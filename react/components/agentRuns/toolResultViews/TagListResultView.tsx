@@ -1,5 +1,5 @@
 import React from 'react';
-import { TagListView, TagRowView } from '../../../types/toolResultViews';
+import { TagListView, TagRowView } from '@beaver/agent-core/run-state/toolResultViews';
 
 const plural = (n: number, noun: string) => `${n} ${noun}${n !== 1 ? 's' : ''}`;
 

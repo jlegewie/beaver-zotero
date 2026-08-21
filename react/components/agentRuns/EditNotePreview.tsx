@@ -3,9 +3,10 @@ import { diffWords, diffLines, diffChars } from 'diff';
 import { getOrSimplify } from '../../../src/utils/noteHtmlSimplifier';
 import { preloadNotePageLabels } from '../../../src/utils/noteCitationExpand';
 import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
-import type { EditNoteOperation } from '../../types/agentActions/editNote';
-import { getPageLocator, normalizeCitationTag, parseRawCitationAttributes } from '../../utils/citationGrammar';
+import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
+import { getPageLocator, normalizeCitationTag, parseRawCitationAttributes } from '@beaver/agent-core/citations/citationGrammar';
 import { modelObjectIdFromReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
+import { assessNoteRewrite, type NoteRewriteRisk } from '../../../src/utils/noteRewriteRisk';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -140,6 +141,48 @@ function renderFormattedParagraph(segments: InlineSegment[]): React.ReactNode[] 
     }
 
     return nodes;
+}
+
+// ---- Rewrite scope ----
+
+/**
+ * A `rewrite` replaces the whole note body, so approving one can delete
+ * everything its payload leaves out. The inline diff alone does not convey
+ * that: a shrinking rewrite reads as a long red passage inside a card that
+ * otherwise looks like any small edit. This states the blast radius in one
+ * line, so the magnitude is visible before the user approves.
+ */
+export interface RewriteScope extends NoteRewriteRisk {
+    oldLines: number;
+    newLines: number;
+}
+
+export function computeRewriteScope(oldHtml: string, newHtml: string): RewriteScope | null {
+    // Until the old body is known (it can still be loading) there is nothing to
+    // compare against, and guessing a magnitude is worse than showing none.
+    if (!oldHtml) return null;
+
+    // Same classifier validation uses to decide whether this rewrite must ask
+    // for approval, so the card's warning and the approval it triggers can
+    // never disagree.
+    return {
+        ...assessNoteRewrite(oldHtml, newHtml),
+        oldLines: oldHtml.split('\n').length,
+        newLines: newHtml.split('\n').length,
+    };
+}
+
+export function formatRewriteScope(scope: RewriteScope | null): string {
+    if (!scope) return 'Replaces the entire note';
+    const lines = `${scope.oldLines} → ${scope.newLines} lines`;
+    // Losing text and swapping it out are both destructive but read very
+    // differently, so report whichever signal actually fired.
+    const detail = scope.reason === 'shrunk'
+        ? `about ${Math.round(scope.removedFraction * 100)}% of the text is deleted`
+        : `about ${Math.round((1 - scope.retainedFraction) * 100)}% of the text is replaced`;
+    return scope.reason === null
+        ? `Replaces the entire note: ${lines}`
+        : `Replaces the entire note: ${lines}, ${detail}`;
 }
 
 // ---- Component ----
@@ -290,10 +333,29 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
         return computeInlineDiff(strippedOld, strippedNew);
     }, [strippedOld, strippedNew, needsNoteContext, noteContext]);
 
+    const rewriteScope = useMemo(
+        () => (isRewrite ? computeRewriteScope(effectiveOld, newString) : null),
+        [isRewrite, effectiveOld, newString],
+    );
+
     return (
         <div className="edit-note-preview">
             <div className="flex flex-col gap-3">
                 <div className="flex flex-col gap-1">
+                    {/* A rewrite discards everything the payload omits, so the
+                        card must say so before the diff — the diff itself is
+                        easy to read as an ordinary long edit. */}
+                    {isRewrite && (
+                        <div
+                            className={`text-sm font-medium px-3 py-1 ${
+                                rewriteScope?.isDestructive && !isApplied
+                                    ? 'font-color-red'
+                                    : 'font-color-secondary'
+                            }`}
+                        >
+                            {formatRewriteScope(rewriteScope)}
+                        </div>
+                    )}
                     {/* Show header for str_replace_all mode */}
                     {operation === 'str_replace_all' && (
                         <div className="text-sm font-color-primary font-medium px-3 py-1">

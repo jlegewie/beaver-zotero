@@ -1,6 +1,6 @@
-import type { NavigationHost, AttachmentMatchNavigation } from '../types';
-import type { ZoteroItemReference } from '../../types/zotero';
-import type { AttachmentMatchTarget } from '../../agents/toolResultTypes';
+import type { NavigationHost, AttachmentMatchNavigation } from '@beaver/agent-ui/host/types';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import type { AttachmentMatchTarget } from '@beaver/agent-core/run-state/toolResultTypes';
 import { revealSource, openSource as openZoteroSource } from '../../utils/sourceUtils';
 import { selectCollection, selectLibrary } from '../../../src/utils/selectItem';
 import { activateCitation } from './citationActivation';
@@ -61,7 +61,20 @@ export const zoteroNavigation: NavigationHost = {
         Zotero.launchFile(filePath);
     },
     openExternalUrl(url: string): void {
-        Zotero.getMainWindow().location.href = url;
+        // Route through ZoteroPane.loadURI: it dispatches `zotero://` URLs to
+        // their registered protocol extension in-process (including Beaver's
+        // own thread links) and hands everything else to the OS browser.
+        // Never navigate the window itself — the UI lives in a chrome document.
+        const pane = Zotero.getMainWindow()?.ZoteroPane;
+        if (pane) {
+            pane.loadURI(url);
+            return;
+        }
+        try {
+            Zotero.launchURL(url);
+        } catch (error) {
+            Zotero.logError(error as Error);
+        }
     },
     activateCitation,
     openSource(ref: ZoteroItemReference): Promise<void> {

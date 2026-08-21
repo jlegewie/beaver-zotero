@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { recentThreadsAtom } from '../atoms/threads';
 import { threadModelToThreadData } from '../utils/threadMatches';
-import { supabase } from '../../src/services/supabaseClient';
+import { supabase } from '@beaver/agent-core/transport/supabaseClient';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 
 const MAX_THREADS = 6;

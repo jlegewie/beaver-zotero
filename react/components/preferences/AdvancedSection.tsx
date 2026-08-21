@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import Button from "../ui/Button";
+import Button from "@beaver/agent-ui/primitives/Button";
 import {SettingsGroup, SettingsRow, DocLink} from "./components/SettingsElements";
 import { dataProviderEnabledAtom, mcpCreateNoteToolEnabledAtom, mcpServerEnabledAtom } from "../../atoms/ui";
 import { isMcpServerSupportedAtom } from "../../atoms/profile";
@@ -7,7 +7,7 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { currentMessageExternalFilesAtom } from "../../atoms/messageComposition";
 import { ensureMcpBridgeScript } from "../../hooks/useMcpServer";
 import { copyToClipboard } from "../../utils/clipboard";
-import { logger } from "../../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { setPref } from "../../../src/utils/prefs";
 import { TickIcon, CopyIcon } from "../icons/icons";
 import CustomInstructionsSection from "./CustomInstructionsSection";

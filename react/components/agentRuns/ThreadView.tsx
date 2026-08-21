@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, forwardRef, useLayoutEffect, useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { allRunsAtom } from "../../agents/atoms";
+import { allRunsAtom } from "@beaver/agent-core/run-state/atoms";
 import { AgentRunView } from "./AgentRunView";
 import { scrollToBottom } from "../../utils/scrollToBottom";
 import { userScrolledAtom, windowUserScrolledAtom } from "../../atoms/ui";
@@ -9,7 +9,7 @@ import { pendingApprovalsAtom } from "../../agents/agentActions";
 import { store } from "../../store";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
 import { toolExpandedAtom, messageSourcesVisibilityAtom, annotationPanelStateAtom } from "../../atoms/messageUIState";
-import { logger } from "../../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 
 const BOTTOM_THRESHOLD = 120; // pixels
 const RESTORE_THRESHOLD = 100; // pixels - threshold for restoring scroll position

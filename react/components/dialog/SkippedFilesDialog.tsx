@@ -3,9 +3,9 @@ import { useAtom, useAtomValue } from 'jotai';
 import { isSkippedFilesDialogVisibleAtom } from '../../atoms/ui';
 import { fileStatusSummaryAtom } from '../../atoms/files';
 import { CancelIcon, InformationCircleIcon } from '../icons/icons';
-import IconButton from '../ui/IconButton';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import PaginatedFailedProcessingList from '../status/PaginatedFailedProcessingList';
-import { getDocumentFromElement } from '../../utils/windowContext';
+import { getDocumentFromElement } from '@beaver/agent-ui/utils/windowContext';
 
 /**
  * Skipped files dialog component
@@ -26,6 +26,7 @@ const SkippedFilesDialog: React.FC = () => {
         if (isVisible) {
             // Get the correct document context for this component
             const doc = getDocumentFromElement(containerRef.current);
+            if (!doc) return;
             doc.addEventListener('keydown', handleKeyDown);
             return () => doc.removeEventListener('keydown', handleKeyDown);
         }

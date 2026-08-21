@@ -71,7 +71,7 @@ import type { ExtractInput } from "../../node/api";
 import type {
     ExtractionSettings,
     InternalProcessedPage,
-} from "../../types";
+} from "@beaver/agent-core/extract/types";
 import type {
     StructuredExtractResult,
     StructuredPage,

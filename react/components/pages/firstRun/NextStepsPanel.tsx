@@ -4,8 +4,8 @@ import { firstRunReturnRequestedAtom } from '../../../atoms/firstRun';
 import { newThreadAtom } from '../../../atoms/threads';
 import { currentMessageContentAtom } from '../../../atoms/messageComposition';
 import { sendWSMessageAtom } from '../../../atoms/agentRunAtoms';
-import { PromptOrigin } from '../../../agents/types';
-import { CardKind } from '../../../types/librarySuggestions';
+import { PromptOrigin } from '@beaver/agent-core/agents/types';
+import { CardKind } from '@beaver/agent-core/types/librarySuggestions';
 import {
     FirstRunFollowup,
     getFollowupsForCardKind,
@@ -13,11 +13,11 @@ import {
     getWhereToStartCardKind,
     renderFollowup,
 } from '../../../types/firstRunFollowups';
-import Button from '../../ui/Button';
+import Button from '@beaver/agent-ui/primitives/Button';
 import { ArrowRightIcon, Icon, CancelIcon } from '../../icons/icons';
 import BackToSuggestions from './BackToSuggestions';
-import IconButton from '../../ui/IconButton';
-import Tooltip from '../../ui/Tooltip';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { textWithTrailingNoWrap } from '../../../utils/textWithTrailingNoWrap';
 
 

@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { Action, ActionCategory, ActionTargetType, CATEGORY_LABELS, TARGET_PRESETS, targetsLabel, targetsDescription } from "../../types/actions";
+import { Action, ActionCategory, ActionTargetType, KNOWN_ACTION_CATEGORIES, KnownActionCategory, categoryLabel, TARGET_PRESETS, targetsLabel, targetsDescription } from "@beaver/agent-core/types/actions";
 import { actionsAtom } from "../../atoms/actions";
-import { getActionCommand, toSlashToken } from "../../utils/slashCommands";
+import { getActionCommand, toSlashToken } from "@beaver/agent-ui/composer/slashCommands";
 import { hasUserInputVariables } from "../../utils/userInputVariables";
 import { exportActionToFile } from "../../utils/actionShareFile";
 import { addPopupMessageAtom } from "../../utils/popupMessageUtils";
-import Button from "../ui/Button";
-import MenuButton from "../ui/MenuButton";
-import Tooltip from "../ui/Tooltip";
-import { MenuItem } from "../ui/menu/ContextMenu";
+import Button from "@beaver/agent-ui/primitives/Button";
+import MenuButton from "@beaver/agent-ui/primitives/MenuButton";
+import Tooltip from "@beaver/agent-ui/primitives/Tooltip";
+import { MenuItem } from "@beaver/agent-ui/primitives/ContextMenu";
 import {
     Icon,
     ArrowDownIcon,
@@ -32,20 +32,21 @@ const MAX_DESCRIPTION_LENGTH = 200;
 const MAX_ARGUMENT_HINT_LENGTH = 100;
 const MAX_PROMPT_TEXT_LENGTH = 12000;
 
-const CATEGORY_OPTIONS: (ActionCategory | undefined)[] = [undefined, "research", "write", "organize", "annotate"];
+// Spread from KNOWN_ACTION_CATEGORIES so this picker can't drift from it.
+const CATEGORY_OPTIONS: (KnownActionCategory | undefined)[] = [undefined, ...KNOWN_ACTION_CATEGORIES];
 
-// Category icons mirror the homepage launcher so the picker matches what users
-// see there. Uncategorized actions fall under the general "Actions" bucket (Zap).
-const CATEGORY_ICONS: Record<ActionCategory, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+// Category icons match the homepage launcher. Zap for missing/unknown categories.
+const CATEGORY_ICON_ENTRIES = {
     research: BookSearchIcon,
     write: QuillWriteIcon,
     organize: LayersIcon,
     annotate: HighlighterIcon,
-};
-const categoryIcon = (cat: ActionCategory | undefined): React.ComponentType<React.SVGProps<SVGSVGElement>> =>
-    cat ? CATEGORY_ICONS[cat] : ZapIcon;
+} satisfies Record<KnownActionCategory, React.ComponentType<React.SVGProps<SVGSVGElement>>>;
 
-const categoryLabel = (cat: ActionCategory | undefined): string => (cat ? CATEGORY_LABELS[cat] : "Uncategorized");
+/** Map so Object.prototype names (`constructor`, …) don't inherit a function. */
+const CATEGORY_ICONS = new Map<string, React.ComponentType<React.SVGProps<SVGSVGElement>>>(Object.entries(CATEGORY_ICON_ENTRIES));
+const categoryIcon = (cat: ActionCategory | undefined): React.ComponentType<React.SVGProps<SVGSVGElement>> =>
+    (cat && CATEGORY_ICONS.get(cat)) || ZapIcon;
 
 /** "Required" marker shown next to mandatory field labels. Muted once the
  *  field has a value, red while it's still empty, so the user can see at a

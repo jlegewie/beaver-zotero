@@ -1,5 +1,5 @@
 import React, { ReactNode } from 'react';
-import Tooltip from '../ui/Tooltip';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { HighlighterIcon, Icon, NoteIcon } from '../icons/icons';
 
 const DEFAULT_TOOLTIP_WIDTH = '250px';

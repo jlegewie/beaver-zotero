@@ -4,14 +4,14 @@
  */
 
 import { AgentAction } from '../agents/agentActions';
-import type { EditNoteResultData, EditNoteOperation } from '../types/agentActions/editNote';
+import type { EditNoteResultData, EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import type {
     EditNoteBatchProposedData,
     EditNoteBatchResultData,
     EditNoteBatchUndoRecord,
     EditNoteBatchEditItem,
-} from '../types/agentActions/editNoteBatch';
-import { logger } from '../../src/utils/logger';
+} from '@beaver/agent-core/types/agentActions/editNoteBatch';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     libraryRefForLibraryID,
     resolveItemReference,
@@ -70,7 +70,7 @@ import { assertNoPreviewMarkers, containsPreviewMarkers, stripPreviewMarkers } f
 import {
     externalReferenceMappingAtom,
     externalReferenceItemMappingAtom,
-} from '../atoms/externalReferences';
+} from '@beaver/agent-core/citations/externalReferences';
 import {
     resolveBatchEdits,
     detectOverlaps,
@@ -88,7 +88,7 @@ import {
     buildAppliedList,
     buildUndoList,
 } from '../../src/services/agentDataProvider/actions/editNoteBatch';
-import { checkLibraryExcluded } from '../../src/services/agentDataProvider/utils';
+import { checkLibraryExcluded, excludedLibraryUserMessage } from '../../src/services/agentDataProvider/utils';
 
 /**
  * Snapshot the thread's external-reference state from the Jotai store so
@@ -269,6 +269,25 @@ export function undoBatchReplaceAllViaContexts(
     return result;
 }
 
+/**
+ * An error whose `message` is model-facing but which also carries wording fit
+ * for the UI. Callers that render a failure to the user should prefer
+ * `userMessage` (see `getUserFacingErrorMessage`); callers that hand the failure
+ * back to the model keep using `message` unchanged.
+ */
+interface UserFacingError extends Error {
+    userMessage?: string;
+}
+
+/**
+ * Message to show a user for a thrown error: the user-facing override when the
+ * thrower supplied one, otherwise the raw message.
+ */
+export function getUserFacingErrorMessage(error: unknown, fallback: string): string {
+    const err = error as UserFacingError | null | undefined;
+    return err?.userMessage || err?.message || fallback;
+}
+
 /** Reject a local note mutation before any item lookup crosses the boundary. */
 function assertNoteLibraryNotExcluded(
     ref: { library_id?: number | null; library_ref?: string | null },
@@ -276,7 +295,13 @@ function assertNoteLibraryNotExcluded(
     const libraryId = resolveLibraryRef(ref);
     if (libraryId === null) return;
     const exclusion = checkLibraryExcluded(libraryId);
-    if (exclusion) throw new Error(exclusion.message);
+    if (!exclusion) return;
+    // These paths serve both the model (WS execute) and the user (sidebar
+    // apply/undo), so the thrown message stays model-facing and the UI wording
+    // rides along separately.
+    const error: UserFacingError = new Error(exclusion.message);
+    error.userMessage = excludedLibraryUserMessage(libraryId);
+    throw error;
 }
 
 /**

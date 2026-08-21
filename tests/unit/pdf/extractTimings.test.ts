@@ -15,7 +15,7 @@ import {
     type RawBlock,
     type RawLine,
     type RawPageData,
-} from "../../../src/beaver-extract/types";
+} from "@beaver/agent-core/extract/types";
 
 vi.mock("../../../src/beaver-extract/worker/docHelpers", async () => {
     const actual = await vi.importActual<

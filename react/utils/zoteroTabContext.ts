@@ -6,7 +6,7 @@
  *
  * This is host-specific code, not part of the client-agnostic render layer —
  * it calls `Zotero.*` directly and must not be imported from
- * `react/components/citations/**` or other client-agnostic surfaces.
+ * `@beaver/agent-ui` or other client-agnostic surfaces.
  */
 
 export interface ReaderOrNoteContext {

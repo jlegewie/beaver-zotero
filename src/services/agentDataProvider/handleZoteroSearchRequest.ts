@@ -7,43 +7,94 @@
  * The Beaver agent is the primary agent that handles chat completions and tool execution.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     // Library management tools
     WSZoteroSearchRequest,
     WSZoteroSearchResponse,
+    ZoteroSearchCondition,
     ZoteroSearchResultItem,
     RegularSearchResultItem,
     AttachmentRowResult,
-} from '../agentProtocol';
-import { ItemStub } from '../../../react/types/zotero';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import { ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
-import { validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem } from './utils';
+import { validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem, degradedAttachmentRow, isReadableItemField, readItemField } from './utils';
+import { addSearchCondition } from './searchConditions';
 
 
-async function filterOutAnnotationItemIds(itemIds: number[]): Promise<number[]> {
-    if (itemIds.length === 0) return itemIds;
+/**
+ * How each `item_category` maps onto a set of Zotero item types.
+ *
+ * A Map, not an object literal: `item_category` arrives over the wire, and a
+ * plain-object lookup would resolve inherited keys ("constructor", "toString")
+ * to truthy non-filters. Unrecognized categories must degrade to "no filter".
+ */
+const ITEM_CATEGORY_TYPE_FILTERS = new Map<string, { itemTypes: string[]; mode: 'include' | 'exclude' }>([
+    ['regular', { itemTypes: ['attachment', 'note', 'annotation'], mode: 'exclude' }],
+    ['attachment', { itemTypes: ['attachment'], mode: 'include' }],
+    ['note', { itemTypes: ['note'], mode: 'include' }],
+    // 'all' is absent because it filters nothing; 'annotation' is absent because
+    // it returns early (zotero_search cannot return annotations at all).
+]);
 
-    const annotationItemTypeID = Zotero.ItemTypes.getID('annotation');
-    const returnableItemIds = new Set<number>();
+/** Search condition fields that select items by collection membership. */
+const COLLECTION_CONDITION_FIELDS = new Set(['collection', 'collectionID']);
+
+/**
+ * Whether a condition can become a collection *scope* rather than a plain
+ * condition: it must select a collection (`is` with a value), not exclude one.
+ */
+function isScopableCollectionCondition(condition: ZoteroSearchCondition): boolean {
+    return COLLECTION_CONDITION_FIELDS.has(condition.field)
+        && condition.operator === 'is'
+        && condition.value != null
+        && String(condition.value).length > 0;
+}
+
+/**
+ * Keep (`include`) or drop (`exclude`) the given itemIDs by item type,
+ * preserving the incoming order. Chunked to stay under SQLite's bound-variable
+ * limit.
+ */
+async function filterItemIdsByItemType(
+    itemIds: number[],
+    itemTypes: string[],
+    mode: 'include' | 'exclude',
+): Promise<number[]> {
+    if (itemIds.length === 0 || itemTypes.length === 0) return itemIds;
+
+    const itemTypeIDs = itemTypes
+        .map(itemType => Zotero.ItemTypes.getID(itemType))
+        .filter((id): id is number => typeof id === 'number');
+    if (itemTypeIDs.length === 0) return itemIds;
+
+    const comparison = mode === 'include' ? 'IN' : 'NOT IN';
+    const typePlaceholders = itemTypeIDs.map(() => '?').join(', ');
+    const matchingItemIds = new Set<number>();
     const chunkSize = 500;
 
     for (let i = 0; i < itemIds.length; i += chunkSize) {
         const chunk = itemIds.slice(i, i + chunkSize);
-        const placeholders = chunk.map(() => '?').join(', ');
+        const idPlaceholders = chunk.map(() => '?').join(', ');
         await Zotero.DB.queryAsync(
-            `SELECT itemID FROM items WHERE itemID IN (${placeholders}) AND itemTypeID != ?`,
-            [...chunk, annotationItemTypeID],
+            `SELECT itemID FROM items WHERE itemID IN (${idPlaceholders}) `
+                + `AND itemTypeID ${comparison} (${typePlaceholders})`,
+            [...chunk, ...itemTypeIDs],
             {
                 onRow: (row: any) => {
-                    returnableItemIds.add(row.getResultByIndex(0));
+                    matchingItemIds.add(row.getResultByIndex(0));
                 },
             },
         );
     }
 
-    return itemIds.filter(id => returnableItemIds.has(id));
+    return itemIds.filter(id => matchingItemIds.has(id));
+}
+
+function filterOutAnnotationItemIds(itemIds: number[]): Promise<number[]> {
+    return filterItemIdsByItemType(itemIds, ['annotation'], 'exclude');
 }
 
 
@@ -72,9 +123,44 @@ export async function handleZoteroSearchRequest(
         }
         const library = validation.library!;
 
+        const anyItemTypeCondition = request.conditions.some((condition) => condition.field === 'itemType');
+        const itemCategory = request.item_category ?? 'regular';
+
+        // zotero_search has no annotation result shape, so annotations are always
+        // dropped from the result set. An annotation-only search can therefore
+        // never return a row: settle it here rather than running the search and
+        // handing back an empty page the model would read as "no matches".
+        if (!anyItemTypeCondition && itemCategory === 'annotation') {
+            return {
+                type: 'zotero_search',
+                request_id: request.request_id,
+                items: [],
+                total_count: 0,
+                warnings: [
+                    "item_category='annotation' returns no results because zotero_search cannot return annotations. "
+                        + 'Use find_annotations to search annotation text and comments.',
+                ],
+            };
+        }
+
         // Create search object
         const search = new Zotero.Search() as unknown as ZoteroSearchWritable;
         search.libraryID = library.libraryID;
+
+        // Collection scope.
+        const scopableCollectionConditions = request.include_children && request.join_mode !== 'any'
+            ? request.conditions.filter(isScopableCollectionCondition)
+            : [];
+        let scopeSearch: Zotero.Search | null = null;
+        let scopedConditionCount = 0;
+        if (scopableCollectionConditions.length > 0) {
+            const scope = new Zotero.Search() as unknown as ZoteroSearchWritable;
+            scope.libraryID = library.libraryID;
+            if (request.recursive) {
+                scope.addCondition('recursive', 'true', '');
+            }
+            scopeSearch = scope as unknown as Zotero.Search;
+        }
 
         // Set join mode first (if 'any')
         if (request.join_mode === 'any') {
@@ -87,66 +173,41 @@ export async function handleZoteroSearchRequest(
 
         // Add search conditions
         for (const condition of request.conditions) {
-            let operator = condition.operator;
-            let value = condition.value ?? '';
-            const originalOperator = operator;
-
-            // Map operator names if needed
-            const operatorMap: Record<string, string> = {
-                'is': 'is',
-                'isNot': 'isNot',
-                'contains': 'contains',
-                'doesNotContain': 'doesNotContain',
-                'beginsWith': 'beginsWith',
-                'isLessThan': 'isLessThan',
-                'isGreaterThan': 'isGreaterThan',
-                'isBefore': 'isBefore',
-                'isAfter': 'isAfter',
-                'isInTheLast': 'isInTheLast',
-            };
-
-            operator = operatorMap[operator] || operator;
-
-            // Handle search for empty fields (Zotero quirk)
-            // "field is empty" must be expressed as "field doesNotContain ''"
-            if (operator === 'is' && (value === null || value === undefined || value === '')) {
-                operator = 'doesNotContain';
-                value = '';
-            }
-
-            try {
-                search.addCondition(
-                    condition.field as _ZoteroTypes.Search.Conditions,
-                    operator as _ZoteroTypes.Search.Operator,
-                    String(value)  // Ensure value is always a string
-                );
-            } catch (err) {
-                const msg = err instanceof Error ? err.message : String(err);
-                logger(`handleZoteroSearchRequest: Invalid condition ${condition.field} ${originalOperator}: ${msg}`, 1);
-                warnings.push(
-                    `Dropped condition field='${condition.field}' operator='${originalOperator}' value='${String(condition.value ?? '')}': ${msg}`
-                );
+            const isScoped = scopeSearch !== null && isScopableCollectionCondition(condition);
+            // Two calls rather than one call on a chosen target: forming the
+            // union of the two search types trips TS2589 ("type instantiation
+            // is excessively deep").
+            const added = isScoped
+                ? addSearchCondition(scopeSearch!, condition, warnings, 'handleZoteroSearchRequest')
+                : addSearchCondition(search, condition, warnings, 'handleZoteroSearchRequest');
+            // Only a condition Zotero accepted narrows the scope; see the
+            // scopedConditionCount guard below.
+            if (added && isScoped) {
+                scopedConditionCount++;
             }
         }
 
-        // Item category filter
-        const anyItemTypeCondition = request.conditions.some((condition) => condition.field === 'itemType');
-        if (!anyItemTypeCondition) {
-            const itemCategory = request.item_category ?? 'regular';
-            if (itemCategory === 'regular') {
-                search.addCondition('itemType', 'isNot', 'attachment');
-                search.addCondition('itemType', 'isNot', 'note');
-                search.addCondition('itemType', 'isNot', 'annotation');
-            } else if (itemCategory === 'attachment') {
-                search.addCondition('itemType', 'is', 'attachment');
-            } else if (itemCategory === 'note') {
-                search.addCondition('itemType', 'is', 'note');
-            } else if (itemCategory === 'annotation') {
-                search.addCondition('itemType', 'is', 'annotation');
+        // Item category filter.
+        //
+        // Zotero ORs together every non-special condition when joinMode is 'any';
+        // only the special conditions (joinMode/noChildren/recursive/…) and the
+        // search's libraryID *property* — set above, not added as a condition —
+        // are ANDed outside the join. Adding itemType conditions there would make
+        // the category an always-true disjunct — e.g. "isNot attachment OR isNot
+        // note" holds for every item — so an 'any' search would silently match
+        // the whole library. For 'any' the category is therefore applied as a
+        // post-filter on the matched itemIDs instead; 'all' keeps the
+        // condition-based filter so Zotero's SQL does the work.
+        const categoryFilter = anyItemTypeCondition ? undefined : ITEM_CATEGORY_TYPE_FILTERS.get(itemCategory);
+        const categoryNeedsPostFilter = request.join_mode === 'any';
+
+        if (categoryFilter && !categoryNeedsPostFilter) {
+            const operator = categoryFilter.mode === 'include' ? 'is' : 'isNot';
+            for (const itemType of categoryFilter.itemTypes) {
+                search.addCondition('itemType', operator, itemType);
             }
-            // 'all' = no filter, do nothing
         }
-        
+
         // Search recursively within collections (only affects collectionID conditions)
         if (request.recursive) {
             search.addCondition('recursive', 'true', '');
@@ -156,9 +217,23 @@ export async function handleZoteroSearchRequest(
         if (!request.include_children) {
             search.addCondition('noChildren', 'true', '');
         }
-        
+
+        // Apply the collection scope. Guarded on a condition having actually been
+        // added: a scope search with no conditions matches the whole library, so
+        // attaching an empty one would widen the search instead of narrowing it.
+        if (scopeSearch && scopedConditionCount > 0) {
+            search.setScope(scopeSearch, true);
+        }
+
         // Execute search
         let itemIds = await search.search();
+
+        // Apply the item category as a post-filter for 'any' searches (see above).
+        // Runs before every other filter so the cheap itemType query shrinks the
+        // set before items get loaded, and before total_count/pagination.
+        if (categoryFilter && categoryNeedsPostFilter) {
+            itemIds = await filterItemIdsByItemType(itemIds, categoryFilter.itemTypes, categoryFilter.mode);
+        }
 
         // Post-filter by attachment status if requested
         if (request.has_attachments != null) {
@@ -185,12 +260,10 @@ export async function handleZoteroSearchRequest(
         // zotero_search has no annotation result shape. When annotations can
         // reach the result set, drop them BEFORE counting and paginating, so
         // total_count and page boundaries reflect only returnable items.
-        const itemCategory = request.item_category ?? 'regular';
-        const mayContainAnnotations =
-            request.join_mode === 'any'
-            || anyItemTypeCondition
-            || itemCategory === 'all'
-            || itemCategory === 'annotation';
+        // A category filter has already excluded them (as conditions or as the
+        // post-filter above); the remaining cases — an explicit itemType
+        // condition, 'all', or an unrecognized category — still need this pass.
+        const mayContainAnnotations = !categoryFilter;
         if (mayContainAnnotations) {
             itemIds = await filterOutAnnotationItemIds(itemIds);
         }
@@ -314,6 +387,24 @@ export async function handleZoteroSearchRequest(
             }
         }
 
+        // Validate the requested extra fields once. Readability does not depend
+        // on the item, so this must not be folded into the result loop: a search
+        // that returns no regular rows would otherwise skip the check entirely.
+        //
+        // Unreadable names are logged, not returned in `warnings`: the backend
+        // treats any warning as "conditions were dropped" and retries the whole
+        // call, and an unusable name in `fields` costs nothing but the extra
+        // column — it must not invalidate an otherwise correct result set.
+        const readableFields: string[] = [];
+        const unreadableFields: string[] = [];
+        for (const field of request.fields ?? []) {
+            if (typeof field !== 'string' || field.length === 0) continue;
+            (isReadableItemField(field) ? readableFields : unreadableFields).push(field);
+        }
+        if (unreadableFields.length > 0) {
+            logger(`handleZoteroSearchRequest: Ignored unreadable field(s): ${unreadableFields.join(', ')}`, 1);
+        }
+
         // Build results
         const items: ZoteroSearchResultItem[] = [];
 
@@ -323,19 +414,28 @@ export async function handleZoteroSearchRequest(
                 items.push(serializeNote(item, parentInfo));
             } else if (item.isAttachment()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
-                const attachmentInfo = await getAttachmentInfoForItem(item, {
-                    parentItemId: parentInfo?.item_id ?? null,
-                    isPrimary: false,
-                    includeAnnotationsCount: true,
-                    skipWorkerFallback: true,
-                });
-                const attachmentItem: AttachmentRowResult = {
-                    ...attachmentInfo,
-                    result_type: 'attachment',
-                    parent_title: parentInfo?.title ?? null,
-                    parent_item: parentInfo ?? null,
-                    date_modified: item.dateModified,
-                };
+                let attachmentItem: AttachmentRowResult;
+                try {
+                    const attachmentInfo = await getAttachmentInfoForItem(item, {
+                        parentItemId: parentInfo?.item_id ?? null,
+                        isPrimary: false,
+                        includeAnnotationsCount: true,
+                        skipWorkerFallback: true,
+                    });
+                    attachmentItem = {
+                        ...attachmentInfo,
+                        result_type: 'attachment',
+                        parent_title: parentInfo?.title ?? null,
+                        parent_item: parentInfo ?? null,
+                        date_modified: item.dateModified,
+                    };
+                } catch (error) {
+                    // Isolate the row: a record Zotero cannot read (e.g. a linked
+                    // file whose stored path is not valid on this platform) must
+                    // degrade to a stub, not empty the whole result page.
+                    logger(`handleZoteroSearchRequest: Degrading unreadable attachment ${item.key}: ${error}`, 2);
+                    attachmentItem = degradedAttachmentRow(item, parentInfo ?? null);
+                }
                 items.push(attachmentItem);
             } else {
                 // Get creators
@@ -372,17 +472,12 @@ export async function handleZoteroSearchRequest(
                 };
 
                 // Include extra fields if requested
-                if (request.fields && request.fields.length > 0) {
+                if (readableFields.length > 0) {
                     const extraFields: Record<string, any> = {};
-                    for (const field of request.fields) {
-                        try {
-                            // includeBaseMapped=true so base fields resolve to type-specific fields
-                            const value = item.getField(field, false, true);
-                            if (value !== undefined && value !== '') {
-                                extraFields[field] = value;
-                            }
-                        } catch {
-                            // Field not valid for this item type - skip silently
+                    for (const field of readableFields) {
+                        const value = readItemField(item, field);
+                        if (value !== undefined && value !== null && value !== '') {
+                            extraFields[field] = value;
                         }
                     }
                     if (Object.keys(extraFields).length > 0) {

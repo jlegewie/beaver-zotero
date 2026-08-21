@@ -36,7 +36,7 @@ import {
     type AttachmentFixture,
 } from "../helpers/fixtures";
 import { post } from "../helpers/zoteroHttpClient";
-import { CoordOrigin } from "../../react/types/citations";
+import { CoordOrigin } from "@beaver/agent-core/types/citations";
 
 let available = false;
 let createdItemIds: string[] = [];
@@ -62,6 +62,8 @@ interface CreatedAnnotationResult {
     client_item_id: string;
     index: number;
     loc_raw: string;
+    page_idx?: number;
+    page_label?: string | null;
 }
 
 interface FailedAnnotationResult {
@@ -360,6 +362,11 @@ describe("create_highlight_annotations: execute", () => {
         expect(res.result_data?.total_created).toBe(2);
         expect(res.result_data?.created.every((c) => c.client_item_id === "hl-multipage"))
             .toBe(true);
+        // The per-page fields are the only thing distinguishing these rows: they
+        // share a client_item_id, a title, and a loc, so without them the backend
+        // cannot tell a page-spanning highlight from a duplicated one.
+        expect(res.result_data?.created.map((c) => c.page_idx)).toEqual([0, 1]);
+        expect(res.result_data?.created.map((c) => c.page_label)).toEqual(["1", "2"]);
     }, 60000);
 
     it("creates highlights for multiple items in a single execute", async () => {

@@ -10,9 +10,9 @@ import {
     filterPromptActionsForContent,
     promptActionsToDescriptors,
     type SlashCommandDescriptor,
-} from '../../../react/utils/slashCommands';
-import type { PromptAction } from '../../../react/agents/types';
-import type { Action } from '../../../react/types/actions';
+} from '@beaver/agent-ui/composer/slashCommands';
+import type { PromptAction } from '@beaver/agent-core/agents/types';
+import type { Action } from '@beaver/agent-core/types/actions';
 
 const action = (command: string, title?: string): PromptAction => ({
     command,

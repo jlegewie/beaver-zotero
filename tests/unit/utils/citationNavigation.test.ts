@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CoordOrigin, type BoundingBox } from '../../../react/types/citations';
+import { CoordOrigin, type BoundingBox } from '@beaver/agent-core/types/citations';
 import { flashHighlightBoundingBoxes } from '../../../react/utils/citationNavigation';
 
 vi.mock('../../../react/utils/pdfUtils', () => ({

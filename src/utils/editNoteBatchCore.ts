@@ -23,9 +23,9 @@
  *     sibling edit's anchor is caught as a genuine conflict.
  */
 
-import type { EditNoteOperation } from '../../react/types/agentActions/editNote';
+import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import type { SimplificationMetadata } from './noteHtmlSimplifier';
-import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
+import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import type { CandidateSnippet } from './editNoteHints';
 import {
     expandBase,
@@ -48,8 +48,9 @@ import {
 import {
     detectPartialSimplifiedTag,
     buildPartialSimplifiedTagMessage,
+    buildExpansionErrorMessage,
 } from './editNoteValidation';
-import { logger } from './logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 // =============================================================================
 // Public types
@@ -323,7 +324,11 @@ function matchEdit(
         // need the base, so try it before surfacing expansion_failed.
         match = findMarkdownRenderMatch(matchInput);
         if (!match) {
-            return failure(spec.index, e?.message || String(e), 'expansion_failed');
+            return failure(
+                spec.index,
+                buildExpansionErrorMessage(e, ctx.simplified, spec.oldString),
+                'expansion_failed',
+            );
         }
     }
 

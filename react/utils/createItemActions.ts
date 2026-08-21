@@ -6,9 +6,9 @@
  */
 
 import { AgentAction } from '../agents/agentActions';
-import { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
+import { CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { applyCreateItemData } from './addItemActions';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { ensureItemSynced } from '../../src/utils/sync';
 import { scheduleBackgroundTask, generateTaskId, cancelTasksForItem, deduplicatedSync } from '../../src/utils/backgroundTasks';
 import { resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';

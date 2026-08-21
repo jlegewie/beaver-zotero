@@ -1,4 +1,5 @@
-import { AgentRun, TextPart } from '../agents/types';
+import { AgentRun, TextPart } from '@beaver/agent-core/agents/types';
+import { isRenderableMessage } from '@beaver/agent-core/agents/messageVisibility';
 
 const MAX_RESPONSE_ANNOUNCEMENT_CHARS = 4000;
 
@@ -43,7 +44,9 @@ export function extractAssistantResponseText(run: AgentRun): string {
     const textParts: string[] = [];
 
     for (const message of run.model_messages) {
-        if (message.kind !== 'response') continue;
+        // Announced content is user-facing, so the same rule applies here as on
+        // screen (see `isRenderableMessage`).
+        if (!isRenderableMessage(message)) continue;
         for (const part of message.parts) {
             if (part.part_kind === 'text') {
                 textParts.push((part as TextPart).content);

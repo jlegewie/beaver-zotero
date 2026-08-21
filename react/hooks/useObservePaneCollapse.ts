@@ -27,7 +27,13 @@ export function useObservePaneCollapse(location: SidebarLocation) {
                     const selectedType = win.Zotero_Tabs.selectedType;
                     const currentLocation = selectedType === 'library' ? 'library' : 'reader';
                     if(currentLocation !== location) return;
-                    const isCollapsed = itemPane.getAttribute("collapsed") === "true";
+                    // Read Zotero's own `collapsed` getter rather than the raw
+                    // attribute. Zotero 10 writes `collapsed="true"`/`"false"`,
+                    // Zotero 11 (Firefox 153) made it a boolean XUL attribute
+                    // written with toggleAttribute(), so it is `collapsed=""`
+                    // there and any `=== "true"` comparison is dead.
+                    // @ts-ignore: `collapsed` is not typed on the Zotero panes
+                    const isCollapsed = Boolean(itemPane.collapsed);
                     if (isCollapsed && sidebar.style.display !== 'none') {
                         // Dismiss any active diff preview in the note editor
                         dismissDiffPreview();

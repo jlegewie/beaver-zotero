@@ -18,8 +18,8 @@
  *   8. Merge overlapping lines (handles drop caps, subscripts, etc.)
  */
 
-import type { BoundingBox, RawPageData, RawBlock, RawLine } from "./types";
-import { bboxHeight, bboxWidth, mergeBoxes } from "./types";
+import type { BoundingBox, RawPageData, RawBlock, RawLine } from "@beaver/agent-core/extract/types";
+import { bboxHeight, bboxWidth, mergeBoxes } from "@beaver/agent-core/extract/types";
 import type { Rect } from "./ColumnDetector";
 import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 

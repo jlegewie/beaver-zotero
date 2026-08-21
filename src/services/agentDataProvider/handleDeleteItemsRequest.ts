@@ -1,4 +1,4 @@
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveItemReference, resolveObjectId } from '../../utils/libraryIdentity';
 
 

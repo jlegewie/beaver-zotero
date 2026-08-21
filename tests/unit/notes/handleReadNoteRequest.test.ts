@@ -40,12 +40,12 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
 }));
 
 // Mock logger
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 
 // Mock transitive dependencies pulled in by agentDataProvider
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: {
         auth: { getSession: vi.fn() },
     },
@@ -73,7 +73,7 @@ vi.mock('../../../react/store', () => ({
 import { handleReadNoteRequest } from '../../../src/services/agentDataProvider/handleReadNoteRequest';
 import { getOrSimplify } from '../../../src/utils/noteHtmlSimplifier';
 import { getLatestNoteHtml, getNoteHtmlForRead } from '../../../src/utils/noteEditorIO';
-import type { WSReadNoteRequest } from '../../../src/services/agentProtocol';
+import type { WSReadNoteRequest } from '@beaver/agent-core/protocol/agentProtocol';
 
 
 // =============================================================================

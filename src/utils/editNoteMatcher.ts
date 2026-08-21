@@ -66,8 +66,8 @@ import {
     stripPartialSimplifiedElements,
     stripSpuriousWrappingTags,
 } from './editNoteStrippers';
-import type { EditNoteOperation } from '../../react/types/agentActions/editNote';
-import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
+import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
+import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 
 // =============================================================================
 // Types
@@ -829,6 +829,10 @@ function escapeRegExp(s: string): string {
  * needles like `<span title="中文">` cannot match `<span title="中文 ">` —
  * attribute and tag markup must match byte-for-byte.
  *
+ * Relaxation is also suppressed inside code-block `<pre>` elements so a
+ * replacement cannot overwrite significant indentation. The strategy's
+ * overlap gate handles needles that start partway inside a `<pre>`.
+ *
  * The whitespace class includes both regex `\s` and the literal HTML entity
  * `&nbsp;` so drift between regular spaces and `&nbsp;`-encoded spaces also
  * folds. Non-whitespace runs that don't cross a CJK boundary are regex-escaped
@@ -838,6 +842,33 @@ function escapeRegExp(s: string): string {
 const HTML_DELIM_PATTERN = /[<>="'/]/;
 const NBSP_ENTITY = '&nbsp;';
 const isHtmlDelim = (ch: string): boolean => HTML_DELIM_PATTERN.test(ch);
+
+// Code-block `<pre>` whitespace must match exactly to preserve indentation.
+// Math `<pre>` elements are excluded because their spacing is not indentation.
+const MATH_CLASS_ATTR = /class\s*=\s*(?:"[^"]*\bmath\b[^"]*"|'[^']*\bmath\b[^']*')/i;
+/** Sticky: probed at a specific offset while walking the needle. */
+const PRE_OPEN_TAG_STICKY = /<pre\b([^>]*)>/iy;
+const PRE_CLOSE_TAG_STICKY = /<\/pre\s*>/iy;
+const PRE_ELEMENT_PATTERN = /<pre\b([^>]*)>[\s\S]*?<\/pre\s*>/gi;
+
+interface PreRegion {
+    /** Offset of the `<` that opens the element. */
+    start: number;
+    /** Offset just past the `>` that closes it. */
+    end: number;
+}
+
+/** Locate closed, non-math `<pre>` elements. */
+function findSignificantPreRegions(html: string): PreRegion[] {
+    const regions: PreRegion[] = [];
+    PRE_ELEMENT_PATTERN.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = PRE_ELEMENT_PATTERN.exec(html)) !== null) {
+        if (MATH_CLASS_ATTR.test(m[1])) continue;
+        regions.push({ start: m.index, end: m.index + m[0].length });
+    }
+    return regions;
+}
 
 function buildWhitespaceRelaxedPattern(needle: string): RegExp {
     const parts: string[] = [];
@@ -850,6 +881,9 @@ function buildWhitespaceRelaxedPattern(needle: string): RegExp {
     };
 
     let inTag = false;
+    // Track nested `<pre>` types so math blocks cannot affect code blocks.
+    const preStack: boolean[] = [];
+    let significantPreDepth = 0;
     let i = 0;
     while (i < needle.length) {
         // Whitespace run (regex `\s` or literal `&nbsp;` entity) anchored at i.
@@ -864,6 +898,12 @@ function buildWhitespaceRelaxedPattern(needle: string): RegExp {
             }
         }
         if (runLen > 0) {
+            // Preserve code-block whitespace byte-for-byte.
+            if (significantPreDepth > 0) {
+                literalBuf += needle.substring(i, i + runLen);
+                i += runLen;
+                continue;
+            }
             flushLiteral();
             const before = i > 0 ? needle.charAt(i - 1) : '';
             const after = needle.charAt(i + runLen);
@@ -881,8 +921,22 @@ function buildWhitespaceRelaxedPattern(needle: string): RegExp {
         // Update tag state. The boundary check below sees the POST-update
         // state, so HTML delimiters and tag interiors never trigger CJK
         // relaxation.
-        if (ch === '<') inTag = true;
-        else if (ch === '>') inTag = false;
+        if (ch === '<') {
+            inTag = true;
+            // Enter/leave `<pre>` when its tag opens.
+            PRE_OPEN_TAG_STICKY.lastIndex = i;
+            const openTag = PRE_OPEN_TAG_STICKY.exec(needle);
+            if (openTag) {
+                const significant = !MATH_CLASS_ATTR.test(openTag[1]);
+                preStack.push(significant);
+                if (significant) significantPreDepth += 1;
+            } else {
+                PRE_CLOSE_TAG_STICKY.lastIndex = i;
+                if (PRE_CLOSE_TAG_STICKY.test(needle) && preStack.pop()) {
+                    significantPreDepth -= 1;
+                }
+            }
+        } else if (ch === '>') inTag = false;
 
         const next = needle.charAt(i + 1);
         const nextStartsWs = !!next && (
@@ -893,6 +947,7 @@ function buildWhitespaceRelaxedPattern(needle: string): RegExp {
             next
             && !nextStartsWs
             && !inTag
+            && significantPreDepth === 0
             && !isHtmlDelim(ch)
             && !isHtmlDelim(next)
             && isCjkChar(ch) !== isCjkChar(next)
@@ -968,6 +1023,15 @@ const whitespaceRelaxedStrategy: Strategy = {
         // adversarial input where the regex engine interpreted the pattern
         // differently than `normalizeCjkSpacing` would.
         if (normalizeCjkSpacing(actualRawSlice) !== normalizedOld) return null;
+
+        // A needle starting inside `<pre>` lacks enough context for the pattern
+        // builder to protect indentation. Insert ops are safe because they
+        // splice the matched bytes back into the result.
+        if (input.operation !== 'insert_after' && input.operation !== 'insert_before') {
+            const opensBeforeMatch = findSignificantPreRegions(input.strippedHtml)
+                .some(region => region.start < rawPos && region.end > rawPos);
+            if (opensBeforeMatch) return null;
+        }
 
         // Build expandedNew. For insert ops, mirror `rewriteInsertReplacementForTrim`:
         // when `input.newString` is the already-merged `oldString + injected`

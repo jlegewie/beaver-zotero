@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { CSSIcon, Icon, ArrowRightIcon } from '../../../components/icons/icons';
-import type { ManageCollectionsResultData } from '../../../types/agentActions/base';
+import type { ManageCollectionsResultData } from '@beaver/agent-core/types/agentActions/base';
 import { shortenActionError } from './agentActionViewHelpers';
 import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 

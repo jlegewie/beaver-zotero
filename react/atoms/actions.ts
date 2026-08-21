@@ -5,7 +5,8 @@
  */
 
 import { atom } from 'jotai';
-import { Action, ActionOverride, ActionTargetType, generateActionId, sameTargets } from '../types/actions';
+import { v4 as uuidv4 } from 'uuid';
+import { Action, ActionOverride, ActionTargetType, generateActionId, sameTargets } from '@beaver/agent-core/types/actions';
 import { ALL_BUILTIN_ACTIONS } from '../types/builtinActions';
 import {
     getMergedActions,
@@ -17,16 +18,26 @@ import {
 } from '../types/actionStorage';
 import { zoteroContextAtom } from './zoteroContext';
 import { isActionVisible, ActionContext } from '../utils/actionVisibility';
-import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../utils/promptVariables';
+import {
+    resolvePromptVariables,
+    resolveTargetContext,
+    EMPTY_VARIABLE_HINTS,
+    type TargetTypeContext,
+} from '../utils/promptVariables';
 import { sendWSMessageAtom } from './agentRunAtoms';
-import { currentMessageItemsAtom, currentMessageCollectionsAtom, pendingPillInsertAtom } from './messageComposition';
-import { CollectionReference } from '../types/zotero';
+import {
+    currentMessageItemsAtom,
+    currentMessageCollectionsAtom,
+    pendingPillInsertsAtom,
+    addItemsToCurrentMessageItemsAtom,
+} from './messageComposition';
+import { CollectionReference, collectionReferenceKey } from '@beaver/agent-core/types/zotero';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
 import { searchableLibraryIdsAtom } from './profile';
-import { getActionCommand, toSlashToken, type SlashCommandDescriptor } from '../utils/slashCommands';
-import type { PromptAction } from '../agents/types';
-import { MessageAttachment, messageAttachmentKey, messageAttachmentLookupKeys } from '../types/attachments/apiTypes';
+import { getActionCommand, toSlashToken, type SlashCommandDescriptor } from '@beaver/agent-ui/composer/slashCommands';
+import type { PromptAction } from '@beaver/agent-core/agents/types';
+import { MessageAttachment, messageAttachmentKey, messageAttachmentLookupKeys } from '@beaver/agent-core/types/attachments/apiTypes';
 import { toMessageAttachment } from '../types/attachments/converters';
 
 // ---------------------------------------------------------------------------
@@ -72,7 +83,8 @@ export const saveActionsAtom = atom(
                 if ((action.name ?? undefined) !== (base.name ?? undefined)) { override.name = action.name; hasChange = true; }
                 if ((action.id_model ?? undefined) !== (base.id_model ?? undefined)) { override.id_model = action.id_model; hasChange = true; }
                 if (!sameTargets(action.targets, base.targets)) { override.targets = action.targets; hasChange = true; }
-                if ((action.category ?? undefined) !== (base.category ?? undefined)) { override.category = action.category; hasChange = true; }
+                // Persist null (not undefined): JSON drops undefined, which would restore the shipped category.
+                if ((action.category ?? undefined) !== (base.category ?? undefined)) { override.category = action.category ?? null; hasChange = true; }
                 if ((action.argumentHint ?? undefined) !== (base.argumentHint ?? undefined)) { override.argumentHint = action.argumentHint; hasChange = true; }
                 if ((action.sortOrder ?? undefined) !== (base.sortOrder ?? undefined)) { override.sortOrder = action.sortOrder; hasChange = true; }
 
@@ -244,10 +256,51 @@ export const markActionUsedAtom = atom(
 // Derived: action context (Zotero state + manually attached items)
 // ---------------------------------------------------------------------------
 
-export const actionContextAtom = atom<ActionContext>((get) => ({
-    zotero: get(zoteroContextAtom),
-    manualItems: get(currentMessageItemsAtom),
-}));
+export const actionContextAtom = atom<ActionContext>((get) => {
+    const zotero = get(zoteroContextAtom);
+    const searchableLibraryIds = get(searchableLibraryIdsAtom);
+
+    // Actions stage their target for a run, so the context an action is chosen
+    // from must contain only items Beaver can actually use.
+    const selectedItems = zotero.selectedItems.filter(
+        (item: Zotero.Item) => searchableLibraryIds.includes(item.libraryID),
+    );
+
+    // Collection targets are filtered on the same principle, so a label never
+    // promises collections the run will not touch.
+    const { libraryView } = zotero;
+    const selectedCollections = libraryView.selectedCollections.filter(
+        (collection) => searchableLibraryIds.includes(collection.libraryId),
+    );
+    const droppedCollections = libraryView.selectedCollections.length - selectedCollections.length;
+    const selectedLibraryIds = libraryView.selectedLibraryIds.filter(
+        (libraryId) => searchableLibraryIds.includes(libraryId),
+    );
+
+    const itemsChanged = selectedItems.length !== zotero.selectedItems.length;
+    const libraryViewChanged = droppedCollections > 0
+        || selectedLibraryIds.length !== libraryView.selectedLibraryIds.length;
+
+    if (!itemsChanged && !libraryViewChanged) {
+        return { zotero, manualItems: get(currentMessageItemsAtom) };
+    }
+
+    return {
+        zotero: {
+            ...zotero,
+            selectedItems,
+            libraryView: libraryViewChanged
+                ? {
+                    ...libraryView,
+                    selectedCollections,
+                    selectedLibraryIds,
+                    selectedRowCount: libraryView.selectedRowCount - droppedCollections,
+                }
+                : libraryView,
+        },
+        manualItems: get(currentMessageItemsAtom),
+    };
+});
 
 // ---------------------------------------------------------------------------
 // Derived: context-filtered actions
@@ -260,13 +313,116 @@ export const actionsForContextAtom = atom<Action[]>((get) => {
 });
 
 // ---------------------------------------------------------------------------
+// Bind an action to its targets the moment the user picks it.
+//
+// Shared by every surface that launches an action: the slash menu, the home
+// launcher, action suggestions, the library context menu, and the reader
+// toolbar. Picking an action attaches the items/collections its target type
+// binds to, so what it will run on is visible in the composer and can be
+// edited — or removed — before sending. Nothing is re-bound at send time.
+//
+// Synchronous on purpose: the pill and its attachments land in the same click,
+// leaving no window in which the draft can change underneath them.
+//
+// Returns the descriptor of the pill to insert, or null when the action cannot
+// run right now — a popup explains why and nothing is staged.
+// ---------------------------------------------------------------------------
+
+export const resolveActionForStagingAtom = atom(
+    null,
+    (get, set, payload: {
+        actionId: string;
+        targetType?: ActionTargetType;
+        /** Title to show when the action definition is not available here. */
+        fallbackTitle?: string;
+        /** Target context to bind instead of the live Zotero state. The library
+         *  context menu binds the rows the user right-clicked, which are not
+         *  always what the current selection resolves to. */
+        contextOverride?: TargetTypeContext;
+        /** Attach the resolved targets to the composer. The message edit
+         *  overlay passes false: it carries its own attachment list, which the
+         *  regenerate path extends on submit. */
+        attachToComposer?: boolean;
+    }): SlashCommandDescriptor | null => {
+        const { actionId, targetType, contextOverride, attachToComposer = true } = payload;
+        const action = get(actionsAtom).find(a => a.id === actionId);
+
+        // The action definition is not available here (it was deleted between
+        // rendering the surface and clicking it). Stage the pill identity
+        // anyway; the send path tells the model the definition is unavailable.
+        if (!action) {
+            const title = payload.fallbackTitle ?? 'action';
+            set(markActionUsedAtom, actionId);
+            return { commandName: toSlashToken(title), actionId, targetType, title };
+        }
+
+        const { items, collections, itemsExcluded, collectionsExcluded } =
+            resolveTargetContext(targetType, contextOverride);
+
+        // The target exists but sits entirely in an excluded library. Running
+        // the action would give the model a target type with nothing behind it,
+        // so fail the same way an explicitly referenced excluded item does.
+        if (itemsExcluded || collectionsExcluded) {
+            set(addPopupMessageAtom, {
+                type: 'error',
+                title: 'Action skipped',
+                text: itemsExcluded
+                    ? 'This action targets an item in a library you excluded from Beaver. You can change excluded libraries in Beaver Preferences.'
+                    : 'This action targets a collection in a library you excluded from Beaver. You can change excluded libraries in Beaver Preferences.',
+                expire: true,
+                duration: 5000,
+            });
+            return null;
+        }
+
+        const validationResults = get(itemValidationResultsAtom);
+        const rejected = items.find(item =>
+            isRejectedItemValidation(item, validationResults.get(`${item.libraryID}-${item.key}`)));
+        if (rejected) {
+            const validation = validationResults.get(`${rejected.libraryID}-${rejected.key}`);
+            set(addPopupMessageAtom, {
+                type: 'error',
+                title: 'Action skipped',
+                text: validation?.reason || 'One or more items failed validation.',
+                expire: true,
+                duration: 4000,
+            });
+            return null;
+        }
+
+        if (attachToComposer) {
+            // Goes through the shared add path, so the targets are validated in
+            // the background like any other attachment the user adds.
+            if (items.length > 0) void set(addItemsToCurrentMessageItemsAtom, items);
+            if (collections.length > 0) {
+                // Merge rather than replace: the composer may already carry
+                // collections the user attached.
+                const current = get(currentMessageCollectionsAtom) as CollectionReference[];
+                const existingKeys = new Set(current.map(collectionReferenceKey));
+                const added = collections.filter(c => !existingKeys.has(collectionReferenceKey(c)));
+                if (added.length > 0) set(currentMessageCollectionsAtom, [...current, ...added]);
+            }
+        }
+
+        set(markActionUsedAtom, action.id);
+        return {
+            commandName: getActionCommand(action),
+            actionId: action.id,
+            targetType,
+            title: action.title,
+            argumentHint: action.argumentHint,
+        };
+    },
+);
+
+// ---------------------------------------------------------------------------
 // Stage an action as a /command pill in the chat input.
 //
-// Single entry point used by the home launcher, action suggestions, the
-// library context menu, and the reader toolbar. The pill is inserted into the
-// input (via `pendingPillInsertAtom`, consumed by InputArea) and the user
-// submits the message themselves; the action's prompt is resolved at send
-// time in `sendComposedMessageAtom`, exactly like a slash-menu pill.
+// Used by the surfaces that do not own an editor handle (home launcher, action
+// suggestions, library context menu, reader toolbar): the pill is handed to
+// InputArea via `pendingPillInsertsAtom`, which inserts it. The user submits
+// the message themselves. The slash menu owns its editor, so it calls
+// `resolveActionForStagingAtom` and inserts the pill itself.
 // ---------------------------------------------------------------------------
 
 export const stageActionPillAtom = atom(
@@ -275,30 +431,40 @@ export const stageActionPillAtom = atom(
         actionId: string;
         targetType?: ActionTargetType;
         fallbackTitle?: string;
+        contextOverride?: TargetTypeContext;
         /** Window whose editor should receive the pill (where the user acted). */
         targetWindow?: Window;
-    }) => {
-        const action = get(actionsAtom).find(a => a.id === payload.actionId);
-        const title = action?.title ?? payload.fallbackTitle ?? 'action';
-        const descriptor: SlashCommandDescriptor = {
-            commandName: action ? getActionCommand(action) : toSlashToken(title),
+    }): boolean => {
+        const descriptor = set(resolveActionForStagingAtom, {
             actionId: payload.actionId,
             targetType: payload.targetType,
-            title,
-            argumentHint: action?.argumentHint,
-        };
-        set(pendingPillInsertAtom, { descriptor, targetWindow: payload.targetWindow, nonce: Date.now() });
-        set(markActionUsedAtom, payload.actionId);
+            fallbackTitle: payload.fallbackTitle,
+            contextOverride: payload.contextOverride,
+        });
+        if (!descriptor) return false;
+        // Queue rather than replace: an editor claims a pill on a timer, so one
+        // staged moments ago may still be waiting, and dropping it would lose an
+        // action the user launched whose targets are already attached.
+        set(pendingPillInsertsAtom, [
+            ...get(pendingPillInsertsAtom),
+            { descriptor, targetWindow: payload.targetWindow },
+        ]);
+        return true;
     },
 );
 
 // ---------------------------------------------------------------------------
-// Resolve /command pills to structured wire actions.
+// Build the structured wire actions for the /command pills in a message.
 //
 // Shared by the compose send path (sendComposedMessageAtom) and the message
-// edit overlay (buildEditedPromptActionsAtom). Each pill's action prompt is
-// resolved ({{ }} variables + targetType context items/collection); the
-// resolved items/collection are returned for the caller to attach.
+// edit overlay (buildEditedPromptActionsAtom). Only the action's prompt text is
+// resolved here: an action binds its targets when the user picks it, so the
+// message runs on exactly what is attached to it, including anything the user
+// added or removed since.
+//
+// `bindTargets` resolves the target context as well. The edit overlay passes
+// it: its pills have no composer to attach to, so the targets of a pill added
+// during the edit are resolved when the edit is submitted.
 //
 // When `persistedActions` is provided (editing a sent message), pills that
 // were rebuilt from those wire actions (descriptor `persisted` flag) reuse
@@ -315,7 +481,7 @@ export const stageActionPillAtom = atom(
 interface ResolvedPillActions {
     actions: PromptAction[];
     items: Zotero.Item[];
-    collection: CollectionReference | null;
+    collections: CollectionReference[];
 }
 
 export const resolvePillsToPromptActionsAtom = atom(
@@ -326,15 +492,18 @@ export const resolvePillsToPromptActionsAtom = atom(
         payload: {
             pills: SlashCommandDescriptor[];
             persistedActions?: PromptAction[];
+            bindTargets?: boolean;
         },
     ): Promise<ResolvedPillActions | null> => {
-        const { pills, persistedActions } = payload;
+        const { pills, persistedActions, bindTargets } = payload;
         const actions = get(actionsAtom);
         const validationResults = get(itemValidationResultsAtom);
         const searchableLibraryIds = get(searchableLibraryIdsAtom);
 
         const accumulatedItems: Zotero.Item[] = [];
-        let accumulatedCollection: CollectionReference | null = null;
+        const accumulatedCollections: CollectionReference[] = [];
+        const seenItemKeys = new Set<string>();
+        const seenCollectionKeys = new Set<string>();
         // One entry per distinct command. Insertion-time collision handling
         // keeps tokens unique per distinct action, so first-wins dedup here
         // only collapses repeated pills of the same action.
@@ -368,8 +537,23 @@ export const resolvePillsToPromptActionsAtom = atom(
                 continue;
             }
 
-            const { text: resolvedText, items, collection, emptyItemVariables } =
-                await resolvePromptVariables(action.text, pill.targetType);
+            const { text: resolvedText, items, collections, emptyItemVariables, targetContextExcluded } =
+                await resolvePromptVariables(action.text, bindTargets ? pill.targetType : undefined);
+
+            // The action is bound to a target that exists but sits entirely in
+            // an excluded library. Sending it would give the model a target
+            // type with nothing attached, so fail the same way an explicitly
+            // referenced excluded item does.
+            if (targetContextExcluded) {
+                set(addPopupMessageAtom, {
+                    type: 'error',
+                    title: 'Action skipped',
+                    text: 'This action targets an item in a library you excluded from Beaver. You can change excluded libraries in Beaver Preferences.',
+                    expire: true,
+                    duration: 5000,
+                });
+                return null;
+            }
 
             if (emptyItemVariables.length > 0) {
                 const hint = EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.';
@@ -407,17 +591,15 @@ export const resolvePillsToPromptActionsAtom = atom(
                     });
                     return null;
                 }
-            }
-
-            for (const item of items) {
-                const key = `${item.libraryID}-${item.key}`;
-                if (!accumulatedItems.some(i => `${i.libraryID}-${i.key}` === key)) {
+                if (!seenItemKeys.has(key)) {
+                    seenItemKeys.add(key);
                     accumulatedItems.push(item);
                 }
             }
-            if (collection && !accumulatedCollection) {
+
+            for (const collection of collections) {
                 // A collection-bound action carries no items, so the per-item
-                // check above never sees it — gate the collection's library here.
+                // check above never sees it — gate each collection's library here.
                 if (!searchableLibraryIds.includes(collection.library_id)) {
                     set(addPopupMessageAtom, {
                         type: 'error',
@@ -428,7 +610,11 @@ export const resolvePillsToPromptActionsAtom = atom(
                     });
                     return null;
                 }
-                accumulatedCollection = collection;
+                const key = collectionReferenceKey(collection);
+                if (!seenCollectionKeys.has(key)) {
+                    seenCollectionKeys.add(key);
+                    accumulatedCollections.push(collection);
+                }
             }
 
             promptActions.push({
@@ -445,17 +631,21 @@ export const resolvePillsToPromptActionsAtom = atom(
             });
         }
 
-        return { actions: promptActions, items: accumulatedItems, collection: accumulatedCollection };
+        return { actions: promptActions, items: accumulatedItems, collections: accumulatedCollections };
     },
 );
 
 // ---------------------------------------------------------------------------
 // Send a composed message that contains one or more /command pills.
 //
-// The pill tokens stay verbatim in the message content; each pill's action
-// prompt is resolved here ({{ }} variables + item/collection attachment) and
-// sent as a structured `actions` entry on the prompt. The backend appends a
-// definition block telling the model what each /command means.
+// The pill tokens stay verbatim in the message content and travel as
+// structured `actions` entries on the prompt; the backend appends a definition
+// block telling the model what each /command means.
+//
+// An action's targets were attached when the user picked it, so nothing is
+// attached here — what the user is left with is what gets sent. The exception
+// is a prompt carrying {{variables}}: those resolve on the way out, and the
+// items they name are merged in as they always have been.
 // ---------------------------------------------------------------------------
 
 export const sendComposedMessageAtom = atom(
@@ -472,19 +662,26 @@ export const sendComposedMessageAtom = atom(
 
         const resolved = await set(resolvePillsToPromptActionsAtom, { pills });
         if (!resolved) return false;
-        const { actions: promptActions, items: accumulatedItems, collection: accumulatedCollection } = resolved;
+        const { actions: promptActions, items: variableItems, collections: variableCollections } = resolved;
 
-        if (accumulatedItems.length > 0) {
+        if (variableItems.length > 0) {
             const currentItems = get(currentMessageItemsAtom);
             const existingKeys = new Set(currentItems.map(i => `${i.libraryID}-${i.key}`));
-            const newItems = accumulatedItems.filter(i => !existingKeys.has(`${i.libraryID}-${i.key}`));
+            const newItems = variableItems.filter(i => !existingKeys.has(`${i.libraryID}-${i.key}`));
             if (newItems.length > 0) {
                 set(currentMessageItemsAtom, [...currentItems, ...newItems]);
             }
         }
 
-        if (accumulatedCollection && (get(currentMessageCollectionsAtom) as CollectionReference[]).length === 0) {
-            set(currentMessageCollectionsAtom, [accumulatedCollection]);
+        if (variableCollections.length > 0) {
+            const currentCollections = get(currentMessageCollectionsAtom) as CollectionReference[];
+            const existingCollectionKeys = new Set(currentCollections.map(collectionReferenceKey));
+            const newCollections = variableCollections.filter(
+                c => !existingCollectionKeys.has(collectionReferenceKey(c)),
+            );
+            if (newCollections.length > 0) {
+                set(currentMessageCollectionsAtom, [...currentCollections, ...newCollections]);
+            }
         }
 
         await set(sendWSMessageAtom, baseText.trim(), { actions: promptActions });
@@ -498,9 +695,12 @@ export const sendComposedMessageAtom = atom(
 //
 // Pills that survive from the original message reuse their persisted wire
 // entry (see resolvePillsToPromptActionsAtom); pills added during the edit
-// resolve like a fresh compose, and the items/collection their action pulls
+// resolve like a fresh compose, and the items/collections their action pulls
 // in are converted to message attachments here (deduped against the ones
 // already on the message).
+//
+// Unlike the composer, this overlay has nowhere to attach a pill's targets
+// when it is inserted, so it binds them on submit.
 //
 // Returns null when the edit cannot be submitted (a popup has been shown).
 // ---------------------------------------------------------------------------
@@ -519,7 +719,11 @@ export const buildEditedPromptActionsAtom = atom(
         const { pills, persistedActions, existingAttachments } = payload;
         if (pills.length === 0) return { actions: undefined, addedAttachments: [] };
 
-        const resolved = await set(resolvePillsToPromptActionsAtom, { pills, persistedActions });
+        const resolved = await set(resolvePillsToPromptActionsAtom, {
+            pills,
+            persistedActions,
+            bindTargets: true,
+        });
         if (!resolved) return null;
 
         const addedAttachments: MessageAttachment[] = [];
@@ -555,16 +759,29 @@ export const buildEditedPromptActionsAtom = atom(
             }
         }
 
-        const hasCollection = (existingAttachments ?? []).some(a => a.type === 'collection');
-        if (resolved.collection && !hasCollection) {
-            addedAttachments.push({
+        // Add each resolved collection the message doesn't already carry, so
+        // widening the selection still reaches the regenerated action. Keyed
+        // against the existing *collection* attachments only: collection and
+        // item keys are separate Zotero namespaces, so the shared item key set
+        // above could otherwise mask a collection that merely shares a key.
+        const existingCollectionKeys = new Set(
+            (existingAttachments ?? [])
+                .filter(a => a.type === 'collection')
+                .flatMap(a => messageAttachmentLookupKeys(a)),
+        );
+        for (const collection of resolved.collections) {
+            const attachment: MessageAttachment = {
                 type: 'collection',
-                library_id: resolved.collection.library_id,
-                zotero_key: resolved.collection.zotero_key,
-                library_ref: resolved.collection.library_ref,
-                name: resolved.collection.name,
-                parent_key: resolved.collection.parent_key,
-            });
+                library_id: collection.library_id,
+                zotero_key: collection.zotero_key,
+                library_ref: collection.library_ref,
+                name: collection.name,
+                parent_key: collection.parent_key,
+            };
+            const aliases = messageAttachmentLookupKeys(attachment);
+            if (aliases.some(key => existingCollectionKeys.has(key))) continue;
+            aliases.forEach(key => existingCollectionKeys.add(key));
+            addedAttachments.push(attachment);
         }
 
         return {

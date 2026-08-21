@@ -1,8 +1,8 @@
 import React from 'react';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
 import { AnnotationTooltip, getAnnotationTooltipIcon, getAnnotationTypeLabel } from '../AnnotationTooltip';
-import { AnnotationRowView } from '../../../types/toolResultViews';
-import { getHost } from '../../../host';
+import { AnnotationRowView } from '@beaver/agent-core/run-state/toolResultViews';
+import { getHost } from '@beaver/agent-ui/host';
 
 /**
  * Shared, client-agnostic annotation row rendered from an {@link AnnotationRowView}.

@@ -4,22 +4,23 @@
 
 import { Setter } from 'jotai';
 import { AgentAction, isAnnotationAgentAction, isZoteroNoteAgentAction, isCreateNoteAgentAction, hasAppliedZoteroItem, ackAgentActionsAtom, threadAgentActionsAtom } from '../agents/agentActions';
-import { NoteProposedData } from '../types/agentActions/base';
-import { AgentRun, ModelMessage } from '../agents/types';
-import { ZoteroItemReference } from '../types/zotero';
-import { activeRunAtom, threadRunsAtom } from '../agents/atoms';
+import { NoteProposedData } from '@beaver/agent-core/types/agentActions/base';
+import { AgentRun, ModelMessage } from '@beaver/agent-core/agents/types';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { loadFullItemDataWithAllTypes, isLibraryEditable } from '../../src/utils/zoteroUtils';
 import { getLibraryByIdOrName, getCollectionByIdOrName, isLibrarySearchable } from '../../src/services/agentDataProvider/utils';
 import { getPref } from '../../src/utils/prefs';
 import { store } from '../store';
 import { currentReaderAttachmentKeyAtom } from '../atoms/messageComposition';
-import { citationMapAtom } from '../atoms/citations';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
+import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { toolAnnotationApplyBatcher, filterAnnotationAgentActions } from './toolAnnotationApplyBatcher';
 import { saveStreamingNote } from './noteActions';
 import { currentThreadIdAtom } from '../atoms/threads';
-import { logger } from '../../src/utils/logger';
-import { parseZoteroId } from './citationGrammar';
+import { recordAppliedActionsAtom } from '../atoms/messageUIState';
+import { logger } from '@beaver/agent-core/platform/logger';
+import { parseZoteroId } from '@beaver/agent-core/citations/citationGrammar';
 import { libraryRefForLibraryID, resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
 
 /**
@@ -296,22 +297,6 @@ function extractNoteBlocksFromRun(runId: string): ParsedNoteBlock[] {
 }
 
 /**
- * Tracks note action IDs that were auto-applied this session.
- * Resets on page/module reload — intentionally not persisted.
- */
-const sessionAutoAppliedNoteIds = new Set<string>();
-
-/** Check if a note action was auto-applied this session */
-export function isNoteAutoApplied(actionId: string): boolean {
-    return sessionAutoAppliedNoteIds.has(actionId);
-}
-
-/** Remove a note action from the auto-applied set (e.g. after undo or dismiss) */
-export function clearNoteAutoApplied(actionId: string): void {
-    sessionAutoAppliedNoteIds.delete(actionId);
-}
-
-/**
  * Auto-create Zotero notes from agent actions if enabled in settings.
  *
  * Note content is NOT stored in agent action proposed_data (it's always null).
@@ -483,7 +468,8 @@ export async function autoCreateNoteAgentActions(
 
             // Acknowledge the action (marks as 'applied')
             set(ackAgentActionsAtom, runId, [{ action_id: action.id, result_data: result }]);
-            sessionAutoAppliedNoteIds.add(action.id);
+            // A note the run created on its own belongs in its completed card.
+            set(recordAppliedActionsAtom, [action.id]);
         } catch (error: any) {
             logger(`autoCreateNoteAgentActions: Failed to create note "${title}": ${error.message}`, 1);
         }

@@ -1,4 +1,4 @@
-import { logger } from '../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { store } from '../../store';
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
 

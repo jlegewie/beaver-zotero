@@ -4,8 +4,8 @@
  */
 
 import { AgentAction } from '../agents/agentActions';
-import { EditMetadataResultData, AppliedMetadataEdit, FailedMetadataEdit, MetadataEdit, CreatorJSON } from '../types/agentActions/base';
-import { logger } from '../../src/utils/logger';
+import { EditMetadataResultData, AppliedMetadataEdit, FailedMetadataEdit, MetadataEdit, CreatorJSON } from '@beaver/agent-core/types/agentActions/base';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { sanitizeCreators } from '../../src/utils/zoteroUtils';
 import { libraryRefForLibraryID, resolveItemReference } from '../../src/utils/libraryIdentity';
 

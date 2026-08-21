@@ -33,7 +33,7 @@ import {
     type OCRDetectionResult,
     type PDFSearchOptions,
     type PDFSearchResult,
-} from "./types";
+} from "@beaver/agent-core/extract/types";
 import type {
     BeaverExtractResult,
     SerializedBeaverExtractResult,

@@ -4,7 +4,7 @@ import { DocumentCache } from '../../../src/services/documentCache';
 import { gzipString } from '../../../src/utils/gzip';
 import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { createMockAttachment } from '../../helpers/factories';
-import type { BeaverExtractResult } from '../../../src/beaver-extract/schema/schema';
+import type { BeaverExtractResult } from '@beaver/agent-core/extract/schema';
 import type { PageGeometry } from '../../../src/services/documentCache';
 import type { EpubDocument } from '../../../src/services/documentExtraction/epub';
 

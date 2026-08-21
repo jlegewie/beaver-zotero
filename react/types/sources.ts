@@ -1,4 +1,4 @@
-import { TextSelection } from "./attachments/apiTypes";
+import { TextSelection } from "@beaver/agent-core/types/attachments/apiTypes";
 
 export interface InputSource {
     id: string;               // Unique identifier

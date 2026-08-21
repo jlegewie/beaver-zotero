@@ -1,16 +1,14 @@
 import React from "react";
 import { useAtomValue } from 'jotai';
-import { allLibrariesExcludedAtom, isDatabaseSyncSupportedAtom } from "../../atoms/profile";
+import { allLibrariesExcludedAtom } from "../../atoms/profile";
 import RecentChats from "../RecentChats";
 import HomeLauncher from "../HomeLauncher";
 import InputArea from "../input/InputArea";
 import DragDropWrapper from "../input/DragDropWrapper";
 import PopupOverlayContainer from "../PopupOverlayContainer";
-import FileStatusBar from "../status/FileStatusBar";
-import { threadWarningsAtom } from "../../atoms/warnings";
 import { SettingsIcon }  from "../icons/icons";
 import { openPreferencesWindow } from "../../../src/ui/openPreferencesWindow";
-import Button from "../ui/Button";
+import Button from "@beaver/agent-ui/primitives/Button";
 
 interface HomePageProps {
     isWindow?: boolean;
@@ -37,10 +35,7 @@ const AllLibrariesExcludedMessage = () => (
 );
 
 const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
-    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const allLibrariesExcluded = useAtomValue(allLibrariesExcludedAtom);
-    const allWarnings = useAtomValue(threadWarningsAtom);
-    const hasCreditInfoWarning = allWarnings.some((w) => w.type === 'credit_info');
 
     // Beta versions use a pre-release tag (e.g. "0.20.0-beta.1")
     const isBeta = /-beta\.\d+$/.test(Zotero.Beaver?.pluginVersion ?? "");
@@ -80,10 +75,6 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                 className="flex-none px-25"
             >
                 <RecentChats />
-
-                {isDatabaseSyncSupported && !isWindow && !hasCreditInfoWarning && (
-                    <FileStatusBar />
-                )}
 
                 <div className="relative -mx-4 px-4 mb-3">
                     <PopupOverlayContainer />

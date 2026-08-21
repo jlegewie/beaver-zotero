@@ -5,20 +5,22 @@
  * live and integration tests.
  */
 
-// Candidate ports probed by `isZoteroAvailable()`. The env var (if set) wins;
-// otherwise we try Zotero 7's default (23119) and the Zotero 10 beta default
-// (23124). The first port that answers `/beaver/test/ping` becomes the
-// resolved port for the rest of the run.
+// Candidate ports probed by `isZoteroAvailable()`. The first one that answers
+// `/beaver/test/ping` becomes the resolved port for the rest of the run.
+//
+// `ZOTERO_HTTP_PORT` is exclusive, not merely first: several Zotero instances
+// commonly run side by side (the main dev profile plus one per worktree), and
+// falling back to a different instance when the named one is briefly down would
+// run the suite against the wrong library — silently, since the fixtures exist
+// in both. Without the env var we probe Zotero 7's default (23119) and the
+// Zotero 10 beta default (23124).
 const ENV_PORT = process.env.ZOTERO_HTTP_PORT
     ? parseInt(process.env.ZOTERO_HTTP_PORT, 10)
     : null;
-export const ZOTERO_PORT_CANDIDATES: number[] = Array.from(
-    new Set(
-        [ENV_PORT, 23119, 23124].filter(
-            (p): p is number => typeof p === 'number' && Number.isFinite(p),
-        ),
-    ),
-);
+export const ZOTERO_PORT_IS_EXPLICIT = ENV_PORT !== null && Number.isFinite(ENV_PORT);
+export const ZOTERO_PORT_CANDIDATES: number[] = ZOTERO_PORT_IS_EXPLICIT
+    ? [ENV_PORT as number]
+    : [23119, 23124];
 
 let resolvedPort: number = ZOTERO_PORT_CANDIDATES[0] ?? 23119;
 

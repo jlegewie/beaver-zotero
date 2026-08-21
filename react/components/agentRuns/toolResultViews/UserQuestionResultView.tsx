@@ -1,5 +1,5 @@
 import React from 'react';
-import { UserQuestionView } from '../../../types/toolResultViews';
+import { UserQuestionView } from '@beaver/agent-core/run-state/toolResultViews';
 
 /**
  * Shared renderer for the {@link UserQuestionView} view model (ask_user_question).

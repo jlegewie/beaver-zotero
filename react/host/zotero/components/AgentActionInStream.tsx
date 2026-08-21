@@ -1,5 +1,5 @@
 import React from 'react';
-import type { AgentActionInStreamProps } from '../../types';
+import type { AgentActionInStreamProps } from '@beaver/agent-ui/host/types';
 import { AgentActionView } from './AgentActionView';
 import { AnnotationToolCallView } from './AnnotationToolCallView';
 import { EditNoteGroupView } from './EditNoteGroupView';

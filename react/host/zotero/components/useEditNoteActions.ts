@@ -1,44 +1,38 @@
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AgentRunStatus, ToolCallPart } from '../../../agents/types';
+import { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
 import {
     AgentAction,
-    PendingApproval,
     agentActionsByToolcallAtom,
     pendingApprovalsAtom,
     removePendingApprovalAtom,
-    ackAgentActionsAtom,
-    rejectAgentActionAtom,
-    setAgentActionsToErrorAtom,
-    undoAgentActionAtom,
 } from '../../../agents/agentActions';
+import type { EditNoteResolvedTarget, PendingApproval } from '@beaver/agent-ui/host';
 import {
     approvalResponseIntentsAtom,
     isWSChatPendingAtom,
     removeApprovalResponseIntentAtom,
     sendApprovalResponseAtom,
 } from '../../../atoms/agentRunAtoms';
-import { getToolCallStatus, toolResultsMapAtom, type ToolCallStatus } from '../../../agents/atoms';
-import {
-    executeEditNoteOrBatchAction,
-    undoEditNoteOrBatchAction,
-} from '../../../utils/editNoteActions';
+import { getToolCallStatus, toolResultsMapAtom, type ToolCallStatus } from '@beaver/agent-core/run-state/atoms';
 import { openNoteAndSearchEdit, openNoteByKey } from '../../../utils/sourceUtils';
 import {
-    dismissDiffPreview,
-    isDiffPreviewActive,
-    isDiffPreviewPending,
     isNoteOpenInEditor,
     showDiffPreview,
     type EditOperation,
 } from '../../../utils/noteEditorDiffPreview';
-import { diffPreviewNoteKeyAtom, isDiffPreviewLive } from '../../../utils/diffPreviewCoordinator';
-import { logger } from '../../../../src/utils/logger';
-import { store } from '../../../store';
-import { PreviewData, STATUS_CONFIGS, buildPreviewData } from './agentActionViewHelpers';
+import { isDiffPreviewLive } from '../../../utils/diffPreviewCoordinator';
+import { logger } from '@beaver/agent-core/platform/logger';
+import { PreviewData, STATUS_CONFIGS, buildPreviewData, hasFailedUndo } from './agentActionViewHelpers';
+import { useApprovalRecovery } from './useApprovalRecovery';
+import {
+    applyAgentActionsAtom,
+    inFlightAgentActionIdsAtom,
+    rejectAgentActionsAtom,
+    undoAgentActionsAtom,
+} from '../agentActionExecution';
 import {
     EditNoteDisplayStatus,
-    EditNoteResolvedTarget,
     findPendingApprovalForToolcall,
     getEditNoteDisplayStatus,
     getEffectiveEditNotePendingApproval,
@@ -48,17 +42,10 @@ import {
     resolveEditNoteTargetFromData,
     type EditNoteRowDescriptor,
 } from '../../../components/agentRuns/editNoteShared';
-import type { EditNoteOperation } from '../../../types/agentActions/editNote';
+import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
+import { dismissActiveEditNotePreview } from '../editNotePreviewLifecycle';
 
-export async function dismissActiveEditNotePreview(): Promise<void> {
-    // A deferred re-render (the revision guard's bounce) is pending-but-not-
-    // active; it must be cancelled here too, or resolving the action from
-    // the sidebar during that window would let the bounce resurrect a stale
-    // preview afterwards. dismissDiffPreview()'s generation bump cancels it.
-    if (!isDiffPreviewActive() && !isDiffPreviewPending()) return;
-    await dismissDiffPreview();
-    store.set(diffPreviewNoteKeyAtom, null);
-}
+export { dismissActiveEditNotePreview } from '../editNotePreviewLifecycle';
 
 async function waitForNoteEditorReady(libraryId: number, zoteroKey: string): Promise<boolean> {
     return await new Promise<boolean>((resolve) => {
@@ -169,10 +156,10 @@ export function useEditNoteActions({
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const removeApprovalResponseIntent = useSetAtom(removeApprovalResponseIntentAtom);
     const removePendingApproval = useSetAtom(removePendingApprovalAtom);
-    const ackAgentActions = useSetAtom(ackAgentActionsAtom);
-    const rejectAgentAction = useSetAtom(rejectAgentActionAtom);
-    const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
-    const undoAgentAction = useSetAtom(undoAgentActionAtom);
+    const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
+    const applyAgentActions = useSetAtom(applyAgentActionsAtom);
+    const undoAgentActions = useSetAtom(undoAgentActionsAtom);
+    const inFlightActionIds = useAtomValue(inFlightAgentActionIdsAtom);
     const isRunPending = useAtomValue(isWSChatPendingAtom);
 
     const actions = precomputed?.actions
@@ -230,6 +217,19 @@ export function useEditNoteActions({
     const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | 'retry' | null>(null);
     const prevPendingApprovalRef = useRef<PendingApproval | null>(pendingApproval);
 
+    const handleApprovalRecovered = useCallback(() => {
+        setIsProcessingApproval(false);
+        setIsExternallyProcessing(false);
+        setClickedButton(null);
+    }, []);
+    const { setProcessingApproval } = useApprovalRecovery({
+        isAwaitingDecision: isProcessingApproval || isExternallyProcessing,
+        hasToolReturn,
+        actionStatus: action?.status,
+        onRecover: handleApprovalRecovered,
+        label: 'useEditNoteActions',
+    });
+
     useEffect(() => {
         const previousPendingApproval = prevPendingApprovalRef.current;
         const wasAwaiting = previousPendingApproval !== null;
@@ -242,6 +242,13 @@ export function useEditNoteActions({
             if (!isProcessingApproval && isRunPending && !hasToolReturn) {
                 setIsExternallyProcessing(true);
                 setClickedButton(previousIntent === false ? 'reject' : 'approve');
+                // Record it for recovery too: a decision made from another
+                // surface (the group's Apply All, the diff-preview banner) can
+                // miss its window exactly like one made here.
+                setProcessingApproval({
+                    actionId: previousActionId,
+                    kind: previousIntent === false ? 'reject' : 'approve',
+                });
             }
 
             if (previousIntent !== undefined) {
@@ -257,21 +264,25 @@ export function useEditNoteActions({
         hasToolReturn,
         approvalResponseIntents,
         removeApprovalResponseIntent,
+        setProcessingApproval,
     ]);
 
     useEffect(() => {
         if ((isProcessingApproval || isExternallyProcessing) && action && action.status !== 'pending') {
             setIsProcessingApproval(false);
+            setProcessingApproval(null);
             setIsExternallyProcessing(false);
             setClickedButton(null);
         }
         if (isExternallyProcessing && (hasToolReturn || !isRunPending)) {
             setIsExternallyProcessing(false);
+            setProcessingApproval(null);
             setClickedButton(null);
         }
-    }, [isProcessingApproval, isExternallyProcessing, action?.status, hasToolReturn, isRunPending, action]);
+    }, [isProcessingApproval, isExternallyProcessing, action?.status, hasToolReturn, isRunPending, action, setProcessingApproval]);
 
-    const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing;
+    const isWriting = actions.some((candidate) => inFlightActionIds.has(candidate.id));
+    const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing || isWriting;
     const effectiveStatus: EditNoteDisplayStatus = getEditNoteDisplayStatus({
         action,
         pendingApproval,
@@ -313,43 +324,33 @@ export function useEditNoteActions({
         setIsProcessingAction(true);
         setClickedButton(button);
         try {
-            await dismissActiveEditNotePreview();
-            const result = await executeEditNoteOrBatchAction(action);
-            await ackAgentActions(runId, [{
-                action_id: action.id,
-                result_data: result,
-            }]);
-            logger(`useEditNoteActions: Applied ${action.action_type} action ${action.id}`, 1);
-        } catch (error: any) {
-            const errorMessage = error?.message || 'Failed to apply edit_note';
-            const stackTrace = error?.stack || '';
-            logger(`useEditNoteActions: Failed to apply edit_note action ${action.id}: ${errorMessage}\n${stackTrace}`, 1);
-            setAgentActionsToError([action.id], errorMessage, {
-                stack_trace: stackTrace,
-                error_name: error?.name,
-                error_code: error?.code,
-            });
+            const result = await applyAgentActions({ actions: [action], runId });
+            if (result.applied.includes(action.id)) {
+                logger(`useEditNoteActions: Applied ${action.action_type} action ${action.id}`, 1);
+            }
         } finally {
             setIsProcessingAction(false);
             setClickedButton(null);
         }
-    }, [action, isProcessing, ackAgentActions, runId, setAgentActionsToError]);
+    }, [action, applyAgentActions, isProcessing, runId]);
 
     const handleApprove = useCallback(() => {
         if (!pendingApproval) return;
         setIsProcessingApproval(true);
+        setProcessingApproval({ actionId: pendingApproval.actionId, kind: 'approve' });
         setClickedButton('approve');
         sendApprovalResponse({ actionId: pendingApproval.actionId, approved: true });
         removePendingApproval(pendingApproval.actionId);
-    }, [pendingApproval, sendApprovalResponse, removePendingApproval]);
+    }, [pendingApproval, sendApprovalResponse, removePendingApproval, setProcessingApproval]);
 
     const handleReject = useCallback(() => {
         if (!pendingApproval) return;
         setIsProcessingApproval(true);
+        setProcessingApproval({ actionId: pendingApproval.actionId, kind: 'reject' });
         setClickedButton('reject');
         sendApprovalResponse({ actionId: pendingApproval.actionId, approved: false });
         removePendingApproval(pendingApproval.actionId);
-    }, [pendingApproval, sendApprovalResponse, removePendingApproval]);
+    }, [pendingApproval, sendApprovalResponse, removePendingApproval, setProcessingApproval]);
 
     const handleApplyPending = useCallback(async () => {
         await runApply('approve');
@@ -358,15 +359,11 @@ export function useEditNoteActions({
     const handleRejectPending = useCallback(() => {
         if (!action || isProcessing) return;
         setClickedButton('reject');
-        // Dismiss (or cancel a pending re-render of) the preview before
-        // resolving — rejection via local action state has no approval for
-        // the coordinator to react to, so without this a deferred preview
-        // bounce could resurrect a stale preview whose Apply callback
-        // targets the now-rejected action.
-        void dismissActiveEditNotePreview();
-        rejectAgentAction(action.id);
+        // The shared atom checks the in-flight claim atomically before
+        // rejecting and dismisses any active note-edit preview.
+        rejectAgentActions({ actions: [action] });
         setTimeout(() => setClickedButton(null), 100);
-    }, [action, isProcessing, rejectAgentAction]);
+    }, [action, isProcessing, rejectAgentActions]);
 
     const handleUndo = useCallback(async () => {
         if (!action || isProcessing) return;
@@ -380,28 +377,33 @@ export function useEditNoteActions({
         setIsProcessingAction(true);
         setClickedButton('undo');
         try {
-            await dismissActiveEditNotePreview();
-            await undoEditNoteOrBatchAction(action);
-            undoAgentAction(action.id);
-            logger(`useEditNoteActions: Undone ${action.action_type} action ${action.id}`, 1);
-        } catch (error: any) {
-            const errorMessage = error?.message || 'Failed to undo edit_note';
-            const stackTrace = error?.stack || '';
-            logger(`useEditNoteActions: Failed to undo edit_note action ${action.id}: ${errorMessage}\n${stackTrace}`, 1);
+            const result = await undoAgentActions({ actions: [action] });
+            if (result.undone.includes(action.id)) {
+                logger(`useEditNoteActions: Undone ${action.action_type} action ${action.id}`, 1);
+                return;
+            }
+            const errorMessage = result.failed[0]?.error ?? result.fatalError;
+            if (errorMessage) {
+                logger(`useEditNoteActions: Failed to undo edit_note action ${action.id}: ${errorMessage}`, 1);
+            }
             if (onUndoErrorChange) {
-                onUndoErrorChange(toolcallId, errorMessage);
+                onUndoErrorChange(toolcallId, errorMessage ?? 'Failed to undo note edit');
             } else {
-                setUndoError(errorMessage);
+                setUndoError(errorMessage ?? 'Failed to undo note edit');
             }
         } finally {
             setIsProcessingAction(false);
             setClickedButton(null);
         }
-    }, [action, isProcessing, onUndoErrorChange, toolcallId, undoAgentAction]);
+    }, [action, isProcessing, onUndoErrorChange, toolcallId, undoAgentActions]);
 
     const handleRetry = useCallback(async () => {
+        if (action && hasFailedUndo([action])) {
+            await handleUndo();
+            return;
+        }
         await runApply('retry');
-    }, [runApply]);
+    }, [action, handleUndo, runApply]);
 
     const handleOpenNote = useCallback(async () => {
         if (!resolvedTarget) return;

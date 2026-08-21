@@ -1,6 +1,6 @@
-import type { DocItem, SentenceItem } from "../types";
+import type { DocItem, SentenceItem } from "@beaver/agent-core/extract/types";
 import { bboxToRect } from "./bbox";
-import type { DocumentItem, Sentence, StructuredPage } from "./schema";
+import type { DocumentItem, Sentence, StructuredPage } from "@beaver/agent-core/extract/schema";
 
 interface InternalPageForProjection {
     index: number;

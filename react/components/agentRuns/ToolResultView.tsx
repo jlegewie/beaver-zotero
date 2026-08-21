@@ -1,7 +1,7 @@
 import React from 'react';
-import { ToolReturnPart } from '../../agents/types';
-import { isToolResultView, ToolResultView as ToolResultViewModel } from '../../types/toolResultViews';
-import { getHost } from '../../host';
+import { ToolReturnPart } from '@beaver/agent-core/agents/types';
+import { isToolResultView, ToolResultView as ToolResultViewModel } from '@beaver/agent-core/run-state/toolResultViews';
+import { getHost } from '@beaver/agent-ui/host';
 import { ItemListResultView } from './toolResultViews/ItemListResultView';
 import { ExternalReferenceListResultView } from './toolResultViews/ExternalReferenceListResultView';
 import { CollectionListResultView } from './toolResultViews/CollectionListResultView';
@@ -9,6 +9,7 @@ import { TagListResultView } from './toolResultViews/TagListResultView';
 import { AnnotationListResultView } from './toolResultViews/AnnotationListResultView';
 import { AttachmentSearchResultView } from './toolResultViews/AttachmentSearchResultView';
 import { UserQuestionResultView } from './toolResultViews/UserQuestionResultView';
+import { BatchOperationResultView } from './toolResultViews/BatchOperationResultView';
 
 interface ToolResultViewProps {
     result: ToolReturnPart;
@@ -36,6 +37,8 @@ function renderFromView(view: ToolResultViewModel): React.ReactNode | null {
             return <AttachmentSearchResultView view={view} />;
         case 'user_question':
             return <UserQuestionResultView view={view} />;
+        case 'batch_operation':
+            return <BatchOperationResultView view={view} />;
         default:
             return null;
     }

@@ -334,7 +334,7 @@ const nodes: Record<string, NodeSpec> = {
         parseDOM: [{
             tag: 'img',
             getAttrs: (dom: HTMLElement) => {
-                let annotation = decodeObject(dom.getAttribute('data-annotation'));
+                const annotation = decodeObject(dom.getAttribute('data-annotation'));
                 // Migrate annotation.uri to annotation.attachmentURI which was used until v4
                 if (annotation && annotation.uri) {
                     annotation.attachmentURI = annotation.uri;

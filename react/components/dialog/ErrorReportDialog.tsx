@@ -6,12 +6,12 @@ import {
     isErrorReportSendingAtom
 } from '../../atoms/ui';
 import { CancelIcon } from '../icons/icons';
-import Button from '../ui/Button';
-import IconButton from '../ui/IconButton';
+import Button from '@beaver/agent-ui/primitives/Button';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { getJotaiState } from '../../utils/getJotaiState';
-import { accountService } from '../../../src/services/accountService';
+import { accountService } from '@beaver/agent-core/transport/clients/accountService';
 import { getPref } from '../../../src/utils/prefs';
-import { getDocumentFromElement } from '../../utils/windowContext';
+import { getDocumentFromElement } from '@beaver/agent-ui/utils/windowContext';
 
 /**
  * Get all plugin preferences for debugging
@@ -74,6 +74,7 @@ const ErrorReportDialog: React.FC = () => {
         if (isVisible) {
             // Get the correct document context for this component
             const doc = getDocumentFromElement(containerRef.current);
+            if (!doc) return;
             doc.addEventListener('keydown', handleKeyDown);
             return () => doc.removeEventListener('keydown', handleKeyDown);
         }

@@ -11,7 +11,7 @@ import {
     CreateNoteAnnotationsProposedData,
     CreateNoteAnnotationsResultData,
     FailedAnnotationResult,
-} from '../types/agentActions/createAnnotations';
+} from '@beaver/agent-core/types/agentActions/createAnnotations';
 import {
     EpubAnnotationError,
     MissingPageGeometryError,
@@ -19,12 +19,14 @@ import {
     createEpubNoteAnnotation,
     createHighlightAnnotation,
     createNoteAnnotation,
+    highlightPartComment,
+    resolvedAnnotationPageLabel,
 } from '../../src/services/annotations/createAnnotation';
 import { getReadableContentKind } from '../../src/services/documentExtraction/attachmentResolution';
 import { getAttachmentFileStatus } from '../../src/services/agentDataProvider/utils';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { libraryRefForLibraryID, resolveItemReference } from '../../src/utils/libraryIdentity';
-import type { ZoteroItemReference } from '../types/zotero';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 
 type AnnotationContentKind = 'pdf' | 'epub';
 
@@ -127,14 +129,16 @@ export async function executeCreateHighlightAnnotationsAction(
             ? (item.page_label ?? null)
             : null;
 
-        for (const loc of item.page_locations) {
+        const partCount = item.page_locations.length;
+        for (let partIndex = 0; partIndex < partCount; partIndex++) {
+            const loc = item.page_locations[partIndex];
             try {
                 const ref = await createHighlightAnnotation(attachment, {
                     pageIndex: loc.page_idx,
                     boxes: loc.boxes ?? [],
                     text: item.text ?? '',
                     color: item.color,
-                    comment: item.comment ?? item.title,
+                    comment: highlightPartComment(item.comment ?? item.title, partIndex, partCount),
                     pageLabel: loc.page_label ?? itemPageLabelFallback,
                     readingOrderOffset: loc.reading_order_offset ?? null,
                     tags,
@@ -146,6 +150,11 @@ export async function executeCreateHighlightAnnotationsAction(
                     library_id: ref.library_id,
                     zotero_key: ref.zotero_key,
                     library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
+                    page_idx: loc.page_idx,
+                    page_label: resolvedAnnotationPageLabel(
+                        loc.page_idx,
+                        loc.page_label ?? itemPageLabelFallback,
+                    ),
                 });
             } catch (error: any) {
                 failed.push({

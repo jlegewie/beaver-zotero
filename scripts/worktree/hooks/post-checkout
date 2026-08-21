@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+#
+# Link the git-ignored agent instruction files into every worktree.
+#
+# Fires on `git worktree add` (whoever runs it: setup-worktree.sh, Claude Code,
+# t3code, Cursor, Codex, or by hand) and on ordinary checkouts, so an
+# un-bootstrapped worktree heals itself on the next git operation.
+#
+# Idempotent, non-destructive (never replaces an existing file), and always
+# exits 0 so it cannot break a checkout.
+
+set -u
+
+# Main worktree = the directory holding the shared .git dir.
+common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || exit 0
+main="$(dirname "$common_dir")"
+here="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+
+# Nothing to do in the main worktree itself.
+[ "$here" = "$main" ] && exit 0
+
+for f in CLAUDE.local.md AGENTS.md; do
+    [ -f "$main/$f" ] || continue   # main doesn't have it
+    [ -e "$here/$f" ] && continue   # already linked or a real file — leave it
+    ln -s "$main/$f" "$here/$f" && echo "linked $f -> $main/$f"
+done
+
+exit 0

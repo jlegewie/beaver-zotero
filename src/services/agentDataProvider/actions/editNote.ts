@@ -1,7 +1,7 @@
-import { logger } from '../../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
-import { EditNoteProposedData, type EditNoteOperation } from '../../../../react/types/agentActions/editNote';
+import { EditNoteProposedData, type EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import {
     getOrSimplify,
     invalidateSimplificationCache,
@@ -16,6 +16,7 @@ import {
     applyOldStringEnrichment,
     detectPartialSimplifiedTag,
     buildPartialSimplifiedTagMessage,
+    buildExpansionErrorMessage,
 } from '../../../utils/editNoteValidation';
 import {
     expandToRawHtml,
@@ -53,12 +54,12 @@ import {
 } from '../../../utils/editNoteMatcher';
 import { clearNoteEditorSelection } from '../../../../react/utils/sourceUtils';
 import { store } from '../../../../react/store';
-import { citationMapAtom } from '../../../../react/atoms/citations';
+import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
 import {
     externalReferenceMappingAtom,
     externalReferenceItemMappingAtom,
-} from '../../../../react/atoms/externalReferences';
+} from '@beaver/agent-core/citations/externalReferences';
 import { renderToHTML, type RenderContextData } from '../../../../react/utils/citationRenderers';
 import { prepareCitationRenderContext } from '../../../../react/utils/citationRenderContext';
 import { addOrUpdateEditFooter, getBeaverFooterAppendPoint } from '../../../utils/noteEditFooter';
@@ -69,7 +70,7 @@ import {
     WSAgentActionValidateResponse,
     WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
-} from '../../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
@@ -612,7 +613,7 @@ async function validateEditNoteAction(
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
                 valid: false,
-                error: e.message || String(e),
+                error: buildExpansionErrorMessage(e, simplified, old_string),
                 error_code: 'expansion_failed',
                 preference: 'always_ask',
             };
@@ -737,7 +738,7 @@ async function validateEditNoteAction(
  * Execute an edit_note action.
  * Performs the string replacement on the note's raw HTML via the simplified format.
  *
- * Concurrency: relies on `AgentService.actionExecutionQueue` (src/services/agentService.ts)
+ * Concurrency: relies on `AgentService.actionExecutionQueue` (@beaver/agent-core)
  * to serialize all agent action dispatches. This function assumes no other edit_note
  * execution is running against the same note. Do not introduce parallel dispatch
  * (e.g. Promise.all) at the caller level without adding a per-note lock here.
@@ -1127,7 +1128,7 @@ async function executeEditNoteAction(
                 type: 'agent_action_execute_response',
                 request_id: request.request_id,
                 success: false,
-                error: e.message || String(e),
+                error: buildExpansionErrorMessage(e, simplified, old_string),
                 error_code: 'expansion_failed',
             };
         }

@@ -4,7 +4,7 @@ import { initializeReactUI } from "../../react/ui/initialization";
 import { KeyboardManager } from "../utils/keyboardManager";
 import { getPref } from "../utils/prefs";
 import { PreferencePageTab } from "../../react/atoms/ui";
-import { ActionCategoryFilter } from "../../react/types/actions";
+import { ActionCategoryFilter } from "@beaver/agent-core/types/actions";
 
 let keyboardManager: KeyboardManager | null = null;
 
@@ -50,7 +50,11 @@ export class BeaverUIFactory {
         function createMountingElement(id: string, location: 'library' | 'reader') {
             const mountPoint = win.document.createXULElement("vbox");
             mountPoint.setAttribute("id", id);
-            mountPoint.setAttribute("class", "display-flex flex-1 h-full min-w-0");
+            // `beaver-root` is the scoping root for @beaver/agent-ui's shared
+            // sheets: they select `.beaver-root .foo`, so the class has to sit
+            // on exactly the elements that carry a `beaver-pane-*` id or the
+            // utility layer stops matching inside this pane.
+            mountPoint.setAttribute("class", "beaver-root display-flex flex-1 h-full min-w-0");
             mountPoint.setAttribute("style", "min-width: 0px; display: none;");
             
             // Create a div inside the vbox as mount point for the React component
@@ -140,6 +144,8 @@ export class BeaverUIFactory {
             if (!floatingPopupRoot) {
                 floatingPopupRoot = win.document.createElement("div");
                 floatingPopupRoot.id = "beaver-pane-floating-popup";
+                // Scoping root for the shared agent-ui sheets, as above.
+                floatingPopupRoot.className = "beaver-root";
                 win.document.documentElement.appendChild(floatingPopupRoot);
                 ztoolkit.log("registerChatPanel: created floating popup root element");
 
@@ -324,6 +330,9 @@ export class BeaverUIFactory {
             // NOTE: This duplicates cleanup logic from dismissDiffPreview() in
             // react/utils/noteEditorDiffPreview.ts. If the cleanup steps change
             // (e.g., new artifacts to remove), update both locations.
+            //
+            // Backstop for a window whose bundle held no agent connection:
+            // when it did, the shutdown close dismisses the preview first.
             try {
                 const instances: any[] = (Zotero as any).Notes?._editorInstances ?? [];
                 for (const inst of instances) {
@@ -593,6 +602,30 @@ export class BeaverUIFactory {
     }
 
     /**
+     * Close the auxiliary windows (separate Beaver window, preferences) that
+     * render with `win`'s React instance.
+     *
+     * Neither window loads its own React bundle: each grabs `BeaverReact` from
+     * a main window at load time and shares that bundle's Jotai store, which it
+     * records as `__beaverOwnerWindowRef`. Once that main window unloads, the
+     * auxiliary window is frozen against a dead bundle and its state is
+     * invisible to the bundle a reopened main window loads — so it must not
+     * outlive its owner. `closeUnowned` additionally closes windows with no
+     * recorded owner, for the last-main-window case where no bundle remains.
+     */
+    static closeWindowsRenderedBy(win: Window, closeUnowned = false): void {
+        const auxiliaryWindows = [this.findBeaverWindow(), this.findPreferencesWindow()];
+        for (const auxiliaryWindow of auxiliaryWindows) {
+            if (!auxiliaryWindow || auxiliaryWindow.closed) continue;
+            const owner = auxiliaryWindow.__beaverOwnerWindowRef?.deref();
+            if (owner === win || (closeUnowned && !owner)) {
+                auxiliaryWindow.close();
+                Zotero.debug("Beaver: Closed auxiliary window whose React owner is going away");
+            }
+        }
+    }
+
+    /**
      * Find an existing Beaver preferences window
      */
     static findPreferencesWindow(): Window | undefined {
@@ -631,7 +664,8 @@ export class BeaverUIFactory {
             'chrome://beaver/content/beaverPreferences.xhtml',
             BEAVER_PREFERENCES_WINDOW_NAME,
             'chrome,resizable,centerscreen,dialog=false',
-            { tab: tab || null, actionsCategoryFilter: actionsCategoryFilter || null, actionId: actionId || null }
+            // `??` so the uncategorized filter (`""`) is not dropped as falsy.
+            { tab: tab || null, actionsCategoryFilter: actionsCategoryFilter ?? null, actionId: actionId || null }
         );
         Zotero.debug("Beaver: Opened preferences window");
     }

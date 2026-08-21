@@ -8,13 +8,14 @@ import {
   buildSortIndex,
   computeNoteRect,
   convertHighlightBoxesToRects,
+  highlightPartComment,
 } from "../../../../src/services/annotations/createAnnotation";
 import {
   CoordOrigin,
   type BoundingBox,
-} from "../../../../react/types/citations";
-import type { NotePosition } from "../../../../react/types/agentActions/annotations";
-import type { PageGeometry } from "../../../../src/beaver-extract/types";
+} from "@beaver/agent-core/types/citations";
+import type { NotePosition } from "@beaver/agent-core/types/agentActions/annotations";
+import type { PageGeometry } from "@beaver/agent-core/extract/types";
 
 const baseGeometry: PageGeometry = {
   viewBox: [0, 0, 400, 600],
@@ -331,6 +332,24 @@ describe("createAnnotation geometry primitives", () => {
       expect(
         computeNoteRect(leftNote, geometry({ viewBox: [5, 7, 405, 607] })),
       ).toEqual([17, 498, 35, 516]);
+    });
+  });
+
+  describe("highlightPartComment", () => {
+    it("leaves a single-page highlight's comment unchanged", () => {
+      expect(highlightPartComment("Key finding", 0, 1)).toBe("Key finding");
+    });
+
+    it("numbers each part of a multi-page highlight", () => {
+      expect(highlightPartComment("Key finding", 0, 3)).toBe("Key finding (1/3)");
+      expect(highlightPartComment("Key finding", 2, 3)).toBe("Key finding (3/3)");
+    });
+
+    it("does not invent a comment for blank input", () => {
+      expect(highlightPartComment("", 0, 3)).toBe("");
+      expect(highlightPartComment("   ", 0, 3)).toBe("   ");
+      expect(highlightPartComment(null, 0, 3)).toBe("");
+      expect(highlightPartComment(undefined, 1, 2)).toBe("");
     });
   });
 });

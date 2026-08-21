@@ -1,23 +1,26 @@
 import { atom } from "jotai";
-import { currentMessageItemsAtom, currentMessageContentAtom, currentMessagePillsAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
+import { currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import { isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowUserScrolledAtom } from "./ui";
 
-import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "./citations";
+import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "@beaver/agent-core/citations/atoms";
+import { maybeShowCitationTipAtom } from "./citationTip";
 import { preloadPageLabelsForCitations } from "../utils/pageLabels";
-import { agentRunService, agentService } from "../../src/services/agentService";
-import { threadService, ZoteroInstanceRef } from "../../src/services/threadService";
+import { agentService } from "@beaver/agent-core/transport/agentService";
+import { threadService, ZoteroInstanceRef } from "@beaver/agent-core/transport/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes, currentZoteroInstanceRef } from "../../src/utils/zoteroUtils";
 import { isThreadInstanceMismatch } from "../utils/threadMatches";
-import { getHost } from "../host";
-import { logger } from "../../src/utils/logger";
-import { ApiError } from "../types/apiErrors";
-import { resetMessageUIStateAtom } from "./messageUIState";
-import { checkExternalReferencesAtom, clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "./externalReferences";
-import { ExternalReference } from "../types/externalReferences";
-import { threadRunsAtom, activeRunAtom } from "../agents/atoms";
+import { getHost } from '@beaver/agent-ui/host';
+import { logger } from "@beaver/agent-core/platform/logger";
+import { ApiError } from "@beaver/agent-core/types/apiErrors";
+import { resetMessageUIStateAtom, retainedReviewActionsAtom } from "./messageUIState";
+import { checkExternalReferencesAtom } from "./externalReferences";
+import { clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "@beaver/agent-core/citations/externalReferences";
+import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
+import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom } from "@beaver/agent-core/run-state/atoms";
+import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
 import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
-import { AgentRun } from "../agents/types";
+import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
 import { 
     threadAgentActionsAtom, 
     isCreateItemAgentAction, 
@@ -26,15 +29,17 @@ import {
     undoAgentActionAtom,
     clearAllPendingApprovalsAtom,
 } from "../agents/agentActions";
-import { clearAllPendingQuestionsAtom } from "../agents/pendingQuestions";
+import { clearAllPendingQuestionsAtom } from "@beaver/agent-core/run-state/pendingQuestions";
+import { clearAllPendingCreditConfirmationsAtom } from "@beaver/agent-core/run-state/pendingCreditConfirmations";
+import { clearAllPendingBatchApprovalsAtom } from "@beaver/agent-core/run-state/pendingBatchApprovals";
 import { processToolReturnResults } from "../agents/toolResultProcessing";
 import { upgradeToolReturn } from "../compat/legacyToolResults";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
 import { BeaverTemporaryAnnotations } from "../utils/annotationUtils";
 import { enrichMessageAttachmentStub } from "../types/attachments/converters";
-import { zoteroReferenceKey } from "../types/attachments/apiTypes";
+import { zoteroReferenceKey } from "@beaver/agent-core/types/attachments/apiTypes";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
-import type { ZoteroItemReference } from "../types/zotero";
+import type { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
 
 /**
  * Stores a run ID that ThreadView should scroll to after a thread finishes loading.
@@ -128,8 +133,9 @@ export interface ThreadData {
 }
 
 // Thread messages and attachments
-export const currentThreadIdAtom = atom<string | null>(null);
-export const currentThreadNameAtom = atom<string | null>(null);
+// These are defined alongside the run state in the shared core and re-exported
+// here so thread consumers can import them from either module.
+export { currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom };
 
 /**
  * Atom to store the scroll position of the current thread
@@ -268,8 +274,10 @@ async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any,
 export const newThreadAtom = atom(
     null,
     async (get, set, options?: { skipAutoPopulate?: boolean; skipActiveRunConfirm?: boolean }) => {
-        // Show loading state immediately if there's an active run to cancel
-        const hasActiveWork = get(isWSChatPendingAtom) || get(activeRunAtom);
+        // Show loading state immediately if there's an active run to cancel.
+        // Gated on run status, not presence: a run that failed keeps sitting in
+        // activeRunAtom, and prompting over it claims Beaver is still working.
+        const hasActiveWork = get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom));
         if (hasActiveWork) {
             if (!options?.skipActiveRunConfirm && !confirmInterruptActiveRun(
                 'Start new chat?',
@@ -300,6 +308,8 @@ export const newThreadAtom = atom(
             set(threadAgentActionsAtom, []);
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
+            set(clearAllPendingCreditConfirmationsAtom);
+            set(clearAllPendingBatchApprovalsAtom);
             
             set(isWebSearchEnabledAtom, false);
             
@@ -309,8 +319,7 @@ export const newThreadAtom = atom(
             set(removePopupMessagesByTypeAtom, ['items_summary']);
             set(citationsAtom, []);
             set(resetCitationMarkersAtom);
-            set(currentMessageContentAtom, '');
-            set(currentMessagePillsAtom, []);
+            set(clearComposerAtom);
             set(resetMessageUIStateAtom);
             set(clearExternalReferenceCacheAtom);
             // Update message items from Zotero selection or reader
@@ -333,11 +342,6 @@ export const newThreadAtom = atom(
         }
     }
 );
-
-/**
- * Atom to check if a thread is loading
- */
-export const isLoadingThreadAtom = atom<boolean>(false);
 
 /**
  * Atom to load a thread
@@ -363,8 +367,9 @@ export const loadThreadAtom = atom(
             skipInstanceMismatchConfirm?: boolean;
         }
     ): Promise<boolean> => {
-        // Confirm before interrupting a run that's actively streaming in the current thread
-        const hasActiveWork = get(isWSChatPendingAtom) || get(activeRunAtom);
+        // Confirm before interrupting a run that's actively streaming in the
+        // current thread. Status, not presence — see newThreadAtom.
+        const hasActiveWork = get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom));
         if (hasActiveWork && !confirmInterruptActiveRun(
             'Switch chat?',
             'Beaver is still generating a response in this chat. Switching chats will stop it.',
@@ -445,7 +450,11 @@ export const loadThreadAtom = atom(
             // Clear all pending approvals/questions when loading a different thread
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
-
+            set(clearAllPendingCreditConfirmationsAtom);
+            set(clearAllPendingBatchApprovalsAtom);
+            // A reopened thread takes a fresh snapshot containing only actions
+            // that are still pending.
+            set(retainedReviewActionsAtom, {});
             // Legacy non-stateful path: fetch the name from the local DB when
             // not provided (the stateful path already resolved it above).
             const threadNamePromise = !resolvedName && !statefulChat
@@ -462,23 +471,20 @@ export const loadThreadAtom = atom(
                 })()
                 : null;
 
-            // Load agent runs with actions from the backend
-            const { runs, agent_actions } = await agentRunService.getThreadRuns(threadId, true);
-
-            console.log("loadThreadAtom: runs", runs);
-            console.log("loadThreadAtom: agent_actions", agent_actions);
-            
-            // Mark any in_progress runs as canceled since they're no longer active
-            const processedRuns = runs.map(run => {
-                if (run.status === 'in_progress') {
-                    logger(`loadThreadAtom: Marking in_progress run ${run.id} as canceled`, 1);
-                    return {
-                        ...run,
-                        status: 'canceled' as const,
-                        completed_at: run.completed_at || new Date().toISOString(),
-                    };
-                }
-                return run;
+            // Load agent runs with actions from the backend, and hydrate each
+            // tool return as the shared loader walks the runs.
+            const {
+                runs: processedRuns,
+                citations: citationMetadata,
+                agentActions: agent_actions,
+            } = await loadThreadRuns(threadId, {
+                onToolReturn: async (part, toolCallArgs) => {
+                    await processToolReturnResults(part, set);
+                    // Synthesize a hydrated `view` for legacy results that lack
+                    // one, so the shared render layer can render old threads
+                    // from `metadata.view`.
+                    await upgradeToolReturn(part, toolCallArgs);
+                },
             });
 
             // Protocol deep-links can request a run that does not exist in the target thread.
@@ -490,47 +496,6 @@ export const loadThreadAtom = atom(
             }
             
             if (processedRuns.length > 0) {
-                // Extract citations from runs
-                const citationMetadata = processedRuns.flatMap(run => 
-                    (run.metadata?.citations || []).map(citation => ({
-                        ...citation,
-                        run_id: run.id
-                    }))
-                );
-                
-                // Build a tool_call_id → args map so the compat layer can derive
-                // the annotation-list variant (it needs the originating call args).
-                const toolCallArgsById = new Map<string, string | Record<string, any> | null>();
-                for (const run of processedRuns) {
-                    for (const message of run.model_messages) {
-                        if (message.kind === 'response') {
-                            for (const part of message.parts) {
-                                if (part.part_kind === 'tool-call' && part.tool_call_id) {
-                                    toolCallArgsById.set(part.tool_call_id, part.args);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Process tool return results
-                const externalReferences: ExternalReference[] = [];
-                for (const run of processedRuns) {
-                    for (const message of run.model_messages) {
-                        if (message.kind === 'request') {
-                            for (const part of message.parts) {
-                                if (part.part_kind === "tool-return") {
-                                    await processToolReturnResults(part, set);
-                                    // Synthesize a hydrated `view` for legacy results
-                                    // that lack one, so the shared render layer can
-                                    // render old threads from `metadata.view`.
-                                    await upgradeToolReturn(part, toolCallArgsById.get(part.tool_call_id));
-                                }
-                            }
-                        }
-                    }
-                }
-                
                 // Load item data for user attachments. Citations no longer
                 // need item preloading: they render from backend metadata
                 // alone (citation v2).
@@ -578,6 +543,7 @@ export const loadThreadAtom = atom(
                 // Update citation state (synchronous: markers + citation tip)
                 set(citationsAtom, citationMetadata);
                 set(processCitationsAtom);
+                set(maybeShowCitationTipAtom);
 
                 // Preload PDF page labels in the background so subsequent
                 // renders can resolve page locators to their display labels.
@@ -677,8 +643,7 @@ export const loadThreadAtom = atom(
         set(currentMessageCollectionsAtom, []);
         set(currentMessageExternalFilesAtom, []);
         set(removePopupMessagesByTypeAtom, ['items_summary']);
-        set(currentMessageContentAtom, '');
-        set(currentMessagePillsAtom, []);
+        set(clearComposerAtom);
         return loaded;
     }
 );

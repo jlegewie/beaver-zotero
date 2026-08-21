@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { version as CURRENT_VERSION } from '../../../package.json';
 import {
     CLIENT_FEATURES,
     ZOTERO_PLUGIN_CLIENT_TYPE,
     ZOTERO_PLUGIN_FEATURES,
-} from '../../../src/services/agentProtocol';
+    zoteroPluginFeatures,
+} from '@beaver/agent-core/protocol/agentProtocol';
 
 // Guards the client-feature handshake (Lane C).
 type Op = 'gt' | 'gte';
@@ -45,6 +45,27 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // shapes a client only honors if its handlers implement them: builds that
 // predate them drop the unknown fields, so the backend degrades gracefully
 // instead of assuming support from a version.
+// citations_event is declaration-only because it gates an outbound frame the
+// client must have a handler for — a version cannot vouch for that, and the
+// backend keeps embedding citations in run_complete without it.
+// recursive_collections_filter is declaration-only because it describes what
+// the client's two item-search handlers do with collections_filter; without it
+// the backend warns the model that only direct membership was matched.
+// item_quick_search is declaration-only because it gates an inbound request
+// event a client only answers if it has the handler: a build that predates it
+// drops the unknown event silently, so the backend refuses the op up front
+// rather than letting the caller wait out the request timeout.
+// list_collections_recursive and list_tags_name_query are declaration-only for
+// the same reason as list_items_include_children: they gate request fields a
+// client only honors if its handler implements them, and a build that predates
+// them drops the field and answers a narrower question without saying so.
+// credit_confirmation is declaration-only because it gates an inbound event a
+// client only answers if it has the handler: a build that predates it drops the
+// event and stalls the run for the whole confirmation timeout, so the backend
+// falls back to the per-tool confirmations instead.
+// batch_operations is declaration-only because it is a backend rollout switch
+// for a deferred capability with no client handler: a client that does not
+// declare it sees no catalog entry. This plugin only opts in in development.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'ask_user_question',
@@ -52,6 +73,19 @@ const DECLARATION_ONLY_FEATURES = [
     'list_items_include_children',
     'create_note_tags_collections',
     'edit_note_batch',
+    'edit_annotations',
+    'citations_event',
+    'recursive_collections_filter',
+    'item_quick_search',
+    'list_collections_recursive',
+    'list_tags_name_query',
+    'credit_confirmation',
+    'batch_operations',
+];
+
+// Features in the vocabulary that this plugin does not declare in production.
+const DEV_ONLY_FEATURES = [
+    'batch_operations',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every
@@ -110,16 +144,13 @@ function featuresFromVersion(version: string): string[] {
 
 // The plugin version drives the derivation, so the contract is checked against
 // whatever this build actually is.
-const pkg = JSON.parse(
-    readFileSync(fileURLToPath(new URL('../../../package.json', import.meta.url)), 'utf8'),
-) as { version: string };
-const CURRENT_VERSION = pkg.version;
 
-// Expected declared set for the current build: everything the backend grants a
-// client of this version, plus the declaration-only features.
+// Expected declared set for the current production build: everything the
+// backend grants a client of this version, plus the declaration-only features
+// this plugin always ships — excluding the development-only rollout switches.
 const EXPECTED_DECLARED_FEATURES = [
     ...featuresFromVersion(CURRENT_VERSION),
-    ...DECLARATION_ONLY_FEATURES,
+    ...DECLARATION_ONLY_FEATURES.filter((f) => !DEV_ONLY_FEATURES.includes(f)),
 ].sort();
 
 describe('client feature declaration (Lane C)', () => {
@@ -147,6 +178,15 @@ describe('client feature declaration (Lane C)', () => {
         // threads — gated on the version header — still get v2 and render fine.
         expect(featuresFromVersion(CURRENT_VERSION)).toContain('citation_v2');
         expect(ZOTERO_PLUGIN_FEATURES).toContain('citation_v2');
+    });
+
+    it('declares batch_operations only in development', () => {
+        expect(ZOTERO_PLUGIN_FEATURES).not.toContain('batch_operations');
+        expect(zoteroPluginFeatures(false)).not.toContain('batch_operations');
+        expect(zoteroPluginFeatures(true)).toEqual([
+            ...ZOTERO_PLUGIN_FEATURES,
+            'batch_operations',
+        ]);
     });
 });
 

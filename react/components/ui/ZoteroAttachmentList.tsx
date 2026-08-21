@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { CSSItemTypeIcon } from '../icons/icons';
-import { FailedFileReference, FailedItemReference } from '../../types/zotero';
+import { FailedFileReference, FailedItemReference } from '../../types/fileStatus';
 import { errorMapping } from '../../atoms/errors';
 import { selectItemById } from '../../../src/utils/selectItem';
 import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
-import IconButton from './IconButton';
+import { safeAttachmentFilename } from '../../../src/utils/attachmentFiles';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 
 interface ItemWithSelectionId {
     item: Zotero.Item;
@@ -101,7 +102,7 @@ const ZoteroAttachmentList: React.FC<ZoteroAttachmentListProps> = ({
                             <CSSItemTypeIcon itemType={item.getItemTypeIconName()} />
                         </div>
                         <div className="truncate text-sm font-color-secondary flex-1 min-w-0">
-                            {item.attachmentFilename}
+                            {safeAttachmentFilename(item)}
                         </div>
                         <div className="display-flex flex-row gap-2 fit-content min-w-0 items-center">
                             {errorMessage && (

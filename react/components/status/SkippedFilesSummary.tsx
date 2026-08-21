@@ -7,7 +7,7 @@ import {
 } from '../../atoms/files';
 import { useErrorCodeStats } from '../../hooks/useErrorCodeStats';
 import { Spinner } from '../icons/icons';
-import Button from '../ui/Button';
+import Button from '@beaver/agent-ui/primitives/Button';
 import { isSkippedFilesDialogVisibleAtom } from '../../atoms/ui';
 import { errorGroupsAtom } from '../../atoms/errors';
 

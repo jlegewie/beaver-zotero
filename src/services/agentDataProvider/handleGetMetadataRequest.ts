@@ -7,15 +7,18 @@
  * The Beaver agent is the primary agent that handles chat completions and tool execution.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
+    ItemProjectionDetail,
     WSGetMetadataRequest,
     WSGetMetadataResponse,
-} from '../agentProtocol';
-import { ItemStub } from '../../../react/types/zotero';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import { AttachmentInfo, ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeAnnotation, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectId, resolveItemReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
-import { checkLibraryExcluded, getAttachmentInfoForItem, formatCreatorsString, extractYear } from './utils';
+import { checkLibraryExcluded, getAttachmentInfoForItem, degradedAttachmentInfo, formatCreatorsString, extractYear } from './utils';
+import { loadQuickSearchHitData, toQuickSearchHit } from './itemSearchSerialization';
+import { getCreatorTypeInfo } from '../../utils/zoteroUtils';
 
 
 /**
@@ -34,22 +37,28 @@ function enrichItemCollections(item: Zotero.Item): { collection_key: string; nam
 
 /**
  * Handle get_metadata request from backend.
- * Returns full Zotero metadata for specific items.
+ * Returns Zotero metadata for specific items.
  *
- * Regular items get the rich toJSON passthrough plus optional attachment/note
- * children. Directly-requested attachments, notes, and annotations are
- * normalized into the same shapes used elsewhere in the agent surface
- * (AttachmentInfo, serializeNote, serializeAnnotation) so the backend can
- * return a consistent, type-appropriate result rather than raw toJSON.
+ * `detail: 'full'` (the default) gives regular items the rich toJSON
+ * passthrough plus optional attachment/note children. Directly-requested
+ * attachments, notes, and annotations are normalized into the same shapes used
+ * elsewhere in the agent surface (AttachmentInfo, serializeNote,
+ * serializeAnnotation) so the backend can return a consistent, type-appropriate
+ * result rather than raw toJSON.
+ *
+ * `detail: 'compact'` gives one `QuickSearchHit` per item instead — the same
+ * projection quick search serves, so a bare reference from thread history
+ * renders as the chip it was without pulling the whole item across the wire.
  */
 export async function handleGetMetadataRequest(
     request: WSGetMetadataRequest
 ): Promise<WSGetMetadataResponse> {
-    logger(`handleGetMetadataRequest: Getting metadata for ${request.item_ids.length} items`, 1);
-    
+    const detail: ItemProjectionDetail = request.detail === 'compact' ? 'compact' : 'full';
+    logger(`handleGetMetadataRequest: Getting metadata for ${request.item_ids.length} items (${detail})`, 1);
+
     const items: Record<string, any>[] = [];
     const notFound: string[] = [];
-    
+
     for (const itemId of request.item_ids) {
         try {
             // Parse item_id format: either the portable "<library_ref>-<zotero_key>"
@@ -80,10 +89,26 @@ export async function handleGetMetadataRequest(
             const item = resolved.item;
             const libraryId = item.libraryID;
 
+            // --- Compact: one chip-sized row per item, whatever its type ---
+            if (detail === 'compact') {
+                // Loads exactly what the compact row reads — including the
+                // note text and parent chain a bare itemData/creators load
+                // leaves behind, which this projection needs precisely because
+                // it serves notes and child items as well as regular ones.
+                await loadQuickSearchHitData([item]);
+                items.push({
+                    item_id: itemId,
+                    ...toQuickSearchHit(item, { includeCitation: request.include_citation === true }),
+                });
+                continue;
+            }
+
             // Load necessary data types before accessing item data
             // Always load itemData and creators for basic fields
-            const dataTypesToLoad: string[] = ['itemData', 'creators', 'relations', 'tags', 'collections', 'childItems'];
-            await Zotero.Items.loadDataTypes([item], dataTypesToLoad);
+            await Zotero.Items.loadDataTypes(
+                [item],
+                ['itemData', 'creators', 'relations', 'tags', 'collections', 'childItems']
+            );
 
             // --- Attachment: normalize to the unified AttachmentInfo shape ---
             if (item.isAttachment()) {
@@ -106,12 +131,22 @@ export async function handleGetMetadataRequest(
                         // getBestAttachment failure is non-fatal — is_primary stays false.
                     }
                 }
-                const info = await getAttachmentInfoForItem(item, {
-                    parentItemId,
-                    isPrimary,
-                    includeAnnotationsCount: true,
-                    skipWorkerFallback: true,
-                });
+                let info: AttachmentInfo;
+                try {
+                    info = await getAttachmentInfoForItem(item, {
+                        parentItemId,
+                        isPrimary,
+                        includeAnnotationsCount: true,
+                        skipWorkerFallback: true,
+                    });
+                } catch (error) {
+                    // Isolate the row so one unreadable record does not fail the
+                    // whole batch. Unlike a child attachment (dropped by the loop
+                    // below), a requested item must still come back — the model
+                    // asked for it by id and needs to know it exists.
+                    logger(`handleGetMetadataRequest: Degrading unreadable attachment ${item.key}: ${error}`, 2);
+                    info = degradedAttachmentInfo(item, parentItemId ?? null, isPrimary);
+                }
                 items.push({
                     ...info,
                     item_id: itemId,
@@ -216,7 +251,19 @@ export async function handleGetMetadataRequest(
                     }
                 });
             }
-            
+
+            // Surface the item type's creator vocabulary alongside its fields.
+            // toJSON() reports the item's current creators but not which types
+            // its schema permits, and `author` is invalid for many types
+            // (patent -> inventor, film -> director, presentation -> presenter,
+            // ...). Without this the agent has to guess a creator type and
+            // learn the right one from a rejected edit.
+            const creatorTypes = getCreatorTypeInfo(item.itemTypeID);
+            if (creatorTypes) {
+                result.valid_creator_types = creatorTypes.valid;
+                result.primary_creator_type = creatorTypes.primary;
+            }
+
             // Handle attachments if requested
             if (request.include_attachments && item.isRegularItem()) {
                 const attachmentIds = item.getAttachments();
@@ -301,6 +348,7 @@ export async function handleGetMetadataRequest(
         type: 'get_metadata',
         request_id: request.request_id,
         items,
+        detail,
         not_found: notFound,
     };
 }

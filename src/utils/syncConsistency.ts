@@ -1,5 +1,5 @@
 import { syncService, SyncDataResponse } from '../services/syncService';
-import { logger } from './logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/store";
 import { getClientDateModifiedAsISOString, getClientDateModifiedBatch, getCollectionClientDateModifiedAsISOString } from './zoteroUtils';

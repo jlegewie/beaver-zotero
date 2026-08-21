@@ -19,14 +19,13 @@ const mocks = vi.hoisted(() => ({
     getLibraryShape: vi.fn(),
 }));
 
-vi.mock("../../../src/services/apiService", () => ({
+vi.mock("@beaver/agent-core/transport/apiService", () => ({
     ApiService: class {
         post = mocks.post;
         constructor(_baseUrl: string) {}
     },
 }));
-vi.mock("../../../src/utils/getAPIBaseURL", () => ({ default: "http://test" }));
-vi.mock("../../../src/utils/logger", () => ({ logger: vi.fn() }));
+vi.mock("@beaver/agent-core/platform/logger", () => ({ logger: vi.fn() }));
 vi.mock("../../../src/utils/agentItemSupport", () => ({
     isAgentSupportedItem: vi.fn(() => true),
 }));

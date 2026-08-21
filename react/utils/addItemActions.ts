@@ -1,6 +1,6 @@
-import { CreateItemProposedAction, CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
-import { ExternalReference, NormalizedPublicationType } from '../types/externalReferences';
-import { logger } from '../../src/utils/logger';
+import { CreateItemProposedAction, CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
+import { ExternalReference, NormalizedPublicationType } from '@beaver/agent-core/types/externalReferences';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { getZoteroTargetContext } from '../../src/utils/zoteroUtils';
 import { scheduleBackgroundTask, generateTaskId, isPdfFetchInProgress, deduplicatedSync } from '../../src/utils/backgroundTasks';
 import { ensureItemSynced } from '../../src/utils/sync';
@@ -9,6 +9,7 @@ import { emitAttachmentResolved } from './attachmentResolvedEvent';
 import { getPref } from '../../src/utils/prefs';
 import { createProvenanceNote } from './noteActions';
 import { libraryRefForLibraryID, resolveLibraryRef } from '../../src/utils/libraryIdentity';
+import { getSelectedLibraryId, getSelectedCollection } from '../../src/utils/zoteroSelection';
 
 const SAVE_ATTACHMENTS_WITH_TRANSLATORS = false;
 const BEAVER_PROVENANCE_MARKER = 'Added by Beaver';
@@ -70,7 +71,7 @@ async function resolveImportTarget(options?: ImportItemOptions): Promise<{
             libraryId = context.targetLibraryId ?? Zotero.Libraries.userLibraryID;
         } else {
             const zp = Zotero.getActiveZoteroPane();
-            const selectedLibraryId = zp?.getSelectedLibraryID?.();
+            const selectedLibraryId = getSelectedLibraryId(zp);
             libraryId = typeof selectedLibraryId === 'number'
                 ? selectedLibraryId
                 : Zotero.Libraries.userLibraryID;
@@ -78,7 +79,7 @@ async function resolveImportTarget(options?: ImportItemOptions): Promise<{
             // Match Zotero's own identifier lookup behavior: imports go into
             // the current collection even if an item row is selected.
             if (collectionId === null) {
-                const collection = zp?.getSelectedCollection?.();
+                const collection = getSelectedCollection(zp);
                 if (collection) {
                     collectionId = collection.id;
                 }

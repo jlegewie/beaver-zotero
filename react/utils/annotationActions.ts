@@ -1,11 +1,12 @@
-import { BoundingBox, CoordOrigin, PageLocation, convertBoundingBoxToBottomLeft, toZoteroRectFromBBox } from '../types/citations';
+import { BoundingBox, CoordOrigin, PageLocation, convertBoundingBoxToBottomLeft, toZoteroRectFromBBox } from '@beaver/agent-core/types/citations';
 import { getCurrentReader, getCurrentReaderAndWaitForView } from './readerUtils';
 import { ZoteroReader } from './annotationUtils';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { getPageViewportInfo, isPDFDocumentAvailable, waitForPDFDocument, applyRotationToBoundingBox } from './pdfUtils';
 import { isLibraryEditable } from '../../src/utils/zoteroUtils';
-import { BEAVER_ANNOTATION_AUTHOR, resolveBeaverAnnotationColor } from '../../src/constants/annotations';
-import { AnnotationProposedAction, isHighlightAnnotationAction, isNoteAnnotationAction, AnnotationResultData } from '../types/agentActions/base';
+import { resolveBeaverAnnotationColor } from '../../src/constants/annotations';
+import { markBeaverAnnotationWriteByKey } from '../../src/services/annotations/beaverAnnotationRegistry';
+import { AnnotationProposedAction, isHighlightAnnotationAction, isNoteAnnotationAction, AnnotationResultData } from '@beaver/agent-core/types/agentActions/base';
 import { libraryRefForLibraryID, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 
 
@@ -32,6 +33,37 @@ function isReaderForAttachmentKey(reader: ZoteroReader | null, attachmentKey: st
     if (!reader) return false;
     if (!attachmentKey) return false;
     return (reader as any)._item === undefined || (reader as any)._item?.key === attachmentKey;
+}
+
+/** The library the reader saves its annotations into, when it can be read. */
+function readerLibraryID(reader: ZoteroReader): number | undefined {
+    const libraryID = (reader as any)._item?.libraryID;
+    return typeof libraryID === 'number' ? libraryID : undefined;
+}
+
+/**
+ * Hand a prepared annotation to the reader and record it as Beaver's own.
+ *
+ * `addAnnotation` returns the key without yielding; record in this same stack
+ * or the observer can see the save first. Record under the reader's library
+ * (what the saved annotation will report).
+ */
+function addReaderAnnotation(reader: ZoteroReader, data: unknown, libraryId: number): string {
+    const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;
+    if (!iframeWindow) {
+        throw new Error('Unable to access reader iframe window');
+    }
+
+    const created = (reader as any)._internalReader._annotationManager.addAnnotation(
+        Components.utils.cloneInto(data, iframeWindow)
+    );
+
+    if (!created || !created.id) {
+        throw new Error('Failed to create annotation - annotation manager returned null');
+    }
+
+    markBeaverAnnotationWriteByKey(readerLibraryID(reader) ?? libraryId, created.id);
+    return created.id;
 }
 
 async function convertLocationToRects(
@@ -100,7 +132,8 @@ function generateSortIndex(pageIndex: number, rect: number[], viewBox: number[])
 
 async function createHighlightAnnotation(
     reader: ZoteroReader,
-    annotation: AnnotationProposedAction
+    annotation: AnnotationProposedAction,
+    libraryId: number
 ): Promise<string> {
     if (
         !annotation.proposed_data.highlight_locations ||
@@ -149,24 +182,9 @@ async function createHighlightAnnotation(
         temporary: false,
         dateCreated: now,
         dateModified: now,
-        authorName: BEAVER_ANNOTATION_AUTHOR,
-        annotationAuthorName: BEAVER_ANNOTATION_AUTHOR
     };
 
-    const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;
-    if (!iframeWindow) {
-        throw new Error('Unable to access reader iframe window');
-    }
-
-    const annotationResult = await (reader as any)._internalReader._annotationManager.addAnnotation(
-        Components.utils.cloneInto(data, iframeWindow)
-    );
-
-    if (!annotationResult || !annotationResult.id) {
-        throw new Error('Failed to create annotation - annotation manager returned null');
-    }
-
-    return annotationResult.id;
+    return addReaderAnnotation(reader, data, libraryId);
 }
 
 async function convertNotePositionToRect(
@@ -225,7 +243,8 @@ async function convertNotePositionToRect(
 
 async function createNoteAnnotation(
     reader: ZoteroReader,
-    annotation: AnnotationProposedAction
+    annotation: AnnotationProposedAction,
+    libraryId: number
 ): Promise<string> {
     const { pageIndex, rect, viewBox } = await convertNotePositionToRect(reader, annotation);
     const sortIndex = generateSortIndex(pageIndex, rect, viewBox);
@@ -246,34 +265,20 @@ async function createNoteAnnotation(
         notePosition: annotation.proposed_data.note_position,
         dateCreated: now,
         dateModified: now,
-        authorName: BEAVER_ANNOTATION_AUTHOR,
-        annotationAuthorName: BEAVER_ANNOTATION_AUTHOR
     };
 
-    const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;
-    if (!iframeWindow) {
-        throw new Error('Unable to access reader iframe window');
-    }
-
-    const annotationResult = await (reader as any)._internalReader._annotationManager.addAnnotation(
-        Components.utils.cloneInto(data, iframeWindow)
-    );
-
-    if (!annotationResult || !annotationResult.id) {
-        throw new Error('Failed to create annotation - annotation manager returned null');
-    }
-
-    return annotationResult.id;
+    return addReaderAnnotation(reader, data, libraryId);
 }
 
 async function createAnnotation(
     reader: ZoteroReader,
-    annotation: AnnotationProposedAction
+    annotation: AnnotationProposedAction,
+    libraryId: number
 ): Promise<string> {
     if (isNoteAnnotationAction(annotation)) {
-        return createNoteAnnotation(reader, annotation);
+        return createNoteAnnotation(reader, annotation, libraryId);
     } else if (isHighlightAnnotationAction(annotation)) {
-        return createHighlightAnnotation(reader, annotation);
+        return createHighlightAnnotation(reader, annotation, libraryId);
     } else {
         throw new Error('Invalid annotation type');
     }
@@ -332,7 +337,7 @@ export async function applyAnnotation(
         }
         
         // Create the annotation
-        const annotationKey = await createAnnotation(reader, annotation);
+        const annotationKey = await createAnnotation(reader, annotation, resolvedLibraryId);
         return {
             zotero_key: annotationKey,
             library_id: resolvedLibraryId,

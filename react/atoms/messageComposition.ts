@@ -1,21 +1,21 @@
 import { atom } from "jotai";
-import { truncateText } from "../utils/stringUtils";
-import { allUserAttachmentKeysAtom } from "../agents/atoms";
+import { truncateText } from "@beaver/agent-ui/utils/stringUtils";
+import { allUserAttachmentKeysAtom } from "@beaver/agent-core/run-state/atoms";
 import { createElement } from 'react';
-import { logger } from "../../src/utils/logger";
-import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom, removePopupMessageAtom, safeChildAttachments } from "../utils/popupMessageUtils";
+import { logger } from "@beaver/agent-core/platform/logger";
+import { addExcludedLibraryPopupAtom, addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom, EXCLUDED_LIBRARY_READER_POPUP_ID, EXCLUDED_LIBRARY_SELECTION_POPUP_ID, removePopupMessageAtom, safeChildAttachments } from "../utils/popupMessageUtils";
 import { getItemValidationAtom, isHardBlockedValidation, isRejectedItemValidation, validateItemsAtom, validateRegularItemAtom } from './itemValidation';
-import { searchableLibraryIdsAtom } from './profile';
+import { excludedLibraryIdsAtom, searchableLibraryIdsAtom } from './profile';
 import type { ItemValidationState } from './itemValidation';
 import { toReadabilityInfo, summarizeRegularItemReadability } from '../utils/attachmentReadabilityCopy';
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
 import { agentItemFilter } from "../../src/utils/agentItemSupport";
 import { getCurrentReader } from "../utils/readerUtils";
-import { TextSelection, zoteroReferenceLookupKeys } from "../types/attachments/apiTypes";
-import { ZoteroTag, CollectionReference } from "../types/zotero";
+import { TextSelection, zoteroReferenceLookupKeys } from "@beaver/agent-core/types/attachments/apiTypes";
+import { ZoteroTag, CollectionReference } from "@beaver/agent-core/types/zotero";
 import type { ExternalFileRecord } from "../../src/services/database";
 import { currentNoteItemAtom } from "./zoteroContext";
-import type { SlashCommandDescriptor } from "../utils/slashCommands";
+import type { SlashCommandDescriptor } from "@beaver/agent-ui/composer/slashCommands";
 import { libraryRefForLibraryID } from "../../src/utils/libraryIdentity";
 
 
@@ -131,6 +131,15 @@ export const addExternalFilesToCurrentMessageAtom = atom(
 );
 
 /**
+ * Composer tokens of the attachments currently in flight, one entry per
+ * operation (see `composerResetTokenAtom`). Copying and hashing a large file
+ * takes long enough for the user to press Enter first, so the composer holds
+ * sending while an entry matches its own token; work left over from a replaced
+ * composition is discarded on completion and holds nothing meanwhile.
+ */
+export const pendingAttachmentTokensAtom = atom<number[]>([]);
+
+/**
  * Remove one external file from the current message.
  */
 export const removeExternalFileFromMessageAtom = atom(
@@ -142,22 +151,26 @@ export const removeExternalFileFromMessageAtom = atom(
     }
 );
 
-/**
- * A /command pill waiting to be inserted into the chat input. Set by
- * `stageActionPillAtom` (home launcher, context menu, reader toolbar) and
- * consumed by InputArea, which owns the editor handle: it inserts the pill,
- * focuses the editor, and clears this atom. The `nonce` distinguishes
- * consecutive requests for the same action.
- *
- * `targetWindow` names the surface where the user triggered the action, so
- * that when several InputAreas are mounted (main-window sidebar + separate
- * Beaver window) the pill deterministically lands in the right editor.
- */
-export const pendingPillInsertAtom = atom<{
+export interface PendingPillInsert {
     descriptor: SlashCommandDescriptor;
+    /** The surface where the user triggered the action, so that when several
+     *  InputAreas are mounted (main-window sidebar + separate Beaver window)
+     *  the pill deterministically lands in the right editor. */
     targetWindow?: Window;
-    nonce: number;
-} | null>(null);
+}
+
+/**
+ * /command pills waiting to be inserted into the chat input, in the order the
+ * user launched them. Written by `stageActionPillAtom` (home launcher, context
+ * menu, reader toolbar) and consumed by InputArea, which owns the editor
+ * handle: it inserts the head of the queue, focuses the editor, and drops that
+ * entry.
+ *
+ * A queue rather than a single slot because an editor claims a pill on a timer:
+ * a second action launched before that timer fires must not displace the first,
+ * which the user has already seen take effect on their attachments.
+ */
+export const pendingPillInsertsAtom = atom<PendingPillInsert[]>([]);
 
 /**
  * The /command pills currently in the message, in document order — the shared
@@ -168,6 +181,43 @@ export const pendingPillInsertAtom = atom<{
  * correctly from every surface.
  */
 export const currentMessagePillsAtom = atom<SlashCommandDescriptor[]>([]);
+
+/**
+ * Bumped every time the composer is cleared programmatically (see
+ * `clearComposerAtom`).
+ *
+ * A clear that lands on an already-empty composer writes the values the mounted
+ * editors already hold, so nothing in their props changes and they cannot tell
+ * it happened. That matters because an editor holds its text back while an IME
+ * composes: without this signal, text composed just before the clear would be
+ * published afterwards, restoring a draft into a thread the user has left.
+ */
+export const composerResetTokenAtom = atom<number>(0);
+
+/**
+ * Clear the composer's text and pills programmatically (new thread, thread
+ * switch, after sending).
+ *
+ * Prefer this over resetting the atoms directly so mounted editors learn the
+ * composer was reset even when the values themselves do not change (see
+ * `composerResetTokenAtom`).
+ */
+export const clearComposerAtom = atom(
+    null,
+    (get, set) => {
+        set(currentMessageContentAtom, '');
+        set(currentMessagePillsAtom, []);
+        // Pills staged but not yet inserted belong to the draft being
+        // discarded — their targets were attached to it and have just been
+        // cleared, so letting an insert land would leave a /command in the next
+        // draft with nothing behind it. Editors re-read this atom when their
+        // claim timer fires, so emptying it cancels a claim already in flight.
+        if (get(pendingPillInsertsAtom).length > 0) {
+            set(pendingPillInsertsAtom, []);
+        }
+        set(composerResetTokenAtom, get(composerResetTokenAtom) + 1);
+    }
+);
 
 /**
 * Current reader attachment
@@ -251,14 +301,19 @@ export const removeTagIdAtom = atom(
     }
 );
 
+/** Identity of an attached item. A Zotero key is only unique within its
+ *  library, so the library has to be part of it. */
+const messageItemKey = (item: Zotero.Item): string => `${item.libraryID}-${item.key}`;
+
 /**
 * Remove item from currentMessageItemsAtom
 */
 export const removeItemFromMessageAtom = atom(
     null,
     (_, set, item: Zotero.Item) => {
+        const key = messageItemKey(item);
         set(currentMessageItemsAtom, (prevItems) =>
-            prevItems.filter((i) => i.key !== item.key)
+            prevItems.filter((i) => messageItemKey(i) !== key)
         );
         set(removePopupMessageAtom, item.key);
     }
@@ -297,7 +352,7 @@ export const addItemToCurrentMessageItemsAtom = atom(
     null,
     async (get, set, item: Zotero.Item) => {
         const currentItems = get(currentMessageItemsAtom);
-        if(currentItems.some((i) => i.key === item.key)) return;
+        if(currentItems.some((i) => messageItemKey(i) === messageItemKey(item))) return;
         
         // Add immediately (optimistic)
         set(currentMessageItemsAtom, [...currentItems, item]);
@@ -316,9 +371,8 @@ export const addItemsToCurrentMessageItemsAtom = atom(
     async (get, set, items: Zotero.Item[]) => {
         // Filter out already added items
         const currentItems = get(currentMessageItemsAtom);
-        const newItems = items.filter((i) => 
-            !currentItems.some((ci) => ci.key === i.key)
-        );
+        const currentKeys = new Set(currentItems.map(messageItemKey));
+        const newItems = items.filter((i) => !currentKeys.has(messageItemKey(i)));
         
         if (newItems.length === 0) return;
 
@@ -539,10 +593,29 @@ export const updateMessageItemsFromZoteroSelectionAtom = atom(
         const items = Zotero.getActiveZoteroPane().getSelectedItems();
         // Never stage items from libraries the user excluded from Beaver.
         const searchableLibraryIds = get(searchableLibraryIdsAtom);
-        const itemsFiltered = items.filter((item) =>
-            (item.isRegularItem() || item.isAttachment() || item.isNote()) &&
+        const supportedItems = items.filter((item) =>
+            item.isRegularItem() || item.isAttachment() || item.isNote()
+        );
+        const itemsFiltered = supportedItems.filter((item) =>
             searchableLibraryIds.includes(item.libraryID)
         );
+
+        // The exclusion filter runs ahead of validation, so these items never
+        // reach the "Item Removed" popup that explains every other rejection.
+        // Say why they were skipped rather than dropping them silently.
+        const excludedLibraryIds = get(excludedLibraryIdsAtom);
+        const excludedItems = supportedItems.filter((item) =>
+            excludedLibraryIds.includes(item.libraryID)
+        );
+        if (excludedItems.length > 0) {
+            set(addExcludedLibraryPopupAtom, {
+                id: EXCLUDED_LIBRARY_SELECTION_POPUP_ID,
+                libraryIDs: excludedItems.map((item) => item.libraryID),
+                title: excludedItems.length === 1
+                    ? 'Item Not Added'
+                    : `${excludedItems.length} Items Not Added`,
+            });
+        }
 
         // Filter out items already in the thread
         const existingKeys = get(allUserAttachmentKeysAtom);
@@ -560,19 +633,80 @@ export const updateMessageItemsFromZoteroSelectionAtom = atom(
 
 
 /**
+ * Whether a reader's attachment may become Beaver context at all.
+ *
+ * Resolves the attachment's library from its item id (cheap in-memory
+ * mapping) so an attachment in a library the user excluded from Beaver is
+ * rejected before anything is read out of that library. This is the one
+ * definition of the rule; callers that track readers use it to decide whether
+ * to track at all.
+ */
+export function isReaderLibrarySearchable(searchableLibraryIds: number[], reader: any): boolean {
+    if (!reader) return false;
+    const libraryAndKey = Zotero.Items.getLibraryAndKeyFromID(reader.itemID);
+    if (!libraryAndKey) return false;
+    return searchableLibraryIds.includes(libraryAndKey.libraryID);
+}
+
+/**
+ * Generation counter for reader-attachment updates.
+ *
+ * The update reads the item asynchronously, so a slower earlier update could
+ * otherwise land after a newer one (or after the attachment was cleared) and
+ * restore a reader the user already left. Every write bumps the counter and
+ * stale writers drop their result.
+ */
+let readerAttachmentGeneration = 0;
+
+/**
+ * Tell the user why the file open in the reader never became Beaver context.
+ *
+ * The reader is gated on the library before anything is read, so the "File
+ * Removed" popup that explains every other rejection never fires for an
+ * excluded library.
+ */
+export const notifyReaderLibraryExcludedAtom = atom(
+    null,
+    (get, set, reader?: any) => {
+        if (!reader) return;
+        const libraryAndKey = Zotero.Items.getLibraryAndKeyFromID(reader.itemID);
+        if (!libraryAndKey) return;
+        // Tracking stops for anything unsearchable, but only a library the user
+        // actually excluded may be reported as one — "absent from searchable"
+        // also covers unsupported library types and the not-yet-loaded scope,
+        // and pointing either at Beaver Preferences would be wrong.
+        if (!get(excludedLibraryIdsAtom).includes(libraryAndKey.libraryID)) return;
+        set(addExcludedLibraryPopupAtom, {
+            id: EXCLUDED_LIBRARY_READER_POPUP_ID,
+            libraryIDs: [libraryAndKey.libraryID],
+            title: 'File Not Added',
+            // The file stays open, so the notice stays until the user leaves
+            // the tab or dismisses it, matching other reader-tab popups.
+            expire: false,
+        });
+    }
+);
+
+/**
 * Update current reader attachment
+*
+* The single choke point for the reader attachment: an attachment from a
+* library the user excluded from Beaver never enters the atom, so it cannot
+* reach display, prompt variables, or any other run context.
 */
 export const updateReaderAttachmentAtom = atom(
     null,
     async (get, set, reader?: any) => {
         // also gets the current reader item (parent item)
         // Zotero.getActiveZoteroPane().getSelectedItems()
-        
+        const generation = ++readerAttachmentGeneration;
+
         // Remove popup message for current reader attachment
         const currentReaderAttachmentKey = get(currentReaderAttachmentKeyAtom);
         if (currentReaderAttachmentKey) {
             set(removePopupMessageAtom, currentReaderAttachmentKey);
         }
+        set(removePopupMessageAtom, EXCLUDED_LIBRARY_READER_POPUP_ID);
 
         // Get current reader
         reader = reader || getCurrentReader();
@@ -581,12 +715,50 @@ export const updateReaderAttachmentAtom = atom(
             return;
         }
 
+        // Excluded libraries are never tracked
+        if (!isReaderLibrarySearchable(get(searchableLibraryIdsAtom), reader)) {
+            set(currentReaderAttachmentAtom, null);
+            set(notifyReaderLibraryExcludedAtom, reader);
+            return;
+        }
+
         // Get reader item
         const item = await Zotero.Items.getAsync(reader.itemID);
+        // A newer update (or a clear) ran while the item was loading
+        if (generation !== readerAttachmentGeneration) return;
+        // The user can exclude the library while the item loads. Re-check
+        // rather than trust the decision made before the await: this atom is
+        // the choke point, so nothing excluded may be stored here or handed to
+        // background validation.
+        if (!isReaderLibrarySearchable(get(searchableLibraryIdsAtom), reader)) {
+            set(currentReaderAttachmentAtom, null);
+            set(notifyReaderLibraryExcludedAtom, reader);
+            return;
+        }
         if (item) {
             set(currentReaderAttachmentAtom, item);
             validateItemsInBackground(get, set, [item], true);
         }
+    }
+);
+
+/**
+ * Clear the current reader attachment and cancel any in-flight update.
+ *
+ * Use this instead of writing `null` directly whenever reader tracking stops
+ * (tab left, Beaver closed): a pending `updateReaderAttachmentAtom` would
+ * otherwise repopulate the atom after the clear.
+ */
+export const clearReaderAttachmentAtom = atom(
+    null,
+    (get, set) => {
+        readerAttachmentGeneration++;
+        const currentReaderAttachmentKey = get(currentReaderAttachmentKeyAtom);
+        if (currentReaderAttachmentKey) {
+            set(removePopupMessageAtom, currentReaderAttachmentKey);
+        }
+        set(removePopupMessageAtom, EXCLUDED_LIBRARY_READER_POPUP_ID);
+        set(currentReaderAttachmentAtom, null);
     }
 );
 

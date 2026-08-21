@@ -2,11 +2,11 @@ import React, { useState } from "react";
 import { useAtomValue } from "jotai";
 import { syncingAtom, syncErrorAtom } from "../../../atoms/sync";
 import { syncZoteroDatabase } from '../../../../src/utils/sync';
-import IconButton from "../IconButton";
+import IconButton from "@beaver/agent-ui/primitives/IconButton";
 import { AlertIcon, SyncIcon } from "../../icons/icons";
 import { syncedLibraryIdsAtom } from "../../../atoms/profile";
-import { logger } from '../../../../src/utils/logger';
-import Tooltip from "../Tooltip";
+import { logger } from '@beaver/agent-core/platform/logger';
+import Tooltip from "@beaver/agent-ui/primitives/Tooltip";
 
 
 const DatabaseStatusButton: React.FC = () => {

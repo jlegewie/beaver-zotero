@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { SearchMenuItem } from '../SearchMenu';
+import { SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
 import { SourceMenuItemContext, createNoteMenuItem } from '../utils/menuItemFactories';
 import { loadFullItemData, getActiveZoteroLibraryId } from '../../../../../src/utils/zoteroUtils';
 
@@ -202,7 +202,7 @@ export const useNotesMenu = ({
             }
 
             const items = await Promise.all(
-                displayNotes.map(note => createNoteMenuItem(note, sourceMenuItemContext))
+                displayNotes.map(note => createNoteMenuItem(note, sourceMenuItemContext, searchQuery))
             );
 
             if (!isCancelled) {

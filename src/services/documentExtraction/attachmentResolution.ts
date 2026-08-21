@@ -4,10 +4,11 @@ import {
     type ContentKind,
     type ExtractContentKind,
     type ReadableContentKind,
-} from './shared/contentKinds';
+} from '@beaver/agent-core/extract/document/shared/contentKinds';
 import {
     hasSnapshotContentType,
     isLinkedUrlAttachment,
+    safeAttachmentFilename,
     safeFileExists,
 } from '../../utils/attachmentFiles';
 import { modelObjectId } from '../../utils/libraryIdentity';
@@ -138,6 +139,22 @@ export async function isLocallyReadableAttachment(item: Zotero.Item): Promise<bo
 }
 
 /**
+ * Name the kind of item an id points at, for agent-facing errors raised when
+ * the id is not the attachment the tool needs. Naming the actual type lets the
+ * model correct itself instead of guessing which id it got wrong.
+ *
+ * Linked URLs are attachments with no local file, so callers that require a
+ * file attachment reject them too.
+ */
+export function describeItemKind(item: Zotero.Item): string {
+    if (item.isNote()) return 'note';
+    if (item.isAnnotation()) return 'annotation';
+    if (item.isRegularItem()) return 'regular item';
+    if (isLinkedUrlAttachment(item)) return 'linked URL attachment';
+    return 'non-attachment item';
+}
+
+/**
  * Result of resolving a Zotero item to a PDF attachment.
  */
 export type PdfAttachmentResolveResult =
@@ -204,8 +221,8 @@ export async function resolveToPdfAttachment(
             );
             if (!resolved) {
                 const label = bestAttachmentKey === onlyKey
-                    ? `'${only.attachmentFilename}' (${onlyKey}, primary)`
-                    : `'${only.attachmentFilename}' (${onlyKey})`;
+                    ? `'${safeAttachmentFilename(only) ?? ''}' (${onlyKey}, primary)`
+                    : `'${safeAttachmentFilename(only) ?? ''}' (${onlyKey})`;
                 return {
                     resolved: false,
                     error: `The id '${uniqueKey}' is a regular item with one attachment (${label}) but it could not be resolved.`,
@@ -220,8 +237,8 @@ export async function resolveToPdfAttachment(
             .map((a) => {
                 const k = modelObjectId(a.libraryID, a.key);
                 return k === bestAttachmentKey
-                    ? `'${a.attachmentFilename}' (${k}, primary)`
-                    : `'${a.attachmentFilename}' (${k})`;
+                    ? `'${safeAttachmentFilename(a) ?? ''}' (${k}, primary)`
+                    : `'${safeAttachmentFilename(a) ?? ''}' (${k})`;
             })
             .join(', ');
         const message = pdfAttachments.length > 0
@@ -230,10 +247,9 @@ export async function resolveToPdfAttachment(
         return { resolved: false, error: message, error_code: 'not_attachment' };
     }
 
-    const kind = item.isNote() ? 'note' : item.isAnnotation() ? 'annotation' : 'non-attachment item';
     return {
         resolved: false,
-        error: `The id '${uniqueKey}' is a ${kind}, not an attachment.`,
+        error: `The id '${uniqueKey}' is a ${describeItemKind(item)}, not an attachment.`,
         error_code: 'not_attachment',
     };
 }
@@ -305,7 +321,7 @@ export async function resolveToImageAttachment(
             if (!resolved) {
                 return {
                     resolved: false,
-                    error: `The id '${uniqueKey}' is a regular item with one image attachment ('${only.attachmentFilename}' (${onlyKey})) but it could not be resolved.`,
+                    error: `The id '${uniqueKey}' is a regular item with one image attachment ('${safeAttachmentFilename(only) ?? ''}' (${onlyKey})) but it could not be resolved.`,
                     error_code: 'not_attachment',
                 };
             }
@@ -314,7 +330,7 @@ export async function resolveToImageAttachment(
         }
 
         const text = imageAttachments
-            .map((a) => `'${a.attachmentFilename}' (${modelObjectId(a.libraryID, a.key)})`)
+            .map((a) => `'${safeAttachmentFilename(a) ?? ''}' (${modelObjectId(a.libraryID, a.key)})`)
             .join(', ');
         const message = imageAttachments.length > 0
             ? `The id '${uniqueKey}' is a regular item, not an attachment. The item has ${imageAttachments.length} image attachments: ${text}`
@@ -322,10 +338,9 @@ export async function resolveToImageAttachment(
         return { resolved: false, error: message, error_code: 'not_attachment' };
     }
 
-    const kind = item.isNote() ? 'note' : item.isAnnotation() ? 'annotation' : 'non-attachment item';
     return {
         resolved: false,
-        error: `The id '${uniqueKey}' is a ${kind}, not an attachment.`,
+        error: `The id '${uniqueKey}' is a ${describeItemKind(item)}, not an attachment.`,
         error_code: 'not_attachment',
     };
 }
@@ -357,7 +372,7 @@ function labelReadableAttachment(
 ): string {
     const key = modelObjectId(item.libraryID, item.key);
     const primary = key === bestAttachmentKey ? ', primary' : '';
-    return `'${item.attachmentFilename}' (${key}${primary}, ${contentKind})`;
+    return `'${safeAttachmentFilename(item) ?? ''}' (${key}${primary}, ${contentKind})`;
 }
 
 /**
@@ -502,10 +517,9 @@ export async function resolveToReadableAttachment(
         return { resolved: false, error: message, error_code: 'not_attachment' };
     }
 
-    const kind = item.isNote() ? 'note' : item.isAnnotation() ? 'annotation' : 'non-attachment item';
     return {
         resolved: false,
-        error: `The id '${uniqueKey}' is a ${kind}, not an attachment.`,
+        error: `The id '${uniqueKey}' is a ${describeItemKind(item)}, not an attachment.`,
         error_code: 'not_attachment',
     };
 }

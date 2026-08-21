@@ -1,4 +1,4 @@
-import type { NoteWriterHost, SaveNoteRequest, SavedNoteReference } from '../types';
+import type { NoteWriterHost, SaveNoteRequest, SavedNoteReference } from '@beaver/agent-ui/host/types';
 import {
     getZoteroTargetContext,
     getZoteroTargetContextSync,
@@ -6,6 +6,7 @@ import {
     isLibraryEditable,
 } from '../../../src/utils/zoteroUtils';
 import { selectItem, selectItemById } from '../../../src/utils/selectItem';
+import { getSelectedCollection as getSelectedZoteroCollection } from '../../../src/utils/zoteroSelection';
 import {
     generateNoteTitle,
     getBeaverNoteFooterHTML,
@@ -40,7 +41,7 @@ function assembleNoteHtml(request: SaveNoteRequest): string {
 
 function getSelectedCollection(): Zotero.Collection | null {
     const zp = Zotero.getActiveZoteroPane();
-    return zp?.getSelectedCollection() || null;
+    return getSelectedZoteroCollection(zp);
 }
 
 /** Zotero implementation of {@link NoteWriterHost}. */

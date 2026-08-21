@@ -934,7 +934,6 @@ export type BackgroundJobPayloadKind = 'structured' | 'markdown';
 export interface PdfBackgroundJobPayload {
     content_kind: 'pdf';
     maxPages: number | null;
-    maxFileSizeMB: number;
     timeoutSeconds: number;
 }
 
@@ -1079,10 +1078,20 @@ export async function waitForQueueDrain(
         }
         await new Promise((r) => setTimeout(r, pollMs));
     }
+    // A row that stays `available` was never claimed, which almost always means
+    // the idle gate: `BackgroundExtractor` only claims priority >= 100 (the
+    // enqueue default) after the OS has been idle for 30s, so such a job drains
+    // or not depending on whether someone is at the keyboard. Say so here — the
+    // raw stats look like a stuck queue.
+    const idleGated = (lastStats?.available ?? 0) > 0;
     throw new Error(
         `background queue did not drain within ${timeoutMs}ms; last stats: ${JSON.stringify(
             lastStats,
-        )}`,
+        )}`
+        + (idleGated
+            ? '. The row is still available (never claimed) — enqueue it with a '
+              + 'priority below 100 if the test needs a deterministic drain.'
+            : ''),
     );
 }
 

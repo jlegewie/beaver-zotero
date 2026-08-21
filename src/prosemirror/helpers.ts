@@ -47,7 +47,11 @@ export function randomString(len?: number, chars?: string): string {
  * used for serialization display text in normalization.
  */
 export function formatCitationItem(citationItem: any): string {
+    // The ZWJ/ZWNJ characters in these classes are intentional (citeproc-style
+    // romanesque detection over scripts that use joiners).
+    // eslint-disable-next-line no-misleading-character-class
     const STARTSWITH_ROMANESQUE_REGEXP = /^[&a-zA-Z\u0e01-\u0e5b\u00c0-\u017f\u0370-\u03ff\u0400-\u052f\u0590-\u05d4\u05d6-\u05ff\u1f00-\u1fff\u0600-\u06ff\u200c\u200d\u200e\u0218\u0219\u021a\u021b\u202a-\u202e]/;
+    // eslint-disable-next-line no-misleading-character-class
     const ENDSWITH_ROMANESQUE_REGEXP = /[.;:&a-zA-Z\u0e01-\u0e5b\u00c0-\u017f\u0370-\u03ff\u0400-\u052f\u0590-\u05d4\u05d6-\u05ff\u1f00-\u1fff\u0600-\u06ff\u200c\u200d\u200e\u0218\u0219\u021a\u021b\u202a-\u202e]$/;
 
     const { itemData } = citationItem;
@@ -94,7 +98,7 @@ export function formatCitationItem(citationItem: any): string {
         if (citationItem.label) {
             label = citationItem.label;
         }
-        else if (/[\-\u2013,]/.test(citationItem.locator)) {
+        else if (/[-\u2013,]/.test(citationItem.locator)) {
             label = 'pp.';
         }
         else {

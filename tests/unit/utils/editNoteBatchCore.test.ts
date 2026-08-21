@@ -10,7 +10,7 @@ import { describe, it, expect, vi } from 'vitest';
 // text. Everything else (countOccurrences, findBestMatch, overlap, apply) is
 // exercised for real.
 
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 
@@ -26,7 +26,7 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test' })),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 vi.mock('../../../src/utils/noteCitationExpand', async () => {
     const actual = await vi.importActual<typeof import('../../../src/utils/noteCitationExpand')>(
@@ -58,8 +58,8 @@ import {
     addOrUpdateEditFooter,
     getBeaverFooterAppendPoint,
 } from '../../../src/utils/noteEditFooter';
-import { logger } from '../../../src/utils/logger';
-import type { EditNoteOperation } from '../../../react/types/agentActions/editNote';
+import { logger } from '@beaver/agent-core/platform/logger';
+import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 
 // =============================================================================
 // Helpers

@@ -7,10 +7,10 @@ import {
     hasEmbeddingIndexErrorAtom,
     hasFailedEmbeddingsAtom
 } from "../../../atoms/embeddingIndex";
-import IconButton from "../IconButton";
+import IconButton from "@beaver/agent-ui/primitives/IconButton";
 import { AlertIcon, SyncIcon } from "../../icons/icons";
-import Tooltip from "../Tooltip";
-import { logger } from "../../../../src/utils/logger";
+import Tooltip from "@beaver/agent-ui/primitives/Tooltip";
+import { logger } from "@beaver/agent-core/platform/logger";
 
 
 /**

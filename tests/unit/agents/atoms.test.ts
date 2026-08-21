@@ -1,15 +1,19 @@
 import { createStore } from 'jotai';
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentRun } from '../../../react/agents/types';
+import type {
+    AgentRun,
+    RetryPromptPart,
+    ToolReturnPart,
+} from '@beaver/agent-core/agents/types';
 import type {
     MessageAttachment,
     SourceAttachment,
-} from '../../../react/types/attachments/apiTypes';
+} from '@beaver/agent-core/types/attachments/apiTypes';
 
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
-vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 vi.mock('../../../src/utils/zoteroUtils', () => ({
     getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test' })),
 }));
@@ -21,16 +25,84 @@ vi.mock('../../../src/utils/prefs', () => ({
 import {
     allUserAttachmentKeysAtom,
     allUserAttachmentsAtom,
+    getToolCallStatus,
     threadRunsAtom,
-} from '../../../react/agents/atoms';
+} from '@beaver/agent-core/run-state/atoms';
 
 function run(id: string, attachments: MessageAttachment[]): AgentRun {
     return {
         id,
+        user_id: 'user-1',
+        thread_id: 'thread-1',
+        agent_name: 'beaver',
         user_prompt: { content: '', attachments },
+        status: 'completed',
         model_messages: [],
-    } as AgentRun;
+        model_name: 'model',
+        created_at: '2026-01-01T00:00:00.000Z',
+        consent_to_share: false,
+    };
 }
+
+describe('getToolCallStatus', () => {
+    function resultsMap(
+        part: ToolReturnPart | RetryPromptPart,
+    ): Map<string, ToolReturnPart | RetryPromptPart> {
+        return new Map([['call-1', part]]);
+    }
+
+    const toolReturn = (extra: Partial<ToolReturnPart> = {}): ToolReturnPart => ({
+        part_kind: 'tool-return',
+        tool_name: 'read',
+        content: 'ok',
+        tool_call_id: 'call-1',
+        ...extra,
+    });
+
+    it('reports error for a terminal tool failure', () => {
+        const map = resultsMap(toolReturn({ outcome: 'failed', content: 'Reading files is not available.' }));
+        expect(getToolCallStatus('call-1', map)).toBe('error');
+    });
+
+    // Neither outcome is emitted today, but a backend that starts sending one
+    // must not have those calls render as successfully completed.
+    it('reports error for an interrupted call', () => {
+        const map = resultsMap(toolReturn({ outcome: 'interrupted', content: 'The tool call was interrupted.' }));
+        expect(getToolCallStatus('call-1', map)).toBe('error');
+    });
+
+    it('reports error for a denied call', () => {
+        const map = resultsMap(toolReturn({ outcome: 'denied', content: 'The user denied this call.' }));
+        expect(getToolCallStatus('call-1', map)).toBe('error');
+    });
+
+    it('reports error for a retry prompt', () => {
+        const map = resultsMap({
+            part_kind: 'retry-prompt',
+            tool_name: 'read',
+            content: 'Fix the errors and try again.',
+            tool_call_id: 'call-1',
+        });
+        expect(getToolCallStatus('call-1', map)).toBe('error');
+    });
+
+    it('reports completed for an explicit success outcome', () => {
+        expect(getToolCallStatus('call-1', resultsMap(toolReturn({ outcome: 'success' })))).toBe('completed');
+    });
+
+    // Only threads persisted by a pre-outcome backend lack the field. The new
+    // outcome check must stay inert for them so the legacy rule still decides:
+    // a tool-return is completed, and failure was expressed as a retry-prompt.
+    it('leaves an absent outcome to the legacy categorization', () => {
+        expect(getToolCallStatus('call-1', resultsMap(toolReturn()))).toBe('completed');
+    });
+
+    it('reports in_progress only while the run is active and no result has arrived', () => {
+        const empty = new Map<string, ToolReturnPart | RetryPromptPart>();
+        expect(getToolCallStatus('call-1', empty, 'in_progress')).toBe('in_progress');
+        expect(getToolCallStatus('call-1', empty)).toBe('error');
+    });
+});
 
 describe('allUserAttachmentsAtom', () => {
     it('replaces a legacy representative with a later portable attachment', () => {

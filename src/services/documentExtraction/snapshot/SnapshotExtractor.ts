@@ -20,12 +20,13 @@ import {
     SNAPSHOT_SCHEMA_VERSION,
     type ExtractSnapshotResult,
     type SnapshotDocument,
-} from "./schema";
+} from "@beaver/agent-core/extract/document/snapshot/schema";
 import { getDeclaredCharset, isLikelyNonUtf8Charset, parseSnapshotHtml } from "./snapshotDom";
 import { getReadableContentKind } from "../attachmentResolution";
-import { effectiveMaxSnapshotFileSizeMB } from "../../attachmentLimits";
+import { safeAttachmentFilename } from "../../../utils/attachmentFiles";
+import { effectiveMaxSnapshotFileSizeMB } from "@beaver/agent-core/transport/attachmentLimits";
 import { isRemoteAccessAvailable } from "../attachmentSource";
-import { logger } from "../../../utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 
 // Coverage below this fraction means the walk dropped a meaningful share of the
 // page's visible text (an unrecognized container/table structure) and warrants a
@@ -37,7 +38,6 @@ const LOW_COVERAGE_WARN_THRESHOLD = 0.85;
 const SYNTHETIC_PAGE_CHAR_INTERVAL = 1800;
 
 export interface ExtractSnapshotDocumentOptions {
-    maxFileSizeMB?: number | null;
     onFileNotSyncedLocally?: () => void;
 }
 
@@ -122,7 +122,7 @@ export async function resolveSnapshotSectionMeta(
     } catch {
         title = undefined;
     }
-    const filename = item.attachmentFilename || undefined;
+    const filename = safeAttachmentFilename(item) ?? undefined;
     return {
         rawHref: url || filename,
         fallbackLabel: title || filename,
@@ -317,7 +317,7 @@ export async function preflightSnapshotFile(
         return preflightResponseError("file_missing", "The snapshot file is not available locally.");
     }
 
-    const maxFileSizeMB = effectiveMaxSnapshotFileSizeMB(options?.maxFileSizeMB);
+    const maxFileSizeMB = effectiveMaxSnapshotFileSizeMB();
     try {
         const stat = await IOUtils.stat(filePath);
         const sizeMB = typeof stat.size === "number" ? stat.size / 1024 / 1024 : null;

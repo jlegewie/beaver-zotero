@@ -1,11 +1,11 @@
 import { BEAVER_CITATION_ANNOTATION_AUTHOR } from "../../../src/constants/annotations";
-import { logger } from "../../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { getBestSnapshotAttachmentAsync } from "../../../src/utils/zoteroItemHelpers";
 import {
     buildSnapshotSortIndex,
     toSnapshotSelector,
 } from "../../../src/services/annotations/snapshot/snapshotAnnotationGeometry";
-import type { SymbolicLocation } from "../../types/citations";
+import type { SymbolicLocation } from "@beaver/agent-core/types/citations";
 import type { ZoteroReader } from "../annotationUtils";
 import { presentTemporaryAnnotations } from "../citationNavigation";
 import { setTemporaryAnnotations } from "../epubVisualizer/epubReaderView";

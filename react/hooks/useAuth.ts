@@ -19,8 +19,8 @@ import {
     sessionAtom,
     resetLoginFormState,
 } from '../atoms/auth';
-import { supabase } from '../../src/services/supabaseClient';
-import { logger } from '../../src/utils/logger';
+import { supabase } from '@beaver/agent-core/transport/supabaseClient';
+import { logger } from '@beaver/agent-core/platform/logger';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import {
     profileWithPlanAtom,

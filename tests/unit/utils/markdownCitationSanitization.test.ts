@@ -6,7 +6,7 @@ const { captureCitationProps } = vi.hoisted(() => ({
     captureCitationProps: vi.fn(),
 }));
 
-vi.mock('../../../react/components/citations/Citation', () => ({
+vi.mock('@beaver/agent-ui/chat/Citation', () => ({
     default: (props: Record<string, unknown>) => {
         captureCitationProps(props);
         return null;

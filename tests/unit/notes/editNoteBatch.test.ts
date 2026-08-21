@@ -43,6 +43,8 @@ vi.mock('../../../src/utils/editNoteValidation', async () => {
         }),
         detectPartialSimplifiedTag: actual.detectPartialSimplifiedTag,
         buildPartialSimplifiedTagMessage: actual.buildPartialSimplifiedTagMessage,
+        buildCitationRefHint: actual.buildCitationRefHint,
+        buildExpansionErrorMessage: actual.buildExpansionErrorMessage,
     };
 });
 
@@ -135,6 +137,7 @@ vi.mock('../../../src/utils/noteCitationExpand', () => ({
     preloadNotePageLabels: vi.fn().mockResolvedValue({}),
     preloadStructuralLocatorPages: vi.fn().mockResolvedValue({ pages: {}, unresolved: [] }),
     buildUnresolvedLocatorWarning: vi.fn(() => null),
+    isCitationRefNotFoundError: vi.fn(() => false),
 }));
 
 vi.mock('../../../src/utils/editNoteStrippers', () => ({
@@ -148,7 +151,12 @@ vi.mock('../../../src/utils/editNoteHints', () => ({
     findInlineTagDriftMatch: vi.fn(() => null),
     findWindowCandidates: vi.fn(() => []),
     centerTruncate: vi.fn((text: string) => ({ snippet: text, truncated: false })),
+    markTruncatedUnlessVerbatim: vi.fn(
+        (result: { snippet: string; truncated: boolean }) => result,
+    ),
+    pasteableSnippetBudget: vi.fn(() => 600),
     DEFAULT_MAX_SNIPPET_LENGTH: 200,
+    MAX_PASTEABLE_SNIPPET_LENGTH: 600,
 }));
 
 vi.mock('../../../src/utils/editNoteRawPosition', async () => {
@@ -163,7 +171,7 @@ vi.mock('../../../src/utils/editNoteRawPosition', async () => {
     };
 });
 
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: {
         auth: {
             getSession: vi.fn(),
@@ -187,7 +195,7 @@ vi.mock('../../../react/store', () => ({
     store: { get: vi.fn(() => [1, 2]) },
 }));
 
-vi.mock('../../../react/atoms/citations', () => ({
+vi.mock('@beaver/agent-core/citations/atoms', () => ({
     citationMapAtom: Symbol('citationMapAtom'),
 }));
 
@@ -205,10 +213,11 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     validateZoteroItemReference: vi.fn(() => null),
     backfillMetadataForError: vi.fn(),
     excludedLibraryMessage: vi.fn((id: number) => `Library ${id} is excluded from Beaver.`),
+    excludedLibraryUserMessage: vi.fn((id: number) => `Library ${id} is excluded from Beaver.`),
     checkLibraryExcluded: vi.fn(() => null),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 
@@ -259,8 +268,8 @@ import {
 import type {
     WSAgentActionValidateRequest,
     WSAgentActionExecuteRequest,
-} from '../../../src/services/agentProtocol';
-import type { EditNoteBatchEditItem } from '../../../react/types/agentActions/editNoteBatch';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import type { EditNoteBatchEditItem } from '@beaver/agent-core/types/agentActions/editNoteBatch';
 import { MAX_BATCH_EDITS } from '../../../src/services/agentDataProvider/actions/editNoteBatch';
 
 
@@ -425,7 +434,7 @@ describe('local edit_note_batch mutation guards', () => {
         await expect(executeLocalEditNoteBatchAction(action)).rejects.toThrow(
             'Library 1 is excluded from Beaver.',
         );
-        expect(Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
+        expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
     });
 
     it('rejects undo before looking up an item in a newly excluded library', async () => {
@@ -452,7 +461,7 @@ describe('local edit_note_batch mutation guards', () => {
         await expect(undoLocalEditNoteBatchAction(action)).rejects.toThrow(
             'Library 1 is excluded from Beaver.',
         );
-        expect(Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
+        expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
     });
 
     it('replace-all undo changes only the occurrences recorded by this action', async () => {
@@ -586,6 +595,54 @@ describe('validateEditNoteBatchAction — success', () => {
             total_lines: 1,
             old_content: NOTE_HTML,
         });
+    });
+
+    it('routes a rewrite that discards most of the note to the destructive group', async () => {
+        const paragraphs = Array.from(
+            { length: 40 },
+            (_, i) => `<p>Paragraph ${i} of a long research note about corrugator activity.</p>`,
+        );
+        useNote(`<div data-schema-version="9">${paragraphs.join('')}</div>`);
+
+        const response = await handleAgentActionValidateRequest(makeValidateRequest([
+            { index: 0, operation: 'rewrite', new_string: paragraphs[3] },
+        ]));
+
+        expect(response.valid).toBe(true);
+        expect(getDeferredToolPreference).toHaveBeenCalledWith(
+            'destructive_note_rewrite',
+            expect.objectContaining({ zotero_key: 'NOTE0001' }),
+        );
+        // The flag must ride along on the action, or the approval that follows
+        // (which only sees the edit_note_batch action type) would fall back to
+        // the ordinary note-edit group.
+        expect(response.normalized_action_data).toMatchObject({
+            zotero_key: 'NOTE0001',
+            destructive_rewrite: true,
+        });
+    });
+
+    it('leaves a rewrite that preserves the note on the ordinary note-edit group', async () => {
+        const paragraphs = Array.from(
+            { length: 40 },
+            (_, i) => `<p>Paragraph ${i} of a long research note about corrugator activity.</p>`,
+        );
+        useNote(`<div data-schema-version="9">${paragraphs.join('')}</div>`);
+
+        const response = await handleAgentActionValidateRequest(makeValidateRequest([
+            {
+                index: 0,
+                operation: 'rewrite',
+                new_string: `${paragraphs.join('')}<p>One appended closing paragraph.</p>`,
+            },
+        ]));
+
+        expect(response.valid).toBe(true);
+        expect(getDeferredToolPreference).toHaveBeenCalledWith(
+            'edit_note_batch',
+            expect.objectContaining({ zotero_key: 'NOTE0001' }),
+        );
+        expect(response.normalized_action_data?.destructive_rewrite).toBeUndefined();
     });
 });
 
@@ -973,6 +1030,42 @@ describe('executeEditNoteBatchAction — atomicity and failures', () => {
         expect(response.error_code).toBe('overlapping_edits');
         expect(item.setNote).not.toHaveBeenCalled();
         expect(item.saveTx).not.toHaveBeenCalled();
+    });
+
+    it('refuses a rewrite that only became destructive after validation cleared it', async () => {
+        // The note grew after validation classified the rewrite as ordinary, so
+        // the payload now discards content that was never covered by approval.
+        const paragraphs = Array.from(
+            { length: 40 },
+            (_, i) => `<p>Paragraph ${i} of a long research note about corrugator activity.</p>`,
+        );
+        const item = useNote(`<div data-schema-version="9">${paragraphs.join('')}</div>`);
+
+        const response = await handleAgentActionExecuteRequest(makeExecuteRequest([
+            { index: 0, operation: 'rewrite', new_string: paragraphs[3] },
+        ]));
+
+        expect(response.success).toBe(false);
+        expect(response.error_code).toBe('note_changed');
+        expect(item.setNote).not.toHaveBeenCalled();
+        expect(item.saveTx).not.toHaveBeenCalled();
+    });
+
+    it('applies a destructive rewrite that was approved as one', async () => {
+        const paragraphs = Array.from(
+            { length: 40 },
+            (_, i) => `<p>Paragraph ${i} of a long research note about corrugator activity.</p>`,
+        );
+        const item = useNote(`<div data-schema-version="9">${paragraphs.join('')}</div>`);
+
+        const response = await handleAgentActionExecuteRequest(makeExecuteRequest(
+            [{ index: 0, operation: 'rewrite', new_string: paragraphs[3] }],
+            { destructive_rewrite: true },
+        ));
+
+        expect(response.success).toBe(true);
+        expect(item.setNote).toHaveBeenCalledTimes(1);
+        expect(item.saveTx).toHaveBeenCalledTimes(1);
     });
 
     it('rolls back with setNote(oldHtml) and reports save_failed when saveTx throws', async () => {

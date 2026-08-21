@@ -20,7 +20,7 @@
 import { makeRemoteFilePath } from '../../src/services/documentFileIdentity';
 import { getAttachmentFileStatus, isRemoteAccessAvailable } from '../../src/services/agentDataProvider/utils';
 import type { PageLabels } from '../../src/services/documentCache';
-import type { Citation } from '../types/citations';
+import type { Citation } from '@beaver/agent-core/types/citations';
 import { getBestPDFAttachmentAsync } from '../../src/utils/zoteroItemHelpers';
 import { UNRESOLVED_LIBRARY_ID, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import {
@@ -29,8 +29,9 @@ import {
     getResolvedRef,
     normalizeCitationTag,
     parseRawCitationAttributes,
-} from './citationGrammar';
-import type { PageLabelsByAttachmentId } from '../atoms/citations';
+} from '@beaver/agent-core/citations/citationGrammar';
+import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
+import { hasPageLabels } from '@beaver/agent-ui/utils/pageLabels';
 
 // Regex for citation tags — matches self-closing and non-self-closing forms
 const CITATION_REGEX = /<citation(?:\s+([^>]*?))?\s*(\/>|>(?:.*?<\/citation>)?)/g;
@@ -38,10 +39,6 @@ const CITATION_REGEX = /<citation(?:\s+([^>]*?))?\s*(\/>|>(?:.*?<\/citation>)?)/
 export type PreloadFilePath =
     | { item: Zotero.Item; filePath: string; isRemoteOnly: false }
     | { item: Zotero.Item; filePath: string; isRemoteOnly: true };
-
-function hasPageLabels(labels: PageLabels | null | undefined): labels is PageLabels {
-    return !!labels && Object.keys(labels).length > 0;
-}
 
 function addPageLabels(
     target: PageLabelsByAttachmentId,
@@ -67,24 +64,6 @@ export async function getCitationPreloadFilePath(item: Zotero.Item): Promise<Pre
     }
 
     return null;
-}
-
-/**
- * Resolve a 1-based page number against an explicit page-label map.
- *
- * @param pageLabels - 0-based page index to display label
- * @param pageNumber - 1-based page number
- * @returns The page label string, or the page number as string
- */
-export function resolvePageLabelFromLabels(
-    pageLabels: PageLabels | null | undefined,
-    pageNumber: number,
-): string {
-    if (!hasPageLabels(pageLabels)) return String(pageNumber);
-    const pageIndex = pageNumber - 1;
-    const label = pageLabels[pageIndex];
-    if (label == null || label.trim() === '') return String(pageNumber);
-    return label;
 }
 
 /**

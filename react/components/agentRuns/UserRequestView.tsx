@@ -1,21 +1,22 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { BeaverAgentPrompt } from '../../agents/types';
-import ContextMenu from '../ui/menu/ContextMenu';
+import { BeaverAgentPrompt } from '@beaver/agent-core/agents/types';
+import ContextMenu from '@beaver/agent-ui/primitives/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { RequestChips } from './requestChips';
 import { EditIcon, Spinner } from '../icons/icons';
-import Button from '../ui/Button';
+import Button from '@beaver/agent-ui/primitives/Button';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
-import SearchMenu from '../ui/menus/SearchMenu';
-import { regenerateWithEditedPromptAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
+import SearchMenu from '@beaver/agent-ui/primitives/SearchMenu';
+import { regenerateWithEditedPromptAtom, isWSChatPendingAtom, retryPendingRunIdAtom } from '../../atoms/agentRunAtoms';
 import { selectedModelAtom } from '../../atoms/models';
-import { isStreamingAtom } from '../../agents/atoms';
+import { isStreamingAtom } from '@beaver/agent-core/run-state/atoms';
 import { actionsAtom, buildEditedPromptActionsAtom } from '../../atoms/actions';
-import { ensurePromptActionTokens, promptActionsToDescriptors, type SlashCommandDescriptor } from '../../utils/slashCommands';
+import { ensurePromptActionTokens, promptActionsToDescriptors, type SlashCommandDescriptor } from '@beaver/agent-ui/composer/slashCommands';
 import { renderContentWithSlashPills } from './slashCommandRendering';
-import { LexicalEditorInput, LexicalEditorInputHandle } from '../input/lexical/LexicalEditorInput';
+import { LexicalEditorInput, LexicalEditorInputHandle } from '@beaver/agent-ui/composer/LexicalEditorInput';
 import { useSlashMenu } from '../../hooks/useSlashMenu';
+import { useActionPopupResolver } from '../../hooks/useActionPopupResolver';
 
 interface UserRequestViewProps {
     userPrompt: BeaverAgentPrompt;
@@ -67,7 +68,14 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     const isPending = useAtomValue(isWSChatPendingAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
+    // Loading state after an edited prompt was submitted: the edit overlay is
+    // already closed while the retry commits its removal on the backend
+    // (truncate POST + undo), before the replacement run replaces this view.
+    const isRetryPending = useAtomValue(retryPendingRunIdAtom) === runId;
     const allActions = useAtomValue(actionsAtom);
+    // Supplies the edit overlay's /command pill hover cards with the live
+    // action definitions, matching the chat composer.
+    const resolveAction = useActionPopupResolver();
     const displayContent = useMemo(
         () => ensurePromptActionTokens(userPrompt.content, userPrompt.actions),
         [userPrompt.content, userPrompt.actions],
@@ -89,7 +97,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     }, []);
     // Stable forwarder so the slash menu can insert a command pill into the
     // Lexical editor (the editor handle isn't available until after mount).
-    const insertSlashCommand = useCallback((descriptor: SlashCommandDescriptor, queryLength: number) => {
+    const insertSlashCommand = useCallback((descriptor: SlashCommandDescriptor, queryLength: number | null) => {
         editorHandleRef.current?.insertSlashCommand(descriptor, queryLength);
     }, []);
 
@@ -103,7 +111,12 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         handleSlashMenuChange,
         handleSlashTrigger,
         handleSlashMenuKeyDown,
-    } = useSlashMenu(editInputRef, 'below', focusEditor, insertSlashCommand, setEditedContent);
+    } = useSlashMenu(editInputRef, 'below', focusEditor, insertSlashCommand, {
+        setContent: setEditedContent,
+        // The overlay edits a sent message's own attachment list; targets an
+        // action pulls in are added to it on submit, not to the composer.
+        attachTargets: false,
+    });
 
     // Check if content needs fade effect
     useEffect(() => {
@@ -227,7 +240,12 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
 
     const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent) => {
         e.preventDefault();
-        if (isPending || editedContent.length === 0) return;
+        // Text typed with an input method reaches `editedContent` one
+        // composition at a time, and the last one lands shortly after the user
+        // commits it. Publish anything still withheld so saving right after the
+        // commit keeps the committed text (see flushPendingText).
+        const content = editorHandleRef.current?.flushPendingText() ?? editedContent;
+        if (isPending || content.length === 0) return;
 
         // Build the edited prompt from the editor's pills: surviving pills
         // reuse their persisted wire action, new pills resolve like a fresh
@@ -243,7 +261,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
 
         const editedPrompt: BeaverAgentPrompt = {
             ...userPrompt,
-            content: editedContent,
+            content,
             actions: result.actions,
             attachments: result.addedAttachments.length > 0
                 ? [...(userPrompt.attachments ?? []), ...result.addedAttachments]
@@ -311,13 +329,21 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                         : displayContent}
                 </div>
 
+                {/* Retry in flight: the edited prompt was submitted and its
+                    removal is being committed on the backend. */}
+                {isRetryPending && !isEditing && (
+                    <div className="user-request-edit-icon mb-075">
+                        <Spinner size={12} />
+                    </div>
+                )}
+
                 {/* Edit icon (visible on hover) */}
-                {isHovered && !isEditing && canEditNow && (
+                {isHovered && !isEditing && !isRetryPending && canEditNow && (
                     <div className="user-request-edit-icon mb-075">
                         <EditIcon width={12} height={12} />
                     </div>
                 )}
-                {isHovered && !isEditing && !canEditNow && (
+                {isHovered && !isEditing && !isRetryPending && !canEditNow && (
                     <div className="user-request-edit-icon mb-075">
                         <Spinner size={12} />
                     </div>
@@ -376,6 +402,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                                 pills={editedPills}
                                 onPillsChange={setEditedPills}
                                 onSubmit={handleEditorSubmit}
+                                resolveAction={resolveAction}
                                 placeholder="Edit your message..."
                                 ariaLabel="Edit message"
                                 onKeyDown={handleEditorKeyDown}

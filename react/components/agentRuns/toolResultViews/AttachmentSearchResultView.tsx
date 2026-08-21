@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { CSSItemTypeIcon, ArrowDownIcon, ArrowRightIcon, ExternalLinkIcon, Icon } from '../../icons/icons';
-import { itemTypeToIconName, ContentKind } from '../../../types/citations';
+import { itemTypeToIconName, ContentKind } from '@beaver/agent-core/types/citations';
 import {
     AttachmentSearchView,
     AttachmentSearchRowView,
     AttachmentMatchView,
-} from '../../../types/toolResultViews';
-import { getHost } from '../../../host';
+} from '@beaver/agent-core/run-state/toolResultViews';
+import { getHost } from '@beaver/agent-ui/host';
 
 /**
  * Shared renderer for the {@link AttachmentSearchView} view model

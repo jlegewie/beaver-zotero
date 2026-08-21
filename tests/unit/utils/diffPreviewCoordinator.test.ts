@@ -58,7 +58,7 @@ vi.mock('../../../react/store', () => ({
     get store() { return storeRef.current; },
 }));
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 

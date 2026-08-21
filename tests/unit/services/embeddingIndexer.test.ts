@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../src/services/embeddingsService', () => ({
+vi.mock('@beaver/agent-core/transport/clients/embeddingsService', () => ({
     embeddingsService: {
         generateEmbeddingsWithRetry: vi.fn(),
     },

@@ -1,8 +1,8 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { citationMapAtom } from '../../atoms/citations';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
-import IconButton from '../ui/IconButton';
+import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import {
     ArrowDownIcon,
     ArrowRightIcon,
@@ -28,11 +28,11 @@ import {
 } from '../../atoms/messageUIState';
 import { ZOTERO_ICONS, ZoteroIcon } from '../icons/ZoteroIcon';
 import { copyToClipboard } from '../../utils/clipboard';
-import Tooltip from '../ui/Tooltip';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { renderToHTML, renderToMarkdown } from '../../utils/citationRenderers';
 import { ToolDisplayFooter } from './ToolDisplayFooter';
 import { prepareCitationRenderContext } from '../../utils/citationRenderContext';
-import { getHost } from '../../host';
+import { getHost } from '@beaver/agent-ui/host';
 
 export interface StreamingNoteBlock {
     id: string;

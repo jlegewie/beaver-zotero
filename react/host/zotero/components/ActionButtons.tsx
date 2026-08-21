@@ -11,20 +11,22 @@ import {
     isExternalReferenceDetailsDialogVisibleAtom,
     selectedExternalReferenceAtom
 } from '../../../atoms/ui';
-import Button from '../../../components/ui/Button';
-import IconButton from '../../../components/ui/IconButton';
-import Tooltip from '../../../components/ui/Tooltip';
+import Button from '@beaver/agent-ui/primitives/Button';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { ZOTERO_ICONS } from '../../../components/icons/ZoteroIcon';
 import { ZoteroIcon } from '../../../components/icons/ZoteroIcon';
 import { revealSource } from '../../../utils/sourceUtils';
 import {
     checkExternalReferenceAtom,
-    externalReferenceItemMappingAtom,
-    isCheckingReferenceObjectAtom,
     markExternalReferenceImportedAtom,
 } from '../../../atoms/externalReferences';
+import {
+    externalReferenceItemMappingAtom,
+    isCheckingReferenceObjectAtom,
+} from '@beaver/agent-core/citations/externalReferences';
 import { createZoteroItem, stampBeaverProvenanceExtra } from '../../../utils/addItemActions';
-import { logger } from '../../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { ensureItemSynced } from '../../../../src/utils/sync';
 import { getPref } from '../../../../src/utils/prefs';
 import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
@@ -33,11 +35,11 @@ import {
     getPendingCreateItemActionBySourceIdAtom,
     ackAgentActionsAtom,
 } from '../../../agents/agentActions';
-import { CreateItemResultData } from '../../../types/agentActions/items';
+import { CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { currentThreadIdAtom } from '../../../atoms/threads';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
-import type { ZoteroItemReference } from '../../../types/zotero';
-import type { ExternalReferenceActionMode, ExternalReferenceActionsProps } from '../../types';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import type { ExternalReferenceActionMode, ExternalReferenceActionsProps } from '@beaver/agent-ui/host/types';
 import { resolveSearchableLibraryId } from '../libraryAccess';
 
 const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';

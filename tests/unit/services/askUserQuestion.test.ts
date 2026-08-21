@@ -9,11 +9,11 @@ const { mockSupabase } = vi.hoisted(() => ({
     },
 }));
 
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: mockSupabase,
 }));
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 
@@ -46,18 +46,18 @@ vi.mock('../../../src/services/agentDataProvider', () => ({
 }));
 
 import { createStore } from 'jotai';
-import { AgentService } from '../../../src/services/agentService';
+import { AgentService } from '@beaver/agent-core/transport/agentService';
 import type {
     AgentRunRequest,
     WSAskUserQuestionRequest,
     WSCallbacks,
-} from '../../../src/services/agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import {
     addPendingQuestionAtom,
     clearAllPendingQuestionsAtom,
     pendingQuestionsAtom,
     removePendingQuestionAtom,
-} from '../../../react/agents/pendingQuestions';
+} from '@beaver/agent-core/run-state/pendingQuestions';
 
 class MockWebSocket {
     static CONNECTING = 0;

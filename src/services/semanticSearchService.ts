@@ -1,6 +1,6 @@
 import { BeaverDB, EmbeddingRecord } from './database';
-import { embeddingsService } from './embeddingsService';
-import { logger } from '../utils/logger';
+import { embeddingsService } from '@beaver/agent-core/transport/clients/embeddingsService';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { safeIsInTrash } from '../utils/zoteroUtils';
 
 
@@ -23,6 +23,7 @@ export interface SearchOptions {
                                 // Interpretation: 0.7+ very similar, 0.5-0.7 related, 
                                 // 0.3-0.5 weak, <0.3 noise
     libraryIds?: number[];      // Optional: filter to specific libraries
+    itemIds?: number[];         // Optional: restrict the search to these item IDs
 }
 
 /**
@@ -48,11 +49,11 @@ export class semanticSearchService {
      * Uses retry with exponential backoff for transient failures.
      * Filters out items that are in the trash.
      * @param query The search query text
-     * @param options Search options (topK, minSimilarity, libraryIds)
+     * @param options Search options (topK, minSimilarity, libraryIds, itemIds)
      * @returns Array of search results sorted by similarity (highest first)
      */
     async search(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
-        const { topK = 20, minSimilarity = 0.4, libraryIds } = options;
+        const { topK = 20, minSimilarity = 0.4, libraryIds, itemIds } = options;
 
         if (!query || query.trim().length === 0) {
             return [];
@@ -62,11 +63,20 @@ export class semanticSearchService {
             return [];
         }
 
+        if (itemIds && itemIds.length === 0) {
+            return [];
+        }
+
         // 1. Start query embedding generation and DB loading in parallel.
         const queryEmbeddingPromise = embeddingsService.generateQueryEmbeddingWithRetry(query);
-        const embeddingsPromise = libraryIds
-            ? this.db.getEmbeddingsByLibraries(libraryIds)
-            : this.db.getAllEmbeddings();
+        let embeddingsPromise: Promise<EmbeddingRecord[]>;
+        if (itemIds) {
+            embeddingsPromise = this.db.getEmbeddingsByItemIds(itemIds, libraryIds);
+        } else if (libraryIds) {
+            embeddingsPromise = this.db.getEmbeddingsByLibraries(libraryIds);
+        } else {
+            embeddingsPromise = this.db.getAllEmbeddings();
+        }
 
         // 2. Wait for both prerequisites needed for similarity computation.
         const [queryEmbeddingResponse, embeddings] = await Promise.all([
@@ -96,13 +106,17 @@ export class semanticSearchService {
      * Find papers similar to a given paper by its item ID.
      * Filters out items that are in the trash.
      * @param itemId The Zotero item ID to find similar papers for
-     * @param options Search options (topK, minSimilarity, libraryIds)
+     * @param options Search options (topK, minSimilarity, libraryIds, itemIds)
      * @returns Array of search results sorted by similarity (highest first)
      */
     async findSimilar(itemId: number, options: SearchOptions = {}): Promise<SearchResult[]> {
-        const { topK = 20, minSimilarity = 0.4, libraryIds } = options;
+        const { topK = 20, minSimilarity = 0.4, libraryIds, itemIds } = options;
 
         if (libraryIds && libraryIds.length === 0) {
+            return [];
+        }
+
+        if (itemIds && itemIds.length === 0) {
             return [];
         }
 
@@ -117,7 +131,9 @@ export class semanticSearchService {
 
         // 2. Load embeddings from database
         let embeddings: EmbeddingRecord[];
-        if (libraryIds) {
+        if (itemIds) {
+            embeddings = await this.db.getEmbeddingsByItemIds(itemIds, libraryIds);
+        } else if (libraryIds) {
             embeddings = await this.db.getEmbeddingsByLibraries(libraryIds);
         } else {
             embeddings = await this.db.getAllEmbeddings();

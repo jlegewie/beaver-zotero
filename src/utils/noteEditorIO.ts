@@ -12,7 +12,7 @@
  * tested without stubbing live-editor globals.
  */
 
-import { logger } from './logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { stripDataCitationItems } from './noteWrapper';
 import { decodeHtmlEntities } from './noteHtmlEntities';
 import { findRangeByContexts } from './editNoteRawPosition';

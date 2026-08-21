@@ -15,7 +15,7 @@ import {
 } from '../../atoms/whereToStart';
 import { libraryItemCountAtom } from '../../atoms/zoteroContext';
 import { OnboardingFooter } from './onboarding';
-import { logger } from '../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /**
  * "Where should we start?" action launcher. The user selects a curated

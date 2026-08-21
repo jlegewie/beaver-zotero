@@ -13,19 +13,21 @@ import {
     isExternalReferenceDetailsDialogVisibleAtom, 
     selectedExternalReferenceAtom 
 } from '../../../atoms/ui';
-import Button from '../../../components/ui/Button';
-import IconButton from '../../../components/ui/IconButton';
-import Tooltip from '../../../components/ui/Tooltip';
+import Button from '@beaver/agent-ui/primitives/Button';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { ZOTERO_ICONS, ZoteroIcon } from '../../../components/icons/ZoteroIcon';
 import { revealSource } from '../../../utils/sourceUtils';
-import { 
-    checkExternalReferenceAtom, 
+import {
+    checkExternalReferenceAtom,
+} from '../../../atoms/externalReferences';
+import {
     getCachedReferenceForObjectAtom,
     isCheckingReferenceObjectAtom,
-} from '../../../atoms/externalReferences';
-import { ButtonVariant } from '../../../components/ui/Button';
+} from '@beaver/agent-core/citations/externalReferences';
+import { ButtonVariant } from '@beaver/agent-ui/primitives/Button';
 import { CreateItemAgentAction } from '../../../agents/agentActions';
-import { ZoteroItemReference } from '../../../types/zotero';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { resolveSearchableLibraryId } from '../libraryAccess';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 

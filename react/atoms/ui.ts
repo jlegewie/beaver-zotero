@@ -1,9 +1,9 @@
 import { atom } from 'jotai';
 import { PopupMessage, PopupMessageType } from '../types/popupMessage';
-import { ExternalReference } from '../types/externalReferences';
+import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { getPref } from '../../src/utils/prefs';
 import { isUsingBeaverCreditsAtom } from './models';
-import type { ActionCategoryFilter } from '../types/actions';
+import type { ActionCategoryFilter } from '@beaver/agent-core/types/actions';
 
 const isSidebarVisibleBaseAtom = atom(false);
 
@@ -20,6 +20,26 @@ export const isSidebarVisibleAtom = atom(
         set(isSidebarVisibleBaseAtom, next);
         if (prev && !next) set(threadListFilterAtom, null);
     }
+);
+
+/**
+ * Whether the separate Beaver window is open. Maintained by the window's React
+ * root (`useBeaverWindowContext`), which mounts when the window opens and
+ * unmounts when it closes.
+ */
+export const isBeaverWindowOpenAtom = atom(false);
+
+/**
+ * Whether Beaver's chat UI is showing anywhere, either the main-window sidebar or the
+ * separate window.
+ *
+ * Context tracking that feeds the chat (current reader attachment, reader text
+ * selection) must key off this rather than `isSidebarVisibleAtom`: the separate
+ * window shares the same store but has no sidebar, so gating on the sidebar
+ * alone leaves those atoms empty for window-only users.
+ */
+export const isBeaverUIVisibleAtom = atom(
+    (get) => get(isSidebarVisibleAtom) || get(isBeaverWindowOpenAtom),
 );
 
 export const isLibraryTabAtom = atom(false);

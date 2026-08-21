@@ -21,8 +21,8 @@ import type {
     StyleProfile,
     TextStyle,
     MarginSettings,
-} from "./types";
-import { bboxFromXYWH, bboxHeight, bboxWidth } from "./types";
+} from "@beaver/agent-core/extract/types";
+import { bboxFromXYWH, bboxHeight, bboxWidth } from "@beaver/agent-core/extract/types";
 import { MarginFilter } from "./MarginFilter";
 import type { Rect, ColumnDetectionResult } from "./ColumnDetector";
 import { pdfLog } from "./logging";

@@ -80,11 +80,9 @@ export function useSidebarDOMEffects() {
         }
 
         // Update toolbar button
-        if (isSidebarVisible) {
-            chatToggleBtn?.setAttribute("selected", "true");
-        } else {
-            chatToggleBtn?.removeAttribute("selected");
-        }
+        // `selected` is a boolean XUL attribute as of Zotero 11 (Firefox 153):
+        // presence alone selects, so toggle it rather than writing "true".
+        chatToggleBtn?.toggleAttribute("selected", isSidebarVisible);
 
         // Cleanup function
         return () => {

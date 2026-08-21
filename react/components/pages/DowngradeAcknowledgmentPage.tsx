@@ -1,8 +1,8 @@
 import React, { useState } from "react";
 import { useAtom, useAtomValue } from "jotai";
 import { profileWithPlanAtom, dataDeletionScheduledForAtom } from "../../atoms/profile";
-import { accountService } from "../../../src/services/accountService";
-import { logger } from "../../../src/utils/logger";
+import { accountService } from "@beaver/agent-core/transport/clients/accountService";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { OnboardingHeader, OnboardingFooter } from "./onboarding";
 import { Icon, CancelIcon, TickIcon, LockIcon } from "../icons/icons";
 

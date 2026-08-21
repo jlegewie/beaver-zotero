@@ -1,6 +1,6 @@
 import React from 'react';
 import { InformationCircleIcon } from '../../icons/icons';
-import IconButton from '../IconButton';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { getInfoItemByTitle } from '../../../constants/info';
 import { parseTextWithLinksAndNewlines } from '../../../utils/parseTextWithLinksAndNewlines';
 

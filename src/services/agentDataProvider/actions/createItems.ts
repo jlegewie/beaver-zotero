@@ -1,4 +1,4 @@
-import { logger } from '../../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { batchFindExistingReferences, BatchReferenceCheckItem } from '../../../../react/utils/batchFindExistingReferences';
 import { store } from '../../../../react/store';
@@ -8,13 +8,13 @@ import {
     WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
     FrontendTimingMetadata,
-} from '../../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { libraryRefForLibraryID, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 import { TimingAccumulator } from '../../../utils/timing';
-import type { CreateItemProposedData, CreateItemResultData } from '../../../../react/types/agentActions/items';
+import type { CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { applyCreateItemData } from '../../../../react/utils/addItemActions';
 
 

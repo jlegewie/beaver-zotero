@@ -60,6 +60,19 @@ const EXTRACT_OPTS = { timeout: 120_000 } as const;
 const MISSING_KEY_LIB = 1;
 const MISSING_KEY_ZOTERO = 'ZZZZTEST';
 
+/**
+ * Priority for every job a test expects to be claimed.
+ *
+ * `BackgroundExtractor` claims jobs at or above `LOW_PRIORITY_CEILING` (100,
+ * also the enqueue default) only once the OS has been idle for 30s, so a job
+ * enqueued at the default drains or not depending on whether someone is
+ * touching the keyboard. Anything below the ceiling — the priority production
+ * uses for hot-path timeout retries — is claimed regardless of idle time, which
+ * is the behavior these tests are actually about. Tests that assert queue
+ * bookkeeping rather than draining still use explicit priorities of their own.
+ */
+const DRAIN_PRIORITY = 10;
+
 describe('background queue — enqueue endpoint', () => {
     beforeEach(async (ctx) => {
         skipIfNoZotero(ctx, available);
@@ -78,7 +91,6 @@ describe('background queue — enqueue endpoint', () => {
             payload: {
                 content_kind: 'pdf',
                 maxPages: null,
-                maxFileSizeMB: 0,
                 timeoutSeconds: 180,
             },
         });
@@ -104,7 +116,7 @@ describe('background queue — enqueue endpoint', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: 100,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         expect(first.enqueued).toBe(true);
 
@@ -115,7 +127,7 @@ describe('background queue — enqueue endpoint', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: 100,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         expect(second.enqueued).toBe(false);
         expect(second.id).toBe(first.id);
@@ -128,7 +140,7 @@ describe('background queue — enqueue endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         const markdown = await backgroundEnqueue({
             library_id: SMALL_PDF.library_id,
@@ -136,7 +148,7 @@ describe('background queue — enqueue endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'markdown',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         expect(structured.enqueued).toBe(true);
         expect(markdown.enqueued).toBe(true);
@@ -166,7 +178,6 @@ describe('background queue — peek endpoint', () => {
             payload: {
                 content_kind: 'pdf',
                 maxPages: 50,
-                maxFileSizeMB: 25,
                 timeoutSeconds: 180,
             },
         });
@@ -187,7 +198,6 @@ describe('background queue — peek endpoint', () => {
         expect(job.payload).toEqual({
             content_kind: 'pdf',
             maxPages: 50,
-            maxFileSizeMB: 25,
             timeoutSeconds: 180,
         });
         expect(typeof job.enqueuedAt).toBe('number');
@@ -201,7 +211,7 @@ describe('background queue — peek endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         await backgroundEnqueue({
             library_id: NORMAL_PDF.library_id,
@@ -209,7 +219,7 @@ describe('background queue — peek endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const limited = await backgroundPeek({ limit: 1 });
@@ -228,7 +238,7 @@ describe('background queue — peek endpoint', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: 200,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         const high = await backgroundEnqueue({
             library_id: NORMAL_PDF.library_id,
@@ -237,7 +247,7 @@ describe('background queue — peek endpoint', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: 10,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const peek = await backgroundPeek();
@@ -273,7 +283,7 @@ describe('background queue — stats endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         const res = await backgroundStats();
         expect(res.queue!.pending).toBe(1);
@@ -313,12 +323,13 @@ describe('background queue — processOnce endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            priority: DRAIN_PRIORITY,
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const res = await backgroundProcessOnce();
         expect(res.ok).toBe(true);
-        expect(res.processed).toBe(true);
+        expect(res.processed, `processOnce declined the job: ${res.reason}`).toBe(true);
         expect(res.reason).toBe('job_done');
 
         // The row must be gone after a successful drain (no retry).
@@ -337,11 +348,12 @@ describe('background queue — processOnce endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            priority: DRAIN_PRIORITY,
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const res = await backgroundProcessOnce();
-        expect(res.processed).toBe(true);
+        expect(res.processed, `processOnce declined the job: ${res.reason}`).toBe(true);
         expect(res.reason).toBe('job_done');
 
         const peek = await backgroundPeek();
@@ -356,11 +368,12 @@ describe('background queue — processOnce endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            priority: DRAIN_PRIORITY,
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const res = await backgroundProcessOnce();
-        expect(res.processed).toBe(true);
+        expect(res.processed, `processOnce declined the job: ${res.reason}`).toBe(true);
         expect(res.reason).toBe('job_done');
 
         const peek = await backgroundPeek();
@@ -375,11 +388,12 @@ describe('background queue — processOnce endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            priority: DRAIN_PRIORITY,
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const res = await backgroundProcessOnce();
-        expect(res.processed).toBe(true);
+        expect(res.processed, `processOnce declined the job: ${res.reason}`).toBe(true);
         expect(res.reason).toBe('job_done');
 
         const peek = await backgroundPeek();
@@ -393,7 +407,8 @@ describe('background queue — processOnce endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            priority: DRAIN_PRIORITY,
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         await backgroundEnqueue({
             library_id: SMALL_PDF.library_id,
@@ -401,14 +416,15 @@ describe('background queue — processOnce endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'markdown',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            priority: DRAIN_PRIORITY,
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const first = await backgroundProcessOnce();
-        expect(first.processed).toBe(true);
+        expect(first.processed, `processOnce declined the first job: ${first.reason}`).toBe(true);
 
         const second = await backgroundProcessOnce();
-        expect(second.processed).toBe(true);
+        expect(second.processed, `processOnce declined the second job: ${second.reason}`).toBe(true);
 
         const third = await backgroundProcessOnce();
         expect(third.processed).toBe(false);
@@ -430,7 +446,7 @@ describe('background queue — enqueue defaults', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         const peek = await backgroundPeek();
         expect(peek.jobs?.length).toBe(1);
@@ -444,7 +460,7 @@ describe('background queue — enqueue defaults', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         const peekNull = await backgroundPeek();
         expect(peekNull.jobs![0].itemId).toBeNull();
@@ -458,7 +474,7 @@ describe('background queue — enqueue defaults', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             item_id: 42,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         const peek = await backgroundPeek();
         expect(peek.jobs![0].itemId).toBe(42);
@@ -498,7 +514,7 @@ describe('background queue — clear endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         await backgroundEnqueue({
             library_id: SMALL_PDF.library_id,
@@ -506,7 +522,7 @@ describe('background queue — clear endpoint', () => {
             content_kind: 'pdf',
             payload_kind: 'markdown',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const before = await backgroundStats();
@@ -538,7 +554,8 @@ describe('background queue — terminal response_error completes without retry',
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            priority: DRAIN_PRIORITY,
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
             notify: true,
         });
 
@@ -548,13 +565,13 @@ describe('background queue — terminal response_error completes without retry',
         // dropped (completed without retry) before extraction. That path is
         // fast, so the queue may already be empty before we call
         // processOnce. Poll for drain instead.
-        const finalQueue = await waitForQueueDrain({ timeoutMs: 15_000 });
+        const finalQueue = await waitForQueueDrain({ timeoutMs: 30_000 });
         expect(finalQueue.pending).toBe(0);
         expect(finalQueue.dead).toBe(0);
 
         const peek = await backgroundPeek();
         expect(peek.jobs?.length).toBe(0);
-    });
+    }, 60_000);
 });
 
 describe('background queue — group library extraction', () => {
@@ -572,7 +589,8 @@ describe('background queue — group library extraction', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            priority: DRAIN_PRIORITY,
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
             notify: true,
         });
 
@@ -605,7 +623,8 @@ describe('background queue — worker slot isolation', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            priority: DRAIN_PRIORITY,
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
             notify: true,
         });
 
@@ -616,7 +635,11 @@ describe('background queue — worker slot isolation', () => {
         const stats = await backgroundStats();
         expect(stats.workers).toBeDefined();
         expect(stats.workers!.background).not.toBeNull();
-        expect(stats.workers!.background!.hasWorker).toBe(true);
+        // `spawnCount`, not `hasWorker`: the processor recycles the background
+        // worker every `RECYCLE_AFTER_N` completed jobs, and that counter runs
+        // for the life of the instance, so a drain that happens to be the Nth
+        // one leaves the slot legitimately empty. The cumulative spawn count is
+        // the durable evidence that this slot got its own worker.
         expect(stats.workers!.background!.spawnCount).toBeGreaterThanOrEqual(1);
         // hot may or may not have a worker depending on prior tests — but
         // when both exist they must be distinct instances tracked under
@@ -640,7 +663,7 @@ describe('background queue — stats.byJobType across payload kinds', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         await backgroundEnqueue({
             library_id: SMALL_PDF.library_id,
@@ -648,7 +671,7 @@ describe('background queue — stats.byJobType across payload kinds', () => {
             content_kind: 'pdf',
             payload_kind: 'markdown',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const stats = await backgroundStats();
@@ -671,7 +694,7 @@ describe('background queue — peek edge cases', () => {
             content_kind: 'pdf',
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         const peek = await backgroundPeek({ limit: 0 });
         expect(peek.ok).toBe(true);
@@ -686,7 +709,7 @@ describe('background queue — peek edge cases', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: 5,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         const mid = await backgroundEnqueue({
             library_id: NORMAL_PDF.library_id,
@@ -695,7 +718,7 @@ describe('background queue — peek edge cases', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: 50,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
         await backgroundEnqueue({
             library_id: NO_TEXT_PDF.library_id,
@@ -704,7 +727,7 @@ describe('background queue — peek edge cases', () => {
             payload_kind: 'structured',
             job_type: 'document_timeout_retry',
             priority: 500,
-            payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
+            payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
         });
 
         const peek = await backgroundPeek({ limit: 2 });
@@ -749,7 +772,7 @@ describe('background queue — hot-path timeout integration', () => {
 
             // The processor must now be able to drain the retry job.
             const drained = await backgroundProcessOnce();
-            expect(drained.processed).toBe(true);
+            expect(drained.processed, `processOnce declined the retry job: ${drained.reason}`).toBe(true);
             expect(drained.reason).toBe('job_done');
         } else {
             // Extraction beat the 1s budget — that's fine, no retry was

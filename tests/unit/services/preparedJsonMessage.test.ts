@@ -4,7 +4,7 @@ import {
     isPreparedJsonMessage,
     materializePreparedJsonMessage,
     withPreparedJsonEnvelope,
-} from '../../../src/services/preparedJsonMessage';
+} from '@beaver/agent-core/transport/preparedJsonMessage';
 
 describe('preparedJsonMessage', () => {
     it('splices raw JSON fields into a small serialized envelope', () => {

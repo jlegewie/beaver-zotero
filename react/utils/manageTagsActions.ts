@@ -21,8 +21,8 @@
  */
 
 import { AgentAction } from '../agents/agentActions';
-import type { ManageTagsProposedData, ManageTagsResultData, TagColorSnapshot } from '../types/agentActions/base';
-import { logger } from '../../src/utils/logger';
+import type { ManageTagsProposedData, ManageTagsResultData, TagColorSnapshot } from '@beaver/agent-core/types/agentActions/base';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     libraryRefForLibraryID,
     modelObjectId,

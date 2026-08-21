@@ -5,10 +5,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // =============================================================================
 
 vi.mock('../../../src/services/FileUploader', () => ({ fileUploader: {} }));
-vi.mock('../../../src/services/accountService', () => ({ accountService: {} }));
+vi.mock('@beaver/agent-core/transport/clients/accountService', () => ({ accountService: {} }));
 
 const claimThreadsMock = vi.fn();
-vi.mock('../../../src/services/threadService', () => ({
+vi.mock('@beaver/agent-core/transport/threadService', () => ({
     threadService: { claimThreads: (...args: unknown[]) => claimThreadsMock(...args) },
 }));
 

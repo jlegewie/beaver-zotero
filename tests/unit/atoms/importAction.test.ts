@@ -16,7 +16,7 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
     return {
         currentMessageItemsAtom: atom<unknown[]>([]),
         currentMessageCollectionsAtom: atom<unknown[]>([]),
-        pendingPillInsertAtom: atom<unknown | null>(null),
+        pendingPillInsertsAtom: atom<unknown[]>([]),
     };
 });
 
@@ -78,9 +78,9 @@ vi.mock('../../../react/atoms/profile', async () => {
 // =============================================================================
 
 import { actionsAtom, hideActionAtom, importActionAtom, resetActionToDefaultAtom, restoreActionAtom, saveActionsAtom } from '../../../react/atoms/actions';
-import { getActionCommand } from '../../../react/utils/slashCommands';
+import { getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
 import { BUILTIN_ACTIONS } from '../../../react/types/builtinActions';
-import type { Action } from '../../../react/types/actions';
+import type { Action } from '@beaver/agent-core/types/actions';
 
 const existing: Action = {
     id: 'custom-existing',
@@ -221,5 +221,18 @@ describe('importActionAtom — conflict handling', () => {
         expect(saveActionCustomizationsMock).toHaveBeenCalledTimes(1);
         const saved = saveActionCustomizationsMock.mock.calls[0][0];
         expect(saved.custom.some((a: Action) => a.title === 'Outline')).toBe(true);
+    });
+
+    it('stores a cleared built-in category as null so it survives serialization', () => {
+        const categorized = BUILTIN_ACTIONS.find(a => !a.locked && a.category)!;
+        getActionCustomizationsMock.mockReturnValue({ version: 1, overrides: {}, custom: [] });
+        const store = makeStore([categorized]);
+
+        store.set(saveActionsAtom, [{ ...categorized, category: undefined }]);
+
+        const saved = saveActionCustomizationsMock.mock.calls[0][0];
+        // JSON.stringify drops undefined; null is what actually survives a save.
+        expect(saved.overrides[categorized.id]).toEqual({ category: null });
+        expect(JSON.parse(JSON.stringify(saved)).overrides[categorized.id]).toEqual({ category: null });
     });
 });

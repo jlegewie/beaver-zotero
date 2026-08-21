@@ -1,4 +1,4 @@
-import type { TextDocumentExtractResult } from '../shared/documentExtractResult';
+import type { TextDocumentExtractResult } from '@beaver/agent-core/extract/document/shared/documentExtractResult';
 
 export const TEXT_SCHEMA_VERSION = '1';
 

@@ -1,0 +1,352 @@
+/*
+ * Wire/DTO reference types shared with the client-agnostic protocol layer.
+ * Keep this module free of React and other UI-only types; presentation
+ * variants of these references live in `./fileStatus`.
+ */
+
+/**
+ * ZoteroLibrary is a reference to a Zotero library.
+ */
+export interface ZoteroLibrary {
+    library_id: number;
+    group_id: number | null;
+    /**
+     * Device-portable library identity ("u" | "g<groupID>"). Absent for
+     * libraries `libraryRefForLibraryID` cannot compute a portable ref for
+     * (e.g. feed libraries). See `src/utils/libraryIdentity.ts`.
+     */
+    library_ref?: string;
+    name: string;
+    is_group: boolean;
+    type: string;
+    type_id: number;
+    read_only: boolean | null;
+}
+
+/**
+ * ZoteroItemReference is a reference to a Zotero item.
+ */
+export interface ZoteroItemReference {
+    zotero_key: string;
+    library_id: number;
+    /** Device-portable library identity ("u" | "g<groupID>") */
+    library_ref?: string;
+}
+
+export interface FileHashReference {
+    file_hash: string;
+    library_id: number;
+    zotero_key: string;
+}
+
+/**
+ * CollectionReference is a reference to a Zotero collection.
+ *
+ * Canonical collection type used across message composition, prompt-variable
+ * resolution, and tool-result display. Build one from a live Zotero collection
+ * with `collectionToReference()` in `react/utils/zoteroReferences.ts`.
+ */
+export interface CollectionReference extends ZoteroItemReference {
+    name: string;
+    parent_key: string | null;
+}
+
+/**
+ * Stable composite key for a collection reference. Zotero collection keys are
+ * only unique within a library, so React list keys and dedup comparisons must
+ * combine the library ID with the key.
+ */
+export function collectionReferenceKey(ref: CollectionReference): string {
+    return `${ref.library_id}-${ref.zotero_key}`;
+}
+
+/**
+ * ZoteroItemBase is a base interface for a Zotero item.
+ */
+export interface ZoteroItemBase extends ZoteroItemReference {
+    date_added: string;
+    date_modified: string;
+}
+
+export interface ZoteroCreator {
+    first_name: string | null;
+    last_name: string | null;
+    field_mode: number;
+    creator_type_id: number;
+    creator_type: string;
+    is_primary: boolean;
+}
+
+export interface CollectionSummary {
+    library_id: number;
+    zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
+    library_ref?: string;
+    name: string;
+}
+
+export interface ZoteroCollection extends ZoteroItemReference {
+    name: string;
+    zotero_version: number;
+    date_modified: string;
+    parent_collection: string | null;
+    relations: Record<string, any> | null;
+}
+
+export interface ZoteroTag {
+    id: number;
+    tag: string;
+    libraryId: number;
+    type: number;
+    color: string; // Hex color string (e.g., '#990000') if the tag has a color assigned
+}
+
+export interface BibliographicIdentifier {
+    doi?: string;
+    isbn?: string;
+    issn?: string;
+    pmid?: string;
+    pmcid?: string;
+    arXivID?: string;
+    archiveID?: string;
+}
+
+export interface DeleteData extends ZoteroItemReference {
+    zotero_version: number | null;
+    zotero_synced: boolean | null;
+    date_modified: string | null;
+}
+
+/** Minimal bibliographic anchor for a regular item */
+export interface ItemStub {
+    item_id: string;
+    /** Device-portable library identity ("u" | "g<groupID>") of the item referenced by `item_id`. */
+    library_ref?: string;
+    item_type?: string | null;
+    title?: string | null;
+    creators?: string | null;
+    year?: number | null;
+}
+
+/**
+ * Lightweight item data for search results. 
+ *
+ * Omits formatted_citation, item_json, hashes, sync fields.
+ */
+export interface ItemSummary extends ZoteroItemReference {
+    item_type: string;
+    title?: string | null;
+    creators?: ZoteroCreator[] | null;
+    year?: number | null;
+    date?: string | null;
+    publication_title?: string | null;
+    abstract?: string | null;
+    identifiers?: BibliographicIdentifier | null;
+    language?: string | null;
+    tags?: string[] | null;
+    collections?: CollectionSummary[] | null;
+    citation_key?: string | null;
+    attachments?: AttachmentInfo[];
+    preview?: string | null;
+    annotation_text?: string | null;
+    annotation_comment?: string | null;
+    page_label?: string | null;
+    parent_key?: string | null;
+}
+
+export interface ItemData extends ZoteroItemBase {
+    // Core fields that most items have
+    item_type: string;
+    title?: string | null;
+    creators?: ZoteroCreator[] | null;
+    date?: string | null;
+    year?: number | null;
+    publication_title?: string | null;
+    abstract?: string | null;
+    url?: string | null;
+    identifiers?: BibliographicIdentifier | null;
+    
+    // full item data
+    item_json?: Record<string, any> | null;
+    
+    // Metadata
+    language?: string | null;
+    formatted_citation?: string | null;
+    deleted: boolean;
+    tags?: any[] | null;
+    collections?: string[] | null;
+    citation_key?: string | null;
+
+    // Item metadata hash and zotero version
+    item_metadata_hash: string;
+    zotero_version: number;
+    zotero_synced: boolean;
+}
+
+export type ItemDataHashedFields = Pick<ItemData,
+    //  Item reference fields
+    | 'zotero_key' | 'library_id'
+    // Core bibliographic fields
+    | 'item_type' | 'title' | 'creators' | 'date' | 'year' | 'publication_title' | 'abstract' | 'url' | 'identifiers'
+    // Metadata
+    | 'language' | 'formatted_citation' | 'deleted' | 'tags' | 'collections' | 'citation_key'
+>;
+
+export interface ItemModel extends ItemData {
+    id: string;  // UUID as string in TypeScript
+    user_id: string;
+}
+
+
+/**
+ * AttachmentData is a base interface for a Zotero attachment.
+ */
+export interface AttachmentData extends ZoteroItemBase {
+    // zotero fields
+    parent_key?: string | null;
+    deleted: boolean;
+    title?: string | null;
+    attachment_url?: string | null;
+    link_mode?: number | null;
+    tags?: any[] | null;
+    collections?: string[] | null;
+    annotations_count?: number | null;
+
+    // file metadata
+    filename: string;
+    file_hash: string;
+
+    // additional fields
+    attachment_metadata_hash: string;
+    zotero_version: number;
+    zotero_synced: boolean;
+}
+
+export interface AttachmentDataWithMimeType extends AttachmentData {
+    mime_type: string;
+}
+
+export type AttachmentDataHashedFields = Pick<AttachmentData,
+    | 'zotero_key' | 'library_id' | 'parent_key' | 'attachment_url'
+    | 'link_mode' | 'deleted' | 'title' | 'filename' | 'tags' | 'collections'
+>;
+
+export interface AttachmentModel extends AttachmentData {
+    id: string;  // UUID as string in TypeScript
+    user_id: string;
+
+    // additional fields
+    current_file_hash?: string | null;
+    is_primary?: boolean | null;
+    user_override_primary: boolean;
+}
+
+/**
+ * Status information about why an item/attachment might not be available in the backend.
+ * 
+ * The frontend knows:
+ * 1. Whether the item's library is configured to sync
+ * 2. Whether the item is in trash
+ * 3. Whether the item passes all sync filters (PDF only, etc.)
+ * 4. Whether the item was modified after the last sync (= pending)
+ */
+export interface ZoteroItemStatus {
+    /** Whether the item's library is configured to sync with Beaver */
+    is_synced_library: boolean;
+    /** Whether the item is in Zotero trash (filtered out of sync) */
+    is_in_trash: boolean;
+    /**
+     * Whether Beaver can access the file: true when the file exists locally,
+     * has a synced server hash, OR is downloadable on demand via the
+     * remote-file-access path (TO_DOWNLOAD/FORCE_DOWNLOAD with the
+     * `accessRemoteFiles` pref enabled).
+     */
+    available_locally_or_on_server: boolean;
+    /**
+     * Whether the item is eligible for backend sync. Stricter than
+     * `available_locally_or_on_server`: requires a local file or a real
+     * synced hash, since backend sync is content-addressed and needs the
+     * hash for de-duplication. Hashless on-demand items can be reached by
+     * the agent (so `available_locally_or_on_server=true`) but cannot be
+     * synced (so `passes_sync_filters=false`).
+     */
+    passes_sync_filters: boolean;
+    /**
+     * Whether item was added/modified after the last sync time.
+     * - true: Item is newer than last sync (pending sync)
+     * - false: Item is older than last sync (should have synced already)
+     * - null: Unable to determine (no modification time or last sync time)
+     */
+    is_pending_sync: boolean | null;
+}
+
+/** Item data with sync status information */
+export interface ItemDataWithStatus {
+    item: ItemData;
+    status: ZoteroItemStatus;
+}
+
+/**
+ * File availability status - describes whether full text content is available for AI use.
+ * Used to communicate to the LLM what content can be extracted from attachments.
+ */
+export interface FrontendFileStatus {
+    /** Is this the primary attachment for the parent item? */
+    is_primary: boolean;
+    /** MIME type (e.g., "application/pdf") */
+    mime_type?: string | null;
+    /** Beaver content kind for this attachment. */
+    content_kind?: ContentKind | null;
+    /** Number of pages (null if unknown or not applicable) */
+    page_count?: number | null;
+    /** Number of lines for text attachments (null if unknown or not applicable) */
+    line_count?: number | null;
+    /** Full text availability status */
+    status: ContentInfoStatus | "available" | "unavailable";
+    /** Machine-readable reason code; backend maps it to model-facing text. */
+    status_code?: FileStatusCodeValue | null;
+    /** Free-form reason. Only set for cases that carry dynamic values (e.g., file too large). */
+    status_reason?: string | null;
+}
+
+/**
+ * Stable codes identifying why a file is unavailable. The backend owns the
+ * model-facing text for each code; keep values in sync with
+ * FILE_STATUS_REASON_TEMPLATES in backend app/models/attachments.py.
+ */
+export const FileStatusCode = {
+    UnsupportedFileType: 'unsupported_file_type',
+    FileNotLocal: 'file_not_local',
+    FileNotLocalRemote: 'file_not_local_remote',
+    PdfEncrypted: 'pdf_encrypted',
+    PdfInvalid: 'pdf_invalid',
+    PdfNeedsOcr: 'pdf_needs_ocr',
+    PdfParserCrash: 'pdf_parser_crash',
+    PdfAnalysisError: 'pdf_analysis_error',
+    PdfUnreadable: 'pdf_unreadable',
+    // Deliberately has no backend template: EPUB statuses always carry a
+    // specific status_reason, and the backend falls back to it for codes
+    // without a template.
+    EpubInvalid: 'epub_invalid',
+} as const;
+export type FileStatusCodeValue = typeof FileStatusCode[keyof typeof FileStatusCode];
+
+/** Attachment data with sync status information */
+export interface AttachmentDataWithStatus {
+    attachment: AttachmentDataWithMimeType;
+    status: ZoteroItemStatus;
+    /** File availability status (optional but recommended) */
+    file_status?: FrontendFileStatus;
+}
+import type {
+    AttachmentInfo,
+    AttachmentStub,
+    ContentInfoStatus,
+    ContentKind,
+} from "../extract/document/shared/contentKinds";
+export type {
+    AttachmentInfo,
+    AttachmentStub,
+    ContentInfoStatus,
+    ContentKind,
+} from "../extract/document/shared/contentKinds";

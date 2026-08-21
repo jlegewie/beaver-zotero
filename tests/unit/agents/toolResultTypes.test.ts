@@ -14,7 +14,7 @@ import {
     isLookupWorkResult,
     extractLookupWorkData,
     extractLookupWorkFoundCount,
-} from '../../../react/agents/toolResultTypes';
+} from '@beaver/agent-core/run-state/toolResultTypes';
 
 /**
  * extractListCollectionsData is the boundary that normalizes backend

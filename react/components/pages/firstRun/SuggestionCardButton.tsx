@@ -1,15 +1,15 @@
 import React, { useState } from 'react';
 import { useSetAtom } from 'jotai';
-import { CardKind, SuggestionCard } from '../../../types/librarySuggestions';
+import { CardKind, SuggestionCard } from '@beaver/agent-core/types/librarySuggestions';
 import { submitFirstRunCardAtom } from '../../../atoms/firstRun';
-import { ChargingPermissions } from '../../../../src/services/agentProtocol';
-import BookmarkIcon from '../../icons/BookmarkIcon';
-import BrainIcon from '../../icons/BrainIcon';
-import GlobalSearchIcon from '../../icons/GlobalSearchIcon';
-import FolderDetailIcon from '../../icons/FolderDetailIcon';
-import TagIcon from '../../icons/TagIcon';
-import HighlighterIcon from '../../icons/HighlighterIcon';
-import { logger } from '../../../../src/utils/logger';
+import { ChargingPermissions } from '@beaver/agent-core/protocol/agentProtocol';
+import BookmarkIcon from '@beaver/agent-ui/icons/BookmarkIcon';
+import BrainIcon from '@beaver/agent-ui/icons/BrainIcon';
+import GlobalSearchIcon from '@beaver/agent-ui/icons/GlobalSearchIcon';
+import FolderDetailIcon from '@beaver/agent-ui/icons/FolderDetailIcon';
+import TagIcon from '@beaver/agent-ui/icons/TagIcon';
+import HighlighterIcon from '@beaver/agent-ui/icons/HighlighterIcon';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 interface SuggestionCardButtonProps {
     card: SuggestionCard;

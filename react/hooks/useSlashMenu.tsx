@@ -3,40 +3,49 @@ import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { PlusSignIcon, BookSearchIcon, LayersIcon, HighlighterIcon, ZapIcon, QuillWriteIcon } from '../components/icons/icons';
 import { CSSIcon, CSSItemTypeIcon } from '../components/icons/zotero';
 import { currentMessageContentAtom } from '../atoms/messageComposition';
-import { actionsAtom, actionContextAtom, markActionUsedAtom } from '../atoms/actions';
+import { actionsAtom, actionContextAtom, resolveActionForStagingAtom } from '../atoms/actions';
 import { computeActionGroups } from '../utils/actionVisibility';
 import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
-import { Action, ActionCategory, ActionTargetType } from '../types/actions';
-import { SlashCommandDescriptor, getActionCommand } from '../utils/slashCommands';
-import { MenuPosition, SearchMenuItem } from '../components/ui/menus/SearchMenu';
+import { Action, ActionCategory, ActionTargetType, KnownActionCategory } from '@beaver/agent-core/types/actions';
+import { SlashCommandDescriptor, getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
+import { MenuPosition, SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
 
-// Category icons mirror the homepage launcher and Actions preferences so the
-// slash menu matches what users see elsewhere. Uncategorized actions fall
-// back to the general "Actions" icon (Zap).
-const CATEGORY_ICONS: Record<ActionCategory, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+// Category icons match the homepage launcher and Actions preferences. Zap for missing/unknown categories.
+const CATEGORY_ICON_ENTRIES = {
     research: BookSearchIcon,
     write: QuillWriteIcon,
     organize: LayersIcon,
     annotate: HighlighterIcon,
-};
+} satisfies Record<KnownActionCategory, React.ComponentType<React.SVGProps<SVGSVGElement>>>;
+
+/** Map so Object.prototype names (`constructor`, …) don't inherit a function. */
+const CATEGORY_ICONS = new Map<string, React.ComponentType<React.SVGProps<SVGSVGElement>>>(Object.entries(CATEGORY_ICON_ENTRIES));
 const categoryIcon = (cat: ActionCategory | undefined): React.ComponentType<React.SVGProps<SVGSVGElement>> =>
-    cat ? CATEGORY_ICONS[cat] : ZapIcon;
+    (cat && CATEGORY_ICONS.get(cat)) || ZapIcon;
 
 export function useSlashMenu(
     inputRef: React.RefObject<HTMLElement | null>,
     verticalPosition: 'above' | 'below' = 'above',
     focusInput?: () => void,
     insertSlashCommand?: (descriptor: SlashCommandDescriptor, queryLength: number) => void,
-    /** Where to write the editor content the menu logic consumed. Defaults to
-     *  the shared compose atom; pass a local setter when the menu drives an
-     *  editor that is not the main chat input (e.g. the message edit overlay). */
-    setContent?: (value: string) => void,
+    options?: {
+        /** Where to write the editor content the menu logic consumed. Defaults
+         *  to the shared compose atom; pass a local setter when the menu drives
+         *  an editor that is not the main chat input (e.g. the message edit
+         *  overlay). */
+        setContent?: (value: string) => void;
+        /** Attach the picked action's targets to the composer. Defaults to
+         *  true; the message edit overlay passes false because it maintains
+         *  its own attachment list. */
+        attachTargets?: boolean;
+    },
 ) {
     const [, setComposeMessageContent] = useAtom(currentMessageContentAtom);
-    const setMessageContent = setContent ?? setComposeMessageContent;
+    const setMessageContent = options?.setContent ?? setComposeMessageContent;
+    const attachTargets = options?.attachTargets ?? true;
     const allActions = useAtomValue(actionsAtom);
     const ctx = useAtomValue(actionContextAtom);
-    const markActionUsed = useSetAtom(markActionUsedAtom);
+    const resolveActionForStaging = useSetAtom(resolveActionForStagingAtom);
 
     const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
     const [slashMenuPosition, setSlashMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
@@ -47,26 +56,28 @@ export function useSlashMenu(
     // the menu (e.g. selecting with the mouse).
     const slashQueryRef = useRef('');
 
-    // Selecting an action completes the typed "/query" into a styled command pill
+    // Selecting an action attaches the targets it binds to and completes the
+    // typed "/query" into a styled command pill. Both happen in this click, so
+    // the typed text is still the tail of the document when it is replaced.
+    // When the action cannot run nothing is staged, the typed text is left
+    // alone, and a popup explains why.
     const handleSlashSelect = useCallback((action: Action, groupTargetType?: ActionTargetType) => {
         const queryLength = slashQueryRef.current.length;
         setIsSlashMenuOpen(false);
         setSlashSearchQuery('');
         slashQueryRef.current = '';
 
-        insertSlashCommand?.(
-            {
-                commandName: getActionCommand(action),
-                actionId: action.id,
-                targetType: groupTargetType,
-                title: action.title,
-                argumentHint: action.argumentHint,
-            },
-            queryLength,
-        );
-        markActionUsed(action.id);
+        const descriptor = resolveActionForStaging({
+            actionId: action.id,
+            targetType: groupTargetType,
+            fallbackTitle: action.title,
+            attachToComposer: attachTargets,
+        });
+        if (!descriptor) return;
+
+        insertSlashCommand?.(descriptor, queryLength);
         setTimeout(() => focusInput ? focusInput() : inputRef.current?.focus(), 0);
-    }, [focusInput, inputRef, insertSlashCommand, markActionUsed]);
+    }, [attachTargets, focusInput, inputRef, insertSlashCommand, resolveActionForStaging]);
 
     const handleSlashDismiss = useCallback(() => {
         setIsSlashMenuOpen(false);

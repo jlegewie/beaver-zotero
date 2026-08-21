@@ -1,11 +1,11 @@
-import { WSAgentActionValidateRequest, WSAgentActionValidateResponse, WSAgentActionExecuteRequest, WSAgentActionExecuteResponse } from '../../agentProtocol';
+import { WSAgentActionValidateRequest, WSAgentActionValidateResponse, WSAgentActionExecuteRequest, WSAgentActionExecuteResponse } from '@beaver/agent-core/protocol/agentProtocol';
 import { store } from '../../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { resolveItemReference, resolveLibraryRef, parseItemReference, modelObjectId } from '../../../utils/libraryIdentity';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
-import { logger } from '../../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { TimingAccumulator } from '../../../utils/timing';
 
 
@@ -32,6 +32,11 @@ function restoreItemSnapshots(
  * Validate an organize_items action.
  * Checks if items exist and are in editable libraries.
  * Returns current state of tags/collections for each item (for undo).
+ *
+ * Every per-item problem (bad format, missing item, unavailable/excluded/
+ * read-only library, unsupported item type, etc.) is collected across the
+ * whole batch before returning, rather than failing on the first one — so a
+ * batch with several bad ids reports all of them in a single error.
  */
 export async function validateOrganizeItemsAction(
     request: WSAgentActionValidateRequest
@@ -91,93 +96,87 @@ export async function validateOrganizeItemsAction(
     const resolvedLibraryIds: number[] = [];
     const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
 
+    // Collect EVERY per-item problem instead of returning on the first one. A
+    // single nonexistent/invalid id in a large batch used to reject the whole
+    // batch while naming only that one id, forcing one round-trip per bad id.
+    // Reporting them all together lets the model drop every bad id and re-send
+    // once.
+    type ItemIssue = { itemId: string; message: string; code: string };
+    const issues: ItemIssue[] = [];
+
     for (const itemId of item_ids) {
         // Accept both the portable "<library_ref>-<key>" grammar and the legacy
         // "<library_id>-<key>" numeric grammar.
         const parsed = parseItemReference(itemId);
         if (!parsed) {
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: `Invalid item_id format: ${itemId}. Expected 'library_id-zotero_key'`,
-                error_code: 'invalid_item_id',
-                preference: 'always_ask',
-            };
+            issues.push({
+                itemId,
+                message: `Invalid item_id format: ${itemId}. Expected 'library_id-zotero_key'`,
+                code: 'invalid_item_id',
+            });
+            continue;
         }
 
         // Resolve to a device-local libraryID (library_ref wins; legacy numeric
         // falls back). null => a portable group ref not present on this device.
         const libraryId = resolveLibraryRef(parsed);
         if (libraryId == null) {
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: `Item not found: ${itemId}. This library isn't available on this computer.`,
-                error_code: 'library_unavailable',
-                preference: 'always_ask',
-            };
+            issues.push({
+                itemId,
+                message: `Item not found: ${itemId}. This library isn't available on this computer.`,
+                code: 'library_unavailable',
+            });
+            continue;
         }
 
         // Validate library exists
         const library = Zotero.Libraries.get(libraryId);
         if (!library) {
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: `Library not found for item: ${itemId}`,
-                error_code: 'library_not_found',
-                preference: 'always_ask',
-            };
+            issues.push({
+                itemId,
+                message: `Library not found for item: ${itemId}`,
+                code: 'library_not_found',
+            });
+            continue;
         }
 
         // Validate library is searchable
         if (!searchableLibraryIds.includes(libraryId)) {
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: excludedLibraryMessage(libraryId),
-                error_code: 'library_not_searchable',
-                preference: 'always_ask',
-            };
+            issues.push({
+                itemId,
+                message: `Item '${itemId}': ${excludedLibraryMessage(libraryId)}`,
+                code: 'library_not_searchable',
+            });
+            continue;
         }
 
         // Validate library is editable
         if (!library.editable) {
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: `Library '${library.name}' is read-only`,
-                error_code: 'library_not_editable',
-                preference: 'always_ask',
-            };
+            issues.push({
+                itemId,
+                message: `Item '${itemId}': library '${library.name}' is read-only`,
+                code: 'library_not_editable',
+            });
+            continue;
         }
 
         // Validate item exists
         const resolved = await resolveItemReference(parsed);
         if (resolved.status === 'library_unavailable') {
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: `Item not found: ${itemId}. This library isn't available on this computer.`,
-                error_code: 'library_unavailable',
-                preference: 'always_ask',
-            };
+            issues.push({
+                itemId,
+                message: `Item not found: ${itemId}. This library isn't available on this computer.`,
+                code: 'library_unavailable',
+            });
+            continue;
         }
         if (resolved.status === 'not_found') {
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: `Item not found: ${itemId}`,
-                error_code: 'item_not_found',
-                preference: 'always_ask',
-            };
+            issues.push({
+                itemId,
+                message: `Item not found: ${itemId}`,
+                code: 'item_not_found',
+            });
+            continue;
         }
         const item = resolved.item;
 
@@ -189,27 +188,23 @@ export async function validateOrganizeItemsAction(
         // Tags: allowed on regular items, attachments, notes, and annotations
         if (hasTagChanges && !item.isRegularItem() && !item.isAttachment() && !item.isNote() && !item.isAnnotation()) {
             const itemType = Zotero.ItemTypes.getName(item.itemTypeID);
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: `Item '${itemId}' is an ${itemType}. Tags can only be added to or removed from regular items, attachments, notes, and annotations.`,
-                error_code: 'item_type_not_supported',
-                preference: 'always_ask',
-            };
+            issues.push({
+                itemId,
+                message: `Item '${itemId}' is an ${itemType}. Tags can only be added to or removed from regular items, attachments, notes, and annotations.`,
+                code: 'item_type_not_supported',
+            });
+            continue;
         }
 
         // Collection: allowed on regular items, attachments, and notes (mainly excludes annotations)
         if (hasCollectionChanges && !item.isRegularItem() && !item.isAttachment() && !item.isNote()) {
             const itemType = Zotero.ItemTypes.getName(item.itemTypeID);
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: `Item '${itemId}' is an ${itemType}. Collections can only be added to or removed from top-level regular items, attachments or notes. Use the parent item instead.`,
-                error_code: 'item_type_not_supported',
-                preference: 'always_ask',
-            };
+            issues.push({
+                itemId,
+                message: `Item '${itemId}' is an ${itemType}. Collections can only be added to or removed from top-level regular items, attachments or notes. Use the parent item instead.`,
+                code: 'item_type_not_supported',
+            });
+            continue;
         }
 
         // Collection changes: only allowed on top-level items
@@ -218,14 +213,12 @@ export async function validateOrganizeItemsAction(
             const parentKey = item.parentKey;
             // Echo the same prefix form the model sent so the id stays actionable.
             const parentId = `${parsed.library_ref ?? parsed.library_id}-${parentKey}`;
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: `Item '${itemId}' is a child ${itemType} and cannot be added to or removed from collections directly. Only top-level items can be added or removed from collections. Use the parent item '${parentId}' instead.`,
-                error_code: 'item_not_top_level',
-                preference: 'always_ask',
-            };
+            issues.push({
+                itemId,
+                message: `Item '${itemId}' is a child ${itemType} and cannot be added to or removed from collections directly. Only top-level items can be added or removed from collections. Use the parent item '${parentId}' instead.`,
+                code: 'item_not_top_level',
+            });
+            continue;
         }
 
         // Collect current state for undo
@@ -247,121 +240,155 @@ export async function validateOrganizeItemsAction(
         resolvedLibraryIds.push(item.libraryID);
     }
 
-    // Validate collection operations: all items must be in the same library
-    if (hasCollectionChanges) {
+    // Collection-key problems are collected into this and combined with any
+    // per-item `issues` below, rather than returning as soon as the item loop
+    // finds a problem — both checks already happen inside this same WS round
+    // trip, so there's no extra cost to reporting them together instead of
+    // making the model fix items, resend, and only then discover the
+    // collection keys were also wrong.
+    let collectionError: { message: string; code: string } | null = null;
+
+    // Validate collection operations: all items must be in the same library.
+    // Only meaningful once at least one item resolved — with zero valid
+    // items there's no library to scope the check against, and the item
+    // `issues` below are already terminal on their own.
+    if (hasCollectionChanges && normalizedItemIds.length > 0) {
         // Check that all items are in the same (resolved) library
         const libraryIds = new Set<number>(resolvedLibraryIds);
 
         if (libraryIds.size > 1) {
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: 'Collection changes require all items to be in the same library. Items span multiple libraries.',
-                error_code: 'mixed_libraries_for_collections',
-                preference: 'always_ask',
+            collectionError = {
+                message: 'Collection changes require all items to be in the same library. Items span multiple libraries.',
+                code: 'mixed_libraries_for_collections',
             };
-        }
+        } else {
+            // Safe to use first value since we verified libraryIds.size >= 1 (from item_ids validation)
+            const libraryId = [...libraryIds][0];
 
-        // Safe to use first value since we verified libraryIds.size >= 1 (from item_ids validation)
-        const libraryId = [...libraryIds][0];
-
-        // Collections are library-scoped: a key that exists in another library is
-        // not usable here. Distinguish "exists elsewhere" from "doesn't exist at all"
-        // so the agent doesn't loop calling create_collection for a key we just returned.
-        const findCollectionLibrary = async (collKey: string): Promise<number | null> => {
-            for (const lib of Zotero.Libraries.getAll()) {
-                if (!searchableLibraryIds.includes(lib.libraryID)) continue;
-                const found = await Zotero.Collections.getByLibraryAndKeyAsync(lib.libraryID, collKey);
-                if (found) return lib.libraryID;
-            }
-            return null;
-        };
-
-        // Collect ALL invalid collection keys (across add and remove) before
-        // returning, so the agent sees the full picture in one shot. Reporting
-        // only the first failure caused models to "fix" one key per retry while
-        // missing the systematic pattern (e.g. mistakenly pasting item keys
-        // into add_to_collections).
-        type InvalidColl = { key: string; otherLibraryId: number | null };
-        const invalidColls: InvalidColl[] = [];
-        const seenInvalid = new Set<string>();
-
-        const checkKeys = async (keys: string[]) => {
-            for (const collKey of keys) {
-                if (seenInvalid.has(collKey)) continue;
-                const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
-                if (!collection) {
-                    seenInvalid.add(collKey);
-                    invalidColls.push({
-                        key: collKey,
-                        otherLibraryId: await findCollectionLibrary(collKey),
-                    });
+            // Collections are library-scoped: a key that exists in another library is
+            // not usable here. Distinguish "exists elsewhere" from "doesn't exist at all"
+            // so the agent doesn't loop calling create_collection for a key we just returned.
+            const findCollectionLibrary = async (collKey: string): Promise<number | null> => {
+                for (const lib of Zotero.Libraries.getAll()) {
+                    if (!searchableLibraryIds.includes(lib.libraryID)) continue;
+                    const found = await Zotero.Collections.getByLibraryAndKeyAsync(lib.libraryID, collKey);
+                    if (found) return lib.libraryID;
                 }
-            }
-        };
+                return null;
+            };
 
-        if (collections?.add && collections.add.length > 0) await checkKeys(collections.add);
-        if (collections?.remove && collections.remove.length > 0) await checkKeys(collections.remove);
+            // Collect ALL invalid collection keys (across add and remove) before
+            // returning, so the agent sees the full picture in one shot. Reporting
+            // only the first failure caused models to "fix" one key per retry while
+            // missing the systematic pattern (e.g. mistakenly pasting item keys
+            // into add_to_collections).
+            type InvalidColl = { key: string; otherLibraryId: number | null };
+            const invalidColls: InvalidColl[] = [];
+            const seenInvalid = new Set<string>();
 
-        if (invalidColls.length > 0) {
-            const notFound = invalidColls.filter(x => x.otherLibraryId === null).map(x => x.key);
-            const inOtherLib = invalidColls.filter(x => x.otherLibraryId !== null);
+            const checkKeys = async (keys: string[]) => {
+                for (const collKey of keys) {
+                    if (seenInvalid.has(collKey)) continue;
+                    const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                    if (!collection) {
+                        seenInvalid.add(collKey);
+                        invalidColls.push({
+                            key: collKey,
+                            otherLibraryId: await findCollectionLibrary(collKey),
+                        });
+                    }
+                }
+            };
 
-            // Detect the common model failure mode: collection keys that are
-            // actually item zotero-keys copy-pasted from item_ids.
-            const itemZoteroKeys = new Set(
-                item_ids.map(id => parseItemReference(id)?.zotero_key).filter(Boolean) as string[]
-            );
-            const overlapWithItemKeys = invalidColls
-                .map(x => x.key)
-                .filter(key => itemZoteroKeys.has(key));
+            if (collections?.add && collections.add.length > 0) await checkKeys(collections.add);
+            if (collections?.remove && collections.remove.length > 0) await checkKeys(collections.remove);
 
-            const currentLibrary = Zotero.Libraries.get(libraryId);
-            const currentLibraryName = currentLibrary ? currentLibrary.name : `library ${libraryId}`;
+            if (invalidColls.length > 0) {
+                const notFound = invalidColls.filter(x => x.otherLibraryId === null).map(x => x.key);
+                const inOtherLib = invalidColls.filter(x => x.otherLibraryId !== null);
 
-            const parts: string[] = [];
-            if (notFound.length > 0) {
-                parts.push(
-                    `Collection${notFound.length === 1 ? '' : 's'} not found in '${currentLibraryName}' (library ${libraryId}): ${notFound.join(', ')}.`
+                // Detect the common model failure mode: collection keys that are
+                // actually item zotero-keys copy-pasted from item_ids.
+                const itemZoteroKeys = new Set(
+                    item_ids.map(id => parseItemReference(id)?.zotero_key).filter(Boolean) as string[]
                 );
-            }
-            if (inOtherLib.length > 0) {
-                const byLib = new Map<number, string[]>();
-                for (const { key, otherLibraryId } of inOtherLib) {
-                    if (otherLibraryId === null) continue;
-                    const arr = byLib.get(otherLibraryId) ?? [];
-                    arr.push(key);
-                    byLib.set(otherLibraryId, arr);
-                }
-                for (const [otherLibId, keys] of byLib) {
-                    const otherLibrary = Zotero.Libraries.get(otherLibId);
-                    const otherLibraryName = otherLibrary ? otherLibrary.name : `library ${otherLibId}`;
+                const overlapWithItemKeys = invalidColls
+                    .map(x => x.key)
+                    .filter(key => itemZoteroKeys.has(key));
+
+                const currentLibrary = Zotero.Libraries.get(libraryId);
+                const currentLibraryName = currentLibrary ? currentLibrary.name : `library ${libraryId}`;
+
+                const parts: string[] = [];
+                if (notFound.length > 0) {
                     parts.push(
-                        `Collection${keys.length === 1 ? '' : 's'} ${keys.join(', ')} belong${keys.length === 1 ? 's' : ''} to '${otherLibraryName}' (library ${otherLibId}), not '${currentLibraryName}'. Collections are library-scoped.`
+                        `Collection${notFound.length === 1 ? '' : 's'} not found in '${currentLibraryName}' (library ${libraryId}): ${notFound.join(', ')}.`
                     );
                 }
-            }
-            if (overlapWithItemKeys.length > 0) {
-                parts.push(
-                    `Note: ${overlapWithItemKeys.length === 1 ? 'key' : 'keys'} ${overlapWithItemKeys.join(', ')} also appear in item_ids — collection keys must come from list_collections (or a prior create_collection), not from item IDs.`
-                );
-            }
-            parts.push('Use list_collections to find valid collection keys, or create_collection to make a new one.');
+                if (inOtherLib.length > 0) {
+                    const byLib = new Map<number, string[]>();
+                    for (const { key, otherLibraryId } of inOtherLib) {
+                        if (otherLibraryId === null) continue;
+                        const arr = byLib.get(otherLibraryId) ?? [];
+                        arr.push(key);
+                        byLib.set(otherLibraryId, arr);
+                    }
+                    for (const [otherLibId, keys] of byLib) {
+                        const otherLibrary = Zotero.Libraries.get(otherLibId);
+                        const otherLibraryName = otherLibrary ? otherLibrary.name : `library ${otherLibId}`;
+                        parts.push(
+                            `Collection${keys.length === 1 ? '' : 's'} ${keys.join(', ')} belong${keys.length === 1 ? 's' : ''} to '${otherLibraryName}' (library ${otherLibId}), not '${currentLibraryName}'. Collections are library-scoped.`
+                        );
+                    }
+                }
+                if (overlapWithItemKeys.length > 0) {
+                    parts.push(
+                        `Note: ${overlapWithItemKeys.length === 1 ? 'key' : 'keys'} ${overlapWithItemKeys.join(', ')} also appear in item_ids — collection keys must come from list_collections (or a prior create_collection), not from item IDs.`
+                    );
+                }
+                parts.push('Use list_collections to find valid collection keys, or create_collection to make a new one.');
 
-            const errorCode = notFound.length === 0 && inOtherLib.length > 0
-                ? 'collection_in_different_library'
-                : 'collection_not_found';
+                const errorCode = notFound.length === 0 && inOtherLib.length > 0
+                    ? 'collection_in_different_library'
+                    : 'collection_not_found';
 
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: parts.join(' '),
-                error_code: errorCode,
-                preference: 'always_ask',
-            };
+                collectionError = { message: parts.join(' '), code: errorCode };
+            }
         }
+    }
+
+    // Report item-level and collection-level problems together: both were
+    // already computed inside this single WS round trip, so there's no
+    // reason to make the model fix items, resend, and only then discover the
+    // collection keys were also wrong (or vice versa).
+    if (issues.length > 0 || collectionError) {
+        const parts = [
+            ...issues.map((i) => i.message),
+            ...(collectionError ? [collectionError.message] : []),
+        ];
+        const codes = [...issues.map((i) => i.code), ...(collectionError ? [collectionError.code] : [])];
+        const uniqueCodes = new Set(codes);
+        // library_not_searchable/library_excluded mark a library-exclusion
+        // (access-control) boundary, not just another validation failure —
+        // never let it collapse into the generic 'multiple_item_errors'
+        // bucket when mixed with unrelated problems, so any code that keys
+        // off this specific code (now or later) still sees it.
+        const exclusionCode = codes.find((c) => c === 'library_not_searchable' || c === 'library_excluded');
+        // Not every message ends in terminal punctuation (e.g. "Item not
+        // found: <id>"), so joining with a bare space can run two messages
+        // together illegibly. Normalize each to end with a period and list
+        // them as a numbered list instead.
+        const normalized = parts.map((p) => (/[.!?]$/.test(p) ? p : `${p}.`));
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: normalized.length === 1
+                ? normalized[0]
+                : `${normalized.length} problems found:\n` + normalized.map((p, i) => `${i + 1}. ${p}`).join('\n'),
+            error_code: uniqueCodes.size === 1 ? [...uniqueCodes][0] : (exclusionCode ?? 'multiple_item_errors'),
+            preference: 'always_ask',
+        };
     }
 
     // Get user preference

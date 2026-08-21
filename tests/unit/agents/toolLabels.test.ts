@@ -1,6 +1,6 @@
 /**
  * Unit tests for the (now pure) tool-call label layer
- * (`react/agents/toolLabels.ts`).
+ * (`@beaver/agent-core/run-state/toolLabels`).
  *
  * `getToolCallLabel` formats a tool-call header label from the request args plus
  * either the hydrated tool-result `view` (completed calls) or host-resolved
@@ -15,16 +15,17 @@ import {
     getViewDisplayName,
     getToolResultLabelSuffix,
     getLabelEnrichmentNeeds,
-} from '../../../react/agents/toolLabels';
-import { getToolResultRenderableCount } from '../../../react/types/toolResultViews';
+} from '@beaver/agent-core/run-state/toolLabels';
+import { getToolResultRenderableCount } from '@beaver/agent-core/run-state/toolResultViews';
 import type {
     ItemListView,
     AnnotationListView,
     CollectionListView,
     AttachmentSearchView,
     ExternalReferenceListView,
-} from '../../../react/types/toolResultViews';
-import type { ToolCallPart } from '../../../react/agents/types';
+    BatchOperationView,
+} from '@beaver/agent-core/run-state/toolResultViews';
+import type { ToolCallPart } from '@beaver/agent-core/agents/types';
 
 function tc(tool_name: string, args: Record<string, unknown> = {}): ToolCallPart {
     return { part_kind: 'tool-call', tool_name, args, tool_call_id: 't1' };
@@ -42,6 +43,19 @@ const itemListView = (count: number): ItemListView => ({
     items: Array.from({ length: count }, (_, i) => ({
         kind: 'item' as const, library_id: 1, zotero_key: `K${i}`, display_name: `Item ${i}`,
     })),
+});
+
+const batchView = (overrides: Partial<BatchOperationView> = {}): BatchOperationView => ({
+    view_type: 'batch_operation',
+    tool_name: 'batch_start',
+    batch_id: 'b1',
+    title: 'Batch operation',
+    status: 'active',
+    status_label: '',
+    scope_primary: '23 items',
+    scope_secondary: 'in Methods',
+    goal: 'File into the matching subject collection',
+    ...overrides,
 });
 
 const annotationView = (sources: string[]): AnnotationListView => ({
@@ -102,6 +116,21 @@ describe('getToolCallLabel', () => {
         expect(label).toBe('List collections: "My Library" (5 collections)');
     });
 
+    it('names the documentation reader instead of falling back to the generic label', () => {
+        const label = getToolCallLabel(tc('read_documentation', { path: '/docs/searching.mdx' }), 'completed');
+        expect(label).toBe('Reading documentation');
+    });
+
+    it('labels a legacy skill path served by the documentation reader as a skill load', () => {
+        const label = getToolCallLabel(tc('read_documentation', { path: '/skills/library-management/SKILL.md' }), 'completed');
+        expect(label).toBe('Loading skill: Library management');
+    });
+
+    it('keeps a documentation path with a skills segment as documentation', () => {
+        const label = getToolCallLabel(tc('read_documentation', { path: '/docs/skills/overview.mdx' }), 'completed');
+        expect(label).toBe('Reading documentation');
+    });
+
     it('falls back to the host-resolved source name for an empty completed annotation view', () => {
         const view = annotationView([]);
         const label = getToolCallLabel(tc('get_annotations', { attachment_id: '1-AAA' }), 'completed', {
@@ -148,6 +177,17 @@ describe('getToolResultLabelSuffix', () => {
         expect(getToolResultLabelSuffix(view, 'find_in_attachments')).toBe(' (4 matches)');
     });
 
+    it('carries the batch population line for a running batch', () => {
+        expect(getToolResultLabelSuffix(batchView(), 'batch_start')).toBe(' (23 items)');
+    });
+
+    it('says how an ended batch ended instead of how big it was', () => {
+        expect(getToolResultLabelSuffix(batchView({ status: 'cancelled', status_label: 'Declined' }), 'batch_start'))
+            .toBe(' (Declined)');
+        expect(getToolResultLabelSuffix(batchView({ status: 'completed', status_label: 'Completed' }), 'batch_start'))
+            .toBe(' (Completed)');
+    });
+
     it('returns a found count for lookup_work', () => {
         const view: ExternalReferenceListView = {
             view_type: 'external_reference_list', tool_name: 'lookup_work', references: [], found_count: 2,
@@ -160,6 +200,10 @@ describe('getToolResultRenderableCount (expansion gating)', () => {
     it('counts item-list rows, including zero (so empty results do not expand)', () => {
         expect(getToolResultRenderableCount(itemListView(3))).toBe(3);
         expect(getToolResultRenderableCount(itemListView(0))).toBe(0);
+    });
+
+    it('never gates a batch card on a count (it always has a goal to show)', () => {
+        expect(getToolResultRenderableCount(batchView())).toBeNull();
     });
 
     it('uses total_count for collection lists', () => {

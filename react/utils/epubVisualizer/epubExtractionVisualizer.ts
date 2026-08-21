@@ -1,5 +1,5 @@
 import { extractEpubDocument } from "../../../src/services/documentExtraction/epub";
-import { logger } from "../../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { BeaverTemporaryAnnotations } from "../annotationUtils";
 import {
     annotationFromRange,

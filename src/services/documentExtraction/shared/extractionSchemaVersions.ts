@@ -1,9 +1,9 @@
-import { SCHEMA_VERSION } from '../../../beaver-extract/schema/schema';
-import { EPUB_SCHEMA_VERSION } from '../epub/schema';
-import { SNAPSHOT_SCHEMA_VERSION } from '../snapshot/schema';
-import type { ExtractContentKind } from './contentKinds';
+import { SCHEMA_VERSION } from '@beaver/agent-core/extract/schema';
+import { EPUB_SCHEMA_VERSION } from '@beaver/agent-core/extract/document/epub/schema';
+import { SNAPSHOT_SCHEMA_VERSION } from '@beaver/agent-core/extract/document/snapshot/schema';
+import type { ExtractContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 
-export type { ExtractContentKind } from './contentKinds';
+export type { ExtractContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 
 /**
  * Return the extraction schema version expected for cache rows of one content

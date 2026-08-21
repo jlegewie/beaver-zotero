@@ -7,13 +7,13 @@ import { createStore } from 'jotai';
 // =============================================================================
 
 const getThreadRunsMock = vi.fn();
-vi.mock('../../../src/services/agentService', () => ({
+vi.mock('@beaver/agent-core/transport/agentService', () => ({
     agentRunService: { getThreadRuns: (...args: unknown[]) => getThreadRunsMock(...args) },
     agentService: { cancel: vi.fn() },
 }));
 
 const getThreadMock = vi.fn();
-vi.mock('../../../src/services/threadService', () => ({
+vi.mock('@beaver/agent-core/transport/threadService', () => ({
     threadService: { getThread: (...args: unknown[]) => getThreadMock(...args) },
 }));
 
@@ -29,16 +29,25 @@ vi.mock('../../../src/utils/prefs', () => ({
 }));
 
 const confirmMock = vi.fn();
-vi.mock('../../../react/host', () => ({
+vi.mock('@beaver/agent-ui/host', () => ({
     getHost: () => ({ dialogs: { confirm: confirmMock } }),
 }));
 
 vi.mock('../../../react/atoms/messageComposition', async () => {
     const { atom } = await import('jotai');
+    const currentMessageContentAtom = atom('');
+    const currentMessagePillsAtom = atom<unknown[]>([]);
+    const composerResetTokenAtom = atom(0);
     return {
         currentMessageItemsAtom: atom<unknown[]>([]),
-        currentMessageContentAtom: atom(''),
-        currentMessagePillsAtom: atom<unknown[]>([]),
+        currentMessageContentAtom,
+        currentMessagePillsAtom,
+        composerResetTokenAtom,
+        clearComposerAtom: atom(null, (get, set) => {
+            set(currentMessageContentAtom, '');
+            set(currentMessagePillsAtom, []);
+            set(composerResetTokenAtom, get(composerResetTokenAtom) + 1);
+        }),
         currentMessageCollectionsAtom: atom<unknown[]>([]),
         currentMessageExternalFilesAtom: atom<unknown[]>([]),
         updateMessageItemsFromZoteroSelectionAtom: atom(null, () => {}),
@@ -57,7 +66,7 @@ vi.mock('../../../react/atoms/ui', async () => {
     };
 });
 
-vi.mock('../../../react/atoms/citations', async () => {
+vi.mock('@beaver/agent-core/citations/atoms', async () => {
     const { atom } = await import('jotai');
     return {
         citationsAtom: atom<unknown[]>([]),
@@ -72,25 +81,47 @@ vi.mock('../../../react/utils/pageLabels', () => ({
     preloadPageLabelsForCitations: vi.fn(async () => new Map()),
 }));
 
-vi.mock('../../../react/atoms/messageUIState', async () => {
+// The Zotero-only citation onboarding tip; stubbing it keeps the popup/prefs
+// chain out of the thread atoms' import graph.
+vi.mock('../../../react/atoms/citationTip', async () => {
     const { atom } = await import('jotai');
-    return { resetMessageUIStateAtom: atom(null, () => {}) };
+    return { maybeShowCitationTipAtom: atom(null, () => {}) };
+});
+
+// Partial mock: the module only pulls in jotai, so keep every atom real and stub
+// just the reset. A hand-written export list would silently resolve any atom
+// added later to `undefined`, and loadThreadAtom writes to several of them.
+vi.mock('../../../react/atoms/messageUIState', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../../../react/atoms/messageUIState')>();
+    const { atom } = await import('jotai');
+    return { ...actual, resetMessageUIStateAtom: atom(null, () => {}) };
 });
 
 vi.mock('../../../react/atoms/externalReferences', async () => {
     const { atom } = await import('jotai');
     return {
         checkExternalReferencesAtom: atom(null, () => {}),
+    };
+});
+
+vi.mock('@beaver/agent-core/citations/externalReferences', async () => {
+    const { atom } = await import('jotai');
+    return {
         clearExternalReferenceCacheAtom: atom(null, () => {}),
         addExternalReferencesToMappingAtom: atom(null, () => {}),
     };
 });
 
-vi.mock('../../../react/agents/atoms', async () => {
+vi.mock('@beaver/agent-core/run-state/atoms', async () => {
     const { atom } = await import('jotai');
     return {
         threadRunsAtom: atom<unknown[]>([]),
         activeRunAtom: atom<unknown | null>(null),
+        // threads.ts re-exports these three from the run state, so the stub must
+        // provide them
+        currentThreadIdAtom: atom<string | null>(null),
+        currentThreadNameAtom: atom<string | null>(null),
+        isLoadingThreadAtom: atom<boolean>(false),
     };
 });
 
@@ -118,7 +149,7 @@ vi.mock('../../../react/agents/agentActions', async () => {
     };
 });
 
-vi.mock('../../../react/agents/pendingQuestions', async () => {
+vi.mock('@beaver/agent-core/run-state/pendingQuestions', async () => {
     const { atom } = await import('jotai');
     return { clearAllPendingQuestionsAtom: atom(null, () => {}) };
 });
@@ -143,7 +174,7 @@ vi.mock('../../../react/types/attachments/converters', () => ({
     enrichMessageAttachmentStub: vi.fn(),
 }));
 
-vi.mock('../../../react/types/attachments/apiTypes', () => ({
+vi.mock('@beaver/agent-core/types/attachments/apiTypes', () => ({
     zoteroReferenceKey: vi.fn(() => 'key'),
 }));
 
@@ -157,7 +188,7 @@ import {
     isLoadingThreadAtom,
     pendingScrollToRunAtom,
 } from '../../../react/atoms/threads';
-import { ApiError } from '../../../react/types/apiErrors';
+import { ApiError } from '@beaver/agent-core/types/apiErrors';
 
 const CURRENT = { zoteroUserId: '111', zoteroLocalId: 'CURKEY' };
 const FOREIGN = { zoteroUserId: '999', zoteroLocalId: 'FOREIGNKEY' };

@@ -8,11 +8,11 @@ vi.mock('../../../../src/utils/webAPI', () => ({
     isAttachmentAvailableRemotely: vi.fn(() => false),
 }));
 
-vi.mock('../../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 
-vi.mock('../../../../src/services/attachmentLimits', () => ({
+vi.mock('@beaver/agent-core/transport/attachmentLimits', () => ({
     effectiveMaxFileSizeMB: vi.fn(() => 50),
 }));
 

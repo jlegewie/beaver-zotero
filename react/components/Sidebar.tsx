@@ -1,14 +1,19 @@
 import React, { useMemo, useRef, useEffect, type ReactNode } from 'react';
 import InputArea from "./input/InputArea"
 import AskUserQuestionPanel from "./input/AskUserQuestionPanel"
+import BatchApprovalPanel from "./input/BatchApprovalPanel"
+import CreditConfirmationPanel from "./input/CreditConfirmationPanel"
 import { pendingApprovalsAtom } from '../agents/agentActions';
-import { pendingQuestionsAtom } from '../agents/pendingQuestions';
+import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
+import { pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
+import { pendingCreditConfirmationsAtom } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
+import { selectComposerTakeover } from '@beaver/agent-ui/chat/composerTakeover';
 import Header from "./Header"
 import { useEventSubscription } from '../hooks/useEventSubscription';
 import { ThreadView } from "./agentRuns";
 import { currentThreadScrollPositionAtom, windowScrollPositionAtom } from '../atoms/threads';
-import { allRunsAtom } from '../agents/atoms';
-import { isFirstRunOrigin } from '../agents/types';
+import { allRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import { isFirstRunOrigin } from '@beaver/agent-core/agents/types';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
@@ -185,15 +190,21 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
             : 'first_run';
     }, [profile?.user_id, shouldAssignFirstRunVariant]);
 
-    // ask_user_question takeover: while the agent blocks on a question, the
-    // question panel replaces the composer entirely (the draft message atom is
-    // untouched, so the composer restores it afterwards). Approval mode wins
-    // when both are pending — InputArea owns the approval flow.
+    // Composer takeover: while the run blocks on a batch approval, a question
+    // or a credit confirmation, that panel replaces the composer entirely (the
+    // draft message atom is untouched, so the composer restores it afterwards).
+    // selectComposerTakeover is shared across clients and owns the precedence
+    // between the blocking states; this client reports all four of them.
     const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
     const pendingQuestionsMap = useAtomValue(pendingQuestionsAtom);
-    const activeQuestion = pendingApprovalsMap.size === 0 && pendingQuestionsMap.size > 0
-        ? pendingQuestionsMap.values().next().value ?? null
-        : null;
+    const pendingBatchApprovalsMap = useAtomValue(pendingBatchApprovalsAtom);
+    const pendingCreditConfirmationsMap = useAtomValue(pendingCreditConfirmationsAtom);
+    const composerTakeover = selectComposerTakeover({
+        pendingApprovalCount: pendingApprovalsMap.size,
+        batchApprovals: pendingBatchApprovalsMap,
+        creditConfirmations: pendingCreditConfirmationsMap,
+        questions: pendingQuestionsMap,
+    });
 
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
@@ -380,11 +391,23 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                     <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
                         <PopupOverlayContainer />
                         <ScrollDownButton onClick={handleScrollToBottom} isWindow={isWindow} />
-                        {activeQuestion ? (
+                        {composerTakeover.kind === 'batch-approval' ? (
+                            // key resets local decision state per approval request
+                            <BatchApprovalPanel
+                                key={composerTakeover.approval.approvalId}
+                                approval={composerTakeover.approval}
+                            />
+                        ) : composerTakeover.kind === 'credit-confirmation' ? (
+                            // key resets local decision state per confirmation
+                            <CreditConfirmationPanel
+                                key={composerTakeover.confirmation.confirmationId}
+                                confirmation={composerTakeover.confirmation}
+                            />
+                        ) : composerTakeover.kind === 'question' ? (
                             // key resets local answer state per question request
                             <AskUserQuestionPanel
-                                key={activeQuestion.questionId}
-                                pendingQuestion={activeQuestion}
+                                key={composerTakeover.question.questionId}
+                                pendingQuestion={composerTakeover.question}
                             />
                         ) : (
                             <DragDropWrapper>

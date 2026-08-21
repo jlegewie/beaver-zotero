@@ -129,25 +129,41 @@ describe('tidy-up explore recipes', () => {
             expect(res.total_count).toBeLessThanOrEqual(all.total_count);
         }, 30000);
 
-        it('join_mode=any with a category filter is NOT used (it inflates the count past the whole library)', async () => {
-            // The category filter shares the global join mode with user
-            // conditions, so `any` can include non-regular items in the count.
-            const regularOnly = await search([]);
-            const inflated = await post<SearchResponse>(
+        it('join_mode=any with a category filter stays within the category', async () => {
+            // Regression guard: Zotero ORs every non-special condition together
+            // under joinMode 'any', so applying item_category as search
+            // conditions made it an always-true disjunct that matched the whole
+            // library. The category is now a post-filter, so an `any` search can
+            // never exceed the number of items in that category.
+            const noDoi = { field: 'DOI', operator: 'doesNotContain', value: '' };
+            const noAbstract = { field: 'abstractNote', operator: 'doesNotContain', value: '' };
+
+            const allRegular = await search([]);
+            const anyOfBoth = await post<SearchResponse>(
                 '/beaver/library/search',
                 {
                     library_id: USER_LIBRARY_ID,
                     item_category: 'regular',
                     join_mode: 'any',
-                    conditions: [
-                        { field: 'DOI', operator: 'doesNotContain', value: '' },
-                        { field: 'abstractNote', operator: 'doesNotContain', value: '' },
-                    ],
+                    conditions: [noDoi, noAbstract],
                     limit: 1,
                 },
                 { timeout: 30000 },
             );
-            expect(inflated.total_count).toBeGreaterThan(regularOnly.total_count);
+
+            expect(anyOfBoth.error).toBeFalsy();
+            expect(anyOfBoth.total_count).toBeLessThanOrEqual(allRegular.total_count);
+
+            // ...and it is a genuine union: at least as large as either branch
+            // alone, and no larger than their sum.
+            const doiOnly = await search([noDoi]);
+            const abstractOnly = await search([noAbstract]);
+            expect(anyOfBoth.total_count).toBeGreaterThanOrEqual(
+                Math.max(doiOnly.total_count, abstractOnly.total_count),
+            );
+            expect(anyOfBoth.total_count).toBeLessThanOrEqual(
+                doiOnly.total_count + abstractOnly.total_count,
+            );
         }, 30000);
     });
 

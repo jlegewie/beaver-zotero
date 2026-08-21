@@ -21,6 +21,7 @@ declare namespace _ZoteroTypes {
       "addBeaverProvenanceNote": boolean;
       "focusResponseForScreenReaders": boolean;
       "annotationToolEnabled": boolean;
+      "annotationAuthorName": string;
       "maxAddAttachmentToMessage": number;
       "readerExplainPrompt": string;
       "imeCompositionOrderFix": boolean;
@@ -32,7 +33,8 @@ declare namespace _ZoteroTypes {
       "autoImportItems": boolean;
       "confirmExtractionCosts": boolean;
       "confirmExternalSearchCosts": boolean;
-      "pauseLongRunningAgent": boolean;
+      "confirmCredits": boolean;
+      "creditConfirmThreshold": number;
       "requestPlusTools": boolean;
       "showDiffPreviewInNoteEditor": boolean;
       "enableSystemNotifications": boolean;
@@ -65,6 +67,7 @@ declare namespace _ZoteroTypes {
       "onboardingWelcomeShownAt": string;
       "versionUpdatePopupShownAt": string;
       "onboardingSignInTextShown": boolean;
+      "interruptedThread": string;
       "threadsClaimKey": string;
       "mcpServerEnabled": boolean;
       "mcpCreateNoteToolEnabled": boolean;
@@ -77,6 +80,7 @@ declare namespace _ZoteroTypes {
       "librarySuggestions": string;
       "librarySuggestionsGeneratedAt": string;
       "firstRunAssignments": string;
+      "maxAttachmentFileSizeMB": number;
     };
   }
 }

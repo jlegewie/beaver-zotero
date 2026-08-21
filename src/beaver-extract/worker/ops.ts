@@ -14,7 +14,7 @@
  * pulling it in here would try to spawn another worker from inside this
  * one. Import analyzers and types directly:
  *   import { StyleAnalyzer } from "../StyleAnalyzer";
- *   import type { RawPageData, InternalExtractionResult } from "../types";
+ *   import type { RawPageData, InternalExtractionResult } from "@beaver/agent-core/extract/types";
  */
 
 import { DocumentAnalyzer, type RawPageProvider } from "../DocumentAnalyzer";
@@ -61,7 +61,7 @@ import type {
     StructuredPagePhaseTimings,
     StyleProfile,
     DegradationSummary,
-} from "../types";
+} from "@beaver/agent-core/extract/types";
 import {
     DEFAULT_EXTRACTION_SETTINGS,
     DEFAULT_MARGIN_ZONE,
@@ -71,7 +71,7 @@ import {
     bboxFromXYWH,
     bboxHeight,
     bboxWidth,
-} from "../types";
+} from "@beaver/agent-core/extract/types";
 import {
     SCHEMA_VERSION,
     assignDocumentIds,

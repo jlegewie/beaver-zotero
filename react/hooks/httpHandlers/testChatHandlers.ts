@@ -17,6 +17,7 @@
  *   /beaver/test/load-thread    reopen an existing thread by id (for history re-validation)
  *   /beaver/test/list-actions   enumerate pending approvals + applied/rejected actions
  *   /beaver/test/approve-action approve or reject a pending write approval
+ *   /beaver/test/confirm-credits continue or skip a pending credit confirmation
  *   /beaver/test/undo-action    undo an applied action
  *
  * All are gated behind the same authenticated-only registration as the rest of
@@ -31,22 +32,31 @@ import {
     currentThreadIdAtom,
     currentThreadNameAtom,
 } from '../../atoms/threads';
-import { activeRunAtom, threadRunsAtom } from '../../agents/atoms';
-import { isWSChatPendingAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
+import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import {
+    isWSChatPendingAtom,
+    sendApprovalResponseAtom,
+    sendCreditConfirmationResponseAtom,
+} from '../../atoms/agentRunAtoms';
+import {
+    pendingCreditConfirmationsAtom,
+    type PendingCreditConfirmation,
+} from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import {
     pendingApprovalsAtom,
     threadAgentActionsAtom,
     undoAgentActionAtom,
-    type PendingApproval,
     type AgentAction,
 } from '../../agents/agentActions';
-import { pendingQuestionsAtom } from '../../agents/pendingQuestions';
+import type { PendingApproval } from '@beaver/agent-ui/host';
+import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
 import {
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
 } from '../../atoms/messageComposition';
 import { userIdAtom, isAuthenticatedAtom } from '../../atoms/auth';
-import { collectionToReference, type CollectionReference } from '../../types/zotero';
+import { type CollectionReference } from '@beaver/agent-core/types/zotero';
+import { collectionToReference } from '../../utils/zoteroReferences';
 import { resolveItemReference } from '../../../src/utils/libraryIdentity';
 import { undoEditMetadataAction } from '../../utils/editMetadataActions';
 import { undoCreateCollectionAction } from '../../utils/createCollectionActions';
@@ -57,6 +67,7 @@ import { undoCreateNoteAction } from '../../utils/createNoteActions';
 import { undoEditNoteAction, undoEditNoteBatchAction } from '../../utils/editNoteActions';
 import { undoCreateAnnotationsAction } from '../../utils/createAnnotationsActions';
 import { undoCreateItemActions } from '../../utils/createItemActions';
+import { undoEditAnnotationsAction } from '../../utils/editAnnotationsActions';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -94,6 +105,8 @@ function currentIds() {
     const runs = store.get(threadRunsAtom);
     const approvals: Map<string, PendingApproval> = store.get(pendingApprovalsAtom);
     const questions: Map<string, unknown> = store.get(pendingQuestionsAtom);
+    const creditConfirmations: Map<string, PendingCreditConfirmation> =
+        store.get(pendingCreditConfirmationsAtom);
     return {
         threadId: store.get(currentThreadIdAtom),
         threadName: store.get(currentThreadNameAtom),
@@ -104,22 +117,32 @@ function currentIds() {
         lastRunId: runs.length ? runs[runs.length - 1].id : null,
         pendingApprovals: Array.from(approvals.values()).map(serializeApproval),
         pendingQuestionIds: Array.from(questions.keys()),
+        pendingCreditConfirmations: Array.from(creditConfirmations.values()).map((c) => ({
+            confirmationId: c.confirmationId,
+            title: c.title,
+            message: c.message,
+            footer: c.footer,
+            pendingCredits: c.pendingCredits,
+            projectedTotalCredits: c.projectedTotalCredits,
+        })),
     };
 }
 
-type SettleReason = 'done' | 'approval' | 'question' | 'timeout';
+type SettleReason = 'done' | 'approval' | 'question' | 'credit-confirmation' | 'timeout';
 
 /**
  * Poll until the run settles: it finished streaming (`done`), paused for a write
- * approval (`approval`), paused for an ask_user_question (`question`), or the
- * timeout elapsed. A paused-for-approval run keeps `isWSChatPendingAtom` true, so
- * we must break on pending approvals/questions or we would block until timeout.
+ * approval (`approval`), paused for an ask_user_question (`question`), paused for
+ * a run-level credit confirmation (`credit-confirmation`), or the timeout
+ * elapsed. A paused run keeps `isWSChatPendingAtom` true, so we must break on
+ * every blocking state or we would block until timeout.
  */
 async function waitForRunSettle(timeoutMs: number, pollMs = 300): Promise<SettleReason> {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
         if (store.get(pendingApprovalsAtom).size > 0) return 'approval';
         if (store.get(pendingQuestionsAtom).size > 0) return 'question';
+        if (store.get(pendingCreditConfirmationsAtom).size > 0) return 'credit-confirmation';
         if (!store.get(isWSChatPendingAtom)) return 'done';
         await sleep(pollMs);
     }
@@ -363,6 +386,43 @@ export async function handleTestApproveActionHttpRequest(request: any) {
 }
 
 /**
+ * Answer the run-level credit confirmation so a headless run can continue.
+ *
+ * Body: { confirmationId?, approved (default true), waitForDone?, timeoutMs? }
+ * The run pauses on this the same way it pauses on an approval, so a driver
+ * that does not answer it waits out the backend's confirmation timeout and
+ * then gets a run that wrapped up without its priced steps.
+ */
+export async function handleTestConfirmCreditsHttpRequest(request: any) {
+    const approved = request?.approved !== false; // default true
+    const pending: Map<string, PendingCreditConfirmation> = store.get(
+        pendingCreditConfirmationsAtom,
+    );
+
+    if (pending.size === 0) {
+        return { ok: false, error: 'No pending credit confirmation', ...currentIds() };
+    }
+
+    const confirmationId: string = request?.confirmationId ?? Array.from(pending.keys())[0];
+    if (!pending.has(confirmationId)) {
+        return { ok: false, error: `Unknown confirmationId: ${confirmationId}`, ...currentIds() };
+    }
+
+    store.set(sendCreditConfirmationResponseAtom, { confirmationId, approved });
+
+    let settle: SettleReason | null = null;
+    if (request?.waitForDone === true) {
+        // Give the WS a moment to resume before polling settle state.
+        await sleep(400);
+        settle = await waitForRunSettle(
+            typeof request?.timeoutMs === 'number' ? request.timeoutMs : 180000,
+        );
+    }
+
+    return { ok: true, approved, actedOn: [confirmationId], settle, ...currentIds() };
+}
+
+/**
  * Undo an applied action. Mirrors the UI undo path (`AgentActionView.handleUndo`
  * / `useEditNoteActions.handleUndo`): first perform the Zotero-side revert via the
  * per-action-type undo helper, THEN flip UI + backend status via
@@ -408,6 +468,10 @@ export async function handleTestUndoActionHttpRequest(request: any) {
                 break;
             case 'edit_note_batch':
                 await undoEditNoteBatchAction(action);
+                break;
+            // Both edit_annotations and delete_annotations share this action type.
+            case 'edit_annotations':
+                await undoEditAnnotationsAction(action);
                 break;
             case 'create_highlight_annotations':
             case 'create_note_annotations':

@@ -49,6 +49,8 @@ vi.mock('../../../src/utils/editNoteValidation', async () => {
         }),
         detectPartialSimplifiedTag: actual.detectPartialSimplifiedTag,
         buildPartialSimplifiedTagMessage: actual.buildPartialSimplifiedTagMessage,
+        buildCitationRefHint: actual.buildCitationRefHint,
+        buildExpansionErrorMessage: actual.buildExpansionErrorMessage,
     };
 });
 
@@ -147,6 +149,7 @@ vi.mock('../../../src/utils/noteCitationExpand', () => ({
     preloadNotePageLabels: vi.fn().mockResolvedValue({}),
     preloadStructuralLocatorPages: vi.fn().mockResolvedValue({ pages: {}, unresolved: [] }),
     buildUnresolvedLocatorWarning: vi.fn(() => null),
+    isCitationRefNotFoundError: vi.fn(() => false),
 }));
 
 vi.mock('../../../src/utils/editNoteStrippers', () => ({
@@ -160,7 +163,12 @@ vi.mock('../../../src/utils/editNoteHints', () => ({
     findInlineTagDriftMatch: vi.fn(() => null),
     findWindowCandidates: vi.fn(() => []),
     centerTruncate: vi.fn((text: string) => ({ snippet: text, truncated: false })),
+    markTruncatedUnlessVerbatim: vi.fn(
+        (result: { snippet: string; truncated: boolean }) => result,
+    ),
+    pasteableSnippetBudget: vi.fn(() => 600),
     DEFAULT_MAX_SNIPPET_LENGTH: 200,
+    MAX_PASTEABLE_SNIPPET_LENGTH: 600,
 }));
 
 vi.mock('../../../src/utils/editNoteRawPosition', async () => {
@@ -175,7 +183,7 @@ vi.mock('../../../src/utils/editNoteRawPosition', async () => {
     };
 });
 
-vi.mock('../../../src/services/supabaseClient', () => ({
+vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: {
         auth: {
             getSession: vi.fn(),
@@ -199,7 +207,7 @@ vi.mock('../../../react/store', () => ({
     store: { get: vi.fn(() => [1, 2]) },
 }));
 
-vi.mock('../../../react/atoms/citations', () => ({
+vi.mock('@beaver/agent-core/citations/atoms', () => ({
     citationMapAtom: Symbol('citationMapAtom'),
 }));
 
@@ -220,7 +228,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     checkLibraryExcluded: vi.fn(() => null),
 }));
 
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 
@@ -247,7 +255,7 @@ vi.mock('../../../react/utils/addItemActions', () => ({
 
 import { handleAgentActionValidateRequest } from '../../../src/services/agentDataProvider/handleAgentActionValidateRequest';
 import { handleAgentActionExecuteRequest } from '../../../src/services/agentDataProvider/handleAgentActionExecuteRequest';
-import { logger } from '../../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     getOrSimplify,
     countOccurrences,
@@ -285,7 +293,7 @@ import { prepareCitationRenderContext } from '../../../react/utils/citationRende
 import type {
     WSAgentActionValidateRequest,
     WSAgentActionExecuteRequest,
-} from '../../../src/services/agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 
 
 // =============================================================================

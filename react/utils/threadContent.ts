@@ -1,6 +1,7 @@
-import { AgentRun, TextPart, ToolCallPart } from '../agents/types';
-import { getToolCallLabel } from '../agents/toolLabels';
-import { isToolResultView } from '../types/toolResultViews';
+import { AgentRun, TextPart, ToolCallPart } from '@beaver/agent-core/agents/types';
+import { isRenderableMessage } from '@beaver/agent-core/agents/messageVisibility';
+import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
+import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
 
 /**
  * Parse args from a ToolCallPart, handling both string and object formats.
@@ -16,21 +17,28 @@ function parseToolCallArgs(part: ToolCallPart): Record<string, unknown> {
 
 /**
  * Extract tool call details as a formatted string.
- * Moved from AgentRunFooter's inline getToolDetails closure.
+ *
+ * `enrichMap` carries the host-resolved names the view model does not supply
+ * (library/collection scope names for list_* tools, item names for pending or
+ * failed calls), keyed by tool_call_id — see `resolveToolCallLabelEnrichMap`.
+ * Without it the label degrades to the raw arg (a library ref like "u").
  */
 export function getToolCallDetails(
     part: ToolCallPart,
-    toolResultsMap: Map<string, any>
+    toolResultsMap: Map<string, any>,
+    enrichMap?: Map<string, ToolCallLabelEnrich> | null
 ): string {
     // The view-derived label already bakes in the name/locator and the count
     // suffix, so we don't append a separate result count here (that would
-    // double-count). Scope names for list_* tools are not host-resolved in this
-    // export path; the label degrades to the raw arg.
+    // double-count).
     const result = toolResultsMap.get(part.tool_call_id);
     const view = result?.part_kind === 'tool-return' && isToolResultView(result.metadata?.view)
         ? result.metadata.view
         : null;
-    const label = getToolCallLabel(part, 'completed', { view });
+    const label = getToolCallLabel(part, 'completed', {
+        view,
+        enrich: enrichMap?.get(part.tool_call_id) ?? null,
+    });
     let query = "";
     try {
         const args = typeof part.args === 'object' && part.args
@@ -55,12 +63,15 @@ export function getToolCallDetails(
  */
 export function extractRunResponseContent(
     run: AgentRun,
-    toolResultsMap: Map<string, any>
+    toolResultsMap: Map<string, any>,
+    enrichMap?: Map<string, ToolCallLabelEnrich> | null
 ): string {
     const parts: string[] = [];
 
     for (const message of run.model_messages) {
-        if (message.kind === 'response') {
+        // Copied/saved content is user-facing, so the same rule applies here as
+        // on screen (see `isRenderableMessage`).
+        if (isRenderableMessage(message)) {
             const textContent = message.parts
                 .filter((part): part is TextPart => part.part_kind === 'text')
                 .map(part => part.content)
@@ -88,7 +99,7 @@ export function extractRunResponseContent(
                                 return `\n\n---\n## ${title}\n\n${content}\n\n---`;
                             }
                         }
-                        return getToolCallDetails(p, toolResultsMap);
+                        return getToolCallDetails(p, toolResultsMap, enrichMap);
                     })
                     .join('\n\n');
                 parts.push(toolDescriptions);
@@ -108,6 +119,8 @@ export interface ExtractThreadContentOptions {
     includeRunLinks?: boolean;
     /** Wrap user messages in blockquotes (for note saves) */
     userMessageAsBlockquote?: boolean;
+    /** Host-resolved tool-call label names, keyed by tool_call_id */
+    enrichMap?: Map<string, ToolCallLabelEnrich> | null;
 }
 
 /**
@@ -127,7 +140,7 @@ export function extractThreadContent(
     toolResultsMap: Map<string, any>,
     options: ExtractThreadContentOptions = {}
 ): string {
-    const { threadName, threadId, includeRunLinks = true, userMessageAsBlockquote = false } = options;
+    const { threadName, threadId, includeRunLinks = true, userMessageAsBlockquote = false, enrichMap } = options;
     const sections: string[] = [];
 
     if (threadName) {
@@ -136,7 +149,7 @@ export function extractThreadContent(
 
     for (const run of runs) {
         const userMessage = run.user_prompt.content;
-        const responseContent = extractRunResponseContent(run, toolResultsMap);
+        const responseContent = extractRunResponseContent(run, toolResultsMap, enrichMap);
 
         if (userMessage) {
             const userHeading = includeRunLinks && threadId

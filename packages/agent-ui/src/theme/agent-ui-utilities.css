@@ -1,0 +1,389 @@
+/*
+ * @beaver/agent-ui — utility layer.
+ *
+ * A hand-rolled, Tailwind-shaped vocabulary shared by every Beaver client, so
+ * the same markup describes the same thing everywhere. The scale is its own and
+ * deliberately not Tailwind's (`gap-2` is a 0.5rem column gap but a 0.35rem row
+ * gap, `py-15` is 0.375rem, `mt-010` is 0.1rem, `p-0` is 0.1rem). Do not
+ * "correct" a value against Tailwind, and do not convert units: these values
+ * are load-bearing in shipped layouts.
+ *
+ * Every selector is scoped under `.beaver-root`, the one root class each client
+ * puts on its React mount points. In beaver-zotero that is every element with a
+ * `beaver-pane-*` id (`src/ui/ui.ts`, `beaverWindow.xhtml`,
+ * `beaverPreferences.xhtml`); `[id^="beaver-pane-"] .foo` and `.beaver-root
+ * .foo` both weigh (0,2,0), so the move was specificity-neutral. Nothing here
+ * may style a client's own root or chrome — a rule that needs the root element
+ * itself belongs in the client's sheet.
+ *
+ * This sheet is loaded BEFORE each client's own sheet, so a client rule of
+ * equal specificity wins. That is the intended direction (the shared layer is
+ * the default, the client overrides it), but it is the opposite of what a
+ * single interleaved file encodes. When a utility class and a client component
+ * class land on the same element and set the same property, the client now
+ * wins. A handful of Zotero rules relied on the old order and were therefore
+ * left in `beaver.css`; see the notes there. Before adding a class here, check
+ * that no client component rule of equal specificity sets the same property on
+ * an element that also carries the new class.
+ *
+ * Tokens: this sheet uses platform custom properties (`--fill-*`, `--accent-*`,
+ * `--material-*`, `--color-scrollbar*`, the flat `--tag-*` hues) that it does
+ * not define. They come from the host application's theme — see
+ * `agent-ui-tokens.css` for the contract.
+ */
+
+/* A few classes declared apart from their own section in the sheet this layer
+   came out of. Order within this file is that sheet's order, and it is
+   load-bearing: `.bg-tertiary`, `.bg-senary` and `.opacity-90` are each declared
+   twice, and the later declaration is the one that applies. */
+
+.beaver-root .bg-quarternary {
+    background-color: var(--fill-quarternary);
+}
+
+.beaver-root .bg-senary {
+    background-color: var(--fill-senary);
+}
+
+.beaver-root .bg-tertiary {
+    background-color: var(--fill-tertiary);
+}
+
+.beaver-root .bg-transparent {
+    background-color: transparent;
+}
+
+.beaver-root .opacity-90 {
+    opacity: 0.9;
+}
+
+.beaver-root .inset-0 {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+}
+
+/* Layout. The `display` utilities (`display-flex`, `hidden`, `inline-flex`,
+   `inline-block`, `block`, `single-line`) and `flex-1` / `h-full` are absent on
+   purpose: in beaver-zotero they are bundled with rules that style the pane root
+   itself, and they sit in cascade ties that the split would invert. They stay in
+   that client's sheet until those ties are gone. */
+.beaver-root .flex-none { flex: none; }
+.beaver-root .flex-row { flex-direction: row; }
+.beaver-root .flex-col { flex-direction: column; }
+.beaver-root .flex-wrap { flex-wrap: wrap; }
+.beaver-root .flex-shrink-0 { flex-shrink: 0 }
+.beaver-root .items-center { align-items: center; }
+.beaver-root .items-start { align-items: flex-start; }
+.beaver-root .items-end { align-items: flex-end; }
+.beaver-root .justify-center { justify-content: center; }
+.beaver-root .justify-between { justify-content: space-between; }
+.beaver-root .justify-end { justify-content: flex-end; }
+.beaver-root .h-screen { height: 100vh; }
+.beaver-root .w-full { width: 100%; }
+.beaver-root .w-90 { width: 90%; }
+.beaver-root .w-screen { width: 100vw; }
+.beaver-root .max-w-full { max-width: 100%; }
+.beaver-root .max-h-full { max-height: 100%; }
+.beaver-root .max-height-200 { max-height: 200px; }
+.beaver-root .fit-content { width: fit-content; }
+.beaver-root .object-contain { object-fit: contain; }
+.beaver-root .min-w-0 { min-width: 0; }
+.beaver-root .min-h-0 { min-height: 0; }
+.beaver-root .relative { position: relative; }
+.beaver-root .fixed { position: fixed; }
+.beaver-root .truncate { text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+.beaver-root .text-left { text-align: left; }
+.beaver-root .text-center { text-align: center; }
+.beaver-root .text-right { text-align: right; }
+.beaver-root .align-self-start { align-self: flex-start; }
+
+.beaver-root .absolute { position: absolute; }
+.beaver-root .left-1\/2 { left: 50%; }
+.beaver-root .transform { transform: none; }
+.beaver-root .-translate-x-1\/2 { transform: translateX(-50%); }
+.beaver-root .z-10 { z-index: 10; }
+.beaver-root .z-1000 { z-index: 1000; }
+/* Floating overlays (tooltips) must clear Zotero's focused items-tree row,
+   which gets z-index: 10000 while the tree has focus (blue selection). */
+.beaver-root .z-100000 { z-index: 100000; }
+.beaver-root .whitespace-nowrap { white-space: nowrap; }
+.beaver-root .whitespace-normal { white-space: normal; }
+
+
+/* Spacing */
+.beaver-root .gap-05 { column-gap: 0.125rem; row-gap: 0.125rem; }
+.beaver-root .gap-1 { column-gap: 0.375rem; row-gap: 0.25rem; }
+.beaver-root .gap-15 { column-gap: 0.425rem; row-gap: 0.30rem; }
+.beaver-root .gap-2 { column-gap: 0.5rem; row-gap: 0.35rem; }
+.beaver-root .gap-25 { column-gap: 0.625rem; row-gap: 0.45rem; }
+.beaver-root .gap-3 { column-gap: 0.75rem; row-gap: 0.5rem; }
+.beaver-root .gap-4 { column-gap: 1rem; row-gap: 0.75rem; }
+.beaver-root .gap-5 { column-gap: 1.25rem; row-gap: 1.2rem; }
+.beaver-root .gap-col-1 { column-gap: 0.25rem; }
+.beaver-root .gap-col-2 { column-gap: 0.35rem; }
+.beaver-root .gap-col-3 { column-gap: 0.5rem; }
+.beaver-root .gap-row-1 { row-gap: 0.25rem; }
+.beaver-root .gap-row-2 { row-gap: 0.35rem; }
+.beaver-root .gap-row-3 { row-gap: 0.5rem; }
+.beaver-root .p-0 { padding: 0.1rem; }
+.beaver-root .p-1 { padding: 0.25rem; }
+.beaver-root .p-15 { padding: 0.375rem; }
+.beaver-root .p-2 { padding: 0.5rem; }
+.beaver-root .p-25 { padding: 0.625rem; }
+.beaver-root .p-3 { padding: 0.75rem; }
+.beaver-root .p-4 { padding: 1rem; }
+.beaver-root .p-5 { padding: 1.25rem; }
+.beaver-root .px-1 { padding-left: 0.25rem; padding-right: 0.25rem; }
+.beaver-root .px-15 { padding-left: 0.375rem; padding-right: 0.375rem; }
+.beaver-root .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+.beaver-root .px-4 { padding-left: 1rem; padding-right: 1rem; }
+.beaver-root .px-5 { padding-left: 1.25rem; padding-right: 1.25rem; }
+.beaver-root .px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+.beaver-root .py-05 { padding-top: 0.125rem; padding-bottom: 0.125rem; }
+.beaver-root .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+.beaver-root .py-15 { padding-top: 0.375rem; padding-bottom: 0.375rem; }
+.beaver-root .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+.beaver-root .py-4 { padding-top: 1rem; padding-bottom: 1rem; }
+.beaver-root .pb-1 { padding-bottom: 0.25rem; }
+.beaver-root .pb-2 { padding-bottom: 0.5rem; }
+.beaver-root .pb-25 { padding-bottom: 0.625rem; }
+.beaver-root .pb-3 { padding-bottom: 0.75rem; }
+.beaver-root .pb-4 { padding-bottom: 1rem; }
+.beaver-root .pb-5 { padding-bottom: 1.25rem; }
+.beaver-root .pt-0 { padding-top: 0rem; }
+.beaver-root .pt-1 { padding-top: 0.25rem; }
+.beaver-root .pt-2 { padding-top: 0.5rem; }
+.beaver-root .pt-3 { padding-top: 0.75rem; }
+.beaver-root .pt-4 { padding-top: 1rem; }
+.beaver-root .m-0 { margin: 0rem; }
+.beaver-root .m-1 { margin: 0.25rem; }
+.beaver-root .m-2 { margin: 0.5rem; }
+.beaver-root .m-3 { margin: 0.75rem; }
+.beaver-root .mx-1 { margin-left: 0.25rem; margin-right: 0.25rem; }
+.beaver-root .mx-2 { margin-left: 0.5rem; margin-right: 0.5rem; }
+.beaver-root .mx-3 { margin-left: 0.75rem; margin-right: 0.75rem; }
+.beaver-root .mx-auto { margin-left: auto; margin-right: auto; }
+.beaver-root .mb-075 { margin-bottom: 0.075rem; }
+.beaver-root .mb-1 { margin-bottom: 0.15rem; }
+.beaver-root .mb-15 { margin-bottom: 0.35rem; }
+.beaver-root .mb-2 { margin-bottom: 0.5rem; }
+.beaver-root .mb-3 { margin-bottom: 0.75rem; }
+.beaver-root .mb-4 { margin-bottom: 1rem; }
+.beaver-root .mb-6 { margin-bottom: 1.5rem; }
+.beaver-root .mb-8 { margin-bottom: 2rem; }
+.beaver-root .mr-01 { margin-right: 0.1rem; }
+.beaver-root .mr-015 { margin-right: 0.15rem; }
+.beaver-root .mr-1 { margin-right: 0.25rem; }
+.beaver-root .mr-2 { margin-right: 0.5rem; }
+.beaver-root .mr-3 { margin-right: 0.75rem; }
+.beaver-root .mr-4 { margin-right: 1rem; }
+.beaver-root .mr-5 { margin-right: 1.25rem; }
+.beaver-root .ml-025 { margin-left: 0.0625rem; }
+.beaver-root .ml-05 { margin-left: 0.125rem; }
+.beaver-root .ml-1 { margin-left: 0.25rem; }
+.beaver-root .ml-15 { margin-left: 0.375rem; }
+.beaver-root .ml-2 { margin-left: 0.5rem; }
+.beaver-root .ml-3 { margin-left: 0.75rem; }
+.beaver-root .ml-4 { margin-left: 1rem; }
+.beaver-root .ml-5 { margin-left: 1.25rem; }
+.beaver-root .mt-010 { margin-top: 0.1rem; }
+.beaver-root .mt-015 { margin-top: 0.15rem; }
+.beaver-root .mt-020 { margin-top: 0.20rem; }
+.beaver-root .mt-1 { margin-top: 0.25rem; }
+.beaver-root .mt-15 { margin-top: 0.375rem; }
+.beaver-root .mt-2 { margin-top: 0.5rem; }
+.beaver-root .mt-3 { margin-top: 0.75rem; }
+.beaver-root .mt-4 { margin-top: 1rem; }
+.beaver-root .mt-5 { margin-top: 1.25rem; }
+.beaver-root .mt-6 { margin-top: 1.5rem; }
+.beaver-root .mt-7 { margin-top: 1.75rem; }
+.beaver-root .mt-8 { margin-top: 2rem; }
+.beaver-root .my-1 { margin-top: 0.25rem; margin-bottom: 0.25rem; }
+.beaver-root .my-2 { margin-top: 0.5rem; margin-bottom: 0.5rem; }
+.beaver-root .my-3 { margin-top: 0.75rem; margin-bottom: 0.75rem; }
+.beaver-root .h-2 { height: 0.5rem; }
+.beaver-root .-mt-010 { margin-top: -0.1rem; }
+.beaver-root .-mb-015 { margin-bottom: -0.15rem; }
+.beaver-root .-mb-1 { margin-bottom: -0.25rem; }
+.beaver-root .-mt-1 { margin-top: -0.25rem; }
+.beaver-root .-mt-2 { margin-top: -0.5rem; }
+.beaver-root .-mt-3 { margin-top: -0.75rem; }
+
+.beaver-root .-ml-015 { margin-left: -0.15rem; }
+.beaver-root .-ml-020 { margin-left: -0.20rem; }
+.beaver-root .-ml-05 { margin-left: -0.125rem; }
+.beaver-root .-ml-1 { margin-left: -0.25rem; }
+.beaver-root .-ml-15 { margin-left: -0.375rem; }
+.beaver-root .-ml-2 { margin-left: -0.5rem; }
+.beaver-root .-ml-3 { margin-left: -0.75rem; }
+.beaver-root .-mr-005 { margin-right: -0.05rem; }
+.beaver-root .-mr-0035 { margin-right: -0.035rem; }
+.beaver-root .-mr-010 { margin-right: -0.10rem; }
+.beaver-root .-mr-015 { margin-right: -0.15rem; }
+.beaver-root .-mr-020 { margin-right: -0.20rem; }
+.beaver-root .-mr-1 { margin-right: -0.25rem; }
+.beaver-root .-mr-2 { margin-right: -0.5rem; }
+.beaver-root .-mr-3 { margin-right: -0.75rem; }
+.beaver-root .-mx-4 { margin-right: -0.75rem; margin-left: -0.75rem; }
+
+.beaver-root .inset-x-0 { left: 0; right: 0; }
+.beaver-root .translate-y-full { transform: translateY(100%); }
+.beaver-root .-translate-y-full { transform: translateY(-100%); }
+.beaver-root .top-4 { top: 1rem; }
+
+
+/* Typography */
+.beaver-root .uppercase { text-transform: uppercase; }
+.beaver-root .text-xs { font-size: 0.75rem; }
+.beaver-root .text-sm { font-size: 0.875rem; }
+.beaver-root .text-lg { font-size: 1.125rem; }
+.beaver-root .text-xl { font-size: 1.25rem; }
+.beaver-root .text-2xl { font-size: 1.5rem; }
+.beaver-root .text-underline { text-decoration: underline; }
+.beaver-root .font-medium { font-weight: 500; }
+.beaver-root .font-semibold { font-weight: 600; }
+.beaver-root .font-italic { font-style: italic; }
+.beaver-root .font-bold { font-weight: 700; }
+.beaver-root .font-color-primary { color: var(--fill-primary); }
+.beaver-root .font-color-secondary { color: var(--fill-secondary); }
+.beaver-root .font-color-tertiary { color: var(--fill-tertiary); }
+.beaver-root .font-color-quarternary { color: var(--fill-quarternary); }
+.beaver-root .font-color-quinary { color: var(--fill-quinary); }
+.beaver-root .font-color-senary { color: var(--fill-senary); }
+.beaver-root .font-color-red { color: var(--tag-red); opacity: 0.8; }
+.beaver-root .font-color-green { color: var(--tag-green); opacity: 0.8; }
+.beaver-root .font-color-accent-green { color: var(--accent-green); opacity: 0.8; }
+.beaver-root .font-color-orange { color: var(--tag-orange); opacity: 0.8; }
+.beaver-root .font-color-blue { color: var(--tag-blue); opacity: 0.8; }
+.beaver-root .font-color-accent-blue { color: var(--accent-blue); }
+.beaver-root .stroke-width-2 path { stroke-width: 2; }
+.beaver-root .font-color-yellow { color: var(--tag-yellow); opacity: 0.8; }
+.beaver-root .font-color-purple { color: var(--tag-purple); opacity: 0.8; }
+.beaver-root .font-color-error { color: var(--tag-red); opacity: 0.8; }
+
+.beaver-root .user-select-none { user-select: none; }
+.beaver-root .user-select-text { user-select: text; }
+
+.beaver-root .line-through { text-decoration: line-through; }
+
+/* Transitions */
+.beaver-root .transition { transition: all 0.2s ease-in-out; }
+.beaver-root .transition-colors { transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out; }
+.beaver-root .transition-opacity { transition: opacity 0.2s ease-in-out; }
+.beaver-root .duration-300 { transition-duration: 0.3s; }
+.beaver-root .duration-400 { transition-duration: 0.4s; }
+.beaver-root .duration-500 { transition-duration: 0.5s; }
+.beaver-root .duration-700 { transition-duration: 0.7s; }
+.beaver-root .duration-1000 { transition-duration: 1s; }
+.beaver-root .ease-in-out { transition-timing-function: ease-in-out; }
+.beaver-root .ease-in { transition-timing-function: ease-in; }
+.beaver-root .ease-out { transition-timing-function: ease-out; }
+
+/* States */
+.beaver-root .opacity-0 { opacity: 0; }
+.beaver-root .opacity-50 { opacity: 0.5; }
+.beaver-root .opacity-60 { opacity: 0.6; }
+.beaver-root .opacity-70 { opacity: 0.7; }
+.beaver-root .opacity-80 { opacity: 0.8; }
+.beaver-root .opacity-85 { opacity: 0.85; }
+.beaver-root .opacity-90 { opacity: 0.9; }
+.beaver-root .opacity-100 { opacity: 1; }
+.beaver-root .cursor-pointer { cursor: pointer; }
+.beaver-root .cursor-default { cursor: default; }
+.beaver-root .cursor-not-allowed { cursor: not-allowed; }
+/* Scaling */
+
+.beaver-root .scale-60 { transform: scale(0.6); }
+.beaver-root .scale-70 { transform: scale(0.7); }
+.beaver-root .scale-75 { transform: scale(0.75); }
+.beaver-root .scale-80 { transform: scale(0.8); }
+.beaver-root .scale-85 { transform: scale(0.85); }
+.beaver-root .scale-90 { transform: scale(0.9); }
+.beaver-root .scale-95 { transform: scale(0.95); }
+.beaver-root .scale-100 { transform: scale(1); }
+.beaver-root .scale-105 { transform: scale(1.05); }
+.beaver-root .scale-11 { transform: scale(1.1); }
+.beaver-root .scale-115 { transform: scale(1.15); }
+.beaver-root .scale-12 { transform: scale(1.2); }
+.beaver-root .scale-125 { transform: scale(1.25); }
+.beaver-root .scale-13 { transform: scale(1.3); }
+.beaver-root .scale-14 { transform: scale(1.4); }
+.beaver-root .scale-15 { transform: scale(1.5); }
+.beaver-root .scale-16 { transform: scale(1.6); }
+.beaver-root .scale-17 { transform: scale(1.7); }
+
+/* Overflow */
+.beaver-root .overflow-scroll { overflow: scroll; }
+.beaver-root .overflow-auto { overflow: auto; }
+.beaver-root .overflow-y-auto { overflow-y: auto; }
+.beaver-root .overflow-x-auto { overflow-x: auto; }
+.beaver-root .overflow-hidden { overflow: hidden; }
+.beaver-root .overflow-x-hidden { overflow-x: hidden; }
+.beaver-root .overflow-y-hidden { overflow-y: hidden; }
+.beaver-root .text-ellipsis { text-overflow: ellipsis; }
+
+/* Opacity */
+.beaver-root .opacity-0 { opacity: 0; }
+.beaver-root .opacity-25 { opacity: 0.25; }
+.beaver-root .opacity-50 { opacity: 0.5; }
+.beaver-root .opacity-75 { opacity: 0.75; }
+.beaver-root .opacity-90 { opacity: 0.9; }
+
+/* Background colors */
+.beaver-root .bg-sidepane { background-color: var(--material-sidepane); }
+.beaver-root .bg-primary { background-color: var(--fill-primary); }
+.beaver-root .bg-secondary { background-color: var(--fill-secondary); }
+.beaver-root .bg-tertiary { background-color: var(--fill-tertiary); }
+.beaver-root .bg-quinary { background-color: var(--fill-quinary); }
+.beaver-root .bg-senary { background-color: var(--fill-senary); }
+
+/* Rounded corners */
+.beaver-root .rounded-sm { border-radius: 0.125rem; }
+.beaver-root .rounded-md { border-radius: 0.375rem; }
+.beaver-root .rounded-lg { border-radius: 0.5rem; }
+.beaver-root .rounded-xl { border-radius: 0.75rem; }
+
+/* Borders */
+.beaver-root .border-left-quinary { border-left: 1px solid var(--fill-quinary); }
+.beaver-root .border-left-quarternary { border-left: 1px solid var(--fill-quarternary); }
+.beaver-root .border-right-quinary { border-right: 1px solid var(--fill-quinary); }
+.beaver-root .border-top-quinary { border-top: 1px solid var(--fill-quinary); }
+.beaver-root .border-bottom-quinary { border-bottom: 1px solid var(--fill-quinary); }
+.beaver-root .border-bottom-quarternary { border-bottom: 1px solid var(--fill-quarternary); }
+.beaver-root .border-quinary { border: 1px solid var(--fill-quinary); }
+.beaver-root .border-quarternary { border: 1px solid var(--material-mix-quarternary); }
+.beaver-root .border-popup { border: 1px solid var(--fill-quarternary); }
+.beaver-root .border-top-popup { border-top: 1px solid var(--fill-quarternary); }
+.beaver-root .border-transparent { border: 1px solid transparent; }
+.beaver-root .border-error { border: 1px solid var(--tag-red-tertiary); }
+
+/* Shadows */
+.beaver-root .shadow-sm { box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.1); }
+.beaver-root .shadow-md { box-shadow: 0 0.375rem 0.75rem rgba(0, 0, 0, 0.15); }
+.beaver-root .shadow-sm-top { box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.1), 0 -0.075rem 0.25rem rgba(0, 0, 0, 0.075); }
+.beaver-root .shadow-md-top { box-shadow: 0 0.375rem 0.75rem rgba(0, 0, 0, 0.125), 0 -0.075rem 0.75rem rgba(0, 0, 0, 0.075); }
+.beaver-root .shadow-lg { box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15); }
+.beaver-root .shadow-xl { box-shadow: 0 0.75rem 1.5rem rgba(0, 0, 0, 0.15); }
+
+/* Scrollbar */
+.beaver-root .scrollbar {
+    scrollbar-color: var(--color-scrollbar) var(--color-scrollbar-background);
+}
+
+.beaver-root .outline-none {
+    outline: none;
+}
+
+.beaver-root .ring-0 {
+    outline: 0 solid transparent;
+}
+
+.beaver-root .shadow-none {
+    box-shadow: none;
+}
+
+.beaver-root .appearance-none {
+    appearance: none;
+}

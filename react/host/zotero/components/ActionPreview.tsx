@@ -1,6 +1,6 @@
 import React from 'react';
 import type { AgentAction } from '../../../agents/agentActions';
-import type { OrganizeItemsResultData } from '../../../types/agentActions/base';
+import type { OrganizeItemsResultData } from '@beaver/agent-core/types/agentActions/base';
 import { EditMetadataPreview } from './EditMetadataPreview';
 import { CreateCollectionPreview } from './CreateCollectionPreview';
 import { OrganizeItemsPreview } from './OrganizeItemsPreview';
@@ -12,6 +12,8 @@ import { CreateNotePreview } from './CreateNotePreview';
 import { ManageTagsPreview } from './ManageTagsPreview';
 import { ManageCollectionsPreview } from './ManageCollectionsPreview';
 import { CreateAnnotationsPreview } from './CreateAnnotationsPreview';
+import { EditAnnotationsPreview } from './EditAnnotationsPreview';
+import { DeleteAnnotationsPreview } from './DeleteAnnotationsPreview';
 import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import type { ActionStatus, PreviewData } from './agentActionViewHelpers';
 import {
@@ -30,7 +32,9 @@ export const ActionPreview: React.FC<{
     actions?: AgentAction[];
     /** Whether tool call arguments are actively streaming */
     isStreaming?: boolean;
-}> = ({ toolName, previewData, status, actions, isStreaming }) => {
+    /** Use the compact presentation intended for the end-of-run review card. */
+    compact?: boolean;
+}> = ({ toolName, previewData, status, actions, isStreaming, compact = false }) => {
     const editNotePreviewKind = getEditNotePreviewKind(toolName, previewData.actionType);
     if (toolName === 'edit_metadata' || previewData.actionType === 'edit_metadata') {
         const edits = previewData.actionData.edits || [];
@@ -193,6 +197,27 @@ export const ActionPreview: React.FC<{
         );
     }
 
+    if (
+        toolName === 'edit_annotations' ||
+        toolName === 'delete_annotations' ||
+        previewData.actionType === 'edit_annotations'
+    ) {
+        const isDelete =
+            toolName === 'delete_annotations' ||
+            previewData.actionData.operation === 'delete';
+        const AnnotationPreview = isDelete
+            ? DeleteAnnotationsPreview
+            : EditAnnotationsPreview;
+        return (
+            <AnnotationPreview
+                actionData={previewData.actionData}
+                currentValue={previewData.currentValue}
+                resultData={previewData.resultData as any}
+                status={status}
+            />
+        );
+    }
+
     if (toolName === 'confirm_extraction' || previewData.actionType === 'confirm_extraction') {
         return (
             <ConfirmExtractionPreview
@@ -257,7 +282,7 @@ export const ActionPreview: React.FC<{
             <div className="flex flex-col gap-3">
                 {edits.map((edit, position) => {
                     const editIndex = typeof edit?.index === 'number' ? edit.index : position;
-                    const op = (edit?.operation ?? 'str_replace') as import('../../../types/agentActions/editNote').EditNoteOperation;
+                    const op = (edit?.operation ?? 'str_replace') as import('@beaver/agent-core/types/agentActions/editNote').EditNoteOperation;
                     const isRewrite = op === 'rewrite';
                     const oldString = isRewrite ? '' : (edit?.old_string || '');
                     const newString = edit?.new_string || '';
@@ -269,10 +294,13 @@ export const ActionPreview: React.FC<{
                         <div key={`edit-${editIndex}`} className="flex flex-col gap-1">
                             {/* Row labels only separate STACKED diffs (full edits[]
                                 render). Group rows slice to one edit each and are
-                                already delimited by row borders — no label there. */}
-                            {edits.length > 1 && (
+                                already delimited by row borders — no label there.
+                                A rewrite needs no label here: it is always the only
+                                edit in its batch, and EditNotePreview heads it with
+                                its own scope line. */}
+                            {edits.length > 1 && !isRewrite && (
                                 <div className="text-sm font-color-secondary px-3 py-1">
-                                    {isRewrite ? 'Full rewrite' : `Edit ${position + 1}`}
+                                    {`Edit ${position + 1}`}
                                 </div>
                             )}
                             <EditNotePreview
@@ -293,7 +321,7 @@ export const ActionPreview: React.FC<{
     }
 
     if (editNotePreviewKind === 'legacy') {
-        const op = (previewData.actionData.operation ?? 'str_replace') as import('../../../types/agentActions/editNote').EditNoteOperation;
+        const op = (previewData.actionData.operation ?? 'str_replace') as import('@beaver/agent-core/types/agentActions/editNote').EditNoteOperation;
         const isRewrite = op === 'rewrite';
         const oldString = isRewrite ? '' : (previewData.actionData.old_string || '');
         const newString = previewData.actionData.new_string || '';
@@ -339,6 +367,7 @@ export const ActionPreview: React.FC<{
                 resultData={previewData.resultData}
                 status={status}
                 isStreaming={isStreaming}
+                compact={compact}
             />
         );
     }

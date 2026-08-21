@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import MenuButton from '../MenuButton';
-import { MenuItem } from '../menu/ContextMenu';
+import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
+import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { ArrowDownIcon, Icon, TickIcon } from '../../icons/icons';
 import {
     DeferredToolPreference,
@@ -17,6 +17,10 @@ interface DeferredToolPreferenceButtonProps {
     onPreferenceChange?: (preference: DeferredToolPreference) => void;
     /** Optional allowed preference subset (defaults to all deferred preferences) */
     allowedPreferences?: DeferredToolPreference[];
+    /** Show the current preference without allowing it to be changed. */
+    disabled?: boolean;
+    /** Optional explanation shown when hovering the button. */
+    tooltipContent?: string;
 }
 
 /**
@@ -27,6 +31,8 @@ const DeferredToolPreferenceButton: React.FC<DeferredToolPreferenceButtonProps> 
     toolName,
     onPreferenceChange,
     allowedPreferences,
+    disabled = false,
+    tooltipContent = 'How to handle this action',
 }) => {
     const getPreferenceForTool = useAtomValue(getPreferenceForToolAtom);
     const updateToolPreference = useSetAtom(updateToolPreferenceAtom);
@@ -68,14 +74,15 @@ const DeferredToolPreferenceButton: React.FC<DeferredToolPreferenceButtonProps> 
             menuItems={menuItems}
             variant="ghost-secondary"
             buttonLabel={buttonLabel}
-            rightIcon={ArrowDownIcon}
+            rightIcon={disabled ? undefined : ArrowDownIcon}
             style={{
                 padding: '2px 2px',
                 fontSize: '0.90rem',
             }}
             rightIconClassName="scale-11 -ml-05"
             ariaLabel="Select action preference"
-            tooltipContent="How to handle this action"
+            tooltipContent={tooltipContent}
+            disabled={disabled}
             showArrow={false}
         />
     );

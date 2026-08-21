@@ -17,8 +17,10 @@ export { handleZoteroAttachmentSearchRequest } from './agentDataProvider/handleZ
 export { handleExternalReferenceCheckRequest } from './agentDataProvider/handleExternalReferenceCheckRequest';
 export { handleItemSearchByMetadataRequest } from './agentDataProvider/handleItemSearchByMetadataRequest';
 export { handleItemSearchByTopicRequest } from './agentDataProvider/handleItemSearchByTopicRequest';
+export { handleItemQuickSearchRequest } from './agentDataProvider/handleItemQuickSearchRequest';
 export { handleZoteroSearchRequest } from './agentDataProvider/handleZoteroSearchRequest';
 export { handleListItemsRequest } from './agentDataProvider/handleListItemsRequest';
+export { handleResolvePopulationRequest } from './agentDataProvider/handleResolvePopulationRequest';
 export { handleGetMetadataRequest } from './agentDataProvider/handleGetMetadataRequest';
 export { handleGetAnnotationsRequest } from './agentDataProvider/handleGetAnnotationsRequest';
 export { handleFindAnnotationsRequest } from './agentDataProvider/handleFindAnnotationsRequest';

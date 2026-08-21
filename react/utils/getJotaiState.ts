@@ -1,4 +1,4 @@
-import { citationsAtom, citationMapAtom, citationsByRunIdAtom } from "../atoms/citations"
+import { citationsAtom, citationMapAtom, citationsByRunIdAtom } from "@beaver/agent-core/citations/atoms"
 import { userAtom, isAuthenticatedAtom, isWaitingForProfileAtom, authLoadingAtom } from "../atoms/auth"
 import { fileStatusAtom, errorCodeStatsAtom, errorCodeStatsIsLoadingAtom, errorCodeStatsErrorAtom, lastFetchedErrorCountsAtom, aggregatedErrorMessagesForFailedFilesAtom, aggregatedErrorMessagesForSkippedFilesAtom, fileStatusSummaryAtom, isUploadProcessedAtom } from "../atoms/files"
 import { readerTextSelectionAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom, currentNoteTabItemKeyAtom } from "../atoms/messageComposition"
@@ -10,7 +10,7 @@ import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, sh
 import { store } from "../store"
 
 // Agent-related atoms
-import { threadRunsAtom, activeRunAtom, allRunsAtom, isStreamingAtom as isAgentStreamingAtom, toolResultsMapAtom } from "../agents/atoms"
+import { threadRunsAtom, activeRunAtom, allRunsAtom, isStreamingAtom as isAgentStreamingAtom, toolResultsMapAtom } from "@beaver/agent-core/run-state/atoms"
 import { threadAgentActionsAtom, agentActionsByToolcallAtom, agentActionsByRunAtom } from "../agents/agentActions"
 import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom, wsReadyDataAtom, wsRequestAckDataAtom, wsErrorAtom, wsWarningAtom } from "../atoms/agentRunAtoms"
 

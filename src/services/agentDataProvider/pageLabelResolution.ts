@@ -10,7 +10,7 @@
 
 import { BeaverExtractor, isWorkerDeadlineError } from '../../beaver-extract';
 import type { DocumentCacheMetadata, PageLabels } from '../documentCache';
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /**
  * Maximum number of sample labels to include in InvalidPageValueError payloads.

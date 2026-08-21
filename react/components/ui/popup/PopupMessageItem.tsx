@@ -10,9 +10,9 @@ import WelcomeOnboardingContent from './WelcomeOnboardingContent';
 import ReaderTipContent from './ReaderTipContent';
 import NoteTipContent from './NoteTipContent';
 import { CitationTipContent } from '../../sources/CitationTipContent';
-import Button from "../Button";
+import Button from "@beaver/agent-ui/primitives/Button";
 import PopupMessageHeader from './PopupMessageHeader';
-import { getWindowFromElement } from '../../../utils/windowContext';
+import { getWindowFromElement } from '@beaver/agent-ui/utils/windowContext';
 import { parseTextWithLinksAndNewlines } from '../../../utils/parseTextWithLinksAndNewlines';
 
 interface PopupMessageItemProps {
@@ -35,7 +35,8 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
     useEffect(() => {
         // Get the correct window context for this component
         const win = getWindowFromElement(containerRef.current);
-        
+        if (!win) return;
+
         let timerId: number | null = null;
         if (message.expire !== false) { // Default to true if undefined
             timerId = win.setTimeout(() => {
@@ -121,6 +122,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
                 {!(isFloating && (message.type === 'version_update' || message.type === 'welcome_onboarding' || message.type === 'reader_tip' || message.type === 'note_tip')) && (
                     <PopupMessageHeader
                         icon={message.icon || getDefaultIcon()}
+                        rightIcon={message.rightIcon}
                         title={message.title}
                         count={message.count}
                         buttonIcon={message.buttonIcon}
@@ -206,6 +208,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
                                 handleDismiss();
                             }}
                             icon={message.button.icon}
+                            rightIcon={message.button.rightIcon}
                             variant={message.button.variant ?? "outline"}
                         >
                             {message.button.text}

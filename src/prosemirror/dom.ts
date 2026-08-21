@@ -18,7 +18,9 @@ export function getDocument(): Document {
         }
     }
     // Fallback: global document (jsdom/browser test environments)
+    // eslint-disable-next-line no-restricted-globals
     if (typeof document !== 'undefined') {
+        // eslint-disable-next-line no-restricted-globals
         return document.implementation.createHTMLDocument('');
     }
     throw new Error('No DOM available for ProseMirror normalization — main window not open');

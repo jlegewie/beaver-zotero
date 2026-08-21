@@ -26,7 +26,7 @@ import {
     setOnDismiss,
     type EditOperation,
 } from './noteEditorDiffPreview';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { getPref } from '../../src/utils/prefs';
 import { store } from '../store';
 import { pendingApprovalsAtom } from '../agents/agentActions';

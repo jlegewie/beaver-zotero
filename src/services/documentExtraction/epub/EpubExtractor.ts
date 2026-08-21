@@ -21,16 +21,16 @@ import {
     EPUB_SCHEMA_VERSION,
     type EpubDocument,
     type ExtractEpubResult,
-} from "./schema";
+} from "@beaver/agent-core/extract/document/epub/schema";
 import {
     epubPageLabelForPosition,
     extractSectionPageMarkers,
     scorePageMarkers,
     type PageMappingSectionMarkers,
 } from "./epubPageMapping";
-import { effectiveMaxFileSizeMB } from "../../attachmentLimits";
+import { effectiveMaxFileSizeMB } from "@beaver/agent-core/transport/attachmentLimits";
 import { isRemoteAccessAvailable } from "../attachmentSource";
-import { logger } from "../../../utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 
 // Coverage below this fraction means the walk dropped a meaningful share of the
 // book's visible text (an unrecognized container/table structure) and warrants a
@@ -51,7 +51,6 @@ interface ZoteroEpubModule {
 }
 
 export interface ExtractEpubDocumentOptions {
-    maxFileSizeMB?: number | null;
     onFileNotSyncedLocally?: () => void;
 }
 
@@ -365,7 +364,7 @@ export async function preflightEpubFile(
         return preflightResponseError("file_missing", "The EPUB file is not available locally.");
     }
 
-    const maxFileSizeMB = effectiveMaxFileSizeMB(options?.maxFileSizeMB);
+    const maxFileSizeMB = effectiveMaxFileSizeMB();
     try {
         const stat = await IOUtils.stat(filePath);
         const sizeMB = typeof stat.size === "number" ? stat.size / 1024 / 1024 : null;

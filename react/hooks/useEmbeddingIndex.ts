@@ -1,8 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { isAuthenticatedAtom } from "../atoms/auth";
-import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom, searchableLibraryIdsAtom, processingModeAtom } from "../atoms/profile";
-import { ProcessingMode } from "../types/profile";
+import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom, searchableLibraryIdsAtom } from "../atoms/profile";
 import {
     embeddingIndexStateAtom,
     setEmbeddingIndexStatusAtom,
@@ -11,11 +10,10 @@ import {
     forceReindexCounterAtom,
     updateFailedItemsCountAtom
 } from "../atoms/embeddingIndex";
-import { mcpServerEnabledAtom } from "../atoms/ui";
 import { EmbeddingIndexer, IndexingError, MIN_CONTENT_LENGTH, INDEX_BATCH_SIZE, mergeIndexingErrors } from "../../src/services/embeddingIndexer";
 import { BeaverDB } from "../../src/services/database";
-import { embeddingsService } from "../../src/services/embeddingsService";
-import { logger } from "../../src/utils/logger";
+import { embeddingsService } from "@beaver/agent-core/transport/clients/embeddingsService";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { getPref, setPref } from "../../src/utils/prefs";
 import { store } from "../store";
 
@@ -50,11 +48,9 @@ export function useEmbeddingIndex() {
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isAuthorized = useAtomValue(hasAuthorizedAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
-    // Use searchableLibraryIds: Free users index ALL libraries, Pro users index synced only
+    // Index every local library that has not been excluded by the user.
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     const forceReindexCounter = useAtomValue(forceReindexCounterAtom);
-    const processingMode = useAtomValue(processingModeAtom);
-    const mcpServerEnabled = useAtomValue(mcpServerEnabledAtom);
 
     // Atoms for state management
     const setIndexStatus = useSetAtom(setEmbeddingIndexStatusAtom);
@@ -534,10 +530,6 @@ export function useEmbeddingIndex() {
         if (!isAuthenticated) return;
         if (!isAuthorized) return;
         if (!isDeviceAuthorized) return;
-        // Skip frontend indexing in BACKEND mode unless MCP server is enabled
-        // (MCP search_by_topic tool requires local embeddings)
-        if (processingMode === ProcessingMode.BACKEND && !mcpServerEnabled) return;
-
         logger("useEmbeddingIndex: Setting up embedding index", 3);
 
         let isMounted = true;
@@ -691,5 +683,5 @@ export function useEmbeddingIndex() {
             // Clear indexer reference
             indexerRef.current = null;
         };
-    }, [isAuthenticated, isAuthorized, isDeviceAuthorized, processingMode, mcpServerEnabled, searchableLibraryIds, forceReindexCounter]);
+    }, [isAuthenticated, isAuthorized, isDeviceAuthorized, searchableLibraryIds, forceReindexCounter]);
 }

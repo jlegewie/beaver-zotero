@@ -4,8 +4,8 @@
  */
 
 import { AgentAction } from '../agents/agentActions';
-import { CreateCollectionResultData } from '../types/agentActions/base';
-import { logger } from '../../src/utils/logger';
+import { CreateCollectionResultData } from '@beaver/agent-core/types/agentActions/base';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     libraryRefForLibraryID,
     resolveItemReference,

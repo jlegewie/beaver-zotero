@@ -787,7 +787,7 @@ export async function handleTestDocumentSerializedHttpRequest(request: any) {
         isPreparedJsonMessage,
         materializePreparedJsonMessage,
         preparedJsonEnvelope,
-    } = await import('../../../src/services/preparedJsonMessage');
+    } = await import('@beaver/agent-core/transport/preparedJsonMessage');
 
     const wsRequest = {
         event: 'zotero_document_request' as const,
@@ -796,7 +796,6 @@ export async function handleTestDocumentSerializedHttpRequest(request: any) {
         external_file_key: request?.external_file_key ?? undefined,
         mode: request?.mode ?? 'structured',
         max_pages: request?.max_pages ?? undefined,
-        max_file_size_mb: request?.max_file_size_mb ?? undefined,
         max_payload_bytes: request?.max_payload_bytes ?? undefined,
         timeout_seconds: request?.timeout_seconds ?? undefined,
     };

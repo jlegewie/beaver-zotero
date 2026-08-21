@@ -7,14 +7,14 @@
  * is not already PNG/JPEG.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';
 import {
     WSZoteroAttachmentImageRequest,
     WSZoteroAttachmentImageResponse,
     AttachmentImageErrorCode,
-} from '../agentProtocol';
-import { ZoteroItemReference } from '../../../react/types/zotero';
+} from '@beaver/agent-core/protocol/agentProtocol';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 import { makeRemoteFilePath } from '../documentFileIdentity';
 import {
@@ -30,7 +30,7 @@ import {
     TimeoutError,
     createTimeoutController,
 } from './timeout';
-import { effectiveMaxFileSizeMB } from '../attachmentLimits';
+import { effectiveMaxFileSizeMB } from '@beaver/agent-core/transport/attachmentLimits';
 import {
     DEFAULT_MAX_IMAGE_DIMENSION,
     HARD_MAX_IMAGE_DIMENSION,
@@ -181,7 +181,7 @@ export async function handleZoteroAttachmentImageRequest(
             );
         }
         if (isRemoteOnly) {
-            const exceeded = checkRemotePdfSize(imageBytes, false, maxFileSizeMB);
+            const exceeded = checkRemotePdfSize(imageBytes, false);
             if (exceeded) {
                 return errorResponse(
                     `The image file for ${imageKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit.`,

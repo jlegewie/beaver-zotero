@@ -1,0 +1,23 @@
+{
+  "name": "@beaver/agent-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*"
+  },
+  "typesVersions": {
+    "*": {
+      "*": ["src/*"]
+    }
+  },
+  "peerDependencies": {
+    "@beaver/agent-core": "*",
+    "@lexical/react": "^0.43.0",
+    "@lexical/utils": "^0.43.0",
+    "jotai": "^2.12.1",
+    "lexical": "^0.43.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

@@ -4,9 +4,9 @@ import {
     DocumentCacheMetadataInput,
     DocumentCachePayloadInput,
 } from '../../../src/services/database';
-import { buildPdfCachedMetadata } from '../../../src/services/documentExtraction/shared/contentKinds';
+import { buildPdfCachedMetadata } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import type { DocumentCachePageLabels } from '../../../src/services/database';
-import type { PageGeometry } from '../../../src/beaver-extract/types';
+import type { PageGeometry } from '@beaver/agent-core/extract/types';
 import { MockDBConnection } from '../../mocks/mockDBConnection';
 
 type MetadataOverrides = Partial<DocumentCacheMetadataInput> & {

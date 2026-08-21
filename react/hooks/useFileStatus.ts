@@ -3,9 +3,9 @@ import { useSetAtom, useAtomValue } from 'jotai';
 import { RealtimeChannel, REALTIME_SUBSCRIBE_STATES, REALTIME_CHANNEL_STATES } from "@supabase/supabase-js";
 import { fileStatusAtom, connectionStatusAtom } from '../atoms/files';
 import { FileStatus, ConnectionStatus } from '../types/fileStatus';
-import { supabase } from '../../src/services/supabaseClient';
+import { supabase } from '@beaver/agent-core/transport/supabaseClient';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { hasAuthorizedProAccessAtom, isDatabaseSyncSupportedAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
 
 export interface FileStatusConnection {

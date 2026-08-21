@@ -9,7 +9,7 @@ import type {
     DocumentCachePayloadRecord,
 } from './database';
 import { getFileSignature, isRemoteFilePath, type FileSignature } from './documentFileIdentity';
-import { logger } from '../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     gzipJsonValueChunked,
     gzipUtf8BytesChunked,
@@ -20,19 +20,19 @@ import { createAbortController } from '../utils/abortController';
 import type {
     BeaverExtractResult,
     SerializedBeaverExtractResult,
-} from '../beaver-extract/schema/schema';
+} from '@beaver/agent-core/extract/schema';
 import {
     validateMarkdownExtractResult,
     validateStructuredExtractResult,
 } from '../beaver-extract/schema/validators';
-import type { PageGeometry } from '../beaver-extract/types';
+import type { PageGeometry } from '@beaver/agent-core/extract/types';
 import {
     buildEpubCachedMetadata,
     buildPdfCachedMetadata,
     buildSnapshotCachedMetadata,
     type EpubSectionSummary,
     type SnapshotSectionSummary,
-} from './documentExtraction/shared/contentKinds';
+} from '@beaver/agent-core/extract/document/shared/contentKinds';
 import {
     expectedExtractionSchemaVersion,
     type ExtractContentKind,
@@ -46,7 +46,7 @@ export const DOCUMENT_PAYLOAD_FORMAT_VERSION = 1;
 export type ExtractionMode = DocumentCacheExtractionMode;
 export type PayloadKind = DocumentCachePayloadKind;
 export type PageLabels = DocumentCachePageLabels;
-export type { PageGeometry } from '../beaver-extract/types';
+export type { PageGeometry } from '@beaver/agent-core/extract/types';
 export type DocumentCacheMetadata = DocumentCacheMetadataRecord;
 export type DocumentPayloadRecord = DocumentCachePayloadRecord;
 

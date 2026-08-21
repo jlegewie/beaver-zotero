@@ -1,4 +1,4 @@
-import type { ZoteroInstanceWire } from './agentProtocol';
+import type { ZoteroInstanceWire } from '@beaver/agent-core/protocol/agentProtocol';
 import { getInstanceIndexScopeRefs, getZoteroUserIdentifier } from '../utils/zoteroUtils';
 
 /**

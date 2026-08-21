@@ -23,7 +23,7 @@ import {
 import { copyToClipboard } from '../utils/clipboard';
 import { getCurrentReader } from '../utils/readerUtils';
 import { getItemLanguage } from '../../src/utils/zoteroUtils';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 export function useReaderVisualizerActionHandler() {
     useEventSubscription('readerVisualizerAction', async (detail) => {

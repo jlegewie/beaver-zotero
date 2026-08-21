@@ -1,30 +1,32 @@
 import React, { useMemo, useEffect, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { AgentRun } from '../../agents/types';
-import { RepeatIcon, ShareIcon, ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
+import { AgentRun } from '@beaver/agent-core/agents/types';
+import { RepeatIcon, MoreHorizontalIcon, ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
 import { copyToClipboard } from '../../utils/clipboard';
-import IconButton from '../ui/IconButton';
-import MenuButton from '../ui/MenuButton';
-import type { MenuItem } from '../ui/menu/ContextMenu';
-import Button from '../ui/Button';
-import CitedSourcesList from '../sources/CitedSourcesList';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
+import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
+import Button from '@beaver/agent-ui/primitives/Button';
+import CitedSourcesList from '@beaver/agent-ui/chat/CitedSourcesList';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../utils/citationRenderers';
 import CopyButton from '../ui/buttons/CopyButton';
-import { citationMapAtom, citationsByRunIdAtom, citationKeyToMarkerAtom } from '../../atoms/citations';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
-import { CitedSource, getCitationKey } from '../../types/citations';
+import { citationMapAtom, citationsByRunIdAtom, citationKeyToMarkerAtom } from '@beaver/agent-core/citations/atoms';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import { CitedSource, getCitationKey } from '@beaver/agent-core/types/citations';
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
-import { toolResultsMapAtom, allRunsAtom } from '../../agents/atoms';
+import { toolResultsMapAtom, allRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import { collectResumeChain, sumChainUsage } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { extractRunResponseContent } from '../../utils/threadContent';
+import { resolveToolCallLabelEnrichMap } from '../../utils/toolCallLabelEnrich';
 import TokenUsageDisplay from './TokenUsageDisplay';
-import { regenerateFromRunAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
+import { regenerateFromRunAtom, retryPendingRunIdAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { currentThreadIdAtom } from '../../atoms/threads';
 import { store } from '../../store';
-import Tooltip from '../ui/Tooltip';
-import Spinner from '../icons/Spinner';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
+import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { prepareCitationRenderContext } from '../../utils/citationRenderContext';
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
-import { getHost } from '../../host';
+import { getHost } from '@beaver/agent-ui/host';
 
 interface AgentRunFooterProps {
     run: AgentRun;
@@ -37,13 +39,26 @@ interface AgentRunFooterProps {
 export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     const citationDataMap = useAtomValue(citationMapAtom);
     const citationsByRunId = useAtomValue(citationsByRunIdAtom);
-    const runCitations = citationsByRunId[run.id] || [];
     const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
     const toolResultsMap = useAtomValue(toolResultsMapAtom);
     const citationMarkerMap = useAtomValue(citationKeyToMarkerAtom);
     const allRuns = useAtomValue(allRunsAtom);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
+
+    // A response that was continued after an error or an interruption spans
+    // several runs but reads as one message, and only its last run carries a
+    // footer. Everything below therefore describes the whole chain: its text,
+    // its citations, its cost, and the question that started it. An ordinary
+    // run is a chain of one, so nothing changes for it.
+    const chainRuns = useMemo(() => collectResumeChain(run, allRuns), [run, allRuns]);
+    // Where the message began: a continuation's own prompt is empty, and it is
+    // the opening run that a link or an id should point at.
+    const messageRun = chainRuns[0];
+    const runCitations = useMemo(
+        () => chainRuns.flatMap(chainRun => citationsByRunId[chainRun.id] || []),
+        [chainRuns, citationsByRunId],
+    );
 
     // Force re-render when menu opens to get fresh context for disabled state
     const [, forceUpdate] = useState({});
@@ -91,10 +106,23 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         }
     }, [run.id, setSourcesVisibility, sourcesVisible, uniqueCitations.length]);
 
-    // Combine all text content from the run's model messages
-    const combinedContent = useMemo(() => {
-        return extractRunResponseContent(run, toolResultsMap);
-    }, [run.model_messages, toolResultsMap]);
+    // Combine all text content from the message's runs, in the order they ran.
+    // Resolved lazily (copy / save-as-note), because tool-call labels need
+    // host-resolved library/collection names — without them a list_* label
+    // shows the raw library ref ("u") instead of the library name.
+    const buildRunContent = useCallback(async () => {
+        const enrichMap = await resolveToolCallLabelEnrichMap(chainRuns, toolResultsMap);
+        return chainRuns
+            .map(chainRun => extractRunResponseContent(chainRun, toolResultsMap, enrichMap))
+            .filter(Boolean)
+            .join('\n\n');
+    }, [chainRuns, toolResultsMap]);
+
+    // What the whole message cost, not just its final run
+    const { usage: chainUsage, cost: chainCost } = useMemo(
+        () => sumChainUsage(chainRuns),
+        [chainRuns],
+    );
 
     // Build share menu items
     const getShareMenuItems = () => {
@@ -147,17 +175,17 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     };
 
     const handleCopy = async () => {
-        const formattedContent = renderToMarkdown(combinedContent);
+        const formattedContent = renderToMarkdown(await buildRunContent());
         await copyToClipboard(formattedContent);
     };
 
     const buildRunNoteContentHtml = async () => {
-        const userQuestion = run.user_prompt.content;
+        const userQuestion = messageRun.user_prompt.content;
         const sections: string[] = [];
         if (userQuestion) {
             sections.push(`## User\n\n> ${userQuestion.replace(/\n/g, '\n> ')}`);
         }
-        sections.push(`## Beaver\n\n${combinedContent}`);
+        sections.push(`## Beaver\n\n${await buildRunContent()}`);
         const noteMarkdown = sections.join('\n\n---\n\n');
 
         const renderContent = preprocessNoteContent(noteMarkdown);
@@ -181,7 +209,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         if (!noteWriter) return;
         try {
             const contentHtml = await buildRunNoteContentHtml();
-            const responseIndex = allRuns.findIndex(r => r.id === run.id) + 1;
+            const responseIndex = allRuns.findIndex(r => r.id === messageRun.id) + 1;
             await noteWriter.saveNote({
                 contentHtml,
                 asChild,
@@ -189,7 +217,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                 format: {
                     kind: 'agent-run',
                     responseIndex: responseIndex || undefined,
-                    runId: run.id,
+                    runId: messageRun.id,
                 },
             });
         } catch (error: any) {
@@ -210,11 +238,11 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     const copyRunUrl = async () => {
         const threadId = store.get(currentThreadIdAtom);
         if (!threadId) return;
-        await copyToClipboard(`zotero://beaver/thread/${threadId}/run/${run.id}`);
+        await copyToClipboard(`zotero://beaver/thread/${threadId}/run/${messageRun.id}`);
     };
 
     const copyRunId = async () => {
-        await copyToClipboard(run.id);
+        await copyToClipboard(messageRun.id);
     };
 
     const copyCitationMetadata = async () => {
@@ -226,6 +254,9 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     };
 
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
+    // Loading state while this run's retry commits its removal on the
+    // backend (truncate POST + undo), before the replacement run appears.
+    const isRetryPending = useAtomValue(retryPendingRunIdAtom) === run.id;
 
     const handleRegenerate = async () => {
         // regenerateFromRunAtom walks the resume chain back to the root
@@ -269,13 +300,10 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                 
                 {/* Action buttons */}
                 <div className="display-flex gap-4">
-                    {/* Usage display */}
-                    {(getHost().config?.isDevelopment() ?? false) && run.status === 'completed' && run.total_usage && run.total_cost && (
-                        <TokenUsageDisplay usage={run.total_usage} cost={run.total_cost} />
-                    )}
-                    {/* Share button */}
+                    {/* Additional action buttons */}
                     <MenuButton
-                        icon={ShareIcon}
+                        icon={MoreHorizontalIcon}
+                        iconClassName="scale-12"
                         menuItems={getShareMenuItems()}
                         className="scale-11"
                         ariaLabel="Share"
@@ -284,6 +312,13 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                         toggleCallback={handleMenuToggle}
                         tooltipContent="More options"
                     />
+                    
+                    {/* Usage display */}
+                    {(getHost().config?.isDevelopment() ?? false) && run.status === 'completed' && chainUsage != null && chainCost != null && (
+                        <TokenUsageDisplay usage={chainUsage} cost={chainCost} />
+                    )}
+
+                    {/* Retry button */}
                     <Tooltip
                         content="Retry"
                         showArrow
@@ -293,14 +328,17 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                             onClick={handleRegenerate}
                             className="scale-11"
                             ariaLabel="Retry"
+                            loading={isRetryPending}
                         />
                     </Tooltip>
+
+                    {/* Copy button */}
                     <Tooltip
                         content="Copy"
                         showArrow
                     >
                         <CopyButton
-                            content={combinedContent}
+                            content={buildRunContent}
                             formatContent={renderToMarkdown}
                             className="scale-11"
                         />

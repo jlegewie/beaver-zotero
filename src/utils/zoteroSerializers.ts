@@ -1,14 +1,17 @@
+import { v4 as uuidv4 } from 'uuid';
 import { calculateObjectHash } from '../utils/hash';
-import { logger } from './logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { libraryRefForLibraryID, modelObjectId } from './libraryIdentity';
-import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemStub, ItemSummary, CollectionSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary, AttachmentStub } from '../../react/types/zotero';
+import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemStub, ItemSummary, CollectionSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary, AttachmentStub } from '@beaver/agent-core/types/zotero';
 import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, getMimeType, safeIsInTrash, safeFileExists } from './zoteroUtils';
+import { safeAttachmentFilename } from './attachmentFiles';
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
 import { skippedItemsManager } from '../services/skippedItemsManager';
-import { AnnotationResultItem, NoteResultItem } from '../services/agentProtocol';
+import { AnnotationResultItem, NoteResultItem } from '@beaver/agent-core/protocol/agentProtocol';
 import { getContentKind } from '../services/documentExtraction/attachmentResolution';
-import type { ContentKind } from '../services/documentExtraction/shared/contentKinds';
+import type { ContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
+import type { ItemSearchResult } from '@beaver/agent-core/transport/clients/searchService';
 
 export interface FileData {
     // filename: string;
@@ -392,6 +395,28 @@ export async function serializeItemSummary(item: Zotero.Item): Promise<ItemSumma
 }
 
 /**
+ * Serializes a Zotero item into an `ItemSearchResult`, the shape used by the
+ * local quick-search UI (client-side scoring, no backend round trip).
+ * @param item Zotero item
+ * @returns ItemSearchResult
+ */
+export function itemSearchResultFromZoteroItem(item: Zotero.Item): ItemSearchResult {
+    return {
+        id: uuidv4(),
+        library_id: item.libraryID,
+        zotero_key: item.key,
+        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
+        item_type: item.itemType,
+        // @ts-ignore - Add proper types later
+        deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
+        title: item.getField('title', false, true),
+        year: getYearFromItem(item),
+        rank: 0,
+        similarity: 0,
+    } as ItemSearchResult;
+}
+
+/**
  * Serializes the minimal bibliographic anchor (`ItemStub`) for a regular item.
  *
  * Emits the lean, model-facing shape the backend consumes directly: a combined
@@ -435,7 +460,7 @@ export function serializeAttachmentStub(item: Zotero.Item, contentKind?: Content
         library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         parent_item_id: item.parentKey ? modelObjectId(item.libraryID, item.parentKey) : null,
         title: item.getField?.('title') || item.getDisplayTitle?.() || null,
-        filename: item.attachmentFilename || null,
+        filename: safeAttachmentFilename(item),
         content_kind: contentKind ?? getContentKind(item),
     };
 }
@@ -522,7 +547,9 @@ export async function serializeAttachment(
             return trashState;
         })(),
         title: item.getField('title', false, true),
-        filename: item.attachmentFilename,
+        // `?? ''` keeps the hash identical to a direct `attachmentFilename` read
+        // for healthy rows (the getter returns '' for an empty path).
+        filename: safeAttachmentFilename(item) ?? '',
     };
 
     // 3. Metadata Hash: Calculate hash from the prepared hashed fields object

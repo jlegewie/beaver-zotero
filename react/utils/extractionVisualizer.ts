@@ -10,7 +10,7 @@
  * always show the same boxes.
  */
 
-import { logger } from "../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { BEAVER_VISUALIZER_ANNOTATION_AUTHOR } from "../../src/constants/annotations";
 import { libraryRefForLibraryID } from "../../src/utils/libraryIdentity";
 import {
@@ -26,7 +26,7 @@ import { getItemLanguage } from "../../src/utils/zoteroUtils";
 import { getCurrentReaderAndWaitForView } from "./readerUtils";
 import { getPageViewportInfo } from "./pdfUtils";
 import { BeaverTemporaryAnnotations, ZoteroReader } from "./annotationUtils";
-import { ZoteroItemReference } from "../types/zotero";
+import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
 import {
     buildColumnOverlayFromDebugPage,
     buildItemOverlayFromDebugPage,

@@ -28,8 +28,8 @@ import {
     AttachmentSearchView,
     ItemRowView,
     AnnotationRowView,
-} from '../../../react/types/toolResultViews';
-import { ToolReturnPart } from '../../../react/agents/types';
+} from '@beaver/agent-core/run-state/toolResultViews';
+import { ToolReturnPart } from '@beaver/agent-core/agents/types';
 
 // ---------------------------------------------------------------------------
 // Mock Zotero item store
@@ -200,6 +200,40 @@ describe('upgradeToolReturn', () => {
         const part = returnPart('totally_unknown_tool', { foo: 'bar' });
         const result = await upgradeToolReturn(part);
         expect(result.metadata!.view).toBeUndefined();
+    });
+
+    it('leaves a non-success return without a view', async () => {
+        // A non-success return carries an explanatory message, not a result payload.
+        // Synthesizing a view here would render an empty result card under a call
+        // the user should see as failed.
+        installItems([{ id: 1, key: 'AAAA1111', firstCreator: 'Smith', date: '2004', title: 'A Paper' }]);
+        const part = returnPart('zotero_search', {
+            tool_name: 'zotero_search',
+            total_count: 1,
+            items: [{ library_id: 1, zotero_key: 'AAAA1111' }],
+        });
+        part.outcome = 'failed';
+        part.content = 'Zotero search is not available in this context.';
+
+        const result = await upgradeToolReturn(part);
+
+        expect(result.metadata!.view).toBeUndefined();
+    });
+
+    it('still synthesizes a view for a part with no outcome field', async () => {
+        // Parts from a pre-outcome backend are exactly the legacy threads this
+        // module exists for, so the outcome check must stay inert for them.
+        installItems([{ id: 1, key: 'AAAA1111', firstCreator: 'Smith', date: '2004', title: 'A Paper' }]);
+        const part = returnPart('zotero_search', {
+            tool_name: 'zotero_search',
+            total_count: 1,
+            items: [{ library_id: 1, zotero_key: 'AAAA1111' }],
+        });
+        expect('outcome' in part).toBe(false);
+
+        const result = await upgradeToolReturn(part);
+
+        expect(isToolResultView(result.metadata!.view)).toBe(true);
     });
 
     it('attaches a synthesized view for a legacy result', async () => {

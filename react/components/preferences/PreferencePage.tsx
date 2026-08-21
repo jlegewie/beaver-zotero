@@ -2,28 +2,21 @@ import React, { useState, useCallback, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, DollarCircleIcon } from '../icons/icons';
-import Button from "../ui/Button";
+import { UserIcon, LogoutIcon, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, DollarCircleIcon } from '../icons/icons';
+import Button from "@beaver/agent-ui/primitives/Button";
 import { useSetAtom } from 'jotai';
-import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, creditPlanAtom, hasCreditPlanAtom } from "../../atoms/profile";
+import { profileWithPlanAtom, creditPlanAtom, hasCreditPlanAtom } from "../../atoms/profile";
 import { activePreferencePageTabAtom, PreferencePageTab } from "../../atoms/ui";
-import { logger } from "../../../src/utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { isDiffPreviewSupported } from "../../utils/noteEditorDiffPreview";
-import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
 import { 
     embeddingIndexStateAtom, 
     forceReindexAtom, 
     isEmbeddingIndexingAtom 
 } from "../../atoms/embeddingIndex";
-import { isLibrarySynced } from "../../../src/utils/zoteroUtils";
-import { accountService } from "../../../src/services/accountService";
-import SyncedLibraries from "./SyncedLibraries";
-import {SettingsGroup, SettingsRow, SectionLabel, DocLink} from "./components/SettingsElements";
-import FileStatusDisplay from "../status/FileStatusDisplay";
-import { connectionStatusAtom, fileStatusAtom } from "../../atoms/files";
-import { fetchFileStatusResult } from "../../hooks/useFileStatus";
+import { accountService } from "@beaver/agent-core/transport/clients/accountService";
+import {SettingsGroup, SettingsRow, SectionLabel} from "./components/SettingsElements";
 import ActionsPreferenceSection from "./ActionsPreferenceSection";
-import CustomInstructionsSection from "./CustomInstructionsSection";
 import BillingSection, { formatPlanName } from "./BillingSection";
 import ApiKeysSection from "./ApiKeysSection";
 import AdvancedSection from "./AdvancedSection";
@@ -40,7 +33,6 @@ const PreferencePage: React.FC = () => {
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
 
     // --- State for Preferences ---
-    const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     const [citationFormat, setCitationFormat] = useState(() => getPref('citationFormat') === 'numeric');
     const [useTemporaryCitationAnnotations, setUseTemporaryCitationAnnotations] = useState(() => getPref('useTemporaryCitationAnnotations') === true);
     const [keyboardShortcut, setKeyboardShortcut] = useState(() => {
@@ -57,106 +49,18 @@ const PreferencePage: React.FC = () => {
     const [emailNotifications, setEmailNotifications] = useState(() => profileWithPlan?.email_notifications || false);
     const creditPlan = useAtomValue(creditPlanAtom);
     const hasCreditPlan = useAtomValue(hasCreditPlanAtom);
-    const syncWithZotero = useAtomValue(syncWithZoteroAtom);
-    const [localSyncToggle, setLocalSyncToggle] = useState(syncWithZotero);
-    const profileBalance = useAtomValue(profileBalanceAtom);
-    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
-    const connectionStatus = useAtomValue(connectionStatusAtom);
-    const setFileStatus = useSetAtom(fileStatusAtom);
     const [activeTab, setActiveTab] = useAtom(activePreferencePageTabAtom);
-
-    // --- Manual File Status Refresh (when no real-time subscription) ---
-    const [manualRefreshTime, setManualRefreshTime] = useState<Date | null>(null);
-    const [isManualRefreshing, setIsManualRefreshing] = useState(false);
-    const [now, setNow] = useState(Date.now());
-
-    React.useEffect(() => {
-        const interval = setInterval(() => setNow(Date.now()), 10000);
-        return () => clearInterval(interval);
-    }, []);
-
-    const handleManualRefresh = useCallback(async () => {
-        if (!user?.id) return;
-        setIsManualRefreshing(true);
-        logger(`PreferencePage: Manually fetching file status (one-time fetch) for user ${user.id}`, 1);
-        try {
-            const { fileStatus: status, error } = await fetchFileStatusResult(user.id);
-            if (error) {
-                logger(`PreferencePage: Manual file status refresh failed: ${error}`, 1);
-                setManualRefreshTime(new Date());
-                setNow(Date.now());
-                return;
-            }
-
-            setFileStatus(status);
-            setManualRefreshTime(new Date());
-            setNow(Date.now());
-        } catch (error) {
-            logger(`PreferencePage: Failed to manually fetch file status: ${error}`, 1);
-            setManualRefreshTime(new Date());
-            setNow(Date.now());
-        } finally {
-            setIsManualRefreshing(false);
-        }
-    }, [user?.id, setFileStatus]);
-
-    React.useEffect(() => {
-        if (activeTab === 'sync' && connectionStatus === 'idle' && !manualRefreshTime && user?.id && !isManualRefreshing) {
-            handleManualRefresh();
-        }
-    }, [activeTab, connectionStatus, manualRefreshTime, user?.id, isManualRefreshing, handleManualRefresh]);
 
     // Update local state when atom changes
     React.useEffect(() => {
-        setLocalSyncToggle(syncWithZotero);
         setConsentToShare(profileWithPlan?.consent_to_share || false);
         setEmailNotifications(profileWithPlan?.email_notifications || false);
-    }, [syncWithZotero, profileWithPlan?.consent_to_share, profileWithPlan?.email_notifications]);
-
-    // --- Sync and Verify Status States ---
-    const [syncStatus, setSyncStatus] = useState<'idle' | 'running' | 'completed'>('idle');
-    const [verifyStatus, setVerifyStatus] = useState<'idle' | 'running' | 'completed'>('idle');
-    const [lastSyncedText, setLastSyncedText] = useState<string>('Never');
+    }, [profileWithPlan?.consent_to_share, profileWithPlan?.email_notifications]);
     
     // --- Embedding Index ---
     const embeddingIndexState = useAtomValue(embeddingIndexStateAtom);
     const isEmbeddingIndexing = useAtomValue(isEmbeddingIndexingAtom);
     const forceReindex = useSetAtom(forceReindexAtom);
- 
-     // --- Load last synced timestamp from local DB ---
-     const loadLastSynced = useCallback(async () => {
-         try {
-             if (!user?.id || !syncedLibraryIds?.length) {
-                setLastSyncedText('Unable to retrieve');
-                return;
-             }
-             const latest = await Zotero.Beaver.db.getMostRecentSyncLogForLibraries(user.id, syncedLibraryIds);
-             if (!latest) {
-                setLastSyncedText('Never');
-                return;
-             }
- 
-            // Timestamps are stored like 'YYYY-MM-DD HH:MM:SS' (UTC); add 'Z' for robust parsing
-            const stamp = latest.timestamp.endsWith('Z') ? latest.timestamp : `${latest.timestamp}Z`;
-            const localDate = new Date(stamp);
-            // e.g., "Aug 11, 2025, 2:34 PM"
-            const nice = new Intl.DateTimeFormat(undefined, {
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric',
-                hour: 'numeric',
-                minute: '2-digit',
-            }).format(localDate);
-            setLastSyncedText(nice);
-        } catch (e: any) {
-            logger(`Failed to load last sync time: ${e.message}`, 1);
-            setLastSyncedText('—');
-        }
-    }, [user?.id, syncedLibraryIds]);
-
-    React.useEffect(() => {
-        loadLastSynced();
-    }, [loadLastSynced]);
 
     const handleKeyboardShortcutChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
         const nextShortcut = event.target.value.toLowerCase();
@@ -169,34 +73,6 @@ const PreferencePage: React.FC = () => {
             logger(`Updated keyboard shortcut to ${nextShortcut.toUpperCase()}`);
         }
     }, []);
-
-    // --- Verify Sync Handler ---
-    const handleVerifySync = useCallback(async () => {
-        if (verifyStatus === 'running') return;
-        
-        setVerifyStatus('running');
-        logger('handleVerifySync: Starting sync verification');
-        
-        try {
-            // Run consistency check for all sync libraries
-            for (const libraryID of syncedLibraryIds) {
-                await performConsistencyCheck(libraryID);
-            }
-            
-            logger('Sync verification completed successfully');
-            setVerifyStatus('completed');
-            
-            // Reset to idle after 2 seconds
-            setTimeout(() => {
-                setVerifyStatus('idle');
-            }, 2000);
-            
-        } catch (error: any) {
-            logger(`Sync verification failed: ${error.message}`, 1);
-            Zotero.logError(error);
-            setVerifyStatus('idle');
-        }
-    }, [syncedLibraryIds, verifyStatus]);
 
     // --- Consent Toggle Change Handler ---
     const handleConsentChange = useCallback(async (checked: boolean) => {
@@ -237,42 +113,6 @@ const PreferencePage: React.FC = () => {
             Zotero.logError(error as Error);
             // Revert the toggle on error
             setEmailNotifications(!checked);
-        }
-    }, [setProfileWithPlan]);
-
-    // --- Sync Toggle Change Handler ---
-    const handleSyncToggleChange = useCallback(async (checked: boolean) => {
-        const action = checked ? 'enable' : 'disable';
-        const message = checked 
-            ? 'Are you sure you want to enable syncing with Zotero? This will build on Zotero sync for multi-device support and improved sync.'
-            : 'Are you sure you want to disable syncing with Zotero? You will only be able to use Beaver on this device and group libraries will not be synced with Beaver anymore.';
-        
-        const buttonIndex = Zotero.Prompt.confirm({
-            window: Zotero.getMainWindow(),
-            title: checked ? 'Enable Coordinate with Zotero Sync?' : 'Disable Coordinate with Zotero Sync?',
-            text: message,
-            button0: Zotero.Prompt.BUTTON_TITLE_YES,
-            button1: Zotero.Prompt.BUTTON_TITLE_NO,
-            defaultButton: 1,
-        });
-
-        if (buttonIndex === 0) { // If "Yes" is clicked
-            try {
-                logger(`User confirmed to ${action} Zotero sync. New value: ${checked}`);
-                await accountService.updatePreference('use_zotero_sync', checked);
-
-                setProfileWithPlan((prev) => {
-                    if (!prev) return null;
-                    return { ...prev, use_zotero_sync: checked };
-                });
-                setLocalSyncToggle(checked);
-                logger('Successfully updated Zotero sync preference.');
-            } catch (error) {
-                logger(`Failed to update Zotero sync preference: ${error}`, 1);
-                Zotero.logError(error as Error);
-                // Revert the toggle on error
-                setLocalSyncToggle(!checked);
-            }
         }
     }, [setProfileWithPlan]);
 
@@ -362,75 +202,19 @@ const PreferencePage: React.FC = () => {
         };
     };
 
-    // Helper function to get sync button props
-    const getSyncButtonProps = () => {
-        switch (syncStatus) {
-            case 'running':
-                return {
-                    icon: SyncIcon,
-                    iconClassName: 'animate-spin',
-                    disabled: true,
-                    text: 'Syncing...'
-                };
-            case 'completed':
-                return {
-                    icon: TickIcon,
-                    iconClassName: '',
-                    disabled: true,
-                    text: 'Synced'
-                };
-            default:
-                return {
-                    icon: SyncIcon,
-                    iconClassName: '',
-                    disabled: false,
-                    text: 'Sync'
-                };
-        }
-    };
-
-    // Helper function to get verify button props
-    const getVerifyButtonProps = () => {
-        switch (verifyStatus) {
-            case 'running':
-                return {
-                    icon: Spinner,
-                    iconClassName: 'animate-spin',
-                    disabled: true,
-                    text: 'Verifying...'
-                };
-            case 'completed':
-                return {
-                    icon: TickIcon,
-                    iconClassName: '',
-                    disabled: true,
-                    text: 'Verified'
-                };
-            default:
-                return {
-                    icon: DatabaseIcon,
-                    iconClassName: '',
-                    disabled: false,
-                    text: 'Verify Data'
-                };
-        }
-    };
-
-    const syncButtonProps = getSyncButtonProps();
-    const verifyButtonProps = getVerifyButtonProps();
     const rebuildIndexButtonProps = getRebuildIndexButtonProps();
     const sidebarShortcutLabel = `${Zotero.isMac ? '⌘' : 'Ctrl'}+${keyboardShortcut}`;
     const windowShortcutLabel = `${Zotero.isMac ? '⌘⇧' : 'Ctrl+Shift'}+${keyboardShortcut}`;
     type VisiblePreferencePageTab = Exclude<PreferencePageTab, 'account'>;
     const tabs = useMemo<{ id: VisiblePreferencePageTab; label: string; icon: React.ComponentType<React.SVGProps<SVGSVGElement>> | React.ReactElement }[]>(() => [
         { id: 'general', label: 'General', icon: SettingsIcon },
-        { id: 'sync', label: isDatabaseSyncSupported ? 'Sync' : 'Search', icon: isDatabaseSyncSupported ? SyncIcon : SearchIcon },
+        { id: 'sync', label: 'Search', icon: SearchIcon },
         { id: 'permissions', label: 'Permissions', icon: LockIcon },
         { id: 'billing', label: 'Plan & Usage', icon: DollarCircleIcon },
         { id: 'models', label: 'API Keys', icon: KeyIcon },
         { id: 'actions', label: 'Actions', icon: ZapIcon },
         { id: 'advanced', label: 'Advanced', icon: ToolsIcon },
-    ], [isDatabaseSyncSupported]);
+    ], []);
     const effectiveActiveTab: VisiblePreferencePageTab = activeTab === 'account' ? 'general' : activeTab;
 
     const handleTabKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -549,18 +333,6 @@ const PreferencePage: React.FC = () => {
                                         </Button>
                                     }
                                 />
-                                {isDatabaseSyncSupported && profileBalance.pagesRemaining !== undefined && (
-                                    <SettingsRow
-                                        title="Page Balance"
-                                        description="Remaining pages for full-document search"
-                                        hasBorder
-                                        control={
-                                            <span className="font-color-primary text-sm font-medium">
-                                                {profileBalance.pagesRemaining.toLocaleString()}
-                                            </span>
-                                        }
-                                    />
-                                )}
                                 <SettingsRow
                                     title="Sign Out"
                                     description="End your current session"
@@ -771,171 +543,47 @@ const PreferencePage: React.FC = () => {
             {/* ===== SYNC TAB ===== */}
             {effectiveActiveTab === 'sync' && (
                 <>
-                    {/* <div className="text-base font-color-secondary mt-1 mb-4" style={{ paddingLeft: '2px' }}>
-                        {isDatabaseSyncSupported ? (
-                            <>
-                                Select the libraries you want to sync with Beaver.
-                                Beaver can only access  synced libraries.
-                                For more details, see documentation on <DocLink path="libraries">libraries</DocLink> and <DocLink path="trouble-file-sync">sync troubleshooting</DocLink>.
-                            </>
-                        ) : (
-                            <>Beaver indexes your library locally for semantic search.</>
-                        )}
-                    </div> */}
-                    {isDatabaseSyncSupported && (
-                        <SettingsGroup>
-                            <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
-                                {/* <div className="font-color-primary text-base font-medium">Permissions</div> */}
-                                <div className="font-color-secondary text-base">
-                                    {isDatabaseSyncSupported ? (
-                                        <>
-                                            Select the libraries you want to sync with Beaver.
-                                            Beaver can only access  synced libraries.
-                                            For more details, see documentation on <DocLink path="libraries">libraries</DocLink> and <DocLink path="trouble-file-sync">sync troubleshooting</DocLink>.
-                                        </>
-                                    ) : (
-                                        <>Beaver indexes your library locally for semantic search.</>
+                    <SectionLabel>Libraries</SectionLabel>
+                    <ExcludedLibrariesList />
+
+                    <SectionLabel>Search Index</SectionLabel>
+                    <SettingsGroup>
+                        <SettingsRow
+                            title="Search Index"
+                            description={
+                                <>
+                                    Check that the local search index matches your Zotero libraries.
+                                    This usually happens automatically, but you can run a manual check if search results look out of date.
+                                    {embeddingIndexState.failedItems > 0 && (
+                                        <span className="display-flex font-color-yellow mt-1">
+                                            {embeddingIndexState.failedItems} items failed to index
+                                        </span>
                                     )}
-
-                                </div>
-                            </div>
-                        </SettingsGroup>
-                    )}
-
-                    {isDatabaseSyncSupported ? (
-                        <span className="mt-4">
-                            <SyncedLibraries />
-                            <div className="display-flex flex-row items-center gap-4 justify-end mt-1" style={{ marginRight: '1px' }}>
+                                    {embeddingIndexState.status === 'error' && embeddingIndexState.error && (
+                                        <span className="display-flex font-color-red mt-1">
+                                            Error: {embeddingIndexState.error}
+                                        </span>
+                                    )}
+                                </>
+                            }
+                            control={
                                 <Button
                                     variant="outline"
-                                    rightIcon={verifyButtonProps.icon}
-                                    iconClassName={verifyButtonProps.iconClassName}
-                                    onClick={handleVerifySync}
-                                    disabled={verifyButtonProps.disabled}
+                                    rightIcon={!isEmbeddingIndexing ? rebuildIndexButtonProps.icon : undefined}
+                                    iconClassName={rebuildIndexButtonProps.iconClassName}
+                                    onClick={handleRebuildSearchIndex}
+                                    disabled={rebuildIndexButtonProps.disabled}
+                                    loading={isEmbeddingIndexing}
+                                    style={{ padding: '4px 6px' }}
                                 >
-                                    {verifyButtonProps.text}
+                                    {rebuildIndexButtonProps.text}
                                 </Button>
-                            </div>
-
-                            <SectionLabel>Sync Settings</SectionLabel>
-                            <SettingsGroup>
-                                <SettingsRow
-                                    title="Coordinate with Zotero Sync"
-                                    description="Builds on Zotero sync for multi-device and group library support"
-                                    onClick={() => {
-                                        if ((!isLibrarySynced(1) && !syncWithZotero)) return;
-                                        handleSyncToggleChange(!localSyncToggle);
-                                    }}
-                                    disabled={!isLibrarySynced(1) && !syncWithZotero}
-                                    tooltip={
-                                        !isLibrarySynced(1) && !syncWithZotero
-                                            ? 'Enable Zotero sync for your main library to use this feature.'
-                                            : 'When enabled, Beaver will build on Zotero sync for multi-device support and improved sync.'
-                                    }
-                                    control={
-                                        <div className="display-flex flex-row items-center gap-2">
-                                            {!(!isLibrarySynced(1) && !syncWithZotero) && !(!isLibrarySynced(1) && syncWithZotero) && !localSyncToggle && (
-                                                <span className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary">
-                                                    Recommended
-                                                </span>
-                                            )}
-                                            {!isLibrarySynced(1) && syncWithZotero && (
-                                                <span
-                                                    className="text-xs px-15 py-05 rounded-md"
-                                                    style={{ color: 'var(--tag-red-secondary)', border: '1px solid var(--tag-red-tertiary)', background: 'var(--tag-red-quinary)' }}
-                                                    title="Unable to sync with Beaver. Please enable Zotero sync in Zotero preferences, sign into your Zotero account or disable the Beaver preference 'Sync with Zotero'."
-                                                >
-                                                    Error
-                                                </span>
-                                            )}
-                                            <input
-                                                type="checkbox"
-                                                aria-label="Coordinate with Zotero Sync"
-                                                checked={localSyncToggle}
-                                                onChange={() => handleSyncToggleChange(!localSyncToggle)}
-                                                onClick={(e) => e.stopPropagation()}
-                                                disabled={!isLibrarySynced(1) && !syncWithZotero}
-                                                style={{ cursor: 'pointer', margin: 0 }}
-                                            />
-                                        </div>
-                                    }
-                                />
-                            </SettingsGroup>
-                        </span>
-                    ) : (
-                        <>
-                            <SectionLabel>Libraries</SectionLabel>
-                            <ExcludedLibrariesList />
-
-                            <SectionLabel>Search Index</SectionLabel>
-                            <SettingsGroup>
-                                <SettingsRow
-                                    title="Search Index"
-                                    description={
-                                        <>
-                                            Check that the local search index matches your Zotero libraries.
-                                            This usually happens automatically, but you can run a manual check if search results look out of date.
-                                            {embeddingIndexState.failedItems > 0 && (
-                                                <span className="display-flex font-color-yellow mt-1">
-                                                    {embeddingIndexState.failedItems} items failed to index
-                                                </span>
-                                            )}
-                                            {embeddingIndexState.status === 'error' && embeddingIndexState.error && (
-                                                <span className="display-flex font-color-red mt-1">
-                                                    Error: {embeddingIndexState.error}
-                                                </span>
-                                            )}
-                                        </>
-                                    }
-                                    control={
-                                        <Button
-                                            variant="outline"
-                                            rightIcon={!isEmbeddingIndexing ? rebuildIndexButtonProps.icon : undefined}
-                                            iconClassName={rebuildIndexButtonProps.iconClassName}
-                                            onClick={handleRebuildSearchIndex}
-                                            disabled={rebuildIndexButtonProps.disabled}
-                                            loading={isEmbeddingIndexing}
-                                            style={{ padding: '4px 6px' }}
-                                        >
-                                            {rebuildIndexButtonProps.text}
-                                        </Button>
-                                    }
-                                />
-                                {isEmbeddingIndexing && embeddingIndexState.phase === 'initial' && embeddingIndexState.totalItems > 0 && (
-                                    <EmbeddingIndexProgress />
-                                )}
-                            </SettingsGroup>
-                        </>
-                    )}
-
-                    {isDatabaseSyncSupported && (
-                        <>
-                            <SectionLabel>File Processing Status</SectionLabel>
-                            <FileStatusDisplay 
-                                connectionStatus={connectionStatus === 'idle' && manualRefreshTime ? 'connected' : connectionStatus} 
-                                isManualRefresh={connectionStatus === 'idle' && !!manualRefreshTime}
-                            />
-                            
-                            {connectionStatus === 'idle' && manualRefreshTime && (
-                                <div className="display-flex flex-row items-center font-color-secondary text-sm mt-2 ml-1">
-                                    <span>
-                                        Last refreshed {
-                                            Math.floor((now - manualRefreshTime.getTime()) / 60000) === 0 
-                                                ? "just now" 
-                                                : `${Math.floor((now - manualRefreshTime.getTime()) / 60000)} minute${Math.floor((now - manualRefreshTime.getTime()) / 60000) !== 1 ? 's' : ''} ago`
-                                        }.
-                                    </span>
-                                    <button 
-                                        className="text-link-muted scale-80 -ml-2"
-                                        onClick={handleManualRefresh}
-                                        disabled={isManualRefreshing}
-                                    >
-                                        {isManualRefreshing ? 'Refreshing...' : 'Refresh now'}
-                                    </button>
-                                </div>
-                            )}
-                        </>
-                    )}
+                            }
+                        />
+                        {isEmbeddingIndexing && embeddingIndexState.phase === 'initial' && embeddingIndexState.totalItems > 0 && (
+                            <EmbeddingIndexProgress />
+                        )}
+                    </SettingsGroup>
                 </>
             )}
 

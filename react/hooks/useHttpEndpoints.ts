@@ -21,10 +21,10 @@
 import { useEffect } from 'react';
 import { useAtomValue } from 'jotai';
 import { isAuthenticatedAtom } from '../atoms/auth';
-import { logger } from '../../src/utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { getZoteroUserIdentifier } from '../../src/utils/zoteroUtils';
-import { providerConnection } from '../../src/services/providerConnection';
-import { enqueueMutatingAction } from '../../src/services/agentActionQueue';
+import { providerConnection } from '@beaver/agent-core/transport/providerConnection';
+import { enqueueMutatingAction } from '@beaver/agent-core/transport/agentActionQueue';
 import { getPref, setPref } from '../../src/utils/prefs';
 import {
     handleZoteroDataRequest,
@@ -34,9 +34,11 @@ import {
     handleZoteroAttachmentSearchRequest,
     handleItemSearchByMetadataRequest,
     handleItemSearchByTopicRequest,
+    handleItemQuickSearchRequest,
     // Library management tools
     handleZoteroSearchRequest,
     handleListItemsRequest,
+    handleResolvePopulationRequest,
     handleGetMetadataRequest,
     handleFindAnnotationsRequest,
     handleListLibrariesRequest,
@@ -86,6 +88,10 @@ import {
     handleTestNoteUndoHttpRequest,
 } from './httpHandlers/testNoteHandlers';
 import {
+    handleTestCollectionCreateHttpRequest,
+    handleTestCollectionDeleteHttpRequest,
+} from './httpHandlers/testCollectionHandlers';
+import {
     handleTestAnnotationCreateHttpRequest,
 } from './httpHandlers/testAnnotationHandlers';
 import {
@@ -116,6 +122,9 @@ import {
 import {
     handleTestSnapshotExtractHttpRequest,
 } from './httpHandlers/testSnapshotHandlers';
+import {
+    handleTestCreateReportHttpRequest,
+} from './httpHandlers/testReportHandlers';
 import {
     handleTestEpubAnnotationParityHttpRequest,
 } from './httpHandlers/testEpubAnnotationHandlers';
@@ -152,8 +161,15 @@ import {
     handleTestLoadThreadHttpRequest,
     handleTestListActionsHttpRequest,
     handleTestApproveActionHttpRequest,
+    handleTestConfirmCreditsHttpRequest,
     handleTestUndoActionHttpRequest,
 } from './httpHandlers/testChatHandlers';
+import {
+    handleTestApplicationStateHttpRequest,
+    handleTestBeaverSidebarHttpRequest,
+    handleTestBeaverWindowHttpRequest,
+    handleTestSelectTabHttpRequest,
+} from './httpHandlers/testApplicationStateHandlers';
 import type {
     WSZoteroDataRequest,
     WSExternalReferenceCheckRequest,
@@ -162,9 +178,11 @@ import type {
     WSZoteroAttachmentSearchRequest,
     WSItemSearchByMetadataRequest,
     WSItemSearchByTopicRequest,
+    WSItemQuickSearchRequest,
     // Library management tools
     WSZoteroSearchRequest,
     WSListItemsRequest,
+    WSResolvePopulationRequest,
     WSGetMetadataRequest,
     WSFindAnnotationsRequest,
     WSListLibrariesRequest,
@@ -175,7 +193,7 @@ import type {
     WSAgentActionExecuteRequest,
     // Notes
     WSReadNoteRequest,
-} from '../../src/services/agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 
 
 // =============================================================================
@@ -202,12 +220,14 @@ const ENDPOINT_PATHS = [
     '/beaver/external-reference-check',
     '/beaver/search/metadata',
     '/beaver/search/topic',
+    '/beaver/search/quick',
     '/beaver/attachment/document',
     '/beaver/attachment/page-images',
     '/beaver/attachment/search',
     // Library management tools
     '/beaver/library/search',
     '/beaver/library/list',
+    '/beaver/library/resolve-population',
     '/beaver/library/metadata',
     '/beaver/library/find-annotations',
     '/beaver/library/libraries',
@@ -248,6 +268,9 @@ const ENDPOINT_PATHS = [
     '/beaver/test/note-open-editor',
     '/beaver/test/note-close-editor',
     '/beaver/test/note-undo',
+    // Test-only endpoints (collection seeding/teardown)
+    '/beaver/test/collection-create',
+    '/beaver/test/collection-delete',
     // Test-only endpoints (headless PDF annotations)
     '/beaver/test/annotation-create',
     // Test-only endpoints (MuPDF worker singleton stats / lifecycle)
@@ -282,6 +305,8 @@ const ENDPOINT_PATHS = [
     // EPUB extraction over a raw file path or attachment (corpus triage)
     '/beaver/test/epub-extract',
     '/beaver/test/snapshot-extract',
+    // Generated HTML reports stored as snapshot attachments (dev-only)
+    '/beaver/test/create-report',
     // EPUB annotation CFI/sortIndex parity (headless resolver vs reader)
     '/beaver/test/epub-annotation-parity',
     // Snapshot annotation selector/sortIndex parity (headless resolver vs reader)
@@ -321,7 +346,12 @@ const ENDPOINT_PATHS = [
     '/beaver/test/load-thread',
     '/beaver/test/list-actions',
     '/beaver/test/approve-action',
+    '/beaver/test/confirm-credits',
     '/beaver/test/undo-action',
+    '/beaver/test/application-state',
+    '/beaver/test/beaver-window',
+    '/beaver/test/beaver-sidebar',
+    '/beaver/test/select-tab',
 ] as const;
 
 /**
@@ -423,9 +453,11 @@ async function handleMetadataSearchHttpRequest(request: any) {
     };
     
     const response = await handleItemSearchByMetadataRequest(wsRequest);
-    
+
     return {
         items: response.items,
+        error: response.error ?? null,
+        error_code: response.error_code ?? null,
     };
 }
 
@@ -445,9 +477,40 @@ async function handleTopicSearchHttpRequest(request: any) {
     };
     
     const response = await handleItemSearchByTopicRequest(wsRequest);
-    
+
     return {
         items: response.items,
+        error: response.error ?? null,
+        error_code: response.error_code ?? null,
+    };
+}
+
+async function handleQuickSearchHttpRequest(request: any) {
+    const wsRequest: WSItemQuickSearchRequest = {
+        event: 'item_quick_search_request',
+        request_id: generateRequestId(),
+        query: request.query,
+        item_type_filter: request.item_type_filter,
+        libraries_filter: request.libraries_filter,
+        tags_filter: request.tags_filter,
+        collections_filter: request.collections_filter,
+        detail: request.detail,
+        include_citation: request.include_citation,
+        limit: request.limit,
+        offset: request.offset,
+    };
+
+    const response = await handleItemQuickSearchRequest(wsRequest);
+
+    return {
+        items: response.items,
+        detail: response.detail,
+        total_count: response.total_count,
+        // Without this a caller reads a truncated total as the complete match
+        // count and pages into a hole. LocalhostFrontendCapability reads it.
+        truncated: response.truncated ?? false,
+        error: response.error ?? null,
+        error_code: response.error_code ?? null,
     };
 }
 
@@ -459,7 +522,6 @@ async function handleAttachmentDocumentHttpRequest(request: any) {
         external_file_key: request.external_file_key,
         mode: request.mode ?? 'structured',
         max_pages: request.max_pages,
-        max_file_size_mb: request.max_file_size_mb,
         timeout_seconds: request.timeout_seconds,
     };
 
@@ -589,6 +651,47 @@ async function handleLibraryListHttpRequest(request: any) {
     };
 }
 
+/**
+ * Population resolution over HTTP. The backend's localhost frontend posts here,
+ * so the accepted body and the returned shape must stay identical to the
+ * `resolve_population` wire request/response.
+ */
+async function handleResolvePopulationHttpRequest(request: any) {
+    const wsRequest: WSResolvePopulationRequest = {
+        event: 'resolve_population_request',
+        request_id: generateRequestId(),
+        library_id: request.library_id,
+        collection_keys: request.collection_keys ?? [],
+        recursive: request.recursive ?? true,
+        tags: request.tags ?? [],
+        unfiled: request.unfiled ?? false,
+        untagged: request.untagged ?? false,
+        conditions: request.conditions || [],
+        item_category: request.item_category === 'attachment' ? 'attachment' : 'regular',
+        has_attachments: request.has_attachments ?? null,
+        max_items: request.max_items ?? 1000,
+    };
+
+    const response = await handleResolvePopulationRequest(wsRequest);
+
+    return {
+        item_ids: response.item_ids,
+        total_count: response.total_count,
+        truncated: response.truncated,
+        // The place the population lives, which the approval card states from
+        // these alone — the WebSocket transport forwards them, so this one has
+        // to as well or a localhost run loses the WHERE half of the card.
+        library_name: response.library_name,
+        collection_names: response.collection_names,
+        // A dropped condition widens the population; the caller must not act on
+        // ids that came back with a warning.
+        warnings: response.warnings,
+        error: response.error,
+        error_code: response.error_code,
+        available_libraries: response.available_libraries,
+    };
+}
+
 async function handleLibraryMetadataHttpRequest(request: any) {
     const wsRequest: WSGetMetadataRequest = {
         event: 'get_metadata_request',
@@ -596,12 +699,15 @@ async function handleLibraryMetadataHttpRequest(request: any) {
         item_ids: request.item_ids || [],
         include_attachments: request.include_attachments ?? false,
         include_notes: request.include_notes ?? false,
+        detail: request.detail,
+        include_citation: request.include_citation,
     };
 
     const response = await handleGetMetadataRequest(wsRequest);
 
     return {
         items: response.items,
+        detail: response.detail,
         not_found: response.not_found,
         error: response.error,
         error_code: response.error_code,
@@ -664,6 +770,7 @@ async function handleListCollectionsHttpRequest(request: any) {
         library_id: request.library_id,
         parent_collection_key: request.parent_collection_key,
         include_item_counts: request.include_item_counts ?? false,
+        recursive: request.recursive ?? false,
         limit: request.limit ?? 50,
         offset: request.offset ?? 0,
     };
@@ -687,6 +794,7 @@ async function handleListTagsHttpRequest(request: any) {
         library_id: request.library_id,
         collection_key: request.collection_key,
         min_item_count: request.min_item_count ?? 0,
+        name_query: request.name_query,
         limit: request.limit ?? 50,
         offset: request.offset ?? 0,
     };
@@ -833,9 +941,12 @@ function registerEndpoints(): boolean {
     Zotero.Server.Endpoints['/beaver/search/metadata'] = 
         createEndpoint(handleMetadataSearchHttpRequest);
     
-    Zotero.Server.Endpoints['/beaver/search/topic'] = 
+    Zotero.Server.Endpoints['/beaver/search/topic'] =
         createEndpoint(handleTopicSearchHttpRequest);
-    
+
+    Zotero.Server.Endpoints['/beaver/search/quick'] =
+        createEndpoint(handleQuickSearchHttpRequest);
+
     Zotero.Server.Endpoints['/beaver/attachment/document'] =
         createEndpoint(handleAttachmentDocumentHttpRequest);
     
@@ -852,6 +963,9 @@ function registerEndpoints(): boolean {
     Zotero.Server.Endpoints['/beaver/library/list'] = 
         createEndpoint(handleLibraryListHttpRequest);
     
+    Zotero.Server.Endpoints['/beaver/library/resolve-population'] =
+        createEndpoint(handleResolvePopulationHttpRequest);
+
     Zotero.Server.Endpoints['/beaver/library/metadata'] =
         createEndpoint(handleLibraryMetadataHttpRequest);
 
@@ -981,6 +1095,13 @@ function registerEndpoints(): boolean {
         Zotero.Server.Endpoints['/beaver/test/note-undo'] =
             createEndpoint(handleTestNoteUndoHttpRequest);
 
+        // Collection seeding/teardown (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/collection-create'] =
+            createEndpoint(handleTestCollectionCreateHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/collection-delete'] =
+            createEndpoint(handleTestCollectionDeleteHttpRequest);
+
         // Headless PDF annotation primitives (dev-only)
         Zotero.Server.Endpoints['/beaver/test/annotation-create'] =
             createEndpoint(handleTestAnnotationCreateHttpRequest);
@@ -1046,6 +1167,10 @@ function registerEndpoints(): boolean {
         // Snapshot extraction over a raw HTML file path / attachment
         Zotero.Server.Endpoints['/beaver/test/snapshot-extract'] =
             createEndpoint(handleTestSnapshotExtractHttpRequest);
+
+        // Generated HTML report stored as a snapshot attachment
+        Zotero.Server.Endpoints['/beaver/test/create-report'] =
+            createEndpoint(handleTestCreateReportHttpRequest);
 
         // EPUB annotation CFI/sortIndex parity: headless resolver vs the reader's
         // own getAnnotationFromRange for the same target.
@@ -1146,8 +1271,22 @@ function registerEndpoints(): boolean {
             createEndpoint(handleTestListActionsHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/approve-action'] =
             createEndpoint(handleTestApproveActionHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/confirm-credits'] =
+            createEndpoint(handleTestConfirmCreditsHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/undo-action'] =
             createEndpoint(handleTestUndoActionHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/application-state'] =
+            createEndpoint(handleTestApplicationStateHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/beaver-window'] =
+            createEndpoint(handleTestBeaverWindowHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/beaver-sidebar'] =
+            createEndpoint(handleTestBeaverSidebarHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/select-tab'] =
+            createEndpoint(handleTestSelectTabHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);

@@ -3,12 +3,12 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom } from '../../../atoms/profile';
 import { PlusSignIcon, CSSIcon, Icon } from '../../icons/icons';
-import SearchMenu, { MenuPosition, SearchMenuItem } from '../../ui/menus/SearchMenu';
+import SearchMenu, { MenuPosition, SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
 import { getLibraryItemCounts, LibraryStatistics } from '../../../../src/utils/libraries';
 import { isLibraryValidForSync, isLibraryValidForSyncWithServerCheck } from '../../../../src/utils/sync';
-import { logger } from '../../../../src/utils/logger';
-import { accountService } from '../../../../src/services/accountService';
-import { ZoteroLibrary } from '../../../types/zotero';
+import { logger } from '@beaver/agent-core/platform/logger';
+import { accountService } from '@beaver/agent-core/transport/clients/accountService';
+import { ZoteroLibrary } from '@beaver/agent-core/types/zotero';
 import { serializeZoteroLibrary } from '../../../../src/utils/zoteroSerializers';
 
 interface AddLibraryButtonProps {

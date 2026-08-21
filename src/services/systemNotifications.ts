@@ -2,7 +2,7 @@
  * OS-native system notifications for events the user may miss while working
  * outside the Beaver UI.
  *
- * Three events are surfaced:
+ * Five events are surfaced:
  *   - Deferred approval requests (note edit, metadata change, cost
  *     confirmation, ...): the approval UI only renders inside the Beaver
  *     sidebar, so if the user is elsewhere the task stalls waiting for a
@@ -10,10 +10,15 @@
  *   - User questions (ask_user_question tool): the question panel only renders
  *     inside the sidebar, so the run stalls until the user answers and a user
  *     working elsewhere has no signal it is waiting (see notifyUserQuestion).
+ *   - Credit confirmations: the run pauses on a spending decision that can only
+ *     be answered in the sidebar (see notifyCreditConfirmation).
+ *   - Batch approvals: the run pauses before a batch starts changing the
+ *     library, and the card only renders in the sidebar (see
+ *     notifyBatchApproval).
  *   - Completed responses: the reply only renders inside the sidebar, so a
  *     user working elsewhere has no signal it is ready (see notifyRunComplete).
  *
- * Both are gated on whether the user can currently see the Beaver UI. Three
+ * All are gated on whether the user can currently see the Beaver UI. Three
  * visibility scenarios are handled (see getBeaverVisibility):
  *   A) Beaver UI is on screen and focused  -> no notification (user sees it).
  *   B) A Zotero window is focused but Beaver is not visible -> system
@@ -27,12 +32,17 @@
  */
 
 import { config } from "../../package.json";
-import { logger } from "../utils/logger";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { getPref } from "../utils/prefs";
 import { store } from "../../react/store";
 import { isSidebarVisibleAtom } from "../../react/atoms/ui";
 import { BeaverUIFactory } from "../ui/ui";
-import { WSAskUserQuestionRequest, WSDeferredApprovalRequest } from "./agentProtocol";
+import {
+    WSAskUserQuestionRequest,
+    WSBatchApprovalRequest,
+    WSCreditConfirmationRequest,
+    WSDeferredApprovalRequest,
+} from "@beaver/agent-core/protocol/agentProtocol";
 
 type BeaverVisibility = "beaver-visible" | "zotero-focused" | "zotero-unfocused";
 
@@ -44,7 +54,13 @@ const NOTIFICATION_ICON = `chrome://${config.addonRef}/content/icons/beaver.png`
 // notifications from replacing each other.
 const APPROVAL_NOTIFICATION_NAME = "beaver-approval";
 const QUESTION_NOTIFICATION_NAME = "beaver-question";
+const CREDIT_CONFIRMATION_NOTIFICATION_NAME = "beaver-credit-confirmation";
+const BATCH_APPROVAL_NOTIFICATION_NAME = "beaver-batch-approval";
 const RUN_COMPLETE_NOTIFICATION_NAME = "beaver-run-complete";
+
+// Notification bodies are one-liners in the OS shell; longer copy is elided
+// rather than wrapped. The card in the sidebar carries the full text.
+const MAX_BODY_CHARS = 160;
 
 // Parallel tool calls can queue several approvals in the same tick. Collect
 // them for a short window and surface a single notification with a count.
@@ -91,6 +107,31 @@ function getBeaverVisibility(): BeaverVisibility {
 }
 
 /**
+ * Whether an event that stalls waiting for the user should surface an
+ * OS-native notification: the user opted in, and the Beaver UI is not already
+ * in front of them.
+ */
+function shouldNotifySystem(): boolean {
+    if (getPref("enableSystemNotifications") !== true) {
+        return false;
+    }
+
+    switch (getBeaverVisibility()) {
+        case "beaver-visible":
+            // Scenario A: the pending UI is already on screen — nothing to do.
+            return false;
+        case "zotero-focused":
+            // SCENARIO B: Zotero is focused but Beaver is not visible.
+            // TODO: when an in-app Zotero notification exists, route this case
+            // there instead of falling through to a system notification.
+            return true;
+        case "zotero-unfocused":
+            // Scenario C: Zotero is in the background.
+            return true;
+    }
+}
+
+/**
  * Human-readable notification text for an approval request.
  */
 function describeApproval(event: WSDeferredApprovalRequest): { title: string; body: string } {
@@ -103,6 +144,8 @@ function describeApproval(event: WSDeferredApprovalRequest): { title: string; bo
         case "edit_note":
         case "edit_note_batch":
             return { title, body: "Review a note edit to let the task continue." };
+        case "edit_annotations":
+            return { title, body: "Review an annotation change to let the task continue." };
         case "edit_metadata":
             return { title, body: "Review a metadata change to let the task continue." };
         default:
@@ -219,24 +262,8 @@ function flushQueuedApprovals(): void {
  * request, based on whether the user can currently see the Beaver UI.
  */
 export function notifyApprovalRequest(event: WSDeferredApprovalRequest): void {
-    if (getPref("enableSystemNotifications") !== true) {
+    if (!shouldNotifySystem()) {
         return;
-    }
-
-    const visibility = getBeaverVisibility();
-
-    switch (visibility) {
-        case "beaver-visible":
-            // Scenario A: the approval UI is already on screen — nothing to do.
-            return;
-        case "zotero-focused":
-            // SCENARIO B: Zotero is focused but Beaver is not visible.
-            // TODO: when an in-app Zotero notification exists, route this case
-            // there instead of falling through to a system notification.
-            break;
-        case "zotero-unfocused":
-            // Scenario C: Zotero is in the background.
-            break;
     }
 
     // Coalesce a burst of parallel approvals into a single notification. The
@@ -274,28 +301,64 @@ function describeQuestions(event: WSAskUserQuestionRequest): { title: string; bo
  * and the user can't currently see the Beaver UI.
  */
 export function notifyUserQuestion(event: WSAskUserQuestionRequest): void {
-    if (getPref("enableSystemNotifications") !== true) {
+    if (!shouldNotifySystem()) {
         return;
-    }
-
-    const visibility = getBeaverVisibility();
-
-    switch (visibility) {
-        case "beaver-visible":
-            // Scenario A: the question is already on screen — nothing to do.
-            return;
-        case "zotero-focused":
-            // SCENARIO B: Zotero is focused but Beaver is not visible.
-            // TODO: when an in-app Zotero notification exists, route this case
-            // there instead of falling through to a system notification.
-            break;
-        case "zotero-unfocused":
-            // Scenario C: Zotero is in the background.
-            break;
     }
 
     const { title, body } = describeQuestions(event);
     showNotification(title, body, QUESTION_NOTIFICATION_NAME);
+}
+
+/** Shorten a body to one notification-sized line. */
+function truncateBody(text: string): string {
+    const cleaned = text.replace(/\s+/g, " ").trim();
+    return cleaned.length > MAX_BODY_CHARS
+        ? `${cleaned.slice(0, MAX_BODY_CHARS - 1).trimEnd()}…`
+        : cleaned;
+}
+
+/**
+ * Surface a system notification when a run pauses for a credit confirmation
+ * and the user can't currently see the Beaver UI.
+ *
+ * The title and body are the backend's own copy — this path composes no
+ * wording of its own, exactly as the card does.
+ */
+export function notifyCreditConfirmation(event: WSCreditConfirmationRequest): void {
+    if (!shouldNotifySystem()) {
+        return;
+    }
+
+    // Keep notification copy consistent with the backend-provided card text.
+    showNotification(
+        event.title,
+        truncateBody(event.message),
+        CREDIT_CONFIRMATION_NOTIFICATION_NAME,
+    );
+}
+
+/**
+ * Surface a system notification when a run pauses for a batch approval and the
+ * user can't currently see the Beaver UI.
+ *
+ * The title and body are the backend's own copy — this path composes no
+ * wording of its own, exactly as the card does.
+ *
+ * The body is the batch goal. The destructive warning stays on the card: it is
+ * a separate claim about what will be removed, it only reads as one in its own
+ * block, and appending it here would both invent a combined sentence and risk
+ * eliding a destruction claim mid-word at the one-line limit.
+ */
+export function notifyBatchApproval(event: WSBatchApprovalRequest): void {
+    if (!shouldNotifySystem()) {
+        return;
+    }
+
+    showNotification(
+        event.title,
+        truncateBody(event.message),
+        BATCH_APPROVAL_NOTIFICATION_NAME,
+    );
 }
 
 /**

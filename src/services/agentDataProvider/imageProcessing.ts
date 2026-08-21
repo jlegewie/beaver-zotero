@@ -12,7 +12,7 @@
  * element-based image loading fails.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /** Default maximum output dimension (longest edge) in pixels. */
 export const DEFAULT_MAX_IMAGE_DIMENSION = 1568;

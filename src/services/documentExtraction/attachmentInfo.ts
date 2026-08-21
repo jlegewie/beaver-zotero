@@ -1,15 +1,16 @@
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode, isTransientWorkerError } from '../../beaver-extract';
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { getPref } from '../../utils/prefs';
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';
-import { effectiveMaxFileSizeMB } from '../attachmentLimits';
+import { effectiveMaxFileSizeMB } from '@beaver/agent-core/transport/attachmentLimits';
 import { isRemoteFilePath, makeRemoteFilePath } from '../documentFileIdentity';
 import type { DocumentCacheMetadata } from '../documentCache';
 import { getContentKind } from './attachmentResolution';
-import { isReadableContentKind, type AttachmentInfo, type ContentKind } from './shared/contentKinds';
+import { isReadableContentKind, type AttachmentInfo, type ContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from './shared/pageCount';
 import type { TimingAccumulator } from '../../utils/timing';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
+import { safeAttachmentFilename } from '../../utils/attachmentFiles';
 import { createAbortController } from '../../utils/abortController';
 import { MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS } from '../agentDataProvider/timeout';
 
@@ -519,7 +520,6 @@ async function loadRemoteData(attachment: Zotero.Item, filePath: string): Promis
     const result = await loadAttachmentData({
         item: attachment,
         source: { kind: 'remote', filePath, isRemoteOnly: true },
-        maxFileSizeMB: effectiveMaxFileSizeMB(),
     });
     if (result.kind === 'ok') {
         return result.data;
@@ -551,7 +551,7 @@ export async function getAttachmentInfo(
         library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         parent_item_id: options.parentItemId ?? defaultParentItemId(item),
         title: item.getField?.('title') || item.getDisplayTitle?.() || null,
-        filename: item.attachmentFilename || null,
+        filename: safeAttachmentFilename(item),
         content_kind: contentKind,
         status: 'unreadable',
         page_count: null,

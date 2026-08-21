@@ -1,10 +1,9 @@
-import { ApiService } from './apiService';
-import API_BASE_URL from '../utils/getAPIBaseURL';
+import { ApiService } from '@beaver/agent-core/transport/apiService';
 import { UploadStatus } from './attachmentsService';
-import { ItemData, DeleteData, AttachmentDataWithMimeType, ZoteroCollection } from '../../react/types/zotero';
-import { ZoteroItemReference } from '../../react/types/zotero';
+import { ItemData, DeleteData, AttachmentDataWithMimeType, ZoteroCollection } from '@beaver/agent-core/types/zotero';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { SyncMethod, SyncType } from '../../react/atoms/sync';
-import { logger } from '../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 // Types that match the backend models
 export interface ItemBatchRequest {
@@ -183,7 +182,7 @@ export class SyncService extends ApiService {
      * Creates a new SyncService instance
      * @param backendUrl The base URL of the backend API
      */
-    constructor(backendUrl: string) {
+    constructor(backendUrl?: string) {
         super(backendUrl);
     }
 
@@ -386,4 +385,4 @@ export class SyncService extends ApiService {
 }
 
 // Export syncService
-export const syncService = new SyncService(API_BASE_URL);
+export const syncService = new SyncService();

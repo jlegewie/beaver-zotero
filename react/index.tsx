@@ -11,12 +11,14 @@ import WindowSidebar from './components/WindowSidebar';
 import FloatingPopupRoot from './components/FloatingPopupRoot';
 import PreferencesWindow from './components/PreferencesWindow';
 import { PreferencePageTab } from './atoms/ui';
-import type { ActionCategoryFilter } from './types/actions';
+import type { ActionCategoryFilter } from '@beaver/agent-core/types/actions';
 import { useZoteroTabSelection } from './hooks/useZoteroTabSelection';
 import { useZoteroContext } from './hooks/useZoteroContext';
+import { useReaderTabSelection } from './hooks/useReaderTabSelection';
 import { useProfileSync } from './hooks/useProfileSync';
 import { useToggleSidebar } from './hooks/useToggleSidebar';
 import { store } from './store';
+import { closeWSConnectionForShutdownAtom } from './atoms/agentRunAtoms';
 import { useValidateSyncLibraries } from './hooks/useValidateSyncLibraries';
 import { useUpgradeHandler } from './hooks/useUpgradeHandler';
 import { useHttpEndpoints } from './hooks/useHttpEndpoints';
@@ -28,10 +30,22 @@ import { useReaderSelectionActionHandler } from './hooks/useReaderSelectionActio
 import { useReaderAnnotationActionHandler } from './hooks/useReaderAnnotationActionHandler';
 import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerActionHandler';
 import { useOnboardingPopups } from './hooks/useOnboardingPopups';
+import { useInterruptedThreadPopup } from './hooks/useInterruptedThreadPopup';
 import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
 import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
+import { setTransportConfig } from '@beaver/agent-core/transport/config';
 import { registerZoteroHost } from './host/zotero';
+import { registerZoteroDataProvider } from '../src/services/zoteroDataProvider';
+import { registerZoteroLibraryIdentity } from '../src/utils/libraryIdentity';
+import { registerZoteroClientIdentity } from '../src/services/zoteroClientIdentity';
+import { setThreadAgentName } from '@beaver/agent-core/transport/threadService';
+import { setActionClient } from '@beaver/agent-core/types/actions';
+import { ZOTERO_AGENT_NAME, ZOTERO_PLUGIN_CLIENT_TYPE } from '@beaver/agent-core/protocol/agentProtocol';
+import { registerZoteroSupabaseStorage, registerZoteroSupabaseReloadBridge } from '../src/services/zoteroSupabaseStorage';
+import { setSupabaseAuthPolicy } from '@beaver/agent-core/transport/supabaseClient';
+import { registerZoteroBusyContext } from '../src/services/busyContext';
+import { registerZoteroSyncPause } from '../src/services/syncPause';
 import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
 
 // Configure the PDF package (webpack bundle copy). The esbuild bundle
@@ -43,10 +57,73 @@ import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
 // Only the webpack copy wires `onWorkerStartFailure` to an in-app popup (hot worker only)
 configurePDFForBeaver({ onWorkerStartFailure: notifyWorkerStartFailure });
 
+// Register the backend endpoints. The `process.env` reads live here rather
+// than in the transport layer because they only work under a bundler that
+// substitutes them at build time; other hosts resolve the same values at
+// runtime. Must run before the first backend request or Supabase client use.
+setTransportConfig({
+    apiBaseUrl: process.env.API_BASE_URL ?? '',
+    supabaseUrl: process.env.SUPABASE_URL ?? '',
+    supabaseAnonKey: process.env.SUPABASE_ANON_KEY ?? '',
+});
+
 // Register the Zotero client host so rendered chat-history components can
 // resolve host-specific navigation and data lookups. Non-Zotero clients omit
 // this and run the render surface with the default empty host.
 registerZoteroHost();
+
+// Register the Zotero agent data-provider as the default for AgentService and
+// ProviderConnection. Must run before either singleton serves its first
+// WebSocket data request (both resolve their provider lazily on first use, so
+// this only needs to land before that point, not before module load).
+registerZoteroDataProvider();
+
+// Register the Zotero library-identity resolvers: the object-id resolver used
+// by citation and note-reference parsing (citationGrammar.ts) to resolve a
+// portable library_ref to this device's local library_id, and the reverse
+// lookup that stamps a local library_id with its portable ref. Must run before
+// any note or citation is read.
+registerZoteroLibraryIdentity();
+
+// Register the Zotero client identity provider used to build the auth
+// handshake's frontend_version/client_type/client_features/zotero_instance
+// fields. Must run before ProviderConnection opens its first connection.
+registerZoteroClientIdentity();
+
+// Declare the client actions are gated on, so a shared action declaring which
+// clients it supports is matched against this one. The esbuild bundle registers
+// the same value from `src/hooks.ts` for its own copy of that module state.
+setActionClient(ZOTERO_PLUGIN_CLIENT_TYPE);
+
+// Scope every thread list to the Zotero agent, matching the agent name the
+// backend stamps on threads this client creates. Without it the list would
+// also show threads created by the user's other Beaver clients.
+setThreadAgentName(ZOTERO_AGENT_NAME);
+
+// Register the Zotero encrypted-storage adapter the Supabase auth session
+// persists into. Must run before the exported `supabase` client is first
+// used (the client is created lazily on first property access).
+registerZoteroSupabaseStorage();
+
+// Zotero runs a single window that may sit obscured for long stretches while
+// its session must stay alive, so the auth client refreshes on its own ticker
+// rather than only while the window is visible. Must run before the client is
+// first used; this restates the default explicitly.
+setSupabaseAuthPolicy({ forceAutoRefresh: true });
+
+// Register the window-scoped bridge to Supabase state that survives a plugin
+// reload. Registering is what stops a previous bundle instance's auto-refresh
+// ticker (two tickers race for the single-use refresh token) and adopts its
+// auth lock, so it must run before the client is first used.
+registerZoteroSupabaseReloadBridge();
+
+// Register the Zotero busy-context snapshot attached to outgoing WS
+// diagnostics, and the sync-pause resume handler released when a mutating
+// data request settles. Both are optional niceties (diagnostics, and
+// suppressing Zotero's own sync) rather than requirements for a correct
+// agent run, but the Zotero plugin always provides them.
+registerZoteroBusyContext();
+registerZoteroSyncPause();
 
 /**
  * Component to initialize global hooks that should only run once.
@@ -73,6 +150,11 @@ const GlobalContextInitializer = () => {
 
     // Track Zotero application state (selected items, collection, tags, etc.)
     useZoteroContext();
+
+    // Track the active reader tab (open attachment, text selection, new
+    // annotations). Global rather than sidebar-mounted so the separate Beaver
+    // window gets reader context while the main-window sidebar is closed.
+    useReaderTabSelection();
 
     // Realtime listener for user profile
     useProfileSync();
@@ -112,6 +194,9 @@ const GlobalContextInitializer = () => {
 
     // Handle first-install and first-reader onboarding popups
     useOnboardingPopups();
+
+    // Offer to reopen a chat that was cut off when Beaver last shut down
+    useInterruptedThreadPopup();
 
     // Mirror background extraction activity into the shared Jotai store
     useBackgroundWorkerStatus();
@@ -269,4 +354,20 @@ export function unmountFromElement(domElement: HTMLElement) {
 export async function cleanupTemporaryAnnotations() {
     if (process.env.NODE_ENV !== 'development') return;
     await BeaverTemporaryAnnotations.cleanupAll();
+}
+
+/**
+ * Close this window's agent connection. Called synchronously from esbuild
+ * shutdown hooks — must not add an await to teardown.
+ *
+ * `rememberInterruptedThread` records the cut-off thread for the next session
+ * to offer. The caller decides — see `onMainWindowUnload`: closing one of
+ * several windows leaves Beaver running, so an offer announcing that it closed
+ * would be plainly wrong.
+ */
+export function closeAgentConnection(
+    reason: string,
+    options?: { rememberInterruptedThread?: boolean },
+) {
+    store.set(closeWSConnectionForShutdownAtom, reason, options);
 }

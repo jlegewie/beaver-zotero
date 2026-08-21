@@ -1,6 +1,6 @@
 import React, { useCallback } from 'react';
-import { ExternalReference } from '../../types/externalReferences';
-import { getHost } from '../../host';
+import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
+import { getHost } from '@beaver/agent-ui/host';
 import ReferenceMetadataDisplay from './ReferenceMetadataDisplay';
 
 interface ExternalReferenceItemPListrops {

@@ -17,7 +17,7 @@ import type { DocumentCacheMetadata } from '../../../src/services/documentCache'
 import { WorkerDeadlineError } from '../../../src/beaver-extract';
 
 // Mock the logger to keep test output clean
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 

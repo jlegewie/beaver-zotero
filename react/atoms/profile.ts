@@ -1,10 +1,10 @@
 import { atom } from "jotai";
 import { selectAtom } from 'jotai/utils';
-import { ExcludedLibrary, SafeProfileWithPlan, PlanFeatures, ProfileBalance, ProcessingMode, CreditPlanStatus, CreditBreakdown, CreditPlan } from "../types/profile";
-import { ZoteroLibrary } from "../types/zotero";
+import { ExcludedLibrary, SafeProfileWithPlan, PlanFeatures, ProfileBalance, ProcessingMode, CreditPlanStatus, CreditBreakdown, CreditPlan } from "@beaver/agent-core/types/profile";
+import { ZoteroLibrary } from "@beaver/agent-core/types/zotero";
 import { fileStatusAtom } from "./files";
 import { compareVersions } from "../utils/compareVersions";
-import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from "../../src/services/attachmentLimits";
+import { effectiveMaxPageCount } from "@beaver/agent-core/transport/attachmentLimits";
 
 // Profile and plan state
 export const isProfileLoadedAtom = atom<boolean>(false);
@@ -101,6 +101,16 @@ export const searchableLibraryIdsAtom = atom<number[]>((get) => {
 });
 
 /**
+ * Local library IDs the user explicitly excluded in Beaver Preferences.
+ */
+export const excludedLibraryIdsAtom = atom<number[]>((get) => {
+    const excluded = new Set(get(excludedLibrariesAtom).map(excludedEntryKey));
+    return get(localZoteroLibrariesAtom)
+        .filter(lib => excluded.has(libraryExclusionKey(lib)))
+        .map(lib => lib.library_id);
+});
+
+/**
  * Whether the library-access snapshot is ready to make allow/deny decisions.
  *
  * `searchableLibraryIdsAtom` intentionally remains fail-closed while the
@@ -156,23 +166,20 @@ export const isBackendIndexingCompleteAtom = atom<boolean>((get) => {
     return profile?.indexing_complete || false;
 });
 
-export const processingModeAtom = atom<ProcessingMode>((get) => {
-    const isBackendIndexingComplete = get(isBackendIndexingCompleteAtom);
-    if (get(isDatabaseSyncSupportedAtom) && isBackendIndexingComplete) {
-        return ProcessingMode.BACKEND;
-    } else {
-        return ProcessingMode.FRONTEND;
-    }
-});
+export const processingModeAtom = atom<ProcessingMode>(() => ProcessingMode.FRONTEND);
 
 // Plan features
 export const planFeaturesAtom = atom<PlanFeatures>((get) => {
     const profile = get(profileWithPlanAtom);
+    // The plan's own upload ceiling, which the backend enforces — unrelated to
+    // the local read ceiling in `attachmentLimits`. A plan row carries whatever
+    // the API returned, so treat anything but a positive number as unset.
+    const planFileSizeLimit = profile?.plan.max_file_size_mb;
     return {
         databaseSync: profile?.plan.sync_database || false,
         uploadFiles: profile?.plan.upload_files || false,
         maxUserAttachments: profile?.plan.max_user_attachments || 2,
-        uploadFileSizeLimit: effectiveMaxFileSizeMB(profile?.plan.max_file_size_mb ?? 10),
+        uploadFileSizeLimit: planFileSizeLimit && planFileSizeLimit > 0 ? planFileSizeLimit : 10,
         maxPageCount: effectiveMaxPageCount(profile?.plan.max_page_count ?? 100),
     } as PlanFeatures;
 });

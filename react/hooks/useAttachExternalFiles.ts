@@ -1,0 +1,164 @@
+import { useCallback } from 'react';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import { attachExternalFile } from '../../src/services/externalFiles';
+import type { ExternalFileRecord } from '../../src/services/database';
+import {
+    addExternalFilesToCurrentMessageAtom,
+    composerResetTokenAtom,
+    pendingAttachmentTokensAtom,
+} from '../atoms/messageComposition';
+import { selectedModelAtom } from '../atoms/models';
+import { requestPlusToolsAtom } from '../atoms/ui';
+import { addPopupMessageAtom } from '../utils/popupMessageUtils';
+import { getPref } from '../../src/utils/prefs';
+import { logger } from '@beaver/agent-core/platform/logger';
+
+/** A file to attach: a path (file picker, clipboard) or an `nsIFile` (drop). */
+export type ExternalFileSource = string | { path: string };
+
+export interface AttachExternalFilesOptions {
+    /**
+     * Reports a rejected file (unsupported type, too large, needs vision, over
+     * the per-message limit). Defaults to a popup message.
+     */
+    onReject?: (message: string) => void;
+    /**
+     * Composition these files were staged for. Callers that do asynchronous
+     * work first pass the token from when the user acted; otherwise the
+     * composition current at the start of the attach is used.
+     */
+    composerToken?: number;
+}
+
+export interface AttachExternalFilesResult {
+    attached: ExternalFileRecord[];
+    /** Number of files rejected; every one was reported through `onReject`. */
+    rejectedCount: number;
+    /** True when the composition was replaced mid-attach, so the files were dropped. */
+    discarded?: boolean;
+}
+
+function defaultMaxFiles(): number {
+    return (getPref('maxAddAttachmentToMessage') as number) || 10;
+}
+
+/**
+ * Runs `work` while the composer holds sending for it (see
+ * `pendingAttachmentTokensAtom`), passing it the composition the work belongs
+ * to. A new or switched thread can send immediately while work for the
+ * composition it replaced runs itself out.
+ *
+ * Callers that prepare a file before attaching it wrap the whole operation, so
+ * the hold spans that too, and pass `composerToken` on to any nested call —
+ * the composition is the one the user started from, not the one current when
+ * the attach finally begins.
+ */
+export function useHoldSendForAttachment() {
+    const setPendingTokens = useSetAtom(pendingAttachmentTokensAtom);
+    const store = useStore();
+    return useCallback(async <T>(
+        work: (composerToken: number) => Promise<T>,
+        composerToken?: number,
+    ): Promise<T> => {
+        const token = composerToken ?? store.get(composerResetTokenAtom);
+        setPendingTokens((tokens) => [...tokens, token]);
+        try {
+            return await work(token);
+        } finally {
+            setPendingTokens((tokens) => {
+                // Drop one entry: concurrent attaches can share a token.
+                const index = tokens.indexOf(token);
+                return index === -1
+                    ? tokens
+                    : [...tokens.slice(0, index), ...tokens.slice(index + 1)];
+            });
+        }
+    }, [setPendingTokens, store]);
+}
+
+/**
+ * Attach files from disk to the current message as external files. Shared by
+ * drag-and-drop, the file picker, and paste, so they agree on the per-message
+ * limit, the model-capability gating, and how rejections are reported.
+ */
+export function useAttachExternalFiles() {
+    const addExternalFilesToCurrentMessage = useSetAtom(addExternalFilesToCurrentMessageAtom);
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
+    const selectedModel = useAtomValue(selectedModelAtom);
+    const requestPlusTools = useAtomValue(requestPlusToolsAtom);
+    const holdSendForAttachment = useHoldSendForAttachment();
+    const store = useStore();
+
+    return useCallback(
+        async (
+            sources: ExternalFileSource[],
+            options: AttachExternalFilesOptions = {},
+        ): Promise<AttachExternalFilesResult> => {
+            const reject = options.onReject
+                ?? ((message: string) => addPopupMessage({
+                    type: 'warning',
+                    title: 'File not added',
+                    text: message,
+                    expire: true,
+                }));
+
+            if (sources.length === 0) {
+                return { attached: [], rejectedCount: 0 };
+            }
+
+            const maxFiles = defaultMaxFiles();
+            if (sources.length > maxFiles) {
+                reject(`You can add up to ${maxFiles} files at a time.`);
+                return { attached: [], rejectedCount: sources.length };
+            }
+
+            // Images need a vision-capable model and scanned PDFs need vision
+            // or the plus tools, so both are rejected here rather than failing
+            // later in the run.
+            const supportsVision = selectedModel?.supports_vision === true;
+            const attachOptions = {
+                supportsVision,
+                canHandleOCRLocally: supportsVision || Boolean(requestPlusTools),
+            };
+
+            // Attaching is asynchronous, so the composition these files belong
+            // to can be replaced mid-flight. The hold resolves which one they
+            // were staged for; check it again before adding them.
+            return holdSendForAttachment(async (composerToken) => {
+                const attached: ExternalFileRecord[] = [];
+                let rejectedCount = 0;
+                for (const source of sources) {
+                    const result = await attachExternalFile(source, attachOptions);
+                    if (result.status === 'attached') {
+                        attached.push(result.record);
+                    } else {
+                        rejectedCount++;
+                        reject(result.message);
+                    }
+                }
+                if (attached.length > 0) {
+                    if (store.get(composerResetTokenAtom) !== composerToken) {
+                        // Adding them now would move files staged for the
+                        // previous message onto the next one.
+                        logger(
+                            `useAttachExternalFiles: composer was reset while attaching; `
+                            + `dropped ${attached.length} file(s)`,
+                            2,
+                        );
+                        return { attached: [], rejectedCount, discarded: true };
+                    }
+                    addExternalFilesToCurrentMessage(attached);
+                }
+                return { attached, rejectedCount };
+            }, options.composerToken);
+        },
+        [
+            addExternalFilesToCurrentMessage,
+            addPopupMessage,
+            selectedModel,
+            requestPlusTools,
+            holdSendForAttachment,
+            store,
+        ],
+    );
+}

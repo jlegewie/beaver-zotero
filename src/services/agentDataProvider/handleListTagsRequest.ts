@@ -7,12 +7,12 @@
  * The Beaver agent is the primary agent that handles chat completions and tool execution.
  */
 
-import { logger } from '../../utils/logger';
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSListTagsRequest,
     WSListTagsResponse,
     TagInfo,
-} from '../agentProtocol';
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, excludedLibraryMessage } from './utils';
 import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 
@@ -25,6 +25,26 @@ interface TagCounts {
     annotationCount: number;
 }
 
+/** Upper bound on `limit`. */
+const MAX_LIMIT = 1000;
+
+/** Applied when the request omits `limit`. */
+const DEFAULT_LIMIT = 50;
+
+/**
+ * Build the `LIKE` pattern for a `name_query` substring match.
+ *
+ * The wildcards a user can type (`%`, `_`) and the escape character itself are
+ * escaped, so a query is matched literally rather than as a pattern.
+ *
+ * SQLite's `LIKE` is case-insensitive for ASCII only, so a query in a
+ * non-ASCII script matches case-sensitively. That is the trade for pushing the
+ * filter into SQL, which is the whole point of `name_query`.
+ */
+function likeContainsPattern(query: string): string {
+    return `%${query.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+}
+
 
 /**
  * Handle list_tags request from backend.
@@ -33,7 +53,7 @@ interface TagCounts {
 export async function handleListTagsRequest(
     request: WSListTagsRequest
 ): Promise<WSListTagsResponse> {
-    logger(`handleListTagsRequest: library=${request.library_id}, collection=${request.collection_key}`, 1);
+    logger(`handleListTagsRequest: library=${request.library_id}, collection=${request.collection_key}, name_query=${request.name_query ?? ''}`, 1);
     
     try {
         // Validate library (checks both existence and searchability)
@@ -134,6 +154,14 @@ export async function handleListTagsRequest(
                 LEFT JOIN itemNotes INo ON I.itemID = INo.itemID
                 LEFT JOIN itemAnnotations IAn ON I.itemID = IAn.itemID`;
 
+        // Name filtering is pushed into SQL rather than applied to the finished
+        // array: this handler groups over the whole library regardless of
+        // `limit`, so the filter is what actually reduces the work, not just
+        // the wire. `total_count` therefore counts matching tags only.
+        const nameQuery = request.name_query?.trim();
+        const nameFilterSql = nameQuery ? `\n                AND T.name LIKE ? ESCAPE '\\'` : '';
+        const nameFilterParams = nameQuery ? [likeContainsPattern(nameQuery)] : [];
+
         if (resolvedCollection) {
             const collection = resolvedCollection;
 
@@ -163,11 +191,11 @@ export async function handleListTagsRequest(
                 JOIN items I ON IT.itemID = I.itemID
                 JOIN scope S ON I.itemID = S.itemID${COUNT_JOINS}
                 WHERE I.libraryID = ?
-                AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
+                AND I.itemID NOT IN (SELECT itemID FROM deletedItems)${nameFilterSql}
                 GROUP BY T.tagID, T.name
             `;
 
-            await Zotero.DB.queryAsync(sql, [...collectionIds, library.libraryID], {
+            await Zotero.DB.queryAsync(sql, [...collectionIds, library.libraryID, ...nameFilterParams], {
                 onRow: accumulateRow,
             });
         } else {
@@ -178,11 +206,11 @@ export async function handleListTagsRequest(
                 JOIN tags T ON IT.tagID = T.tagID
                 JOIN items I ON IT.itemID = I.itemID${COUNT_JOINS}
                 WHERE I.libraryID = ?
-                AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
+                AND I.itemID NOT IN (SELECT itemID FROM deletedItems)${nameFilterSql}
                 GROUP BY T.tagID, T.name
             `;
 
-            await Zotero.DB.queryAsync(sql, [library.libraryID], {
+            await Zotero.DB.queryAsync(sql, [library.libraryID, ...nameFilterParams], {
                 onRow: accumulateRow,
             });
         }
@@ -221,10 +249,12 @@ export async function handleListTagsRequest(
             return a.name.localeCompare(b.name);
         });
         
-        // Apply pagination
+        // Apply pagination. The cap matches list_collections: a client is meant
+        // to be able to fetch a library's tags in one call and filter locally,
+        // falling back to `name_query` only when it cannot.
         const totalCount = tags.length;
-        const offset = request.offset ?? 0;
-        const limit = request.limit ?? 50;
+        const offset = Math.max(0, request.offset ?? 0);
+        const limit = Math.max(0, Math.min(request.limit ?? DEFAULT_LIMIT, MAX_LIMIT));
         const paginatedTags = tags.slice(offset, offset + limit);
         
         logger(`handleListTagsRequest: Returning ${paginatedTags.length}/${totalCount} tags`, 1);
