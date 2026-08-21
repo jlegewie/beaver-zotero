@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { StopIcon, GlobalSearchIcon } from '../icons/icons';
+import { StopIcon, GlobalSearchIcon, ArrowUpLineIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
 import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom } from '../../atoms/messageComposition';
@@ -9,6 +9,7 @@ import Button from '@beaver/agent-ui/primitives/Button';
 import SearchMenu from '@beaver/agent-ui/primitives/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
+import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryTabAtom, isWebSearchAllowedAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
 import { currentNoteItemAtom } from '../../atoms/zoteroContext';
@@ -124,6 +125,9 @@ const InputArea: React.FC<InputAreaProps> = ({
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const removePendingApproval = useSetAtom(removePendingApprovalAtom);
     const isAwaitingApproval = pendingApprovalsMap.size > 0;
+    // Reject stands in for Send only once there are instructions to reject
+    // with; an approval pending against an empty composer leaves Stop in place.
+    const showRejectButton = isAwaitingApproval && messageContent.trim().length > 0;
     // Note: while an ask_user_question request is pending (and no approval is),
     // Sidebar renders AskUserQuestionPanel INSTEAD of this component, so no
     // question-mode handling is needed here.
@@ -344,7 +348,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     }, [handleAddSourcesKeyDown, handleSlashMenuKeyDown, newThread]);
 
     const handleSubmit = async (
-        e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
+        e: React.FormEvent<HTMLFormElement> | React.MouseEvent
     ) => {
         e.preventDefault();
         // Guard against double submission
@@ -501,24 +505,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                 </div>
             )}
 
-            {/* Message attachments */}
-            {!hideAttachmentMenu && (
-                <MessageAttachmentDisplay
-                    isAddAttachmentMenuOpen={isAddSourcesMenuOpen}
-                    menuPosition={addSourcesMenuPosition}
-                    addSourcesSearchQuery={addSourcesSearchQuery}
-                    addSourcesQuerySource={addSourcesQuerySource}
-                    onAddSourcesQueryChange={setAddSourcesSearchQuery}
-                    onOpenAddSourcesMenu={openAddSourcesMenu}
-                    onDismissAddSourcesMenu={dismissAddSourcesMenu}
-                    onCommitAddSourcesMenu={commitAddSourcesMenu}
-                    onResetAddSourcesQuery={resetAddSourcesQuery}
-                    addSourcesMenuRef={addSourcesMenuRef}
-                    menuPortalContainer={menuPortalContainer}
-                    disabled={isAwaitingApproval}
-                    verticalPosition={verticalPosition}
-                />
-            )}
+            {/* Message attachments — absent entirely when nothing is attached */}
+            {!hideAttachmentMenu && <MessageAttachmentDisplay />}
 
             <SearchMenu
                 menuItems={slashMenuItems}
@@ -576,94 +564,107 @@ const InputArea: React.FC<InputAreaProps> = ({
                     />
                 </div>
 
-                {/* Button Row */}
-                <div className="display-flex flex-row items-center pt-2">
+                {/* Control row: add sources and the model on the left, web
+                    search and send after the flexible gap. */}
+                <div className="composer-controls">
+                    {!hideAttachmentMenu && (
+                        <AddSourcesMenu
+                            ref={addSourcesMenuRef}
+                            isMenuOpen={isAddSourcesMenuOpen}
+                            menuPosition={addSourcesMenuPosition}
+                            searchQuery={addSourcesSearchQuery}
+                            querySource={addSourcesQuerySource}
+                            onQueryChange={setAddSourcesSearchQuery}
+                            onOpen={openAddSourcesMenu}
+                            onDismiss={dismissAddSourcesMenu}
+                            onCommit={commitAddSourcesMenu}
+                            onResetQuery={resetAddSourcesQuery}
+                            menuPortalContainer={menuPortalContainer}
+                            disabled={isAwaitingApproval}
+                            verticalPosition={verticalPosition}
+                        />
+                    )}
                     {!hideModelSelector && (
                         <ModelSelectionButton inputRef={inputRef} focusInput={focusEditor} disabled={isAwaitingApproval} />
                     )}
                     <div className="flex-1" />
-                    <div className="display-flex flex-row items-center gap-4">
-                        <span id={webSearchDescriptionId} className="sr-only">
-                            {webSearchDescription}
-                        </span>
-                        <Tooltip
-                            key={String(isWebSearchAllowed)}
-                            content={webSearchTooltipContent}
-                            padding={false}
-                            width={!isWebSearchAllowed ? '250px' : isWebSearchEnabled ? '220px' : '190px'}
-                            customContent={
-                                !isWebSearchAllowed ? (
-                                    <div className="px-2 py-1 display-flex flex-col gap-1">
-                                        <span className="text-base font-color-secondary font-medium">Web search requires Beaver credits</span>
-                                        <span className="text-sm font-color-tertiary">Use a Beaver model, or enable Plus Tools in Settings → API Keys</span>
-                                    </div>
-                                ) : isWebSearchEnabled ? (
-                                    <div className="px-2 py-1 display-flex flex-col gap-1">
-                                        <span className="text-base font-color-secondary font-medium">Stop requesting web search</span>
-                                        <span className="text-sm font-color-tertiary">May still search the web when helpful</span>
-                                    </div>
-                                ) : (
-                                    <div className="px-2 py-1 display-flex flex-col gap-1">
-                                        <span className="text-base font-color-secondary font-medium">Request web search</span>
-                                        <span className="text-sm font-color-tertiary">May search the web either way</span>
-                                    </div>
-                                )
-                            }
-                        >
-                            <IconButton
-                                icon={GlobalSearchIcon}
-                                variant="ghost-secondary"
-                                className="scale-12 mt-015"
-                                iconClassName={isWebSearchEnabled ? 'font-color-accent-blue stroke-width-2' : ''}
-                                ariaLabel="Web search"
-                                ariaPressed={isWebSearchEnabled}
-                                ariaDescribedBy={webSearchDescriptionId}
-                                onClick={handleWebSearchToggle}
-                                disabled={isAwaitingApproval || !isWebSearchAllowed}
-                            />
-                        </Tooltip>
+                    <span id={webSearchDescriptionId} className="sr-only">
+                        {webSearchDescription}
+                    </span>
+                    <Tooltip
+                        key={String(isWebSearchAllowed)}
+                        content={webSearchTooltipContent}
+                        padding={false}
+                        width={!isWebSearchAllowed ? '250px' : isWebSearchEnabled ? '220px' : '190px'}
+                        customContent={
+                            !isWebSearchAllowed ? (
+                                <div className="px-2 py-1 display-flex flex-col gap-1">
+                                    <span className="text-base font-color-secondary font-medium">Web search requires Beaver credits</span>
+                                    <span className="text-sm font-color-tertiary">Use a Beaver model, or enable Plus Tools in Settings → API Keys</span>
+                                </div>
+                            ) : isWebSearchEnabled ? (
+                                <div className="px-2 py-1 display-flex flex-col gap-1">
+                                    <span className="text-base font-color-secondary font-medium">Stop requesting web search</span>
+                                    <span className="text-sm font-color-tertiary">May still search the web when helpful</span>
+                                </div>
+                            ) : (
+                                <div className="px-2 py-1 display-flex flex-col gap-1">
+                                    <span className="text-base font-color-secondary font-medium">Request web search</span>
+                                    <span className="text-sm font-color-tertiary">May search the web either way</span>
+                                </div>
+                            )
+                        }
+                    >
+                        <IconButton
+                            icon={GlobalSearchIcon}
+                            variant="ghost-secondary"
+                            className="composer-web-search"
+                            iconClassName={isWebSearchEnabled ? 'font-color-accent-blue stroke-width-2' : ''}
+                            ariaLabel="Web search"
+                            ariaPressed={isWebSearchEnabled}
+                            ariaDescribedBy={webSearchDescriptionId}
+                            onClick={handleWebSearchToggle}
+                            disabled={isAwaitingApproval || !isWebSearchAllowed}
+                        />
+                    </Tooltip>
+
+                    {/* Send, and the two things that take its place: Stop while
+                        a run is live, Reject once there are instructions to
+                        reject a pending approval with. */}
+                    {showRejectButton ? (
                         <Button
-                            rightIcon={isPending && !(isAwaitingApproval && messageContent.trim().length > 0) ? StopIcon : undefined}
-                            ariaLabel={
-                                isAwaitingApproval && messageContent.trim().length > 0
-                                    ? pendingApprovalsMap.size > 1 ? 'Reject all proposed actions' : 'Reject proposed action'
-                                    : isPending
-                                        ? 'Stop generating'
-                                        : 'Send message'
-                            }
                             type="button"
-                            variant={
-                                (
-                                    (isPending && !(isAwaitingApproval && messageContent.trim().length > 0)) ||
-                                    (isAwaitingApproval && messageContent.trim().length > 0)
-                                )
-                                ? 'surface' : 'solid'
-                            }
-                            style={{ padding: '2px 5px' }}
-                            onClick={
-                                isAwaitingApproval && messageContent.trim().length > 0
-                                    ? handleRejectWithInstructions
-                                    : (isPending
-                                        ? (e) => handleStop(e as any)
-                                        : handleSubmit)
-                            }
+                            variant="surface"
+                            className="composer-reject"
+                            ariaLabel={pendingApprovalsMap.size > 1 ? 'Reject all proposed actions' : 'Reject proposed action'}
+                            onClick={handleRejectWithInstructions}
+                        >
+                            {pendingApprovalsMap.size > 1 ? 'Reject All' : 'Reject'}
+                        </Button>
+                    ) : isPending ? (
+                        <IconButton
+                            icon={StopIcon}
+                            variant="surface"
+                            className="composer-send composer-send-stop"
+                            ariaLabel="Stop generating"
+                            onClick={handleStop}
+                        />
+                    ) : (
+                        <IconButton
+                            icon={ArrowUpLineIcon}
+                            variant="solid"
+                            className="composer-send"
+                            ariaLabel="Send message"
+                            onClick={handleSubmit}
                             disabled={
-                                // When awaiting approval with text, never disable (Reject button)
-                                // When awaiting approval without text, never disable (Stop button)
-                                // Otherwise, disable if no content and not pending, or no model selected
+                                // Awaiting approval without instructions: left
+                                // live, as it was before the row was rebuilt.
                                 isAwaitingApproval
                                     ? false
-                                    : ((messageContent.length === 0 && !isPending) || !selectedModel || isSlashMenuOpen || isAttachingFiles)
+                                    : (messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles)
                             }
-                        >
-                            {isAwaitingApproval && messageContent.trim().length > 0
-                                ? pendingApprovalsMap.size > 1 ? 'Reject All' : 'Reject'
-                                : isPending
-                                    ? 'Stop'
-                                    : (<span>Send <span className="opacity-50">⏎</span></span>)
-                            }
-                        </Button>
-                    </div>
+                        />
+                    )}
                 </div>
             </form>
         </div>

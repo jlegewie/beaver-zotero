@@ -189,16 +189,107 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif;
 }
 
+/* The composer surface, shared with the cards that stand in for it (user
+ * request, approval, credit confirmation, ask-user-question).
+ *
+ * The pane behind it is --material-sidepane, so the card is mixed from
+ * --material-background towards that ground rather than given a fill of its
+ * own: in a light theme it lands above the pane (#fafafa on #f2f2f2), in a
+ * dark one below it (#252525 on #303030), which is what Zotero's own inputs
+ * do. The flat --material-sidepane before it is the fallback for a renderer
+ * without color-mix().
+ *
+ * Anything that docks to the card's top edge cancels the padding with the
+ * same custom properties — see .pending-actions-bar below. */
 [id^="beaver-pane-"] .user-message-display {
-    /* margin: 0 auto; */
-    padding-left: 0.65rem;
-    padding-right: 0.65rem;
-    padding-top: 0.65rem;
-    padding-bottom: 0.65rem;
-    border: 1px solid var(--fill-quinary);
-    border-radius: 6px;
-    background-color: var(--material-mix-quarternary);
+    --composer-pad-x: 0.8rem;
+    --composer-pad-top: 0.85rem;
+    --composer-pad-bottom: 0.7rem;
+    --composer-radius: 10px;
+    padding: var(--composer-pad-top) var(--composer-pad-x) var(--composer-pad-bottom);
+    border: 1px solid var(--fill-quarternary);
+    border-radius: var(--composer-radius);
+    background-color: var(--material-sidepane);
+    background-color: color-mix(in srgb, var(--material-background) 60%, var(--material-sidepane));
     user-select: text;
+}
+
+/* Chips for whatever is attached to the message being composed. Mounted only
+ * when there is something to show — the "+" that used to live here moved into
+ * the control row. */
+[id^="beaver-pane-"] .composer-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-bottom: 0.75rem;
+}
+
+/* Control row under the editor: add sources and the model on the left, web
+ * search and send after the flexible gap. */
+[id^="beaver-pane-"] .composer-controls {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 2px;
+    margin-top: 0.75rem;
+}
+
+/* One height and one hover shape for every control in the row, whatever
+ * variant it carries. The element selector is what beats .variant-* further
+ * down this file, irrespective of source order. */
+[id^="beaver-pane-"] .composer-controls button {
+    height: 26px;
+    border-radius: 6px;
+}
+
+/* Icon-only controls are square. `Icon` defaults to 1em, so an icon that is
+ * not given an explicit size follows the button's font-size. */
+[id^="beaver-pane-"] .composer-controls button.composer-add-sources,
+[id^="beaver-pane-"] .composer-controls button.composer-web-search,
+[id^="beaver-pane-"] button.composer-send {
+    width: 26px;
+    padding: 0;
+    justify-content: center;
+}
+
+[id^="beaver-pane-"] button.composer-web-search {
+    font-size: 15px;
+}
+
+[id^="beaver-pane-"] button.composer-send {
+    height: 26px;
+    margin-left: 4px;
+    border-radius: 999px;
+}
+
+/* Disabled Send greys out rather than fading the accent, which at
+ * .variant-solid's 0.5 opacity still reads as an available button. */
+[id^="beaver-pane-"] button.composer-send:disabled {
+    background-color: var(--fill-quarternary);
+    border-color: transparent;
+    color: var(--fill-tertiary);
+    opacity: 1;
+}
+
+/* Send carries an arrow rather than a label, so it needs a real icon size
+ * instead of .variant-solid's 1em. */
+[id^="beaver-pane-"] button.composer-send svg {
+    width: 16px;
+    height: 16px;
+}
+
+[id^="beaver-pane-"] button.composer-send.composer-send-stop svg {
+    width: 13px;
+    height: 13px;
+}
+
+/* Reject sits in Send's slot while an approval is pending, and matches its
+ * pill shape rather than the square buttons elsewhere in the row. */
+[id^="beaver-pane-"] button.composer-reject {
+    height: 26px;
+    margin-left: 4px;
+    padding: 0 10px;
+    border-radius: 999px;
 }
 
 /* Source Preview Container */
@@ -241,22 +332,22 @@
 
 /* Pending Actions Bar - shows when agent actions await approval */
 [id^="beaver-pane-"] .pending-actions-bar {
-    margin: -0.65rem -0.65rem 0.65rem -0.65rem;
-    border-radius: 5px 5px 0 0;
+    margin: calc(-1 * var(--composer-pad-top)) calc(-1 * var(--composer-pad-x)) var(--composer-pad-top);
+    border-radius: calc(var(--composer-radius) - 1px) calc(var(--composer-radius) - 1px) 0 0;
 }
 
 /* High token usage warning above composer */
 [id^="beaver-pane-"] .high-token-usage-warning-bar {
-    margin: -0.65rem -0.65rem 0.65rem -0.65rem;
-    border-radius: 5px 5px 0 0;
+    margin: calc(-1 * var(--composer-pad-top)) calc(-1 * var(--composer-pad-x)) var(--composer-pad-top);
+    border-radius: calc(var(--composer-radius) - 1px) calc(var(--composer-radius) - 1px) 0 0;
     background-color: var(--tag-yellow-senary);
     border-bottom: 1px solid var(--fill-quinary);
 }
 
 /* First-run "Next steps" panel above composer */
 [id^="beaver-pane-"] .next-steps-panel {
-    margin: -0.65rem -0.65rem 0.65rem -0.65rem;
-    border-radius: 5px 5px 0 0;
+    margin: calc(-1 * var(--composer-pad-top)) calc(-1 * var(--composer-pad-x)) var(--composer-pad-top);
+    border-radius: calc(var(--composer-radius) - 1px) calc(var(--composer-radius) - 1px) 0 0;
     border-bottom: 1px solid var(--fill-quarternary);
     /* background-color: var(--material-mix-quarternary); */
 }
@@ -898,7 +989,7 @@
 
 /* Spacing and type utilities that override a component's own padding or size.
  * `.px-25` beats `.edit-annotations-preview-row` (padding 6px) on the annotation
- * preview rows; `.px-3` / `.py-2` beat `.user-message-display` (0.65rem) on the
+ * preview rows; `.px-3` / `.py-2` beat `.user-message-display`'s padding shorthand on the
  * onboarding example prompts; `.text-base` (1rem) beats `.chat-input`'s literal
  * 13px, and `rem` here resolves against the host's root font size, so the two
  * are not interchangeable. */

@@ -91,7 +91,7 @@ export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) 
     const attachments = userPrompt.attachments ?? EMPTY_ATTACHMENTS;
 
     return (
-        <div className="display-flex flex-wrap gap-col-3 gap-row-2 mb-2">
+        <div className="composer-attachments">
             {userPrompt.filters?.libraries?.map((library) => (
                 <LibraryChip
                     key={library.library_id}

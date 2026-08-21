@@ -106,7 +106,6 @@ const getRecentItems = async (): Promise<Zotero.Item[]> => {
 
 
 export interface AddSourcesMenuProps {
-    showText: boolean;
     isMenuOpen: boolean;
     menuPosition: MenuPosition;
     /** The current search query, wherever it is being typed. */
@@ -133,7 +132,6 @@ export interface AddSourcesMenuProps {
 }
 
 const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(function AddSourcesMenu({
-    showText,
     isMenuOpen,
     menuPosition,
     searchQuery,
@@ -532,8 +530,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         <>
             <Tooltip content="Add Sources" showArrow singleLine>
                 <button
-                    className="variant-outline source-button"
-                    style={{ height: '22px', paddingRight: '4px', paddingLeft: '4px', paddingTop: '3px', paddingBottom: '3px' }}
+                    className="variant-ghost composer-add-sources"
                     ref={buttonRef}
                     onClick={handleButtonClick}
                     aria-label="Add Sources"
@@ -541,8 +538,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
                     aria-expanded={isMenuOpen}
                     disabled={disabled}
                 >
-                    <Icon icon={PlusSignIcon} className="scale-12" />
-                    {showText && <span>Add Sources</span>}
+                    <Icon icon={PlusSignIcon} size={18} className="scale-12"/>
                 </button>
             </Tooltip>
             <SearchMenu
