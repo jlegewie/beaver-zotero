@@ -6,20 +6,11 @@
             Beaver preferences are available from within the sidebar.
         </html:p>
         <hbox>
-        <button id="beaver-open-prefs-btn"
-                label="Open Beaver"
-                oncommand="
-                    var mainWin = Zotero.getMainWindow();
-                    mainWin.focus();
-                    var eventBus = mainWin.__beaverEventBus;
-                    if (eventBus) {
-                        eventBus.dispatchEvent(
-                            new mainWin.CustomEvent('toggleChat', {
-                                detail: { forceOpen: true }
-                            })
-                        );
-                    }
-                " />
+        <!-- The command handler lives in beaverZoteroPrefs.js, registered via
+             the `scripts` option of Zotero.PreferencePanes.register(). Inline
+             event handlers are blocked by the baseline chrome CSP that
+             Firefox 153 (Zotero 11) introduced. -->
+        <button id="beaver-open-prefs-btn" label="Open Beaver" />
         </hbox>
     </groupbox>
 </vbox>

@@ -217,11 +217,9 @@ class UIManager {
     }
 
     public updateToolbarButton(isVisible: boolean): void {
-        if (isVisible) {
-            this.elements.chatToggleButton?.setAttribute("selected", "true");
-        } else {
-            this.elements.chatToggleButton?.removeAttribute("selected");
-        }
+        // `selected` is a boolean XUL attribute as of Zotero 11 (Firefox 153):
+        // presence alone selects, so toggle it rather than writing "true".
+        this.elements.chatToggleButton?.toggleAttribute("selected", isVisible);
         // Expose the open/closed state to screen readers as a toggle button.
         this.elements.chatToggleButton?.setAttribute("aria-pressed", isVisible ? "true" : "false");
     }
