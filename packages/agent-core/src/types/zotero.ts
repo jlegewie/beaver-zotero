@@ -126,6 +126,11 @@ export interface ItemStub {
     title?: string | null;
     creators?: string | null;
     year?: number | null;
+    /**
+     * One-line bibliographic reference, rendered by the client that owns the
+     * library, so a consumer can show a citation without a follow-up lookup.
+     */
+    formatted_citation?: string | null;
 }
 
 /**

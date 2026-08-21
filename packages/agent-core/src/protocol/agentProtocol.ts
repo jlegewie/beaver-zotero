@@ -680,19 +680,16 @@ export interface QuickSearchHit {
     display_name: string;
     /**
      * Second line for the row: title and publication context, or the parent
-     * relationship for a note or attachment. Composed from Zotero's fields —
-     * cheap enough to serve for a whole page, unlike `formatted_citation`.
+     * relationship for a note or attachment. Shorter than `formatted_citation`.
      */
     description?: string;
     title?: string;
     year?: number;
     /**
-     * Formatted bibliography entry, for a hover card.
+     * One-line bibliographic reference, for a hover card.
      *
-     * Only present when the request set `include_citation`. Rendering one runs
-     * the CSL engine per item, which costs hundreds of milliseconds and is far
-     * too slow for a page of results — ask for it for a single item the user
-     * actually paused on, and use `description` everywhere else.
+     * Only present when the request set `include_citation`. Longer than
+     * `description`; prefer `description` for a dense list.
      */
     formatted_citation?: string;
     /** Whether the item has at least one child attachment */
@@ -733,10 +730,8 @@ export interface WSItemQuickSearchRequest extends WSBaseEvent {
     /**
      * Also render `formatted_citation` on each hit. Default false.
      *
-     * Off by default because it runs the CSL engine once per row, which costs
-     * hundreds of milliseconds per item — enough to make a picker unusable.
-     * `description` carries the same information cheaply; reach for this only
-     * when a real bibliography entry is required.
+     * Off because a full reference is longer than a picker row; `description`
+     * says the same thing more briefly.
      */
     include_citation?: boolean;
     /** Maximum number of results to return. Default 20. */
@@ -1501,9 +1496,6 @@ export interface WSGetMetadataRequest extends WSBaseEvent {
     /**
      * Also render `formatted_citation` on each compact row. Default false;
      * ignored when `detail` is 'full', which always carries one.
-     *
-     * This is the op to ask for a real bibliography entry — for one item the
-     * user paused on, not for a list. See `QuickSearchHit.formatted_citation`.
      */
     include_citation?: boolean;
 }

@@ -5,6 +5,7 @@ import { libraryRefForLibraryID, modelObjectId } from './libraryIdentity';
 import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemStub, ItemSummary, CollectionSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary, AttachmentStub } from '@beaver/agent-core/types/zotero';
 import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, getMimeType, safeIsInTrash, safeFileExists } from './zoteroUtils';
 import { safeAttachmentFilename } from './attachmentFiles';
+import { formatItemReference } from './itemReference';
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
 import { skippedItemsManager } from '../services/skippedItemsManager';
@@ -305,7 +306,7 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
         url: item.getField('url'),
         identifiers: getIdentifiersFromItem(item),
         language: item.getField('language'),
-        formatted_citation: Zotero.Beaver?.citationService?.formatBibliography(item) ?? '',
+        formatted_citation: formatItemReference(item),
         deleted: (() => {
             const trashState = safeIsInTrash(item);
             if (trashState === null) {
@@ -366,8 +367,8 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
 
 /**
  * Lightweight item serializer for search results.
- * Skips expensive operations: formatBibliography(), item.toJSON(), calculateObjectHash(),
- * and all sync/date/deleted fields.
+ * Skips expensive operations: item.toJSON(), calculateObjectHash(), and all
+ * sync/date/deleted fields.
  * @param item Zotero item
  * @returns Promise resolving to ItemSummary
  */
@@ -431,6 +432,7 @@ export function serializeItemStub(item: Zotero.Item): ItemStub {
         title: item.getField('title', false, true) || null,
         creators: formatZoteroCreatorsString(getCreatorsFromItem(item)),
         year: getYearFromItem(item) ?? null,
+        formatted_citation: formatItemReference(item) || null,
     };
 }
 

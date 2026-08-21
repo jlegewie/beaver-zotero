@@ -114,10 +114,8 @@ export interface ItemQuickSearchParams {
     /** What each hit carries. Default 'compact'. */
     detail?: QuickSearchDetail;
     /**
-     * Also render `formatted_citation` per hit. Default false, and best left
-     * that way: it runs the CSL engine once per row at hundreds of
-     * milliseconds each. Every hit already carries `description`, which says
-     * the same thing at field-read cost.
+     * Also render `formatted_citation` per hit. Default false: every hit
+     * already carries `description`, which says the same thing more briefly.
      */
     include_citation?: boolean;
     /** 1–50, default 20 */
@@ -237,8 +235,7 @@ export interface GetMetadataParams {
     detail?: ItemProjectionDetail;
     /**
      * Render `formatted_citation` on compact rows. Default false; ignored when
-     * `detail` is 'full'. This is where to ask for a real bibliography entry —
-     * for the one item a user paused on, never for a list.
+     * `detail` is 'full', which always carries one.
      */
     include_citation?: boolean;
     /** Child attachments per item. Default false; ignored when compact. */

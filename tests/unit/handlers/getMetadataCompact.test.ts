@@ -60,8 +60,13 @@ function regularItem(key: string, overrides: Record<string, any> = {}) {
         key,
         libraryID: 1,
         itemType: 'journalArticle',
+        itemTypeID: 4,
         firstCreator: 'Legewie and DiPrete',
         year: 2014,
+        getCreators: () => [
+            { creatorTypeID: 1, fieldMode: 0, lastName: 'Legewie', firstName: 'Joscha' },
+            { creatorTypeID: 1, fieldMode: 0, lastName: 'DiPrete', firstName: 'Thomas A.' },
+        ],
         isAttachment: () => false,
         isNote: () => false,
         isAnnotation: () => false,
@@ -117,7 +122,10 @@ beforeEach(() => {
     const zotero = (globalThis as any).Zotero;
     getAsync.mockResolvedValue([]);
     zotero.Items = { ...(zotero.Items ?? {}), loadDataTypes, getAsync };
-    zotero.Beaver = { citationService: { formatBibliography: vi.fn(() => 'Legewie, J. (2014).') } };
+    zotero.CreatorTypes = {
+        getID: (name: string) => (name === 'author' ? 1 : false),
+        getPrimaryIDForType: () => 1,
+    };
 });
 
 describe('handleGetMetadataRequest compact projection', () => {
@@ -135,8 +143,6 @@ describe('handleGetMetadataRequest compact projection', () => {
                 // Zotero's own et-al-aware creator string plus the year, which
                 // is why a client must render this rather than rebuild it.
                 display_name: 'Legewie and DiPrete 2014',
-                // The second line under it, composed from fields rather than
-                // rendered by the citation engine.
                 description: 'Title AAAAAAAA',
                 title: 'Title AAAAAAAA',
                 year: 2014,
@@ -150,7 +156,6 @@ describe('handleGetMetadataRequest compact projection', () => {
     it('does not render a citation unless the caller asked for one', async () => {
         const res = await handleGetMetadataRequest(request({ detail: 'compact' }));
 
-        expect((Zotero as any).Beaver.citationService.formatBibliography).not.toHaveBeenCalled();
         expect(res.items[0].formatted_citation).toBeUndefined();
     });
 
@@ -159,7 +164,8 @@ describe('handleGetMetadataRequest compact projection', () => {
             request({ detail: 'compact', include_citation: true })
         );
 
-        expect(res.items[0].formatted_citation).toBe('Legewie, J. (2014).');
+        expect(res.items[0].formatted_citation)
+            .toBe('Legewie, Joscha; and DiPrete, Thomas A. (2014). Title AAAAAAAA.');
     });
 
     it('skips the child payloads the projection has no place for', async () => {
