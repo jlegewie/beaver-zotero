@@ -12,7 +12,10 @@
  * drawn, and what it looks like, stays each client's own.
  */
 
-import { isAutoLoadingToolCall } from "../agents/messageVisibility";
+import {
+    isAutoLoadingToolCall,
+    isThinkingInProgress,
+} from "../agents/messageVisibility";
 import type {
     AgentRun,
     ModelResponse,
@@ -30,11 +33,17 @@ import { getToolCallStatus } from "./atoms";
  * backend injected, and a client that hides them would be pointing at a blank
  * space if they suppressed the status line.
  */
-function hasVisibleContent(run: AgentRun): boolean {
+function newestResponse(run: AgentRun): ModelResponse | null {
     const lastMessage = run.model_messages[run.model_messages.length - 1];
-    if (!lastMessage || lastMessage.kind !== "response") return false;
+    if (!lastMessage || lastMessage.kind !== "response") return null;
+    return lastMessage as ModelResponse;
+}
 
-    return (lastMessage as ModelResponse).parts.some(
+function hasVisibleContent(run: AgentRun): boolean {
+    const lastMessage = newestResponse(run);
+    if (!lastMessage) return false;
+
+    return lastMessage.parts.some(
         (part) =>
             (part.part_kind === "text" && part.content.trim() !== "") ||
             (part.part_kind === "thinking" && part.content.trim() !== "") ||
@@ -86,10 +95,20 @@ function hasInProgressToolCall(
 /**
  * Whether a run is working with nothing on screen to show for it.
  *
- * True exactly in the gaps: after the prompt is sent and before the first part
- * arrives, and between a tool result and whatever the model does next. A tool
- * call still running is not a gap — its own card says so, and a second spinner
- * beside it would be the pane claiming two things are happening.
+ * True in two kinds of gap. The first needs no clock: the run has produced
+ * nothing visible at all, either because the prompt was only just sent or
+ * because a tool result is the newest thing in the run and the model has yet to
+ * respond to it. The second is a gap *inside* a response — the reader is looking
+ * at a sentence of preamble the model wrote before calling its tools, and the
+ * provider has gone quiet while it decides what those tools are. Nothing about
+ * the run's contents distinguishes that from a response that simply finished, so
+ * the caller has to bring the observation with it in `isStreamQuiet`.
+ *
+ * A tool call still running is not a gap — its own card says so, and a second
+ * spinner beside it would be the pane claiming two things are happening. Neither
+ * is a response whose reasoning is still the only thing in it: the shimmering
+ * "Thinking" line is already the working indicator, so a quiet stretch there is
+ * left to it rather than doubled.
  *
  * `in_progress` and not `isRunActive`: a run holding for a deferred approval is
  * live, but it is waiting on the reader rather than working, and its card is
@@ -101,10 +120,19 @@ function hasInProgressToolCall(
 export function shouldShowRunStatus(
     run: AgentRun,
     toolResults: Map<string, ToolReturnPart | RetryPromptPart>,
+    options: {
+        /**
+         * Whether the stream has been quiet long enough to report — see
+         * `streamActivity`. Must be scoped to *this* run by the caller.
+         */
+        isStreamQuiet?: boolean;
+    } = {},
 ): boolean {
-    return (
-        run.status === "in_progress" &&
-        !hasVisibleContent(run) &&
-        !hasInProgressToolCall(run, toolResults)
-    );
+    if (run.status !== "in_progress") return false;
+    if (hasInProgressToolCall(run, toolResults)) return false;
+    if (!hasVisibleContent(run)) return true;
+
+    if (!options.isStreamQuiet) return false;
+    const newest = newestResponse(run);
+    return newest !== null && !isThinkingInProgress(newest);
 }

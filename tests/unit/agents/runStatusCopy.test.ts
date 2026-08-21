@@ -73,4 +73,48 @@ describe('runStatusText', () => {
             }),
         ).toBe('Beaver is working…');
     });
+
+    it('counts a long wait out beside the idle label', () => {
+        expect(
+            runStatusText({
+                reconnect: null,
+                backendRetry: null,
+                idleLabel: 'Generating',
+                elapsedSeconds: 12,
+            }),
+        ).toBe('Generating 12s');
+    });
+
+    it('says nothing about a wait the caller is withholding', () => {
+        for (const elapsedSeconds of [undefined, null, 0]) {
+            expect(
+                runStatusText({
+                    reconnect: null,
+                    backendRetry: null,
+                    idleLabel: 'Generating',
+                    elapsedSeconds,
+                }),
+            ).toBe('Generating');
+        }
+    });
+
+    it('leaves a reconnect and a retry to their own progress', () => {
+        // A second number beside an attempt count reads as part of it.
+        expect(
+            runStatusText({
+                reconnect: reconnect(3),
+                backendRetry: null,
+                idleLabel: 'Generating',
+                elapsedSeconds: 12,
+            }),
+        ).toBe('Reconnecting… (3/4)');
+        expect(
+            runStatusText({
+                reconnect: null,
+                backendRetry: backendRetry(),
+                idleLabel: 'Generating',
+                elapsedSeconds: 12,
+            }),
+        ).toBe('Retrying…');
+    });
 });

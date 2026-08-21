@@ -51,6 +51,16 @@ function toolResultMessage(): ModelMessage {
     } as unknown as ModelMessage;
 }
 
+const text = (content: string): ResponsePart => ({
+    part_kind: 'text',
+    content,
+});
+
+const thinking = (content: string): ResponsePart => ({
+    part_kind: 'thinking',
+    content,
+});
+
 const toolCall = (toolCallId: string): ResponsePart => ({
     part_kind: 'tool-call',
     tool_name: 'search',
@@ -196,5 +206,90 @@ describe('shouldShowRunStatus', () => {
         ] as const) {
             expect(shouldShowRunStatus(run([], status), noResults)).toBe(false);
         }
+    });
+});
+
+/**
+ * The gap the provider leaves *inside* a response. The reader is looking at the
+ * sentence of preamble the model writes before calling its tools, and nothing
+ * about the run's contents says whether the model is still working or has
+ * stopped — which is why the caller has to bring the observation with it.
+ */
+describe('shouldShowRunStatus during a quiet stream', () => {
+    const quiet = { isStreamQuiet: true };
+
+    it('shows beside a preamble the model has gone quiet after', () => {
+        expect(
+            shouldShowRunStatus(
+                run([response(text('Issuing ten parallel metadata edits…'))]),
+                noResults,
+                quiet,
+            ),
+        ).toBe(true);
+    });
+
+    it('stays hidden for the same preamble while the stream is flowing', () => {
+        expect(
+            shouldShowRunStatus(
+                run([response(text('Issuing ten parallel metadata edits…'))]),
+                noResults,
+            ),
+        ).toBe(false);
+    });
+
+    it('leaves a quiet stretch to the thinking shimmer that already covers it', () => {
+        expect(
+            shouldShowRunStatus(
+                run([response(thinking('Considering the metadata fields…'))]),
+                noResults,
+                quiet,
+            ),
+        ).toBe(false);
+    });
+
+    it('takes over once a preamble follows the reasoning and stops the shimmer', () => {
+        expect(
+            shouldShowRunStatus(
+                run([
+                    response(
+                        thinking('Considering the metadata fields…'),
+                        text('Issuing ten parallel metadata edits…'),
+                    ),
+                ]),
+                noResults,
+                quiet,
+            ),
+        ).toBe(true);
+    });
+
+    it('shows in the gap after a tool result the model has not answered yet', () => {
+        // The un-delayed branch, unchanged: no clock needed when the newest
+        // message is a request, because there is nothing on screen either way.
+        expect(
+            shouldShowRunStatus(
+                run([response(toolCall('call-1')), toolResultMessage()]),
+                results(toolReturn('call-1')),
+            ),
+        ).toBe(true);
+    });
+
+    it('defers to a tool call still running, however long the stream is quiet', () => {
+        expect(
+            shouldShowRunStatus(
+                run([response(text('Searching now.'), toolCall('call-1'))]),
+                noResults,
+                quiet,
+            ),
+        ).toBe(false);
+    });
+
+    it('says nothing for a quiet stream on a run that has ended', () => {
+        expect(
+            shouldShowRunStatus(
+                run([response(text('Done.'))], 'completed'),
+                noResults,
+                quiet,
+            ),
+        ).toBe(false);
     });
 });
