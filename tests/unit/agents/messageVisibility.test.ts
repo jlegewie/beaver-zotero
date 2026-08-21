@@ -13,8 +13,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { ModelMessage } from '@beaver/agent-core/agents/types';
-import { isRenderableMessage } from '@beaver/agent-core/agents/messageVisibility';
+import { ModelMessage, ModelResponse } from '@beaver/agent-core/agents/types';
+import { isRenderableMessage, isThinkingInProgress } from '@beaver/agent-core/agents/messageVisibility';
 
 /** A request message shaped like one carrying a tool result plus an injected directive. */
 const requestWithInjectedPrompt = {
@@ -51,5 +51,74 @@ describe('isRenderableMessage', () => {
 
     it('accepts response messages', () => {
         expect(isRenderableMessage(assistantResponse)).toBe(true);
+    });
+});
+
+/**
+ * Who owns a gap. The shimmering "Thinking" line and the run status indicator
+ * are both working indicators, and both consult this: get it wrong one way and a
+ * quiet stretch shows two spinners claiming the same thing, wrong the other way
+ * and it shows none.
+ */
+describe('isThinkingInProgress', () => {
+    const responseWith = (...parts: unknown[]) =>
+        ({ kind: 'response', run_id: 'run-1', parts } as ModelResponse);
+
+    it('is true while reasoning is all the response has produced', () => {
+        expect(
+            isThinkingInProgress(
+                responseWith({ part_kind: 'thinking', content: 'Weighing the options…' }),
+            ),
+        ).toBe(true);
+    });
+
+    it('is false for an empty reasoning part, which renders nothing to shimmer', () => {
+        expect(
+            isThinkingInProgress(responseWith({ part_kind: 'thinking', content: '' })),
+        ).toBe(false);
+    });
+
+    it('is false for a response that has produced nothing at all', () => {
+        expect(isThinkingInProgress(responseWith())).toBe(false);
+    });
+
+    it('ends as soon as there is text, empty or not', () => {
+        for (const content of ['Here is what I found.', '']) {
+            expect(
+                isThinkingInProgress(
+                    responseWith(
+                        { part_kind: 'thinking', content: 'Weighing the options…' },
+                        { part_kind: 'text', content },
+                    ),
+                ),
+            ).toBe(false);
+        }
+    });
+
+    it('ends at a tool call: a step is being taken, not considered', () => {
+        expect(
+            isThinkingInProgress(
+                responseWith(
+                    { part_kind: 'thinking', content: 'Weighing the options…' },
+                    { part_kind: 'tool-call', tool_name: 'search', args: null, tool_call_id: 'c1' },
+                ),
+            ),
+        ).toBe(false);
+    });
+
+    it('survives a return_suggestions call, which is follow-up prompts rather than a step', () => {
+        expect(
+            isThinkingInProgress(
+                responseWith(
+                    { part_kind: 'thinking', content: 'Weighing the options…' },
+                    {
+                        part_kind: 'tool-call',
+                        tool_name: 'return_suggestions',
+                        args: null,
+                        tool_call_id: 'c1',
+                    },
+                ),
+            ),
+        ).toBe(true);
     });
 });

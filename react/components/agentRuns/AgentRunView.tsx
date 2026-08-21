@@ -13,6 +13,7 @@ import { RunResumeDisplay } from './RunResumeDisplay';
 import { RunInterruptedDisplay } from './RunInterruptedDisplay';
 import { threadWarningsAtom } from '../../atoms/warnings';
 import { toolResultsMapAtom, resumedRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
+import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
 import { streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { getHost } from '@beaver/agent-ui/host';
 
@@ -34,6 +35,9 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     const resultsMap = useAtomValue(toolResultsMapAtom);
     const streamingDoneRunIds = useAtomValue(streamingDoneRunIdsAtom);
     const isPostProcessing = streamingDoneRunIds.has(run.id);
+    // Safe to subscribe from every run in the thread: this atom changes when a
+    // wait starts and when it ends, not once per streamed token.
+    const streamQuiet = useAtomValue(streamQuietAtom);
 
     // A run a later run continued: its error card or resume offer and its
     // footer give way to the continuation's, and it shows the subtle resume
@@ -48,14 +52,28 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // Don't show user message for resume runs (empty content)
     const showUserMessage = !run.user_prompt.is_resume || run.user_prompt.content.length > 0;
     
+    // The provider can go quiet mid-response — after the sentence of preamble it
+    // writes before calling its tools, while it works out what those calls are —
+    // and until it speaks again there is nothing in the run to render. The wait
+    // has to be observed rather than derived, so it arrives from the stream
+    // tracker; `isPostProcessing` excludes the tail after the model is done,
+    // which the footer already speaks for.
+    const isStreamQuiet =
+        streamQuiet?.runId === run.id && !isPostProcessing;
+
     // Only the newest run: further up the thread a run that is still working is
     // one the conversation has moved past, and its gap is not what the reader is
     // waiting on.
     const runHasNothingToShow = useMemo(
-        () => shouldShowRunStatus(run, resultsMap),
-        [run, resultsMap],
+        () => shouldShowRunStatus(run, resultsMap, { isStreamQuiet }),
+        [run, resultsMap, isStreamQuiet],
     );
     const showStatusIndicator = isLastRun && runHasNothingToShow;
+
+    // Where the visible wait started, so the indicator can count it up. Null
+    // while the run has produced nothing yet: there is no event to count from,
+    // and the indicator falls back to its own mount.
+    const waitingSince = isStreamQuiet ? streamQuiet.quietSince : null;
 
     // Show agent run footer
     const showAgentRunFooter =
@@ -111,6 +129,7 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 isStreaming={isStreaming}
                 showStatusIndicator={showStatusIndicator}
                 status={run.status}
+                waitingSince={waitingSince}
             />
 
             {/* Error display (includes retry/resume buttons) - hide if run was resumed */}
