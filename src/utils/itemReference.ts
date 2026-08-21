@@ -60,22 +60,12 @@ const VENUE_FIELDS: readonly string[] = [
     'organization',     // standard
     'committee',        // hearing, standard
     'legislativeBody',  // bill, hearing
-    'meetingName',      // presentation, conference paper
+    'conferenceName',   // conference paper
+    'meetingName',      // presentation
     'reporter',         // case, when it has no court
     'publisher',        // base: book, thesis, report, preprint, film, software, recordings, map, manuscript, dataset
     'seriesTitle',      // report, map, computerProgram, podcast, recordings
     'series',           // thesis, preprint, presentation
-];
-
-/**
- * Last-resort context when nothing bibliographic resolves: the medium
- * ("Oil on canvas") rather than the localized type name.
- */
-const MEDIUM_FIELDS: readonly string[] = [
-    'artworkMedium',
-    'audioRecordingFormat',
-    'videoRecordingFormat',
-    'interviewMedium',
 ];
 
 /** Creators listed in full before the list is cut to "et al.". */
@@ -165,9 +155,17 @@ function creatorNames(item: Zotero.Item): CreatorName[] {
     return [];
 }
 
-/** "Legewie, Joscha" — or the whole institution name in single-field mode. */
+/**
+ * "Smith, John" — or the whole institution name in single-field mode.
+ *
+ * A two-field creator can arrive with either half empty (imported records
+ * routinely carry a first name and no surname); print the half that exists
+ * rather than a dangling comma.
+ */
 function formatCreator(creator: CreatorName): string {
-    if (creator.single || !creator.first) return creator.last || creator.first;
+    if (creator.single || !creator.last || !creator.first) {
+        return creator.last || creator.first;
+    }
     return `${creator.last}, ${creator.first}`;
 }
 
@@ -314,7 +312,10 @@ function referenceContext(item: Zotero.Item, title: string, creators: string): s
     }
 
     if (parts.length === 0) {
-        const medium = firstField(item, MEDIUM_FIELDS);
+        // Last resort: the medium ("Oil on canvas") rather than the localized
+        // type name. Base-mapped, so artwork, interviews and every recording
+        // type answer through one read.
+        const medium = field(item, 'medium');
         parts.push(medium || itemTypeLabel(item));
     }
 

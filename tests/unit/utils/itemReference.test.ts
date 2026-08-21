@@ -37,6 +37,7 @@ const BASE_FIELD_MAP: Record<string, string[]> = {
     number: ['patentNumber', 'docketNumber', 'reportNumber', 'billNumber', 'publicLawNumber', 'documentNumber', 'archiveID', 'identifier', 'episodeNumber'],
     date: ['dateDecided', 'issueDate', 'dateEnacted'],
     place: ['repositoryLocation'],
+    medium: ['artworkMedium', 'interviewMedium', 'audioRecordingFormat', 'videoRecordingFormat', 'audioFileType'],
 };
 
 interface FakeCreator {
@@ -156,6 +157,16 @@ describe('formatItemReference', () => {
             ])).toBe('World Bank (2021). World Development Report. World Bank.');
         });
 
+        it('prints the half that exists when a creator has only one name part', () => {
+            expect(cite('journalArticle', { title: 'T', publicationTitle: 'J', date: '2000' }, [
+                { type: 'author', last: '', first: 'Aristotle' },
+            ])).toBe('Aristotle (2000). T. J.');
+
+            expect(cite('journalArticle', { title: 'T', publicationTitle: 'J', date: '2000' }, [
+                { type: 'author', last: 'Aristotle', first: '' },
+            ])).toBe('Aristotle (2000). T. J.');
+        });
+
         it('names an edited volume by its editors when it has no authors', () => {
             expect(cite('book', {
                 title: 'The Handbook of Economic Sociology',
@@ -169,6 +180,43 @@ describe('formatItemReference', () => {
                 'Smelser, Neil J.; and Swedberg, Richard (2005). The Handbook of Economic Sociology. '
                 + 'Princeton University Press: Princeton, NJ.'
             );
+        });
+    });
+
+    describe('conference papers', () => {
+        it('places a paper by its proceedings when it has one', () => {
+            expect(cite('conferencePaper', {
+                title: 'Deep Residual Learning for Image Recognition',
+                proceedingsTitle: 'Proceedings of the IEEE Conference on Computer Vision',
+                conferenceName: 'CVPR 2016',
+                pages: '770-778',
+                date: '2016',
+            }, [{ type: 'author', last: 'He', first: 'Kaiming' }])).toBe(
+                'He, Kaiming (2016). Deep Residual Learning for Image Recognition. '
+                + 'Proceedings of the IEEE Conference on Computer Vision, 770-778.'
+            );
+        });
+
+        it('falls back to the conference name when there is no proceedings title', () => {
+            expect(cite('conferencePaper', {
+                title: 'Attention Is All You Need',
+                conferenceName: 'Advances in Neural Information Processing Systems',
+                date: '2017',
+            }, [{ type: 'author', last: 'Vaswani', first: 'Ashish' }])).toBe(
+                'Vaswani, Ashish (2017). Attention Is All You Need. '
+                + 'Advances in Neural Information Processing Systems.'
+            );
+        });
+
+        it('prefers the conference name over the publisher', () => {
+            expect(cite('conferencePaper', {
+                title: 'A Paper',
+                conferenceName: 'ACM SIGCOMM',
+                publisher: 'ACM Press',
+                place: 'New York, NY',
+                date: '2019',
+            }, [{ type: 'author', last: 'Roe', first: 'Ada' }]))
+                .toBe('Roe, Ada (2019). A Paper. ACM SIGCOMM.');
         });
     });
 
@@ -289,6 +337,12 @@ describe('formatItemReference', () => {
             expect(cite('artwork', { title: 'The Two Fridas', artworkMedium: 'Oil on canvas', date: '1939' }, [
                 { type: 'artist', last: 'Kahlo', first: 'Frida' },
             ])).toBe('Kahlo, Frida (1939). The Two Fridas. Oil on canvas.');
+        });
+
+        it('reads the medium through its base field, not one type at a time', () => {
+            expect(cite('podcast', { title: 'Episode 1', audioFileType: 'MP3', date: '2020' }, [
+                { type: 'podcaster', last: 'Vedantam', first: 'Shankar' },
+            ])).toBe('Vedantam, Shankar (2020). Episode 1. MP3.');
         });
 
         it('falls back to the localized type name when nothing else resolves', () => {
