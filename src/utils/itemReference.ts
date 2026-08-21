@@ -156,32 +156,51 @@ function creatorNames(item: Zotero.Item): CreatorName[] {
 }
 
 /**
- * "Smith, John" — or the whole institution name in single-field mode.
+ * Whether a creator prints as one indivisible string.
  *
- * A two-field creator can arrive with either half empty (imported records
- * routinely carry a first name and no surname); print the half that exists
- * rather than a dangling comma.
+ * True for Zotero's single-field mode (an institution, stored whole in
+ * `lastName`) and for a two-field creator arriving with either half empty —
+ * imported records routinely carry a first name and no surname. Both print
+ * the half that exists, in either position, rather than a dangling comma.
  */
-function formatCreator(creator: CreatorName): string {
-    if (creator.single || !creator.last || !creator.first) {
-        return creator.last || creator.first;
-    }
+function isWholeName(creator: CreatorName): boolean {
+    return creator.single || !creator.last || !creator.first;
+}
+
+/** "Smith, John" — the sort-order form that leads a reference. */
+function invertedName(creator: CreatorName): string {
+    if (isWholeName(creator)) return creator.last || creator.first;
     return `${creator.last}, ${creator.first}`;
+}
+
+/** "John Smith" — the reading-order form every name after the first takes. */
+function naturalName(creator: CreatorName): string {
+    if (isWholeName(creator)) return creator.last || creator.first;
+    return `${creator.first} ${creator.last}`;
 }
 
 /**
  * Join creators into the head of a reference.
  *
- * Entries are separated by semicolons because each already contains a comma.
+ * Only the first name is inverted, the way author-date styles print a
+ * bibliography: "Abraham, Linus, and Osei Appiah". Besides matching the
+ * convention, it keeps the commas unambiguous — exactly one name contains
+ * one — and it lets a single-field personal name sit among the rest without
+ * looking misordered, since everything after the first is in reading order
+ * anyway.
  */
 function formatCreatorList(creators: CreatorName[]): string {
-    const names = creators.map(formatCreator).filter(Boolean);
-    if (names.length === 0) return '';
+    const named = creators.filter(creator => creator.last || creator.first);
+    if (named.length === 0) return '';
+
+    const names = named.map((creator, index) => (
+        index === 0 ? invertedName(creator) : naturalName(creator)
+    ));
     if (names.length === 1) return names[0];
     if (names.length > MAX_CREATORS) {
-        return `${names.slice(0, MAX_CREATORS).join('; ')}; et al.`;
+        return `${names.slice(0, MAX_CREATORS).join(', ')}, et al.`;
     }
-    return `${names.slice(0, -1).join('; ')}; and ${names[names.length - 1]}`;
+    return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
 }
 
 /**
@@ -290,12 +309,18 @@ function referenceContext(item: Zotero.Item, title: string, creators: string): s
     } else {
         // `codeVolume` already rode with the code above.
         const volume = codeVolume ? '' : firstField(item, ['volume', 'codeVolume']);
-        const issue = field(item, 'issue');
-        if (volume || issue) parts.push(issue ? `${volume}(${issue})` : volume);
+        // An issue number only locates something alongside its volume, and a
+        // bare "(4)" next to the year parenthetical reads as a formatting slip.
+        const issue = volume ? field(item, 'issue') : '';
+        if (volume) parts.push(issue ? `${volume}(${issue})` : volume);
     }
 
     const edition = field(item, 'edition');
-    if (edition) parts.push(/\bed\b|\bedition\b/i.test(edition) ? edition : `${edition} ed.`);
+    if (edition) {
+        parts.push(
+            /\bed\b|\bedition\b/i.test(edition) ? edition : `${ordinalize(edition)} ed.`,
+        );
+    }
 
     // Base-mapped identifier (patentNumber, reportNumber, …). Labelled so a
     // bare number next to a volume is not ambiguous.
@@ -329,6 +354,23 @@ function referenceContext(item: Zotero.Item, title: string, creators: string): s
         seen.add(key);
         return true;
     });
+}
+
+/**
+ * "1" → "1st", so an edition reads the way a bibliography prints it.
+ *
+ * Zotero stores `edition` as free text: a bare number from most translators,
+ * but also "Revised" or "2nd". Anything that is not a plain integer is left
+ * alone — an ordinal is only ever right for a count.
+ */
+function ordinalize(value: string): string {
+    if (!/^\d+$/.test(value)) return value;
+    const n = Number(value);
+    // 11th/12th/13th break the last-digit rule.
+    const suffix = n % 100 >= 11 && n % 100 <= 13
+        ? 'th'
+        : ['th', 'st', 'nd', 'rd'][n % 10] || 'th';
+    return `${value}${suffix}`;
 }
 
 /** Terminate a segment, unless it already ends in sentence punctuation. */

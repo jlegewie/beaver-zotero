@@ -117,7 +117,7 @@ describe('formatItemReference', () => {
             { type: 'author', last: 'Legewie', first: 'Joscha' },
             { type: 'author', last: 'DiPrete', first: 'Thomas A.' },
         ])).toBe(
-            'Legewie, Joscha; and DiPrete, Thomas A. (2014). '
+            'Legewie, Joscha, and Thomas A. DiPrete (2014). '
             + 'The High School Environment and the Gender Gap. '
             + 'Sociology of Education, 87(4), 259-280.'
         );
@@ -130,7 +130,7 @@ describe('formatItemReference', () => {
                 { type: 'author', last: 'Kilduff', first: 'Martin' },
                 { type: 'author', last: 'Tasselli', first: 'Stefano' },
             ]);
-            expect(three).toContain('Burt, Ronald; Kilduff, Martin; and Tasselli, Stefano (2000).');
+            expect(three).toContain('Burt, Ronald, Martin Kilduff, and Stefano Tasselli (2000).');
 
             const four = cite('journalArticle', { title: 'T', date: '2000' }, [
                 { type: 'author', last: 'He', first: 'Kaiming' },
@@ -138,7 +138,7 @@ describe('formatItemReference', () => {
                 { type: 'author', last: 'Ren', first: 'Shaoqing' },
                 { type: 'author', last: 'Sun', first: 'Jian' },
             ]);
-            expect(four).toContain('He, Kaiming; Zhang, Xiangyu; Ren, Shaoqing; et al. (2000).');
+            expect(four).toContain('He, Kaiming, Xiangyu Zhang, Shaoqing Ren, et al. (2000).');
         });
 
         it('strips the bidi isolates Zotero stores around creator names', () => {
@@ -147,8 +147,27 @@ describe('formatItemReference', () => {
                 { type: 'author', last: '⁨Legewie⁩', first: 'Joscha' },
             ]);
 
-            expect(reference).toContain('Figures, Kevin; and Legewie, Joscha');
+            expect(reference).toContain('Figures, Kevin, and Joscha Legewie');
             expect(reference).not.toMatch(/[⁦-⁩]/);
+        });
+
+        it('inverts only the first name and leaves the rest in reading order', () => {
+            // The convention every author-date bibliography uses, and the
+            // reason a comma inside a name stays unambiguous: only one has one.
+            expect(cite('journalArticle', { title: 'T', publicationTitle: 'J', date: '2000' }, [
+                { type: 'author', last: 'Abraham', first: 'Linus' },
+                { type: 'author', last: 'Appiah', first: 'Osei' },
+            ])).toBe('Abraham, Linus, and Osei Appiah (2000). T. J.');
+        });
+
+        it('leaves a single-field personal name alone after the first position', () => {
+            // Zotero stores some imported names whole. In reading order it
+            // sits among the others without looking misordered.
+            expect(cite('journalArticle', { title: 'T', publicationTitle: 'J', date: '2017' }, [
+                { type: 'author', last: 'Vaswani', first: 'Ashish' },
+                { type: 'author', last: 'Noam Shazeer', single: true },
+                { type: 'author', last: 'Parmar', first: 'Niki' },
+            ])).toBe('Vaswani, Ashish, Noam Shazeer, and Niki Parmar (2017). T. J.');
         });
 
         it('keeps an institutional name whole rather than splitting it', () => {
@@ -177,7 +196,7 @@ describe('formatItemReference', () => {
                 { type: 'editor', last: 'Smelser', first: 'Neil J.' },
                 { type: 'editor', last: 'Swedberg', first: 'Richard' },
             ])).toBe(
-                'Smelser, Neil J.; and Swedberg, Richard (2005). The Handbook of Economic Sociology. '
+                'Smelser, Neil J., and Richard Swedberg (2005). The Handbook of Economic Sociology. '
                 + 'Princeton University Press: Princeton, NJ.'
             );
         });
@@ -329,6 +348,47 @@ describe('formatItemReference', () => {
             expect(reference).toContain('International Organization for Standardization,');
             expect(reference).not.toContain('JTC 1/SC 27');
             expect(reference).toContain('No. ISO/IEC 27001:2022, v3.');
+        });
+    });
+
+    describe('volume, issue and edition', () => {
+        it('drops an issue number that has no volume to locate it', () => {
+            // A bare "(4)" would sit next to the year parenthetical and read
+            // as a formatting slip rather than as an issue.
+            expect(cite('magazineArticle', {
+                title: 'Deep Learning Comes of Age',
+                publicationTitle: 'The Atlantic',
+                issue: '4',
+                date: '2019',
+            }, [{ type: 'author', last: 'Doe', first: 'Jane' }])).toBe(
+                'Doe, Jane (2019). Deep Learning Comes of Age. The Atlantic.'
+            );
+        });
+
+        it('prints an ordinal edition the way a bibliography does', () => {
+            expect(cite('book', {
+                title: 'Digital Sociology',
+                publisher: 'Routledge',
+                edition: '1',
+                date: '2014',
+            }, [{ type: 'author', last: 'Lupton', first: 'Deborah' }])).toBe(
+                'Lupton, Deborah (2014). Digital Sociology. Routledge, 1st ed.'
+            );
+        });
+
+        it('uses the teens suffix for an edition in the eleven-to-thirteen range', () => {
+            expect(cite('book', { title: 'T', publisher: 'P', edition: '13', date: '2000' }))
+                .toContain('13th ed.');
+        });
+
+        it('leaves a non-numeric edition alone rather than inventing an ordinal', () => {
+            expect(cite('book', { title: 'T', publisher: 'P', edition: 'Revised', date: '2000' }))
+                .toContain('Revised ed.');
+        });
+
+        it('keeps an edition that already names itself one', () => {
+            expect(cite('book', { title: 'T', publisher: 'P', edition: '2nd edition', date: '2000' }))
+                .toContain('2nd edition');
         });
     });
 

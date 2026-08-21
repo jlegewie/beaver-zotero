@@ -165,7 +165,7 @@ describe('handleGetMetadataRequest compact projection', () => {
         );
 
         expect(res.items[0].formatted_citation)
-            .toBe('Legewie, Joscha; and DiPrete, Thomas A. (2014). Title AAAAAAAA.');
+            .toBe('Legewie, Joscha, and Thomas A. DiPrete (2014). Title AAAAAAAA.');
     });
 
     it('skips the child payloads the projection has no place for', async () => {
