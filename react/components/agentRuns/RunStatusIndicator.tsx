@@ -12,7 +12,7 @@ import { runStatusText } from '@beaver/agent-core/run-state/runStatusCopy';
  * digits ticking under every response would be noise. The counter is for the
  * wait that has gone on long enough that a still spinner starts to look stuck.
  */
-const COUNT_AFTER_MS = 3000;
+const COUNT_AFTER_MS = 8000;
 
 interface RunStatusIndicatorProps {
     status: AgentRunStatus;
@@ -20,6 +20,11 @@ interface RunStatusIndicatorProps {
     runId?: string;
     /** Whether the previous message has a tool call */
     lastMessageHasToolCall?: boolean;
+    /**
+     * Whether the wait sits under a text part. Text has no trailing margin, so
+     * the indicator needs the same extra top gap a tool-call block uses.
+     */
+    followsText?: boolean;
     /**
      * When the wait began, in epoch ms. Null when the run has produced no event
      * to date it from — at the start of a run — where this component's own mount
@@ -56,7 +61,7 @@ function useElapsedSeconds(since: number | null | undefined): number {
  * connection.
  * Note: Errors are displayed separately by RunErrorDisplay.
  */
-export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, runId, lastMessageHasToolCall, waitingSince }) => {
+export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, runId, lastMessageHasToolCall, followsText, waitingSince }) => {
     const retryState = useAtomValue(wsRetryAtom);
     const reconnectState = useAtomValue(wsReconnectingAtom);
     const elapsedSeconds = useElapsedSeconds(waitingSince);
@@ -76,13 +81,13 @@ export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, 
         elapsedSeconds: elapsedSeconds >= COUNT_AFTER_MS / 1000 ? elapsedSeconds : null,
     });
     // The announced copy leaves the counter out. It changes once a second, and a
-    // live region reading "Generating 4s… Generating 5s…" over a forty-second
+    // live region reading "Generating · 4s… Generating · 5s…" over a forty-second
     // wait is worse than the silence it was added to break.
     const announcedText = runStatusText(state);
 
     // Structure matches ThinkingPartView for smooth visual transition
     return (
-        <div className="rounded-md flex flex-col min-w-0 border-transparent">
+        <div className={`rounded-md flex flex-col min-w-0 border-transparent ${followsText ? 'mt-2' : ''}`}>
             <div className="display-flex flex-row py-15">
                 <button
                     type="button"

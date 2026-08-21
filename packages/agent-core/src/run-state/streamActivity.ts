@@ -79,6 +79,16 @@ export interface StreamActivityTracker {
      */
     noteActivity(runId: string): void;
     /**
+     * Starts a wait for `runId` immediately, dated from now.
+     *
+     * `noteActivity` waits out the quiet threshold, and if a wait was already
+     * on screen it drops it for a second before putting it back. A backend
+     * retry is already a wait the reader should see — the Retrying line lives
+     * on this same indicator — and the seconds beside it should count from the
+     * retry, not from the last token that prompted it.
+     */
+    startWait(runId: string): void;
+    /**
      * Forgets the run being tracked and disarms the clock, reporting nothing.
      * Call when a run ends or is abandoned, however that happens.
      */
@@ -107,6 +117,12 @@ export function createStreamActivityTracker(
     let quietSince = 0;
     /** The last state handed to `publish`, so a transition publishes once. */
     let reported: StreamQuietState | null = null;
+    /**
+     * When `reported` last became non-null. The minimum hold dates from here
+     * so a wait reported immediately (`startWait`) is not held as if it had
+     * already waited out `quietAfterMs`.
+     */
+    let reportedAt = 0;
 
     const disarm = () => {
         if (timer !== null) {
@@ -126,6 +142,7 @@ export function createStreamActivityTracker(
             return;
         }
         reported = state;
+        if (state !== null) reportedAt = now();
         publish(state);
     };
 
@@ -146,7 +163,7 @@ export function createStreamActivityTracker(
         // the rest of its minimum and re-settle: by then the stream is either
         // flowing again or already into a fresh quiet stretch.
         if (reported !== null) {
-            const held = now() - reported.quietSince - quietAfterMs;
+            const held = now() - reportedAt;
             if (held < minReportedMs) {
                 timer = setTimeout(settle, minReportedMs - held);
                 return;
@@ -168,6 +185,12 @@ export function createStreamActivityTracker(
             }
             quietSince = now();
             settle();
+        },
+        startWait(eventRunId: string) {
+            disarm();
+            runId = eventRunId;
+            quietSince = now();
+            report({ runId, quietSince });
         },
         reset() {
             disarm();

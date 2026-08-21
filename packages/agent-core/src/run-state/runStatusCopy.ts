@@ -66,5 +66,7 @@ export function runStatusText(state: {
     if (seconds === null || seconds === undefined || seconds < 1) {
         return state.idleLabel;
     }
-    return `${state.idleLabel} ${Math.floor(seconds)}s`;
+    // A middot keeps the number from reading as a duration of generation
+    // ("Generating 8s") or as time remaining.
+    return `${state.idleLabel} · ${Math.floor(seconds)}s`;
 }

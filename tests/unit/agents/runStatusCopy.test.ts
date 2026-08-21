@@ -82,7 +82,7 @@ describe('runStatusText', () => {
                 idleLabel: 'Generating',
                 elapsedSeconds: 12,
             }),
-        ).toBe('Generating 12s');
+        ).toBe('Generating · 12s');
     });
 
     it('says nothing about a wait the caller is withholding', () => {

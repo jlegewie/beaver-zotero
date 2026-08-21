@@ -1738,6 +1738,11 @@ export function createWSCallbacks(
                 waitSeconds: event.wait_seconds,
             });
 
+            // A new wait, dated from the retry: `noteActivity` would drop an
+            // already-showing indicator for a second, and leaving the old clock
+            // would count seconds from the last token rather than from now.
+            streamActivity.startWait(event.run_id);
+
             // If reset is true, clear any partial content that was streamed
             if (event.reset) {
                 logger(`WS onRetry: resetting run messages for run ${event.run_id}`, 1);

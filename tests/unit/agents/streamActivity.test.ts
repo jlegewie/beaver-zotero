@@ -156,4 +156,50 @@ describe('createStreamActivityTracker', () => {
         vi.advanceTimersByTime(1);
         expect(latest()).toEqual({ runId: 'run-1', quietSince: expect.any(Number) });
     });
+
+    it('startWait reports immediately, dated from now, without the quiet threshold', () => {
+        const { tracker, published } = tracked();
+        const startedAt = Date.now();
+        tracker.startWait('run-1');
+
+        expect(published).toEqual([{ runId: 'run-1', quietSince: startedAt }]);
+    });
+
+    it('startWait redates an already-showing wait rather than dropping it', () => {
+        const { tracker, published, latest } = tracked();
+        tracker.noteActivity('run-1');
+        vi.advanceTimersByTime(DEFAULT_QUIET_AFTER_MS + 20_000);
+        expect(latest()).not.toBeNull();
+
+        const retriedAt = Date.now();
+        tracker.startWait('run-1');
+
+        expect(latest()).toEqual({ runId: 'run-1', quietSince: retriedAt });
+        // One report for the original quiet, one redate — no null in between.
+        expect(published).toEqual([
+            { runId: 'run-1', quietSince: retriedAt - 20_000 - DEFAULT_QUIET_AFTER_MS },
+            { runId: 'run-1', quietSince: retriedAt },
+        ]);
+    });
+
+    it('startWait replaces another run\'s wait without a hold', () => {
+        const { tracker, latest } = tracked();
+        tracker.noteActivity('run-1');
+        vi.advanceTimersByTime(DEFAULT_QUIET_AFTER_MS);
+        tracker.startWait('run-2');
+
+        expect(latest()).toEqual({ runId: 'run-2', quietSince: Date.now() });
+    });
+
+    it('lets a later event retire a startWait after the minimum hold, not the quiet threshold', () => {
+        const { tracker, latest } = tracked();
+        tracker.startWait('run-1');
+        tracker.noteActivity('run-1');
+
+        vi.advanceTimersByTime(DEFAULT_MIN_REPORTED_MS - 1);
+        expect(latest()).not.toBeNull();
+
+        vi.advanceTimersByTime(1);
+        expect(latest()).toBeNull();
+    });
 });
