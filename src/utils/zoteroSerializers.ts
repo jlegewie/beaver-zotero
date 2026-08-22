@@ -5,6 +5,8 @@ import { libraryRefForLibraryID, modelObjectId } from './libraryIdentity';
 import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemStub, ItemSummary, CollectionSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary, AttachmentStub } from '@beaver/agent-core/types/zotero';
 import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, getMimeType, safeIsInTrash, safeFileExists } from './zoteroUtils';
 import { safeAttachmentFilename } from './attachmentFiles';
+import { formatItemReference } from './itemReference';
+import { getItemDisplayName } from './itemDisplayName';
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
 import { skippedItemsManager } from '../services/skippedItemsManager';
@@ -305,7 +307,7 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
         url: item.getField('url'),
         identifiers: getIdentifiersFromItem(item),
         language: item.getField('language'),
-        formatted_citation: Zotero.Beaver?.citationService?.formatBibliography(item) ?? '',
+        formatted_citation: formatItemReference(item),
         deleted: (() => {
             const trashState = safeIsInTrash(item);
             if (trashState === null) {
@@ -354,6 +356,8 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
         // derived from library_id (already hashed) and never changes on its
         // own, so it must not affect the metadata hash.
         library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
+        // The item's canonical short label ("Smith and Johnson 2014").
+        display_name: safeLabel(() => getItemDisplayName(item)),
         // Add the calculated hash
         zotero_version: item.version,
         zotero_synced: item.synced,
@@ -366,8 +370,8 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
 
 /**
  * Lightweight item serializer for search results.
- * Skips expensive operations: formatBibliography(), item.toJSON(), calculateObjectHash(),
- * and all sync/date/deleted fields.
+ * Skips expensive operations: item.toJSON(), calculateObjectHash(), and all
+ * sync/date/deleted fields.
  * @param item Zotero item
  * @returns Promise resolving to ItemSummary
  */
@@ -391,6 +395,11 @@ export async function serializeItemSummary(item: Zotero.Item): Promise<ItemSumma
         tags: tags.length > 0 ? tags.map((t: any) => t.tag) : null,
         collections: getCollectionSummariesFromItem(item),
         citation_key: await getCitationKeyFromItem(item),
+        // Citation-shaped labels are rendered here, in Zotero, so a consumer
+        // never has to rebuild them from `creators` and drift from what the
+        // rest of Beaver calls the same item.
+        formatted_citation: safeLabel(() => formatItemReference(item)),
+        display_name: safeLabel(() => getItemDisplayName(item)),
     };
 }
 
@@ -417,6 +426,17 @@ export function itemSearchResultFromZoteroItem(item: Zotero.Item): ItemSearchRes
 }
 
 /**
+ * Reads one optional label field without letting it sink the whole payload.
+ */
+function safeLabel(read: () => string | null | undefined): string | null {
+    try {
+        return read() || null;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Serializes the minimal bibliographic anchor (`ItemStub`) for a regular item.
  *
  * Emits the lean, model-facing shape the backend consumes directly: a combined
@@ -431,6 +451,8 @@ export function serializeItemStub(item: Zotero.Item): ItemStub {
         title: item.getField('title', false, true) || null,
         creators: formatZoteroCreatorsString(getCreatorsFromItem(item)),
         year: getYearFromItem(item) ?? null,
+        formatted_citation: safeLabel(() => formatItemReference(item)),
+        display_name: safeLabel(() => getItemDisplayName(item)),
     };
 }
 

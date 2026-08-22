@@ -126,18 +126,26 @@ export interface ItemStub {
     title?: string | null;
     creators?: string | null;
     year?: number | null;
+    /** One-line bibliographic reference */
+    formatted_citation?: string | null;
+    /** The item's canonical short label ("Smith and Johnson 2014") */
+    display_name?: string | null;
 }
 
 /**
- * Lightweight item data for search results. 
+ * Lightweight item data for search results.
  *
- * Omits formatted_citation, item_json, hashes, sync fields.
+ * Omits item_json, hashes, sync fields.
  */
 export interface ItemSummary extends ZoteroItemReference {
     item_type: string;
     title?: string | null;
     creators?: ZoteroCreator[] | null;
     year?: number | null;
+    /** One-line bibliographic reference */
+    formatted_citation?: string | null;
+    /** The item's canonical short label ("Smith and Johnson 2014") */
+    display_name?: string | null;
     date?: string | null;
     publication_title?: string | null;
     abstract?: string | null;
@@ -172,6 +180,8 @@ export interface ItemData extends ZoteroItemBase {
     // Metadata
     language?: string | null;
     formatted_citation?: string | null;
+    /** The item's canonical short label ("Smith and Johnson 2014"). */
+    display_name?: string | null;
     deleted: boolean;
     tags?: any[] | null;
     collections?: string[] | null;

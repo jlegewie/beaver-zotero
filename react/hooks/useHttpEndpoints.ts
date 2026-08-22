@@ -502,7 +502,6 @@ async function handleQuickSearchHttpRequest(request: any) {
         tags_filter: request.tags_filter,
         collections_filter: request.collections_filter,
         detail: request.detail,
-        include_citation: request.include_citation,
         limit: request.limit,
         offset: request.offset,
     };
@@ -707,7 +706,6 @@ async function handleLibraryMetadataHttpRequest(request: any) {
         include_attachments: request.include_attachments ?? false,
         include_notes: request.include_notes ?? false,
         detail: request.detail,
-        include_citation: request.include_citation,
     };
 
     const response = await handleGetMetadataRequest(wsRequest);
@@ -828,6 +826,8 @@ async function handleAgentActionValidateHttpRequest(request: any) {
 
     const response = await handleAgentActionValidateRequest(wsRequest);
 
+    // Hand-maintained projection of WSAgentActionValidateResponse minus the
+    // transport envelope.
     return {
         valid: response.valid,
         error: response.error,
@@ -836,6 +836,7 @@ async function handleAgentActionValidateHttpRequest(request: any) {
         edit_errors: response.edit_errors,
         current_value: response.current_value,
         normalized_action_data: response.normalized_action_data,
+        collection_names: response.collection_names,
         preference: response.preference,
         warnings: response.warnings,
     };

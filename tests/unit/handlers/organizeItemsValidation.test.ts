@@ -305,6 +305,44 @@ describe("validateOrganizeItemsAction", () => {
     expect(res.error).not.toContain("GOODKEY1");
   });
 
+  it("returns the display name of every collection the action touches", async () => {
+    const zotero = (globalThis as any).Zotero;
+    const names: Record<string, string> = {
+      COLLADD1: "3.5 Learning, Prediction, Control",
+      COLLREM1: "Inbox",
+    };
+    zotero.Collections.getByLibraryAndKeyAsync = vi.fn(async (_libId: number, key: string) =>
+      names[key] ? { key, name: names[key] } : false,
+    );
+
+    const res = await validateOrganizeItemsAction(
+      buildRequest({
+        item_ids: ["1-REGULARKEY"],
+        tags: null,
+        collections: { add: ["COLLADD1"], remove: ["COLLREM1"] },
+      }),
+    );
+
+    expect(res.valid).toBe(true);
+    expect(res.collection_names).toEqual({
+      COLLADD1: "3.5 Learning, Prediction, Control",
+      COLLREM1: "Inbox",
+    });
+  });
+
+  it("omits collection_names for a tag-only action", async () => {
+    const res = await validateOrganizeItemsAction(
+      buildRequest({
+        item_ids: ["1-REGULARKEY"],
+        tags: { add: ["methods"], remove: [] },
+        collections: null,
+      }),
+    );
+
+    expect(res.valid).toBe(true);
+    expect(res.collection_names).toBeUndefined();
+  });
+
   it("uses a generic error_code when the batch has mixed failure reasons", async () => {
     const zotero = (globalThis as any).Zotero;
     zotero.Items.getByLibraryAndKeyAsync = vi.fn(async () => false);

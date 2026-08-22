@@ -15,6 +15,8 @@ import {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { AttachmentInfo, ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeAnnotation, serializeItemStub } from '../../utils/zoteroSerializers';
+import { formatItemReference } from '../../utils/itemReference';
+import { getItemDisplayName } from '../../utils/itemDisplayName';
 import { libraryRefForLibraryID, modelObjectId, resolveItemReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { checkLibraryExcluded, getAttachmentInfoForItem, degradedAttachmentInfo, formatCreatorsString, extractYear } from './utils';
 import { loadQuickSearchHitData, toQuickSearchHit } from './itemSearchSerialization';
@@ -98,7 +100,7 @@ export async function handleGetMetadataRequest(
                 await loadQuickSearchHitData([item]);
                 items.push({
                     item_id: itemId,
-                    ...toQuickSearchHit(item, { includeCitation: request.include_citation === true }),
+                    ...toQuickSearchHit(item),
                 });
                 continue;
             }
@@ -234,6 +236,24 @@ export async function handleGetMetadataRequest(
             
             // Return all fields (including tags and collections)
             const result: Record<string, any> = { ...itemData };
+
+            // The citation-shaped labels, which `toJSON` does not carry. Only
+            // for regular items: a note or attachment has no reference to
+            // render. Guarded because these read a wider slice of the item API
+            // than the field reads above, and a hover-card label must not cost
+            // the whole row.
+            if (item.isRegularItem()) {
+                try {
+                    result.formatted_citation = formatItemReference(item) || null;
+                } catch {
+                    result.formatted_citation = null;
+                }
+                try {
+                    result.display_name = getItemDisplayName(item) || null;
+                } catch {
+                    result.display_name = null;
+                }
+            }
 
             // Enrich collection keys with names for agent readability
             // toJSON() returns collections as plain key strings: ["ABCD1234", ...]
