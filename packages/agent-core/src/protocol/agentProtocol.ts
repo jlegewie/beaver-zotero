@@ -1505,9 +1505,13 @@ export interface WSResolvePopulationResponse {
     /** Available libraries (only included when error_code is 'library_not_found') */
     available_libraries?: AvailableLibraryInfo[] | null;
     /**
-     * Non-fatal warnings (e.g. conditions Zotero rejected and the handler
-     * dropped). A dropped filter WIDENS the population, so the caller must
-     * treat any warning as a failed resolution rather than acting on the ids.
+     * Unused by this response: a condition Zotero refuses fails the whole
+     * resolution with `error_code: 'invalid_condition'` instead. The population
+     * is about to be mutated, so a filter that could not be applied as
+     * described has to produce an answer that cannot be acted on — no ids —
+     * rather than ids the caller is trusted to discard.
+     *
+     * Kept so a caller that also reads older answers can still see them.
      */
     warnings?: string[] | null;
 }

@@ -19,6 +19,11 @@
  * turn its item-type guards into always-true disjuncts and select the whole
  * library. Groups are recombined with the main search by `setScope` or by
  * intersecting ids, both of which keep the group ANDed with everything else.
+ *
+ * A filter that cannot be applied as described FAILS the request; this handler
+ * never answers with ids beside a warning. The population it resolves is about
+ * to be mutated, so an answer that no longer matches the description has to be
+ * impossible to act on, not merely flagged.
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -220,7 +225,7 @@ function valuesOrGroup(
  *
  * Returns null when no condition survived validation, because such a group
  * would carry nothing but its join mode and match the whole library. The
- * dropped conditions are already recorded in `warnings`.
+ * refused conditions are recorded in `warnings`, which fails the request.
  */
 function conditionsOrGroup(
     libraryID: number,
@@ -420,6 +425,18 @@ export async function handleResolvePopulationRequest(
                 : null,
         ].filter((group): group is Zotero.Search => group !== null);
 
+        // Every condition is now in place, so this is the first point at which
+        // a refused one is known. A population is about to be MUTATED, and what
+        // is left of the filter no longer describes it, so the request fails
+        // rather than resolving ids beside a warning: an empty answer cannot be
+        // acted on by mistake, and it is how every other unapplicable filter in
+        // this handler already answers. A read path can afford to hand back
+        // results and a warning; this one cannot.
+        if (warnings.length > 0) {
+            logger(`handleResolvePopulationRequest: Refused ${warnings.length} condition(s)`, 1);
+            return errorResponse(request.request_id, warnings.join(' '), 'invalid_condition');
+        }
+
         const [scope, ...extraGroups] = groups;
         if (scope) {
             search.setScope(scope, true);
@@ -489,7 +506,7 @@ export async function handleResolvePopulationRequest(
         if (maxItems === 0) {
             logger(
                 `handleResolvePopulationRequest: Returning 0/${totalCount} item ids`
-                    + `${totalCount > 0 ? ' (truncated)' : ''}${warnings.length ? ` with ${warnings.length} warning(s)` : ''}`,
+                    + `${totalCount > 0 ? ' (truncated)' : ''}`,
                 1,
             );
             return {
@@ -504,7 +521,6 @@ export async function handleResolvePopulationRequest(
                 // Echoed so a caller that asked for 'any' can tell an applied
                 // 'any' from a provider that never knew the field.
                 conditions_join_mode: conditionsJoinMode,
-                warnings: warnings.length ? warnings : undefined,
             };
         }
 
@@ -524,7 +540,7 @@ export async function handleResolvePopulationRequest(
 
         logger(
             `handleResolvePopulationRequest: Returning ${resultIds.length}/${totalCount} item ids`
-                + `${truncated ? ' (truncated)' : ''}${warnings.length ? ` with ${warnings.length} warning(s)` : ''}`,
+                + `${truncated ? ' (truncated)' : ''}`,
             1,
         );
 
@@ -542,7 +558,6 @@ export async function handleResolvePopulationRequest(
             // Echoed so a caller that asked for 'any' can tell an applied
             // 'any' from a provider that never knew the field.
             conditions_join_mode: conditionsJoinMode,
-            warnings: warnings.length ? warnings : undefined,
         };
     } catch (error) {
         logger(`handleResolvePopulationRequest: Error: ${error}`, 1);

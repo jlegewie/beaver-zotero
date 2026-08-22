@@ -765,7 +765,7 @@ describe('handleResolvePopulationRequest', () => {
             expect(addedConditions()).toContainEqual(['noChildren', 'true', '']);
         });
 
-        it('builds no conditions group when every condition was dropped', async () => {
+        it('fails rather than run a group whose every condition was refused', async () => {
             searchResultIds = [1, 2];
             seedItem(1);
             seedItem(2);
@@ -787,7 +787,8 @@ describe('handleResolvePopulationRequest', () => {
                 conditions: [{ field: 'bogusField', operator: 'is', value: 'x' }],
             }));
 
-            expect(response.warnings).toHaveLength(1);
+            expect(response.error_code).toBe('invalid_condition');
+            expect(response.item_ids).toEqual([]);
             // A group left carrying nothing but its join mode matches the whole
             // library, so attaching or running it would widen the population.
             expect(mainSearch()?.setScope).not.toHaveBeenCalled();
@@ -1138,7 +1139,7 @@ describe('handleResolvePopulationRequest', () => {
             expect(addedConditions()).toContainEqual(['publisher', 'doesNotContain', 'Elsevier']);
         });
 
-        it('drops a condition Zotero rejects into warnings instead of failing the request', async () => {
+        it('fails the resolution when Zotero rejects a condition', async () => {
             searchResultIds = [1, 2];
             seedItem(1);
             seedItem(2);
@@ -1161,15 +1162,16 @@ describe('handleResolvePopulationRequest', () => {
                 ],
             }));
 
-            expect(response.error).toBeUndefined();
-            expect(response.error_code).toBeUndefined();
-            expect(response.item_ids).toEqual(['u-KEY1', 'u-KEY2']);
-            expect(response.warnings).toHaveLength(1);
-            expect(response.warnings![0]).toContain("field='bogusField'");
-            expect(response.warnings![0]).toContain("operator='is'");
-            expect(response.warnings![0]).toContain('Invalid search condition');
-            // The valid condition still made it onto the search.
-            expect(addedConditions()).toContainEqual(['title', 'contains', 'climate']);
+            // No ids at all: what is left of the filter no longer describes
+            // the population, and this one is about to be mutated.
+            expect(response.error_code).toBe('invalid_condition');
+            expect(response.item_ids).toEqual([]);
+            expect(response.total_count).toBe(0);
+            expect(response.error).toContain("field='bogusField'");
+            expect(response.error).toContain("operator='is'");
+            expect(response.error).toContain('Invalid search condition');
+            // Refused before any search ran.
+            expect(searches[0].search).not.toHaveBeenCalled();
         });
     });
 
@@ -1267,8 +1269,9 @@ describe('handleResolvePopulationRequest', () => {
             }));
 
             expect(searches[0].addCondition).not.toHaveBeenCalledWith('joinMode', expect.anything(), expect.anything());
-            expect(searches[0].addCondition).toHaveBeenCalledWith('DOI', 'doesNotContain', '');
-            expect(response.warnings?.join(' ')).toContain('joinMode');
+            expect(response.error_code).toBe('invalid_condition');
+            expect(response.error).toContain('joinMode');
+            expect(response.item_ids).toEqual([]);
         });
 
         it('refuses conditions that would admit trashed or child items', async () => {
@@ -1281,14 +1284,16 @@ describe('handleResolvePopulationRequest', () => {
                 ],
             }));
 
+            // None of them reached the search, and the request failed before
+            // the handler got as far as adding its own guards.
             const added = searches[0].addCondition.mock.calls.map((call: any[]) => call[0]);
             expect(added).not.toContain('includeDeleted');
             expect(added).not.toContain('includeParentsAndChildren');
-            // The handler adds noChildren itself; the caller's is dropped, so
-            // exactly one call remains and it is the handler's own 'true'.
-            expect(added.filter((field: string) => field === 'noChildren')).toHaveLength(1);
-            expect(searches[0].addCondition).toHaveBeenCalledWith('noChildren', 'true', '');
-            expect(response.warnings).toHaveLength(3);
+            expect(added).not.toContain('noChildren');
+            expect(response.error_code).toBe('invalid_condition');
+            expect(response.error).toContain('controls how the search runs');
+            expect(response.item_ids).toEqual([]);
+            expect(searches[0].search).not.toHaveBeenCalled();
         });
 
         it('keeps predicates that only narrow, however unfamiliar', async () => {
