@@ -12,6 +12,7 @@ import {
     isCellEmpty,
     isColumnSortable,
     isRowInLibrary,
+    summarizeCoverage,
     rowActions,
     rowIdFor,
     selectLabelsInColumn,
@@ -556,5 +557,63 @@ describe("column progress validation", () => {
                 .map((i) => i.code)
                 .sort(),
         ).toEqual(["invalid_column_progress", "unknown_anchor_column"]);
+    });
+});
+
+describe("coverage", () => {
+    it("separates filled, not-reported, pending and failed cells", () => {
+        const spec: TableSpec = {
+            id: "t",
+            columns: [
+                { id: "a", header: "A", type: "text" },
+                { id: "b", header: "B", type: "text" },
+            ],
+            rows: [
+                {
+                    id: "r1",
+                    cells: {
+                        a: { value: { kind: "text", text: "x" } },
+                        b: {},
+                    },
+                },
+                {
+                    id: "r2",
+                    status: "error",
+                    cells: {
+                        a: { status: "pending" },
+                        b: { status: "error", error: "no text layer" },
+                    },
+                },
+            ],
+        };
+        expect(summarizeCoverage(spec)).toEqual({
+            rows: 2,
+            cells: 4,
+            filled: 1,
+            empty: 1,
+            pending: 1,
+            error: 1,
+            errorRows: 1,
+        });
+    });
+
+    it("counts only the rows it is given, so a footer can report the filtered view", () => {
+        const spec: TableSpec = {
+            id: "t",
+            columns: [{ id: "a", header: "A", type: "text" }],
+            rows: [
+                {
+                    id: "r1",
+                    cells: { a: { value: { kind: "text", text: "x" } } },
+                },
+                { id: "r2", cells: {} },
+            ],
+        };
+        expect(summarizeCoverage(spec, [spec.rows[0]])).toMatchObject({
+            rows: 1,
+            cells: 1,
+            filled: 1,
+            empty: 0,
+        });
     });
 });

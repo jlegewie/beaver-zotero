@@ -1,58 +1,176 @@
 import React from "react";
 import {
-    cellIdFor,
+    columnWrap,
     type Cell,
-    type CellDetails,
     type CellValue,
     type Column,
+    type Details,
     type Row,
-    type RowAction,
-    type RowRef,
     type SelectColor,
 } from "@beaver/agent-core/layouts/table";
 import { itemTypeToIconName } from "@beaver/agent-core/types/citations";
 import { getHost } from "../host";
 import {
     AlertCircleIcon,
-    ArrowRightIcon,
+    ArrowUpRightIcon,
+    EditIcon,
+    ExternalLinkIcon,
     FileIcon,
-    FileViewIcon,
     Icon,
-    LibraryIcon,
-    Spinner,
     TickIcon,
 } from "../icons";
 import IconButton from "../primitives/IconButton";
+import { EMPTY_CELL, type TextRenderer } from "./tableView";
 
-/** Renders a cell's text (markdown, possibly with citation tags). The default is plain text. */
-export type TextRenderer = (text: string) => React.ReactNode;
+/**
+ * One cell, in four states that must not be confused with one another:
+ *
+ * - **pending** — a producer is still filling it. A shimmer block sized like
+ *   the text that is coming, not a spinner: a filling column would otherwise
+ *   strobe once it has more than a handful of rows.
+ * - **error** — the reason in words, with the retry the caller supplies. Never
+ *   a red wash and never a dimmed row: dimming hides the data that did arrive.
+ * - **empty** — an em dash. In an extraction table this is a finding ("the
+ *   paper does not report this"), so it has to read as a value.
+ * - **filled** — the value, clamped to the row height unless the column opts
+ *   out with `wrap: "nowrap"`.
+ */
 
-export const renderPlainText: TextRenderer = (text) => text;
-
-export const EMPTY_CELL = "—";
-
-function selectColorClass(label: string, column: Column): string {
-    const color: SelectColor =
-        column.options?.find((o) => o.label === label)?.color ?? "gray";
-    return `bt-select bt-select-${color}`;
+export interface CellViewProps {
+    cell: Cell | undefined;
+    column: Column;
+    row: Row;
+    renderText: TextRenderer;
+    /** Clicking a select pill filters by it, where the table allows filtering. */
+    onSelectClick?: (label: string) => void;
+    /** Offered next to a cell-level error when the surface can re-run one cell. */
+    onRetry?: () => void;
 }
 
-/** The compact, always-visible rendering of a value. */
+export function CellView({
+    cell,
+    column,
+    row,
+    renderText,
+    onSelectClick,
+    onRetry,
+}: CellViewProps): React.ReactElement {
+    if (cell?.status === "pending") return <PendingCell />;
+    if (cell?.status === "error")
+        return <ErrorCell message={cell.error} onRetry={onRetry} />;
+
+    if (!cell?.value)
+        return (
+            <span className="bt-empty" role="img" aria-label="Not reported">
+                {EMPTY_CELL}
+            </span>
+        );
+
+    return (
+        <span
+            className={[
+                "bt-value",
+                overflowClass(cell.value, column),
+                cell.provenance === "user" ? "bt-edited" : "",
+            ]
+                .filter(Boolean)
+                .join(" ")}
+        >
+            <CellValueView
+                value={cell.value}
+                column={column}
+                row={row}
+                renderText={renderText}
+                onSelectClick={onSelectClick}
+            />
+            {cell.provenance === "user" ? (
+                <span className="bt-edit-mark" title="Edited by you">
+                    <Icon icon={EditIcon} size={11} />
+                </span>
+            ) : null}
+        </span>
+    );
+}
+
+/**
+ * Only prose clamps. A reference cell does its own clamping inside (title over
+ * subtitle), and a number, date, pill or link is a single short token that
+ * should ellipsise rather than wrap — clamping those would break their layout
+ * for no gain.
+ */
+function overflowClass(value: CellValue, column: Column): string {
+    if (value.kind === "reference") return "";
+    if (value.kind === "text")
+        return columnWrap(column) === "clamp" ? "bt-clamp" : "bt-nowrap";
+    return "bt-nowrap";
+}
+
+function PendingCell(): React.ReactElement {
+    return (
+        <span className="bt-pending" role="img" aria-label="Filling">
+            <span className="bt-skeleton" style={{ width: "92%" }} />
+            <span className="bt-skeleton" style={{ width: "68%" }} />
+        </span>
+    );
+}
+
+function ErrorCell({
+    message,
+    onRetry,
+}: {
+    message?: string;
+    onRetry?: () => void;
+}): React.ReactElement {
+    return (
+        <span className="bt-cell-error">
+            <span className="bt-cell-error-mark" aria-hidden="true">
+                <Icon icon={AlertCircleIcon} size={13} />
+            </span>
+            <span className="bt-cell-error-text">
+                {message ?? "Could not be extracted"}
+                {onRetry ? (
+                    <>
+                        {" "}
+                        <button
+                            type="button"
+                            className="bt-inline-link"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onRetry();
+                            }}
+                        >
+                            Retry
+                        </button>
+                    </>
+                ) : null}
+            </span>
+        </span>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Values, one renderer per CellValue kind
+// ---------------------------------------------------------------------------
+
+export interface CellValueViewProps {
+    value: CellValue;
+    column: Column;
+    row: Row;
+    renderText: TextRenderer;
+    onSelectClick?: (label: string) => void;
+}
+
 export function CellValueView({
     value,
     column,
+    row,
     renderText,
     onSelectClick,
-}: {
-    value: CellValue;
-    column: Column;
-    renderText: TextRenderer;
-    /** When given, select pills are clickable (filter by this label). */
-    onSelectClick?: (label: string) => void;
-}): React.ReactElement {
+}: CellValueViewProps): React.ReactElement {
     switch (value.kind) {
         case "text":
-            return <span className="bt-text">{renderText(value.text)}</span>;
+            return <>{renderText(value.text)}</>;
+
         case "number":
             return (
                 <span className="bt-number">
@@ -62,197 +180,193 @@ export function CellValueView({
                     ) : null}
                 </span>
             );
+
         case "date":
             return (
-                <span className="bt-date">{value.display ?? value.value}</span>
+                <span className="bt-number">
+                    {value.display ?? value.value}
+                </span>
             );
+
         case "boolean":
-            return (
-                <span
-                    className={`bt-boolean${value.value ? " bt-boolean-true" : ""}`}
-                    role="img"
-                    aria-label={value.value ? "yes" : "no"}
-                >
-                    {value.value ? (
-                        <Icon icon={TickIcon} size={14} />
-                    ) : (
-                        <span className="bt-boolean-false" />
-                    )}
+            // A check or a short dash, never a checkbox glyph: a checkbox reads
+            // as editable, and false must not look like empty (an em dash).
+            return value.value ? (
+                <span className="bt-bool-yes" role="img" aria-label="yes">
+                    <Icon icon={TickIcon} size={14} />
                 </span>
-            );
-        case "select":
-            return onSelectClick ? (
-                <button
-                    type="button"
-                    className={`${selectColorClass(value.label, column)} bt-select-button`}
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onSelectClick(value.label);
-                    }}
-                    title={`Filter by ${value.label}`}
-                >
-                    {value.label}
-                </button>
             ) : (
-                <span className={selectColorClass(value.label, column)}>
-                    {value.label}
+                <span className="bt-bool-no" role="img" aria-label="no">
+                    –
                 </span>
             );
-        case "reference": {
-            const inLibrary = (value.library_items?.length ?? 0) > 0;
-            const iconName = itemTypeToIconName(value.item_type, undefined);
-            const hostIcon = getHost().components?.itemTypeIcon({
-                itemType: iconName,
-                className: "bt-ref-icon",
-            });
+
+        case "select":
             return (
-                <span className="bt-reference">
-                    <span className="bt-ref-icon-slot" aria-hidden="true">
-                        {hostIcon ?? (
-                            <Icon
-                                icon={FileIcon}
-                                size={16}
-                                className="bt-ref-icon"
-                            />
-                        )}
-                    </span>
-                    <span className="bt-ref-body">
-                        <span className="bt-ref-name">
-                            {value.display_name}
-                            {inLibrary ? (
-                                <span
-                                    className="bt-ref-in-library"
-                                    title="In your library"
-                                >
-                                    <Icon icon={LibraryIcon} size={12} />
-                                </span>
-                            ) : null}
-                        </span>
-                        {value.subtitle ? (
-                            <span className="bt-ref-subtitle">
-                                {value.subtitle}
-                            </span>
-                        ) : null}
-                    </span>
-                </span>
+                <SelectPill
+                    label={value.label}
+                    column={column}
+                    onClick={onSelectClick}
+                />
             );
-        }
+
+        case "reference":
+            return <ReferenceValue value={value} row={row} />;
+
         case "link": {
             const label = value.label ?? value.url;
             const navigation = getHost().navigation;
-            return navigation ? (
+            return (
                 <button
                     type="button"
-                    className="bt-link text-link"
+                    className="bt-link"
+                    title={value.url}
                     onClick={(e) => {
                         e.stopPropagation();
-                        navigation.openExternalUrl(value.url);
+                        navigation?.openExternalUrl(value.url);
                     }}
-                    title={value.url}
+                    disabled={!navigation}
                 >
-                    {label}
+                    <span className="bt-link-label">{label}</span>
+                    <Icon icon={ExternalLinkIcon} size={11} />
                 </button>
-            ) : (
-                <a
-                    className="bt-link text-link"
-                    href={value.url}
-                    target="_blank"
-                    rel="noreferrer"
-                >
-                    {label}
-                </a>
             );
         }
     }
 }
 
-/** One cell: status, value and the expand affordance when it has details. */
-export function CellView({
-    cell,
+function selectColor(label: string, column: Column): SelectColor {
+    return column.options?.find((o) => o.label === label)?.color ?? "gray";
+}
+
+function SelectPill({
+    label,
     column,
-    row,
-    renderText,
-    expanded,
-    onToggleExpand,
-    onSelectClick,
+    onClick,
 }: {
-    cell: Cell | undefined;
+    label: string;
     column: Column;
-    row: Row;
-    renderText: TextRenderer;
-    expanded: boolean;
-    onToggleExpand?: (cellId: string) => void;
-    onSelectClick?: (label: string) => void;
+    onClick?: (label: string) => void;
 }): React.ReactElement {
-    const cellId = cellIdFor(row.id, column.id);
-
-    if (cell?.status === "pending") {
-        return (
-            <span className="bt-cell-pending" aria-label="Pending">
-                <Spinner size={12} />
-            </span>
-        );
-    }
-
-    if (cell?.status === "error") {
-        return (
-            <span className="bt-cell-error" title={cell.error ?? "Error"}>
-                <Icon icon={AlertCircleIcon} size={14} />
-                <span className="bt-cell-error-text">
-                    {cell.error ?? "Error"}
-                </span>
-            </span>
-        );
-    }
-
-    const hasDetails = !!cell?.details && !!onToggleExpand;
+    const className = `bt-pill bt-pill-${selectColor(label, column)}`;
+    if (!onClick) return <span className={className}>{label}</span>;
     return (
-        <span
-            className={`bt-cell-inner${hasDetails ? " bt-cell-expandable" : ""}`}
+        <button
+            type="button"
+            className={`${className} bt-pill-button`}
+            title={`Filter by ${label}`}
+            onClick={(e) => {
+                e.stopPropagation();
+                onClick(label);
+            }}
         >
-            {cell?.value ? (
-                <CellValueView
-                    value={cell.value}
-                    column={column}
-                    renderText={renderText}
-                    onSelectClick={onSelectClick}
-                />
-            ) : (
-                <span className="bt-empty" aria-label="No value">
-                    {EMPTY_CELL}
+            {label}
+        </button>
+    );
+}
+
+/**
+ * The anchor cell, and the one column fed from two different sources: a Zotero
+ * item or an external reference. Both carry a display name, a subtitle and an
+ * item type, so they render identically here — only the row's verbs differ,
+ * and those are resolved in `rowActions.tsx`.
+ */
+function ReferenceValue({
+    value,
+    row,
+}: {
+    value: Extract<CellValue, { kind: "reference" }>;
+    row: Row;
+}): React.ReactElement {
+    const host = getHost();
+    const iconName = itemTypeToIconName(value.item_type, undefined);
+    const hostIcon = host.components?.itemTypeIcon({
+        itemType: iconName,
+        className: "bt-ref-icon",
+    });
+    const reveal = revealHandler(row);
+
+    return (
+        <span className="bt-reference">
+            <span className="bt-ref-icon-slot" aria-hidden="true">
+                {hostIcon ?? (
+                    <Icon icon={FileIcon} size={15} className="bt-ref-icon" />
+                )}
+            </span>
+            <span className="bt-ref-body">
+                {reveal ? (
+                    <button
+                        type="button"
+                        className="bt-ref-title bt-ref-title-button"
+                        title="Reveal in library"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            reveal();
+                        }}
+                    >
+                        {value.display_name}
+                    </button>
+                ) : (
+                    <span className="bt-ref-title">{value.display_name}</span>
+                )}
+                {value.subtitle ? (
+                    <span className="bt-ref-subtitle">{value.subtitle}</span>
+                ) : null}
+            </span>
+            {reveal ? (
+                <span className="bt-ref-reveal">
+                    <IconButton
+                        icon={ArrowUpRightIcon}
+                        variant="ghost-secondary"
+                        ariaLabel="Reveal in library"
+                        title="Reveal in library"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            reveal();
+                        }}
+                    />
                 </span>
-            )}
-            {hasDetails ? (
-                <IconButton
-                    icon={ArrowRightIcon}
-                    variant="ghost-secondary"
-                    className={`bt-expand${expanded ? " bt-expand-open" : ""}`}
-                    ariaLabel={expanded ? "Hide details" : "Show details"}
-                    ariaPressed={expanded}
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onToggleExpand(cellId);
-                    }}
-                />
             ) : null}
         </span>
     );
 }
 
-/** The expandable part of a cell, rendered in the detail row under its table row. */
-export function CellDetailsView({
+/**
+ * Reveal is offered on the anchor cell itself — the title is the target, with
+ * an arrow at the cell's edge — because it is the row's most common verb and
+ * making people find it in an action column costs a hunt per row. Only for a
+ * row that resolves to a library item, and only where the host can navigate.
+ */
+export function revealHandler(row: Row): (() => void) | undefined {
+    const navigation = getHost().navigation;
+    const ref = row.ref;
+    if (!navigation || ref?.kind !== "item") return undefined;
+    return () =>
+        navigation.revealInLibrary({
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            library_ref: ref.library_ref,
+        });
+}
+
+// ---------------------------------------------------------------------------
+// Details
+// ---------------------------------------------------------------------------
+
+/** The expandable part of a cell or a column header, shown in the row detail. */
+export function DetailsView({
     details,
-    column,
+    label,
     renderText,
 }: {
-    details: CellDetails;
-    column: Column;
+    details: Details;
+    label?: string;
     renderText: TextRenderer;
 }): React.ReactElement {
-    const label = details.label ?? column.header;
+    const heading = details.label ?? label;
     return (
         <div className="bt-details">
-            <div className="bt-details-label">{label}</div>
+            {heading ? <div className="bt-details-label">{heading}</div> : null}
             {details.kind === "text" ? (
                 <div className="bt-details-text">
                     {renderText(details.text)}
@@ -265,81 +379,5 @@ export function CellDetailsView({
                 </ul>
             )}
         </div>
-    );
-}
-
-/**
- * Row actions resolved against the row's reference. External references use
- * the host's own action buttons (import / reveal are library writes and
- * navigations); library items map to the navigation slice. Without a host
- * slice, nothing is rendered — never a dead control.
- */
-export function RowActionsView({
-    rowRef: ref,
-    actions,
-}: {
-    rowRef: RowRef | undefined;
-    actions: RowAction[];
-}): React.ReactElement | null {
-    const host = getHost();
-    if (!ref || actions.length === 0) return null;
-
-    if (ref.kind === "external") {
-        if (!ref.reference || !host.components) return null;
-        const mode = (action: RowAction) =>
-            actions.includes(action) ? "icon-only" : "none";
-        return (
-            <>
-                {host.components.externalReferenceActions({
-                    item: ref.reference,
-                    buttonVariant: "ghost-secondary",
-                    importButtonMode: mode("import"),
-                    revealButtonMode: mode("reveal"),
-                    pdfButtonMode: mode("open"),
-                    detailsButtonMode: "none",
-                    webButtonMode: "none",
-                    showCitationCount: false,
-                })}
-            </>
-        );
-    }
-
-    const navigation = host.navigation;
-    if (!navigation) return null;
-    const itemRef = {
-        library_id: ref.library_id,
-        zotero_key: ref.zotero_key,
-        library_ref: ref.library_ref,
-    };
-    const revealIcon = host.components?.revealInLibraryIcon({
-        className: "bt-action-icon",
-    });
-    return (
-        <>
-            {actions.includes("reveal") ? (
-                <IconButton
-                    icon={revealIcon ? () => <>{revealIcon}</> : LibraryIcon}
-                    variant="ghost-secondary"
-                    ariaLabel="Reveal in library"
-                    title="Reveal in library"
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        navigation.revealInLibrary(itemRef);
-                    }}
-                />
-            ) : null}
-            {actions.includes("open") ? (
-                <IconButton
-                    icon={FileViewIcon}
-                    variant="ghost-secondary"
-                    ariaLabel="Open"
-                    title="Open"
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        void navigation.openSource(itemRef);
-                    }}
-                />
-            ) : null}
-        </>
     );
 }

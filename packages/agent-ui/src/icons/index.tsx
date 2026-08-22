@@ -73,6 +73,7 @@ export { default as LinkIcon } from './LinkIcon';
 export { default as KeyIcon } from './KeyIcon';
 export { default as BrainIcon } from './BrainIcon';
 export { default as TextAlignLeftIcon } from './TextAlignLeftIcon';
+export { default as SortIcon } from './SortIcon';
 export { default as SearchIcon } from './SearchIcon';
 export { default as ArrowUpRightIcon } from './ArrowUpRightIcon';
 export { default as ZapIcon } from './ZapIcon';

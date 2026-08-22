@@ -397,6 +397,50 @@ export function cellValueText(value: CellValue | undefined): string {
     }
 }
 
+/**
+ * How much of the table is actually filled. A review table's honesty is the
+ * point of it, so the counts a footer reports are computed once, here, rather
+ * than by each renderer walking the rows its own way.
+ *
+ * `empty` counts cells the producer reports nothing for — in an extraction
+ * table that is "the paper does not report this", a finding rather than a gap.
+ */
+export interface TableCoverage {
+    rows: number;
+    cells: number;
+    filled: number;
+    empty: number;
+    pending: number;
+    error: number;
+    errorRows: number;
+}
+
+export function summarizeCoverage(
+    spec: TableSpec,
+    rows: Row[] = spec.rows,
+): TableCoverage {
+    const coverage: TableCoverage = {
+        rows: rows.length,
+        cells: rows.length * spec.columns.length,
+        filled: 0,
+        empty: 0,
+        pending: 0,
+        error: 0,
+        errorRows: 0,
+    };
+    for (const row of rows) {
+        if (row.status === "error") coverage.errorRows += 1;
+        for (const column of spec.columns) {
+            const cell = row.cells[column.id];
+            if (cell?.status === "pending") coverage.pending += 1;
+            else if (cell?.status === "error") coverage.error += 1;
+            else if (cell?.value) coverage.filled += 1;
+            else coverage.empty += 1;
+        }
+    }
+    return coverage;
+}
+
 // ---------------------------------------------------------------------------
 // Sorting
 // ---------------------------------------------------------------------------
@@ -596,6 +640,7 @@ export interface TableSpecIssue {
         | "unknown_sort_column"
         | "unknown_anchor_column"
         | "invalid_column_progress"
+        | "missing_cost_estimate"
         | "unresolved_citation";
     message: string;
     row_id?: string;
@@ -638,6 +683,15 @@ export function validateTableSpec(spec: TableSpec): TableSpecIssue[] {
                 message: `Column "${column.id}" has progress ${progress.done}/${progress.total}`,
             });
         }
+    }
+
+    // An add-column affordance bills per row, so a table that offers one and
+    // cannot state the price is a spec error, not a rendering choice.
+    if (spec.capabilities?.allow_add_column && !spec.cost_estimate) {
+        issues.push({
+            code: "missing_cost_estimate",
+            message: "Table allows adding columns but carries no cost_estimate",
+        });
     }
 
     if (spec.anchor_column_id && !columns.has(spec.anchor_column_id)) {

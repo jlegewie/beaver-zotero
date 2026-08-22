@@ -9,18 +9,26 @@ import {
     type TableSort,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
+import type { TableDensity } from "./tableView";
 
 /**
- * View state of a rendered table: sort, filters and what is expanded.
+ * View state of a rendered table: sort, filters, density, and what is expanded
+ * or selected.
  *
  * All of it is ephemeral and local to the component — the spec is never
  * mutated, and nothing here reads a global store, so the same hook serves the
- * sidebar, the window and an isolated render root alike.
+ * sidebar, the window and an isolated render root alike. The grid and the
+ * chrome around it share one instance, which is why this is a hook the surface
+ * owns rather than state hidden inside `DataTable`.
  */
 export interface TableState {
     sort: TableSort | undefined;
     /** asc → desc → none on repeated calls for the same column. */
     toggleSort(columnId: string): void;
+
+    density: TableDensity;
+    setDensity(density: TableDensity): void;
+
     /** Substring match across every filterable column (OR), case-insensitive. */
     quickFilter: string;
     setQuickFilter(text: string): void;
@@ -31,12 +39,40 @@ export interface TableState {
     clearFilters(): void;
     /** Toggle membership of one select label in the column's `in` filter. */
     toggleSelectFilter(columnId: string, label: string): void;
+    /** Toggle a boolean column's `equals` filter; passing the active value clears it. */
+    toggleBooleanFilter(columnId: string, value: boolean): void;
+    /** True when anything narrows the view — what the Filter control lights up on. */
+    hasFilters: boolean;
+
     /** Rows after filtering and sorting, in display order. */
     rows: Row[];
+
+    /**
+     * Columns the viewer has hidden. The spec is untouched — hiding is a view
+     * preference, so a hidden column keeps its data and comes back on request.
+     */
+    hiddenColumns: ReadonlySet<string>;
+    toggleColumn(columnId: string): void;
+    showAllColumns(): void;
+
     expandedRows: ReadonlySet<string>;
     toggleRow(rowId: string): void;
-    expandedCells: ReadonlySet<string>;
-    toggleCell(cellId: string): void;
+
+    /**
+     * Selected row ids. Selection drives bulk verbs in the chrome (import the
+     * selection, export it), so it lives here rather than in a surface.
+     */
+    selectedRows: ReadonlySet<string>;
+    toggleRowSelection(rowId: string): void;
+    /** Selects every row currently in view, or clears when all of them already are. */
+    toggleSelectAll(): void;
+    clearSelection(): void;
+    allInViewSelected: boolean;
+}
+
+export interface UseTableStateOptions {
+    /** Initial density. The chrome's density control moves it from there. */
+    density?: TableDensity;
 }
 
 function toggleInSet(set: ReadonlySet<string>, id: string): Set<string> {
@@ -56,14 +92,23 @@ function matchesQuickFilter(spec: TableSpec, row: Row, query: string): boolean {
     });
 }
 
-export function useTableState(spec: TableSpec): TableState {
+export function useTableState(
+    spec: TableSpec,
+    options: UseTableStateOptions = {},
+): TableState {
     const [sort, setSort] = useState<TableSort | undefined>(spec.sort);
+    const [density, setDensity] = useState<TableDensity>(
+        options.density ?? "cozy",
+    );
     const [quickFilter, setQuickFilter] = useState("");
     const [filters, setFilters] = useState<Filter[]>([]);
     const [expandedRows, setExpandedRows] = useState<ReadonlySet<string>>(
         () => new Set(),
     );
-    const [expandedCells, setExpandedCells] = useState<ReadonlySet<string>>(
+    const [selectedRows, setSelectedRows] = useState<ReadonlySet<string>>(
+        () => new Set(),
+    );
+    const [hiddenColumns, setHiddenColumns] = useState<ReadonlySet<string>>(
         () => new Set(),
     );
 
@@ -115,6 +160,24 @@ export function useTableState(spec: TableSpec): TableState {
         [],
     );
 
+    const toggleBooleanFilter = useCallback(
+        (columnId: string, value: boolean) => {
+            setFilters((current) => {
+                const existing = current.find((f) => f.column_id === columnId);
+                const rest = current.filter((f) => f.column_id !== columnId);
+                // Picking the value that is already active means "stop
+                // filtering by it", so one control both sets and clears.
+                if (existing?.kind === "equals" && existing.value === value)
+                    return rest;
+                return [
+                    ...rest,
+                    { column_id: columnId, kind: "equals", value },
+                ];
+            });
+        },
+        [],
+    );
+
     const rows = useMemo(() => {
         const filtered = filterRows(spec, filters);
         const quick = quickFilter.trim();
@@ -128,14 +191,33 @@ export function useTableState(spec: TableSpec): TableState {
         (rowId: string) => setExpandedRows((s) => toggleInSet(s, rowId)),
         [],
     );
-    const toggleCell = useCallback(
-        (cellId: string) => setExpandedCells((s) => toggleInSet(s, cellId)),
+    const toggleRowSelection = useCallback(
+        (rowId: string) => setSelectedRows((s) => toggleInSet(s, rowId)),
         [],
     );
+    const clearSelection = useCallback(() => setSelectedRows(new Set()), []);
+    const toggleColumn = useCallback(
+        (columnId: string) => setHiddenColumns((s) => toggleInSet(s, columnId)),
+        [],
+    );
+    const showAllColumns = useCallback(() => setHiddenColumns(new Set()), []);
+
+    const allInViewSelected =
+        rows.length > 0 && rows.every((row) => selectedRows.has(row.id));
+
+    const toggleSelectAll = useCallback(() => {
+        setSelectedRows((current) => {
+            const all =
+                rows.length > 0 && rows.every((row) => current.has(row.id));
+            return all ? new Set() : new Set(rows.map((row) => row.id));
+        });
+    }, [rows]);
 
     return {
         sort,
         toggleSort,
+        density,
+        setDensity,
         quickFilter,
         setQuickFilter,
         filters,
@@ -143,10 +225,18 @@ export function useTableState(spec: TableSpec): TableState {
         clearFilter,
         clearFilters,
         toggleSelectFilter,
+        toggleBooleanFilter,
+        hasFilters: filters.length > 0 || quickFilter.trim().length > 0,
         rows,
+        hiddenColumns,
+        toggleColumn,
+        showAllColumns,
         expandedRows,
         toggleRow,
-        expandedCells,
-        toggleCell,
+        selectedRows,
+        toggleRowSelection,
+        toggleSelectAll,
+        clearSelection,
+        allInViewSelected,
     };
 }

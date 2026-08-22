@@ -18,13 +18,9 @@ const externalRef: ExternalReference = {
 const spec: TableSpec = {
     id: "t",
     title: "Results",
+    anchor_column_id: "ref",
     columns: [
-        {
-            id: "ref",
-            header: "Reference",
-            type: "reference",
-            priority: "primary",
-        },
+        { id: "ref", header: "Item", type: "reference", priority: "primary" },
         {
             id: "cites",
             header: "Citations",
@@ -38,7 +34,12 @@ const spec: TableSpec = {
             options: [{ label: "Article", color: "blue" }, { label: "Book" }],
         },
         { id: "oa", header: "Open access", type: "boolean" },
-        { id: "methods", header: "Methods", type: "text" },
+        {
+            id: "methods",
+            header: "Methods",
+            type: "text",
+            description: "What method did the study use?",
+        },
     ],
     rows: [
         {
@@ -55,7 +56,6 @@ const spec: TableSpec = {
                         kind: "reference",
                         display_name: "Smith 2020",
                         subtitle: "Alpha",
-                        library_items: [{ library_id: 1, zotero_key: "K1" }],
                     },
                     details: {
                         kind: "text",
@@ -83,11 +83,14 @@ const spec: TableSpec = {
                 },
                 cites: { value: { kind: "number", value: 7 } },
                 type: { value: { kind: "select", label: "Book" } },
+                oa: { value: { kind: "boolean", value: false } },
                 methods: { status: "pending" },
             },
         },
         {
             id: "r3",
+            status: "error",
+            error: "No text layer",
             cells: {
                 ref: {
                     value: { kind: "reference", display_name: "Adams 2022" },
@@ -114,13 +117,21 @@ describe("DataTable", () => {
     }
 
     const rowNames = () =>
-        Array.from(container!.querySelectorAll("tr.bt-row .bt-ref-name")).map(
+        Array.from(container!.querySelectorAll("tr.bt-row .bt-ref-title")).map(
             (el) => el.textContent?.trim(),
+        );
+    const headerLabels = () =>
+        Array.from(container!.querySelectorAll("th.bt-th .bt-th-label")).map(
+            (el) => el.textContent,
         );
     const click = (el: Element | null) =>
         act(() =>
             el!.dispatchEvent(new MouseEvent("click", { bubbles: true })),
         );
+    const headerFor = (label: string) =>
+        Array.from(container!.querySelectorAll("th.bt-th")).find(
+            (th) => th.querySelector(".bt-th-label")?.textContent === label,
+        )!;
 
     beforeEach(() => {
         setHost({});
@@ -134,13 +145,10 @@ describe("DataTable", () => {
         vi.clearAllMocks();
     });
 
-    it("renders every column in full density, applying the initial sort with empties last", () => {
-        mount(React.createElement(DataTable, { table: spec, density: "full" }));
-        const headers = Array.from(container!.querySelectorAll("th.bt-th")).map(
-            (th) => th.textContent,
-        );
-        expect(headers).toEqual([
-            "Reference",
+    it("renders every column with the initial sort applied and empties last", () => {
+        mount(React.createElement(DataTable, { table: spec }));
+        expect(headerLabels()).toEqual([
+            "Item",
             "Citations",
             "Type",
             "Open access",
@@ -154,159 +162,109 @@ describe("DataTable", () => {
         ).toBe("descending");
     });
 
-    it("renders value kinds: empty dash, pending spinner, error, select colour, in-library badge", () => {
-        mount(React.createElement(DataTable, { table: spec, density: "full" }));
-        const rows = container!.querySelectorAll("tr.bt-row");
+    it("renders a column's question as a header line rather than a tooltip", () => {
+        mount(React.createElement(DataTable, { table: spec }));
         expect(
-            rows[2].querySelector(".bt-kind-number .bt-empty")?.textContent,
+            headerFor("Methods").querySelector(".bt-th-description")
+                ?.textContent,
+        ).toBe("What method did the study use?");
+    });
+
+    it("distinguishes filled, empty, pending and failed cells", () => {
+        mount(React.createElement(DataTable, { table: spec }));
+        const rows = container!.querySelectorAll("tr.bt-row");
+
+        expect(rows[0].querySelector(".bt-pill-blue")?.textContent).toBe(
+            "Article",
+        );
+        expect(rows[0].querySelector(".bt-bool-yes")).not.toBeNull();
+
+        expect(rows[1].querySelector(".bt-bool-no")).not.toBeNull();
+        expect(rows[1].querySelector(".bt-skeleton")).not.toBeNull();
+
+        // An absent value is itself a value ("not reported"); a failure is not.
+        expect(
+            rows[2].querySelector('[id="r3/cites"] .bt-empty')?.textContent,
         ).toBe("—");
         expect(
-            rows[1].querySelector(".bt-kind-text .bt-cell-pending"),
-        ).not.toBeNull();
-        expect(
-            rows[2]
-                .querySelector(".bt-kind-text .bt-cell-error")
-                ?.getAttribute("title"),
-        ).toBe("Extraction failed");
-        expect(rows[0].querySelector(".bt-select")?.className).toContain(
-            "bt-select-blue",
-        );
-        expect(rows[1].querySelector(".bt-select")?.className).toContain(
-            "bt-select-gray",
-        );
-        expect(rows[0].querySelector(".bt-ref-in-library")).not.toBeNull();
-        expect(rows[1].querySelector(".bt-ref-in-library")).toBeNull();
-        expect(rows[0].querySelector(".bt-boolean-true")).not.toBeNull();
-        expect(
-            rows[0].querySelector(`[id="ext:openalex:W1/cites"]`),
-        ).not.toBeNull();
+            rows[2].querySelector(".bt-cell-error-text")?.textContent,
+        ).toContain("Extraction failed");
+        expect(rows[2].classList.contains("bt-row-error")).toBe(true);
     });
 
-    it("cycles a column sort asc → desc → none on header clicks", () => {
-        mount(React.createElement(DataTable, { table: spec, density: "full" }));
-        const header = Array.from(container!.querySelectorAll("th.bt-th")).find(
-            (th) => th.textContent === "Reference",
-        )!;
-        expect(header.querySelector("button")).not.toBeNull(); // every column sorts
+    it("sorts on any column, cycling asc → desc → none", () => {
+        mount(React.createElement(DataTable, { table: spec }));
 
-        const cites = Array.from(container!.querySelectorAll("th.bt-th")).find(
-            (th) => th.textContent?.startsWith("Citations"),
-        )!;
-        click(cites.querySelector("button"));
-        expect(rowNames()).toEqual(["Smith 2020", "Jones 2018", "Adams 2022"]); // desc → none: spec order
+        // Reference columns sort too — every column does.
+        click(headerFor("Item").querySelector("button"));
+        expect(rowNames()).toEqual(["Adams 2022", "Jones 2018", "Smith 2020"]);
+
+        const cites = () => headerFor("Citations").querySelector("button");
+        click(cites());
+        expect(rowNames()).toEqual(["Jones 2018", "Smith 2020", "Adams 2022"]);
+        click(cites());
+        expect(rowNames()).toEqual(["Smith 2020", "Jones 2018", "Adams 2022"]);
+        click(cites());
         expect(container!.querySelector("th[aria-sort]")).toBeNull();
-        click(cites.querySelector("button"));
-        expect(rowNames()).toEqual(["Jones 2018", "Smith 2020", "Adams 2022"]); // none → asc, empty last
-        click(cites.querySelector("button"));
-        expect(rowNames()).toEqual(["Smith 2020", "Jones 2018", "Adams 2022"]); // asc → desc
     });
 
-    it("filters with the quick-filter box and by clicking a select pill", () => {
-        mount(React.createElement(DataTable, { table: spec, density: "full" }));
-        const input = container!.querySelector<HTMLInputElement>(
-            "input.bt-quick-filter",
-        )!;
-        const setter = Object.getOwnPropertyDescriptor(
-            HTMLInputElement.prototype,
-            "value",
-        )!.set!;
-        act(() => {
-            setter.call(input, "jones");
-            input.dispatchEvent(new Event("input", { bubbles: true }));
-        });
-        expect(rowNames()).toEqual(["Jones 2018"]);
-        expect(container!.querySelector(".bt-row-count")?.textContent).toBe(
-            "1 of 3 rows",
-        );
+    it("expands a row into every field in full, including cell details", () => {
+        mount(React.createElement(DataTable, { table: spec }));
+        expect(container!.querySelector(".bt-detail")).toBeNull();
 
-        act(() => {
-            setter.call(input, "");
-            input.dispatchEvent(new Event("input", { bubbles: true }));
-        });
-        click(container!.querySelector("tr.bt-row .bt-select-button"));
-        expect(rowNames()).toEqual(["Smith 2020", "Adams 2022"]);
+        click(container!.querySelector("tr.bt-row .bt-rail-chevron"));
+
+        const detail = container!.querySelector(".bt-detail")!;
+        expect(detail.textContent).toContain("An abstract about alpha.");
         expect(
-            container!.querySelector(".bt-filter-chip")?.textContent,
-        ).toContain("Type:");
-
-        click(container!.querySelector(".bt-filter-chip"));
-        expect(rowNames()).toHaveLength(3);
-    });
-
-    it("renders select pills as plain text in a column that opts out of filtering", () => {
-        const unfilterable: TableSpec = {
-            ...spec,
-            columns: spec.columns.map((c) =>
-                c.id === "type" ? { ...c, filterable: false } : c,
+            Array.from(detail.querySelectorAll("dt")).map(
+                (dt) => dt.textContent,
             ),
-        };
-        mount(
-            React.createElement(DataTable, {
-                table: unfilterable,
-                density: "full",
-            }),
-        );
-        expect(
-            container!.querySelector("tr.bt-row .bt-select-button"),
-        ).toBeNull();
-        expect(
-            container!.querySelector("tr.bt-row .bt-select")?.textContent,
-        ).toBe("Article");
-        expect(container!.querySelectorAll("tr.bt-row")).toHaveLength(3);
+        ).toEqual(["Item", "Citations", "Type", "Open access", "Methods"]);
     });
 
-    it("expands a cell with details inline under its row", () => {
-        mount(React.createElement(DataTable, { table: spec, density: "full" }));
-        expect(container!.querySelector(".bt-detail-row")).toBeNull();
-        click(container!.querySelector("tr.bt-row .bt-expand"));
-        const detail = container!.querySelector(".bt-detail-row");
-        expect(detail?.querySelector(".bt-details-label")?.textContent).toBe(
-            "Abstract",
+    it("shows a row-level error in the expanded row", () => {
+        mount(React.createElement(DataTable, { table: spec }));
+        click(container!.querySelectorAll(".bt-rail-chevron")[2]);
+        expect(container!.querySelector(".bt-detail-error")?.textContent).toBe(
+            "No text layer",
         );
-        expect(detail?.querySelector(".bt-details-text")?.textContent).toBe(
-            "An abstract about alpha.",
-        );
-        click(container!.querySelector("tr.bt-row .bt-expand"));
-        expect(container!.querySelector(".bt-detail-row")).toBeNull();
     });
 
-    it("shows only primary columns in compact density and lists the rest on row expand", () => {
-        mount(
-            React.createElement(DataTable, { table: spec, density: "compact" }),
+    it("selects rows from the rail and from the header", () => {
+        mount(React.createElement(DataTable, { table: spec }));
+
+        click(container!.querySelector("tr.bt-row .bt-checkbox"));
+        expect(container!.querySelectorAll("tr.bt-row-selected").length).toBe(
+            1,
         );
-        const headers = Array.from(container!.querySelectorAll("th.bt-th")).map(
-            (th) => th.textContent,
+
+        const headerBox = () =>
+            container!.querySelector("th.bt-th-rail .bt-checkbox");
+        click(headerBox());
+        expect(container!.querySelectorAll("tr.bt-row-selected").length).toBe(
+            3,
         );
-        expect(headers).toEqual(["Reference", "Citations"]);
-        click(container!.querySelector("td.bt-td-expand button"));
-        const terms = Array.from(
-            container!.querySelectorAll(".bt-hidden-columns dt"),
-        ).map((dt) => dt.textContent);
-        expect(terms).toEqual(["Type", "Open access", "Methods"]);
+        click(headerBox());
+        expect(container!.querySelectorAll("tr.bt-row-selected").length).toBe(
+            0,
+        );
     });
 
-    it("uses the injected text renderer for text cells and details", () => {
-        const renderText = vi.fn((text: string) =>
-            React.createElement("em", null, text),
-        );
-        mount(
-            React.createElement(DataTable, {
-                table: spec,
-                density: "full",
-                renderText,
-            }),
-        );
-        expect(container!.querySelector(".bt-kind-text em")?.textContent).toBe(
-            "Survey",
-        );
-        expect(renderText).toHaveBeenCalledWith("Survey");
+    it("filters by clicking a select pill, and unfilters on a second click", () => {
+        mount(React.createElement(DataTable, { table: spec }));
+
+        click(container!.querySelector(".bt-pill-button"));
+        expect(rowNames()).toEqual(["Smith 2020", "Adams 2022"]);
+
+        click(container!.querySelector(".bt-pill-button"));
+        expect(rowNames().length).toBe(3);
     });
 
-    it("renders no row actions without a host, and host-resolved actions with one", () => {
-        mount(React.createElement(DataTable, { table: spec, density: "full" }));
-        expect(
-            container!.querySelector(".bt-actions")?.children.length ?? 0,
-        ).toBe(0);
+    it("renders no row actions without a host, and resolved ones with a host", () => {
+        mount(React.createElement(DataTable, { table: spec }));
+        expect(container!.querySelector(".bt-td-actions")).toBeNull();
+
         act(() => root?.unmount());
         container?.remove();
 
@@ -339,19 +297,18 @@ describe("DataTable", () => {
                 launchExternalFile: () => {},
             },
         });
-        mount(React.createElement(DataTable, { table: spec, density: "full" }));
+        mount(React.createElement(DataTable, { table: spec }));
+
+        // Off-library external row: import is offered, reveal is not.
         expect(externalReferenceActions).toHaveBeenCalledWith(
             expect.objectContaining({
                 item: externalRef,
-                // The row's reference cell lists a library copy, so the row is
-                // in the library: reveal is offered, import is not.
-                importButtonMode: "none",
-                revealButtonMode: "icon-only",
-                pdfButtonMode: "none",
+                importButtonMode: "icon-only",
+                revealButtonMode: "none",
             }),
         );
-        expect(container!.querySelector(".host-import")).not.toBeNull();
 
+        // In-library item row: reveal, from the action column and from the title.
         const rows = container!.querySelectorAll("tr.bt-row");
         click(rows[1].querySelector('button[aria-label="Reveal in library"]'));
         expect(revealInLibrary).toHaveBeenCalledWith({
@@ -359,8 +316,12 @@ describe("DataTable", () => {
             zotero_key: "K2",
             library_ref: "u",
         });
-        expect(rows[1].querySelector('button[aria-label="Open"]')).toBeNull(); // 'open' not in row_actions
-        expect(rows[2].querySelector(".bt-actions")?.children.length).toBe(0); // no ref
+
+        click(rows[1].querySelector(".bt-ref-title-button"));
+        expect(revealInLibrary).toHaveBeenCalledTimes(2);
+
+        // A row with no ref offers nothing.
+        expect(rows[2].querySelector(".bt-actions")?.children.length).toBe(0);
     });
 
     it("renders the empty text for a table without rows", () => {
@@ -373,5 +334,109 @@ describe("DataTable", () => {
         expect(container!.querySelector(".bt-empty-table")?.textContent).toBe(
             "Nothing found",
         );
+    });
+});
+
+describe("DataTable — density, columns and expansion", () => {
+    let root: ReturnType<typeof createRoot> | null = null;
+    let container: HTMLDivElement | null = null;
+
+    function mount(element: React.ReactElement) {
+        container = document.createElement("div");
+        document.body.appendChild(container);
+        root = createRoot(container);
+        act(() => root?.render(element));
+        return container;
+    }
+    const headerLabels = () =>
+        Array.from(container!.querySelectorAll("th.bt-th .bt-th-label")).map(
+            (el) => el.textContent,
+        );
+    const click = (el: Element | null) =>
+        act(() =>
+            el!.dispatchEvent(new MouseEvent("click", { bubbles: true })),
+        );
+
+    beforeEach(() => setHost({}));
+    afterEach(() => {
+        if (root) act(() => root?.unmount());
+        container?.remove();
+        root = null;
+        container = null;
+        vi.clearAllMocks();
+    });
+
+    it("keeps every column when only the row height changes", () => {
+        // Row height is the viewer's lever; dropping columns from under them
+        // because they wanted shorter rows would be a different feature.
+        mount(React.createElement(DataTable, { table: spec }));
+        const before = headerLabels();
+        expect(before.length).toBe(5);
+        act(() =>
+            root?.render(React.createElement(DataTable, { table: spec })),
+        );
+        expect(headerLabels()).toEqual(before);
+    });
+
+    it("drops non-primary columns only when the surface says it is narrow", () => {
+        mount(
+            React.createElement(DataTable, {
+                table: spec,
+                primaryColumnsOnly: true,
+            }),
+        );
+        expect(headerLabels()).toEqual(["Item", "Citations"]);
+
+        // Nothing is lost: the rest are listed when the row is expanded.
+        click(container!.querySelector("tr.bt-row .bt-rail-chevron"));
+        expect(
+            Array.from(container!.querySelectorAll(".bt-detail dt")).map(
+                (dt) => dt.textContent,
+            ),
+        ).toEqual(["Item", "Citations", "Type", "Open access", "Methods"]);
+    });
+
+    it("keeps a failed column in the expanded row and offers its retry", () => {
+        const onRetryCell = vi.fn();
+        mount(React.createElement(DataTable, { table: spec, onRetryCell }));
+        click(container!.querySelectorAll(".bt-rail-chevron")[2]);
+
+        const detail = container!.querySelector(".bt-detail")!;
+        expect(
+            Array.from(detail.querySelectorAll("dt")).map(
+                (dt) => dt.textContent,
+            ),
+        ).toContain("Methods");
+
+        click(detail.querySelector(".bt-inline-link"));
+        expect(onRetryCell).toHaveBeenCalledTimes(1);
+        expect(onRetryCell.mock.calls[0][1].id).toBe("methods");
+    });
+
+    it("offers no expansion when the table says rows are not expandable", () => {
+        mount(
+            React.createElement(DataTable, {
+                table: {
+                    ...spec,
+                    capabilities: {
+                        ...spec.capabilities,
+                        expandable_rows: false,
+                    },
+                },
+            }),
+        );
+        expect(
+            container!.querySelector("tr.bt-row button.bt-rail-chevron"),
+        ).toBeNull();
+    });
+
+    it("widens the table to fit its columns rather than starving them", () => {
+        mount(React.createElement(DataTable, { table: spec }));
+        const style = container!
+            .querySelector("table.bt-table")!
+            .getAttribute("style")!;
+        // Every column contributes, including a floor for the flexible one.
+        // rail 3.2 + anchor 20 + number 6.5 + select 9.5 + boolean 4 + text 14
+        expect(style).toContain("57.2rem");
     });
 });

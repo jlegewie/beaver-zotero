@@ -111,7 +111,13 @@
  *
  * Materials — composited surfaces, not flat colours:
  *
- *     --material-sidepane  --material-mix-quarternary
+ *     --material-background  --material-sidepane  --material-mix-quarternary
+ *
+ *   `--material-background` is the application's base content surface — the one
+ *   a full-width working surface sits on, as opposed to `--material-sidepane`,
+ *   which is the pane material. The table layer needs it because the fill scale
+ *   is translucent: a sticky header or a hovered row has to composite a fill
+ *   over an *opaque* base, and there is no other token that names one.
  *
  * Accents — the host application's interactive colour and the foreground that
  * is legible on it:

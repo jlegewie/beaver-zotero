@@ -4,399 +4,520 @@ import {
     cellIdFor,
     columnAlign,
     isColumnFilterable,
-    isColumnSortable,
-    rowActions as resolveRowActions,
     type Column,
     type Row,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
+import { ArrowRightIcon, Icon, TickIcon } from "../icons";
+import type { MenuItem } from "../primitives/ContextMenu";
+import { CellView, DetailsView } from "./cells";
+import { ColumnHeaderCell } from "./columnHeader";
+import { RowActionsView, tableHasRowActions } from "./rowActions";
 import {
-    ArrowDownIcon,
-    ArrowRightIcon,
-    ArrowUpIcon,
-    CancelIcon,
-    Icon,
-} from "../icons";
-import IconButton from "../primitives/IconButton";
-import {
-    CellDetailsView,
-    CellView,
-    RowActionsView,
+    defaultColumnWidth,
     renderPlainText,
+    tableMinWidth,
     type TextRenderer,
-} from "./cells";
+} from "./tableView";
 import { useTableState, type TableState } from "./useTableState";
 
-export type TableDensity = "compact" | "full";
+export type { TableDensity } from "./tableView";
+
+/** Stands in for the spec when the surface owns the state — see `DataTable`. */
+const EMPTY_TABLE: TableSpec = { id: "", columns: [], rows: [] };
 
 export interface DataTableProps {
     table: TableSpec;
     /**
-     * `compact` (sidebar): only `priority: 'primary'` columns are columns; the
-     * rest are listed when a row is expanded. `full` (window / tab): every column.
+     * The view state. Pass the surface's own instance so the chrome and the
+     * grid agree on sort, filters and selection; omit it and the grid keeps a
+     * private one, which is what a bare embedded table wants.
      */
-    density?: TableDensity;
-    /** Renders cell text — inject the client's markdown + citation renderer. Plain text by default. */
+    state?: TableState;
+    /**
+     * Show only the anchor and `priority: "primary"` columns, listing the rest
+     * in the row detail. This is a question about how much room the surface
+     * has — the ~350px sidebar — and is deliberately not tied to the row-height
+     * control, which the viewer moves for their own reasons.
+     */
+    primaryColumnsOnly?: boolean;
+    /** Renders cell text — inject the client's markdown + citation renderer. */
     renderText?: TextRenderer;
-    /** Show the quick-filter box and active-filter chips. Default true when the table is filterable. */
-    showToolbar?: boolean;
-    className?: string;
+    /** Row-level detail, appended under the expanded row's own fields. */
+    renderRowDetail?: (row: Row) => React.ReactNode;
+    /** When it returns items, that column's header gains a menu. */
+    columnMenuItems?: (column: Column) => MenuItem[];
+    /** Offered beside a cell error; absent ⇒ no retry control. */
+    onRetryCell?: (row: Row, column: Column) => void;
     /** Shown when the table has no rows at all. */
     emptyText?: string;
+    /** Shown when filters hide every row. */
+    filteredEmptyText?: string;
+    className?: string;
 }
 
 /**
- * `Column.width` is CSS px or `"fill"`; absent leaves the width to the
- * stylesheet's default for the column type.
- */
-function columnWidthStyle(column: Column): React.CSSProperties | undefined {
-    if (column.width == null) return undefined;
-    return { width: column.width === "fill" ? "100%" : column.width };
-}
-
-function SortIndicator({
-    column,
-    state,
-}: {
-    column: Column;
-    state: TableState;
-}): React.ReactElement | null {
-    if (state.sort?.column_id !== column.id) return null;
-    return (
-        <Icon
-            icon={state.sort.direction === "asc" ? ArrowUpIcon : ArrowDownIcon}
-            size={12}
-            className="bt-sort-icon"
-            aria-hidden="true"
-        />
-    );
-}
-
-/**
- * The shared table renderer. One component serves the compact sidebar and
- * the full-width window: the spec is self-contained, the state is local, and
- * everything client-specific (item icons, reveal / import / open) reaches the
- * host through `getHost()`.
+ * The grid: everything that renders a `TableSpec`, and nothing that surrounds
+ * one. Title, toolbar, footer and dialogs are the surface's job (`TableSurface`)
+ * because they differ per kind of table while this does not.
+ *
+ * Three decisions carry the layout:
+ *
+ * 1. **Every row is the same height**, set by the density, with each cell's
+ *    line clamp derived from the same line box. A table of abstracts whose rows
+ *    grow to their tallest cell stops reading as a table, and comparison is the
+ *    whole point of it. Density moves the row height and nothing else — which
+ *    columns are columns is `primaryColumnsOnly`, a question about the surface.
+ * 2. **One expansion affordance per row**, in the left rail. The expanded row
+ *    shows every field in full, so no cell needs a chevron of its own.
+ * 3. **The anchor column is sticky**, together with the rail, so the row keeps
+ *    its identity while the value columns scroll horizontally.
+ *
+ * Nothing here reads a global store and nothing queries the client at render
+ * time: the spec is self-contained, and client behaviour arrives through
+ * `getHost()` in `cells.tsx` / `rowActions.tsx`.
  */
 export function DataTable({
     table,
-    density = "full",
+    state: externalState,
+    primaryColumnsOnly = false,
     renderText = renderPlainText,
-    showToolbar,
-    className,
+    renderRowDetail,
+    columnMenuItems,
+    onRetryCell,
     emptyText = "No rows",
+    filteredEmptyText = "No rows match these filters",
+    className,
 }: DataTableProps): React.ReactElement {
-    const state = useTableState(table);
+    // Hooks cannot be conditional, but the derivation can be: when the surface
+    // owns the state, this instance runs against an empty spec so the filter
+    // and sort passes are not repeated on every render.
+    const internalState = useTableState(externalState ? EMPTY_TABLE : table);
+    const state = externalState ?? internalState;
+
     const capabilities = table.capabilities ?? {};
     const sortable = capabilities.sortable ?? true;
     const filterable = capabilities.filterable ?? true;
-    const toolbar = showToolbar ?? filterable;
-    const anchorId = anchorColumn(table)?.id;
-    const hasRowActions = table.rows.some(
-        (r) => resolveRowActions(table, r).length > 0,
+    const density = state.density;
+
+    const anchor = anchorColumn(table);
+    const hasRowActions = tableHasRowActions(table);
+    const selectable = table.rows.length > 0;
+    const expandable = capabilities.expandable_rows ?? true;
+
+    // A narrow surface carries only the primary columns; the rest are listed in
+    // the row detail rather than dropped, so nothing becomes unreachable.
+    const { visibleColumns, hiddenColumns } = useMemo(
+        () =>
+            splitColumns(
+                table.columns,
+                primaryColumnsOnly,
+                anchor,
+                state.hiddenColumns,
+            ),
+        [table.columns, primaryColumnsOnly, anchor, state.hiddenColumns],
     );
 
-    const { visibleColumns, hiddenColumns } = useMemo(() => {
-        if (density === "full")
-            return {
-                visibleColumns: table.columns,
-                hiddenColumns: [] as Column[],
-            };
-        const primary = table.columns.filter((c) => c.priority === "primary");
-        // A table without any primary column shows its first column rather than nothing.
-        const visible = primary.length ? primary : table.columns.slice(0, 1);
-        const hidden = table.columns.filter((c) => !visible.includes(c));
-        return { visibleColumns: visible, hiddenColumns: hidden };
-    }, [table.columns, density]);
+    const columnCount = visibleColumns.length + 1 + (hasRowActions ? 1 : 0);
+    const minWidth = useMemo(
+        () => tableMinWidth(visibleColumns, anchor?.id, hasRowActions),
+        [visibleColumns, anchor, hasRowActions],
+    );
 
-    // Select pills filter by click only where both the table and the column allow it.
     const selectClickFor = (column: Column) =>
         filterable && isColumnFilterable(column)
             ? (label: string) => state.toggleSelectFilter(column.id, label)
             : undefined;
 
-    const canExpandRows =
-        hiddenColumns.length > 0 && (capabilities.expandable_rows ?? true);
-    const columnCount =
-        visibleColumns.length +
-        (canExpandRows ? 1 : 0) +
-        (hasRowActions ? 1 : 0);
-
-    const activeFilterChips = state.filters.flatMap((filter) => {
-        const column = table.columns.find((c) => c.id === filter.column_id);
-        if (!column) return [];
-        const text =
-            filter.kind === "in"
-                ? filter.labels.join(", ")
-                : filter.kind === "contains"
-                  ? `"${filter.text}"`
-                  : filter.kind === "equals"
-                    ? String(filter.value)
-                    : filter.kind === "empty"
-                      ? filter.empty
-                          ? "empty"
-                          : "not empty"
-                      : [filter.min, filter.max]
-                            .filter((v) => v != null)
-                            .join(" – ");
-        return [{ column, text }];
-    });
-
-    const renderDetailRow = (row: Row): React.ReactElement | null => {
-        const rowExpanded = canExpandRows && state.expandedRows.has(row.id);
-        const expandedCells = table.columns.filter(
-            (c) =>
-                row.cells[c.id]?.details &&
-                state.expandedCells.has(cellIdFor(row.id, c.id)),
-        );
-        if (!rowExpanded && expandedCells.length === 0) return null;
-        return (
-            <tr className="bt-detail-row" key={`${row.id}/details`}>
-                <td colSpan={columnCount}>
-                    {rowExpanded ? (
-                        <dl className="bt-hidden-columns">
-                            {hiddenColumns.map((column) => (
-                                <React.Fragment key={column.id}>
-                                    <dt>{column.header}</dt>
-                                    <dd>
-                                        <CellView
-                                            cell={row.cells[column.id]}
-                                            column={column}
-                                            row={row}
-                                            renderText={renderText}
-                                            expanded={state.expandedCells.has(
-                                                cellIdFor(row.id, column.id),
-                                            )}
-                                            onToggleExpand={state.toggleCell}
-                                            onSelectClick={selectClickFor(
-                                                column,
-                                            )}
-                                        />
-                                    </dd>
-                                </React.Fragment>
-                            ))}
-                        </dl>
-                    ) : null}
-                    {expandedCells.map((column) => (
-                        <CellDetailsView
-                            key={column.id}
-                            details={row.cells[column.id]!.details!}
-                            column={column}
-                            renderText={renderText}
-                        />
-                    ))}
-                </td>
-            </tr>
-        );
-    };
-
     return (
         <div
-            className={`bt bt-${density}${className ? ` ${className}` : ""}`}
+            className={`bt${className ? ` ${className}` : ""}`}
+            data-density={density}
             data-table-id={table.id}
         >
-            {table.title ? <div className="bt-title">{table.title}</div> : null}
-            {toolbar ? (
-                <div className="bt-toolbar">
-                    <input
-                        type="search"
-                        className="bt-quick-filter"
-                        placeholder="Filter…"
-                        aria-label="Filter rows"
-                        value={state.quickFilter}
-                        onChange={(e) => state.setQuickFilter(e.target.value)}
-                    />
-                    {activeFilterChips.map(({ column, text }) => (
-                        <button
+            <table className="bt-table" style={{ minWidth }}>
+                <colgroup>
+                    <col className="bt-col-rail" />
+                    {visibleColumns.map((column) => (
+                        <col
                             key={column.id}
-                            type="button"
-                            className="bt-filter-chip"
-                            onClick={() => state.clearFilter(column.id)}
-                            title={`Remove filter on ${column.header}`}
-                        >
-                            <span className="bt-filter-chip-column">
-                                {column.header}:
-                            </span>{" "}
-                            {text}
-                            <Icon
-                                icon={CancelIcon}
-                                size={10}
-                                className="bt-filter-chip-x"
-                                aria-hidden="true"
-                            />
-                        </button>
+                            style={{
+                                width: defaultColumnWidth(
+                                    column,
+                                    column.id === anchor?.id,
+                                ),
+                            }}
+                        />
                     ))}
-                    <span className="bt-row-count" aria-live="polite">
-                        {state.rows.length === table.rows.length
-                            ? `${table.rows.length} rows`
-                            : `${state.rows.length} of ${table.rows.length} rows`}
-                    </span>
-                </div>
-            ) : null}
-            <div className="bt-scroll">
-                <table className="bt-table">
-                    <thead>
-                        <tr>
-                            {canExpandRows ? (
-                                <th
-                                    className="bt-th-expand"
-                                    aria-label="Expand"
+                    {hasRowActions ? <col className="bt-col-actions" /> : null}
+                </colgroup>
+
+                <thead>
+                    <tr className="bt-head-row">
+                        <th className="bt-th bt-th-rail" scope="col">
+                            {selectable ? (
+                                <SelectionBox
+                                    checked={state.allInViewSelected}
+                                    label={
+                                        state.allInViewSelected
+                                            ? "Clear selection"
+                                            : "Select all rows"
+                                    }
+                                    onToggle={state.toggleSelectAll}
                                 />
                             ) : null}
-                            {visibleColumns.map((column) => {
-                                const canSort =
-                                    sortable && isColumnSortable(column);
-                                const sorted =
-                                    state.sort?.column_id === column.id
-                                        ? state.sort.direction
-                                        : undefined;
-                                return (
-                                    <th
-                                        key={column.id}
-                                        className={`bt-th bt-align-${columnAlign(column)}${column.id === anchorId ? " bt-th-anchor" : ""}${canSort ? " bt-th-sortable" : ""}`}
-                                        style={columnWidthStyle(column)}
-                                        aria-sort={
-                                            sorted
-                                                ? sorted === "asc"
-                                                    ? "ascending"
-                                                    : "descending"
-                                                : undefined
-                                        }
-                                        scope="col"
-                                    >
-                                        {canSort ? (
-                                            <button
-                                                type="button"
-                                                className="bt-th-button"
-                                                onClick={() =>
-                                                    state.toggleSort(column.id)
-                                                }
-                                            >
-                                                <span className="bt-th-label">
-                                                    {column.header}
-                                                </span>
-                                                <SortIndicator
-                                                    column={column}
-                                                    state={state}
-                                                />
-                                            </button>
-                                        ) : (
-                                            <span className="bt-th-label">
-                                                {column.header}
-                                            </span>
-                                        )}
-                                        {column.description &&
-                                        density === "full" ? (
-                                            <span className="bt-th-description">
-                                                {column.description}
-                                            </span>
-                                        ) : null}
-                                    </th>
-                                );
-                            })}
-                            {hasRowActions ? (
-                                <th
-                                    className="bt-th-actions"
-                                    aria-label="Actions"
-                                />
-                            ) : null}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {table.rows.length === 0 ? (
-                            <tr>
-                                <td
-                                    className="bt-empty-table"
-                                    colSpan={Math.max(columnCount, 1)}
-                                >
-                                    {emptyText}
-                                </td>
-                            </tr>
+                        </th>
+                        {visibleColumns.map((column) => (
+                            <ColumnHeaderCell
+                                key={column.id}
+                                column={column}
+                                isAnchor={column.id === anchor?.id}
+                                sort={state.sort}
+                                sortable={sortable}
+                                onSort={state.toggleSort}
+                                showDescription={density !== "compact"}
+                                menuItems={columnMenuItems?.(column)}
+                            />
+                        ))}
+                        {hasRowActions ? (
+                            <th className="bt-th bt-th-actions" scope="col">
+                                <span className="bt-visually-hidden">
+                                    Actions
+                                </span>
+                            </th>
                         ) : null}
-                        {state.rows.map((row) => {
-                            const rowExpanded = state.expandedRows.has(row.id);
-                            return (
-                                <React.Fragment key={row.id}>
-                                    <tr
-                                        className={`bt-row${row.status === "error" ? " bt-row-error" : ""}${rowExpanded ? " bt-row-open" : ""}`}
-                                        data-row-id={row.id}
-                                        title={
-                                            row.status === "error"
-                                                ? row.error
-                                                : undefined
-                                        }
-                                    >
-                                        {canExpandRows ? (
-                                            <td className="bt-td-expand">
-                                                <IconButton
-                                                    icon={ArrowRightIcon}
-                                                    variant="ghost-secondary"
-                                                    className={`bt-expand${rowExpanded ? " bt-expand-open" : ""}`}
-                                                    ariaLabel={
-                                                        rowExpanded
-                                                            ? "Collapse row"
-                                                            : "Expand row"
-                                                    }
-                                                    ariaPressed={rowExpanded}
-                                                    onClick={() =>
-                                                        state.toggleRow(row.id)
-                                                    }
-                                                />
-                                            </td>
-                                        ) : null}
-                                        {visibleColumns.map((column) => (
-                                            <td
-                                                key={column.id}
-                                                className={`bt-td bt-align-${columnAlign(column)} bt-kind-${column.type}`}
-                                                id={cellIdFor(
-                                                    row.id,
-                                                    column.id,
-                                                )}
-                                            >
-                                                <CellView
-                                                    cell={row.cells[column.id]}
-                                                    column={column}
-                                                    row={row}
-                                                    renderText={renderText}
-                                                    expanded={state.expandedCells.has(
-                                                        cellIdFor(
-                                                            row.id,
-                                                            column.id,
-                                                        ),
-                                                    )}
-                                                    onToggleExpand={
-                                                        state.toggleCell
-                                                    }
-                                                    onSelectClick={selectClickFor(
-                                                        column,
-                                                    )}
-                                                />
-                                            </td>
-                                        ))}
-                                        {hasRowActions ? (
-                                            <td className="bt-td-actions">
-                                                <span className="bt-actions">
-                                                    <RowActionsView
-                                                        rowRef={row.ref}
-                                                        actions={resolveRowActions(
-                                                            table,
-                                                            row,
-                                                        )}
-                                                    />
-                                                </span>
-                                            </td>
-                                        ) : null}
-                                    </tr>
-                                    {renderDetailRow(row)}
-                                </React.Fragment>
-                            );
-                        })}
-                    </tbody>
-                </table>
-            </div>
-            {table.caption ? (
-                <div className="bt-caption">{table.caption}</div>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    {state.rows.map((row, index) => (
+                        <TableRow
+                            key={row.id}
+                            table={table}
+                            row={row}
+                            index={index}
+                            columns={visibleColumns}
+                            hiddenColumns={hiddenColumns}
+                            anchorId={anchor?.id}
+                            state={state}
+                            renderText={renderText}
+                            renderRowDetail={renderRowDetail}
+                            selectClickFor={selectClickFor}
+                            onRetryCell={onRetryCell}
+                            hasRowActions={hasRowActions}
+                            expandable={expandable}
+                            columnCount={columnCount}
+                        />
+                    ))}
+
+                    {state.rows.length === 0 ? (
+                        <tr>
+                            <td
+                                className="bt-empty-table"
+                                colSpan={columnCount}
+                            >
+                                {table.rows.length === 0
+                                    ? emptyText
+                                    : filteredEmptyText}
+                            </td>
+                        </tr>
+                    ) : null}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
+/**
+ * Which columns are columns here: the viewer's own hidden set, narrowed further
+ * on a surface that has room for the primary ones only. The anchor survives
+ * both — it carries row identity, so a rendering that hides it has nothing left
+ * to expand from.
+ */
+function splitColumns(
+    columns: Column[],
+    primaryOnly: boolean,
+    anchor: Column | undefined,
+    hiddenByViewer: ReadonlySet<string>,
+): { visibleColumns: Column[]; hiddenColumns: Column[] } {
+    const keeps = (c: Column) =>
+        c.id === anchor?.id ||
+        (!hiddenByViewer.has(c.id) &&
+            (!primaryOnly || c.priority === "primary"));
+
+    const visible = columns.filter(keeps);
+    if (visible.length === 0)
+        return {
+            visibleColumns: columns.slice(0, 1),
+            hiddenColumns: columns.slice(1),
+        };
+    return {
+        visibleColumns: visible,
+        hiddenColumns: columns.filter((c) => !visible.includes(c)),
+    };
+}
+
+interface TableRowProps {
+    table: TableSpec;
+    row: Row;
+    index: number;
+    columns: Column[];
+    hiddenColumns: Column[];
+    anchorId: string | undefined;
+    state: TableState;
+    renderText: TextRenderer;
+    renderRowDetail?: (row: Row) => React.ReactNode;
+    selectClickFor: (column: Column) => ((label: string) => void) | undefined;
+    onRetryCell?: (row: Row, column: Column) => void;
+    hasRowActions: boolean;
+    expandable: boolean;
+    columnCount: number;
+}
+
+function TableRow({
+    table,
+    row,
+    index,
+    columns,
+    hiddenColumns,
+    anchorId,
+    state,
+    renderText,
+    renderRowDetail,
+    selectClickFor,
+    onRetryCell,
+    hasRowActions,
+    expandable,
+    columnCount,
+}: TableRowProps): React.ReactElement {
+    const expanded = expandable && state.expandedRows.has(row.id);
+    const selected = state.selectedRows.has(row.id);
+    const detailId = `${row.id}/detail`;
+
+    return (
+        <>
+            <tr
+                className={[
+                    "bt-row",
+                    row.status === "error" ? "bt-row-error" : "",
+                    expanded ? "bt-row-open" : "",
+                    selected ? "bt-row-selected" : "",
+                ]
+                    .filter(Boolean)
+                    .join(" ")}
+                data-row-id={row.id}
+            >
+                <td className="bt-td bt-td-rail">
+                    <RowRail
+                        index={index + 1}
+                        expandable={expandable}
+                        expanded={expanded}
+                        detailId={detailId}
+                        selected={selected}
+                        onToggleExpand={() => state.toggleRow(row.id)}
+                        onToggleSelect={() => state.toggleRowSelection(row.id)}
+                    />
+                </td>
+
+                {columns.map((column) => (
+                    <td
+                        key={column.id}
+                        id={cellIdFor(row.id, column.id)}
+                        className={[
+                            "bt-td",
+                            `bt-align-${columnAlign(column)}`,
+                            `bt-kind-${column.type}`,
+                            column.id === anchorId ? "bt-td-anchor" : "",
+                        ]
+                            .filter(Boolean)
+                            .join(" ")}
+                    >
+                        <CellView
+                            cell={row.cells[column.id]}
+                            column={column}
+                            row={row}
+                            renderText={renderText}
+                            onSelectClick={selectClickFor(column)}
+                            onRetry={
+                                onRetryCell
+                                    ? () => onRetryCell(row, column)
+                                    : undefined
+                            }
+                        />
+                    </td>
+                ))}
+
+                {hasRowActions ? (
+                    <td className="bt-td bt-td-actions">
+                        <span className="bt-actions">
+                            <RowActionsView table={table} row={row} />
+                        </span>
+                    </td>
+                ) : null}
+            </tr>
+
+            {expanded ? (
+                <tr className="bt-detail-row" id={detailId}>
+                    <td colSpan={columnCount}>
+                        <RowDetail
+                            table={table}
+                            row={row}
+                            hiddenColumns={hiddenColumns}
+                            renderText={renderText}
+                            onRetryCell={onRetryCell}
+                            extra={renderRowDetail?.(row)}
+                        />
+                    </td>
+                </tr>
             ) : null}
+        </>
+    );
+}
+
+/**
+ * The left rail: expand, and a row number that becomes a checkbox on hover.
+ * Two affordances in the space of one, which is what keeps the row's own
+ * columns free of chrome.
+ */
+function RowRail({
+    index,
+    expandable,
+    expanded,
+    selected,
+    detailId,
+    onToggleExpand,
+    onToggleSelect,
+}: {
+    index: number;
+    expandable: boolean;
+    expanded: boolean;
+    selected: boolean;
+    detailId: string;
+    onToggleExpand(): void;
+    onToggleSelect(): void;
+}): React.ReactElement {
+    return (
+        <span className="bt-rail">
+            {expandable ? (
+                <button
+                    type="button"
+                    className={`bt-rail-chevron${expanded ? " bt-open" : ""}`}
+                    aria-label={expanded ? "Collapse row" : "Expand row"}
+                    aria-expanded={expanded}
+                    aria-controls={expanded ? detailId : undefined}
+                    onClick={onToggleExpand}
+                >
+                    <Icon icon={ArrowRightIcon} size={12} />
+                </button>
+            ) : (
+                <span className="bt-rail-spacer" aria-hidden="true" />
+            )}
+            <span className={`bt-rail-mark${selected ? " bt-selected" : ""}`}>
+                <span className="bt-rail-index" aria-hidden="true">
+                    {index}
+                </span>
+                <SelectionBox
+                    checked={selected}
+                    label={selected ? "Deselect row" : "Select row"}
+                    onToggle={onToggleSelect}
+                />
+            </span>
+        </span>
+    );
+}
+
+function SelectionBox({
+    checked,
+    label,
+    onToggle,
+}: {
+    checked: boolean;
+    label: string;
+    onToggle(): void;
+}): React.ReactElement {
+    return (
+        <button
+            type="button"
+            className={`bt-checkbox${checked ? " bt-checked" : ""}`}
+            role="checkbox"
+            aria-checked={checked}
+            aria-label={label}
+            onClick={(e) => {
+                e.stopPropagation();
+                onToggle();
+            }}
+        >
+            <Icon icon={TickIcon} size={10} />
+        </button>
+    );
+}
+
+/**
+ * The expanded row: every field in full, including the ones a clamp cut short
+ * plus, on a narrow surface, the columns that are not columns here. This is what
+ * makes clamping safe — nothing is unreachable, it is one click away.
+ */
+function RowDetail({
+    table,
+    row,
+    hiddenColumns,
+    renderText,
+    onRetryCell,
+    extra,
+}: {
+    table: TableSpec;
+    row: Row;
+    hiddenColumns: Column[];
+    renderText: TextRenderer;
+    onRetryCell?: (row: Row, column: Column) => void;
+    extra?: React.ReactNode;
+}): React.ReactElement {
+    // A column that failed or is still filling is exactly what the reader
+    // expanded the row to look at, so a status counts as content here.
+    const fields = table.columns.filter((column) => {
+        const cell = row.cells[column.id];
+        return (
+            !!cell?.value ||
+            !!cell?.details ||
+            !!cell?.status ||
+            hiddenColumns.includes(column)
+        );
+    });
+
+    return (
+        <div className="bt-detail">
+            {row.status === "error" && row.error ? (
+                <div className="bt-detail-error">{row.error}</div>
+            ) : null}
+
+            <dl className="bt-detail-fields">
+                {fields.map((column) => (
+                    <React.Fragment key={column.id}>
+                        <dt>{column.header}</dt>
+                        <dd>
+                            <CellView
+                                cell={row.cells[column.id]}
+                                column={column}
+                                row={row}
+                                renderText={renderText}
+                                onRetry={
+                                    onRetryCell
+                                        ? () => onRetryCell(row, column)
+                                        : undefined
+                                }
+                            />
+                            {row.cells[column.id]?.details ? (
+                                <DetailsView
+                                    details={row.cells[column.id]!.details!}
+                                    renderText={renderText}
+                                />
+                            ) : null}
+                        </dd>
+                    </React.Fragment>
+                ))}
+            </dl>
+
+            {extra ? <div className="bt-detail-extra">{extra}</div> : null}
         </div>
     );
 }
