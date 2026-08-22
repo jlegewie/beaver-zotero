@@ -677,6 +677,10 @@ async function handleResolvePopulationHttpRequest(request: any) {
     return {
         item_ids: response.item_ids,
         total_count: response.total_count,
+        // How many bibliographic items matched, before an attachment population
+        // was derived from them. Without it the caller cannot tell an empty
+        // attachment population from filters that matched nothing.
+        matched_item_count: response.matched_item_count,
         truncated: response.truncated,
         // The place the population lives, which the approval card states from
         // these alone — the WebSocket transport forwards them, so this one has

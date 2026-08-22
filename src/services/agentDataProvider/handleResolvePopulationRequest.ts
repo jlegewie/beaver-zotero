@@ -463,6 +463,13 @@ export async function handleResolvePopulationRequest(
                 : itemIds.filter(id => !withAttachments.has(id));
         }
 
+        // How many bibliographic items the filters matched, captured before an
+        // attachment population is derived from them. From here on `total_count`
+        // counts attachments for an attachment scope, and is 0 when none of the
+        // matched items has a file — reporting this alongside it is what lets
+        // the caller tell that apart from filters that matched nothing.
+        const matchedItemCount = itemIds.length;
+
         // An attachment population is the matched items' own attachments, so
         // it is derived here rather than searched for. Standalone attachments
         // are not included: they have none of the bibliographic fields the
@@ -490,6 +497,7 @@ export async function handleResolvePopulationRequest(
                 request_id: request.request_id,
                 item_ids: [],
                 total_count: totalCount,
+                matched_item_count: matchedItemCount,
                 truncated: totalCount > 0,
                 library_name: library.name,
                 collection_names: collectionNames,
@@ -525,6 +533,7 @@ export async function handleResolvePopulationRequest(
             request_id: request.request_id,
             item_ids: resultIds,
             total_count: totalCount,
+            matched_item_count: matchedItemCount,
             truncated,
             // Where the population lives, in the names the user gave those
             // places. The approval card states the location from these alone.

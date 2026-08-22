@@ -1310,4 +1310,81 @@ describe('handleResolvePopulationRequest', () => {
             expect(response.total_count).toBe(0);
         });
     });
+
+    describe('matched_item_count', () => {
+        it('equals total_count for a regular population', async () => {
+            searchResultIds = [1, 2, 3];
+            seedItem(1);
+            seedItem(2);
+            seedItem(3);
+
+            const response = await handleResolvePopulationRequest(makeRequest({ item_category: 'regular' }));
+
+            expect(response.matched_item_count).toBe(3);
+            expect(response.total_count).toBe(3);
+        });
+
+        it('counts items while total_count counts their attachments', async () => {
+            searchResultIds = [1, 2];
+            seedItem(1, { attachments: [101, 102] });
+            seedItem(2, { attachments: [103] });
+
+            const response = await handleResolvePopulationRequest(makeRequest({ item_category: 'attachment' }));
+
+            expect(response.matched_item_count).toBe(2);
+            expect(response.total_count).toBe(3);
+            expect(response.item_ids).toEqual(['u-ATT101', 'u-ATT102', 'u-ATT103']);
+        });
+
+        it('reports the items that matched when none of them has a file', async () => {
+            // The case the field exists for: an empty population whose filters
+            // were correct. Without this count the caller sees only
+            // total_count 0 and reads it as "the filters matched nothing".
+            searchResultIds = [1, 2, 3];
+            seedItem(1, { attachments: [] });
+            seedItem(2, { attachments: [] });
+            seedItem(3, { attachments: [] });
+
+            const response = await handleResolvePopulationRequest(makeRequest({ item_category: 'attachment' }));
+
+            expect(response.error).toBeUndefined();
+            expect(response.matched_item_count).toBe(3);
+            expect(response.total_count).toBe(0);
+            expect(response.item_ids).toEqual([]);
+        });
+
+        it('counts the items has_attachments kept, not the ones the search returned', async () => {
+            searchResultIds = [1, 2, 3];
+            seedItem(1, { attachments: [101] });
+            seedItem(2);
+            seedItem(3, { attachments: [103] });
+
+            const response = await handleResolvePopulationRequest(makeRequest({ has_attachments: true }));
+
+            expect(response.matched_item_count).toBe(2);
+            expect(response.total_count).toBe(2);
+        });
+
+        it('is reported on the count-only path', async () => {
+            searchResultIds = [1, 2];
+            seedItem(1, { attachments: [101, 102] });
+            seedItem(2, { attachments: [103] });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                item_category: 'attachment',
+                max_items: 0,
+            }));
+
+            expect(response.matched_item_count).toBe(2);
+            expect(response.total_count).toBe(3);
+            expect(response.item_ids).toEqual([]);
+        });
+
+        it('is absent from an error response', async () => {
+            const response = await handleResolvePopulationRequest(makeRequest({ collection_keys: ['ZZZZ9999'] }));
+
+            expect(response.error_code).toBe('collection_not_found');
+            expect(response.matched_item_count).toBeUndefined();
+        });
+    });
 });

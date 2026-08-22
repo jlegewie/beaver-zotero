@@ -1457,6 +1457,22 @@ export interface WSResolvePopulationResponse {
     item_ids: string[];
     /** True number of matches, counted before truncation. */
     total_count: number;
+    /**
+     * Number of bibliographic items the filters matched, counted before any
+     * attachment population is derived from them and before truncation.
+     *
+     * Under `item_category: 'regular'` it equals `total_count`. Under
+     * `item_category: 'attachment'` the two answer different questions:
+     * `total_count` counts the attachments hanging off the matched items, so it
+     * can be larger than this one, and it is 0 whenever none of the matched
+     * items has a file. This count is therefore what separates "the filters
+     * matched nothing" from "the filters matched, but none of the matches has a
+     * file" — two cases that call for opposite corrections.
+     *
+     * Set on every successful resolution; absent from a failure and from a
+     * provider that predates the field.
+     */
+    matched_item_count?: number | null;
     /** True when total_count exceeded max_items and item_ids was cut short. */
     truncated: boolean;
     /**
