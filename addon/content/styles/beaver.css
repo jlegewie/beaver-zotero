@@ -204,13 +204,14 @@
 [id^="beaver-pane-"] .user-message-display {
     --composer-pad-x: 0.8rem;
     --composer-pad-top: 0.85rem;
-    --composer-pad-bottom: 0.7rem;
+    --composer-pad-bottom: 0.5rem;
     --composer-radius: 10px;
     padding: var(--composer-pad-top) var(--composer-pad-x) var(--composer-pad-bottom);
-    border: 1px solid var(--fill-quarternary);
+    border: 1px solid color-mix(in srgb, var(--material-mix-quarternary) 50%, var(--fill-quarternary));
     border-radius: var(--composer-radius);
     background-color: var(--material-sidepane);
-    background-color: color-mix(in srgb, var(--material-background) 60%, var(--material-sidepane));
+    /* background-color: color-mix(in srgb, var(--material-background) 60%, var(--material-sidepane)); */
+    background-color: color-mix(in srgb, var(--material-mix-quarternary) 60%, var(--material-sidepane));
     user-select: text;
 }
 
@@ -231,7 +232,8 @@
     flex-direction: row;
     align-items: center;
     gap: 4px;
-    margin-top: 0.75rem;
+    margin-top: 0.8rem;
+    margin-right: -0.2rem;
 }
 
 /* One height and one hover shape for every control in the row, whatever
