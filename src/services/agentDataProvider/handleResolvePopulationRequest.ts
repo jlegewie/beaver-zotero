@@ -466,8 +466,8 @@ export async function handleResolvePopulationRequest(
         // How many bibliographic items the filters matched, captured before an
         // attachment population is derived from them. From here on `total_count`
         // counts attachments for an attachment scope, and is 0 when none of the
-        // matched items has a file — reporting this alongside it is what lets
-        // the caller tell that apart from filters that matched nothing.
+        // matched items has one — reporting this alongside it is what lets the
+        // caller tell that apart from filters that matched nothing.
         const matchedItemCount = itemIds.length;
 
         // An attachment population is the matched items' own attachments, so

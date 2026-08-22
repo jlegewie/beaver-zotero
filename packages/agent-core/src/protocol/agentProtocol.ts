@@ -1465,9 +1465,11 @@ export interface WSResolvePopulationResponse {
      * `item_category: 'attachment'` the two answer different questions:
      * `total_count` counts the attachments hanging off the matched items, so it
      * can be larger than this one, and it is 0 whenever none of the matched
-     * items has a file. This count is therefore what separates "the filters
-     * matched nothing" from "the filters matched, but none of the matches has a
-     * file" — two cases that call for opposite corrections.
+     * items has an attachment. This count is therefore what separates "the
+     * filters matched nothing" from "the filters matched, but none of the
+     * matches has an attachment" — two cases that call for opposite
+     * corrections. It says nothing about whether an attachment's file is
+     * present on disk: an attachment record is counted either way.
      *
      * Set on every successful resolution; absent from a failure and from a
      * provider that predates the field.
