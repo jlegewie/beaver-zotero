@@ -21,6 +21,21 @@ function truncate(text: string, maxLength: number): string {
     return text.slice(0, maxLength) + '...';
 }
 
+/** Unicode directional isolates: FSI, LRI, RLI, PDI. */
+const BIDI_ISOLATES = /[⁦-⁩]/g;
+
+/**
+ * Remove the Unicode directional isolates Zotero wraps around creator names.
+ *
+ * `item.firstCreator` wraps each name of a two-creator item in U+2068/U+2069
+ * so the joiner renders correctly in mixed-direction text. Invisible in a
+ * rendered label, but they corrupt anything that compares, hashes, or sends
+ * the string.
+ */
+export function stripBidiIsolates(text: string): string {
+    return text.replace(BIDI_ISOLATES, '');
+}
+
 /**
  * Zotero's own title for an item.
  *
@@ -66,7 +81,7 @@ export function getItemDisplayName(
     } else if (item.isAttachment() && !item.parentItem) {
         displayName = item.getField('title') || '';
     } else {
-        const firstCreator = item.firstCreator || displayTitle(item) || 'Unknown Author';
+        const firstCreator = stripBidiIsolates(item.firstCreator || '') || displayTitle(item) || 'Unknown Author';
         // Base-mapped for the same reason as the title: a case dates from
         // `dateDecided`, a patent from `issueDate`, a statute from
         // `dateEnacted`, and a plain `date` read finds none of them.

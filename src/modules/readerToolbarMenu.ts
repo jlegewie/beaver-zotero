@@ -219,6 +219,10 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
             // Disabled header
             const header = xulDoc.createXULElement('menuitem');
             header.setAttribute('label', 'Actions');
+            // Keep the literal 'true': Gecko 115 (Zotero 7-10) disables a
+            // menuitem only on disabled="true", while Zotero 11 (Firefox 153)
+            // treats the attribute as boolean and accepts any value. Writing
+            // "true" is the one form that disables under both.
             header.setAttribute('disabled', 'true');
             popup.appendChild(header);
 

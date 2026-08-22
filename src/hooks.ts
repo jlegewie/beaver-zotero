@@ -300,6 +300,7 @@ async function onStartup() {
         await Zotero.PreferencePanes.register({
             pluginID: addon.data.config.addonID,
             src: rootURI + 'content/beaverZoteroPrefs.xhtml',
+            scripts: [rootURI + 'content/beaverZoteroPrefs.js'],
             id: 'beaver-prefpane',
             label: 'Beaver',
             image: rootURI + 'content/icons/beaver@0.5x.png',

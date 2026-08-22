@@ -248,6 +248,10 @@ export async function validateOrganizeItemsAction(
     // collection keys were also wrong.
     let collectionError: { message: string; code: string } | null = null;
 
+    // Display names of the collections this action touches, keyed by collection
+    // key.
+    const collectionNames: Record<string, string> = {};
+
     // Validate collection operations: all items must be in the same library.
     // Only meaningful once at least one item resolved — with zero valid
     // items there's no library to scope the check against, and the item
@@ -296,6 +300,8 @@ export async function validateOrganizeItemsAction(
                             key: collKey,
                             otherLibraryId: await findCollectionLibrary(collKey),
                         });
+                    } else if (collection.name) {
+                        collectionNames[collKey] = collection.name;
                     }
                 }
             };
@@ -402,6 +408,8 @@ export async function validateOrganizeItemsAction(
         // Return the portable ids so the backend persists + replays them instead
         // of the model-authored device-local ids (the validate-time enrichment seam).
         normalized_action_data: { item_ids: normalizedItemIds },
+        // Omitted for tag-only actions, which touch no collection.
+        collection_names: Object.keys(collectionNames).length > 0 ? collectionNames : undefined,
         preference,
     };
 }

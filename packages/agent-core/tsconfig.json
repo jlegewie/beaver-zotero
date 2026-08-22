@@ -117,6 +117,7 @@
     "./src/run-state/toolLabels.ts",
     "./src/run-state/runErrorCopy.ts",
     "./src/run-state/runStatusCopy.ts",
-    "./src/run-state/runStatusVisibility.ts"
+    "./src/run-state/runStatusVisibility.ts",
+    "./src/run-state/streamActivity.ts"
   ]
 }

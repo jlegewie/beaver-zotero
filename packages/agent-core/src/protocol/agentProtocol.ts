@@ -680,20 +680,12 @@ export interface QuickSearchHit {
     display_name: string;
     /**
      * Second line for the row: title and publication context, or the parent
-     * relationship for a note or attachment. Composed from Zotero's fields —
-     * cheap enough to serve for a whole page, unlike `formatted_citation`.
+     * relationship for a note or attachment. Shorter than `formatted_citation`.
      */
     description?: string;
     title?: string;
     year?: number;
-    /**
-     * Formatted bibliography entry, for a hover card.
-     *
-     * Only present when the request set `include_citation`. Rendering one runs
-     * the CSL engine per item, which costs hundreds of milliseconds and is far
-     * too slow for a page of results — ask for it for a single item the user
-     * actually paused on, and use `description` everywhere else.
-     */
+    /** One-line bibliographic reference */
     formatted_citation?: string;
     /** Whether the item has at least one child attachment */
     has_attachment?: boolean;
@@ -730,15 +722,6 @@ export interface WSItemQuickSearchRequest extends WSBaseEvent {
     // Options
     /** What each hit carries. Default 'compact'. */
     detail?: QuickSearchDetail;
-    /**
-     * Also render `formatted_citation` on each hit. Default false.
-     *
-     * Off by default because it runs the CSL engine once per row, which costs
-     * hundreds of milliseconds per item — enough to make a picker unusable.
-     * `description` carries the same information cheaply; reach for this only
-     * when a real bibliography entry is required.
-     */
-    include_citation?: boolean;
     /** Maximum number of results to return. Default 20. */
     limit?: number;
     /** Number of results to skip for pagination. Default 0. */
@@ -1417,12 +1400,15 @@ export interface WSResolvePopulationRequest extends WSBaseEvent {
     request_id: string;
     /** Library id or name. Null/absent = the user's default library. */
     library_id?: number | string | null;
-    /** Bare collection key (never library-qualified); the backend down-converts. */
-    collection_key?: string | null;
-    /** Include items from subcollections when scoped to a collection. */
+    /**
+     * Bare collection keys (never library-qualified); the backend
+     * down-converts. ORed: an item matches when it is in ANY of them.
+     */
+    collection_keys?: string[] | null;
+    /** Include items from subcollections of every scoped collection. */
     recursive: boolean;
-    /** Exact tag the items must carry. */
-    tag?: string | null;
+    /** Exact tag names. ORed: an item matches when it carries ANY of them. */
+    tags?: string[] | null;
     /** Only items that belong to no collection. */
     unfiled: boolean;
     /** Only items that carry no tags. */
@@ -1455,13 +1441,18 @@ export interface WSResolvePopulationResponse {
     /** True when total_count exceeded max_items and item_ids was cut short. */
     truncated: boolean;
     /**
-     * Display names of the library and collection the filters resolved
+     * Display names of the library and collections the filters resolved
      * against. The approval card names the population's location from these
      * and says nothing about it when they are absent, so omitting them costs
      * the user the WHERE half of what they are approving.
+     *
+     * `collection_names` is in the order `collection_keys` named them, and is
+     * answered in full or not at all — the card cannot state the place from a
+     * partial list, because the collections it skipped are part of the
+     * population too.
      */
     library_name?: string | null;
-    collection_name?: string | null;
+    collection_names?: string[] | null;
     error?: string | null;
     error_code?: string | null;
     /** Available libraries (only included when error_code is 'library_not_found') */
@@ -1490,14 +1481,6 @@ export interface WSGetMetadataRequest extends WSBaseEvent {
      * payloads have no place in that projection.
      */
     detail?: ItemProjectionDetail;
-    /**
-     * Also render `formatted_citation` on each compact row. Default false;
-     * ignored when `detail` is 'full', which always carries one.
-     *
-     * This is the op to ask for a real bibliography entry — for one item the
-     * user paused on, not for a list. See `QuickSearchHit.formatted_citation`.
-     */
-    include_citation?: boolean;
 }
 
 /** Response to get_metadata request */
@@ -1855,6 +1838,8 @@ export interface WSAgentActionValidateResponse {
      * instead of the original request action_data.
      */
     normalized_action_data?: Record<string, any>;
+    /** Display names of the collections the action touches */
+    collection_names?: Record<string, string>;
     preference: DeferredToolPreference;
     /** Optional warnings surfaced during validation */
     warnings?: string[];
