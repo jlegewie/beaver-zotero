@@ -1,10 +1,9 @@
 /**
  * `getItemDescription` — the second line under an item's display name.
  *
- * It replaces a rendered CSL bibliography entry, which cost hundreds of
- * milliseconds per row, so the bar is that it stays informative across the
- * whole item-type vocabulary — not just journal articles, whose fields are the
- * ones a naive implementation happens to read.
+ * The bar is that it stays informative across the whole item-type vocabulary —
+ * not just journal articles, whose fields are the ones a naive implementation
+ * happens to read.
  */
 import { describe, expect, it, beforeEach } from 'vitest';
 import { getItemDescription } from '../../../src/utils/itemDescription';

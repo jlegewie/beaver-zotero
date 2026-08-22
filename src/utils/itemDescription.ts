@@ -8,12 +8,11 @@
  * no local Zotero (the Word add-in) and every surface calls the same item the
  * same thing.
  *
- * **Why not a formatted citation.** A CSL bibliography entry says the same
- * thing, but rendering one costs a few hundred milliseconds *per item* — a
- * 20-row picker page spends seconds on it, on Zotero's main thread. Everything
- * below is plain `getField` reads. Zotero's own citation dialog builds its
- * second line the same way and for the same reason (see
- * `chrome/content/zotero/integration/citationDialog/helpers.mjs`).
+ * **Why not a formatted citation.** A bibliography entry is longer than a
+ * picker row wants. Zotero's own citation dialog builds its second line from
+ * fields the same way (see
+ * `chrome/content/zotero/integration/citationDialog/helpers.mjs`). The fuller,
+ * citation-shaped line lives in `itemReference.ts`.
  *
  * **How it generalizes past journal articles.** Zotero maps type-specific
  * fields onto a handful of *base fields*, so one read covers many item types:
