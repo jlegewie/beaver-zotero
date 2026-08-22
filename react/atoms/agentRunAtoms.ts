@@ -76,7 +76,7 @@ import type { ExternalFileAttachment } from '@beaver/agent-core/types/attachment
 import { getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
-import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptAction, PromptOrigin, ToolRequest, isRunActive } from '@beaver/agent-core/agents/types';
+import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptAction, PromptOrigin, ResumeTrigger, ToolRequest, isRunActive } from '@beaver/agent-core/agents/types';
 import {
     threadRunsAtom,
     activeRunAtom,
@@ -92,6 +92,10 @@ import {
     wsReconnectingAtom,
     wsRetryAtom,
 } from '@beaver/agent-core/run-state/atoms';
+import {
+    createStreamActivityTracker,
+    streamQuietAtom,
+} from '@beaver/agent-core/run-state/streamActivity';
 import { userIdAtom } from './auth';
 import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import { maybeShowCitationTipAtom } from './citationTip';
@@ -534,6 +538,12 @@ function createAgentRunShell(
 
 type StartResumeRunOptions = {
     requireResumable: boolean;
+    /**
+     * Who is asking. Sent to the backend, which reorders its model chain only
+     * for `auto` — a user-clicked resume usually follows a dropped connection
+     * or a closed client, where no provider failed.
+     */
+    trigger: ResumeTrigger;
     logPrefix: string;
     failureErrorType: string;
     failureMessage: string;
@@ -608,6 +618,7 @@ async function startResumeRun(
             content: '',
             is_resume: true,
             resumes_run_id: failedRunId,
+            resume_trigger: options.trigger,
         };
 
         const { run: newRun, request } = createAgentRunShell(
@@ -1175,6 +1186,20 @@ const scheduledAutoResumeRunIdsAtom = atom<Set<string>>(new Set<string>());
 // =============================================================================
 
 /**
+ * The one tracker measuring how long the stream has been quiet.
+ *
+ * Module-level rather than mounted with a component: the events it measures
+ * arrive at these handlers whether or not anything is on screen, and a tracker
+ * that had to be mounted would silently stop measuring in any window state that
+ * failed to mount it. Every handler below that advances a run calls it — one
+ * left out would make its event look like more silence, which is exactly the
+ * false report this exists to prevent.
+ */
+const streamActivity = createStreamActivityTracker({
+    publish: (state) => store.set(streamQuietAtom, state),
+});
+
+/**
  * Reset all WebSocket state atoms
  */
 export const resetWSStateAtom = atom(null, (_get, set) => {
@@ -1188,6 +1213,7 @@ export const resetWSStateAtom = atom(null, (_get, set) => {
     set(wsRetryAtom, null);
     set(wsReconnectingAtom, null);
     set(streamingDoneRunIdsAtom, new Set<string>());
+    streamActivity.reset();
 });
 
 /**
@@ -1380,6 +1406,9 @@ export function createWSCallbacks(
         },
 
         onPart: async (event: WSPartEvent) => {
+            // Stamped before the item-data load below, not after: the wait this
+            // reports is the provider's, and our own lookup is not silence.
+            streamActivity.noteActivity(event.run_id);
             // Load item data for tool call
             if (event.part.part_kind === "tool-call") {
                 logger(`WS onPart (${event.part.part_kind}):`, {
@@ -1407,6 +1436,7 @@ export function createWSCallbacks(
         },
 
         onToolReturn: async (event: WSToolReturnEvent) => {
+            streamActivity.noteActivity(event.run_id);
             logger('WS onToolReturn:', {
                 runId: event.run_id,
                 messageIndex: event.message_index,
@@ -1476,16 +1506,22 @@ export function createWSCallbacks(
         },
 
         onToolCallProgress: (event: WSToolCallProgressEvent) => {
+            streamActivity.noteActivity(event.run_id);
             logger(`WS onToolCallProgress: ${event.run_id} - ${event.tool_call_id} - ${event.progress}`, 1);
             set(activeRunAtom, (prev) => prev ? updateRunWithToolCallProgress(prev, event) : prev);
         },
 
         onToolCallArgsStream: (event: WSToolCallArgsStreamEvent) => {
+            streamActivity.noteActivity(event.run_id);
             set(activeRunAtom, (prev) => prev ? updateRunWithToolCallArgsStream(prev, event) : prev);
         },
 
         onStreamingDone: (event: WSStreamingDoneEvent) => {
             logger('WS onStreamingDone:', { runId: event.run_id }, 1);
+            // The model is done; what is left is the citation lookup, and the
+            // footer reports that. Stop measuring rather than counting it as a
+            // gap the model is sitting in.
+            streamActivity.reset();
             set(streamingDoneRunIdsAtom, (prev) => new Set([...prev, event.run_id]));
         },
 
@@ -1578,6 +1614,7 @@ export function createWSCallbacks(
 
         onDone: () => {
             logger('WS onDone: Request fully complete', 1);
+            streamActivity.reset();
 
             // Clear any remaining streaming-done state (safety net)
             set(streamingDoneRunIdsAtom, new Set<string>());
@@ -1611,6 +1648,7 @@ export function createWSCallbacks(
 
             // Clear streaming-done state
             set(streamingDoneRunIdsAtom, new Set<string>());
+            streamActivity.reset();
 
             // The connect loop in executeWSRequest reads this atom to tell a
             // server application error from a transport failure. Leaving it
@@ -1707,6 +1745,11 @@ export function createWSCallbacks(
                 reason: event.reason,
                 waitSeconds: event.wait_seconds,
             });
+
+            // A new wait, dated from the retry: `noteActivity` would drop an
+            // already-showing indicator for a second, and leaving the old clock
+            // would count seconds from the last token rather than from now.
+            streamActivity.startWait(event.run_id);
 
             // If reset is true, clear any partial content that was streamed
             if (event.reset) {
@@ -1910,6 +1953,7 @@ export function createWSCallbacks(
             }
             // Clear streaming-done state (connection lost during post-processing)
             set(streamingDoneRunIdsAtom, new Set<string>());
+            streamActivity.reset();
             // Clear pending approvals and dismiss diff preview (connection lost)
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
@@ -2830,6 +2874,7 @@ export const autoResumeErroredRunAtom = atom(
         try {
             await startResumeRun(get, set, failedRunId, {
                 requireResumable: false,
+                trigger: 'auto',
                 logPrefix: 'autoResumeErroredRunAtom',
                 failureErrorType: 'auto_resume_error',
                 failureMessage: 'Failed to automatically resume run',
@@ -2871,6 +2916,7 @@ export const resumeFromRunAtom = atom(
     async (get, set, failedRunId: string) => {
         await startResumeRun(get, set, failedRunId, {
             requireResumable: true,
+            trigger: 'user',
             logPrefix: 'resumeFromRunAtom',
             failureErrorType: 'resume_error',
             failureMessage: 'Failed to resume run',
@@ -2910,6 +2956,7 @@ export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
 
     // Clear streaming-done state (abandoned during post-processing)
     set(streamingDoneRunIdsAtom, new Set<string>());
+    streamActivity.reset();
 });
 
 /**

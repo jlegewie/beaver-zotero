@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
     buildReviewRows,
+    countCompletedChangedUnits,
+    shouldShowCompletedCard,
     getCompletedHeaderCopy,
     getReviewHeaderCopy,
     hasPendingReviewRows,
@@ -590,5 +592,101 @@ describe('getCompletedHeaderCopy counting', () => {
         } as Partial<AgentAction>)]);
 
         expect(getCompletedHeaderCopy(rows)).toBe('Created 1 note');
+    });
+});
+
+describe('countCompletedChangedUnits', () => {
+    const completedRows = (actions: AgentAction[]) => buildReviewRows(actions, {
+        mode: 'completed',
+        appliedActionIds: new Set(actions.map((item) => item.id)),
+    });
+
+    it('counts a single edit as one unit', () => {
+        const rows = completedRows([action({
+            action_type: 'edit_metadata',
+            status: 'applied',
+            proposed_data: { library_id: 1, zotero_key: 'ITEM1' },
+        })]);
+
+        expect(countCompletedChangedUnits(rows)).toBe(1);
+    });
+
+    it('counts a batch tool by its targets, even in one row', () => {
+        const rows = completedRows([action({
+            action_type: 'organize_items',
+            status: 'applied',
+            proposed_data: { item_ids: Array.from({ length: 45 }, (_, index) => index) },
+        })]);
+
+        expect(rows).toHaveLength(1);
+        expect(countCompletedChangedUnits(rows)).toBe(45);
+    });
+
+    it('counts an all-reverted card by its original actions', () => {
+        const actions = [
+            action({ toolcall_id: 'call-1', action_type: 'create_note', status: 'undone' }),
+            action({ toolcall_id: 'call-2', action_type: 'create_note', status: 'undone' }),
+        ];
+        const rows = buildReviewRows(actions, {
+            mode: 'completed',
+            appliedActionIds: new Set(actions.map((item) => item.id)),
+        });
+
+        expect(countCompletedChangedUnits(rows)).toBe(2);
+    });
+
+    it('counts mixed kinds by the actions still in effect', () => {
+        const rows = completedRows([
+            action({ toolcall_id: 'call-1', action_type: 'create_note', status: 'applied' }),
+            action({ toolcall_id: 'call-2', action_type: 'manage_tags', status: 'applied' }),
+        ]);
+
+        expect(countCompletedChangedUnits(rows)).toBe(2);
+    });
+});
+
+describe('shouldShowCompletedCard', () => {
+    const completedRows = (actions: AgentAction[]) => buildReviewRows(actions, {
+        mode: 'completed',
+        appliedActionIds: new Set(actions.map((item) => item.id)),
+    });
+
+    it('hides a single metadata edit', () => {
+        const rows = completedRows([action({
+            action_type: 'edit_metadata',
+            status: 'applied',
+            proposed_data: { library_id: 1, zotero_key: 'ITEM1' },
+        })]);
+
+        expect(shouldShowCompletedCard(rows)).toBe(false);
+    });
+
+    it('shows a single created note', () => {
+        const rows = completedRows([action({
+            action_type: 'create_note',
+            status: 'applied',
+        })]);
+
+        expect(shouldShowCompletedCard(rows)).toBe(true);
+    });
+
+    it('hides a single created note once it has been undone', () => {
+        const undone = action({ action_type: 'create_note', status: 'undone' });
+        const rows = buildReviewRows([undone], {
+            mode: 'completed',
+            appliedActionIds: new Set([undone.id]),
+        });
+
+        expect(shouldShowCompletedCard(rows)).toBe(false);
+    });
+
+    it('shows a one-row batch of many units', () => {
+        const rows = completedRows([action({
+            action_type: 'organize_items',
+            status: 'applied',
+            proposed_data: { item_ids: Array.from({ length: 45 }, (_, index) => index) },
+        })]);
+
+        expect(shouldShowCompletedCard(rows)).toBe(true);
     });
 });

@@ -8,6 +8,7 @@ import {
 } from '../../../agents/agentActions';
 import CreateItemAgentActionDisplay from './CreateItemAgentActionDisplay';
 import ChangesCard from './reviewChanges/ChangesCard';
+import { shouldShowCompletedCard } from './reviewChangeRows';
 import { useCompletedRows, useReviewRows } from './reviewChanges/useReviewRows';
 
 interface AgentActionsReviewProps {
@@ -42,9 +43,14 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) =
     const hasCreateItems = createItemActions.length > 0 &&
         !createItemActions.every(a => a.status === 'rejected' || a.status === 'undone');
 
+    // A single changed unit is already the in-stream action card, except a
+    // created note — this card replaced that dedicated display. A 1-row batch
+    // of many units still uses the one-row rendering inside ChangesCard.
+    const showCompletedCard = shouldShowCompletedCard(completedRows);
+
     // The two change cards are independent displays: either renders whenever the
     // run has rows for it, even with the citation import list empty.
-    if (!hasCreateItems && reviewRows.length === 0 && completedRows.length === 0) {
+    if (!hasCreateItems && reviewRows.length === 0 && !showCompletedCard) {
         return null;
     }
 
@@ -57,7 +63,7 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) =
                 />
             )}
             {reviewRows.length > 0 && <ChangesCard run={run} rows={reviewRows} />}
-            {completedRows.length > 0 && (
+            {showCompletedCard && (
                 <ChangesCard run={run} rows={completedRows} mode="completed" />
             )}
         </div>

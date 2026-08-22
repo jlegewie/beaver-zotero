@@ -668,9 +668,9 @@ async function handleResolvePopulationHttpRequest(request: any) {
         event: 'resolve_population_request',
         request_id: generateRequestId(),
         library_id: request.library_id,
-        collection_key: request.collection_key ?? null,
+        collection_keys: request.collection_keys ?? [],
         recursive: request.recursive ?? true,
-        tag: request.tag ?? null,
+        tags: request.tags ?? [],
         unfiled: request.unfiled ?? false,
         untagged: request.untagged ?? false,
         conditions: request.conditions || [],
@@ -685,6 +685,11 @@ async function handleResolvePopulationHttpRequest(request: any) {
         item_ids: response.item_ids,
         total_count: response.total_count,
         truncated: response.truncated,
+        // The place the population lives, which the approval card states from
+        // these alone — the WebSocket transport forwards them, so this one has
+        // to as well or a localhost run loses the WHERE half of the card.
+        library_name: response.library_name,
+        collection_names: response.collection_names,
         // A dropped condition widens the population; the caller must not act on
         // ids that came back with a warning.
         warnings: response.warnings,

@@ -14,6 +14,11 @@
  * - A **client** reconnect does show its attempt numbers. A reconnect that is
  *   counting up is the difference between "wait a moment" and "something is
  *   wrong", and that is a judgement only the reader can make.
+ *
+ * The idle label can carry a count of the seconds waited, for the same reason.
+ * A still spinner says only "something may be happening"; a number climbing past
+ * it says "and it has been happening for a while, and this pane is alive enough
+ * to keep telling you so", which is what a thirty-second wait needs.
  */
 
 import type { ReconnectState, RetryState } from "./atoms";
@@ -37,6 +42,14 @@ export function runStatusText(state: {
     backendRetry: RetryState | null;
     /** What to say when neither is happening. */
     idleLabel: string;
+    /**
+     * How long the run has been waiting, appended to `idleLabel` alone: the two
+     * branches above carry their own progress, and a second number beside an
+     * attempt count reads as part of it. Omit it, or pass null, to say nothing —
+     * a caller is expected to withhold it until the wait is long enough that a
+     * bare spinner starts to look stuck.
+     */
+    elapsedSeconds?: number | null;
 }): string {
     if (state.reconnect) {
         // The shared connect-retry loop reports the attempt it is *about* to
@@ -49,5 +62,11 @@ export function runStatusText(state: {
             : "Reconnecting…";
     }
     if (state.backendRetry) return "Retrying…";
-    return state.idleLabel;
+    const seconds = state.elapsedSeconds;
+    if (seconds === null || seconds === undefined || seconds < 1) {
+        return state.idleLabel;
+    }
+    // A middot keeps the number from reading as a duration of generation
+    // ("Generating 8s") or as time remaining.
+    return `${state.idleLabel} · ${Math.floor(seconds)}s`;
 }

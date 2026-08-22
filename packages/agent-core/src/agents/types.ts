@@ -140,6 +140,17 @@ export interface PromptAction {
 }
 
 /**
+ * Who initiated a resume request.
+ *
+ * `auto` is the client retrying a stream the provider aborted; the backend
+ * reorders its model chain for those so the provider that just failed does not
+ * lead again. `user` is a resume the user clicked, which keeps the default
+ * chain — it usually follows a dropped connection or a closed client, where no
+ * provider failed.
+ */
+export type ResumeTrigger = 'auto' | 'user';
+
+/**
  * Chat message content sent by the client.
  * Contains all user input for a chat completion request.
  */
@@ -158,6 +169,8 @@ export interface BeaverAgentPrompt {
     is_resume?: boolean;
     /** The run ID this request resumes (for resume requests) */
     resumes_run_id?: string;
+    /** Who started the resume; only 'auto' reorders the backend model chain */
+    resume_trigger?: ResumeTrigger;
     /** Custom system instructions for this request */
     custom_instructions?: string;
     /** Where this prompt came from */

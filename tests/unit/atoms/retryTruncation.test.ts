@@ -73,6 +73,7 @@ import {
     isWSChatPendingAtom,
     regenerateFromRunAtom,
     regenerateWithEditedPromptAtom,
+    autoResumeErroredRunAtom,
     resumeFromRunAtom,
     retryPendingRunIdAtom,
     sendWSMessageAtom,
@@ -493,6 +494,7 @@ describe('retry via synchronous truncation', () => {
             const request = sentRequest();
             expect(request.user_prompt.is_resume).toBe(true);
             expect(request.user_prompt.resumes_run_id).toBe('interrupted');
+            expect(request.user_prompt.resume_trigger).toBe('user');
         });
 
         it.each([
@@ -536,7 +538,22 @@ describe('retry via synchronous truncation', () => {
             const request = sentRequest();
             expect(request.user_prompt.is_resume).toBe(true);
             expect(request.user_prompt.resumes_run_id).toBe('failed');
+            expect(request.user_prompt.resume_trigger).toBe('user');
             expect(request.retry_run_id).toBeUndefined();
+        });
+
+        it('marks an automatic resume as such so the backend can reorder its chain', async () => {
+            store.set(threadRunsAtom, [makeRun('a')]);
+            store.set(activeRunAtom, makeRun('failed', {
+                status: 'error',
+                error: { type: 'llm_streaming_error', message: 'stream aborted' },
+            }));
+
+            await store.set(autoResumeErroredRunAtom, 'failed');
+
+            const request = sentRequest();
+            expect(request.user_prompt.is_resume).toBe(true);
+            expect(request.user_prompt.resume_trigger).toBe('auto');
         });
     });
 

@@ -87,11 +87,11 @@
 }
 
 #zotero-beaver-tb-chat-toggle:active,
-#zotero-beaver-tb-chat-toggle[selected="true"] {
+#zotero-beaver-tb-chat-toggle[selected] {
     background-color: var(--fill-quarternary);
 }
 
-#zotero-beaver-tb-chat-toggle[disabled="true"] {
+#zotero-beaver-tb-chat-toggle[disabled] {
     opacity: .5;
 }
 

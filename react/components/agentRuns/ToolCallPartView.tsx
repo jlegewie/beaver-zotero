@@ -116,6 +116,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     // Batch operations
     batch_start: LayersIcon,
     batch_resolve: LayersIcon,
+    batch_digest: LayersIcon,
 
     // User interaction
     ask_user_question: ChattingIcon,
@@ -133,6 +134,7 @@ const NON_EXPANDABLE_TOOLS = new Set([
     'search_tools',
     'load_tool_results',
     'batch_resolve',
+    'batch_digest',
 ]);
 
 /**

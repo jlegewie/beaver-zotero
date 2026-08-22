@@ -4,7 +4,7 @@ import { TextPartView } from './TextPartView';
 import { ThinkingPartView } from './ThinkingPartView';
 import { ToolCallPartView } from './ToolCallPartView';
 import { isAnnotationToolResult } from '@beaver/agent-core/run-state/toolResultTypes';
-import { isAutoLoadingToolCall } from '@beaver/agent-core/agents/messageVisibility';
+import { isAutoLoadingToolCall, isThinkingInProgress } from '@beaver/agent-core/agents/messageVisibility';
 import ContextMenu from '@beaver/agent-ui/primitives/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { buildEditNoteRenderItems, getEditNoteGroupInstanceId } from './editNoteShared';
@@ -100,7 +100,7 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = React.memo(fu
                 <ThinkingPartView
                     key={`${responseId}-thinking`}
                     parts={thinkingParts}
-                    isThinking={isStreaming && textParts.length === 0 && toolCallParts.length === 0}
+                    isThinking={isStreaming && isThinkingInProgress(message)}
                     hasFollowingContent={textParts.length > 0 || toolCallParts.length > 0}
                     thinkingId={`${responseId}-thinking`}
                 />
