@@ -106,6 +106,7 @@
     "./src/run-state/askUserQuestionAnswers.ts",
     "./src/run-state/batchApprovalAnswers.ts",
     "./src/run-state/toolResultViews.ts",
+    "./src/layouts/table.ts",
     "./src/run-state/toolResultTypes.ts",
     "./src/run-state/toolCallRequest.ts",
     "./src/run-state/runResumeHelpers.ts",

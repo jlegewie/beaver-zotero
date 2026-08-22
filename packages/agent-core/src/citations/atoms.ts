@@ -243,6 +243,13 @@ function getInvalidCitationFallbackKey(rawTag: string): string | null {
     return !normalized.ok && normalized.rawIdentity ? `invalid:${normalized.rawIdentity}` : null;
 }
 
+/** Every lookup key a citation answers to: requested and resolved refs, plus the raw tag's identity. */
+export function collectCitationKeys(citation: Citation): Set<string> {
+    const keys = new Set<string>();
+    addCitationKeys(keys, citation);
+    return keys;
+}
+
 function addCitationKeys(keys: Set<string>, citation: Citation) {
     for (const ref of [getRequestedRef(citation), getResolvedRef(citation)]) {
         if (!ref) continue;
