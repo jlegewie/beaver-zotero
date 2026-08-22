@@ -110,6 +110,10 @@ const TEST_TYPE_IDS: Record<string, number> = {
     bookSection: 5,
 };
 
+// The {id, name} rows Zotero.ItemTypes.getAll returns, from the same map.
+const testItemTypes = () =>
+    Object.entries(TEST_TYPE_IDS).map(([name, id]) => ({ id, name }));
+
 // Minimal DOI cleaner — strips a common "https://doi.org/" prefix and lowercases.
 // Zotero's real cleanDOI is more thorough, but this is enough for comparisons.
 function testCleanDOI(value: string | null | undefined): string | null {
@@ -189,6 +193,9 @@ function testRemoveDiacritics(s: string): string {
     },
     ItemTypes: {
         getID: vi.fn((name: string) => TEST_TYPE_IDS[name] ?? 0),
+        // getAll and getTypes are the same function in Zotero.
+        getAll: vi.fn(testItemTypes),
+        getTypes: vi.fn(testItemTypes),
     },
     Libraries: {
         getAll: vi.fn(() => [{ libraryID: 1 }]),

@@ -64,6 +64,32 @@ const OPERATOR_MAP: Record<string, string> = {
     'isInTheLast': 'isInTheLast',
 };
 
+/** How many example item type names an unknown-`itemType` warning lists. */
+const ITEM_TYPE_SAMPLE_SIZE = 12;
+
+/**
+ * A sample of the item type names Zotero accepts, for the unknown-`itemType`
+ * warning.
+ *
+ * Read from Zotero rather than listed here so the sample can never disagree
+ * with what a search actually accepts. Sorted by `itemTypeID` and truncated:
+ * the lowest ids are Zotero's long-standing core types and types added to the
+ * schema later get higher ids, so the sample stays short and stable as Zotero
+ * gains types. The warning presents it as examples, not the full set.
+ *
+ * `getAll()` hands back Zotero's own live array, so copy before sorting.
+ *
+ * Throws when item type data is not loaded yet; callers must treat that as
+ * "skip validation".
+ */
+function sampleItemTypeNames(): string[] {
+    return Zotero.ItemTypes.getAll()
+        .slice()
+        .sort((a, b) => a.id - b.id)
+        .slice(0, ITEM_TYPE_SAMPLE_SIZE)
+        .map(type => type.name);
+}
+
 /**
  * Add one wire condition to `search`, handling the operator mapping and the
  * empty-value quirk.
@@ -100,6 +126,31 @@ export function addSearchCondition(
     if (operator === 'is' && (value === null || value === undefined || value === '')) {
         operator = 'doesNotContain';
         value = '';
+    }
+
+    // Zotero validates the condition name and the operator, but not the value.
+    // An unknown item type compiles to a subquery that matches nothing, so the
+    // search would return zero results with no indication why. Name the bad
+    // value instead, and drop the condition like the rejection path below.
+    if (condition.field === 'itemType' && value !== '') {
+        try {
+            // getID returns false for a name no item type has.
+            if (!Zotero.ItemTypes.getID(value)) {
+                logger(`${logLabel}: Unknown item type '${value}'`, 1);
+                warnings.push(
+                    `Dropped condition field='itemType' value='${value}': no item type has that name. `
+                        + `Item types include: ${sampleItemTypeNames().join(', ')}. `
+                        + "Use list_items or get_metadata to see an item's own type."
+                );
+                return false;
+            }
+        } catch (err) {
+            // Item type data is loaded lazily and is not ready yet. Let the
+            // condition through unvalidated — a cold cache must never block a
+            // search — and leave any mismatch to return no results.
+            const msg = err instanceof Error ? err.message : String(err);
+            logger(`${logLabel}: Skipped item type validation for '${value}': ${msg}`, 1);
+        }
     }
 
     try {
