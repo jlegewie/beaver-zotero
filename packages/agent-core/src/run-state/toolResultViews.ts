@@ -393,6 +393,8 @@ export function getToolResultRenderableCount(view: ToolResultView): number | nul
             return view.found_count ?? view.references.length;
         case "user_question":
             return view.answers.length;
+        case "table":
+            return view.table.rows.length;
         case "batch_operation":
             // A batch card always has something to show (goal + population),
             // so it must not be gated on a count.

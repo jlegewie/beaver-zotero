@@ -1,0 +1,471 @@
+/*
+ * Shared table layout (`@beaver/agent-ui/layouts/DataTable`).
+ *
+ * Scoped `.beaver-root .bt-*` like the other sheets and loaded after
+ * agent-ui-components.css. Two densities share one rule set: `.bt-compact`
+ * (sidebar, ~350px) tightens padding and hides secondary columns behind the
+ * row expander; `.bt-full` is the working surface in the window / tab.
+ *
+ * Colours come from the host's platform tokens (`--fill-*`, `--material-*`,
+ * `--color-border50`, the flat `--tag-*` hues); nothing here is hard-coded.
+ */
+
+.beaver-root .bt {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
+    font-size: 0.85rem;
+    color: var(--fill-primary);
+}
+
+.beaver-root .bt-title {
+    font-weight: 600;
+    padding: 0 0.25rem;
+}
+
+.beaver-root .bt-caption {
+    color: var(--fill-tertiary);
+    font-size: 0.8rem;
+    padding: 0 0.25rem;
+}
+
+/* Toolbar ------------------------------------------------------------------ */
+
+.beaver-root .bt-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0 0.25rem;
+}
+
+.beaver-root .bt-quick-filter {
+    flex: 1 1 8rem;
+    min-width: 6rem;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--color-border50);
+    border-radius: 0.35rem;
+    background: var(--material-sidepane);
+    color: var(--fill-primary);
+    font: inherit;
+    font-size: 0.8rem;
+}
+
+.beaver-root .bt-filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.1rem 0.45rem;
+    border: 1px solid var(--color-border50);
+    border-radius: 999px;
+    background: var(--fill-quinary);
+    color: var(--fill-secondary);
+    font: inherit;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.beaver-root .bt-filter-chip:hover {
+    background: var(--fill-quarternary);
+}
+
+.beaver-root .bt-filter-chip-column {
+    color: var(--fill-tertiary);
+}
+
+.beaver-root .bt-row-count {
+    margin-left: auto;
+    color: var(--fill-tertiary);
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+/* Table -------------------------------------------------------------------- */
+
+.beaver-root .bt-scroll {
+    overflow: auto;
+    max-width: 100%;
+    border: 1px solid var(--color-border50);
+    border-radius: 0.4rem;
+}
+
+.beaver-root .bt-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: 100%;
+    table-layout: auto;
+}
+
+.beaver-root .bt-th,
+.beaver-root .bt-th-expand,
+.beaver-root .bt-th-actions {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 0.35rem 0.5rem;
+    background: var(--material-mix-quarternary);
+    border-bottom: 1px solid var(--color-border50);
+    color: var(--fill-secondary);
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-align: left;
+    white-space: nowrap;
+    vertical-align: bottom;
+}
+
+.beaver-root .bt-th-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.beaver-root .bt-th-sortable:hover {
+    color: var(--fill-primary);
+}
+
+.beaver-root .bt-sort-icon {
+    color: var(--fill-secondary);
+}
+
+.beaver-root .bt-td,
+.beaver-root .bt-td-expand,
+.beaver-root .bt-td-actions {
+    padding: 0.35rem 0.5rem;
+    border-bottom: 1px solid var(--fill-quinary);
+    vertical-align: top;
+    line-height: 1.35;
+}
+
+.beaver-root .bt-row:last-child > .bt-td,
+.beaver-root .bt-row:last-child > .bt-td-expand,
+.beaver-root .bt-row:last-child > .bt-td-actions {
+    border-bottom: 0;
+}
+
+.beaver-root .bt-row:hover > td {
+    background: var(--fill-senary);
+}
+
+.beaver-root .bt-row-error > td {
+    opacity: 0.6;
+}
+
+.beaver-root .bt-align-end,
+.beaver-root .bt-align-end .bt-cell-inner {
+    text-align: right;
+    justify-content: flex-end;
+}
+
+.beaver-root .bt-align-end .bt-th-button {
+    flex-direction: row-reverse;
+}
+
+.beaver-root .bt-w-narrow {
+    width: 5rem;
+}
+.beaver-root .bt-w-medium {
+    width: 10rem;
+}
+.beaver-root .bt-w-wide {
+    width: 18rem;
+}
+.beaver-root .bt-w-fill {
+    width: 100%;
+}
+
+.beaver-root .bt-td-expand,
+.beaver-root .bt-th-expand {
+    width: 1.5rem;
+    padding-left: 0.25rem;
+    padding-right: 0;
+}
+
+.beaver-root .bt-td-actions,
+.beaver-root .bt-th-actions {
+    width: 1%;
+    white-space: nowrap;
+}
+
+.beaver-root .bt-actions {
+    display: inline-flex;
+    gap: 0.1rem;
+    opacity: 0.55;
+}
+
+.beaver-root .bt-row:hover .bt-actions,
+.beaver-root .bt-row:focus-within .bt-actions {
+    opacity: 1;
+}
+
+.beaver-root .bt-empty-table {
+    padding: 0.75rem;
+    color: var(--fill-tertiary);
+    text-align: center;
+}
+
+/* Cells -------------------------------------------------------------------- */
+
+.beaver-root .bt-cell-inner {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+.beaver-root .bt-cell-inner > :first-child {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.beaver-root .bt-text {
+    overflow-wrap: anywhere;
+}
+
+.beaver-root .bt-number,
+.beaver-root .bt-date {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.beaver-root .bt-unit {
+    margin-left: 0.15rem;
+    color: var(--fill-tertiary);
+    font-size: 0.75em;
+}
+
+.beaver-root .bt-empty {
+    color: var(--fill-quarternary);
+}
+
+.beaver-root .bt-boolean {
+    display: inline-flex;
+    align-items: center;
+    color: var(--fill-tertiary);
+}
+
+.beaver-root .bt-boolean-true {
+    color: var(--tag-green-primary);
+}
+
+.beaver-root .bt-boolean-false {
+    display: inline-block;
+    width: 0.75rem;
+    height: 0.75rem;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 0.2rem;
+}
+
+.beaver-root .bt-cell-pending {
+    display: inline-flex;
+    color: var(--fill-tertiary);
+}
+
+.beaver-root .bt-cell-error {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    color: var(--tag-red-primary);
+    font-size: 0.8em;
+}
+
+.beaver-root .bt-compact .bt-cell-error-text {
+    display: none;
+}
+
+.beaver-root .bt-expand {
+    flex: 0 0 auto;
+    padding: 0;
+    margin-top: -0.1rem;
+}
+
+.beaver-root .bt-expand svg {
+    width: 14px;
+    height: 14px;
+    transition: transform 120ms ease;
+}
+
+.beaver-root .bt-expand-open svg {
+    transform: rotate(90deg);
+}
+
+/* Select pills: Notion-style single category, coloured from --tag-* hues. */
+
+.beaver-root .bt-select {
+    display: inline-block;
+    max-width: 100%;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    background: var(--fill-quinary);
+    color: var(--fill-secondary);
+    font-size: 0.75rem;
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+}
+
+.beaver-root .bt-select-button {
+    border: 0;
+    font: inherit;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.beaver-root .bt-select-button:hover {
+    filter: brightness(0.93);
+}
+
+.beaver-root .bt-select-gray {
+    background: var(--fill-quinary);
+    color: var(--fill-secondary);
+}
+.beaver-root .bt-select-blue {
+    background: var(--tag-blue-quarternary);
+    color: var(--tag-blue-primary);
+}
+.beaver-root .bt-select-green {
+    background: var(--tag-green-quarternary);
+    color: var(--tag-green-primary);
+}
+.beaver-root .bt-select-yellow {
+    background: var(--tag-yellow-quarternary);
+    color: var(--tag-orange-primary);
+}
+.beaver-root .bt-select-orange {
+    background: var(--tag-orange-quarternary);
+    color: var(--tag-orange-primary);
+}
+.beaver-root .bt-select-red {
+    background: var(--tag-red-quarternary);
+    color: var(--tag-red-primary);
+}
+.beaver-root .bt-select-purple {
+    background: var(--tag-purple-quarternary);
+    color: var(--tag-purple-primary);
+}
+
+/* Reference cell: icon + name (+ subtitle). */
+
+.beaver-root .bt-reference {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.beaver-root .bt-ref-icon-slot {
+    flex: 0 0 auto;
+    display: inline-flex;
+    margin-top: 0.1rem;
+}
+
+.beaver-root .bt-ref-body {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.beaver-root .bt-ref-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
+.beaver-root .bt-ref-in-library {
+    display: inline-flex;
+    color: var(--fill-tertiary);
+}
+
+.beaver-root .bt-ref-subtitle {
+    color: var(--fill-tertiary);
+    font-size: 0.8rem;
+    overflow-wrap: anywhere;
+}
+
+.beaver-root .bt-compact .bt-ref-subtitle {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.beaver-root .bt-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    cursor: pointer;
+    overflow-wrap: anywhere;
+}
+
+/* Detail row: expanded cell details and, in compact density, the hidden columns. */
+
+.beaver-root .bt-detail-row > td {
+    padding: 0.35rem 0.75rem 0.6rem;
+    background: var(--fill-senary);
+    border-bottom: 1px solid var(--fill-quinary);
+}
+
+.beaver-root .bt-hidden-columns {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 0.2rem 0.75rem;
+    margin: 0;
+}
+
+.beaver-root .bt-hidden-columns dt {
+    color: var(--fill-tertiary);
+    font-size: 0.75rem;
+    padding-top: 0.1rem;
+}
+
+.beaver-root .bt-hidden-columns dd {
+    margin: 0;
+    min-width: 0;
+}
+
+.beaver-root .bt-details {
+    margin-top: 0.35rem;
+}
+
+.beaver-root .bt-details-label {
+    color: var(--fill-tertiary);
+    font-size: 0.75rem;
+    margin-bottom: 0.15rem;
+}
+
+.beaver-root .bt-details-text {
+    overflow-wrap: anywhere;
+}
+
+.beaver-root .bt-details-list {
+    margin: 0;
+    padding-left: 1.1rem;
+}
+
+/* Compact density ---------------------------------------------------------- */
+
+.beaver-root .bt-compact {
+    font-size: 0.8rem;
+}
+
+.beaver-root .bt-compact .bt-th,
+.beaver-root .bt-compact .bt-td {
+    padding: 0.25rem 0.35rem;
+}
+
+.beaver-root .bt-compact .bt-w-narrow,
+.beaver-root .bt-compact .bt-w-medium,
+.beaver-root .bt-compact .bt-w-wide {
+    width: auto;
+}

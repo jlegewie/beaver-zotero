@@ -675,6 +675,7 @@ const GLOBAL_STYLESHEETS = [
     "agent-ui-tokens.css",
     "agent-ui-utilities.css",
     "agent-ui-components.css",
+    "agent-ui-table.css",
     "beaver.css",
 ];
 
