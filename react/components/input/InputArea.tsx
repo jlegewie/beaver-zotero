@@ -531,7 +531,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             {/* Input Form */}
             <form onSubmit={handleSubmit} className="display-flex flex-col">
                 {/* Message Input - Lexical-backed rich input with inline pills */}
-                <div className="mb-2 -ml-1">
+                <div className="mb-2">
                     <LexicalEditorInput
                         ref={editorHandleRef}
                         value={messageContent}

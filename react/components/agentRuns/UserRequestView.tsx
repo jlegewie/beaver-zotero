@@ -395,7 +395,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
 
                     {/* Lexical editor input */}
                     <form onSubmit={handleSubmit} className="display-flex flex-col">
-                        <div className="mb-2 -ml-1">
+                        <div className="mb-2">
                             <LexicalEditorInput
                                 ref={editorHandleRef}
                                 value={editedContent}
