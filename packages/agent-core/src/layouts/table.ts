@@ -16,9 +16,15 @@
  * - Default-valued fields are omitted on the wire: `status` absent means
  *   filled, `provenance` absent means AI-produced, a missing `value` means
  *   "not reported" and renders as an em dash.
- * - Actions are declarative. `capabilities.row_actions` names the verbs
- *   (import, reveal, open) and the host resolves them against `Row.ref`; a
- *   rendering without a host simply omits them.
+ * - Actions are declarative. `capabilities.row_actions` names the verbs the
+ *   table offers and `rowActions()` resolves them for one row — a row already in
+ *   the library gets reveal/open, one that is not gets import. A row may narrow
+ *   the set with `Row.actions`; a rendering without a host omits them entirely.
+ * - One column is the **anchor** (`anchor_column_id`): it owns row identity, is
+ *   the sticky column under horizontal scroll and is the target of reveal.
+ * - A column is a question, not just a label. `Column.description` is the line
+ *   rendered under the header — for an extraction column it is the extraction
+ *   prompt — and `Column.details` carries the long form behind it.
  * - Citations: text cells may contain inline `<citation …/>` tags exactly like
  *   run text, and `TableSpec.citations` carries the matching `Citation`
  *   metadata so a stored or exported table resolves them offline.
@@ -67,23 +73,59 @@ export interface Column {
     id: string;
     header: string;
     type: ColumnType;
-    /** The per-column question. For extraction columns this is the extraction prompt. */
+    /**
+     * The column's question, rendered as a second line under the header — not a
+     * tooltip. For an extraction column this is the extraction prompt, which is
+     * why the header is where it belongs: the column *is* the contract.
+     */
     description?: string;
+    /**
+     * The long form behind `description`: the full prompt when the header line
+     * is clamped, coding rules, unit conventions. Revealed from the header, the
+     * same way `Cell.details` is revealed from a cell.
+     */
+    details?: Details;
     /** `select` only: the category set, so filters can enumerate it without scanning rows. */
     options?: SelectOption[];
     /** `number` only: unit shown with the values ("%", "USD"). */
     unit?: string;
-    /** Defaults: true except for `reference` and `link`. */
+    /** Default true for every type; set false to opt a column out. */
     sortable?: boolean;
     /** Default true. */
     filterable?: boolean;
     /** Reserved for cell editing; default false. */
     editable?: boolean;
-    width?: "narrow" | "medium" | "wide" | "fill";
+    /**
+     * Rendered width in CSS px, or `"fill"` to take the remaining space. Absent
+     * ⇒ the renderer's default for this `type`, which is what most producers
+     * should emit: widths are a rendering concern and differ per surface.
+     */
+    width?: number | "fill";
+    /**
+     * How a value longer than the row handles the overflow. Default `"clamp"`:
+     * clamped to the row height and revealed on expand, so rows stay a uniform
+     * height. `"nowrap"` keeps a value on one line and ellipsises it.
+     */
+    wrap?: "clamp" | "nowrap";
     /** Compact renderings show only `primary` columns; the rest appear on row expand. */
     priority?: "primary" | "secondary";
     /** Default `end` for number/date, `start` otherwise. */
     align?: "start" | "end";
+    /**
+     * Absent ⇒ ready. `"filling"` means a producer is populating this column
+     * right now; its unfilled cells carry `status: "pending"`.
+     */
+    status?: "filling";
+    /**
+     * Progress of a `filling` column, so a header can show "6 of 9" without
+     * counting cells on every render.
+     */
+    progress?: ColumnProgress;
+}
+
+export interface ColumnProgress {
+    done: number;
+    total: number;
 }
 
 export type ExternalReferenceSource = "semantic_scholar" | "openalex";
@@ -108,6 +150,16 @@ export interface Row {
     ref?: RowRef;
     /** Column id → cell. A missing entry is an empty cell. */
     cells: Record<string, Cell>;
+    /**
+     * Whether this row's item is in the user's library — it decides whether the
+     * row offers reveal or import. Absent ⇒ derived by {@link isRowInLibrary}:
+     * true for an `item` ref, or for an external ref whose reference cell lists
+     * `library_items`. Producers set it explicitly when they know better; a
+     * client that imports a row updates it locally.
+     */
+    in_library?: boolean;
+    /** Verbs for this row only. Absent ⇒ the table's `capabilities.row_actions`. */
+    actions?: RowAction[];
     /** Row-level outcome, e.g. extraction failed for this paper. */
     status?: "error";
     error?: string;
@@ -138,10 +190,16 @@ export type CellValue =
 
 export type CellValueKind = CellValue["kind"];
 
-/** Content revealed when a cell is expanded. Never participates in sorting. */
-export type CellDetails =
+/**
+ * Secondary content revealed on expand — of a cell, or of a column header.
+ * Never participates in sorting, filtering or export.
+ */
+export type Details =
     | { kind: "text"; text: string; label?: string }
     | { kind: "list"; items: string[]; label?: string };
+
+/** The cell-side name for {@link Details}. */
+export type CellDetails = Details;
 
 export interface Cell {
     /** Absent ⇒ the producer reports nothing for this cell ("—"). */
@@ -163,12 +221,27 @@ export interface TableCapabilities {
     filterable?: boolean;
     /** Compact renderings may expand a row to show secondary columns. */
     expandable_rows?: boolean;
-    /** Verbs the host may offer per row, resolved against `Row.ref`. */
+    /** Verbs the host may offer per row — see {@link rowActions}. */
     row_actions?: RowAction[];
-    /** Reserved. */
+    /**
+     * The table may gain a column the user defines (name, type, question). The
+     * affordance must show `TableSpec.cost_estimate` before anything runs; in a
+     * rendering that cannot run one, it is absent rather than dead.
+     */
     allow_add_column?: boolean;
-    /** Reserved. */
+    /** The table may gain rows (more papers) after it was first produced. */
     allow_add_row?: boolean;
+}
+
+/**
+ * What a run over this table costs, so an add-column / re-extract affordance can
+ * state it before spending anything.
+ */
+export interface TableCostEstimate {
+    /** Credits per row for one column-wide run. */
+    per_row_credits: number;
+    /** Rough wall clock for the whole run, in seconds. */
+    estimated_seconds?: number;
 }
 
 export interface TableSort {
@@ -182,9 +255,17 @@ export interface TableSpec {
     caption?: string;
     columns: Column[];
     rows: Row[];
+    /**
+     * The column that owns row identity: sticky under horizontal scroll and the
+     * target of reveal. Absent ⇒ {@link anchorColumn} picks the first
+     * `reference` column, else the first column.
+     */
+    anchor_column_id?: string;
     /** Initial sort. Static renderings (snapshot) bake it in. */
     sort?: TableSort;
     capabilities?: TableCapabilities;
+    /** Cost of one column-wide run; required wherever `allow_add_column` is set. */
+    cost_estimate?: TableCostEstimate;
     /** Metadata for every `<citation …/>` tag in any cell, same model as run citations. */
     citations?: Citation[];
 }
@@ -222,8 +303,24 @@ const VALUE_KIND_BY_COLUMN_TYPE: Record<ColumnType, CellValueKind> = {
 };
 
 export function isColumnSortable(column: Column): boolean {
-    if (column.sortable != null) return column.sortable;
-    return column.type !== "reference" && column.type !== "link";
+    return column.sortable ?? true;
+}
+
+export function columnWrap(column: Column): "clamp" | "nowrap" {
+    return column.wrap ?? "clamp";
+}
+
+/**
+ * The column that owns row identity. Explicit when the producer says so,
+ * otherwise the first `reference` column and finally the first column, so a
+ * table without a bibliographic column still has an anchor.
+ */
+export function anchorColumn(spec: TableSpec): Column | undefined {
+    if (spec.anchor_column_id) {
+        const named = spec.columns.find((c) => c.id === spec.anchor_column_id);
+        if (named) return named;
+    }
+    return spec.columns.find((c) => c.type === "reference") ?? spec.columns[0];
 }
 
 export function isColumnFilterable(column: Column): boolean {
@@ -237,6 +334,40 @@ export function columnAlign(column: Column): "start" | "end" {
 
 export function isCellEmpty(cell: Cell | undefined): boolean {
     return cell?.value == null;
+}
+
+/**
+ * Whether the row's item is in the user's library. The explicit flag wins; an
+ * `item` ref is by definition in a library; otherwise an external row counts as
+ * in-library once one of its reference cells lists a library copy.
+ */
+export function isRowInLibrary(row: Row): boolean {
+    if (row.in_library != null) return row.in_library;
+    if (row.ref?.kind === "item") return true;
+    for (const cell of Object.values(row.cells)) {
+        const value = cell.value;
+        if (
+            value?.kind === "reference" &&
+            (value.library_items?.length ?? 0) > 0
+        )
+            return true;
+    }
+    return false;
+}
+
+/**
+ * The verbs this row actually offers, in declared order. The table (or the row)
+ * names the candidates; applicability is decided here so a renderer never draws
+ * "import" on a row that is already in the library, or "reveal" on one that is
+ * nowhere to reveal. A row with no `ref` offers nothing.
+ */
+export function rowActions(spec: TableSpec, row: Row): RowAction[] {
+    if (!row.ref) return [];
+    const declared = row.actions ?? spec.capabilities?.row_actions ?? [];
+    const inLibrary = isRowInLibrary(row);
+    return declared.filter((action) =>
+        action === "import" ? !inLibrary : inLibrary,
+    );
 }
 
 export function getCell(row: Row, columnId: string): Cell | undefined {
@@ -463,6 +594,8 @@ export interface TableSpecIssue {
         | "value_kind_mismatch"
         | "unknown_select_label"
         | "unknown_sort_column"
+        | "unknown_anchor_column"
+        | "invalid_column_progress"
         | "unresolved_citation";
     message: string;
     row_id?: string;
@@ -487,6 +620,32 @@ export function validateTableSpec(spec: TableSpec): TableSpecIssue[] {
             });
         }
         columns.set(column.id, column);
+    }
+
+    for (const column of spec.columns) {
+        const progress = column.progress;
+        if (!progress) continue;
+        if (
+            !Number.isFinite(progress.done) ||
+            !Number.isFinite(progress.total) ||
+            progress.total < 0 ||
+            progress.done < 0 ||
+            progress.done > progress.total
+        ) {
+            issues.push({
+                code: "invalid_column_progress",
+                column_id: column.id,
+                message: `Column "${column.id}" has progress ${progress.done}/${progress.total}`,
+            });
+        }
+    }
+
+    if (spec.anchor_column_id && !columns.has(spec.anchor_column_id)) {
+        issues.push({
+            code: "unknown_anchor_column",
+            column_id: spec.anchor_column_id,
+            message: `Anchor column "${spec.anchor_column_id}" does not exist`,
+        });
     }
 
     if (spec.sort && !columns.has(spec.sort.column_id)) {

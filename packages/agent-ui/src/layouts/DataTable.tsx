@@ -1,9 +1,11 @@
 import React, { useMemo } from "react";
 import {
+    anchorColumn,
     cellIdFor,
     columnAlign,
     isColumnFilterable,
     isColumnSortable,
+    rowActions as resolveRowActions,
     type Column,
     type Row,
     type TableSpec,
@@ -43,6 +45,15 @@ export interface DataTableProps {
     emptyText?: string;
 }
 
+/**
+ * `Column.width` is CSS px or `"fill"`; absent leaves the width to the
+ * stylesheet's default for the column type.
+ */
+function columnWidthStyle(column: Column): React.CSSProperties | undefined {
+    if (column.width == null) return undefined;
+    return { width: column.width === "fill" ? "100%" : column.width };
+}
+
 function SortIndicator({
     column,
     state,
@@ -80,9 +91,10 @@ export function DataTable({
     const sortable = capabilities.sortable ?? true;
     const filterable = capabilities.filterable ?? true;
     const toolbar = showToolbar ?? filterable;
-    const rowActions = capabilities.row_actions ?? [];
-    const hasRowActions =
-        rowActions.length > 0 && table.rows.some((r) => r.ref);
+    const anchorId = anchorColumn(table)?.id;
+    const hasRowActions = table.rows.some(
+        (r) => resolveRowActions(table, r).length > 0,
+    );
 
     const { visibleColumns, hiddenColumns } = useMemo(() => {
         if (density === "full")
@@ -241,7 +253,8 @@ export function DataTable({
                                 return (
                                     <th
                                         key={column.id}
-                                        className={`bt-th bt-align-${columnAlign(column)} bt-w-${column.width ?? "auto"}${canSort ? " bt-th-sortable" : ""}`}
+                                        className={`bt-th bt-align-${columnAlign(column)}${column.id === anchorId ? " bt-th-anchor" : ""}${canSort ? " bt-th-sortable" : ""}`}
+                                        style={columnWidthStyle(column)}
                                         aria-sort={
                                             sorted
                                                 ? sorted === "asc"
@@ -249,7 +262,6 @@ export function DataTable({
                                                     : "descending"
                                                 : undefined
                                         }
-                                        title={column.description}
                                         scope="col"
                                     >
                                         {canSort ? (
@@ -273,6 +285,12 @@ export function DataTable({
                                                 {column.header}
                                             </span>
                                         )}
+                                        {column.description &&
+                                        density === "full" ? (
+                                            <span className="bt-th-description">
+                                                {column.description}
+                                            </span>
+                                        ) : null}
                                     </th>
                                 );
                             })}
@@ -360,7 +378,10 @@ export function DataTable({
                                                 <span className="bt-actions">
                                                     <RowActionsView
                                                         rowRef={row.ref}
-                                                        actions={rowActions}
+                                                        actions={resolveRowActions(
+                                                            table,
+                                                            row,
+                                                        )}
                                                     />
                                                 </span>
                                             </td>

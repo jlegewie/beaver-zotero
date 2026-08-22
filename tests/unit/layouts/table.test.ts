@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Citation } from "@beaver/agent-core/types/citations";
 import {
+    anchorColumn,
     cellIdFor,
     cellSortKey,
     citationKeysInTable,
@@ -10,11 +11,14 @@ import {
     filterRows,
     isCellEmpty,
     isColumnSortable,
+    isRowInLibrary,
+    rowActions,
     rowIdFor,
     selectLabelsInColumn,
     sortRows,
     toCsv,
     validateTableSpec,
+    type Column,
     type Row,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
@@ -100,18 +104,21 @@ describe("ids", () => {
 });
 
 describe("defaults", () => {
-    it("treats reference and link columns as unsortable unless declared", () => {
+    it("treats every column as sortable unless it opts out", () => {
         expect(
             isColumnSortable({ id: "r", header: "", type: "reference" }),
-        ).toBe(false);
+        ).toBe(true);
+        expect(isColumnSortable({ id: "l", header: "", type: "link" })).toBe(
+            true,
+        );
         expect(
             isColumnSortable({
                 id: "r",
                 header: "",
                 type: "reference",
-                sortable: true,
+                sortable: false,
             }),
-        ).toBe(true);
+        ).toBe(false);
         expect(isColumnSortable({ id: "n", header: "", type: "number" })).toBe(
             true,
         );
@@ -437,5 +444,117 @@ describe("TableView", () => {
         };
         expect(isToolResultView(view)).toBe(true);
         expect(isTableView(view as any)).toBe(true);
+    });
+});
+
+describe("anchor column", () => {
+    it("prefers the declared anchor, then the first reference column, then the first column", () => {
+        const columns: Column[] = [
+            { id: "year", header: "Year", type: "number" },
+            { id: "item", header: "Item", type: "reference" },
+        ];
+        const base: TableSpec = { id: "t", columns, rows: [] };
+        expect(anchorColumn(base)?.id).toBe("item");
+        expect(anchorColumn({ ...base, anchor_column_id: "year" })?.id).toBe(
+            "year",
+        );
+        // An anchor id that does not exist falls back rather than yielding nothing.
+        expect(anchorColumn({ ...base, anchor_column_id: "nope" })?.id).toBe(
+            "item",
+        );
+        expect(anchorColumn({ ...base, columns: [columns[0]] })?.id).toBe(
+            "year",
+        );
+    });
+});
+
+describe("row actions", () => {
+    const spec: TableSpec = {
+        id: "t",
+        columns: [{ id: "item", header: "Item", type: "reference" }],
+        rows: [],
+        capabilities: { row_actions: ["import", "reveal", "open"] },
+    };
+
+    function mkRow(partial: Partial<Row>): Row {
+        return { id: "r", cells: {}, ...partial };
+    }
+
+    it("treats an item ref, an explicit flag and a library copy as in-library", () => {
+        expect(
+            isRowInLibrary(
+                mkRow({
+                    ref: {
+                        kind: "item",
+                        library_id: 1,
+                        zotero_key: "K",
+                    },
+                }),
+            ),
+        ).toBe(true);
+        expect(isRowInLibrary(mkRow({}))).toBe(false);
+        expect(isRowInLibrary(mkRow({ in_library: true }))).toBe(true);
+        expect(
+            isRowInLibrary(
+                mkRow({
+                    cells: {
+                        item: {
+                            value: {
+                                kind: "reference",
+                                display_name: "Smith",
+                                library_items: [
+                                    { library_id: 1, zotero_key: "K" },
+                                ],
+                            },
+                        },
+                    },
+                }),
+            ),
+        ).toBe(true);
+    });
+
+    it("offers import only off-library and reveal/open only in-library", () => {
+        const external = mkRow({
+            id: "ext",
+            ref: { kind: "external", source: "openalex", source_id: "W1" },
+        });
+        expect(rowActions(spec, external)).toEqual(["import"]);
+        expect(rowActions(spec, { ...external, in_library: true })).toEqual([
+            "reveal",
+            "open",
+        ]);
+    });
+
+    it("lets a row narrow the table's verbs, and offers none without a ref", () => {
+        const inLib = mkRow({
+            ref: { kind: "item", library_id: 1, zotero_key: "K" },
+            actions: ["reveal"],
+        });
+        expect(rowActions(spec, inLib)).toEqual(["reveal"]);
+        expect(rowActions(spec, mkRow({ in_library: true }))).toEqual([]);
+    });
+});
+
+describe("column progress validation", () => {
+    it("flags an impossible progress pair and an unknown anchor column", () => {
+        const spec: TableSpec = {
+            id: "t",
+            anchor_column_id: "nope",
+            columns: [
+                {
+                    id: "sample",
+                    header: "Sample",
+                    type: "text",
+                    status: "filling",
+                    progress: { done: 12, total: 9 },
+                },
+            ],
+            rows: [],
+        };
+        expect(
+            validateTableSpec(spec)
+                .map((i) => i.code)
+                .sort(),
+        ).toEqual(["invalid_column_progress", "unknown_anchor_column"]);
     });
 });

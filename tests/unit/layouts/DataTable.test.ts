@@ -187,8 +187,7 @@ describe("DataTable", () => {
         const header = Array.from(container!.querySelectorAll("th.bt-th")).find(
             (th) => th.textContent === "Reference",
         )!;
-        const button = header.querySelector("button");
-        expect(button).toBeNull(); // reference columns are not sortable by default
+        expect(header.querySelector("button")).not.toBeNull(); // every column sorts
 
         const cites = Array.from(container!.querySelectorAll("th.bt-th")).find(
             (th) => th.textContent?.startsWith("Citations"),
@@ -344,7 +343,9 @@ describe("DataTable", () => {
         expect(externalReferenceActions).toHaveBeenCalledWith(
             expect.objectContaining({
                 item: externalRef,
-                importButtonMode: "icon-only",
+                // The row's reference cell lists a library copy, so the row is
+                // in the library: reveal is offered, import is not.
+                importButtonMode: "none",
                 revealButtonMode: "icon-only",
                 pdfButtonMode: "none",
             }),

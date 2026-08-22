@@ -167,17 +167,30 @@
     flex-direction: row-reverse;
 }
 
-.beaver-root .bt-w-narrow {
-    width: 5rem;
+/* Column widths come from `Column.width` as an inline style (px or 100%);
+   these are the per-type defaults for a column that declares none. */
+.beaver-root .bt-th.bt-align-end {
+    width: 6rem;
 }
-.beaver-root .bt-w-medium {
-    width: 10rem;
+
+.beaver-root .bt-th-anchor {
+    width: 20rem;
 }
-.beaver-root .bt-w-wide {
-    width: 18rem;
-}
-.beaver-root .bt-w-fill {
-    width: 100%;
+
+/* `Column.description` is the column's question — a second header line, not a
+   tooltip. Shown at full density only; compact has no room for it. */
+.beaver-root .bt-th-description {
+    display: -webkit-box;
+    max-width: 22rem;
+    margin-top: 0.1rem;
+    color: var(--fill-tertiary);
+    font-weight: 400;
+    font-size: 0.7rem;
+    line-height: 1.3;
+    white-space: normal;
+    overflow: hidden;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
 }
 
 .beaver-root .bt-td-expand,
@@ -464,8 +477,7 @@
     padding: 0.25rem 0.35rem;
 }
 
-.beaver-root .bt-compact .bt-w-narrow,
-.beaver-root .bt-compact .bt-w-medium,
-.beaver-root .bt-compact .bt-w-wide {
+.beaver-root .bt-compact .bt-th,
+.beaver-root .bt-compact .bt-th-anchor {
     width: auto;
 }
