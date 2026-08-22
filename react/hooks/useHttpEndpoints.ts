@@ -101,6 +101,10 @@ import {
     handleTestSidebarWidthHandlerHttpRequest,
 } from './httpHandlers/testUiHandlers';
 import {
+    handleBatchProgressPreview,
+    handleBatchProgressClear,
+} from './httpHandlers/testBatchProgressHandlers';
+import {
     handleTestPdfPageCountHttpRequest,
     handleTestPdfPageLabelsHttpRequest,
     handleTestPdfRenderPagesHttpRequest,
@@ -273,6 +277,9 @@ const ENDPOINT_PATHS = [
     '/beaver/test/collection-delete',
     // Test-only endpoints (headless PDF annotations)
     '/beaver/test/annotation-create',
+    // Test-only endpoints (batch progress bar preview)
+    '/beaver/test/batch-progress-preview',
+    '/beaver/test/batch-progress-clear',
     // Test-only endpoints (MuPDF worker singleton stats / lifecycle)
     '/beaver/test/worker-stats',
     '/beaver/test/worker-mark-stale',
@@ -1047,6 +1054,15 @@ function registerEndpoints(): boolean {
         // guardSerializedPayloadSize that the object-mode endpoint skips.
         Zotero.Server.Endpoints['/beaver/test/document-serialized'] =
             createEndpoint(handleTestDocumentSerializedHttpRequest);
+
+        // Batch progress bar preview (dev-only): stage a synthetic stamp so the
+        // bar can be inspected in every operation and ledger state without
+        // paying for a real batch run of each.
+        Zotero.Server.Endpoints['/beaver/test/batch-progress-preview'] =
+            createEndpoint(handleBatchProgressPreview);
+
+        Zotero.Server.Endpoints['/beaver/test/batch-progress-clear'] =
+            createEndpoint(handleBatchProgressClear);
 
         // MuPDF worker singleton stats / lifecycle (dev-only)
         Zotero.Server.Endpoints['/beaver/test/worker-stats'] =

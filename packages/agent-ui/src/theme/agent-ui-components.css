@@ -233,3 +233,39 @@
     color: var(--tag-red-primary);
     opacity: 1;
 }
+
+/* Batch progress: the track before anything has been credited.
+   A determinate track sitting at zero reads as a batch that has stalled, which
+   is exactly wrong at the moment one has just been approved and the model is
+   still deciding what the first slice should get. The sweep says "working" and
+   is replaced by real segments as soon as the first outcome lands.
+   Keyframes live here with `spin` for the same reason: this is the only rule
+   that needs them, and a client sheet animating the same name keeps working. */
+.beaver-root .batch-progress-indeterminate {
+    height: 100%;
+    width: 100%;
+    opacity: 0.7;
+    background-image: linear-gradient(
+        90deg,
+        transparent 0%,
+        var(--accent-blue) 50%,
+        transparent 100%
+    );
+    background-size: 40% 100%;
+    background-repeat: no-repeat;
+    animation: beaver-batch-progress-sweep 1.6s ease-in-out infinite;
+}
+
+@keyframes beaver-batch-progress-sweep {
+    0% { background-position: -40% 0; }
+    100% { background-position: 140% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .beaver-root .batch-progress-indeterminate {
+        animation: none;
+        background-image: none;
+        background-color: var(--fill-tertiary);
+        opacity: 0.4;
+    }
+}

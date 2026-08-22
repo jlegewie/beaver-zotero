@@ -16,6 +16,7 @@ import { selectedModelAtom, isUsingBeaverCreditsAtom } from '../../atoms/models'
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
+import BatchProgressPanel from './BatchProgressPanel';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToSuggestions';
@@ -470,6 +471,12 @@ const InputArea: React.FC<InputAreaProps> = ({
             onClick={handleContainerClick}
             style={{ minHeight: 'fit-content' }}
         >
+            {/* Live batch progress. Above the approval bar so the two stack in
+                the order they are read: what the run is doing, then what it is
+                waiting on. Renders nothing unless a batch is open and big
+                enough for the backend to have flagged it worth showing. */}
+            <BatchProgressPanel />
+
             {/* Pending actions bar - shown when awaiting approval */}
             <PendingActionsBar />
             {canRenderHighTokenWarningBar && (

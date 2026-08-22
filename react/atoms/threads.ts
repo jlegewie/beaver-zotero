@@ -34,6 +34,7 @@ import { clearAllPendingCreditConfirmationsAtom } from "@beaver/agent-core/run-s
 import { clearAllPendingBatchApprovalsAtom } from "@beaver/agent-core/run-state/pendingBatchApprovals";
 import { processToolReturnResults } from "../agents/toolResultProcessing";
 import { upgradeToolReturn } from "../compat/legacyToolResults";
+import { resolveBatchProgressNames } from '../utils/batchProgressNames';
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
 import { BeaverTemporaryAnnotations } from "../utils/annotationUtils";
 import { enrichMessageAttachmentStub } from "../types/attachments/converters";
@@ -484,6 +485,9 @@ export const loadThreadAtom = atom(
                     // one, so the shared render layer can render old threads
                     // from `metadata.view`.
                     await upgradeToolReturn(part, toolCallArgs);
+                    // Same resolution as the live path, so a reopened thread
+                    // shows the batch card's destinations by name, not by key.
+                    resolveBatchProgressNames(part);
                 },
             });
 

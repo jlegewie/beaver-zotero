@@ -33,6 +33,19 @@ export type { AskUserQuestionCardProps } from './AskUserQuestionCard';
 export { default as BatchApprovalCard } from './BatchApprovalCard';
 export type { BatchApprovalCardProps } from './BatchApprovalCard';
 
+export { default as BatchProgressBar } from './BatchProgressBar';
+export type { BatchProgressBarProps, BatchReviewStatus } from './BatchProgressBar';
+
+export {
+    BatchBlockHeading,
+    BatchFailureReasonBlock,
+    BatchProgressTrack,
+    BatchRemovalBlock,
+    BatchTallyBlock,
+    BatchTallyRow,
+} from './BatchOutcomeBlocks';
+export type { BatchLabelNames } from './BatchOutcomeBlocks';
+
 export { default as CreditConfirmationCard, createCreditDecisionHandlers } from './CreditConfirmationCard';
 export type { CreditConfirmationCardProps, CreditDecisionHandlers } from './CreditConfirmationCard';
 

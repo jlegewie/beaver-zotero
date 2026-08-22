@@ -80,6 +80,7 @@ import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptAction, Prompt
 import {
     threadRunsAtom,
     activeRunAtom,
+    allRunsAtom,
     currentThreadIdAtom,
     updateRunWithPart,
     updateRunWithToolReturn,
@@ -158,6 +159,8 @@ import { undoEditAnnotationsAction } from '../utils/editAnnotationsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { upgradeToolReturn } from '../compat/legacyToolResults';
 import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
+import { selectBatchProgress } from '@beaver/agent-core/run-state/batchProgress';
+import { resolveBatchProgressNames } from '../utils/batchProgressNames';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom, recordAppliedActionsAtom } from './messageUIState';
 import { currentThreadNameAtom, loadThreadAtom } from './threads';
@@ -1425,6 +1428,11 @@ export function createWSCallbacks(
                     const toolCallArgs = findToolCallArgs(store.get(activeRunAtom), event.part.tool_call_id);
                     await upgradeToolReturn(event.part, toolCallArgs);
                 }
+
+                // Collection keys become names here, once, on the way into run
+                // state — so the progress bar and the batch card both render
+                // names without a Zotero lookup of their own.
+                resolveBatchProgressNames(event.part);
             }
 
             // Update run with tool return (event.part now carries a synthesized
@@ -3185,3 +3193,13 @@ export const sendBatchApprovalResponseAtom = atom(
         set(removePendingBatchApprovalAtom, approvalId);
     }
 );
+
+/**
+ * Batch progress for the open thread, or null when no batch has been stamped.
+ *
+ * Derived, never stored: the state of record is the newest
+ * `metadata.batch_progress` in the thread's runs, which is exactly what
+ * survives a reload, a restart or a move to another machine. A stored copy
+ * would drift from it the moment a thread was reopened.
+ */
+export const batchProgressAtom = atom((get) => selectBatchProgress(get(allRunsAtom)));
