@@ -162,7 +162,7 @@ describe('handleItemQuickSearchRequest projection', () => {
                 description: 'Description AAAAAAAA',
                 title: 'Title AAAAAAAA',
                 year: 2014,
-                formatted_citation: undefined,
+                formatted_citation: 'Reference AAAAAAAA',
                 has_attachment: true,
                 score: 1,
             },
@@ -170,23 +170,23 @@ describe('handleItemQuickSearchRequest projection', () => {
         expect(res.total_count).toBe(1);
     });
 
-    it('does not run the citation engine for a page of results', async () => {
+    it('renders a citation for every hit on the page', async () => {
         quickSearchItems.mockImplementation(async (libraryId: number) =>
             searchResult(libraryId === 1 ? [searchHit(1, 'AAAAAAAA'), searchHit(1, 'BBBBBBBB')] : [])
         );
 
         const res = await handleItemQuickSearchRequest(request());
 
-        expect(formatItemReference).not.toHaveBeenCalled();
-        expect(res.items.every((hit: any) => hit.formatted_citation === undefined)).toBe(true);
+        expect(formatItemReference).toHaveBeenCalledTimes(2);
+        expect(res.items.every((hit: any) => typeof hit.formatted_citation === 'string')).toBe(true);
     });
 
-    it('renders a citation per hit when include_citation is set', async () => {
+    it('carries both the citation and the shorter description per hit', async () => {
         quickSearchItems.mockImplementation(async (libraryId: number) =>
             searchResult(libraryId === 1 ? [searchHit(1, 'AAAAAAAA')] : [])
         );
 
-        const res = await handleItemQuickSearchRequest(request({ include_citation: true }));
+        const res = await handleItemQuickSearchRequest(request());
 
         expect((res.items[0] as any).formatted_citation).toBe('Reference AAAAAAAA');
         expect((res.items[0] as any).description).toBe('Description AAAAAAAA');

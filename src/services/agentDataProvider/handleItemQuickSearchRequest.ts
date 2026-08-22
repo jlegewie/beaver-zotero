@@ -323,7 +323,6 @@ export async function handleItemQuickSearchRequest(
         );
         items = page.map(entry => toQuickSearchHit(entry.item, {
             score: entry.score,
-            includeCitation: request.include_citation === true,
         }));
     }
 

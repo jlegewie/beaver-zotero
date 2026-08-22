@@ -113,11 +113,6 @@ export interface ItemQuickSearchParams {
     item_type_filter?: string;
     /** What each hit carries. Default 'compact'. */
     detail?: QuickSearchDetail;
-    /**
-     * Also render `formatted_citation` per hit. Default false: every hit
-     * already carries `description`, which says the same thing more briefly.
-     */
-    include_citation?: boolean;
     /** 1–50, default 20 */
     limit?: number;
     offset?: number;
@@ -233,11 +228,6 @@ export interface GetMetadataParams {
     item_ids: string[];
     /** What each row carries. Default 'full'. */
     detail?: ItemProjectionDetail;
-    /**
-     * Render `formatted_citation` on compact rows. Default false; ignored when
-     * `detail` is 'full', which always carries one.
-     */
-    include_citation?: boolean;
     /** Child attachments per item. Default false; ignored when compact. */
     include_attachments?: boolean;
     /** Child notes per item. Default false; ignored when compact. */

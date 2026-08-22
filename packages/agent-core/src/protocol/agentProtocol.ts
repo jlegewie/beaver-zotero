@@ -685,12 +685,7 @@ export interface QuickSearchHit {
     description?: string;
     title?: string;
     year?: number;
-    /**
-     * One-line bibliographic reference, for a hover card.
-     *
-     * Only present when the request set `include_citation`. Longer than
-     * `description`; prefer `description` for a dense list.
-     */
+    /** One-line bibliographic reference */
     formatted_citation?: string;
     /** Whether the item has at least one child attachment */
     has_attachment?: boolean;
@@ -727,13 +722,6 @@ export interface WSItemQuickSearchRequest extends WSBaseEvent {
     // Options
     /** What each hit carries. Default 'compact'. */
     detail?: QuickSearchDetail;
-    /**
-     * Also render `formatted_citation` on each hit. Default false.
-     *
-     * Off because a full reference is longer than a picker row; `description`
-     * says the same thing more briefly.
-     */
-    include_citation?: boolean;
     /** Maximum number of results to return. Default 20. */
     limit?: number;
     /** Number of results to skip for pagination. Default 0. */
@@ -1493,11 +1481,6 @@ export interface WSGetMetadataRequest extends WSBaseEvent {
      * payloads have no place in that projection.
      */
     detail?: ItemProjectionDetail;
-    /**
-     * Also render `formatted_citation` on each compact row. Default false;
-     * ignored when `detail` is 'full', which always carries one.
-     */
-    include_citation?: boolean;
 }
 
 /** Response to get_metadata request */

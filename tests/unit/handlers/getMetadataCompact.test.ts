@@ -146,23 +146,15 @@ describe('handleGetMetadataRequest compact projection', () => {
                 description: 'Title AAAAAAAA',
                 title: 'Title AAAAAAAA',
                 year: 2014,
-                formatted_citation: undefined,
+                formatted_citation: 'Legewie, Joscha, and Thomas A. DiPrete (2014). Title AAAAAAAA.',
                 has_attachment: true,
                 score: undefined,
             },
         ]);
     });
 
-    it('does not render a citation unless the caller asked for one', async () => {
+    it('renders a citation on every compact row', async () => {
         const res = await handleGetMetadataRequest(request({ detail: 'compact' }));
-
-        expect(res.items[0].formatted_citation).toBeUndefined();
-    });
-
-    it('renders a citation when include_citation is set', async () => {
-        const res = await handleGetMetadataRequest(
-            request({ detail: 'compact', include_citation: true })
-        );
 
         expect(res.items[0].formatted_citation)
             .toBe('Legewie, Joscha, and Thomas A. DiPrete (2014). Title AAAAAAAA.');

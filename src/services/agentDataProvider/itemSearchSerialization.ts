@@ -109,12 +109,6 @@ export interface QuickSearchHitOptions {
      * to explain.
      */
     score?: number;
-    /**
-     * Also render `formatted_citation`. Off by default: `description` already
-     * gives a picker its second line, and a full reference is longer than a
-     * compact row wants.
-     */
-    includeCitation?: boolean;
 }
 
 /**
@@ -132,7 +126,7 @@ export function toQuickSearchHit(
     item: Zotero.Item,
     options: QuickSearchHitOptions = {}
 ): QuickSearchHit {
-    const { score, includeCitation = false } = options;
+    const { score } = options;
 
     let hasAttachment: boolean | undefined;
     try {
@@ -153,8 +147,12 @@ export function toQuickSearchHit(
 
     // Notes and attachments format as "PDF (n.d.). Attachment.", which is
     // worse for a hover card than having no body at all.
+    //
+    // Guarded like `description` above, and for the same reason: this path
+    // serializes a whole page without a per-item catch, so one unreadable item
+    // must cost its own hover card rather than the entire response.
     let formattedCitation: string | undefined;
-    if (includeCitation && item.isRegularItem()) {
+    if (item.isRegularItem()) {
         try {
             formattedCitation = formatItemReference(item) || undefined;
         } catch {

@@ -6,6 +6,7 @@ import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemStub, I
 import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, getMimeType, safeIsInTrash, safeFileExists } from './zoteroUtils';
 import { safeAttachmentFilename } from './attachmentFiles';
 import { formatItemReference } from './itemReference';
+import { getItemDisplayName } from './itemDisplayName';
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
 import { skippedItemsManager } from '../services/skippedItemsManager';
@@ -392,6 +393,11 @@ export async function serializeItemSummary(item: Zotero.Item): Promise<ItemSumma
         tags: tags.length > 0 ? tags.map((t: any) => t.tag) : null,
         collections: getCollectionSummariesFromItem(item),
         citation_key: await getCitationKeyFromItem(item),
+        // Citation-shaped labels are rendered here, in Zotero, so a consumer
+        // never has to rebuild them from `creators` and drift from what the
+        // rest of Beaver calls the same item.
+        formatted_citation: safeLabel(() => formatItemReference(item)),
+        display_name: safeLabel(() => getItemDisplayName(item)),
     };
 }
 
@@ -418,6 +424,17 @@ export function itemSearchResultFromZoteroItem(item: Zotero.Item): ItemSearchRes
 }
 
 /**
+ * Reads one optional label field without letting it sink the whole payload.
+ */
+function safeLabel(read: () => string | null | undefined): string | null {
+    try {
+        return read() || null;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Serializes the minimal bibliographic anchor (`ItemStub`) for a regular item.
  *
  * Emits the lean, model-facing shape the backend consumes directly: a combined
@@ -432,7 +449,8 @@ export function serializeItemStub(item: Zotero.Item): ItemStub {
         title: item.getField('title', false, true) || null,
         creators: formatZoteroCreatorsString(getCreatorsFromItem(item)),
         year: getYearFromItem(item) ?? null,
-        formatted_citation: formatItemReference(item) || null,
+        formatted_citation: safeLabel(() => formatItemReference(item)),
+        display_name: safeLabel(() => getItemDisplayName(item)),
     };
 }
 
