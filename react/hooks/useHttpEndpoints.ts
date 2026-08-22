@@ -666,6 +666,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         unfiled: request.unfiled ?? false,
         untagged: request.untagged ?? false,
         conditions: request.conditions || [],
+        conditions_join_mode: request.conditions_join_mode ?? null,
         item_category: request.item_category === 'attachment' ? 'attachment' : 'regular',
         has_attachments: request.has_attachments ?? null,
         max_items: request.max_items ?? 1000,
@@ -676,12 +677,20 @@ async function handleResolvePopulationHttpRequest(request: any) {
     return {
         item_ids: response.item_ids,
         total_count: response.total_count,
+        // How many bibliographic items matched, before an attachment population
+        // was derived from them. Without it the caller cannot tell an empty
+        // attachment population from filters that matched nothing.
+        matched_item_count: response.matched_item_count,
         truncated: response.truncated,
         // The place the population lives, which the approval card states from
         // these alone — the WebSocket transport forwards them, so this one has
         // to as well or a localhost run loses the WHERE half of the card.
         library_name: response.library_name,
         collection_names: response.collection_names,
+        // The join mode actually applied to `conditions`. Its absence is how the
+        // caller detects a provider that predates the field, so it has to be
+        // forwarded here too.
+        conditions_join_mode: response.conditions_join_mode,
         // A dropped condition widens the population; the caller must not act on
         // ids that came back with a warning.
         warnings: response.warnings,
