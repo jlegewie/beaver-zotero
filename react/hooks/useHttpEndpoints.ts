@@ -170,6 +170,10 @@ import {
     handleTestBeaverWindowHttpRequest,
     handleTestSelectTabHttpRequest,
 } from './httpHandlers/testApplicationStateHandlers';
+import {
+    handleTestOpenTableHttpRequest,
+    handleTestCloseTableHttpRequest,
+} from './httpHandlers/testTableHandlers';
 import type {
     WSZoteroDataRequest,
     WSExternalReferenceCheckRequest,
@@ -352,6 +356,9 @@ const ENDPOINT_PATHS = [
     '/beaver/test/beaver-window',
     '/beaver/test/beaver-sidebar',
     '/beaver/test/select-tab',
+    // Table renderer, driven until a producer routes to it (dev-only)
+    '/beaver/test/open-table',
+    '/beaver/test/close-table',
 ] as const;
 
 /**
@@ -1282,6 +1289,12 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/beaver-window'] =
             createEndpoint(handleTestBeaverWindowHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/open-table'] =
+            createEndpoint(handleTestOpenTableHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/close-table'] =
+            createEndpoint(handleTestCloseTableHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/beaver-sidebar'] =
             createEndpoint(handleTestBeaverSidebarHttpRequest);

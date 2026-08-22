@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useCallback, useMemo } from "react";
 import {
     anchorColumn,
     cellIdFor,
@@ -212,14 +212,14 @@ export function DataTable({
 
                     {state.rows.length === 0 ? (
                         <tr>
-                            <td
+                            <SpanningCell
                                 className="bt-empty-table"
                                 colSpan={columnCount}
                             >
                                 {table.rows.length === 0
                                     ? emptyText
                                     : filteredEmptyText}
-                            </td>
+                            </SpanningCell>
                         </tr>
                     ) : null}
                 </tbody>
@@ -358,7 +358,7 @@ function TableRow({
 
             {expanded ? (
                 <tr className="bt-detail-row" id={detailId}>
-                    <td colSpan={columnCount}>
+                    <SpanningCell colSpan={columnCount}>
                         <RowDetail
                             table={table}
                             row={row}
@@ -367,10 +367,42 @@ function TableRow({
                             onRetryCell={onRetryCell}
                             extra={renderRowDetail?.(row)}
                         />
-                    </td>
+                    </SpanningCell>
                 </tr>
             ) : null}
         </>
+    );
+}
+
+/**
+ * A `<td>` that spans columns, setting `colspan` through the IDL property
+ * rather than the JSX attribute.
+ *
+ * The separate Beaver window is an XHTML document, where attribute names are
+ * case-sensitive: the `colSpan` React writes survives verbatim, the cell never
+ * sees a `colspan`, and it silently spans one column — the row detail then
+ * renders squeezed inside the rail. Assigning the property reflects to the
+ * correctly-cased attribute in an HTML and an XML document alike.
+ */
+function SpanningCell({
+    colSpan,
+    className,
+    children,
+}: {
+    colSpan: number;
+    className?: string;
+    children: React.ReactNode;
+}): React.ReactElement {
+    const ref = useCallback(
+        (el: HTMLTableCellElement | null) => {
+            if (el) el.colSpan = colSpan;
+        },
+        [colSpan],
+    );
+    return (
+        <td ref={ref} className={className}>
+            {children}
+        </td>
     );
 }
 

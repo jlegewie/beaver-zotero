@@ -294,17 +294,26 @@ function ReferenceValue({
                 )}
             </span>
             <span className="bt-ref-body">
+                {/*
+                 * The clamp lives on the inner span even when the title is a
+                 * button: Gecko forces a button's computed `display` to a
+                 * flow root, and `-webkit-line-clamp` never reaches the
+                 * anonymous block inside it — the title then wraps to its full
+                 * length and takes the row's height with it.
+                 */}
                 {reveal ? (
                     <button
                         type="button"
-                        className="bt-ref-title bt-ref-title-button"
+                        className="bt-ref-title-button"
                         title="Reveal in library"
                         onClick={(e) => {
                             e.stopPropagation();
                             reveal();
                         }}
                     >
-                        {value.display_name}
+                        <span className="bt-ref-title">
+                            {value.display_name}
+                        </span>
                     </button>
                 ) : (
                     <span className="bt-ref-title">{value.display_name}</span>

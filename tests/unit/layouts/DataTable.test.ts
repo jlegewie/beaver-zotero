@@ -223,6 +223,19 @@ describe("DataTable", () => {
         ).toEqual(["Item", "Citations", "Type", "Open access", "Methods"]);
     });
 
+    it("spans the detail row across every column", () => {
+        // The window is an XHTML document, where a JSX `colSpan` lands as a
+        // case-sensitive attribute the cell never reads — so this is set as the
+        // IDL property, and read back as one here.
+        mount(React.createElement(DataTable, { table: spec }));
+        click(container!.querySelector("tr.bt-row .bt-rail-chevron"));
+        const cell = container!.querySelector(
+            "tr.bt-detail-row td",
+        ) as HTMLTableCellElement;
+        // rail + 5 columns (no actions column without a host)
+        expect(cell.colSpan).toBe(6);
+    });
+
     it("shows a row-level error in the expanded row", () => {
         mount(React.createElement(DataTable, { table: spec }));
         click(container!.querySelectorAll(".bt-rail-chevron")[2]);
@@ -319,6 +332,15 @@ describe("DataTable", () => {
 
         click(rows[1].querySelector(".bt-ref-title-button"));
         expect(revealInLibrary).toHaveBeenCalledTimes(2);
+
+        // The clamp must sit on a span inside the button, never on the button:
+        // Gecko forces a button's display to a flow root and the clamp never
+        // reaches the anonymous block its text is laid out in, so the title
+        // wraps to full length and takes the row height with it.
+        expect(container!.querySelector("button.bt-ref-title")).toBeNull();
+        expect(
+            container!.querySelector(".bt-ref-title-button > .bt-ref-title"),
+        ).not.toBeNull();
 
         // A row with no ref offers nothing.
         expect(rows[2].querySelector(".bt-actions")?.children.length).toBe(0);
