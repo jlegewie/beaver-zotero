@@ -32,6 +32,10 @@ type MockSearchInstance = {
 
 const LIBRARY_ID = 1;
 
+/** Predicate for `groupResults`: matches the OR-group carrying a condition on `field`. */
+const hasCondition = (field: string) => (conditions: string[][]) =>
+    conditions.some(([name]) => name === field);
+
 describe('handleResolvePopulationRequest', () => {
     /** Fake `items` table, keyed by itemID. */
     const itemRows = new Map<number, ItemRow>();
@@ -45,6 +49,13 @@ describe('handleResolvePopulationRequest', () => {
      * care about the second OR-group wants.
      */
     let scopeSearchResultIds: number[] | null = null;
+    /**
+     * Results for individual OR-group searches, for the requests that build
+     * more than one. Each entry pairs a predicate over the conditions a group
+     * carries with the ids that group resolves to; the first match wins, and a
+     * group no entry matches falls back to `scopeSearchResultIds`.
+     */
+    let groupResults: [(conditions: string[][]) => boolean, number[]][] = [];
     /** Tags that exist in the library; an unknown tag is reported, not silently empty. */
     let libraryTags: string[] = [];
     /** Every Zotero.Search the handler constructed, in construction order. */
@@ -86,6 +97,11 @@ describe('handleResolvePopulationRequest', () => {
 
     /** The OR-group search over `field`, if one exists. */
     const scopeFor = (field: 'collection' | 'tag') =>
+        orGroupSearches().find(search =>
+            conditionsOn(search).some(([name]) => name === field)) ?? null;
+
+    /** The OR-group search carrying a condition on `field`, if one exists. */
+    const groupWith = (field: string) =>
         orGroupSearches().find(search =>
             conditionsOn(search).some(([name]) => name === field)) ?? null;
 
@@ -143,6 +159,7 @@ describe('handleResolvePopulationRequest', () => {
         collections.clear();
         searchResultIds = [];
         scopeSearchResultIds = null;
+        groupResults = [];
         searches = [];
         libraryTags = ['to-read', 'reviewed'];
 
@@ -166,10 +183,13 @@ describe('handleResolvePopulationRequest', () => {
             addCondition = vi.fn();
             // searches[0] is the main search; anything later is a scope
             // search the handler built and may run on its own.
-            search = vi.fn(async () =>
-                (searches[0] as unknown) === this || scopeSearchResultIds === null
-                    ? searchResultIds
-                    : scopeSearchResultIds);
+            search = vi.fn(async () => {
+                if ((searches[0] as unknown) === this) return searchResultIds;
+                const conditions = this.addCondition.mock.calls.map((call: any[]) => call.slice(0, 3));
+                const override = groupResults.find(([matches]) => matches(conditions));
+                if (override) return override[1];
+                return scopeSearchResultIds === null ? searchResultIds : scopeSearchResultIds;
+            });
             scope: MockSearchInstance | null = null;
             setScope = vi.fn((scope: MockSearchInstance) => {
                 this.scope = scope;
@@ -436,6 +456,306 @@ describe('handleResolvePopulationRequest', () => {
             for (const scope of orGroupSearches()) {
                 expect(scope.libraryID).toBe(LIBRARY_ID);
             }
+        });
+    });
+
+    describe('conditions join mode', () => {
+        it('puts the conditions in their own OR-group under any, not on the main search', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions_join_mode: 'any',
+                conditions: [
+                    { field: 'DOI', operator: 'is', value: '' },
+                    { field: 'publicationTitle', operator: 'is', value: '' },
+                ],
+            }));
+
+            expect(response.error).toBeUndefined();
+            const group = groupWith('DOI');
+            expect(conditionsOn(group)).toContainEqual(['joinMode', 'any', '']);
+            expect(conditionsOn(group)).toContainEqual(['DOI', 'doesNotContain', '']);
+            expect(conditionsOn(group)).toContainEqual(['publicationTitle', 'doesNotContain', '']);
+            // ANDed on the main search, these two would select only items
+            // missing BOTH fields.
+            expect(addedConditions().some(([field]) => field === 'DOI')).toBe(false);
+            expect(addedConditions().some(([field]) => field === 'publicationTitle')).toBe(false);
+        });
+
+        it('never sets a join mode on the main search under any', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            await handleResolvePopulationRequest(makeRequest({
+                conditions_join_mode: 'any',
+                tags: ['to-read'],
+                conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+            }));
+
+            // 'any' on the main search would turn its itemType guards into
+            // always-true disjuncts and select the whole library.
+            expect(addedConditions().some(([field]) => field === 'joinMode')).toBe(false);
+        });
+
+        it('narrows the population to the conditions group, in both directions', async () => {
+            // The tag group takes the scope slot, so the conditions group is
+            // the one run on its own and intersected.
+            searchResultIds = [1, 2, 3];
+            groupResults = [[hasCondition('DOI'), [2, 3, 4]]];
+            seedItem(1);
+            seedItem(2);
+            seedItem(3);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                tags: ['to-read'],
+                conditions_join_mode: 'any',
+                conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+            }));
+
+            expect(scopeChain()).toHaveLength(1);
+            expect(groupWith('DOI')?.search).toHaveBeenCalled();
+            // 1 matched the main search but not the group; 4 the group but not
+            // the main search. Neither belongs to the population.
+            expect(response.item_ids).toEqual(['u-KEY2', 'u-KEY3']);
+            expect(response.total_count).toBe(2);
+        });
+
+        it('keeps untagged on the main search under any, where it stays ANDed', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            await handleResolvePopulationRequest(makeRequest({
+                untagged: true,
+                conditions_join_mode: 'any',
+                conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+            }));
+
+            // untagged is a real primary condition, so as a disjunct it would
+            // add every untagged item to the population.
+            expect(addedConditions()).toContainEqual(['tag', 'doesNotContain', '']);
+            expect(conditionsOn(groupWith('DOI')).some(([field]) => field === 'tag')).toBe(false);
+        });
+
+        it('keeps the item-type guards on the main search under any', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            await handleResolvePopulationRequest(makeRequest({
+                conditions_join_mode: 'any',
+                conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+            }));
+
+            expect(addedConditions()).toContainEqual(['itemType', 'isNot', 'attachment']);
+            expect(addedConditions()).toContainEqual(['itemType', 'isNot', 'note']);
+            expect(addedConditions()).toContainEqual(['itemType', 'isNot', 'annotation']);
+            expect(addedConditions()).toContainEqual(['noChildren', 'true', '']);
+            const groupFields = conditionsOn(groupWith('DOI')).map(([field]) => field);
+            expect(groupFields).not.toContain('itemType');
+            expect(groupFields).not.toContain('noChildren');
+        });
+
+        it('recurses a collection condition inside the conditions group', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            await handleResolvePopulationRequest(makeRequest({
+                conditions_join_mode: 'any',
+                recursive: true,
+                conditions: [
+                    { field: 'collection', operator: 'is', value: 'ABCD2345' },
+                    { field: 'DOI', operator: 'is', value: '' },
+                ],
+            }));
+
+            // Without this the condition form would match direct membership
+            // only while collection_keys recursed. recursive is a flag, not a
+            // disjunct, so it stays ANDed inside the group.
+            expect(conditionsOn(groupWith('collection'))).toContainEqual(['recursive', 'true', '']);
+        });
+
+        it('omits recursive from the conditions group when recursive is false', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            await handleResolvePopulationRequest(makeRequest({
+                conditions_join_mode: 'any',
+                recursive: false,
+                conditions: [{ field: 'collection', operator: 'is', value: 'ABCD2345' }],
+            }));
+
+            expect(conditionsOn(groupWith('collection')).some(([field]) => field === 'recursive'))
+                .toBe(false);
+        });
+
+        it('builds no group and runs no extra search when the mode is all', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions_join_mode: 'all',
+                conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+            }));
+
+            expect(response.conditions_join_mode).toBe('all');
+            expect(addedConditions()).toContainEqual(['DOI', 'doesNotContain', '']);
+            expect(orGroupSearches()).toHaveLength(0);
+            expect(mainSearch()?.setScope).not.toHaveBeenCalled();
+        });
+
+        it('treats an omitted mode as all', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+            }));
+
+            expect(response.conditions_join_mode).toBe('all');
+            expect(addedConditions()).toContainEqual(['DOI', 'doesNotContain', '']);
+            expect(orGroupSearches()).toHaveLength(0);
+        });
+
+        it('treats an unrecognized mode as all rather than widening the population', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                // Off-wire value: a bogus mode must not resolve to 'any'.
+                conditions_join_mode: 'ANY' as any,
+                conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+            }));
+
+            expect(response.conditions_join_mode).toBe('all');
+            expect(addedConditions()).toContainEqual(['DOI', 'doesNotContain', '']);
+            expect(orGroupSearches()).toHaveLength(0);
+        });
+
+        it.each(['unfiled', 'retracted', 'publications', 'feed'])(
+            'rejects a %s condition under any, which Zotero would AND instead of OR',
+            async (field) => {
+                const response = await handleResolvePopulationRequest(makeRequest({
+                    conditions_join_mode: 'any',
+                    conditions: [
+                        { field, operator: 'true', value: '' },
+                        { field: 'DOI', operator: 'is', value: '' },
+                    ],
+                }));
+
+                expect(response.error_code).toBe('invalid_request');
+                expect(response.error).toContain(field);
+                expect(response.item_ids).toEqual([]);
+                expect(response.total_count).toBe(0);
+                // A failed resolution carries no applied mode.
+                expect(response.conditions_join_mode).toBeUndefined();
+                expect(searches).toHaveLength(0);
+            },
+        );
+
+        it('accepts those same conditions under all, where they only narrow', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [
+                    { field: 'unfiled', operator: 'true', value: '' },
+                    { field: 'retracted', operator: 'true', value: '' },
+                ],
+            }));
+
+            expect(response.error).toBeUndefined();
+            expect(addedConditions()).toContainEqual(['unfiled', 'true', '']);
+            expect(addedConditions()).toContainEqual(['retracted', 'true', '']);
+        });
+
+        it('echoes the applied mode on a resolved population', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions_join_mode: 'any',
+                conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+            }));
+
+            expect(response.conditions_join_mode).toBe('any');
+            expect(response.item_ids).toEqual(['u-KEY1']);
+        });
+
+        it('echoes the applied mode on a count-only request', async () => {
+            searchResultIds = [1, 2];
+            seedItem(1);
+            seedItem(2);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                max_items: 0,
+                conditions_join_mode: 'any',
+                conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+            }));
+
+            expect(response.conditions_join_mode).toBe('any');
+            expect(response.item_ids).toEqual([]);
+            expect(response.total_count).toBe(2);
+        });
+
+        it('applies all three groups and returns their intersection', async () => {
+            searchResultIds = [1, 2, 3, 4];
+            groupResults = [
+                [hasCondition('tag'), [2, 3, 4, 5]],
+                [hasCondition('DOI'), [3, 4, 6]],
+            ];
+            for (const itemID of [1, 2, 3, 4]) seedItem(itemID);
+            collections.set(`${LIBRARY_ID}/ABCD2345`, { id: 77, name: 'Methods' });
+            collections.set(`${LIBRARY_ID}/EFGH6789`, { id: 78, name: 'Theory' });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                collection_keys: ['ABCD2345', 'EFGH6789'],
+                tags: ['to-read', 'reviewed'],
+                conditions_join_mode: 'any',
+                conditions: [
+                    { field: 'DOI', operator: 'is', value: '' },
+                    { field: 'abstractNote', operator: 'is', value: '' },
+                ],
+            }));
+
+            expect(response.error).toBeUndefined();
+            expect(orGroupSearches()).toHaveLength(3);
+            expect(orGroupValues('collection')).toEqual(['ABCD2345', 'EFGH6789']);
+            expect(orGroupValues('tag')).toEqual(['to-read', 'reviewed']);
+            expect(conditionsOn(groupWith('DOI'))).toContainEqual(['joinMode', 'any', '']);
+            // Still exactly one scope: the collection group. The other two are
+            // run on their own and intersected.
+            expect(scopeChain()).toHaveLength(1);
+            expect(response.item_ids).toEqual(['u-KEY3', 'u-KEY4']);
+            expect(response.total_count).toBe(2);
+        });
+
+        it('builds no conditions group when every condition was dropped', async () => {
+            searchResultIds = [1, 2];
+            seedItem(1);
+            seedItem(2);
+            (globalThis as any).Zotero.Search = class RejectingSearch {
+                libraryID = 0;
+                addCondition = vi.fn((field: string) => {
+                    if (field === 'bogusField') throw new Error('Invalid search condition');
+                    return 1;
+                });
+                search = vi.fn(async () => searchResultIds);
+                setScope = vi.fn();
+                constructor() {
+                    searches.push(this as unknown as MockSearchInstance);
+                }
+            };
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions_join_mode: 'any',
+                conditions: [{ field: 'bogusField', operator: 'is', value: 'x' }],
+            }));
+
+            expect(response.warnings).toHaveLength(1);
+            // A group left carrying nothing but its join mode matches the whole
+            // library, so attaching or running it would widen the population.
+            expect(mainSearch()?.setScope).not.toHaveBeenCalled();
+            expect(orGroupSearches()[0]?.search).not.toHaveBeenCalled();
         });
     });
 

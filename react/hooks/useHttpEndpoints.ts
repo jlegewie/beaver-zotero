@@ -666,6 +666,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         unfiled: request.unfiled ?? false,
         untagged: request.untagged ?? false,
         conditions: request.conditions || [],
+        conditions_join_mode: request.conditions_join_mode ?? null,
         item_category: request.item_category === 'attachment' ? 'attachment' : 'regular',
         has_attachments: request.has_attachments ?? null,
         max_items: request.max_items ?? 1000,
@@ -682,6 +683,10 @@ async function handleResolvePopulationHttpRequest(request: any) {
         // to as well or a localhost run loses the WHERE half of the card.
         library_name: response.library_name,
         collection_names: response.collection_names,
+        // The join mode actually applied to `conditions`. Its absence is how the
+        // caller detects a provider that predates the field, so it has to be
+        // forwarded here too.
+        conditions_join_mode: response.conditions_join_mode,
         // A dropped condition widens the population; the caller must not act on
         // ids that came back with a warning.
         warnings: response.warnings,

@@ -1391,9 +1391,10 @@ export interface WSListItemsResponse {
  *
  * Resolves the complete set of item ids matching a filter description in one
  * round trip, so a batch operation never has to page through `list_items`.
- * Every filter is ANDed (the join mode is always `all`); filters left unset do
- * not constrain the result, so an otherwise empty request selects the whole
- * library.
+ * Every filter is ANDed with every other one; `conditions_join_mode` sets how
+ * the `conditions` list is joined among itself, and joins nothing else.
+ * Filters left unset do not constrain the result, so an otherwise empty
+ * request selects the whole library.
  */
 export interface WSResolvePopulationRequest extends WSBaseEvent {
     event: 'resolve_population_request';
@@ -1413,8 +1414,26 @@ export interface WSResolvePopulationRequest extends WSBaseEvent {
     unfiled: boolean;
     /** Only items that carry no tags. */
     untagged: boolean;
-    /** Additional search conditions, ANDed with the other filters. */
+    /** Additional search conditions, joined per `conditions_join_mode` and ANDed with the other filters. */
     conditions: ZoteroSearchCondition[];
+    /**
+     * How the entries of `conditions` are joined with each other. 'all' ANDs
+     * them; 'any' ORs them, so an item matches when it satisfies at least one.
+     * Absent or unrecognized = 'all'.
+     *
+     * It joins the `conditions` list ALONE. `collection_keys`, `tags`,
+     * `unfiled`, `untagged`, `has_attachments` and `item_category` stay ANDed
+     * with the conditions group and with each other, so 'any' can only be used
+     * to widen within `conditions`.
+     *
+     * Under 'any' the list may not contain a `unfiled`, `retracted`,
+     * `publications` or `feed` condition: Zotero applies each of those as a
+     * search-wide flag rather than as a matchable condition, so it would be
+     * ANDed with the other entries instead of ORed with them. Such a request
+     * is rejected with `invalid_request` rather than resolved to a population
+     * narrower than described.
+     */
+    conditions_join_mode?: 'all' | 'any' | null;
     /** 'regular' = bibliographic items, 'attachment' = child attachments. */
     item_category: 'regular' | 'attachment';
     /** Filter regular items by attachment presence; null = no filter. */
@@ -1453,6 +1472,16 @@ export interface WSResolvePopulationResponse {
      */
     library_name?: string | null;
     collection_names?: string[] | null;
+    /**
+     * The join mode actually applied to the request's `conditions`. Set on
+     * every successful resolution, and absent from a failure.
+     *
+     * A caller that asked for 'any' must check it: a provider that predates the
+     * field answers without it, having resolved the population under 'all' —
+     * strictly narrower than what was asked for, and otherwise indistinguishable
+     * from a correct answer.
+     */
+    conditions_join_mode?: 'all' | 'any' | null;
     error?: string | null;
     error_code?: string | null;
     /** Available libraries (only included when error_code is 'library_not_found') */
