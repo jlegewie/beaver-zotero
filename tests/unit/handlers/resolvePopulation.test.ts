@@ -731,6 +731,40 @@ describe('handleResolvePopulationRequest', () => {
             expect(response.total_count).toBe(2);
         });
 
+        it('cannot admit an item the main search excluded, whatever a disjunct matches', async () => {
+            // A tag-presence predicate (`tag contains ""`) matches tagged items
+            // of EVERY type, notes and attachments included. It is safe as a
+            // disjunct here only because a group never contributes ids of its
+            // own: it is the main search's scope or is intersected into the
+            // main search's result, and the main search always carries the
+            // itemType guards. Ids 8 and 9 stand for the tagged note and
+            // attachment the group matched and the population must not hold.
+            // A collection group takes the scope slot, so the conditions group
+            // reaches the intersect path.
+            searchResultIds = [1, 2];
+            groupResults = [[hasCondition('tag'), [2, 8, 9]]];
+            for (const itemID of [1, 2, 8, 9]) seedItem(itemID);
+            collections.set(`${LIBRARY_ID}/ABCD2345`, { id: 77, name: 'Methods' });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                collection_keys: ['ABCD2345'],
+                conditions_join_mode: 'any',
+                conditions: [
+                    { field: 'tag', operator: 'contains', value: '' },
+                    { field: 'DOI', operator: 'is', value: '' },
+                ],
+            }));
+
+            expect(response.error).toBeUndefined();
+            expect(response.item_ids).toEqual(['u-KEY2']);
+            expect(response.item_ids).not.toContain('u-KEY8');
+            expect(response.item_ids).not.toContain('u-KEY9');
+            // The guards that make this hold, on the main search and not the group.
+            expect(addedConditions()).toContainEqual(['itemType', 'isNot', 'note']);
+            expect(addedConditions()).toContainEqual(['itemType', 'isNot', 'attachment']);
+            expect(addedConditions()).toContainEqual(['noChildren', 'true', '']);
+        });
+
         it('builds no conditions group when every condition was dropped', async () => {
             searchResultIds = [1, 2];
             seedItem(1);
