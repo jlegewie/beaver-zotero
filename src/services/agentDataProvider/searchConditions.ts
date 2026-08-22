@@ -91,6 +91,21 @@ function sampleItemTypeNames(): string[] {
 }
 
 /**
+ * Whether Zotero accepts `operator` for `condition`.
+ *
+ * Used to skip a value check when the operator is already wrong, so the caller
+ * hears about one problem at a time. Answers true when Zotero cannot be asked,
+ * which leaves `addCondition` to report whatever is actually wrong.
+ */
+function acceptsOperator(condition: string, operator: string): boolean {
+    try {
+        return Zotero.SearchConditions.hasOperator(condition, operator);
+    } catch {
+        return true;
+    }
+}
+
+/**
  * Add one wire condition to `search`, handling the operator mapping and the
  * empty-value quirk.
  *
@@ -106,6 +121,7 @@ export function addSearchCondition(
     condition: ZoteroSearchCondition,
     warnings: string[],
     logLabel: string,
+    libraryID?: number,
 ): boolean {
     const originalOperator = condition.operator;
 
@@ -128,11 +144,16 @@ export function addSearchCondition(
         value = '';
     }
 
-    // Zotero validates the condition name and the operator, but not the value.
+    // Zotero validates the condition name and the operator, but never the
+    // value, so the two checks below do it. Both are skipped when the operator
+    // is one Zotero refuses for this condition: `addCondition` reports that
+    // below, and a value complaint would send the caller to fix the wrong half.
+    const operatorAccepted = acceptsOperator(condition.field, operator);
+
     // An unknown item type compiles to a subquery that matches nothing, so the
     // search would return zero results with no indication why. Name the bad
     // value instead, and drop the condition like the rejection path below.
-    if (condition.field === 'itemType' && value !== '') {
+    if (condition.field === 'itemType' && value !== '' && operatorAccepted) {
         try {
             // getID returns false for a name no item type has.
             if (!Zotero.ItemTypes.getID(value)) {
@@ -150,6 +171,35 @@ export function addSearchCondition(
             // search — and leave any mismatch to return no results.
             const msg = err instanceof Error ? err.message : String(err);
             logger(`${logLabel}: Skipped item type validation for '${value}': ${msg}`, 1);
+        }
+    }
+
+    // A collection Zotero cannot resolve is NOT a condition that matches
+    // nothing: it compiles to `itemID IN (0)`, and under `isNot` that negates
+    // to every non-annotation item. So an unknown key silently turns a
+    // narrowing condition into one that matches the whole library — and inside
+    // a `joinMode any` group, one such disjunct makes the entire group match
+    // everything. Refuse it here, where the key can still be named.
+    if (condition.field === 'collection' && value !== '' && operatorAccepted && libraryID !== undefined) {
+        try {
+            // Zotero parses a legacy '<libraryID>_<key>' value server-side, so
+            // only the key half identifies the collection.
+            const key = /^\d+_/.test(value) ? value.slice(value.indexOf('_') + 1) : value;
+            if (!Zotero.Collections.getByLibraryAndKey(libraryID, key)) {
+                logger(`${logLabel}: Unknown collection key '${value}'`, 1);
+                warnings.push(
+                    `Dropped condition field='collection' value='${value}': this library has no `
+                        + 'collection with that key. Use list_collections to get the key. Zotero '
+                        + 'treats an unknown collection as one that matches nothing, which under '
+                        + "'isNot' would select the whole library."
+                );
+                return false;
+            }
+        } catch (err) {
+            // Collection data is loaded lazily. Let the condition through
+            // unvalidated rather than block a search on a cold cache.
+            const msg = err instanceof Error ? err.message : String(err);
+            logger(`${logLabel}: Skipped collection validation for '${value}': ${msg}`, 1);
         }
     }
 

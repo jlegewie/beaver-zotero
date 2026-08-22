@@ -178,8 +178,8 @@ export async function handleZoteroSearchRequest(
             // union of the two search types trips TS2589 ("type instantiation
             // is excessively deep").
             const added = isScoped
-                ? addSearchCondition(scopeSearch!, condition, warnings, 'handleZoteroSearchRequest')
-                : addSearchCondition(search, condition, warnings, 'handleZoteroSearchRequest');
+                ? addSearchCondition(scopeSearch!, condition, warnings, 'handleZoteroSearchRequest', library.libraryID)
+                : addSearchCondition(search, condition, warnings, 'handleZoteroSearchRequest', library.libraryID);
             // Only a condition Zotero accepted narrows the scope; see the
             // scopedConditionCount guard below.
             if (added && isScoped) {

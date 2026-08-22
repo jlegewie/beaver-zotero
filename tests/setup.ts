@@ -197,6 +197,21 @@ function testRemoveDiacritics(s: string): string {
         getAll: vi.fn(testItemTypes),
         getTypes: vi.fn(testItemTypes),
     },
+    SearchConditions: {
+        // Permissive except for the conditions Zotero restricts and our
+        // handlers rely on. Enough to exercise the operator gate without
+        // restating Zotero's whole condition table.
+        hasOperator: vi.fn((condition: string, operator: string) => {
+            const restricted: Record<string, string[]> = {
+                itemType: ['is', 'isNot'],
+                collection: ['is', 'isNot'],
+                savedSearch: ['is', 'isNot'],
+                note: ['contains', 'doesNotContain'],
+            };
+            const allowed = restricted[condition];
+            return allowed ? allowed.includes(operator) : true;
+        }),
+    },
     Libraries: {
         getAll: vi.fn(() => [{ libraryID: 1 }]),
     },

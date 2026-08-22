@@ -558,6 +558,7 @@ describe('handleResolvePopulationRequest', () => {
         it('recurses a collection condition inside the conditions group', async () => {
             searchResultIds = [1];
             seedItem(1);
+            collections.set(`${LIBRARY_ID}/ABCD2345`, { id: 77, name: 'Methods' });
 
             await handleResolvePopulationRequest(makeRequest({
                 conditions_join_mode: 'any',
@@ -576,6 +577,7 @@ describe('handleResolvePopulationRequest', () => {
 
         it('omits recursive from the conditions group when recursive is false', async () => {
             searchResultIds = [1];
+            collections.set(`${LIBRARY_ID}/ABCD2345`, { id: 77, name: 'Methods' });
             seedItem(1);
 
             await handleResolvePopulationRequest(makeRequest({

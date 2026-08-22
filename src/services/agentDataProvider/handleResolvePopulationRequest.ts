@@ -233,7 +233,7 @@ function conditionsOrGroup(
     const group = newOrGroup(libraryID);
     let disjuncts = 0;
     for (const condition of conditions) {
-        if (addSearchCondition(group, condition, warnings, 'handleResolvePopulationRequest')) {
+        if (addSearchCondition(group, condition, warnings, 'handleResolvePopulationRequest', libraryID)) {
             disjuncts++;
         }
     }
@@ -391,7 +391,7 @@ export async function handleResolvePopulationRequest(
         // into always-true disjuncts and selects the whole library.
         if (conditionsJoinMode === 'all') {
             for (const condition of requestedConditions) {
-                addSearchCondition(search, condition, warnings, 'handleResolvePopulationRequest');
+                addSearchCondition(search, condition, warnings, 'handleResolvePopulationRequest', library.libraryID);
             }
         }
 
