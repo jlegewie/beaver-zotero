@@ -23,6 +23,7 @@ import { rowIdFor } from '@beaver/agent-core/layouts/table';
 import { store } from '../../store';
 import { windowSurfaceAtom, type WindowSurface } from '../../atoms/windowSurface';
 import { BeaverUIFactory } from '../../../src/ui/ui';
+import { closeTableTab, openTableTab } from '../../../src/ui/tableTab';
 import { getSearchableLibraryIds } from '../../../src/services/agentDataProvider/utils';
 import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
 
@@ -72,6 +73,44 @@ export async function handleTestOpenTableHttpRequest(
         rows: table.rows.length,
         window_open: !!BeaverUIFactory.findBeaverWindow(),
     };
+}
+
+interface OpenTableTabRequest extends OpenTableRequest {
+    /** Reuse (and re-render) this tab instead of adding another. */
+    tab_id?: string;
+}
+
+/**
+ * The same spec, in a Zotero tab rather than the window — the static HTML
+ * rendering, which is what a saved snapshot would hold.
+ */
+export async function handleTestOpenTableTabHttpRequest(
+    request: OpenTableTabRequest = {}
+): Promise<any> {
+    const variant = request.variant === 'extraction' ? 'extraction' : 'search';
+    const table =
+        request.table ??
+        (await buildDemoTable(variant, request.limit ?? DEMO_ROW_LIMIT));
+
+    const tabId = openTableTab(table, {
+        title: request.title ?? (variant === 'extraction' ? 'Extraction' : 'Search results'),
+        tabId: request.tab_id,
+    });
+
+    return {
+        ok: !!tabId,
+        tab_id: tabId,
+        variant,
+        rows: table.rows.length,
+        columns: table.columns.map((c) => c.id),
+    };
+}
+
+export async function handleTestCloseTableTabHttpRequest(
+    request: { tab_id?: string } = {}
+): Promise<any> {
+    if (request.tab_id) closeTableTab(request.tab_id);
+    return { ok: true };
 }
 
 /** Hands the window back to the thread. */
@@ -168,7 +207,7 @@ async function buildDemoTable(
         : buildSearchDemo(items);
 }
 
-function referenceRow(item: DemoItem, index: number): Row {
+function referenceRow(item: DemoItem, index: number, withAbstract = true): Row {
     const ref = {
         kind: 'item' as const,
         library_id: item.libraryID,
@@ -188,9 +227,10 @@ function referenceRow(item: DemoItem, index: number): Row {
                         .join(' · '),
                     item_type: item.itemType,
                 },
-                details: item.abstract
-                    ? { kind: 'text', label: 'Abstract', text: item.abstract }
-                    : undefined,
+                details:
+                    withAbstract && item.abstract
+                        ? { kind: 'text', label: 'Abstract', text: item.abstract }
+                        : undefined,
             },
         },
     };
@@ -218,7 +258,9 @@ function buildSearchDemo(items: DemoItem[]): TableSpec {
     ];
 
     const rows: Row[] = items.map((item, i) => {
-        const row = referenceRow(item, i);
+        // No abstract on the reference cell: this table has a column for it,
+        // and carrying both prints it twice in the expanded row.
+        const row = referenceRow(item, i, false);
         row.cells.year = item.year
             ? { value: { kind: 'date', value: item.year } }
             : {};
