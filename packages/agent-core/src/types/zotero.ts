@@ -180,6 +180,8 @@ export interface ItemData extends ZoteroItemBase {
     // Metadata
     language?: string | null;
     formatted_citation?: string | null;
+    /** The item's canonical short label ("Smith and Johnson 2014"). */
+    display_name?: string | null;
     deleted: boolean;
     tags?: any[] | null;
     collections?: string[] | null;

@@ -356,6 +356,8 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
         // derived from library_id (already hashed) and never changes on its
         // own, so it must not affect the metadata hash.
         library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
+        // The item's canonical short label ("Smith and Johnson 2014").
+        display_name: safeLabel(() => getItemDisplayName(item)),
         // Add the calculated hash
         zotero_version: item.version,
         zotero_synced: item.synced,
