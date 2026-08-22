@@ -819,6 +819,8 @@ async function handleAgentActionValidateHttpRequest(request: any) {
 
     const response = await handleAgentActionValidateRequest(wsRequest);
 
+    // Hand-maintained projection of WSAgentActionValidateResponse minus the
+    // transport envelope.
     return {
         valid: response.valid,
         error: response.error,
@@ -827,6 +829,7 @@ async function handleAgentActionValidateHttpRequest(request: any) {
         edit_errors: response.edit_errors,
         current_value: response.current_value,
         normalized_action_data: response.normalized_action_data,
+        collection_names: response.collection_names,
         preference: response.preference,
         warnings: response.warnings,
     };

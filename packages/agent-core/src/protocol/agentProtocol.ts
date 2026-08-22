@@ -1838,6 +1838,8 @@ export interface WSAgentActionValidateResponse {
      * instead of the original request action_data.
      */
     normalized_action_data?: Record<string, any>;
+    /** Display names of the collections the action touches */
+    collection_names?: Record<string, string>;
     preference: DeferredToolPreference;
     /** Optional warnings surfaced during validation */
     warnings?: string[];
