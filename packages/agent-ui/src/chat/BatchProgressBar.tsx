@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import type { BatchProgressEntry } from '@beaver/agent-core/run-state/batchProgress';
+import { hasBatchEnded } from '@beaver/agent-core/run-state/batchProgress';
 import { ArrowDownIcon, Icon, LayersIcon, TickIcon } from '../icons';
 import {
     BatchBlockHeading,
@@ -9,29 +10,14 @@ import {
     BatchTallyBlock,
 } from './BatchOutcomeBlocks';
 
-/** Labels for the slots this bar lays out. */
 const WAITING_HEADING = 'Waiting';
-/**
- * Things the batch took away, listed apart from where items went.
- *
- * Bare, and deliberately not "Also removed": the block above it is headed by
- * the backend in the operation's own words ("Where items are going"), so
- * "Also" pointed back at something that never mentioned removal.
- *
- * One word for every operation, because the direction is not the same one
- * twice — `sort` rows are collections items were pulled OUT OF, `tag` rows are
- * tags cleared FROM items — and a client that spelled that out would be
- * keeping the per-operation wording table this record exists to avoid. The
- * title above already says which operation is running, which is what makes the
- * direction readable without stating it.
- */
+/** Things the batch took away, listed apart from destinations. */
 const REMOVED_HEADING = 'Removed';
 const FAILURE_HEADING = 'Could not be read';
-const REVIEW_HEADING = 'Needs your review';
-/** Introduces the queue. Lower case: it continues the line above it. */
+/** Lower case: continues the line above it. */
 const QUEUE_PREFIX = 'then ';
 
-/** The queue */
+/** Remaining batches as "then Filing items, Tagging items ×2". */
 function queueSummary(entries: readonly BatchProgressEntry[]): string {
     const counts = new Map<string, number>();
     for (const entry of entries) {
@@ -44,62 +30,32 @@ function queueSummary(entries: readonly BatchProgressEntry[]): string {
     return parts.length ? QUEUE_PREFIX + parts.join(', ') : '';
 }
 
-/**
- * Changes this batch proposed that the user has not applied yet.
- *
- * Deliberately NOT part of the backend stamp. The batch ledger counts an item
- * resolved once the agent has PROPOSED the edit — applied, queued for review
- * and rejected all end the agent's work on it — which is right for the ledger
- * and misleading on its own: a batch can read "184 of 184" while 184 changes
- * sit unreviewed. Only the client knows what happened to them afterwards, so
- * the host supplies this and the bar renders it beside the count.
- */
-export interface BatchReviewStatus {
-    /** Proposed, awaiting the user's decision. */
-    pending: number;
-    /** The user declined them. */
-    rejected: number;
-    /** Opens whatever review surface the host has. Omitted: no link is shown. */
-    onReview?: () => void;
-}
-
 export interface BatchProgressBarProps {
     /** The batch the bar tracks — the one being worked. */
     batch: BatchProgressEntry;
-    /** Every other batch still open, for the "also running" list. */
+    /**
+     * Other batches on the stamp. Ended ones are filtered out here — a stamp
+     * can carry a batch that finished on the same call that moved this one.
+     */
     otherBatches?: readonly BatchProgressEntry[];
-    /** What the user still has to review, when the host can say. */
-    review?: BatchReviewStatus | null;
 }
 
 /**
  * Live progress for a batch operation, shown above the composer.
  *
- * The bar exists because a batch's work happens between its `batch_start`
- * calls: the model files a hundred items across a dozen turns and the only
- * thing the transcript shows is tool rows scrolling past. Pinning progress to
- * the composer puts it where the user is already looking and keeps it from
- * scrolling away.
+ * Collapsed: one line and a 2px segmented hairline. Expanded: goal, counts,
+ * and (when the operation has one) the outcome distribution.
  *
- * Collapsed it is one line and a 2px segmented hairline. Expanded it adds the
- * goal, the counts, and — for the operations that have one — the distribution
- * of where items are actually going, which is the signal that catches a run
- * collapsing every item onto one destination while it is still running.
- *
- * Read-only by design. Stopping is the composer's Stop button, and cancelling
- * a batch is the model's own `batch_start(status='cancelled')`; a third control
- * here would be a fourth way to halt the same run.
- *
- * Host-agnostic: pure view data, no client lookups — every label the backend
- * sends is already the name a user knows.
+ * Read-only — stopping is the composer's Stop button. Silent about review
+ * status: the ledger counts an item resolved once the agent has proposed the
+ * edit, so "184 of 184" can sit next to 184 unreviewed changes. That belongs
+ * on the run's review card.
  */
 export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
     batch,
     otherBatches = [],
-    review = null,
 }) => {
-    // Collapsed by default: during a run the user is reading the answer, and a
-    // panel that opened itself would push the composer down every turn.
+    // Collapsed by default so the panel does not push the composer down mid-run.
     const [isExpanded, setIsExpanded] = useState(false);
     const toggle = useCallback(() => setIsExpanded((open) => !open), []);
     const onKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -109,23 +65,18 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
         }
     }, []);
 
-    // The backend omits default-valued fields, so every optional is defaulted
-    // here and gated on the NON-default state — never on `=== 'active'`.
+    // Backend omits default-valued fields — default here, never test `=== 'active'`.
     const status = batch.status ?? 'active';
     const total = batch.total ?? 0;
     const resolved = batch.resolved ?? 0;
     const noChange = batch.no_change ?? 0;
     const failed = batch.failed ?? 0;
-    // The two terminal states that reach a client (`cancelled` batches are
-    // dropped from the stamp backend-side). Both are over, and the bar must say
-    // so: without this a finished batch with failures is indistinguishable from
-    // one still failing its way through the population.
+    // `cancelled` batches are dropped from the stamp backend-side.
     const isOver = status === 'completed' || status === 'failed_out';
     const hasFailures = failed > 0 || status === 'failed_out';
 
     const share = (count: number) => (total > 0 ? (count / total) * 100 : 0);
-    // Same rule as the expanded track: before the first outcome lands there is
-    // no progress to draw, and a determinate hairline at zero reads as stalled.
+    // A determinate track at zero reads as stalled before the first outcome.
     const isIndeterminate = status === 'active' && resolved + noChange + failed === 0;
     const segments = isIndeterminate ? (
         <div className="batch-progress-indeterminate" />
@@ -137,18 +88,14 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
         </>
     );
 
-    // Absent from a record written before the field existed, and from any
-    // backend older than this client. The bar then falls back to the headline
-    // it has always shown rather than naming the operation itself: a title
-    // composed here could disagree with the approval and result cards, which
-    // is the one thing this record's wording rules exist to prevent.
+    // Older records omit this; fall back to the headline, do not invent a title.
     const title = batch.progress_title?.trim();
 
-    const otherShown = otherBatches.filter((entry) => entry.show_progress);
+    // A stamp can carry a batch that finished on the same call as this one.
+    const otherShown = otherBatches.filter(
+        (entry) => entry.show_progress && !hasBatchEnded(entry),
+    );
     const queued = queueSummary(otherShown);
-    const reviewPending = review?.pending ?? 0;
-    const reviewRejected = review?.rejected ?? 0;
-    const hasReview = reviewPending > 0 || reviewRejected > 0;
 
     return (
         <div
@@ -157,9 +104,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
             role="group"
             aria-label="Batch operation progress"
         >
-            {/* Overlay, not in-flow: the composer already has a 1px top border,
-                so a hairline in the layout stacks on it and the edge reads as
-                2px. Completing the batch just fades this away. */}
+            {/* Overlay so it does not stack on the composer's 1px top border. */}
             <div
                 className="display-flex flex-row batch-progress-hairline"
                 style={{
@@ -194,39 +139,23 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
             >
                 <div className="display-flex flex-row items-center gap-2 min-w-0">
                 <Icon icon={LayersIcon} className="font-color-secondary flex-none" />
-                {/* What the batch is doing leads, because the counts already
-                    answer "how far" and nothing else answers "at what". It is
-                    also the only part of the line that may be cut: the count
-                    and the chips are each a fact that survives truncation
-                    badly. */}
+                {/* Title is the only part of the line that may truncate. */}
                 <span
                     className={`font-color-primary font-medium text-base ${title ? 'truncate' : 'flex-none'}`}
-                    // The one label here that is allowed to be cut, so the one
-                    // that needs a way back to the full text. Worst case is a
-                    // narrow pane carrying both chips at once.
                     title={title || undefined}
                 >
                     {title || batch.progress_primary}
                 </span>
-                {/* Without a title the headline keeps the shape it had: the
-                    count leads and its context follows. */}
                 {!title && batch.progress_secondary && (
                     <span className="font-color-secondary text-sm truncate">
                         {batch.progress_secondary}
                     </span>
                 )}
-                {/* Against the title, not opposite it. "Editing items" and
-                    "94 of 184" are one statement; a justified row sets them
-                    200px apart in a pane barely wider than that, and the pair
-                    stops reading as a sentence. Everything the line has to say
-                    is one left-flowing group; only the chevron is furniture and
-                    only the chevron is anchored right. */}
                 {title && (
                     <span className="font-color-secondary text-sm flex-none">
                         {batch.progress_primary}
                     </span>
                 )}
-                {/* Only a non-default state earns a chip. */}
                 {hasFailures && (
                     <span
                         className="text-sm font-color-orange flex-none"
@@ -241,11 +170,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                         {`${failed.toLocaleString()} failed`}
                     </span>
                 )}
-                {/* The mark answers "is it over"; the colour answers "how did
-                    it go". Withholding it on failures left the only end-of-run
-                    signal missing exactly when the run had something to report,
-                    and a green tick beside a failure chip would claim the batch
-                    was done rather than merely finished. */}
+                {/* Orange on failure so a green tick does not claim success. */}
                 {isOver && (
                     <Icon
                         icon={TickIcon}
@@ -260,8 +185,6 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                 />
                 </div>
 
-                {/* Indented to the title, so the queue reads as a continuation
-                    of the line above rather than as a second batch. */}
                 {queued && (
                     <div
                         className="font-color-secondary text-sm truncate opacity-60"
@@ -273,8 +196,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
             </div>
 
             {isExpanded && (
-                /* Bounded and scrollable, because the composer block this sits
-                   in never shrinks. */
+                /* Bounded: the composer block this sits in never shrinks. */
                 <div
                     className="display-flex flex-col gap-5 px-3 pb-3 min-w-0"
                     style={{
@@ -295,41 +217,6 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
 
                     <BatchFailureReasonBlock batch={batch} heading={FAILURE_HEADING} />
 
-                    {hasReview && (
-                        <div className="display-flex flex-col gap-1 min-w-0 pt-2 border-top-quinary">
-                            <BatchBlockHeading>{REVIEW_HEADING}</BatchBlockHeading>
-                            {reviewPending > 0 && (
-                                <div className="display-flex flex-row items-center gap-2 text-sm min-w-0">
-                                    <span className="font-color-primary font-medium flex-none">
-                                        {reviewPending.toLocaleString()}
-                                    </span>
-                                    <span className="font-color-secondary truncate">
-                                        proposed, not yet applied
-                                    </span>
-                                    <div className="flex-1" />
-                                    {review?.onReview && (
-                                        <a
-                                            href="#"
-                                            className="text-sm font-color-accent-blue flex-none"
-                                            onClick={(e) => {
-                                                e.preventDefault();
-                                                e.stopPropagation();
-                                                review.onReview?.();
-                                            }}
-                                        >
-                                            Review
-                                        </a>
-                                    )}
-                                </div>
-                            )}
-                            {reviewRejected > 0 && (
-                                <div className="text-sm font-color-secondary">
-                                    {`${reviewRejected.toLocaleString()} you rejected`}
-                                </div>
-                            )}
-                        </div>
-                    )}
-
                     {otherShown.length > 0 && (
                         <div className="display-flex flex-col gap-1 min-w-0">
                             <BatchBlockHeading>{WAITING_HEADING}</BatchBlockHeading>
@@ -343,16 +230,10 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                                             icon={LayersIcon}
                                             className="font-color-secondary flex-none scale-90"
                                         />
-                                        {/* Same order as the tracked bar. */}
                                         <span className="font-color-primary font-medium opacity-80 truncate">
                                             {entry.progress_title?.trim() ||
                                                 entry.progress_primary}
                                         </span>
-                                        {/* Grouped left like the tracked row.
-                                            A right-aligned column would scan
-                                            marginally better across rows, but
-                                            not at the price of the list and the
-                                            line above it being set differently. */}
                                         <span className="font-color-secondary flex-none">
                                             {entry.progress_title?.trim()
                                                 ? entry.progress_primary
@@ -360,10 +241,6 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                                         </span>
                                         <div className="flex-1" />
                                     </div>
-                                    {/* The only thing that separates two
-                                        batches of one operation over different
-                                        populations, and the reason this list
-                                        exists rather than a longer teaser. */}
                                     {entry.goal && (
                                         <div
                                             className="font-color-secondary truncate opacity-60"

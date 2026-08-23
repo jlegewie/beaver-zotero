@@ -2,22 +2,12 @@
  * Batch progress, as the client reads it back off the run.
  *
  * The backend stamps `metadata.batch_progress` on every watched tool return
- * while a batch is open. A tool return is already both a live WebSocket frame
- * and a persisted message part, so one field carries live progress and durable
- * progress at once — a reload, a restart or a different machine all recover the
- * same state with no backfill and no extra request.
+ * while a batch is open. Newest stamp wins — everything before it describes a
+ * batch that has since moved on.
  *
- * The rule for reading it is the same one the backend uses to find the ledger:
- * **the newest stamp wins**. Everything before it describes a batch that has
- * since moved on.
- *
- * Every user-facing string here is composed backend-side and rendered verbatim,
- * exactly as on the approval card and the batch result card. A client owns its
- * own headings and its own layout, and nothing else — the three surfaces must
- * not be able to describe one batch differently. That now includes collection
- * NAMES: the backend composes them from the `collection_names` this client
- * returns while validating an `organize_items` action, so no surface resolves a
- * key at render time or at the run-state boundary.
+ * User-facing strings are composed backend-side and rendered verbatim, so the
+ * progress bar, approval card, and result card cannot describe one batch
+ * differently. Collection names included: no surface resolves a key.
  */
 
 import type { AgentRun, ModelMessage } from '../agents/types';
@@ -28,33 +18,20 @@ export type BatchProgressStatus = 'active' | 'completed' | 'failed_out' | 'cance
 /**
  * One row of a batch's outcome distribution.
  *
- * What a row MEANS depends on the operation — a collection for `sort`, a tag
+ * What a row means depends on the operation — a collection for `sort`, a tag
  * for `tag`, a field name for `edit_metadata` — so the row carries no type of
- * its own and `tallyHeading` says which.
+ * its own and `tally_heading` says which.
  */
 export interface BatchOutcomeTally {
-    /**
-     * Text to show. Already the name a user knows a destination by: the
-     * backend composes `sort` labels from the `collection_names` this client
-     * returns during action validation, so nothing here needs a library lookup.
-     */
+    /** Already composed; no library lookup. */
     label: string;
     /** Items this row was recorded for. */
     count: number;
-    /**
-     * Stable identity behind the label when it has one — a Zotero collection
-     * key for `sort`. Absent otherwise. What makes two rows provably the same
-     * destination when their names collide.
-     */
+    /** Stable identity when names collide — a collection key for `sort`. */
     reference?: string;
-    /**
-     * The run brought this destination into existence rather than using one the
-     * user already had. The difference a distribution cannot be read without:
-     * a run that invents twelve collections looks identical to one that files
-     * into twelve existing ones until this is shown.
-     */
+    /** Destination created by this run, not one the user already had. */
     created?: boolean;
-    /** Something taken AWAY, never a destination. Rendered apart. */
+    /** Something taken away, never a destination. Rendered apart. */
     removal?: boolean;
 }
 
@@ -69,22 +46,15 @@ export interface BatchProgressEntry {
      */
     status?: BatchProgressStatus;
     /**
-     * Whether this batch is big enough to draw progress for. Decided backend-side
-     * from the operation's slice size; a client must not reimplement the rule.
+     * Whether this batch is big enough to draw progress for. Decided
+     * backend-side; a client must not reimplement the rule.
      */
     show_progress?: boolean;
-    /** This is the batch being worked, and the one the bar tracks. */
+    /** The batch being worked, and the one the bar tracks. */
     is_handover?: boolean;
     /**
-     * What the batch is DOING, e.g. "Filing items" while it runs and "Filed
-     * items" once it is over — the one thing the counts cannot say.
-     *
-     * Composed backend-side like every other user-facing string here, so an
-     * operation added there needs no client release and the three surfaces
-     * cannot name one batch differently. Absent from a record written before
-     * the field existed, and from any backend older than this client, so a
-     * renderer must degrade to the headline alone rather than substitute a
-     * title of its own.
+     * What the batch is doing, e.g. "Filing items". Composed backend-side.
+     * Absent on older records — fall back to the headline, do not invent a title.
      */
     progress_title?: string;
     /** Emphasised half of the headline, e.g. "109 of 184". Always set. */
@@ -99,25 +69,19 @@ export interface BatchProgressEntry {
     no_change?: number;
     failed?: number;
     /**
-     * Heading for the distribution. EMPTY (absent) for an operation that records
-     * no distribution — every call carries the same outcome label and a chart of
-     * it would be one bar at 100%. Hiding the block on this alone is what keeps
-     * the client from having to know which operations those are.
+     * Heading for the distribution. Absent for operations that record none —
+     * hide the block on this alone rather than hard-coding which those are.
      */
     tally_heading?: string;
     tallies?: BatchOutcomeTally[];
     tallies_overflow?: number;
     /**
-     * Sum across ALL rows, listed or not. Tallies count MEMBERSHIPS, not items —
-     * one item takes several tags — so this is what the rows are a share of, and
-     * never the item count.
+     * Sum across all rows, listed or not. Tallies count memberships, not items
+     * (one item can take several tags), so this is never the item count.
      */
     tallies_total?: number;
     removals?: BatchOutcomeTally[];
-    /**
-     * Why items could not be processed. Only operations whose failures a user
-     * can act on report any — `extract`, where a blind retry costs money.
-     */
+    /** Why items could not be processed. Only reported when a user can act on it. */
     failure_reasons?: BatchOutcomeTally[];
 }
 
@@ -153,26 +117,64 @@ function stampInMessage(message: ModelMessage): BatchProgressStamp | null {
     return null;
 }
 
-/**
- * The newest batch progress in a thread, or null when nothing has been stamped.
- *
- * Walks runs newest-first and stops at the first readable stamp. Deliberately
- * NOT an accumulation across runs: a stamp is a complete statement of every
- * batch that was open when it was written, so merging older ones back in would
- * resurrect batches that have since been cancelled or compacted away.
- *
- * Pure — no Zotero, no store, no I/O — so it can be exercised as a function.
- */
-export function selectBatchProgress(runs: readonly AgentRun[]): BatchProgressStamp | null {
+/** The newest stamp in a thread, with the run that carried it. */
+function newestStamp(
+    runs: readonly AgentRun[],
+): { stamp: BatchProgressStamp; runIndex: number } | null {
     for (let runIndex = runs.length - 1; runIndex >= 0; runIndex--) {
         const messages = runs[runIndex]?.model_messages;
         if (!messages?.length) continue;
         for (let index = messages.length - 1; index >= 0; index--) {
             const stamp = stampInMessage(messages[index]);
-            if (stamp) return stamp;
+            if (stamp) return { stamp, runIndex };
         }
     }
     return null;
+}
+
+/**
+ * The newest batch progress in a thread, or null when nothing has been stamped.
+ *
+ * Walks runs newest-first and stops at the first readable stamp. A stamp is a
+ * complete statement of every open batch, so this is not an accumulation —
+ * merging older stamps would resurrect cancelled or compacted batches.
+ *
+ * Use {@link selectLiveBatchProgress} for what a bar should still draw.
+ */
+export function selectBatchProgress(runs: readonly AgentRun[]): BatchProgressStamp | null {
+    return newestStamp(runs)?.stamp ?? null;
+}
+
+/**
+ * Whether a batch has ended. Absent `status` means `active` — the backend
+ * omits default-valued fields, so never compare with `=== 'active'`.
+ */
+export function hasBatchEnded(entry: BatchProgressEntry): boolean {
+    return (entry.status ?? 'active') !== 'active';
+}
+
+/**
+ * Batch progress a bar should still draw, or null when nothing was stamped.
+ *
+ * Newest stamp, minus batches that had already ended when a newer run started.
+ * A stamp is only written by a call that moves a batch, so a later run with no
+ * stamp leaves the previous one standing — right for an active batch (still
+ * open, must survive reload), wrong for an ended one (its bar would stay pinned
+ * above the composer for the rest of the thread).
+ *
+ * An active batch survives later runs. An ended batch is retired as soon as a
+ * later run exists.
+ */
+export function selectLiveBatchProgress(
+    runs: readonly AgentRun[],
+): BatchProgressStamp | null {
+    const newest = newestStamp(runs);
+    if (!newest) return null;
+    if (newest.runIndex === runs.length - 1) return newest.stamp;
+    const open = newest.stamp.batches.filter((entry) => !hasBatchEnded(entry));
+    // Keep the original stamp when nothing was dropped so derived atoms stay
+    // reference-equal.
+    return open.length === newest.stamp.batches.length ? newest.stamp : { batches: open };
 }
 
 /**

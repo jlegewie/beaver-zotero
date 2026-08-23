@@ -34,7 +34,7 @@ export { default as BatchApprovalCard } from './BatchApprovalCard';
 export type { BatchApprovalCardProps } from './BatchApprovalCard';
 
 export { default as BatchProgressBar } from './BatchProgressBar';
-export type { BatchProgressBarProps, BatchReviewStatus } from './BatchProgressBar';
+export type { BatchProgressBarProps } from './BatchProgressBar';
 
 export {
     BatchBlockHeading,

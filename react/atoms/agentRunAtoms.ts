@@ -163,7 +163,7 @@ import { undoEditAnnotationsAction } from '../utils/editAnnotationsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { upgradeToolReturn } from '../compat/legacyToolResults';
 import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
-import { selectBatchProgress } from '@beaver/agent-core/run-state/batchProgress';
+import { selectLiveBatchProgress } from '@beaver/agent-core/run-state/batchProgress';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom, recordAppliedActionsAtom } from './messageUIState';
 import { currentThreadNameAtom, loadThreadAtom } from './threads';
@@ -3237,11 +3237,9 @@ export const sendBatchApprovalResponseAtom = atom(
 );
 
 /**
- * Batch progress for the open thread, or null when no batch has been stamped.
+ * Batch progress for the open thread, or null when nothing has been stamped.
  *
- * Derived, never stored: the state of record is the newest
- * `metadata.batch_progress` in the thread's runs, which is exactly what
- * survives a reload, a restart or a move to another machine. A stored copy
- * would drift from it the moment a thread was reopened.
+ * Derived from the newest `metadata.batch_progress` via
+ * `selectLiveBatchProgress` — ended batches drop once a later run starts.
  */
-export const batchProgressAtom = atom((get) => selectBatchProgress(get(allRunsAtom)));
+export const batchProgressAtom = atom((get) => selectLiveBatchProgress(get(allRunsAtom)));

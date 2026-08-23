@@ -1,17 +1,12 @@
 /**
  * Dev-only HTTP handlers for inspecting the batch progress bar.
  *
- * The bar renders from `metadata.batch_progress` on a tool return, which only
- * a real batch run produces — and a real run of each operation costs credits,
- * takes minutes, and cannot be made to sit at an interesting state on demand.
- * These handlers stage a synthetic stamp into run state instead, so the bar can
- * be looked at in every operation and every ledger state without one.
+ * Stage a synthetic stamp into run state so the bar can be looked at without a
+ * real (credit-consuming) batch run. The stamp goes through the same selector
+ * and component as a backend stamp.
  *
- * Nothing here is a mock of the bar: the stamp goes through the same run state,
- * the same selector and the same component the backend's own stamp does. The
- * only thing faked is the run that produced it.
- *
- * Endpoints (wired in `useHttpEndpoints.ts`):
+ * An ended preview retires once a later run exists, same as a real batch —
+ * stage from an idle thread, or stage an active batch.
  *
  *   /beaver/test/batch-progress-preview  stage a synthetic stamp
  *   /beaver/test/batch-progress-clear    remove it again

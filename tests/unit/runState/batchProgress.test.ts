@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     isBatchProgressStamp,
     selectBatchProgress,
+    selectLiveBatchProgress,
     selectTrackedBatch,
 } from '@beaver/agent-core/run-state/batchProgress';
 import type {
@@ -147,6 +148,77 @@ describe('selectBatchProgress', () => {
         const good = stamp(entry({ progress_primary: '5 of 9' }));
         const result = selectBatchProgress([run('r1', [request(good), bad])]);
         expect(result?.batches[0].progress_primary).toBe('5 of 9');
+    });
+});
+
+describe('selectLiveBatchProgress', () => {
+    it('returns null when nothing has been stamped', () => {
+        expect(selectLiveBatchProgress([run('r1', [request(null)])])).toBeNull();
+    });
+
+    it('keeps a batch that ended in the newest run', () => {
+        const done = stamp(entry({ status: 'completed', progress_primary: '184 of 184' }));
+        const result = selectLiveBatchProgress([run('r1', [request(done)])]);
+        expect(result?.batches).toHaveLength(1);
+    });
+
+    it('drops a batch that ended before the newest run started', () => {
+        const done = stamp(entry({ status: 'completed' }));
+        const result = selectLiveBatchProgress([
+            run('r1', [request(done)]),
+            run('r2', [request(null)]),
+        ]);
+        expect(result?.batches).toEqual([]);
+        expect(selectTrackedBatch(result)).toBeNull();
+    });
+
+    it.each(['completed', 'failed_out', 'cancelled'] as const)(
+        'retires a %s batch once a later run exists',
+        (status) => {
+            const ended = stamp(entry({ status }));
+            const result = selectLiveBatchProgress([
+                run('r1', [request(ended)]),
+                run('r2', [request(null)]),
+            ]);
+            expect(result?.batches).toEqual([]);
+        },
+    );
+
+    it('keeps an active batch across later runs', () => {
+        const running = stamp(entry({ progress_primary: '40 of 184' }));
+        const result = selectLiveBatchProgress([
+            run('r1', [request(running)]),
+            run('r2', [request(null)]),
+            run('r3', [request(null)]),
+        ]);
+        expect(result?.batches[0].progress_primary).toBe('40 of 184');
+    });
+
+    it('keeps the open batches of a stamp and drops only the ended ones', () => {
+        const mixed = stamp(
+            entry({ batch_id: 'done', status: 'completed' }),
+            entry({ batch_id: 'open' }),
+        );
+        const result = selectLiveBatchProgress([
+            run('r1', [request(mixed)]),
+            run('r2', [request(null)]),
+        ]);
+        expect(result?.batches.map((b) => b.batch_id)).toEqual(['open']);
+    });
+
+    it('returns the stamp itself when nothing was dropped', () => {
+        // Reference equality — a rebuilt stamp would re-render derived atoms.
+        const running = stamp(entry());
+        const runs = [run('r1', [request(running)]), run('r2', [request(null)])];
+        expect(selectLiveBatchProgress(runs)).toBe(selectBatchProgress(runs));
+    });
+
+    it('treats a newer run with no messages as having moved on', () => {
+        // A run exists as soon as the user sends, before it has streamed anything.
+        const done = stamp(entry({ status: 'completed' }));
+        const starting = { id: 'r2', model_messages: [] } as unknown as AgentRun;
+        const result = selectLiveBatchProgress([run('r1', [request(done)]), starting]);
+        expect(result?.batches).toEqual([]);
     });
 });
 
