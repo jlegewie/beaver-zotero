@@ -137,7 +137,7 @@ export const BatchTallyRow: React.FC<{
                         border: '1px solid var(--tag-purple-tertiary)',
                         borderRadius: '3px',
                         padding: '0 3px',
-                        lineHeight: 1.5,
+                        lineHeight: 1.2,
                     }}
                     title="Created by this run"
                 >
@@ -196,7 +196,7 @@ export const BatchTallyBlock: React.FC<{
     if (overflow > 0) footnote.push(`+ ${overflow.toLocaleString()} more`);
 
     return (
-        <div className="display-flex flex-col gap-05 min-w-0">
+        <div className="display-flex flex-col gap-1 min-w-0">
             <BatchBlockHeading>{heading}</BatchBlockHeading>
             {tallies.map((row) => (
                 <BatchTallyRow
@@ -207,7 +207,7 @@ export const BatchTallyBlock: React.FC<{
                 />
             ))}
             {footnote.length > 0 && (
-                <div className="text-sm font-color-tertiary">{footnote.join(' · ')}</div>
+                <div className="text-sm font-color-secondary">{footnote.join(' · ')}</div>
             )}
         </div>
     );
@@ -228,7 +228,7 @@ export const BatchRemovalBlock: React.FC<{
     if (removals.length === 0) return null;
     const top = topCount(removals);
     return (
-        <div className="display-flex flex-col gap-05 min-w-0">
+        <div className="display-flex flex-col gap-1 min-w-0">
             <BatchBlockHeading>{heading}</BatchBlockHeading>
             {removals.map((row) => (
                 <BatchTallyRow
@@ -257,7 +257,7 @@ export const BatchFailureReasonBlock: React.FC<{
     const reasons = batch.failure_reasons ?? [];
     if (reasons.length === 0) return null;
     return (
-        <div className="display-flex flex-col gap-05 min-w-0">
+        <div className="display-flex flex-col gap-1 min-w-0">
             <BatchBlockHeading>{heading}</BatchBlockHeading>
             {reasons.map((row) => (
                 <div
@@ -265,7 +265,7 @@ export const BatchFailureReasonBlock: React.FC<{
                     className="display-flex flex-row items-baseline gap-2 text-sm min-w-0"
                 >
                     <span className="font-color-secondary flex-1 min-w-0">{row.label}</span>
-                    <span className="font-color-orange flex-none">{row.count}</span>
+                    <span className="font-color-secondary flex-none">{row.count}</span>
                 </div>
             ))}
         </div>

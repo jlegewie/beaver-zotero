@@ -15,7 +15,10 @@ import {
  */
 const ACTION_HEADING = 'Requested action';
 const INSTRUCTIONS_HEADING = 'Your instructions';
-const REMOVED_HEADING = 'Also removed';
+// Bare, and the same word the live bar uses: the block above it is headed in
+// the operation's own words, so "Also removed" pointed back at a heading that
+// never mentioned removal.
+const REMOVED_HEADING = 'Removed';
 const FAILURE_HEADING = 'Could not be read';
 const INCOMPLETE_HEADING = 'Not completed';
 

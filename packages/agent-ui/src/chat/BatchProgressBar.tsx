@@ -9,33 +9,29 @@ import {
     BatchTallyBlock,
 } from './BatchOutcomeBlocks';
 
-/**
- * Labels for the slots this bar lays out, as opposed to what goes in them.
- * Naming a slot is chrome; everything the slots hold is composed backend-side
- * and rendered verbatim, so the bar, the approval card and the result card
- * cannot describe one batch differently.
- */
+/** Labels for the slots this bar lays out. */
 const WAITING_HEADING = 'Waiting';
-const REMOVED_HEADING = 'Also removed';
+/**
+ * Things the batch took away, listed apart from where items went.
+ *
+ * Bare, and deliberately not "Also removed": the block above it is headed by
+ * the backend in the operation's own words ("Where items are going"), so
+ * "Also" pointed back at something that never mentioned removal.
+ *
+ * One word for every operation, because the direction is not the same one
+ * twice — `sort` rows are collections items were pulled OUT OF, `tag` rows are
+ * tags cleared FROM items — and a client that spelled that out would be
+ * keeping the per-operation wording table this record exists to avoid. The
+ * title above already says which operation is running, which is what makes the
+ * direction readable without stating it.
+ */
+const REMOVED_HEADING = 'Removed';
 const FAILURE_HEADING = 'Could not be read';
 const REVIEW_HEADING = 'Needs your review';
 /** Introduces the queue. Lower case: it continues the line above it. */
 const QUEUE_PREFIX = 'then ';
 
-/**
- * The queue, named rather than counted.
- *
- * Only one batch is ever worked — the backend hands over a single batch's ids
- * per turn — so the others are not running alongside it, they are waiting their
- * turn. Saying WHICH costs the same line a bare count would and answers the
- * question the count only raises.
- *
- * Batches that share a title collapse into "Editing items x2". Two batches of
- * one operation over different populations are a real case, and a list that
- * repeated the same words would read as a rendering bug. What actually tells
- * them apart is their goal, which has no room here — the expanded list gives
- * each its own row and shows it there.
- */
+/** The queue */
 function queueSummary(entries: readonly BatchProgressEntry[]): string {
     const counts = new Map<string, number>();
     for (const entry of entries) {
@@ -156,7 +152,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
 
     return (
         <div
-            className="batch-progress-bar bg-senary border-bottom-quarternary"
+            className="batch-progress-bar bg-senary border-bottom-quinary"
             style={{ position: 'relative' }}
             role="group"
             aria-label="Batch operation progress"
@@ -204,7 +200,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                     and the chips are each a fact that survives truncation
                     badly. */}
                 <span
-                    className={`font-color-primary font-medium text-sm ${title ? 'truncate' : 'flex-none'}`}
+                    className={`font-color-primary font-medium text-base ${title ? 'truncate' : 'flex-none'}`}
                     // The one label here that is allowed to be cut, so the one
                     // that needs a way back to the full text. Worst case is a
                     // narrow pane carrying both chips at once.
@@ -239,7 +235,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                             border: '1px solid var(--tag-orange-tertiary)',
                             borderRadius: '4px',
                             padding: '0 4px',
-                            lineHeight: 1.5,
+                            lineHeight: 1.2,
                         }}
                     >
                         {`${failed.toLocaleString()} failed`}
@@ -253,7 +249,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                 {isOver && (
                     <Icon
                         icon={TickIcon}
-                        className={`flex-none scale-11 ${hasFailures ? 'font-color-orange' : 'font-color-green'}`}
+                        className={`flex-none scale-12 ${hasFailures ? 'font-color-orange' : 'font-color-green'}`}
                     />
                 )}
                 <div className="flex-1" />
@@ -268,8 +264,8 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                     of the line above rather than as a second batch. */}
                 {queued && (
                     <div
-                        className="font-color-tertiary text-sm truncate"
-                        style={{ paddingLeft: 24 }}
+                        className="font-color-secondary text-sm truncate opacity-60"
+                        style={{ paddingLeft: 20 }}
                     >
                         {queued}
                     </div>
@@ -277,9 +273,18 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
             </div>
 
             {isExpanded && (
-                <div className="display-flex flex-col gap-4 px-3 pb-3 min-w-0">
+                /* Bounded and scrollable, because the composer block this sits
+                   in never shrinks. */
+                <div
+                    className="display-flex flex-col gap-5 px-3 pb-3 min-w-0"
+                    style={{
+                        maxHeight: 'max(120px, calc(100vh - 320px))',
+                        overflowY: 'auto',
+                        overflowX: 'hidden',
+                    }}
+                >
                     {batch.goal && (
-                        <div className="font-color-secondary text-sm">{batch.goal}</div>
+                        <div className="font-color-secondary text-base">{batch.goal}</div>
                     )}
 
                     <BatchProgressTrack batch={batch} />
@@ -291,7 +296,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                     <BatchFailureReasonBlock batch={batch} heading={FAILURE_HEADING} />
 
                     {hasReview && (
-                        <div className="display-flex flex-col gap-05 min-w-0 pt-2 border-top-quinary">
+                        <div className="display-flex flex-col gap-1 min-w-0 pt-2 border-top-quinary">
                             <BatchBlockHeading>{REVIEW_HEADING}</BatchBlockHeading>
                             {reviewPending > 0 && (
                                 <div className="display-flex flex-row items-center gap-2 text-sm min-w-0">
@@ -326,7 +331,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                     )}
 
                     {otherShown.length > 0 && (
-                        <div className="display-flex flex-col gap-05 min-w-0">
+                        <div className="display-flex flex-col gap-1 min-w-0">
                             <BatchBlockHeading>{WAITING_HEADING}</BatchBlockHeading>
                             {otherShown.map((entry) => (
                                 <div
@@ -336,10 +341,10 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                                     <div className="display-flex flex-row items-center gap-2 min-w-0">
                                         <Icon
                                             icon={LayersIcon}
-                                            className="font-color-tertiary flex-none scale-85"
+                                            className="font-color-secondary flex-none scale-90"
                                         />
                                         {/* Same order as the tracked bar. */}
-                                        <span className="font-color-primary font-medium truncate">
+                                        <span className="font-color-primary font-medium opacity-80 truncate">
                                             {entry.progress_title?.trim() ||
                                                 entry.progress_primary}
                                         </span>
@@ -361,8 +366,8 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                                         exists rather than a longer teaser. */}
                                     {entry.goal && (
                                         <div
-                                            className="font-color-tertiary truncate"
-                                            style={{ paddingLeft: 22 }}
+                                            className="font-color-secondary truncate opacity-60"
+                                            style={{ paddingLeft: 18 }}
                                         >
                                             {entry.goal}
                                         </div>
