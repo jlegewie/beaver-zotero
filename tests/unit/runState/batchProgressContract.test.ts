@@ -11,6 +11,7 @@ import editMetadataStamp from './fixtures/batchProgress-edit_metadata.json';
 import annotateStamp from './fixtures/batchProgress-annotate.json';
 import extractStamp from './fixtures/batchProgress-extract.json';
 import createNotesStamp from './fixtures/batchProgress-create_notes.json';
+import completedStamp from './fixtures/batchProgress-completed.json';
 
 /**
  * The wire contract, against payloads the BACKEND actually produced.
@@ -41,9 +42,10 @@ describe('backend payload contract', () => {
         expect(isBatchProgressStamp(stamp)).toBe(true);
         const tracked = selectTrackedBatch(stamp as BatchProgressStamp);
         expect(tracked).not.toBeNull();
-        // The four things the collapsed bar renders. A backend rename of any of
+        // The things the collapsed bar renders. A backend rename of any of
         // them shows up here rather than as a blank row.
         expect(tracked!.operation).toBe(name);
+        expect(tracked!.progress_title).toBeTruthy();
         expect(tracked!.progress_primary).toMatch(/\d/);
         expect(tracked!.progress_secondary).toBeTruthy();
         expect(tracked!.total).toBeGreaterThan(0);
@@ -56,6 +58,47 @@ describe('backend payload contract', () => {
         for (const stamp of Object.values(FIXTURES)) {
             expect(selectTrackedBatch(stamp as BatchProgressStamp)).not.toBeNull();
         }
+    });
+});
+
+describe('the title, which is the only thing the counts cannot say', () => {
+    it.each([
+        ['sort', 'Filing items'],
+        ['tag', 'Tagging'],
+        ['extract', 'Reading'],
+        ['annotate', 'Annotating'],
+        ['edit_metadata', 'Editing items'],
+        ['create_notes', 'Writing notes'],
+    ])('names what a running %s batch is doing', (name, expected) => {
+        const tracked = selectTrackedBatch(FIXTURES[name] as BatchProgressStamp)!;
+        expect(tracked.progress_title).toBe(expected);
+    });
+
+    it('moves to the past once the batch is over', () => {
+        // The bar outlives the batch by design, so a present participle beside
+        // a completed tick would read as work still going on.
+        const tracked = selectTrackedBatch(completedStamp as BatchProgressStamp)!;
+        expect(tracked.status).toBe('completed');
+        expect(tracked.progress_title).toBe('Filed items');
+    });
+
+    it('stays short enough to share one line with the count', () => {
+        // The bar is one line in a narrow sidebar and the title shares it with
+        // the count and, when things go wrong, a failure chip.
+        for (const stamp of [...Object.values(FIXTURES), completedStamp]) {
+            const tracked = selectTrackedBatch(stamp as BatchProgressStamp)!;
+            expect(tracked.progress_title!.length).toBeLessThanOrEqual(14);
+        }
+    });
+
+    it('is optional, so an older backend still renders', () => {
+        // The plugin ships against a backend that may not have deployed this
+        // field yet. The bar falls back to the headline; nothing must require
+        // the title to be present.
+        const { progress_title: _omitted, ...withoutTitle } = selectTrackedBatch(
+            sortStamp as BatchProgressStamp,
+        )!;
+        expect(isBatchProgressStamp({ batches: [withoutTitle] })).toBe(true);
     });
 });
 

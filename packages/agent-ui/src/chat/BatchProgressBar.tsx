@@ -15,10 +15,39 @@ import {
  * and rendered verbatim, so the bar, the approval card and the result card
  * cannot describe one batch differently.
  */
-const ALSO_RUNNING_HEADING = 'Also running';
+const WAITING_HEADING = 'Waiting';
 const REMOVED_HEADING = 'Also removed';
 const FAILURE_HEADING = 'Could not be read';
 const REVIEW_HEADING = 'Needs your review';
+/** Introduces the queue. Lower case: it continues the line above it. */
+const QUEUE_PREFIX = 'then ';
+
+/**
+ * The queue, named rather than counted.
+ *
+ * Only one batch is ever worked — the backend hands over a single batch's ids
+ * per turn — so the others are not running alongside it, they are waiting their
+ * turn. Saying WHICH costs the same line a bare count would and answers the
+ * question the count only raises.
+ *
+ * Batches that share a title collapse into "Editing items x2". Two batches of
+ * one operation over different populations are a real case, and a list that
+ * repeated the same words would read as a rendering bug. What actually tells
+ * them apart is their goal, which has no room here — the expanded list gives
+ * each its own row and shows it there.
+ */
+function queueSummary(entries: readonly BatchProgressEntry[]): string {
+    const counts = new Map<string, number>();
+    for (const entry of entries) {
+        const label = entry.progress_title?.trim() || entry.progress_primary;
+        counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+    const parts = [...counts].map(([label, count]) =>
+        count > 1 ? `${label} ×${count}` : label,
+    );
+    return parts.length ? QUEUE_PREFIX + parts.join(', ') : '';
+}
+
 /**
  * Changes this batch proposed that the user has not applied yet.
  *
@@ -91,7 +120,11 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
     const resolved = batch.resolved ?? 0;
     const noChange = batch.no_change ?? 0;
     const failed = batch.failed ?? 0;
-    const isFinished = status === 'completed';
+    // The two terminal states that reach a client (`cancelled` batches are
+    // dropped from the stamp backend-side). Both are over, and the bar must say
+    // so: without this a finished batch with failures is indistinguishable from
+    // one still failing its way through the population.
+    const isOver = status === 'completed' || status === 'failed_out';
     const hasFailures = failed > 0 || status === 'failed_out';
 
     const share = (count: number) => (total > 0 ? (count / total) * 100 : 0);
@@ -108,7 +141,15 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
         </>
     );
 
+    // Absent from a record written before the field existed, and from any
+    // backend older than this client. The bar then falls back to the headline
+    // it has always shown rather than naming the operation itself: a title
+    // composed here could disagree with the approval and result cards, which
+    // is the one thing this record's wording rules exist to prevent.
+    const title = batch.progress_title?.trim();
+
     const otherShown = otherBatches.filter((entry) => entry.show_progress);
+    const queued = queueSummary(otherShown);
     const reviewPending = review?.pending ?? 0;
     const reviewRejected = review?.rejected ?? 0;
     const hasReview = reviewPending > 0 || reviewRejected > 0;
@@ -131,7 +172,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                     left: 0,
                     right: 0,
                     height: 2,
-                    opacity: isFinished ? 0 : 1,
+                    opacity: isOver ? 0 : 1,
                     overflow: 'hidden',
                     pointerEvents: 'none',
                     transition: 'opacity 0.7s ease',
@@ -140,26 +181,53 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                 aria-valuemin={0}
                 aria-valuemax={total}
                 aria-valuenow={resolved + noChange}
-                aria-valuetext={`${batch.progress_primary} ${batch.progress_secondary ?? ''}`.trim()}
+                aria-valuetext={[title, batch.progress_primary, title ? '' : batch.progress_secondary]
+                    .filter(Boolean)
+                    .join(' ')}
             >
                 {segments}
             </div>
 
             <div
-                className="display-flex flex-row items-center gap-2 px-3 py-2 cursor-pointer"
+                className="display-flex flex-col px-3 py-2 cursor-pointer"
                 onClick={toggle}
                 onKeyDown={onKeyDown}
                 role="button"
                 tabIndex={0}
                 aria-expanded={isExpanded}
             >
+                <div className="display-flex flex-row items-center gap-2 min-w-0">
                 <Icon icon={LayersIcon} className="font-color-secondary flex-none" />
-                <span className="font-color-primary font-medium text-sm">
-                    {batch.progress_primary}
+                {/* What the batch is doing leads, because the counts already
+                    answer "how far" and nothing else answers "at what". It is
+                    also the only part of the line that may be cut: the count
+                    and the chips are each a fact that survives truncation
+                    badly. */}
+                <span
+                    className={`font-color-primary font-medium text-sm ${title ? 'truncate' : 'flex-none'}`}
+                    // The one label here that is allowed to be cut, so the one
+                    // that needs a way back to the full text. Worst case is a
+                    // narrow pane carrying both chips at once.
+                    title={title || undefined}
+                >
+                    {title || batch.progress_primary}
                 </span>
-                {batch.progress_secondary && (
+                {/* Without a title the headline keeps the shape it had: the
+                    count leads and its context follows. */}
+                {!title && batch.progress_secondary && (
                     <span className="font-color-secondary text-sm truncate">
                         {batch.progress_secondary}
+                    </span>
+                )}
+                {/* Against the title, not opposite it. "Editing items" and
+                    "94 of 184" are one statement; a justified row sets them
+                    200px apart in a pane barely wider than that, and the pair
+                    stops reading as a sentence. Everything the line has to say
+                    is one left-flowing group; only the chevron is furniture and
+                    only the chevron is anchored right. */}
+                {title && (
+                    <span className="font-color-secondary text-sm flex-none">
+                        {batch.progress_primary}
                     </span>
                 )}
                 {/* Only a non-default state earns a chip. */}
@@ -177,22 +245,16 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                         {`${failed.toLocaleString()} failed`}
                     </span>
                 )}
-                {isFinished && !hasFailures && (
-                    <Icon icon={TickIcon} className="font-color-green flex-none scale-11" />
-                )}
-                {otherShown.length > 0 && (
-                    <span
-                        className="text-sm font-color-secondary flex-none"
-                        style={{
-                            backgroundColor: 'var(--fill-quinary)',
-                            border: '1px solid var(--fill-quarternary)',
-                            borderRadius: '4px',
-                            padding: '0 4px',
-                            lineHeight: 1.5,
-                        }}
-                    >
-                        {`+${otherShown.length} batch${otherShown.length === 1 ? '' : 'es'}`}
-                    </span>
+                {/* The mark answers "is it over"; the colour answers "how did
+                    it go". Withholding it on failures left the only end-of-run
+                    signal missing exactly when the run had something to report,
+                    and a green tick beside a failure chip would claim the batch
+                    was done rather than merely finished. */}
+                {isOver && (
+                    <Icon
+                        icon={TickIcon}
+                        className={`flex-none scale-11 ${hasFailures ? 'font-color-orange' : 'font-color-green'}`}
+                    />
                 )}
                 <div className="flex-1" />
                 <Icon
@@ -200,6 +262,18 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                     className="font-color-secondary flex-none scale-85 transition"
                     style={{ transform: isExpanded ? 'rotate(180deg)' : undefined }}
                 />
+                </div>
+
+                {/* Indented to the title, so the queue reads as a continuation
+                    of the line above rather than as a second batch. */}
+                {queued && (
+                    <div
+                        className="font-color-tertiary text-sm truncate"
+                        style={{ paddingLeft: 24 }}
+                    >
+                        {queued}
+                    </div>
+                )}
             </div>
 
             {isExpanded && (
@@ -253,22 +327,46 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
 
                     {otherShown.length > 0 && (
                         <div className="display-flex flex-col gap-05 min-w-0">
-                            <BatchBlockHeading>{ALSO_RUNNING_HEADING}</BatchBlockHeading>
+                            <BatchBlockHeading>{WAITING_HEADING}</BatchBlockHeading>
                             {otherShown.map((entry) => (
                                 <div
                                     key={entry.batch_id}
-                                    className="display-flex flex-row items-center gap-2 text-sm min-w-0"
+                                    className="display-flex flex-col min-w-0 text-sm"
                                 >
-                                    <Icon
-                                        icon={LayersIcon}
-                                        className="font-color-tertiary flex-none scale-85"
-                                    />
-                                    <span className="font-color-primary font-medium flex-none">
-                                        {entry.progress_primary}
-                                    </span>
-                                    <span className="font-color-secondary truncate">
-                                        {entry.progress_secondary}
-                                    </span>
+                                    <div className="display-flex flex-row items-center gap-2 min-w-0">
+                                        <Icon
+                                            icon={LayersIcon}
+                                            className="font-color-tertiary flex-none scale-85"
+                                        />
+                                        {/* Same order as the tracked bar. */}
+                                        <span className="font-color-primary font-medium truncate">
+                                            {entry.progress_title?.trim() ||
+                                                entry.progress_primary}
+                                        </span>
+                                        {/* Grouped left like the tracked row.
+                                            A right-aligned column would scan
+                                            marginally better across rows, but
+                                            not at the price of the list and the
+                                            line above it being set differently. */}
+                                        <span className="font-color-secondary flex-none">
+                                            {entry.progress_title?.trim()
+                                                ? entry.progress_primary
+                                                : entry.progress_secondary}
+                                        </span>
+                                        <div className="flex-1" />
+                                    </div>
+                                    {/* The only thing that separates two
+                                        batches of one operation over different
+                                        populations, and the reason this list
+                                        exists rather than a longer teaser. */}
+                                    {entry.goal && (
+                                        <div
+                                            className="font-color-tertiary truncate"
+                                            style={{ paddingLeft: 22 }}
+                                        >
+                                            {entry.goal}
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                         </div>

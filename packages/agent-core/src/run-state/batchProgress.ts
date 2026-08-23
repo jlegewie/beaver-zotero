@@ -75,6 +75,18 @@ export interface BatchProgressEntry {
     show_progress?: boolean;
     /** This is the batch being worked, and the one the bar tracks. */
     is_handover?: boolean;
+    /**
+     * What the batch is DOING, e.g. "Filing items" while it runs and "Filed
+     * items" once it is over — the one thing the counts cannot say.
+     *
+     * Composed backend-side like every other user-facing string here, so an
+     * operation added there needs no client release and the three surfaces
+     * cannot name one batch differently. Absent from a record written before
+     * the field existed, and from any backend older than this client, so a
+     * renderer must degrade to the headline alone rather than substitute a
+     * title of its own.
+     */
+    progress_title?: string;
     /** Emphasised half of the headline, e.g. "109 of 184". Always set. */
     progress_primary: string;
     /** Context half, e.g. "items filed". */
