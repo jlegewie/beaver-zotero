@@ -61,8 +61,9 @@ describe('isBatchProgressStamp', () => {
         expect(isBatchProgressStamp({ batches: 'nope' })).toBe(false);
     });
 
-    it('leaves entry validation to the read step', () => {
-        expect(isBatchProgressStamp({ batches: [{ batch_id: 'b1' }] })).toBe(true);
+    it('rejects a stamp with an unrenderable entry', () => {
+        expect(isBatchProgressStamp({ batches: [{ batch_id: 'b1' }] })).toBe(false);
+        expect(isBatchProgressStamp({ batches: [null] })).toBe(false);
     });
 });
 
@@ -75,6 +76,14 @@ describe('readBatchProgressStamp', () => {
     it('drops an entry missing the headline the bar renders', () => {
         const value = { batches: [{ batch_id: 'bad' }, entry({ batch_id: 'good' })] };
         expect(readBatchProgressStamp(value)?.batches.map((b) => b.batch_id)).toEqual(['good']);
+    });
+
+    it('drops a null entry without exposing it to selectors', () => {
+        const value = { batches: [null, entry({ batch_id: 'good' })] };
+        const result = readBatchProgressStamp(value);
+
+        expect(result?.batches.map((b) => b.batch_id)).toEqual(['good']);
+        expect(() => selectTrackedBatch(result)).not.toThrow();
     });
 
     it('returns an empty stamp when no entry is renderable', () => {

@@ -94,6 +94,10 @@ export interface BatchProgressStamp {
     batches: BatchProgressEntry[];
 }
 
+interface BatchProgressContainer {
+    batches: unknown[];
+}
+
 /** Whether an entry carries the fields the bar cannot render without. */
 function isRenderableEntry(entry: unknown): entry is BatchProgressEntry {
     return (
@@ -107,7 +111,17 @@ function isRenderableEntry(entry: unknown): entry is BatchProgressEntry {
 /** Narrow an unknown metadata value to a {@link BatchProgressStamp}. */
 export function isBatchProgressStamp(value: unknown): value is BatchProgressStamp {
     if (!value || typeof value !== 'object') return false;
-    return Array.isArray((value as { batches?: unknown }).batches);
+    const batches = (value as { batches?: unknown }).batches;
+    return Array.isArray(batches) && batches.every(isRenderableEntry);
+}
+
+/** Whether a value has the stamp container shape, without validating its entries. */
+function isBatchProgressContainer(value: unknown): value is BatchProgressContainer {
+    return (
+        !!value &&
+        typeof value === 'object' &&
+        Array.isArray((value as { batches?: unknown }).batches)
+    );
 }
 
 /**
@@ -118,9 +132,9 @@ export function isBatchProgressStamp(value: unknown): value is BatchProgressStam
  * keeps its readable siblings. An empty result still supersedes.
  */
 export function readBatchProgressStamp(value: unknown): BatchProgressStamp | null {
-    if (!isBatchProgressStamp(value)) return null;
-    const usable = value.batches.filter(isRenderableEntry);
-    return usable.length === value.batches.length ? value : { batches: usable };
+    if (!isBatchProgressContainer(value)) return null;
+    if (isBatchProgressStamp(value)) return value;
+    return { batches: value.batches.filter(isRenderableEntry) };
 }
 
 /** The stamp a message's tool returns carry, latest part first. */
