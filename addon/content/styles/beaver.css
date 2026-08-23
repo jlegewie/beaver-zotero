@@ -274,14 +274,22 @@
     border-radius: 0;
 }
 
+/* The batch receipt - the same completed rows, kept under a terminal run instead
+   of above the composer - is a card in the transcript, so it needs none of the
+   composer bleed the panel variant does. It clips its own corners in
+   `BatchDoneRows`, not here: the component is shared, and a client without these
+   panes must get the same card. */
+
 /* The whole collapsed row is the disclosure control. */
 [id^="beaver-pane-"] .batch-progress-bar [role="button"]:hover,
-[id^="beaver-pane-"] .batch-done-rows [role="button"]:hover {
+[id^="beaver-pane-"] .batch-done-rows [role="button"]:hover,
+[id^="beaver-pane-"] .batch-run-receipt [role="button"]:hover {
     background-color: var(--fill-quinary);
 }
 
 [id^="beaver-pane-"] .batch-progress-bar [role="button"]:focus-visible,
-[id^="beaver-pane-"] .batch-done-rows [role="button"]:focus-visible {
+[id^="beaver-pane-"] .batch-done-rows [role="button"]:focus-visible,
+[id^="beaver-pane-"] .batch-run-receipt [role="button"]:focus-visible {
     outline: none;
     box-shadow: inset 0 0 0 1px var(--fill-tertiary);
 }

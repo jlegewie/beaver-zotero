@@ -289,21 +289,36 @@ export const BatchFailureChip: React.FC<{ batch: BatchProgressEntry }> = ({ batc
  * The body behind every disclosure that expands a batch, shared for the same
  * reason the blocks are — the live bar and the completed row it turns into must
  * not describe one batch differently.
- *
- * Bounded: the composer block this sits in never shrinks.
  */
 export const BatchOutcomeBody: React.FC<{
     batch: BatchProgressEntry;
-    /** Appended inside the same scroll box — what is one caller's alone. */
+    /**
+     * Scroll inside a viewport-relative cap rather than growing. For the
+     * composer block, which never shrinks and would otherwise be pushed down
+     * the pane. False in the transcript, which scrolls already: a second
+     * scroller nested inside it would swallow the wheel, and a `100vh` bound
+     * means nothing there.
+     *
+     * Unbounded leaves overflow alone entirely rather than clipping one axis:
+     * `overflow-x: hidden` beside a visible `overflow-y` computes the latter to
+     * `auto`, which is a scroll container again the moment anything caps the
+     * height. The container clips instead — see `.batch-run-receipt`.
+     */
+    bounded?: boolean;
+    /** Appended inside the same box — what is one caller's alone. */
     children?: React.ReactNode;
-}> = ({ batch, children }) => (
+}> = ({ batch, bounded = true, children }) => (
     <div
         className="display-flex flex-col gap-5 px-3 pb-3 min-w-0"
-        style={{
-            maxHeight: 'max(120px, calc(100vh - 320px))',
-            overflowY: 'auto',
-            overflowX: 'hidden',
-        }}
+        style={
+            bounded
+                ? {
+                      maxHeight: 'max(120px, calc(100vh - 320px))',
+                      overflowY: 'auto',
+                      overflowX: 'hidden',
+                  }
+                : undefined
+        }
     >
         {batch.goal && <div className="font-color-secondary text-base">{batch.goal}</div>}
         <BatchProgressTrack batch={batch} />

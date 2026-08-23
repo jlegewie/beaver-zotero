@@ -16,6 +16,7 @@ import { toolResultsMapAtom, resumedRunIdsAtom } from '@beaver/agent-core/run-st
 import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
 import { streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { getHost } from '@beaver/agent-ui/host';
+import BatchRunReceipt from '@beaver/agent-ui/chat/BatchRunReceipt';
 
 interface AgentRunViewProps {
     run: AgentRun;
@@ -147,6 +148,11 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 <AgentRunFooter run={run} />
             )}
 
+
+            {/* What this run's batch operations ended up doing. Above the review
+                card so the two read as summary then detail: what the batch did,
+                then what there is to decide about it. */}
+            {isTerminal && <BatchRunReceipt run={run} />}
 
             {/* Agent actions (e.g., create item from citations) — client-specific
                 UI injected by the host; absent for clients without it. */}

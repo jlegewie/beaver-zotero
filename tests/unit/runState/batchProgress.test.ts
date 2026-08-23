@@ -5,6 +5,7 @@ import {
     selectBatchProgress,
     selectBatchPanelGroups,
     selectLiveBatchProgress,
+    selectRunBatchOutcomes,
     selectTrackedBatch,
 } from '@beaver/agent-core/run-state/batchProgress';
 import type {
@@ -43,8 +44,16 @@ function request(...stamps: (BatchProgressStamp | null)[]): ModelMessage {
     } as unknown as ModelMessage;
 }
 
-function run(id: string, messages: ModelMessage[]): AgentRun {
-    return { id, model_messages: messages } as unknown as AgentRun;
+/**
+ * A run, still going unless a status says otherwise: an ended batch is live
+ * only while the run that finished it is.
+ */
+function run(
+    id: string,
+    messages: ModelMessage[],
+    status: AgentRun['status'] = 'in_progress',
+): AgentRun {
+    return { id, status, model_messages: messages } as unknown as AgentRun;
 }
 
 describe('isBatchProgressStamp', () => {
@@ -267,16 +276,56 @@ describe('selectLiveBatchProgress', () => {
         expect(selectLiveBatchProgress([run('r1', [request(null)])])).toBeNull();
     });
 
-    it('keeps a batch that ended in the newest run', () => {
+    it('keeps a batch that ended in the run still going', () => {
         const done = stamp(entry({ status: 'completed', progress_primary: '184 of 184' }));
         const result = selectLiveBatchProgress([run('r1', [request(done)])]);
+        expect(result?.batches).toHaveLength(1);
+    });
+
+    it.each(['completed', 'error', 'canceled'] as const)(
+        'hands an ended batch to the receipt once its run is %s',
+        (status) => {
+            // Otherwise it would be drawn twice at once: above the composer and,
+            // a few lines up, under the run that just ended.
+            const done = stamp(entry({ status: 'completed' }));
+            const result = selectLiveBatchProgress([run('r1', [request(done)], status)]);
+            expect(result?.batches).toEqual([]);
+        },
+    );
+
+    it('keeps an ended batch while its run holds for an approval', () => {
+        // `awaiting_deferred` is not terminal, so the run has not ended and no
+        // receipt is drawn for it yet.
+        const done = stamp(entry({ status: 'completed' }));
+        const result = selectLiveBatchProgress([
+            run('r1', [request(done)], 'awaiting_deferred'),
+        ]);
+        expect(result?.batches).toHaveLength(1);
+    });
+
+    it('keeps an ended batch while its carrying run is live, last run or not', () => {
+        // The panel gives an ended batch up on exactly the condition the receipt
+        // takes it on, so this is the case that would otherwise fall through
+        // both: a carrier that is not the newest run and has not finished.
+        const done = stamp(entry({ status: 'completed' }));
+        const result = selectLiveBatchProgress([
+            run('r1', [request(done)], 'in_progress'),
+            run('r2', [request(null)]),
+        ]);
+        expect(result?.batches).toHaveLength(1);
+    });
+
+    it('keeps an open batch in the panel after its run ends', () => {
+        // Nothing has finished it, so there is no receipt to hand it to.
+        const running = stamp(entry({ progress_primary: '40 of 184' }));
+        const result = selectLiveBatchProgress([run('r1', [request(running)], 'completed')]);
         expect(result?.batches).toHaveLength(1);
     });
 
     it('drops a batch that ended before the newest run started', () => {
         const done = stamp(entry({ status: 'completed' }));
         const result = selectLiveBatchProgress([
-            run('r1', [request(done)]),
+            run('r1', [request(done)], 'completed'),
             run('r2', [request(null)]),
         ]);
         expect(result?.batches).toEqual([]);
@@ -288,7 +337,7 @@ describe('selectLiveBatchProgress', () => {
         (status) => {
             const ended = stamp(entry({ status }));
             const result = selectLiveBatchProgress([
-                run('r1', [request(ended)]),
+                run('r1', [request(ended)], 'completed'),
                 run('r2', [request(null)]),
             ]);
             expect(result?.batches).toEqual([]);
@@ -298,8 +347,8 @@ describe('selectLiveBatchProgress', () => {
     it('keeps an active batch across later runs', () => {
         const running = stamp(entry({ progress_primary: '40 of 184' }));
         const result = selectLiveBatchProgress([
-            run('r1', [request(running)]),
-            run('r2', [request(null)]),
+            run('r1', [request(running)], 'completed'),
+            run('r2', [request(null)], 'completed'),
             run('r3', [request(null)]),
         ]);
         expect(result?.batches[0].progress_primary).toBe('40 of 184');
@@ -311,7 +360,7 @@ describe('selectLiveBatchProgress', () => {
             entry({ batch_id: 'open' }),
         );
         const result = selectLiveBatchProgress([
-            run('r1', [request(mixed)]),
+            run('r1', [request(mixed)], 'completed'),
             run('r2', [request(null)]),
         ]);
         expect(result?.batches.map((b) => b.batch_id)).toEqual(['open']);
@@ -320,16 +369,117 @@ describe('selectLiveBatchProgress', () => {
     it('returns the stamp itself when nothing was dropped', () => {
         // Reference equality — a rebuilt stamp would re-render derived atoms.
         const running = stamp(entry());
-        const runs = [run('r1', [request(running)]), run('r2', [request(null)])];
+        const runs = [run('r1', [request(running)], 'completed'), run('r2', [request(null)])];
+        expect(selectLiveBatchProgress(runs)).toBe(selectBatchProgress(runs));
+    });
+
+    it('returns the stamp itself when a terminal run ended nothing', () => {
+        const running = stamp(entry());
+        const runs = [run('r1', [request(running)], 'completed')];
         expect(selectLiveBatchProgress(runs)).toBe(selectBatchProgress(runs));
     });
 
     it('treats a newer run with no messages as having moved on', () => {
         // A run exists as soon as the user sends, before it has streamed anything.
         const done = stamp(entry({ status: 'completed' }));
-        const starting = { id: 'r2', model_messages: [] } as unknown as AgentRun;
-        const result = selectLiveBatchProgress([run('r1', [request(done)]), starting]);
+        const starting = { id: 'r2', status: 'in_progress', model_messages: [] } as unknown as AgentRun;
+        const result = selectLiveBatchProgress([run('r1', [request(done)], 'completed'), starting]);
         expect(result?.batches).toEqual([]);
+    });
+});
+
+describe('selectRunBatchOutcomes', () => {
+    it('returns nothing for a run that stamped no batch', () => {
+        expect(selectRunBatchOutcomes(run('r1', [request(null)]))).toEqual([]);
+    });
+
+    it('returns nothing while every batch of the run is still open', () => {
+        const running = stamp(entry({ progress_primary: '40 of 184' }));
+        expect(selectRunBatchOutcomes(run('r1', [request(running)]))).toEqual([]);
+    });
+
+    it('reports a finished batch in the state it finished in', () => {
+        // The run keeps stamping as the batch works; the last record is the one
+        // the receipt has to show.
+        const started = stamp(entry({ progress_primary: '0 of 184' }));
+        const half = stamp(entry({ progress_primary: '92 of 184' }));
+        const done = stamp(entry({ status: 'completed', progress_primary: '184 of 184' }));
+        const outcomes = selectRunBatchOutcomes(
+            run('r1', [request(started), request(half), request(done)]),
+        );
+        expect(outcomes.map((b) => b.progress_primary)).toEqual(['184 of 184']);
+    });
+
+    it.each(['completed', 'failed_out', 'cancelled'] as const)(
+        'reports a batch that ended as %s',
+        (status) => {
+            const outcomes = selectRunBatchOutcomes(run('r1', [request(stamp(entry({ status })))]));
+            expect(outcomes).toHaveLength(1);
+        },
+    );
+
+    it('leaves an open batch to the live panel', () => {
+        const mixed = stamp(
+            entry({ batch_id: 'done', status: 'completed' }),
+            entry({ batch_id: 'open' }),
+        );
+        const outcomes = selectRunBatchOutcomes(run('r1', [request(mixed)]));
+        expect(outcomes.map((b) => b.batch_id)).toEqual(['done']);
+    });
+
+    it('skips a batch the backend judged too small for a progress bar', () => {
+        const small = stamp(entry({ batch_id: 'small', status: 'completed', show_progress: false }));
+        expect(selectRunBatchOutcomes(run('r1', [request(small)]))).toEqual([]);
+    });
+
+    it('lists the most recent completion first, as the panel does', () => {
+        // Both stacks cap their rows and keep the ones listed first, so ordering
+        // these oldest-first would fold the batch that held the bar a second ago
+        // away at the very moment its run ended.
+        const first = stamp(
+            entry({ batch_id: 'filing', is_handover: true }),
+            entry({ batch_id: 'tagging' }),
+        );
+        const second = stamp(
+            entry({ batch_id: 'tagging', is_handover: true, status: 'completed' }),
+            entry({ batch_id: 'filing', status: 'completed' }),
+        );
+        const outcomes = selectRunBatchOutcomes(run('r1', [request(first), request(second)]));
+        expect(outcomes.map((b) => b.batch_id)).toEqual(['tagging', 'filing']);
+    });
+
+    it('keeps the rows the panel had just shown, either side of the handover', () => {
+        // Five batches, the last one finishing on the call that ended the run.
+        // The panel's bar was on b5 with b4, b3 under it; the receipt must open
+        // on the same three, not on the two nobody has looked at since.
+        //
+        // Every stamp leads with the handover, this one included, so a batch's
+        // place cannot be read off where it first appeared — b5 leads the only
+        // stamp there is despite being the last to finish.
+        const end = stamp(
+            entry({ batch_id: 'b5', is_handover: true, status: 'completed' }),
+            ...['b1', 'b2', 'b3', 'b4'].map((batch_id) => entry({ batch_id, status: 'completed' })),
+        );
+        const outcomes = selectRunBatchOutcomes(run('r1', [request(end)]));
+        expect(outcomes.map((b) => b.batch_id)).toEqual(['b5', 'b4', 'b3', 'b2', 'b1']);
+    });
+
+    it('reads the newest stamp of a message carrying several', () => {
+        const outcomes = selectRunBatchOutcomes(
+            run('r1', [
+                request(
+                    stamp(entry({ progress_primary: '92 of 184' })),
+                    stamp(entry({ status: 'completed', progress_primary: '184 of 184' })),
+                ),
+            ]),
+        );
+        expect(outcomes.map((b) => b.progress_primary)).toEqual(['184 of 184']);
+    });
+
+    it('returns one shared empty list, so a run with no batches never re-renders', () => {
+        expect(selectRunBatchOutcomes(run('r1', [request(null)]))).toBe(
+            selectRunBatchOutcomes(run('r2', [])),
+        );
     });
 });
 

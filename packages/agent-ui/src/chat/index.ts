@@ -37,7 +37,10 @@ export { default as BatchProgressBar } from './BatchProgressBar';
 export type { BatchProgressBarProps } from './BatchProgressBar';
 
 export { default as BatchDoneRows } from './BatchDoneRows';
-export type { BatchDoneRowsProps } from './BatchDoneRows';
+export type { BatchDoneRowsProps, BatchDoneRowsVariant } from './BatchDoneRows';
+
+export { default as BatchRunReceipt } from './BatchRunReceipt';
+export type { BatchRunReceiptProps } from './BatchRunReceipt';
 
 export {
     BatchBlockFootnote,

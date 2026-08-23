@@ -74,10 +74,34 @@ function renderedText(node: React.ReactNode, out: string[] = []): string[] {
     return out;
 }
 
+/** The props the stack hands each row, without rendering one. */
+function rowProps(
+    batches: BatchProgressEntry[],
+    variant?: 'panel' | 'receipt',
+): { ruleAbove: boolean; chrome: { boundBody: boolean } }[] {
+    hookState.slots = [];
+    hookState.index = 0;
+    const stack = BatchDoneRows({ batches, variant }) as React.ReactElement<any>;
+    // The stack's children are [heading?, rows[], overflow?]; the rows are the
+    // array among them, so this does not move when the chrome around them does.
+    const rows = (stack.props.children as unknown[]).find(Array.isArray) as
+        | React.ReactElement<any>[]
+        | undefined;
+    return (rows ?? []).map((row) => row.props);
+}
+
 function render(batches: BatchProgressEntry[]): string {
     hookState.slots = [];
     hookState.index = 0;
     return renderedText(BatchDoneRows({ batches }) as React.ReactNode).join(' ');
+}
+
+function renderReceipt(batches: BatchProgressEntry[]): string {
+    hookState.slots = [];
+    hookState.index = 0;
+    return renderedText(
+        BatchDoneRows({ batches, variant: 'receipt' }) as React.ReactNode,
+    ).join(' ');
 }
 
 describe('the completed batch rows', () => {
@@ -183,6 +207,63 @@ describe('the completed batch rows', () => {
         // The open row must not still offer rows it has already revealed.
         expect(text).not.toContain('more completed');
         expect(text).toContain('Show fewer');
+    });
+
+    it('bleeds into the composer as the panel, and is a card as the receipt', () => {
+        // The two variants differ only in chrome, and the chrome is load-bearing:
+        // the panel class carries the negative margins that pull the stack onto
+        // the composer's own padding, which would tear a card in the transcript
+        // apart. Nothing about the text distinguishes them.
+        const batches = [entry({ progress_title: 'Filed items' })];
+        const panel = BatchDoneRows({ batches }) as React.ReactElement<any>;
+        const receipt = BatchDoneRows({ batches, variant: 'receipt' }) as React.ReactElement<any>;
+        expect(panel.props.className).toContain('batch-done-rows');
+        expect(panel.props.className).not.toContain('rounded-md');
+        expect(receipt.props.className).toContain('batch-run-receipt');
+        expect(receipt.props.className).toContain('rounded-md');
+    });
+
+    it('names itself as a batch operation in the receipt, but not in the panel', () => {
+        // In the transcript the rows are ticks and numbers with no bar above
+        // them, and a review card counting changes sits right underneath. The
+        // panel needs no heading: the live bar is directly above it.
+        const one = [entry({ progress_title: 'Filed items' })];
+        expect(render(one)).not.toContain('Batch operation');
+        expect(renderReceipt(one)).toContain('Batch operation');
+    });
+
+    it('matches the approval card wording, in the number the rows call for', () => {
+        // The word the user first met on the card they approved. A third name
+        // for the same feature is worse than a plain one.
+        const two = [
+            entry({ batch_id: 'a', progress_title: 'Filed items' }),
+            entry({ batch_id: 'b', progress_title: 'Tagged items' }),
+        ];
+        // The singular assertion has to rule the plural out: one is a substring
+        // of the other, so `toContain` alone passes against a hard-coded plural.
+        const single = renderReceipt([entry({ progress_title: 'Filed items' })]);
+        expect(single).toContain('Batch operation');
+        expect(single).not.toContain('Batch operations');
+        expect(renderReceipt(two)).toContain('Batch operations');
+    });
+
+    it('rules the receipt rows off from one another, and the panel rows not', () => {
+        // A card needs its rows separated; a strip bleeding into the composer
+        // reads as one block, where a rule would look like a seam.
+        const batches = [
+            entry({ batch_id: 'a', progress_title: 'Filed items' }),
+            entry({ batch_id: 'b', progress_title: 'Tagged items' }),
+        ];
+        expect(rowProps(batches, 'receipt').map((row) => row.ruleAbove)).toEqual([false, true]);
+        expect(rowProps(batches).map((row) => row.ruleAbove)).toEqual([false, false]);
+    });
+
+    it('bounds the panel body against the composer, and lets the receipt grow', () => {
+        // The transcript is its own scroller; a second one nested inside it
+        // would swallow the wheel, and its `100vh` bound would mean nothing.
+        const batches = [entry({ progress_title: 'Filed items' })];
+        expect(rowProps(batches)[0].chrome.boundBody).toBe(true);
+        expect(rowProps(batches, 'receipt')[0].chrome.boundBody).toBe(false);
     });
 
     it('keeps the two most recent completions, which arrive first', () => {

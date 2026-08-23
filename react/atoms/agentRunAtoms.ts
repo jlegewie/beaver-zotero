@@ -3240,6 +3240,7 @@ export const sendBatchApprovalResponseAtom = atom(
  * Batch progress for the open thread, or null when nothing has been stamped.
  *
  * Derived from the newest `metadata.batch_progress` via
- * `selectLiveBatchProgress` — ended batches drop once a later run starts.
+ * `selectLiveBatchProgress` — ended batches drop as soon as the run that
+ * carried them is terminal, where `BatchRunReceipt` picks them up.
  */
 export const batchProgressAtom = atom((get) => selectLiveBatchProgress(get(allRunsAtom)));
