@@ -14,12 +14,11 @@ import type {
  * {@link BatchProgressEntry} and render it the same way; only the wording
  * around them differs, and that wording is composed backend-side.
  *
- * Host-agnostic: pure view data, no client lookups. Collection names arrive
- * resolved, as `labelNames`.
+ * Host-agnostic: pure view data, no client lookups. Every label arrives ready
+ * to render — the backend composes a `sort` destination's name from the
+ * `collection_names` the Zotero client returns while validating the action, so
+ * no surface here resolves a key.
  */
-
-/** Resolved display text per tally label, keyed by `BatchOutcomeTally.label`. */
-export type BatchLabelNames = Readonly<Record<string, string>>;
 
 const NEW_BADGE = 'new';
 
@@ -177,14 +176,10 @@ export const BatchTallyRow: React.FC<{
  */
 export const BatchTallyBlock: React.FC<{
     batch: BatchProgressEntry;
-    labelNames?: BatchLabelNames;
-}> = ({ batch, labelNames }) => {
+}> = ({ batch }) => {
     const heading = batch.tally_heading?.trim() ?? '';
     const tallies = batch.tallies ?? [];
     if (!heading || tallies.length === 0) return null;
-
-    const nameFor = (row: BatchOutcomeTally) =>
-        labelNames?.[row.label] || row.display || row.label;
 
     const resolved = batch.resolved ?? 0;
     const talliesTotal = batch.tallies_total ?? 0;
@@ -204,7 +199,12 @@ export const BatchTallyBlock: React.FC<{
         <div className="display-flex flex-col gap-05 min-w-0">
             <BatchBlockHeading>{heading}</BatchBlockHeading>
             {tallies.map((row) => (
-                <BatchTallyRow key={row.label} row={row} top={top} name={nameFor(row)} />
+                <BatchTallyRow
+                    key={row.reference || row.label}
+                    row={row}
+                    top={top}
+                    name={row.label}
+                />
             ))}
             {footnote.length > 0 && (
                 <div className="text-xs font-color-tertiary">{footnote.join(' · ')}</div>
@@ -223,8 +223,7 @@ export const BatchTallyBlock: React.FC<{
 export const BatchRemovalBlock: React.FC<{
     batch: BatchProgressEntry;
     heading: string;
-    labelNames?: BatchLabelNames;
-}> = ({ batch, heading, labelNames }) => {
+}> = ({ batch, heading }) => {
     const removals = batch.removals ?? [];
     if (removals.length === 0) return null;
     const top = topCount(removals);
@@ -233,11 +232,11 @@ export const BatchRemovalBlock: React.FC<{
             <BatchBlockHeading>{heading}</BatchBlockHeading>
             {removals.map((row) => (
                 <BatchTallyRow
-                    key={row.label}
+                    key={row.reference || row.label}
                     row={row}
                     top={top}
                     muted
-                    name={labelNames?.[row.label] || row.display || row.label}
+                    name={row.label}
                 />
             ))}
         </div>

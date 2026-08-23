@@ -25,7 +25,6 @@ import type {
     BatchProgressStamp,
 } from '@beaver/agent-core/run-state/batchProgress';
 import type { AgentRun, ModelMessage } from '@beaver/agent-core/agents/types';
-import { resolveBatchProgressNames } from '../../utils/batchProgressNames';
 
 /** Run id the preview run is stored under, so clearing removes only it. */
 const PREVIEW_RUN_ID = 'batch-progress-preview';
@@ -75,18 +74,6 @@ export async function handleBatchProgressPreview(
 ): Promise<{ ok: boolean; batches: number; tracked: string | null }> {
     const batches = Array.isArray(body?.batches) ? body.batches : [];
     const stamp: BatchProgressStamp = { batches };
-
-    // The same resolution the live and thread-load boundaries apply, so a
-    // preview of a `sort` batch shows collection names exactly as a real run
-    // would rather than raw keys.
-    const part = {
-        part_kind: 'tool-return' as const,
-        tool_name: 'organize_items',
-        tool_call_id: PREVIEW_TOOL_CALL_ID,
-        content: {},
-        metadata: { batch_progress: stamp },
-    };
-    resolveBatchProgressNames(part);
 
     const runs = withoutPreview(store.get(threadRunsAtom) as AgentRun[]);
     store.set(threadRunsAtom, [...runs, previewRun(stamp)]);

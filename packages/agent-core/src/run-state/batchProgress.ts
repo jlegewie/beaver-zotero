@@ -14,7 +14,10 @@
  * Every user-facing string here is composed backend-side and rendered verbatim,
  * exactly as on the approval card and the batch result card. A client owns its
  * own headings and its own layout, and nothing else — the three surfaces must
- * not be able to describe one batch differently.
+ * not be able to describe one batch differently. That now includes collection
+ * NAMES: the backend composes them from the `collection_names` this client
+ * returns while validating an `organize_items` action, so no surface resolves a
+ * key at render time or at the run-state boundary.
  */
 
 import type { AgentRun, ModelMessage } from '../agents/types';
@@ -31,19 +34,19 @@ export type BatchProgressStatus = 'active' | 'completed' | 'failed_out' | 'cance
  */
 export interface BatchOutcomeTally {
     /**
-     * Text to show. For a `sort` batch this is a Zotero collection KEY, not a
-     * name: `organize_items` files by key, and resolving one needs the user's
-     * library, which the backend cannot reach from the hook that builds the
-     * stamp. A client with a library resolves it; one without shows the key.
+     * Text to show. Already the name a user knows a destination by: the
+     * backend composes `sort` labels from the `collection_names` this client
+     * returns during action validation, so nothing here needs a library lookup.
      */
     label: string;
     /** Items this row was recorded for. */
     count: number;
     /**
-     * Name to show instead of `label`, when the backend already knew it — a
-     * collection this run created. Absent otherwise.
+     * Stable identity behind the label when it has one — a Zotero collection
+     * key for `sort`. Absent otherwise. What makes two rows provably the same
+     * destination when their names collide.
      */
-    display?: string;
+    reference?: string;
     /**
      * The run brought this destination into existence rather than using one the
      * user already had. The difference a distribution cannot be read without:
@@ -99,12 +102,11 @@ export interface BatchProgressEntry {
      */
     tallies_total?: number;
     removals?: BatchOutcomeTally[];
-    /** Why items could not be processed. Only `extract` reports these. */
+    /**
+     * Why items could not be processed. Only operations whose failures a user
+     * can act on report any — `extract`, where a blind retry costs money.
+     */
     failure_reasons?: BatchOutcomeTally[];
-    /** Library the batch works in, so a client can resolve collection keys locally. */
-    library_id?: number;
-    /** Device-portable library identity ('u' / 'g<groupID>'). */
-    library_ref?: string;
 }
 
 /** Every batch worth showing, as of the tool return this rode on. */

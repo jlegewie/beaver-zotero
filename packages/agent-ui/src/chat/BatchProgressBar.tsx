@@ -8,7 +8,6 @@ import {
     BatchRemovalBlock,
     BatchTallyBlock,
 } from './BatchOutcomeBlocks';
-import type { BatchLabelNames } from './BatchOutcomeBlocks';
 
 /**
  * Labels for the slots this bar lays out, as opposed to what goes in them.
@@ -46,14 +45,6 @@ export interface BatchProgressBarProps {
     otherBatches?: readonly BatchProgressEntry[];
     /** What the user still has to review, when the host can say. */
     review?: BatchReviewStatus | null;
-    /**
-     * Resolved display text per tally label, keyed by `label`. A `sort` batch
-     * tallies by collection KEY, which is not something to show a user; a host
-     * with a library resolves them and passes the names in here. Anything
-     * missing falls back to the tally's own `display`, then to the key — a
-     * client without a library still renders, just less helpfully.
-     */
-    labelNames?: BatchLabelNames;
 }
 
 /**
@@ -74,14 +65,13 @@ export interface BatchProgressBarProps {
  * a batch is the model's own `batch_start(status='cancelled')`; a third control
  * here would be a fourth way to halt the same run.
  *
- * Host-agnostic: pure view data, no client lookups. Collection names are
- * resolved by the host and passed in as `labelNames`.
+ * Host-agnostic: pure view data, no client lookups — every label the backend
+ * sends is already the name a user knows.
  */
 export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
     batch,
     otherBatches = [],
     review = null,
-    labelNames,
 }) => {
     // Collapsed by default: during a run the user is reading the answer, and a
     // panel that opened itself would push the composer down every turn.
@@ -208,13 +198,9 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
 
                     <BatchProgressTrack batch={batch} />
 
-                    <BatchTallyBlock batch={batch} labelNames={labelNames} />
+                    <BatchTallyBlock batch={batch} />
 
-                    <BatchRemovalBlock
-                        batch={batch}
-                        heading={REMOVED_HEADING}
-                        labelNames={labelNames}
-                    />
+                    <BatchRemovalBlock batch={batch} heading={REMOVED_HEADING} />
 
                     <BatchFailureReasonBlock batch={batch} heading={FAILURE_HEADING} />
 

@@ -51,11 +51,10 @@ function reviewStatus(
  * Live batch progress above the composer, wired to Zotero.
  *
  * Owns the one thing neither the backend nor the shared bar can know: how many
- * of the batch's proposed changes the user has actually acted on. Collection
- * names are resolved earlier, at the run-state boundary
- * (`utils/batchProgressNames`), so both this bar and the batch card in the
- * transcript read the same ones. Everything else is the backend's stamp,
- * rendered verbatim.
+ * of the batch's proposed changes the user has actually acted on. Everything
+ * else — including the collection names, which the backend composes from the
+ * `collection_names` this client returns during action validation — is the
+ * backend's record, rendered verbatim.
  *
  * Renders nothing when no batch is open, or when every open batch is below the
  * size the backend decided is worth a progress bar.

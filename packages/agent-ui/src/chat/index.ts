@@ -44,7 +44,6 @@ export {
     BatchTallyBlock,
     BatchTallyRow,
 } from './BatchOutcomeBlocks';
-export type { BatchLabelNames } from './BatchOutcomeBlocks';
 
 export { default as CreditConfirmationCard, createCreditDecisionHandlers } from './CreditConfirmationCard';
 export type { CreditConfirmationCardProps, CreditDecisionHandlers } from './CreditConfirmationCard';

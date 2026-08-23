@@ -117,6 +117,22 @@ describe('selectBatchProgress', () => {
         expect(result?.batches.map((b) => b.batch_id)).toEqual(['b1']);
     });
 
+    it('lets an empty stamp supersede a populated one', () => {
+        // Cancelling the last batch writes an EMPTY record rather than none:
+        // unrelated tool returns omit the field entirely, so writing nothing
+        // would leave the previous stamp standing and bring the cancelled bar
+        // back on the next reload.
+        const running = stamp(entry({ batch_id: 'b1' }));
+        const cancelled: BatchProgressStamp = { batches: [] };
+        const result = selectBatchProgress([
+            run('r1', [request(running)]),
+            run('r2', [request(cancelled)]),
+        ]);
+        expect(result).not.toBeNull();
+        expect(result!.batches).toEqual([]);
+        expect(selectTrackedBatch(result)).toBeNull();
+    });
+
     it('skips a run with no messages', () => {
         const only = stamp(entry());
         const empty = { id: 'r2', model_messages: [] } as unknown as AgentRun;
@@ -165,5 +181,25 @@ describe('selectTrackedBatch', () => {
         expect(
             selectTrackedBatch(stamp(entry({ batch_id: 'b1', show_progress: false }))),
         ).toBeNull();
+    });
+});
+
+describe('tally rows', () => {
+    it('carries a destination name and its key apart', () => {
+        // The backend composes the name from the `collection_names` this client
+        // returns during action validation, and splits the composed label back
+        // into halves — so no surface here resolves a key.
+        const tally = { label: 'Ecology', count: 23, reference: 'CHT8AIF6' };
+        const result = selectTrackedBatch(stamp(entry({ tallies: [tally] })));
+        expect(result?.tallies?.[0].label).toBe('Ecology');
+        expect(result?.tallies?.[0].reference).toBe('CHT8AIF6');
+    });
+
+    it('leaves a label with no identity behind it alone', () => {
+        // A tag or a field name is its own identity; only `sort` has a key.
+        const result = selectTrackedBatch(
+            stamp(entry({ tallies: [{ label: 'machine learning', count: 41 }] })),
+        );
+        expect(result?.tallies?.[0].reference).toBeUndefined();
     });
 });

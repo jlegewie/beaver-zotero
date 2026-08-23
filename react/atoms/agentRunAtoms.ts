@@ -164,7 +164,6 @@ import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { upgradeToolReturn } from '../compat/legacyToolResults';
 import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
 import { selectBatchProgress } from '@beaver/agent-core/run-state/batchProgress';
-import { resolveBatchProgressNames } from '../utils/batchProgressNames';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom, recordAppliedActionsAtom } from './messageUIState';
 import { currentThreadNameAtom, loadThreadAtom } from './threads';
@@ -1459,10 +1458,6 @@ export function createWSCallbacks(
                     await upgradeToolReturn(event.part, toolCallArgs);
                 }
 
-                // Collection keys become names here, once, on the way into run
-                // state — so the progress bar and the batch card both render
-                // names without a Zotero lookup of their own.
-                resolveBatchProgressNames(event.part);
             }
 
             // Update run with tool return (event.part now carries a synthesized
