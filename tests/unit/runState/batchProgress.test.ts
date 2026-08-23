@@ -5,6 +5,7 @@ import {
     selectBatchProgress,
     selectBatchPanelGroups,
     selectLiveBatchProgress,
+    selectChainBatchOutcomes,
     selectRunBatchOutcomes,
     selectTrackedBatch,
 } from '@beaver/agent-core/run-state/batchProgress';
@@ -479,6 +480,68 @@ describe('selectRunBatchOutcomes', () => {
     it('returns one shared empty list, so a run with no batches never re-renders', () => {
         expect(selectRunBatchOutcomes(run('r1', [request(null)]))).toBe(
             selectRunBatchOutcomes(run('r2', [])),
+        );
+    });
+});
+
+describe('selectChainBatchOutcomes', () => {
+    it('reports one run the same way selectRunBatchOutcomes does', () => {
+        const only = run('r1', [request(stamp(entry({ status: 'completed' })))], 'completed');
+        expect(selectChainBatchOutcomes([only])).toEqual(selectRunBatchOutcomes(only));
+    });
+
+    it('gathers the batches of every run of a continued answer', () => {
+        const interrupted = run(
+            'r1',
+            [request(stamp(entry({ batch_id: 'filing', status: 'completed' })))],
+            'canceled',
+        );
+        const continuation = run(
+            'r2',
+            [request(stamp(entry({ batch_id: 'tagging', status: 'completed' })))],
+            'completed',
+        );
+        const outcomes = selectChainBatchOutcomes([interrupted, continuation]);
+        expect(outcomes.map((b) => b.batch_id)).toEqual(['tagging', 'filing']);
+    });
+
+    it('keeps the later record of a batch worked across the interruption', () => {
+        // The run that was cut off saw the batch at 92; the run that picked it
+        // up saw it end. Only the second is the outcome.
+        const interrupted = run(
+            'r1',
+            [request(stamp(entry({ status: 'cancelled', progress_primary: '92 of 184' })))],
+            'canceled',
+        );
+        const continuation = run(
+            'r2',
+            [request(stamp(entry({ status: 'completed', progress_primary: '184 of 184' })))],
+            'completed',
+        );
+        const outcomes = selectChainBatchOutcomes([interrupted, continuation]);
+        expect(outcomes.map((b) => b.progress_primary)).toEqual(['184 of 184']);
+    });
+
+    it('drops an older outcome for a batch the continuation reopened', () => {
+        // The continuation picked the batch back up and was itself cut off
+        // before it ended, so the batch is open again: the panel draws it, and
+        // the receipt must not also report the state it was left in before.
+        const interrupted = run(
+            'r1',
+            [request(stamp(entry({ status: 'cancelled', progress_primary: '92 of 184' })))],
+            'canceled',
+        );
+        const continuation = run(
+            'r2',
+            [request(stamp(entry({ progress_primary: '120 of 184' })))],
+            'error',
+        );
+        expect(selectChainBatchOutcomes([interrupted, continuation])).toEqual([]);
+    });
+
+    it('returns one shared empty list, so a chain with no batches never re-renders', () => {
+        expect(selectChainBatchOutcomes([run('r1', [request(null)]), run('r2', [])])).toBe(
+            selectChainBatchOutcomes([]),
         );
     });
 });

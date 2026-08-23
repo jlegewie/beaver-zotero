@@ -2,7 +2,7 @@ import React, { forwardRef, useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
 import { AgentRun, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
-import { shouldOfferResume, wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
+import { collectResumeChain, shouldOfferResume, wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
@@ -12,7 +12,7 @@ import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
 import { RunInterruptedDisplay } from './RunInterruptedDisplay';
 import { threadWarningsAtom } from '../../atoms/warnings';
-import { toolResultsMapAtom, resumedRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
+import { allRunsAtom, toolResultsMapAtom, resumedRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
 import { streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { getHost } from '@beaver/agent-ui/host';
@@ -33,6 +33,7 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     const allWarnings = useAtomValue(threadWarningsAtom);
     const runWarnings = allWarnings.filter((w) => w.run_id === run.id && w.type !== 'credit_info');
     const resumedRunIds = useAtomValue(resumedRunIdsAtom);
+    const allRuns = useAtomValue(allRunsAtom);
     const resultsMap = useAtomValue(toolResultsMapAtom);
     const streamingDoneRunIds = useAtomValue(streamingDoneRunIdsAtom);
     const isPostProcessing = streamingDoneRunIds.has(run.id);
@@ -106,6 +107,13 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // Terminal statuses: the run is done. `awaiting_deferred` is still live (see isRunActive).
     const isTerminal = run.status === 'completed' || run.status === 'error' || run.status === 'canceled';
 
+    // A response continued after an interruption spans several runs but reads
+    // as one message, so what the whole answer ended up doing belongs under its
+    // last run — beside the footer, which already speaks for the chain. An
+    // ordinary run is a chain of one, so nothing changes for it.
+    const chainRuns = useMemo(() => collectResumeChain(run, allRuns), [run, allRuns]);
+    const showRunOutcomes = isTerminal && !wasResumed;
+
     // Allow editing when run is in a terminal state (not actively streaming or awaiting approval)
     const canEdit = !isStreaming && isTerminal;
 
@@ -149,14 +157,19 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
             )}
 
 
-            {/* What this run's batch operations ended up doing. Above the review
-                card so the two read as summary then detail: what the batch did,
-                then what there is to decide about it. */}
-            {isTerminal && <BatchRunReceipt run={run} />}
+            {/* What this answer's batch operations ended up doing. Above the
+                review card so the two read as summary then detail: what the
+                batch did, then what there is to decide about it. */}
+            {showRunOutcomes && <BatchRunReceipt runs={chainRuns} />}
 
             {/* Agent actions (e.g., create item from citations) — client-specific
-                UI injected by the host; absent for clients without it. */}
-            {isTerminal && (getHost().components?.pendingActionsReview({ run }) ?? null)}
+                UI injected by the host; absent for clients without it. Actions
+                are recorded per run, so a continued answer lists each run's. */}
+            {showRunOutcomes && chainRuns.map((chainRun) => (
+                <React.Fragment key={chainRun.id}>
+                    {getHost().components?.pendingActionsReview({ run: chainRun }) ?? null}
+                </React.Fragment>
+            ))}
 
             {/* Suggestions (only for the last run, rendered below footer) */}
             {suggestionParts.length > 0 && !suggestionsDismissed && (

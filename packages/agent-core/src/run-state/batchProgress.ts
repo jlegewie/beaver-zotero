@@ -366,6 +366,41 @@ export function selectRunBatchOutcomes(run: AgentRun): readonly BatchProgressEnt
 }
 
 /**
+ * Batches an answer finished, across every run that produced it.
+ *
+ * A response continued after an interruption spans a chain of runs but reads as
+ * one message, and its receipt has to speak for the whole chain. Each run knows
+ * only its own stamp, so the per-run outcomes are collected newest run first
+ * and the newest record of a batch wins.
+ *
+ * Superseding is decided on every batch the newer run stamped, not just the
+ * ones it ended: a batch the continuation picked back up is open again, and an
+ * older run's ended record of it would otherwise resurface here while the panel
+ * still draws it as running.
+ */
+export function selectChainBatchOutcomes(
+    runs: readonly AgentRun[],
+): readonly BatchProgressEntry[] {
+    if (runs.length <= 1) {
+        return runs.length ? selectRunBatchOutcomes(runs[0]) : NO_OUTCOMES;
+    }
+    const seen = new Set<string>();
+    const outcomes: BatchProgressEntry[] = [];
+    for (let index = runs.length - 1; index >= 0; index--) {
+        const run = runs[index];
+        for (const entry of selectRunBatchOutcomes(run)) {
+            if (seen.has(entry.batch_id)) continue;
+            seen.add(entry.batch_id);
+            outcomes.push(entry);
+        }
+        for (const entry of newestStamp([run])?.stamp.batches ?? []) {
+            seen.add(entry.batch_id);
+        }
+    }
+    return outcomes.length ? outcomes : NO_OUTCOMES;
+}
+
+/**
  * The batch the bar tracks, for callers that need nothing else.
  *
  * Delegates, so there is exactly one rule for which batch that is.

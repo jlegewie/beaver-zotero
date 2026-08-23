@@ -78,8 +78,12 @@ function request(value: BatchProgressStamp | null): ModelMessage {
     } as unknown as ModelMessage;
 }
 
-function run(messages: ModelMessage[], status: AgentRun['status'] = 'completed'): AgentRun {
-    return { id: 'r1', status, model_messages: messages } as unknown as AgentRun;
+function run(
+    messages: ModelMessage[],
+    status: AgentRun['status'] = 'completed',
+    id = 'r1',
+): AgentRun {
+    return { id, status, model_messages: messages } as unknown as AgentRun;
 }
 
 /** Every string rendered, joined — what the user actually reads. */
@@ -103,19 +107,24 @@ function renderedText(node: React.ReactNode, out: string[] = []): string[] {
 }
 
 function render(messages: ModelMessage[]): string {
+    return renderChain([run(messages)]);
+}
+
+/** The receipt for a whole answer: one run, or a chain oldest first. */
+function renderChain(runs: AgentRun[]): string {
     hookState.slots = [];
     hookState.index = 0;
-    return renderedText(BatchRunReceipt({ run: run(messages) }) as React.ReactNode).join(' ');
+    return renderedText(BatchRunReceipt({ runs }) as React.ReactNode).join(' ');
 }
 
 describe('the batch receipt under a terminal run', () => {
     it('renders nothing for a run that finished no batch', () => {
-        expect(BatchRunReceipt({ run: run([request(null)]) })).toBeNull();
+        expect(BatchRunReceipt({ runs: [run([request(null)])] })).toBeNull();
     });
 
     it('renders nothing for a run whose batch is still open', () => {
         const running = stamp(entry({ status: undefined, progress_primary: '40 of 184' }));
-        expect(BatchRunReceipt({ run: run([request(running)]) })).toBeNull();
+        expect(BatchRunReceipt({ runs: [run([request(running)])] })).toBeNull();
     });
 
     it.each(['in_progress', 'awaiting_deferred'] as const)(
@@ -126,7 +135,7 @@ describe('the batch receipt under a terminal run', () => {
             hookState.slots = [];
             hookState.index = 0;
             const done = stamp(entry({ progress_title: 'Filed items' }));
-            expect(BatchRunReceipt({ run: run([request(done)], status) })).toBeNull();
+            expect(BatchRunReceipt({ runs: [run([request(done)], status)] })).toBeNull();
         },
     );
 
@@ -181,6 +190,17 @@ describe('the batch receipt under a terminal run', () => {
         expect(text).toContain('Tagged items');
         expect(text).toContain('Filed items');
         expect(text).not.toContain('more completed');
+    });
+
+    it('reports the batches of every run an interrupted answer took', () => {
+        // The chain reads as one message and carries one receipt, under its
+        // last run — a batch the interrupted run finished belongs in it too.
+        const text = renderChain([
+            run([request(stamp(entry({ batch_id: 'filing', progress_title: 'Filed items' })))], 'canceled', 'r1'),
+            run([request(stamp(entry({ batch_id: 'tagging', progress_title: 'Tagged items' })))], 'completed', 'r2'),
+        ]);
+        expect(text).toContain('Filed items');
+        expect(text).toContain('Tagged items');
     });
 
     it('says what each batch was for, so two of one operation are told apart', () => {
