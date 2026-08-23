@@ -3,6 +3,9 @@
  *
  * Driven through a hook stand-in rather than mounted — same approach as
  * `batchApprovalCard.test.ts` (jsdom is not loaded).
+ *
+ * Which batches reach the bar is `selectBatchPanelGroups`' decision, covered in
+ * `tests/unit/runState/batchProgress.test.ts`; the bar renders what it is given.
  */
 import { describe, expect, it, vi } from 'vitest';
 
@@ -63,10 +66,10 @@ function renderedText(node: React.ReactNode, out: string[] = []): string[] {
     return out;
 }
 
-function render(batch: BatchProgressEntry, otherBatches: BatchProgressEntry[]): string {
+function render(batch: BatchProgressEntry, queuedBatches: BatchProgressEntry[]): string {
     hookState.slots = [];
     hookState.index = 0;
-    const tree = BatchProgressBar({ batch, otherBatches }) as React.ReactNode;
+    const tree = BatchProgressBar({ batch, queuedBatches }) as React.ReactNode;
     return renderedText(tree).join(' ');
 }
 
@@ -80,47 +83,16 @@ describe('the batch progress bar queue', () => {
         expect(text).toContain('Tagging items');
     });
 
-    it('leaves out a sibling that has already finished', () => {
+    it('counts repeats of one kind of work rather than listing them', () => {
         const text = render(tracked, [
-            entry({ batch_id: 'done', progress_title: 'Tagging items', status: 'completed' }),
+            entry({ batch_id: 'a', progress_title: 'Tagging items' }),
+            entry({ batch_id: 'b', progress_title: 'Tagging items' }),
         ]);
-        expect(text).not.toContain('Tagging items');
+        expect(text).toContain('Tagging items ×2');
     });
 
-    it.each(['completed', 'failed_out', 'cancelled'] as const)(
-        'leaves out a %s sibling',
-        (status) => {
-            const text = render(tracked, [
-                entry({ batch_id: 'ended', progress_title: 'Reading documents', status }),
-            ]);
-            expect(text).not.toContain('Reading documents');
-        },
-    );
-
-    it('leaves out a sibling the backend said is too small to show', () => {
-        const text = render(tracked, [
-            entry({
-                batch_id: 'small',
-                progress_title: 'Tagging items',
-                show_progress: false,
-            }),
-        ]);
-        expect(text).not.toContain('Tagging items');
-    });
-
-    it('keeps the open siblings and drops only the ended ones', () => {
-        const text = render(tracked, [
-            entry({ batch_id: 'done', progress_title: 'Tagging items', status: 'completed' }),
-            entry({ batch_id: 'next', progress_title: 'Reading documents' }),
-        ]);
-        expect(text).toContain('Reading documents');
-        expect(text).not.toContain('Tagging items');
-    });
-
-    it('still renders the tracked batch when every sibling has ended', () => {
-        const text = render(tracked, [
-            entry({ batch_id: 'done', progress_title: 'Tagging items', status: 'completed' }),
-        ]);
+    it('renders the tracked batch when nothing is queued behind it', () => {
+        const text = render(tracked, []);
         expect(text).toContain('Filing items');
     });
 });

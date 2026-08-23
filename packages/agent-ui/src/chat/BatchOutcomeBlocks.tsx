@@ -252,3 +252,62 @@ export const BatchOutcomeBlocks: React.FC<{
         </>
     );
 };
+
+/** Layout wording. Everything that describes a batch is composed backend-side. */
+const failedLabel = (count: number): string => `${count.toLocaleString()} failed`;
+
+/**
+ * The count of what a batch could not do, on its collapsed line.
+ *
+ * Shared so a batch cannot state its failures on the live bar and then lose
+ * them when it settles into a completed row. Renders nothing when a batch has
+ * none: one with no failures should not have to mention failure at all.
+ */
+export const BatchFailureChip: React.FC<{ batch: BatchProgressEntry }> = ({ batch }) => {
+    // Backend omits default-valued fields — default here, never test `=== 'active'`.
+    const failed = batch.failed ?? 0;
+    if (failed === 0 && batch.status !== 'failed_out') return null;
+    return (
+        <span
+            className="text-sm font-color-orange flex-none"
+            style={{
+                backgroundColor: 'var(--tag-orange-quarternary)',
+                border: '1px solid var(--tag-orange-tertiary)',
+                borderRadius: '4px',
+                padding: '0 4px',
+                lineHeight: 1.2,
+            }}
+        >
+            {failedLabel(failed)}
+        </span>
+    );
+};
+
+/**
+ * What a batch has done, opened out: its goal, its track, its distribution.
+ *
+ * The body behind every disclosure that expands a batch, shared for the same
+ * reason the blocks are — the live bar and the completed row it turns into must
+ * not describe one batch differently.
+ *
+ * Bounded: the composer block this sits in never shrinks.
+ */
+export const BatchOutcomeBody: React.FC<{
+    batch: BatchProgressEntry;
+    /** Appended inside the same scroll box — what is one caller's alone. */
+    children?: React.ReactNode;
+}> = ({ batch, children }) => (
+    <div
+        className="display-flex flex-col gap-5 px-3 pb-3 min-w-0"
+        style={{
+            maxHeight: 'max(120px, calc(100vh - 320px))',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+        }}
+    >
+        {batch.goal && <div className="font-color-secondary text-base">{batch.goal}</div>}
+        <BatchProgressTrack batch={batch} />
+        <BatchOutcomeBlocks batch={batch} />
+        {children}
+    </div>
+);

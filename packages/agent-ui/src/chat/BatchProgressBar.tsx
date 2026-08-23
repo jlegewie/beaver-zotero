@@ -1,11 +1,10 @@
 import React, { useCallback, useState } from 'react';
 import type { BatchProgressEntry } from '@beaver/agent-core/run-state/batchProgress';
-import { hasBatchEnded } from '@beaver/agent-core/run-state/batchProgress';
 import { ArrowDownIcon, Icon, LayersIcon, TickIcon } from '../icons';
 import {
     BatchBlockHeading,
-    BatchOutcomeBlocks,
-    BatchProgressTrack,
+    BatchFailureChip,
+    BatchOutcomeBody,
 } from './BatchOutcomeBlocks';
 
 const WAITING_HEADING = 'Waiting';
@@ -29,10 +28,11 @@ export interface BatchProgressBarProps {
     /** The batch the bar tracks — the one being worked. */
     batch: BatchProgressEntry;
     /**
-     * Other batches on the stamp. Ended ones are filtered out here — a stamp
-     * can carry a batch that finished on the same call that moved this one.
+     * Batches still waiting their turn, in the order they will be worked.
+     * Already grouped by `selectBatchPanelGroups` — this filters nothing.
+     * Finished batches are not here; they belong to `BatchDoneRows`.
      */
-    otherBatches?: readonly BatchProgressEntry[];
+    queuedBatches?: readonly BatchProgressEntry[];
 }
 
 /**
@@ -48,7 +48,7 @@ export interface BatchProgressBarProps {
  */
 export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
     batch,
-    otherBatches = [],
+    queuedBatches = [],
 }) => {
     // Collapsed by default so the panel does not push the composer down mid-run.
     const [isExpanded, setIsExpanded] = useState(false);
@@ -86,11 +86,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
     // Older records omit this; fall back to the headline, do not invent a title.
     const title = batch.progress_title?.trim();
 
-    // A stamp can carry a batch that finished on the same call as this one.
-    const otherShown = otherBatches.filter(
-        (entry) => entry.show_progress && !hasBatchEnded(entry),
-    );
-    const queued = queueSummary(otherShown);
+    const queued = queueSummary(queuedBatches);
 
     return (
         <div
@@ -151,20 +147,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                         {batch.progress_primary}
                     </span>
                 )}
-                {hasFailures && (
-                    <span
-                        className="text-sm font-color-orange flex-none"
-                        style={{
-                            backgroundColor: 'var(--tag-orange-quarternary)',
-                            border: '1px solid var(--tag-orange-tertiary)',
-                            borderRadius: '4px',
-                            padding: '0 4px',
-                            lineHeight: 1.2,
-                        }}
-                    >
-                        {`${failed.toLocaleString()} failed`}
-                    </span>
-                )}
+                <BatchFailureChip batch={batch} />
                 {/* Orange on failure so a green tick does not claim success. */}
                 {isOver && (
                     <Icon
@@ -191,27 +174,11 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
             </div>
 
             {isExpanded && (
-                /* Bounded: the composer block this sits in never shrinks. */
-                <div
-                    className="display-flex flex-col gap-5 px-3 pb-3 min-w-0"
-                    style={{
-                        maxHeight: 'max(120px, calc(100vh - 320px))',
-                        overflowY: 'auto',
-                        overflowX: 'hidden',
-                    }}
-                >
-                    {batch.goal && (
-                        <div className="font-color-secondary text-base">{batch.goal}</div>
-                    )}
-
-                    <BatchProgressTrack batch={batch} />
-
-                    <BatchOutcomeBlocks batch={batch} />
-
-                    {otherShown.length > 0 && (
+                <BatchOutcomeBody batch={batch}>
+                    {queuedBatches.length > 0 && (
                         <div className="display-flex flex-col gap-1 min-w-0">
                             <BatchBlockHeading>{WAITING_HEADING}</BatchBlockHeading>
-                            {otherShown.map((entry) => (
+                            {queuedBatches.map((entry) => (
                                 <div
                                     key={entry.batch_id}
                                     className="display-flex flex-col min-w-0 text-sm"
@@ -244,7 +211,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                             ))}
                         </div>
                     )}
-                </div>
+                </BatchOutcomeBody>
             )}
         </div>
     );

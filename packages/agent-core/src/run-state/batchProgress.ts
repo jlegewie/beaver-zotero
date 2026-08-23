@@ -290,16 +290,72 @@ export function selectLiveBatchProgress(
     return open.length === newest.stamp.batches.length ? newest.stamp : { batches: open };
 }
 
+/** How the panel above the composer splits a stamp into its three tenses. */
+export interface BatchPanelGroups {
+    /**
+     * The batch the bar tracks, or null when nothing is worth showing — no
+     * batches, or every batch below the size the backend decided is worth a
+     * progress bar.
+     */
+    tracked: BatchProgressEntry | null;
+    /** Batches that have ended, most recent first. Never includes `tracked`. */
+    done: readonly BatchProgressEntry[];
+    /** Batches still waiting their turn, in the order they will be worked. */
+    queued: readonly BatchProgressEntry[];
+}
+
+const NO_GROUPS: BatchPanelGroups = { tracked: null, done: [], queued: [] };
+
 /**
- * The batch the bar tracks: the one being worked, or the first that is left.
+ * The stamp's batches, grouped the way the panel above the composer draws them.
  *
- * Returns null when nothing is worth showing — no batches, or every batch below
- * the size the backend decided is worth a progress bar.
+ * The single place the panel's policy lives: which batch gets the full bar, what
+ * is still to come, and what has finished. Surfaces downstream render what they
+ * are given and filter nothing, so the three groups cannot drift apart.
+ *
+ * An open batch always outranks an ended one for the bar — a stamp can flag a
+ * batch as the handover on the same call that ends it, and tracking that one
+ * would hide the batch actually being worked. With nothing open, the previous
+ * rule stands, so a run that finishes its only batch still reads as it always
+ * did: the completed bar, with its tick and its distribution.
+ *
+ * `done` runs most-recent-first, which the stamp's own order gives in two
+ * pieces. The batch flagged as the handover leads the stamp, and the backend
+ * pins that flag at the top of the request rather than clearing it when the
+ * batch ends — so an ended handover is the batch that finished on this very
+ * call, and it leads. Everything behind it is in the order the batches were
+ * created, and they are worked oldest-first, so reversing that tail puts the
+ * completion before it next.
+ */
+export function selectBatchPanelGroups(
+    stamp: BatchProgressStamp | null,
+): BatchPanelGroups {
+    const shown = stamp?.batches.filter((entry) => entry.show_progress) ?? [];
+    if (!shown.length) return NO_GROUPS;
+    const open = shown.filter((entry) => !hasBatchEnded(entry));
+    const tracked =
+        open.find((entry) => entry.is_handover) ??
+        open[0] ??
+        shown.find((entry) => entry.is_handover) ??
+        shown[0];
+    const ended = shown.filter((entry) => entry !== tracked && hasBatchEnded(entry));
+    return {
+        tracked,
+        done: [
+            ...ended.filter((entry) => entry.is_handover),
+            ...ended.filter((entry) => !entry.is_handover).reverse(),
+        ],
+        queued: open.filter((entry) => entry !== tracked),
+    };
+}
+
+/**
+ * The batch the bar tracks, for callers that need nothing else.
+ *
+ * Delegates, so there is exactly one rule for which batch that is.
  */
 export function selectTrackedBatch(
     stamp: BatchProgressStamp | null,
 ): BatchProgressEntry | null {
-    const shown = stamp?.batches.filter((entry) => entry.show_progress) ?? [];
-    if (!shown.length) return null;
-    return shown.find((entry) => entry.is_handover) ?? shown[0];
+    return selectBatchPanelGroups(stamp).tracked;
 }

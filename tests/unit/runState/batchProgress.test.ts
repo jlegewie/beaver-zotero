@@ -3,6 +3,7 @@ import {
     isBatchProgressStamp,
     readBatchProgressStamp,
     selectBatchProgress,
+    selectBatchPanelGroups,
     selectLiveBatchProgress,
     selectTrackedBatch,
 } from '@beaver/agent-core/run-state/batchProgress';
@@ -363,6 +364,113 @@ describe('selectTrackedBatch', () => {
         expect(
             selectTrackedBatch(stamp(entry({ batch_id: 'b1', show_progress: false }))),
         ).toBeNull();
+    });
+});
+
+describe('selectBatchPanelGroups', () => {
+    it('has nothing to draw without a stamp', () => {
+        expect(selectBatchPanelGroups(null)).toEqual({ tracked: null, done: [], queued: [] });
+    });
+
+    it('tracks the batch being worked and queues the rest in work order', () => {
+        const groups = selectBatchPanelGroups(
+            stamp(
+                entry({ batch_id: 'b2', is_handover: true }),
+                entry({ batch_id: 'b3' }),
+                entry({ batch_id: 'b4' }),
+            ),
+        );
+        expect(groups.tracked?.batch_id).toBe('b2');
+        expect(groups.queued.map((e) => e.batch_id)).toEqual(['b3', 'b4']);
+        expect(groups.done).toEqual([]);
+    });
+
+    it('keeps a batch that has ended instead of dropping it', () => {
+        const groups = selectBatchPanelGroups(
+            stamp(
+                entry({ batch_id: 'open', is_handover: true }),
+                entry({ batch_id: 'ended', status: 'completed' }),
+            ),
+        );
+        expect(groups.done.map((e) => e.batch_id)).toEqual(['ended']);
+        expect(groups.queued).toEqual([]);
+    });
+
+    it.each(['completed', 'failed_out', 'cancelled'] as const)(
+        'counts a %s batch as done',
+        (status) => {
+            const groups = selectBatchPanelGroups(
+                stamp(entry({ batch_id: 'open', is_handover: true }), entry({ batch_id: 'x', status })),
+            );
+            expect(groups.done.map((e) => e.batch_id)).toEqual(['x']);
+        },
+    );
+
+    it('puts the most recent completion nearest the bar', () => {
+        // The stamp lists the handover batch first, then the rest in the order
+        // they were created — and batches are worked oldest-first.
+        const groups = selectBatchPanelGroups(
+            stamp(
+                entry({ batch_id: 'open', is_handover: true }),
+                entry({ batch_id: 'first', status: 'completed' }),
+                entry({ batch_id: 'second', status: 'completed' }),
+            ),
+        );
+        expect(groups.done.map((e) => e.batch_id)).toEqual(['second', 'first']);
+    });
+
+    it('leads with the batch that ended on this very call', () => {
+        // The backend pins the handover flag at the top of the request and does
+        // not clear it when that batch ends, so an ended handover leads the
+        // stamp while having finished AFTER the batches listed behind it.
+        const groups = selectBatchPanelGroups(
+            stamp(
+                entry({ batch_id: 'just-ended', status: 'completed', is_handover: true }),
+                entry({ batch_id: 'ended-first', status: 'completed' }),
+                entry({ batch_id: 'ended-second', status: 'completed' }),
+                entry({ batch_id: 'open' }),
+            ),
+        );
+        expect(groups.tracked?.batch_id).toBe('open');
+        expect(groups.done.map((e) => e.batch_id)).toEqual([
+            'just-ended',
+            'ended-second',
+            'ended-first',
+        ]);
+    });
+
+    it('tracks the open batch even when an ended one is flagged as the handover', () => {
+        // A stamp can flag a batch as the handover on the call that ends it;
+        // tracking that one would hide the batch actually being worked.
+        const groups = selectBatchPanelGroups(
+            stamp(
+                entry({ batch_id: 'ended', status: 'completed', is_handover: true }),
+                entry({ batch_id: 'open' }),
+            ),
+        );
+        expect(groups.tracked?.batch_id).toBe('open');
+        expect(groups.done.map((e) => e.batch_id)).toEqual(['ended']);
+    });
+
+    it('still gives the full bar to the last batch when every one has ended', () => {
+        const groups = selectBatchPanelGroups(
+            stamp(
+                entry({ batch_id: 'b1', status: 'completed', is_handover: true }),
+                entry({ batch_id: 'b2', status: 'completed' }),
+            ),
+        );
+        expect(groups.tracked?.batch_id).toBe('b1');
+        expect(groups.done.map((e) => e.batch_id)).toEqual(['b2']);
+    });
+
+    it('leaves out batches the backend said are too small to show', () => {
+        const groups = selectBatchPanelGroups(
+            stamp(
+                entry({ batch_id: 'big', is_handover: true }),
+                entry({ batch_id: 'small', status: 'completed', show_progress: false }),
+            ),
+        );
+        expect(groups.done).toEqual([]);
     });
 });
 

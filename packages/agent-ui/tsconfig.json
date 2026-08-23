@@ -196,6 +196,7 @@
     "./src/chat/ChipPopup.tsx",
     "./src/chat/AskUserQuestionCard.tsx",
     "./src/chat/BatchApprovalCard.tsx",
+    "./src/chat/BatchDoneRows.tsx",
     "./src/chat/BatchOutcomeBlocks.tsx",
     "./src/chat/BatchProgressBar.tsx",
     "./src/chat/CreditConfirmationCard.tsx",
