@@ -48,6 +48,7 @@ export { default as RepeatIcon } from './RepeatIcon';
 export { default as GlobalSearchIcon } from './GlobalSearchIcon';
 export { default as CopyIcon } from './CopyIcon';
 export { default as TickIcon } from './TickIcon';
+export { default as TableIcon } from './TableIcon';
 export { default as ShareIcon } from './ShareIcon';
 export { default as Share05Icon } from './Share05Icon';
 export { default as AlertIcon } from './AlertIcon';
