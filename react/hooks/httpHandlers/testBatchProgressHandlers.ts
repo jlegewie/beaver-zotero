@@ -5,12 +5,10 @@
  * real (credit-consuming) batch run. The stamp goes through the same selector
  * and component as a backend stamp.
  *
- * `runStatus` picks which surface an ENDED batch is previewed on, because a
- * real one moves between them: the panel above the composer carries it while
- * its run is going, and the run's own receipt keeps it once that run is over.
- * An active batch shows in the panel either way. The default (`in_progress`)
- * also puts the preview run's status indicator in the transcript, since that is
- * what a run in that state looks like.
+ * `runStatus` picks which surface an ENDED batch is previewed on: `in_progress`
+ * for the panel (open batches only), `completed` for the receipt. An active
+ * batch shows in the panel either way. Default `in_progress` also shows the
+ * preview run's status indicator, matching a live run.
  *
  * The response says where the batches landed, so a caller can tell the two
  * surfaces apart without reading the DOM.
@@ -24,6 +22,7 @@ import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atom
 import { batchProgressAtom } from '../../atoms/agentRunAtoms';
 import { isRunActive } from '@beaver/agent-core/agents/types';
 import {
+    hasBatchEnded,
     selectBatchPanelGroups,
     selectRunBatchOutcomes,
 } from '@beaver/agent-core/run-state/batchProgress';
@@ -99,17 +98,18 @@ export async function handleBatchProgressPreview(
     const staged = previewRun(stamp, runStatus);
     store.set(threadRunsAtom, [...runs, staged]);
 
-    // Report what each surface DRAWS, not what it was handed: both apply a rule
-    // of their own on top of the stamp, and a caller checking a preview against
-    // the screen has to be able to trust this.
+    // Report what each surface draws, not what it was handed.
     const groups = selectBatchPanelGroups(store.get(batchProgressAtom));
-    const panel = groups.tracked
-        ? [groups.tracked, ...groups.done, ...groups.queued].map((entry) => entry.batch_id)
-        : [];
+    // Open batch and queue only. The panel's brief hold after completion is
+    // transient and is not reported here.
+    const panel =
+        groups.tracked && !hasBatchEnded(groups.tracked)
+            ? [groups.tracked, ...groups.queued].map((entry) => entry.batch_id)
+            : [];
     return {
         ok: true,
         batches: batches.length,
-        tracked: groups.tracked?.batch_id ?? null,
+        tracked: panel.length ? (groups.tracked?.batch_id ?? null) : null,
         panel,
         // `BatchRunReceipt` draws nothing until the run is terminal, which the
         // selector alone does not know.

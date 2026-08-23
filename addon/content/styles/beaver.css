@@ -245,50 +245,28 @@
     border-radius: 5px 5px 0 0;
 }
 
-/* Batch progress bar - live progress for a running batch operation.
-   Same bleed as the pending-actions bar: negative margins pull it over the
-   composer's own padding so it reads as the composer's top edge rather than a
-   card floating inside it. */
+/* Same bleed as the pending-actions bar so it reads as the composer's top edge. */
 [id^="beaver-pane-"] .batch-progress-bar {
     position: relative;
     margin: -0.65rem -0.65rem 0.65rem -0.65rem;
     border-radius: 5px 5px 0 0;
 }
 
-/* Batches this run has finished, stacked under the live bar. Same bleed, so
-   the strip reads as one surface. Never rounded: it only ever renders below
-   the bar, whose progress hairline is the composer's top edge. */
-[id^="beaver-pane-"] .batch-done-rows {
-    margin: -0.65rem -0.65rem 0.65rem -0.65rem;
-    border-radius: 0;
-}
-
-/* Stacked bars. The following bar's own -0.65rem top margin already cancels
-   this one's bottom margin, so the two sit flush and the batch bar's bottom
-   border is what separates them -- all that is left is to stop the lower bar
-   rounding a corner that is no longer the composer's. */
+/* Flush stacked bars: drop the lower bar's top-corner rounding. */
 [id^="beaver-pane-"] .batch-progress-bar + .pending-actions-bar,
-[id^="beaver-pane-"] .batch-progress-bar + .high-token-usage-warning-bar,
-[id^="beaver-pane-"] .batch-done-rows + .pending-actions-bar,
-[id^="beaver-pane-"] .batch-done-rows + .high-token-usage-warning-bar {
+[id^="beaver-pane-"] .batch-progress-bar + .high-token-usage-warning-bar {
     border-radius: 0;
 }
 
-/* The batch receipt - the same completed rows, kept under a terminal run instead
-   of above the composer - is a card in the transcript, so it needs none of the
-   composer bleed the panel variant does. It clips its own corners in
-   `BatchDoneRows`, not here: the component is shared, and a client without these
-   panes must get the same card. */
+/* Receipt is a transcript card (`BatchDoneRows` clips its corners). No composer bleed. */
 
 /* The whole collapsed row is the disclosure control. */
 [id^="beaver-pane-"] .batch-progress-bar [role="button"]:hover,
-[id^="beaver-pane-"] .batch-done-rows [role="button"]:hover,
 [id^="beaver-pane-"] .batch-run-receipt [role="button"]:hover {
     background-color: var(--fill-quinary);
 }
 
 [id^="beaver-pane-"] .batch-progress-bar [role="button"]:focus-visible,
-[id^="beaver-pane-"] .batch-done-rows [role="button"]:focus-visible,
 [id^="beaver-pane-"] .batch-run-receipt [role="button"]:focus-visible {
     outline: none;
     box-shadow: inset 0 0 0 1px var(--fill-tertiary);

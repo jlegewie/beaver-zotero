@@ -271,30 +271,15 @@ export function hasBatchEnded(entry: BatchProgressEntry): boolean {
  * Batch progress the panel above the composer should still draw, or null when
  * nothing was stamped.
  *
- * Newest stamp, minus the batches that have ended — kept only while the run
- * that carried the stamp is still going. A stamp is only written by a call that
- * moves a batch, so a run with no stamp of its own leaves the previous one
- * standing: right for an active batch (still open, must survive reload), wrong
- * for an ended one, which would otherwise stay pinned above the composer for
- * the rest of the thread.
+ * Newest stamp, with ended batches kept only while their carrying run is still
+ * going — the panel holds them briefly after completion. Once that run is
+ * terminal they belong to {@link selectRunBatchOutcomes}. `isRunActive` is the
+ * complement of the statuses the receipt mounts for, so the two surfaces cannot
+ * both draw one batch. Do not also require "newest run": a later run implies
+ * the carrier finished, but if that ever stopped holding the batch would be
+ * unreachable.
  *
- * An ended batch is therefore live only for the remainder of its own run. Once
- * that run is terminal the panel hands it over to {@link selectRunBatchOutcomes},
- * which puts it under the run in the transcript, where it keeps its numbers
- * instead of retiring with the panel. Showing it in both places at once is what
- * this avoids — the two sit a few lines apart on screen when a run has just
- * ended.
- *
- * The test is the carrying run's own status, and nothing else. `isRunActive` is
- * the exact complement of the terminal statuses the receipt mounts for, so the
- * two surfaces cannot both draw one batch, and for the run holding the newest
- * stamp they cannot both skip it either. Adding "and it is the newest run"
- * would look equivalent, because a later run implies the carrier has finished;
- * it would also open a gap the moment that stopped holding, and a batch falling
- * through it is unreachable.
- *
- * An active batch survives regardless — it is still open, and the panel is
- * where it belongs.
+ * Active batches always survive: they are still open.
  */
 export function selectLiveBatchProgress(
     runs: readonly AgentRun[],
@@ -316,7 +301,11 @@ export interface BatchPanelGroups {
      * progress bar.
      */
     tracked: BatchProgressEntry | null;
-    /** Batches that have ended, most recent first. Never includes `tracked`. */
+    /**
+     * Ended batches, most recent first. Never includes `tracked`.
+     * The panel does not draw these; {@link selectRunBatchOutcomes} uses them
+     * for the receipt, and needs `{tracked} ∪ done` to cover every ended entry.
+     */
     done: readonly BatchProgressEntry[];
     /** Batches still waiting their turn, in the order they will be worked. */
     queued: readonly BatchProgressEntry[];
@@ -325,32 +314,13 @@ export interface BatchPanelGroups {
 const NO_GROUPS: BatchPanelGroups = { tracked: null, done: [], queued: [] };
 
 /**
- * The stamp's batches, grouped the way the panel above the composer draws them.
+ * Group a stamp the way the panel and receipt both consume it.
  *
- * The single place the policy lives: which batch gets the full bar, what is
- * still to come, and what has finished. Surfaces downstream render what they
- * are given and filter nothing, so the three groups cannot drift apart.
- *
- * Also the ordering `selectRunBatchOutcomes` gives the run's receipt, so the
- * receipt opens on the rows the panel closed with. That second consumer needs
- * two things this must keep giving it: `{tracked} ∪ done` covers every ended
- * `show_progress` entry in the stamp, and `done` never repeats `tracked`.
- * Capping `done` here, or moving an ended batch into `queued`, would silently
- * drop it from the receipt as well as from the panel.
- *
- * An open batch always outranks an ended one for the bar — a stamp can flag a
- * batch as the handover on the same call that ends it, and tracking that one
- * would hide the batch actually being worked. With nothing open, the previous
- * rule stands, so a run that finishes its only batch still reads as it always
- * did: the completed bar, with its tick and its distribution.
- *
- * `done` runs most-recent-first, which the stamp's own order gives in two
- * pieces. The batch flagged as the handover leads the stamp, and the backend
- * pins that flag at the top of the request rather than clearing it when the
- * batch ends — so an ended handover is the batch that finished on this very
- * call, and it leads. Everything behind it is in the order the batches were
- * created, and they are worked oldest-first, so reversing that tail puts the
- * completion before it next.
+ * Open batches outrank ended ones for `tracked` — a stamp can flag handover on
+ * the same call that ends it. `done` is most-recent-first: the ended handover
+ * leads, then the rest reversed (they were worked oldest-first).
+ * `{tracked} ∪ done` must cover every ended `show_progress` entry, and `done`
+ * must not repeat `tracked` — {@link selectRunBatchOutcomes} relies on both.
  */
 export function selectBatchPanelGroups(
     stamp: BatchProgressStamp | null,
@@ -378,34 +348,12 @@ export function selectBatchPanelGroups(
 const NO_OUTCOMES: readonly BatchProgressEntry[] = [];
 
 /**
- * The batches this run finished, most recent first.
+ * Batches this run finished, most recent first.
  *
- * The durable counterpart of the live panel: the panel gives an ended batch up
- * when its run goes terminal, and this is what the run keeps. Attribution falls
- * out of the wire — the backend carries a finished batch on the run that
- * finished it and no further — so a batch appears under exactly one run, the
- * one where it ended, even when it was started several runs earlier.
- *
- * One stamp is enough, and it has to be the newest: a batch stays on every
- * stamp of the run that finished it — nothing retires it from the backend's
- * state, and the marker that carries it survives result compression untouched —
- * so the newest stamp of a run states every batch that run touched. Only a
- * cancelled batch leaves, and the backend keeps those off every stamp anyway.
- * Merging older stamps in would buy nothing and resurrect exactly those.
- *
- * Ordered and filtered by {@link selectBatchPanelGroups}, the panel's own rule,
- * so the receipt opens on the rows the panel closed with. Both stacks cap what
- * they draw, and a different order would fold the batch that held the bar a
- * second ago away at the very moment its run ended, while promoting ones
- * finished long before it. Reading the order off the stamp directly does not
- * work: every stamp leads with the handover, the first one a batch appears in
- * included, so where a batch first shows up says nothing about when it started.
- *
- * The bar's own batch leads whenever it has ended — to the reader it is one
- * more completed batch, and the handover flag makes it the most recent. An
- * active one is dropped: it is still the panel's, run over or not. "Most recent
- * first" holds only as far as that flag does; a stamp whose handover is too
- * small to show falls back to the oldest, here and on the bar alike.
+ * Newest stamp of the run only — merging older stamps would resurrect cancelled
+ * batches. Order and filter via {@link selectBatchPanelGroups} so the receipt
+ * matches the panel. An active tracked batch is dropped; it still belongs to
+ * the panel.
  */
 export function selectRunBatchOutcomes(run: AgentRun): readonly BatchProgressEntry[] {
     const stamp = newestStamp([run])?.stamp;

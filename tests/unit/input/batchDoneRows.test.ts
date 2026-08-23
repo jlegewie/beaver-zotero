@@ -1,9 +1,9 @@
 /**
- * The completed-batch rows stacked under the live progress bar.
+ * The completed-batch rows a run keeps under it in the transcript.
  *
  * Driven through a hook stand-in rather than mounted — same approach as
- * `batchProgressBar.test.ts` (jsdom is not loaded). Which batches are `done` is
- * `selectBatchPanelGroups`' decision, covered in
+ * `batchProgressBar.test.ts` (jsdom is not loaded). Which batches reach here is
+ * `selectRunBatchOutcomes`' decision, covered in
  * `tests/unit/runState/batchProgress.test.ts`; these rows render what they are
  * given.
  */
@@ -52,6 +52,23 @@ function entry(overrides: Partial<BatchProgressEntry> = {}): BatchProgressEntry 
     };
 }
 
+/** Walk the tree, invoking function components so their props are reachable. */
+function elements(node: React.ReactNode, out: React.ReactElement<any>[] = []): React.ReactElement<any>[] {
+    if (Array.isArray(node)) {
+        node.forEach((child) => elements(child, out));
+        return out;
+    }
+    if (!React.isValidElement(node)) return out;
+    const element = node as React.ReactElement<any>;
+    out.push(element);
+    if (typeof element.type === 'function') {
+        elements((element.type as (props: any) => React.ReactNode)(element.props), out);
+        return out;
+    }
+    elements(element.props.children ?? null, out);
+    return out;
+}
+
 /** Every string rendered, joined — what the user actually reads. */
 function renderedText(node: React.ReactNode, out: string[] = []): string[] {
     if (typeof node === 'string') {
@@ -75,15 +92,11 @@ function renderedText(node: React.ReactNode, out: string[] = []): string[] {
 }
 
 /** The props the stack hands each row, without rendering one. */
-function rowProps(
-    batches: BatchProgressEntry[],
-    variant?: 'panel' | 'receipt',
-): { ruleAbove: boolean; chrome: { boundBody: boolean } }[] {
+function rowProps(batches: BatchProgressEntry[]): { ruleAbove: boolean }[] {
     hookState.slots = [];
     hookState.index = 0;
-    const stack = BatchDoneRows({ batches, variant }) as React.ReactElement<any>;
-    // The stack's children are [heading?, rows[], overflow?]; the rows are the
-    // array among them, so this does not move when the chrome around them does.
+    const stack = BatchDoneRows({ batches }) as React.ReactElement<any>;
+    // Children are [heading, rows[]]; find the array so this survives chrome changes.
     const rows = (stack.props.children as unknown[]).find(Array.isArray) as
         | React.ReactElement<any>[]
         | undefined;
@@ -94,14 +107,6 @@ function render(batches: BatchProgressEntry[]): string {
     hookState.slots = [];
     hookState.index = 0;
     return renderedText(BatchDoneRows({ batches }) as React.ReactNode).join(' ');
-}
-
-function renderReceipt(batches: BatchProgressEntry[]): string {
-    hookState.slots = [];
-    hookState.index = 0;
-    return renderedText(
-        BatchDoneRows({ batches, variant: 'receipt' }) as React.ReactNode,
-    ).join(' ');
 }
 
 describe('the completed batch rows', () => {
@@ -126,7 +131,6 @@ describe('the completed batch rows', () => {
     });
 
     it('keeps stating the failures the live bar stated', () => {
-        // A batch must not lose its numbers by finishing.
         const text = render([
             entry({ progress_title: 'Filed items', failed: 7, status: 'failed_out' }),
         ]);
@@ -161,11 +165,9 @@ describe('the completed batch rows', () => {
                 ],
             }),
         ];
-        // Walking the tree is what runs the row's own body, and so what mounts
-        // its hooks; the state it allocates there is what the click flips.
+        // Walking the tree runs the row body and mounts its hooks; slot 0 is `isExpanded`.
         renderedText(BatchDoneRows({ batches }) as React.ReactNode);
-        // Slot 0 is the stack's `showAll`; slot 1 is the row's `isExpanded`.
-        hookState.slots[1].value = true;
+        hookState.slots[0].value = true;
         hookState.index = 0;
         const text = renderedText(BatchDoneRows({ batches }) as React.ReactNode).join(' ');
         expect(text).toContain('File the Methods collection by topic');
@@ -175,7 +177,7 @@ describe('the completed batch rows', () => {
         expect(text).toContain('+ 4 more');
     });
 
-    it('folds everything past the first two behind one line', () => {
+    it('keeps every batch the run finished, however many that is', () => {
         const text = render([
             entry({ batch_id: 'a', progress_title: 'Filed items' }),
             entry({ batch_id: 'b', progress_title: 'Tagged items' }),
@@ -184,96 +186,49 @@ describe('the completed batch rows', () => {
         ]);
         expect(text).toContain('Filed items');
         expect(text).toContain('Tagged items');
-        expect(text).not.toContain('Read attachments');
-        expect(text).not.toContain('Edited fields');
-        expect(text).toContain('2 more completed');
-    });
-
-    it('shows every row once the overflow line is opened', () => {
-        hookState.slots = [];
-        hookState.index = 0;
-        const batches = [
-            entry({ batch_id: 'a', progress_title: 'Filed items' }),
-            entry({ batch_id: 'b', progress_title: 'Tagged items' }),
-            entry({ batch_id: 'c', progress_title: 'Read attachments' }),
-        ];
-        // First pass mounts the hooks; flipping the stack's own state and
-        // re-rendering is what the click does.
-        BatchDoneRows({ batches });
-        hookState.slots[0].value = true;
-        hookState.index = 0;
-        const text = renderedText(BatchDoneRows({ batches }) as React.ReactNode).join(' ');
         expect(text).toContain('Read attachments');
-        // The open row must not still offer rows it has already revealed.
-        expect(text).not.toContain('more completed');
-        expect(text).toContain('Show fewer');
+        expect(text).toContain('Edited fields');
     });
 
-    it('bleeds into the composer as the panel, and is a card as the receipt', () => {
-        // The two variants differ only in chrome, and the chrome is load-bearing:
-        // the panel class carries the negative margins that pull the stack onto
-        // the composer's own padding, which would tear a card in the transcript
-        // apart. Nothing about the text distinguishes them.
-        const batches = [entry({ progress_title: 'Filed items' })];
-        const panel = BatchDoneRows({ batches }) as React.ReactElement<any>;
-        const receipt = BatchDoneRows({ batches, variant: 'receipt' }) as React.ReactElement<any>;
-        expect(panel.props.className).toContain('batch-done-rows');
-        expect(panel.props.className).not.toContain('rounded-md');
-        expect(receipt.props.className).toContain('batch-run-receipt');
-        expect(receipt.props.className).toContain('rounded-md');
+    it('is a card, not a strip bleeding into something', () => {
+        const stack = BatchDoneRows({ batches: [entry({ progress_title: 'Filed items' })] }) as
+            React.ReactElement<any>;
+        expect(stack.props.className).toContain('batch-run-receipt');
+        expect(stack.props.className).toContain('rounded-md');
     });
 
-    it('names itself as a batch operation in the receipt, but not in the panel', () => {
-        // In the transcript the rows are ticks and numbers with no bar above
-        // them, and a review card counting changes sits right underneath. The
-        // panel needs no heading: the live bar is directly above it.
-        const one = [entry({ progress_title: 'Filed items' })];
-        expect(render(one)).not.toContain('Batch operation');
-        expect(renderReceipt(one)).toContain('Batch operation');
+    it('names itself, having no live bar above it to do so', () => {
+        expect(render([entry({ progress_title: 'Filed items' })])).toContain('Batch operation');
     });
 
     it('matches the approval card wording, in the number the rows call for', () => {
-        // The word the user first met on the card they approved. A third name
-        // for the same feature is worse than a plain one.
-        const two = [
-            entry({ batch_id: 'a', progress_title: 'Filed items' }),
-            entry({ batch_id: 'b', progress_title: 'Tagged items' }),
-        ];
-        // The singular assertion has to rule the plural out: one is a substring
-        // of the other, so `toContain` alone passes against a hard-coded plural.
-        const single = renderReceipt([entry({ progress_title: 'Filed items' })]);
+        // Singular is a substring of plural, so `toContain` alone would pass a hard-coded plural.
+        const single = render([entry({ progress_title: 'Filed items' })]);
         expect(single).toContain('Batch operation');
         expect(single).not.toContain('Batch operations');
-        expect(renderReceipt(two)).toContain('Batch operations');
-    });
-
-    it('rules the receipt rows off from one another, and the panel rows not', () => {
-        // A card needs its rows separated; a strip bleeding into the composer
-        // reads as one block, where a rule would look like a seam.
-        const batches = [
+        expect(render([
             entry({ batch_id: 'a', progress_title: 'Filed items' }),
             entry({ batch_id: 'b', progress_title: 'Tagged items' }),
-        ];
-        expect(rowProps(batches, 'receipt').map((row) => row.ruleAbove)).toEqual([false, true]);
-        expect(rowProps(batches).map((row) => row.ruleAbove)).toEqual([false, false]);
+        ])).toContain('Batch operations');
     });
 
-    it('bounds the panel body against the composer, and lets the receipt grow', () => {
-        // The transcript is its own scroller; a second one nested inside it
-        // would swallow the wheel, and its `100vh` bound would mean nothing.
-        const batches = [entry({ progress_title: 'Filed items' })];
-        expect(rowProps(batches)[0].chrome.boundBody).toBe(true);
-        expect(rowProps(batches, 'receipt')[0].chrome.boundBody).toBe(false);
+    it('rules the rows off from one another', () => {
+        expect(rowProps([
+            entry({ batch_id: 'a', progress_title: 'Filed items' }),
+            entry({ batch_id: 'b', progress_title: 'Tagged items' }),
+        ]).map((row) => row.ruleAbove)).toEqual([false, true]);
     });
 
-    it('keeps the two most recent completions, which arrive first', () => {
-        const text = render([
-            entry({ batch_id: 'newest', progress_title: 'Edited fields' }),
-            entry({ batch_id: 'older', progress_title: 'Tagged items' }),
-            entry({ batch_id: 'oldest', progress_title: 'Filed items' }),
-        ]);
-        expect(text).toContain('Edited fields');
-        expect(text).toContain('Tagged items');
-        expect(text).not.toContain('Filed items');
+    it('lets an opened row grow instead of scrolling inside itself', () => {
+        // Nested scroll inside the transcript would swallow the wheel.
+        hookState.slots = [];
+        hookState.index = 0;
+        const batches = [entry({ progress_title: 'Filed items', goal: 'File by topic' })];
+        elements(BatchDoneRows({ batches }) as React.ReactNode);
+        hookState.slots[0].value = true;
+        hookState.index = 0;
+        const body = elements(BatchDoneRows({ batches }) as React.ReactNode)
+            .find((element) => element.props && 'bounded' in element.props);
+        expect(body?.props.bounded).toBe(false);
     });
 });
