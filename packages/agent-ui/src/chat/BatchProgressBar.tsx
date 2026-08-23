@@ -115,15 +115,27 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
 
     return (
         <div
-            className="batch-progress-bar bg-senary border-bottom-quinary overflow-hidden"
+            className="batch-progress-bar bg-senary border-bottom-quarternary"
+            style={{ position: 'relative' }}
             role="group"
             aria-label="Batch operation progress"
         >
-            {/* The hairline: the same segmentation as the expanded track, at the
-                bar's top edge, so progress reads before a single word does. */}
+            {/* Overlay, not in-flow: the composer already has a 1px top border,
+                so a hairline in the layout stacks on it and the edge reads as
+                2px. Completing the batch just fades this away. */}
             <div
-                className="display-flex flex-row"
-                style={{ height: '2px', backgroundColor: 'var(--fill-quinary)' }}
+                className="display-flex flex-row batch-progress-hairline"
+                style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: 2,
+                    opacity: isFinished ? 0 : 1,
+                    overflow: 'hidden',
+                    pointerEvents: 'none',
+                    transition: 'opacity 0.7s ease',
+                }}
                 role="progressbar"
                 aria-valuemin={0}
                 aria-valuemax={total}
@@ -153,7 +165,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                 {/* Only a non-default state earns a chip. */}
                 {hasFailures && (
                     <span
-                        className="text-xs font-color-orange flex-none"
+                        className="text-sm font-color-orange flex-none"
                         style={{
                             backgroundColor: 'var(--tag-orange-quarternary)',
                             border: '1px solid var(--tag-orange-tertiary)',
@@ -166,11 +178,11 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                     </span>
                 )}
                 {isFinished && !hasFailures && (
-                    <Icon icon={TickIcon} className="font-color-green flex-none scale-85" />
+                    <Icon icon={TickIcon} className="font-color-green flex-none scale-11" />
                 )}
                 {otherShown.length > 0 && (
                     <span
-                        className="text-xs font-color-secondary flex-none"
+                        className="text-sm font-color-secondary flex-none"
                         style={{
                             backgroundColor: 'var(--fill-quinary)',
                             border: '1px solid var(--fill-quarternary)',
@@ -191,7 +203,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
             </div>
 
             {isExpanded && (
-                <div className="display-flex flex-col gap-3 px-3 pb-3 min-w-0">
+                <div className="display-flex flex-col gap-4 px-3 pb-3 min-w-0">
                     {batch.goal && (
                         <div className="font-color-secondary text-sm">{batch.goal}</div>
                     )}
@@ -219,7 +231,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                                     {review?.onReview && (
                                         <a
                                             href="#"
-                                            className="text-xs font-color-accent-blue flex-none"
+                                            className="text-sm font-color-accent-blue flex-none"
                                             onClick={(e) => {
                                                 e.preventDefault();
                                                 e.stopPropagation();

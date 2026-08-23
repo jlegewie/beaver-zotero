@@ -30,7 +30,7 @@ function topCount(rows: readonly BatchOutcomeTally[]): number {
 /** A block heading, in the voice the batch approval and result cards use. */
 export const BatchBlockHeading: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <div
-        className="text-xs font-semibold uppercase font-color-secondary"
+        className="text-sm font-semibold uppercase font-color-secondary"
         style={{ letterSpacing: '0.06em' }}
     >
         {children}
@@ -71,7 +71,7 @@ export const BatchProgressTrack: React.FC<{
                     <div className="batch-progress-indeterminate" />
                 </div>
                 {showDetail && batch.detail_label && (
-                    <div className="text-xs font-color-secondary">{batch.detail_label}</div>
+                    <div className="text-sm font-color-secondary">{batch.detail_label}</div>
                 )}
             </div>
         );
@@ -103,7 +103,7 @@ export const BatchProgressTrack: React.FC<{
                 />
             </div>
             {showDetail && batch.detail_label && (
-                <div className="text-xs font-color-secondary">{batch.detail_label}</div>
+                <div className="text-sm font-color-secondary">{batch.detail_label}</div>
             )}
         </div>
     );
@@ -131,7 +131,7 @@ export const BatchTallyRow: React.FC<{
             </span>
             {row.created && (
                 <span
-                    className="text-xs font-color-purple flex-none"
+                    className="text-sm font-color-purple flex-none"
                     style={{
                         backgroundColor: 'var(--tag-purple-quarternary)',
                         border: '1px solid var(--tag-purple-tertiary)',
@@ -207,7 +207,7 @@ export const BatchTallyBlock: React.FC<{
                 />
             ))}
             {footnote.length > 0 && (
-                <div className="text-xs font-color-tertiary">{footnote.join(' · ')}</div>
+                <div className="text-sm font-color-tertiary">{footnote.join(' · ')}</div>
             )}
         </div>
     );

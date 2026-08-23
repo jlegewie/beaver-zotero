@@ -268,4 +268,8 @@
         background-color: var(--fill-tertiary);
         opacity: 0.4;
     }
+
+    .beaver-root .batch-progress-hairline {
+        transition: none !important;
+    }
 }

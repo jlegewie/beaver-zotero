@@ -250,6 +250,7 @@
    composer's own padding so it reads as the composer's top edge rather than a
    card floating inside it. */
 [id^="beaver-pane-"] .batch-progress-bar {
+    position: relative;
     margin: -0.65rem -0.65rem 0.65rem -0.65rem;
     border-radius: 5px 5px 0 0;
 }
