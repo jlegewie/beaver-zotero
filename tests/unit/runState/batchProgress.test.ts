@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     isBatchProgressStamp,
+    readBatchProgressStamp,
     selectBatchProgress,
     selectLiveBatchProgress,
     selectTrackedBatch,
@@ -60,8 +61,30 @@ describe('isBatchProgressStamp', () => {
         expect(isBatchProgressStamp({ batches: 'nope' })).toBe(false);
     });
 
-    it('rejects an entry missing the headline the bar renders', () => {
-        expect(isBatchProgressStamp({ batches: [{ batch_id: 'b1' }] })).toBe(false);
+    it('leaves entry validation to the read step', () => {
+        expect(isBatchProgressStamp({ batches: [{ batch_id: 'b1' }] })).toBe(true);
+    });
+});
+
+describe('readBatchProgressStamp', () => {
+    it('returns null for anything that is not a stamp', () => {
+        expect(readBatchProgressStamp(null)).toBeNull();
+        expect(readBatchProgressStamp({ batches: 'nope' })).toBeNull();
+    });
+
+    it('drops an entry missing the headline the bar renders', () => {
+        const value = { batches: [{ batch_id: 'bad' }, entry({ batch_id: 'good' })] };
+        expect(readBatchProgressStamp(value)?.batches.map((b) => b.batch_id)).toEqual(['good']);
+    });
+
+    it('returns an empty stamp when no entry is renderable', () => {
+        const result = readBatchProgressStamp({ batches: [{ batch_id: 'bad' }] });
+        expect(result?.batches).toEqual([]);
+    });
+
+    it('returns the value itself when every entry is renderable', () => {
+        const value = stamp(entry());
+        expect(readBatchProgressStamp(value)).toBe(value);
     });
 });
 
@@ -148,6 +171,20 @@ describe('selectBatchProgress', () => {
         const good = stamp(entry({ progress_primary: '5 of 9' }));
         const result = selectBatchProgress([run('r1', [request(good), bad])]);
         expect(result?.batches[0].progress_primary).toBe('5 of 9');
+    });
+
+    it('keeps a readable entry beside an unreadable one', () => {
+        // Per-entry, not all-or-nothing: falling back to the older stamp here
+        // would show stale numbers for a batch that has since moved.
+        const older = stamp(entry({ batch_id: 'b1', progress_primary: '5 of 9' }));
+        const mixed = {
+            batches: [{ batch_id: 'broken' }, entry({ batch_id: 'b1', progress_primary: '9 of 9' })],
+        };
+        const result = selectBatchProgress([
+            run('r1', [request(older)]),
+            run('r2', [request(mixed as never)]),
+        ]);
+        expect(result?.batches.map((b) => b.progress_primary)).toEqual(['9 of 9']);
     });
 });
 

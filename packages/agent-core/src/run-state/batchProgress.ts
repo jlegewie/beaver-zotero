@@ -74,6 +74,7 @@ export interface BatchProgressEntry {
      */
     tally_heading?: string;
     tallies?: BatchOutcomeTally[];
+    /** Distribution rows beyond those listed. Every truncated list reports one. */
     tallies_overflow?: number;
     /**
      * Sum across all rows, listed or not. Tallies count memberships, not items
@@ -81,8 +82,10 @@ export interface BatchProgressEntry {
      */
     tallies_total?: number;
     removals?: BatchOutcomeTally[];
+    removals_overflow?: number;
     /** Why items could not be processed. Only reported when a user can act on it. */
     failure_reasons?: BatchOutcomeTally[];
+    failure_reasons_overflow?: number;
 }
 
 /** Every batch worth showing, as of the tool return this rode on. */
@@ -91,18 +94,33 @@ export interface BatchProgressStamp {
     batches: BatchProgressEntry[];
 }
 
+/** Whether an entry carries the fields the bar cannot render without. */
+function isRenderableEntry(entry: unknown): entry is BatchProgressEntry {
+    return (
+        !!entry &&
+        typeof entry === 'object' &&
+        typeof (entry as BatchProgressEntry).batch_id === 'string' &&
+        typeof (entry as BatchProgressEntry).progress_primary === 'string'
+    );
+}
+
 /** Narrow an unknown metadata value to a {@link BatchProgressStamp}. */
 export function isBatchProgressStamp(value: unknown): value is BatchProgressStamp {
     if (!value || typeof value !== 'object') return false;
-    const batches = (value as { batches?: unknown }).batches;
-    if (!Array.isArray(batches)) return false;
-    return batches.every(
-        (entry) =>
-            !!entry &&
-            typeof entry === 'object' &&
-            typeof (entry as BatchProgressEntry).batch_id === 'string' &&
-            typeof (entry as BatchProgressEntry).progress_primary === 'string',
-    );
+    return Array.isArray((value as { batches?: unknown }).batches);
+}
+
+/**
+ * A stamp with unrenderable entries dropped, or null when it is not a stamp.
+ *
+ * Per-entry, not all-or-nothing: discarding the whole stamp over one bad entry
+ * falls back to an older one and shows stale numbers, where dropping the entry
+ * keeps its readable siblings. An empty result still supersedes.
+ */
+export function readBatchProgressStamp(value: unknown): BatchProgressStamp | null {
+    if (!isBatchProgressStamp(value)) return null;
+    const usable = value.batches.filter(isRenderableEntry);
+    return usable.length === value.batches.length ? value : { batches: usable };
 }
 
 /** The stamp a message's tool returns carry, latest part first. */
@@ -112,7 +130,8 @@ function stampInMessage(message: ModelMessage): BatchProgressStamp | null {
         const part = message.parts[index];
         if (part.part_kind !== 'tool-return') continue;
         const stamp = (part.metadata as { batch_progress?: unknown } | undefined)?.batch_progress;
-        if (isBatchProgressStamp(stamp)) return stamp;
+        const usable = readBatchProgressStamp(stamp);
+        if (usable) return usable;
     }
     return null;
 }

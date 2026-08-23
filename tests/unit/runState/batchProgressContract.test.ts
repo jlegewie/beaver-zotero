@@ -11,6 +11,8 @@ import editMetadataStamp from './fixtures/batchProgress-edit_metadata.json';
 import annotateStamp from './fixtures/batchProgress-annotate.json';
 import extractStamp from './fixtures/batchProgress-extract.json';
 import createNotesStamp from './fixtures/batchProgress-create_notes.json';
+import removalsOverflowStamp from './fixtures/batchProgress-removals-overflow.json';
+import failuresOverflowStamp from './fixtures/batchProgress-failures-overflow.json';
 import completedStamp from './fixtures/batchProgress-completed.json';
 
 /**
@@ -180,5 +182,33 @@ describe('per-operation wording the registry owns', () => {
         // resolved — the bar states this rather than leaving it to be inferred.
         const tracked = selectTrackedBatch(tagStamp as BatchProgressStamp)!;
         expect(tracked.tallies_total!).toBeGreaterThan(tracked.resolved!);
+    });
+});
+
+describe('a capped list says what it hides', () => {
+    // A truncated list with no count reads as a complete one, so every block
+    // that caps its rows reports the remainder.
+    it('reports the destination rows left off the distribution', () => {
+        const tracked = selectTrackedBatch(tagStamp as BatchProgressStamp)!;
+        expect(tracked.tallies_overflow).toBeGreaterThan(0);
+    });
+
+    it('reports the removal rows left off', () => {
+        const tracked = selectTrackedBatch(removalsOverflowStamp as BatchProgressStamp)!;
+        expect(tracked.removals?.length).toBeGreaterThan(0);
+        expect(tracked.removals_overflow).toBeGreaterThan(0);
+    });
+
+    it('reports the failure reasons left off', () => {
+        const tracked = selectTrackedBatch(failuresOverflowStamp as BatchProgressStamp)!;
+        expect(tracked.failure_reasons?.length).toBeGreaterThan(0);
+        expect(tracked.failure_reasons_overflow).toBeGreaterThan(0);
+    });
+
+    it('omits the count when every row was listed', () => {
+        // Absent, not zero — the backend drops a default-valued field.
+        const tracked = selectTrackedBatch(sortStamp as BatchProgressStamp)!;
+        expect(tracked.removals?.length).toBe(1);
+        expect(tracked.removals_overflow).toBeUndefined();
     });
 });

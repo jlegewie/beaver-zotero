@@ -37,6 +37,16 @@ export const BatchBlockHeading: React.FC<{ children: React.ReactNode }> = ({ chi
     </div>
 );
 
+/** The line under a block's rows. */
+export const BatchBlockFootnote: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+    <div className="text-sm font-color-secondary">{children}</div>
+);
+
+/** What a truncated list hides. Every capped block says this, or it reads complete. */
+function moreLabel(overflow: number): string {
+    return `+ ${overflow.toLocaleString()} more`;
+}
+
 /**
  * The segmented progress track: changed, examined-and-left-alone, failed.
  *
@@ -193,7 +203,7 @@ export const BatchTallyBlock: React.FC<{
     if (talliesTotal > resolved && resolved > 0) {
         footnote.push(`${talliesTotal.toLocaleString()} across ${resolved.toLocaleString()} items`);
     }
-    if (overflow > 0) footnote.push(`+ ${overflow.toLocaleString()} more`);
+    if (overflow > 0) footnote.push(moreLabel(overflow));
 
     return (
         <div className="display-flex flex-col gap-1 min-w-0">
@@ -206,9 +216,7 @@ export const BatchTallyBlock: React.FC<{
                     name={row.label}
                 />
             ))}
-            {footnote.length > 0 && (
-                <div className="text-sm font-color-secondary">{footnote.join(' · ')}</div>
-            )}
+            {footnote.length > 0 && <BatchBlockFootnote>{footnote.join(' · ')}</BatchBlockFootnote>}
         </div>
     );
 };
@@ -227,6 +235,7 @@ export const BatchRemovalBlock: React.FC<{
     const removals = batch.removals ?? [];
     if (removals.length === 0) return null;
     const top = topCount(removals);
+    const overflow = batch.removals_overflow ?? 0;
     return (
         <div className="display-flex flex-col gap-1 min-w-0">
             <BatchBlockHeading>{heading}</BatchBlockHeading>
@@ -239,6 +248,7 @@ export const BatchRemovalBlock: React.FC<{
                     name={row.label}
                 />
             ))}
+            {overflow > 0 && <BatchBlockFootnote>{moreLabel(overflow)}</BatchBlockFootnote>}
         </div>
     );
 };
@@ -256,6 +266,7 @@ export const BatchFailureReasonBlock: React.FC<{
 }> = ({ batch, heading }) => {
     const reasons = batch.failure_reasons ?? [];
     if (reasons.length === 0) return null;
+    const overflow = batch.failure_reasons_overflow ?? 0;
     return (
         <div className="display-flex flex-col gap-1 min-w-0">
             <BatchBlockHeading>{heading}</BatchBlockHeading>
@@ -268,6 +279,7 @@ export const BatchFailureReasonBlock: React.FC<{
                     <span className="font-color-secondary flex-none">{row.count}</span>
                 </div>
             ))}
+            {overflow > 0 && <BatchBlockFootnote>{moreLabel(overflow)}</BatchBlockFootnote>}
         </div>
     );
 };

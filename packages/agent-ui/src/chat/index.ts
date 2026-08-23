@@ -37,6 +37,7 @@ export { default as BatchProgressBar } from './BatchProgressBar';
 export type { BatchProgressBarProps } from './BatchProgressBar';
 
 export {
+    BatchBlockFootnote,
     BatchBlockHeading,
     BatchFailureReasonBlock,
     BatchProgressTrack,
