@@ -4,16 +4,11 @@ import { hasBatchEnded } from '@beaver/agent-core/run-state/batchProgress';
 import { ArrowDownIcon, Icon, LayersIcon, TickIcon } from '../icons';
 import {
     BatchBlockHeading,
-    BatchFailureReasonBlock,
+    BatchOutcomeBlocks,
     BatchProgressTrack,
-    BatchRemovalBlock,
-    BatchTallyBlock,
 } from './BatchOutcomeBlocks';
 
 const WAITING_HEADING = 'Waiting';
-/** Things the batch took away, listed apart from destinations. */
-const REMOVED_HEADING = 'Removed';
-const FAILURE_HEADING = 'Could not be read';
 /** Lower case: continues the line above it. */
 const QUEUE_PREFIX = 'then ';
 
@@ -211,11 +206,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
 
                     <BatchProgressTrack batch={batch} />
 
-                    <BatchTallyBlock batch={batch} />
-
-                    <BatchRemovalBlock batch={batch} heading={REMOVED_HEADING} />
-
-                    <BatchFailureReasonBlock batch={batch} heading={FAILURE_HEADING} />
+                    <BatchOutcomeBlocks batch={batch} />
 
                     {otherShown.length > 0 && (
                         <div className="display-flex flex-col gap-1 min-w-0">

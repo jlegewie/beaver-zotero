@@ -39,10 +39,9 @@ export type { BatchProgressBarProps } from './BatchProgressBar';
 export {
     BatchBlockFootnote,
     BatchBlockHeading,
-    BatchFailureReasonBlock,
+    BatchOutcomeBlocks,
+    BatchOutcomeBlockView,
     BatchProgressTrack,
-    BatchRemovalBlock,
-    BatchTallyBlock,
     BatchTallyRow,
 } from './BatchOutcomeBlocks';
 

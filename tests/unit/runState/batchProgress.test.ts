@@ -97,6 +97,70 @@ describe('readBatchProgressStamp', () => {
     });
 });
 
+describe('records written before blocks existed', () => {
+    // Stored threads keep the old shape forever. The read step adapts them once,
+    // so nothing downstream has to know there were ever two shapes.
+    const legacy = {
+        batch_id: 'b1',
+        operation: 'sort',
+        progress_primary: '40 of 184',
+        resolved: 40,
+        tally_heading: 'Where items are going',
+        tallies: [{ label: 'Ecology', count: 23, reference: 'CHT8AIF6' }],
+        tallies_overflow: 3,
+        tallies_total: 77,
+        removals: [{ label: 'Inbox', count: 31, removal: true }],
+        removals_overflow: 2,
+        failure_reasons: [{ label: 'No text layer', count: 4 }],
+        failure_reasons_overflow: 1,
+    };
+
+    const adapted = () => readBatchProgressStamp({ batches: [legacy] })!.batches[0].blocks!;
+
+    it('builds one block per legacy list, in render order', () => {
+        expect(adapted().map((b) => b.kind)).toEqual(['destination', 'removal', 'failure']);
+    });
+
+    it('carries the rows, overflow and total of each list across', () => {
+        const [destination, removal, failure] = adapted();
+        expect(destination).toEqual({
+            heading: 'Where items are going',
+            kind: 'destination',
+            rows: legacy.tallies,
+            overflow: 3,
+            total: 77,
+        });
+        expect(removal.rows).toEqual(legacy.removals);
+        expect(removal.overflow).toBe(2);
+        expect(failure.rows).toEqual(legacy.failure_reasons);
+        expect(failure.overflow).toBe(1);
+    });
+
+    it('supplies the headings the client used to own', () => {
+        const [, removal, failure] = adapted();
+        expect(removal.heading).toBe('Removed');
+        expect(failure.heading).toBe('Could not be read');
+    });
+
+    it('leaves an entry that already has blocks alone', () => {
+        const modern = entry({ blocks: [{ heading: 'Tags applied', kind: 'destination' }] });
+        const read = readBatchProgressStamp({ batches: [modern] })!;
+        expect(read.batches[0]).toBe(modern);
+    });
+
+    it('adds nothing to an entry with no outcomes in either shape', () => {
+        const bare = entry();
+        expect(readBatchProgressStamp({ batches: [bare] })!.batches[0]).toBe(bare);
+    });
+
+    it('skips a legacy distribution the backend hid with an empty heading', () => {
+        // An empty `tally_heading` was how the old shape said "no distribution".
+        const hidden = { ...legacy, tally_heading: '' };
+        const blocks = readBatchProgressStamp({ batches: [hidden] })!.batches[0].blocks!;
+        expect(blocks.map((b) => b.kind)).toEqual(['removal', 'failure']);
+    });
+});
+
 describe('selectBatchProgress', () => {
     it('returns null when nothing has been stamped', () => {
         expect(selectBatchProgress([run('r1', [request(null)])])).toBeNull();

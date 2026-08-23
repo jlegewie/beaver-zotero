@@ -2,10 +2,8 @@ import React from 'react';
 import { BatchOperationView } from '@beaver/agent-core/run-state/toolResultViews';
 import { Icon, LayersIcon, SecurityWarningIcon } from '@beaver/agent-ui/icons';
 import {
-    BatchFailureReasonBlock,
+    BatchOutcomeBlocks,
     BatchProgressTrack,
-    BatchRemovalBlock,
-    BatchTallyBlock,
 } from '@beaver/agent-ui/chat/BatchOutcomeBlocks';
 
 /**
@@ -15,11 +13,6 @@ import {
  */
 const ACTION_HEADING = 'Requested action';
 const INSTRUCTIONS_HEADING = 'Your instructions';
-// Bare, and the same word the live bar uses: the block above it is headed in
-// the operation's own words, so "Also removed" pointed back at a heading that
-// never mentioned removal.
-const REMOVED_HEADING = 'Removed';
-const FAILURE_HEADING = 'Could not be read';
 const INCOMPLETE_HEADING = 'Not completed';
 
 /**
@@ -75,9 +68,7 @@ export const BatchOperationResultView: React.FC<{ view: BatchOperationView }> = 
             {progress && (
                 <div className="display-flex flex-col min-w-0 gap-3">
                     <BatchProgressTrack batch={progress} />
-                    <BatchTallyBlock batch={progress} />
-                    <BatchRemovalBlock batch={progress} heading={REMOVED_HEADING} />
-                    <BatchFailureReasonBlock batch={progress} heading={FAILURE_HEADING} />
+                    <BatchOutcomeBlocks batch={progress} />
                 </div>
             )}
 

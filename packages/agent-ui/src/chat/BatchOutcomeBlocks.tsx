@@ -1,5 +1,6 @@
 import React from 'react';
 import type {
+    BatchOutcomeBlock,
     BatchOutcomeTally,
     BatchProgressEntry,
 } from '@beaver/agent-core/run-state/batchProgress';
@@ -175,111 +176,79 @@ export const BatchTallyRow: React.FC<{
 );
 
 /**
- * The outcome distribution — where items went, which tags were applied, which
- * fields were changed.
+ * One labelled group of outcome rows.
  *
- * Renders nothing when the backend sent no heading. An empty heading is how it
- * says this operation records no distribution: every call carries the same
- * outcome label, so a chart of it would be one bar at 100%. Gating on the
- * heading alone is what keeps the client from having to know which operations
- * those are.
+ * `kind` is the only thing that varies: destinations get an accent bar and a
+ * `new` badge, removals the same bar muted, failure reasons no bar at all. The
+ * heading and every label arrive composed — nothing here is per-operation.
  */
-export const BatchTallyBlock: React.FC<{
-    batch: BatchProgressEntry;
-}> = ({ batch }) => {
-    const heading = batch.tally_heading?.trim() ?? '';
-    const tallies = batch.tallies ?? [];
-    if (!heading || tallies.length === 0) return null;
+export const BatchOutcomeBlockView: React.FC<{
+    block: BatchOutcomeBlock;
+    /** Items a call changed, for the memberships footnote. Destinations only. */
+    resolved?: number;
+}> = ({ block, resolved = 0 }) => {
+    const rows = block.rows ?? [];
+    if (rows.length === 0) return null;
 
-    const resolved = batch.resolved ?? 0;
-    const talliesTotal = batch.tallies_total ?? 0;
-    const overflow = batch.tallies_overflow ?? 0;
-    const top = topCount(tallies);
+    const overflow = block.overflow ?? 0;
+    const total = block.total ?? 0;
 
-    // Tallies count MEMBERSHIPS, not items — one item takes several tags — so
-    // when the sum runs past the item count, say so rather than leave the user
-    // to work out why the numbers add up to more than the population.
+    // Destination rows count MEMBERSHIPS, not items — one item takes several
+    // tags — so when the sum runs past the item count, say so rather than leave
+    // the user to work out why the numbers exceed the population.
     const footnote: string[] = [];
-    if (talliesTotal > resolved && resolved > 0) {
-        footnote.push(`${talliesTotal.toLocaleString()} across ${resolved.toLocaleString()} items`);
+    if (block.kind === 'destination' && total > resolved && resolved > 0) {
+        footnote.push(`${total.toLocaleString()} across ${resolved.toLocaleString()} items`);
     }
     if (overflow > 0) footnote.push(moreLabel(overflow));
 
     return (
         <div className="display-flex flex-col gap-1 min-w-0">
-            <BatchBlockHeading>{heading}</BatchBlockHeading>
-            {tallies.map((row) => (
-                <BatchTallyRow
-                    key={row.reference || row.label}
-                    row={row}
-                    top={top}
-                    name={row.label}
-                />
-            ))}
+            <BatchBlockHeading>{block.heading}</BatchBlockHeading>
+            {rows.map((row) =>
+                block.kind === 'failure' ? (
+                    <div
+                        key={row.label}
+                        className="display-flex flex-row items-baseline gap-2 text-sm min-w-0"
+                    >
+                        <span className="font-color-secondary flex-1 min-w-0">{row.label}</span>
+                        <span className="font-color-secondary flex-none">{row.count}</span>
+                    </div>
+                ) : (
+                    <BatchTallyRow
+                        key={row.reference || row.label}
+                        row={row}
+                        top={topCount(rows)}
+                        muted={block.kind === 'removal'}
+                        name={row.label}
+                    />
+                ),
+            )}
             {footnote.length > 0 && <BatchBlockFootnote>{footnote.join(' · ')}</BatchBlockFootnote>}
         </div>
     );
 };
 
 /**
- * Things the batch took away — a collection items were removed from, a tag it
- * cleared.
+ * Everything a batch has to show, in the order the backend sent it.
  *
- * Its own block because these arrive in the same tally as the destinations: a
- * removal rendered as a destination reads as somewhere items went.
+ * Renders nothing when there are no blocks — which is how an operation that
+ * records no distribution says so, without the client knowing which those are.
  */
-export const BatchRemovalBlock: React.FC<{
+export const BatchOutcomeBlocks: React.FC<{
     batch: BatchProgressEntry;
-    heading: string;
-}> = ({ batch, heading }) => {
-    const removals = batch.removals ?? [];
-    if (removals.length === 0) return null;
-    const top = topCount(removals);
-    const overflow = batch.removals_overflow ?? 0;
+}> = ({ batch }) => {
+    const blocks = batch.blocks ?? [];
+    if (blocks.length === 0) return null;
     return (
-        <div className="display-flex flex-col gap-1 min-w-0">
-            <BatchBlockHeading>{heading}</BatchBlockHeading>
-            {removals.map((row) => (
-                <BatchTallyRow
-                    key={row.reference || row.label}
-                    row={row}
-                    top={top}
-                    muted
-                    name={row.label}
+        <>
+            {blocks.map((block, index) => (
+                <BatchOutcomeBlockView
+                    key={`${block.kind}-${index}`}
+                    block={block}
+                    resolved={batch.resolved ?? 0}
                 />
             ))}
-            {overflow > 0 && <BatchBlockFootnote>{moreLabel(overflow)}</BatchBlockFootnote>}
-        </div>
-    );
-};
-
-/**
- * Why items could not be processed.
- *
- * Only `extract` reports reasons, and it is the operation where they matter
- * most: it is metered, so "these are scans that need OCR" is worth far more
- * than a count that invites a blind, paid-for retry.
- */
-export const BatchFailureReasonBlock: React.FC<{
-    batch: BatchProgressEntry;
-    heading: string;
-}> = ({ batch, heading }) => {
-    const reasons = batch.failure_reasons ?? [];
-    if (reasons.length === 0) return null;
-    const overflow = batch.failure_reasons_overflow ?? 0;
-    return (
-        <div className="display-flex flex-col gap-1 min-w-0">
-            <BatchBlockHeading>{heading}</BatchBlockHeading>
-            {reasons.map((row) => (
-                <div
-                    key={row.label}
-                    className="display-flex flex-row items-baseline gap-2 text-sm min-w-0"
-                >
-                    <span className="font-color-secondary flex-1 min-w-0">{row.label}</span>
-                    <span className="font-color-secondary flex-none">{row.count}</span>
-                </div>
-            ))}
-            {overflow > 0 && <BatchBlockFootnote>{moreLabel(overflow)}</BatchBlockFootnote>}
-        </div>
+        </>
     );
 };

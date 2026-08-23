@@ -31,8 +31,28 @@ export interface BatchOutcomeTally {
     reference?: string;
     /** Destination created by this run, not one the user already had. */
     created?: boolean;
-    /** Something taken away, never a destination. Rendered apart. */
-    removal?: boolean;
+}
+
+/** How a block's rows are drawn. */
+export type BatchOutcomeBlockKind = 'destination' | 'removal' | 'failure';
+
+/**
+ * One labelled group of outcome rows.
+ *
+ * A repeated block rather than a field per axis, so an operation that grows a
+ * new axis costs a client nothing. Headings are composed backend-side.
+ */
+export interface BatchOutcomeBlock {
+    heading: string;
+    kind: BatchOutcomeBlockKind;
+    rows?: BatchOutcomeTally[];
+    /** Rows beyond those listed. Every capped block reports one. */
+    overflow?: number;
+    /**
+     * Sum across all rows, listed or not. Destination rows count memberships,
+     * not items (one item can take several tags), so this is never the item count.
+     */
+    total?: number;
 }
 
 /** Progress for one batch. */
@@ -69,23 +89,66 @@ export interface BatchProgressEntry {
     no_change?: number;
     failed?: number;
     /**
-     * Heading for the distribution. Absent for operations that record none —
-     * hide the block on this alone rather than hard-coding which those are.
+     * What the batch has done, in labelled groups. Empty for an operation that
+     * records none — render what arrives, never hard-code which those are.
+     *
+     * Absent on records written before blocks existed; `readBatchProgressStamp`
+     * builds it from the legacy fields so nothing downstream sees two shapes.
      */
+    blocks?: BatchOutcomeBlock[];
+}
+
+/**
+ * The pre-`blocks` shape, still present in stored threads.
+ *
+ * Read only by {@link legacyBlocks}. Nothing else may reach for these — every
+ * surface reads `blocks`.
+ */
+interface LegacyOutcomeFields {
     tally_heading?: string;
     tallies?: BatchOutcomeTally[];
-    /** Distribution rows beyond those listed. Every truncated list reports one. */
     tallies_overflow?: number;
-    /**
-     * Sum across all rows, listed or not. Tallies count memberships, not items
-     * (one item can take several tags), so this is never the item count.
-     */
     tallies_total?: number;
     removals?: BatchOutcomeTally[];
     removals_overflow?: number;
-    /** Why items could not be processed. Only reported when a user can act on it. */
     failure_reasons?: BatchOutcomeTally[];
     failure_reasons_overflow?: number;
+}
+
+/** Headings the client used to own, kept for records that predate `blocks`. */
+const LEGACY_REMOVAL_HEADING = 'Removed';
+const LEGACY_FAILURE_HEADING = 'Could not be read';
+
+/** Blocks for an entry written before the backend sent any. */
+function legacyBlocks(entry: BatchProgressEntry): BatchOutcomeBlock[] {
+    const legacy = entry as LegacyOutcomeFields;
+    const blocks: BatchOutcomeBlock[] = [];
+    if (legacy.tally_heading && legacy.tallies?.length) {
+        blocks.push({
+            heading: legacy.tally_heading,
+            kind: 'destination',
+            rows: legacy.tallies,
+            overflow: legacy.tallies_overflow,
+            total: legacy.tallies_total,
+        });
+    }
+    if (legacy.removals?.length) {
+        blocks.push({
+            heading: LEGACY_REMOVAL_HEADING,
+            kind: 'removal',
+            rows: legacy.removals,
+            overflow: legacy.removals_overflow,
+        });
+    }
+    if (legacy.failure_reasons?.length) {
+        blocks.push({
+            heading: LEGACY_FAILURE_HEADING,
+            kind: 'failure',
+            rows: legacy.failure_reasons,
+            overflow: legacy.failure_reasons_overflow,
+        });
+    }
+    return blocks;
 }
 
 /** Every batch worth showing, as of the tool return this rode on. */
@@ -124,17 +187,34 @@ function isBatchProgressContainer(value: unknown): value is BatchProgressContain
     );
 }
 
+/** An entry with `blocks` filled in, whichever shape it was stored in. */
+function withBlocks(entry: BatchProgressEntry): BatchProgressEntry {
+    if (entry.blocks) return entry;
+    const blocks = legacyBlocks(entry);
+    return blocks.length ? { ...entry, blocks } : entry;
+}
+
 /**
- * A stamp with unrenderable entries dropped, or null when it is not a stamp.
+ * A stamp with unrenderable entries dropped and `blocks` normalized, or null
+ * when it is not a stamp.
  *
  * Per-entry, not all-or-nothing: discarding the whole stamp over one bad entry
  * falls back to an older one and shows stale numbers, where dropping the entry
  * keeps its readable siblings. An empty result still supersedes.
+ *
+ * The single place a pre-`blocks` record is adapted, so every surface downstream
+ * reads one shape.
  */
 export function readBatchProgressStamp(value: unknown): BatchProgressStamp | null {
     if (!isBatchProgressContainer(value)) return null;
-    if (isBatchProgressStamp(value)) return value;
-    return { batches: value.batches.filter(isRenderableEntry) };
+    const usable = value.batches.filter(isRenderableEntry);
+    const adapted = usable.map(withBlocks);
+    // Reference-equal when nothing needed changing, so derived atoms do not
+    // re-render on every unrelated read.
+    return adapted.every((entry, index) => entry === usable[index]) &&
+        usable.length === value.batches.length
+        ? (value as BatchProgressStamp)
+        : { batches: adapted };
 }
 
 /** The stamp a message's tool returns carry, latest part first. */

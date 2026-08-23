@@ -3,7 +3,10 @@ import {
     isBatchProgressStamp,
     selectTrackedBatch,
 } from '@beaver/agent-core/run-state/batchProgress';
-import type { BatchProgressStamp } from '@beaver/agent-core/run-state/batchProgress';
+import type {
+    BatchProgressEntry,
+    BatchProgressStamp,
+} from '@beaver/agent-core/run-state/batchProgress';
 
 import sortStamp from './fixtures/batchProgress-sort.json';
 import tagStamp from './fixtures/batchProgress-tag.json';
@@ -37,6 +40,14 @@ const FIXTURES: Record<string, unknown> = {
     extract: extractStamp,
     create_notes: createNotesStamp,
 };
+
+/** The outcome block of `kind` on an entry, or undefined. */
+function block(entry: BatchProgressEntry, kind = 'destination') {
+    return (entry.blocks ?? []).find((b) => b.kind === kind);
+}
+
+const rowsOf = (entry: BatchProgressEntry, kind = 'destination') =>
+    block(entry, kind)?.rows ?? [];
 
 describe('backend payload contract', () => {
     it.each(Object.keys(FIXTURES))('reads a real %s record', (name) => {
@@ -107,16 +118,15 @@ describe('the title, which is the only thing the counts cannot say', () => {
 describe('the distribution the backend registry decides', () => {
     it.each(['sort', 'tag', 'edit_metadata'])('%s carries a heading and rows', (name) => {
         const tracked = selectTrackedBatch(FIXTURES[name] as BatchProgressStamp)!;
-        expect(tracked.tally_heading).toBeTruthy();
-        expect(tracked.tallies?.length).toBeGreaterThan(0);
+        expect(block(tracked)?.heading).toBeTruthy();
+        expect(rowsOf(tracked).length).toBeGreaterThan(0);
     });
 
     it.each(['annotate', 'extract', 'create_notes'])('%s carries none', (name) => {
-        // Their outcome label is the same string on every call. The client hides
-        // the block on the empty heading alone and never learns the list.
+        // Their outcome label is the same string on every call. No block is
+        // sent, so the client renders nothing and never learns the list.
         const tracked = selectTrackedBatch(FIXTURES[name] as BatchProgressStamp)!;
-        expect(tracked.tally_heading ?? '').toBe('');
-        expect(tracked.tallies ?? []).toEqual([]);
+        expect(block(tracked)).toBeUndefined();
     });
 });
 
@@ -127,32 +137,32 @@ describe('sort destinations', () => {
         // The backend composes these from the `collection_names` this client
         // returns while validating the action, then splits the composed label
         // back into halves — so nothing here resolves a key.
-        for (const row of tracked.tallies ?? []) {
+        for (const row of rowsOf(tracked)) {
             expect(row.label).not.toMatch(/^[A-Z0-9]{8}$/);
             expect(row.label).not.toMatch(/\([A-Z0-9]{8}\)$/);
         }
     });
 
     it('keep the key as the row identity', () => {
-        expect(tracked.tallies?.[0].reference).toMatch(/^[A-Z0-9]{8}$/);
+        expect(rowsOf(tracked)[0].reference).toMatch(/^[A-Z0-9]{8}$/);
     });
 
     it('mark a destination the run invented', () => {
-        const created = (tracked.tallies ?? []).filter((row) => row.created);
+        const created = (rowsOf(tracked)).filter((row) => row.created);
         expect(created).toHaveLength(1);
         expect(created[0].label).toBe('Remote sensing');
     });
 
-    it('keep removals out of the distribution', () => {
-        expect((tracked.tallies ?? []).some((row) => row.removal)).toBe(false);
-        expect(tracked.removals?.[0].removal).toBe(true);
-        expect(tracked.removals?.[0].label).toBe('Inbox');
+    it('keep removals in their own block, out of the distribution', () => {
+        expect(rowsOf(tracked).map((row) => row.label)).not.toContain('Inbox');
+        expect(rowsOf(tracked, 'removal').map((row) => row.label)).toEqual(['Inbox']);
+        expect(block(tracked, 'removal')?.heading).toBe('Removed');
     });
 
     it('report a tally sum the listed rows are a share of', () => {
-        const listed = (tracked.tallies ?? []).reduce((sum, row) => sum + row.count, 0);
-        expect(tracked.tallies_total).toBeGreaterThanOrEqual(listed);
-        expect(tracked.tallies_overflow).toBeGreaterThan(0);
+        const listed = (rowsOf(tracked)).reduce((sum, row) => sum + row.count, 0);
+        expect(block(tracked)?.total).toBeGreaterThanOrEqual(listed);
+        expect(block(tracked)?.overflow).toBeGreaterThan(0);
     });
 });
 
@@ -171,7 +181,7 @@ describe('per-operation wording the registry owns', () => {
 
     it('reports why extract could not read a document', () => {
         const tracked = selectTrackedBatch(extractStamp as BatchProgressStamp)!;
-        const reasons = tracked.failure_reasons ?? [];
+        const reasons = rowsOf(tracked, 'failure');
         expect(reasons.length).toBeGreaterThan(0);
         // Grouping keys are also the text a user reads, so no placeholders.
         for (const reason of reasons) expect(reason.label).not.toMatch(/<[a-z]+>/);
@@ -181,7 +191,7 @@ describe('per-operation wording the registry owns', () => {
         // One item takes several tags, so the sum deliberately exceeds what was
         // resolved — the bar states this rather than leaving it to be inferred.
         const tracked = selectTrackedBatch(tagStamp as BatchProgressStamp)!;
-        expect(tracked.tallies_total!).toBeGreaterThan(tracked.resolved!);
+        expect(block(tracked)!.total!).toBeGreaterThan(tracked.resolved!);
     });
 });
 
@@ -190,25 +200,25 @@ describe('a capped list says what it hides', () => {
     // that caps its rows reports the remainder.
     it('reports the destination rows left off the distribution', () => {
         const tracked = selectTrackedBatch(tagStamp as BatchProgressStamp)!;
-        expect(tracked.tallies_overflow).toBeGreaterThan(0);
+        expect(block(tracked)?.overflow).toBeGreaterThan(0);
     });
 
     it('reports the removal rows left off', () => {
         const tracked = selectTrackedBatch(removalsOverflowStamp as BatchProgressStamp)!;
-        expect(tracked.removals?.length).toBeGreaterThan(0);
-        expect(tracked.removals_overflow).toBeGreaterThan(0);
+        expect(rowsOf(tracked, 'removal').length).toBeGreaterThan(0);
+        expect(block(tracked, 'removal')?.overflow).toBeGreaterThan(0);
     });
 
     it('reports the failure reasons left off', () => {
         const tracked = selectTrackedBatch(failuresOverflowStamp as BatchProgressStamp)!;
-        expect(tracked.failure_reasons?.length).toBeGreaterThan(0);
-        expect(tracked.failure_reasons_overflow).toBeGreaterThan(0);
+        expect(rowsOf(tracked, 'failure').length).toBeGreaterThan(0);
+        expect(block(tracked, 'failure')?.overflow).toBeGreaterThan(0);
     });
 
     it('omits the count when every row was listed', () => {
         // Absent, not zero — the backend drops a default-valued field.
         const tracked = selectTrackedBatch(sortStamp as BatchProgressStamp)!;
-        expect(tracked.removals?.length).toBe(1);
-        expect(tracked.removals_overflow).toBeUndefined();
+        expect(rowsOf(tracked, 'removal').length).toBe(1);
+        expect(block(tracked, 'removal')?.overflow).toBeUndefined();
     });
 });
