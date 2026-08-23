@@ -1,10 +1,6 @@
 import React from 'react';
 import { BatchOperationView } from '@beaver/agent-core/run-state/toolResultViews';
-import { Icon, LayersIcon, SecurityWarningIcon } from '@beaver/agent-ui/icons';
-import {
-    BatchOutcomeBlocks,
-    BatchProgressTrack,
-} from '@beaver/agent-ui/chat/BatchOutcomeBlocks';
+import { Icon, SecurityWarningIcon } from '@beaver/agent-ui/icons';
 
 /**
  * Labels for the slots this card lays out, as opposed to what goes in them.
@@ -13,7 +9,6 @@ import {
  */
 const ACTION_HEADING = 'Requested action';
 const INSTRUCTIONS_HEADING = 'Your instructions';
-const INCOMPLETE_HEADING = 'Not completed';
 
 /**
  * Shared renderer for the {@link BatchOperationView} view model (batch_start).
@@ -34,23 +29,12 @@ export const BatchOperationResultView: React.FC<{ view: BatchOperationView }> = 
     const scopeSecondary = view.scope_secondary?.trim();
     const destructive = view.destructive_warning?.trim();
     const instructions = view.user_instructions?.trim();
-    // A batch that has ended says how; one still running says how far it got.
-    const badge = view.status_label?.trim() || view.progress_label?.trim();
-    // Only a batch nobody finished is called out; completion is not a warning.
-    const isStopped = view.status === 'cancelled';
-    // The bar's own entry, when the backend sent one. Its absence is what makes
-    // a card written before this existed render exactly as it always did.
-    const progress = view.progress ?? null;
-    // `is_finished` is also satisfied by items that failed often enough to stop
-    // being retried. The badge already refuses to call those completed; this
-    // says how many, so the honest ending is legible and not just a label.
-    const failedOut = progress?.status === 'failed_out' ? (progress.failed ?? 0) : 0;
 
     return (
         <div className="display-flex flex-col min-w-0 p-3 gap-4">
-            {/* Header: the backend's title and, opposite it, how the batch
-                ended or how far it has got — the slot the credit chip occupies
-                on the approval card, which has nothing to say after the fact. */}
+            {/* Header: what the batch covers, in the words the approval card
+                used. Nothing opposite it — the slot the credit chip occupies on
+                the approval card has nothing to say after the fact. */}
             <div className="display-flex flex-col min-w-0 gap-1">
                 {/* What the batch covers, weighted the way the approval card
                     weights it: the count is the fact, the location is context. */}
@@ -61,16 +45,6 @@ export const BatchOperationResultView: React.FC<{ view: BatchOperationView }> = 
                     {scopeSecondary && ` ${scopeSecondary}`}
                 </div>
             </div>
-
-            {/* What the batch actually did, in the shapes the live bar used —
-                a user who watched it run must not have to reconcile two
-                different pictures of one batch. */}
-            {progress && (
-                <div className="display-flex flex-col min-w-0 gap-3">
-                    <BatchProgressTrack batch={progress} />
-                    <BatchOutcomeBlocks batch={progress} />
-                </div>
-            )}
 
             <div className="display-flex flex-col min-w-0 gap-05">
                 <div
@@ -101,20 +75,6 @@ export const BatchOperationResultView: React.FC<{ view: BatchOperationView }> = 
                     />
                     <div className="font-color-orange min-w-0">
                         {destructive.charAt(0).toUpperCase() + destructive.slice(1)}
-                    </div>
-                </div>
-            )}
-
-            {failedOut > 0 && (
-                <div className="display-flex flex-col min-w-0 gap-05">
-                    <div
-                        className="text-xs font-semibold uppercase font-color-secondary"
-                        style={{ letterSpacing: '0.06em' }}
-                    >
-                        {INCOMPLETE_HEADING}
-                    </div>
-                    <div className="font-color-secondary text-sm">
-                        {`${failedOut.toLocaleString()} item${failedOut === 1 ? '' : 's'} could not be completed after repeated attempts.`}
                     </div>
                 </div>
             )}
