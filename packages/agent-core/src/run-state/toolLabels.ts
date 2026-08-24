@@ -26,6 +26,12 @@ export interface ToolCallLabelOptions {
     view?: ToolResultView | null;
     /** Host-resolved request-side display data (used when there is no `view`). */
     enrich?: ToolCallLabelEnrich | null;
+    /**
+     * The write tool returned successfully but produced no agent action, so it
+     * changed nothing (e.g. the item already held the requested value). The
+     * label reports that instead of naming an edit that never happened.
+     */
+    noChange?: boolean;
 }
 
 const CAPABILITY_LABELS: Record<string, string> = {
@@ -381,6 +387,12 @@ function computeMainLabel(
     // Progress messages take precedence when present
     if (status === 'in_progress' && part.progress) {
         return `${baseLabel}: ${part.progress}`;
+    }
+
+    // A write that changed nothing: the return holds guidance written for the
+    // model, so the label is the whole story the row can tell.
+    if (opts?.noChange) {
+        return `${baseLabel}: no change needed`;
     }
 
     const args = parseArgs(part);
