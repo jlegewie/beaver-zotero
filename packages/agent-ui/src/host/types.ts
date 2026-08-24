@@ -479,9 +479,9 @@ export interface ComponentsHost {
      */
     agentActionInStream(props: AgentActionInStreamProps): ReactNode;
     /**
-     * Render the post-run pending-approval review block (create-item / note /
-     * annotation mutation summaries). Return null when the client has nothing to
-     * approve.
+     * Render the post-run review block for the client's library changes
+     * (create-item / note / annotation mutation summaries), pending or settled.
+     * Return null when the client has nothing to show for the run.
      */
     pendingActionsReview(props: { run: AgentRun }): ReactNode;
     /**

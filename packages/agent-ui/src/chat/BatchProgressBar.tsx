@@ -44,7 +44,7 @@ export interface BatchProgressBarProps {
  * Read-only — stopping is the composer's Stop button. Silent about review
  * status: the ledger counts an item resolved once the agent has proposed the
  * edit, so "184 of 184" can sit next to 184 unreviewed changes. That belongs
- * on the run's review card.
+ * on the run's changes card.
  */
 export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
     batch,

@@ -16,7 +16,7 @@ import { allRunsAtom, toolResultsMapAtom, resumedRunIdsAtom } from '@beaver/agen
 import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
 import { streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { getHost } from '@beaver/agent-ui/host';
-import BatchRunReceipt from '@beaver/agent-ui/chat/BatchRunReceipt';
+import BatchRunReceipt, { hasBatchReceipt } from '@beaver/agent-ui/chat/BatchRunReceipt';
 
 interface AgentRunViewProps {
     run: AgentRun;
@@ -113,6 +113,7 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // ordinary run is a chain of one, so nothing changes for it.
     const chainRuns = useMemo(() => collectResumeChain(run, allRuns), [run, allRuns]);
     const showRunOutcomes = isTerminal && !wasResumed;
+    const showBatchReceipt = showRunOutcomes && hasBatchReceipt(chainRuns);
 
     // Allow editing when run is in a terminal state (not actively streaming or awaiting approval)
     const canEdit = !isStreaming && isTerminal;
@@ -157,10 +158,10 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
             )}
 
 
-            {/* What this answer's batch jobs ended up doing. Above the
-                review card so the two read as summary then detail: what the
-                batch did, then what there is to decide about it. */}
-            {showRunOutcomes && <BatchRunReceipt runs={chainRuns} />}
+            {/* What this answer's batch jobs ended up doing. Above the changes
+                card, so the two read as outcome then detail: how each batch came
+                out, then the individual changes it made. */}
+            {showBatchReceipt && <BatchRunReceipt runs={chainRuns} />}
 
             {/* Agent actions (e.g., create item from citations) — client-specific
                 UI injected by the host; absent for clients without it. Actions

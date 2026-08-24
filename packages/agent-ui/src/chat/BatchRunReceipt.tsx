@@ -13,12 +13,18 @@ export interface BatchRunReceiptProps {
     runs: readonly AgentRun[];
 }
 
+/** Whether `BatchRunReceipt` draws anything for these runs. */
+export function hasBatchReceipt(runs: readonly AgentRun[]): boolean {
+    return !runs.some(isRunActive) && selectChainBatchOutcomes(runs).length > 0;
+}
+
 /**
  * Completed batches for a terminal answer, kept in the transcript.
  *
  * Renders nothing while a run is live (the panel has its batches) or when the
- * answer finished no batch. Distinct from the review card: this is the
- * distribution, that one is the per-change list. Rendered above it.
+ * answer finished no batch. Distinct from the changes card below it: this
+ * reports how each batch as a whole came out, that one lists the individual
+ * changes and offers the apply and undo for them.
  */
 export const BatchRunReceipt: React.FC<BatchRunReceiptProps> = ({ runs }) => {
     // A finished run's messages no longer change, so this is computed once.

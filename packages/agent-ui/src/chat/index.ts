@@ -39,7 +39,7 @@ export type { BatchProgressBarProps } from './BatchProgressBar';
 export { default as BatchDoneRows } from './BatchDoneRows';
 export type { BatchDoneRowsProps } from './BatchDoneRows';
 
-export { default as BatchRunReceipt } from './BatchRunReceipt';
+export { default as BatchRunReceipt, hasBatchReceipt } from './BatchRunReceipt';
 export type { BatchRunReceiptProps } from './BatchRunReceipt';
 
 export {

@@ -342,11 +342,6 @@ export const updateAgentActionsAtom = atom(
 export const ackAgentActionsAtom = atom(
     null,
     async (_, set, runId: string, actionResultData: AckActionLink[]) => {
-        // Note: this is not where the completed-changes card learns about a
-        // write. Both a run's own writes and the applies the user makes from
-        // the review card afterwards acknowledge here, and the card shows only
-        // the former — see `sessionAppliedActionIdsAtom`.
-
         // Frontend: Update UI state
         set(threadAgentActionsAtom, (prev: AgentAction[]) => {
             const actionIds = actionResultData.map((result) => result.action_id);
