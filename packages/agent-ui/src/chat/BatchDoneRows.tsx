@@ -79,7 +79,7 @@ const BatchDoneRow: React.FC<{
                 {/* Both halves may shrink, but the trail is the longer string and
                     so gives way first. */}
                 <span
-                    className="font-color-primary font-medium opacity-70 text-base truncate min-w-0"
+                    className="font-color-primary text-base truncate min-w-0"
                     style={{ flex: '0 1 auto' }}
                     title={lead}
                 >
