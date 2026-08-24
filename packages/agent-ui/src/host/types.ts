@@ -483,7 +483,16 @@ export interface ComponentsHost {
      * annotation mutation summaries). Return null when the client has nothing to
      * approve.
      */
-    pendingActionsReview(props: { run: AgentRun }): ReactNode;
+    pendingActionsReview(props: {
+        run: AgentRun;
+        /**
+         * True when a batch receipt (`BatchRunReceipt`) is rendered above this
+         * run's review block. The receipt already reports the outcome, so the
+         * client's completed-changes card should present itself as the review
+         * of those changes rather than restate them.
+         */
+        underBatchReceipt?: boolean;
+    }): ReactNode;
     /**
      * Render the icon that stands for a bibliographic item of the given type.
      *

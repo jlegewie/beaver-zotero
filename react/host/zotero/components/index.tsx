@@ -26,8 +26,8 @@ export const zoteroComponents: ComponentsHost = {
     agentActionInStream(props: AgentActionInStreamProps) {
         return <AgentActionInStream {...props} />;
     },
-    pendingActionsReview(props: { run: AgentRun }) {
-        return <AgentActionsReview run={props.run} />;
+    pendingActionsReview(props: { run: AgentRun; underBatchReceipt?: boolean }) {
+        return <AgentActionsReview run={props.run} underBatchReceipt={props.underBatchReceipt} />;
     },
     itemTypeIcon({ itemType, className }: { itemType: string; className?: string }) {
         // Zotero's item-type glyphs are CSS icons keyed by the item type itself,

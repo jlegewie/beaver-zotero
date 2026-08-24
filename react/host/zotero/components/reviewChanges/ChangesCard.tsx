@@ -31,6 +31,7 @@ import {
     Spinner,
     TickIcon,
 } from '../../../../components/icons/icons';
+import { TaskDailyIcon } from '@beaver/agent-ui/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
@@ -54,14 +55,25 @@ interface ChangesCardProps {
     rows: ReviewRow[];
     /** Defaults to `'review'`. */
     mode?: ChangesCardMode;
+    /**
+     * Completed mode only: a batch receipt is rendered above this card, so the
+     * header names what the card offers instead of repeating the receipt's
+     * outcome. The receipt is the record; this card is the session's per-change
+     * review of it, and the run may also have written changes outside any batch,
+     * so a count here could disagree with the receipt's.
+     */
+    underBatchReceipt?: boolean;
 }
+
+/** Header of the completed card when a batch receipt already reports the outcome. */
+const UNDER_RECEIPT_HEADER_TEXT = 'Review library changes';
 
 /**
  * Bottom-of-thread card for a terminal run's agent actions: one row per tool
  * call under a collapsible aggregate header. See `ChangesCardMode` for what the
  * header offers in each mode.
  */
-export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows, mode = 'review' }) => {
+export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows, mode = 'review', underBatchReceipt = false }) => {
     const isCompleted = mode === 'completed';
     const [isHovered, setIsHovered] = useState(false);
     const [showAllRows, setShowAllRows] = useState(false);
@@ -211,8 +223,10 @@ export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows, mode = 'rev
     // A one-row completed card would print its aggregate header above a row
     // saying the same thing ("Organized 1 item" over "Organize 1 item"), so the
     // row is the card: it already carries the icon, the title of what changed,
-    // and the undo/retry cluster the header would have to borrow anyway.
-    if (isCompleted && rows.length === 1) {
+    // and the undo/retry cluster the header would have to borrow anyway. Under a
+    // receipt the header stays, so the card reads as the review of the receipt
+    // rather than a second statement of what it did.
+    if (isCompleted && rows.length === 1 && !underBatchReceipt) {
         return (
             <ReviewActionRow
                 runId={run.id}
@@ -224,10 +238,13 @@ export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows, mode = 'rev
     }
 
     const reviewCopy = getReviewHeaderCopy(rows);
-    const headerText = isCompleted ? getCompletedHeaderCopy(rows) : reviewCopy.text;
+    const headerText = underBatchReceipt
+        ? UNDER_RECEIPT_HEADER_TEXT
+        : isCompleted ? getCompletedHeaderCopy(rows) : reviewCopy.text;
     // The completed header names live changes, so it keeps the emphasis the
-    // review header only has while something is still pending.
-    const tone = isCompleted ? 'review' : reviewCopy.tone;
+    // review header only has while something is still pending. Under a receipt
+    // it names an affordance, not an outcome, so it takes the quieter style.
+    const tone = isCompleted && !underBatchReceipt ? 'review' : reviewCopy.tone;
     const allApplied = rows.every((row) => row.actions.every((action) => action.status === 'applied'));
     const hasFailedRow = rows.some((row) => row.actions.some((action) => action.status === 'error'));
     // A row applying on its own must finish before a bulk run starts, or the same
@@ -252,12 +269,16 @@ export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows, mode = 'rev
         if (isBulkRunning || hasWritingRow) return Spinner;
         if (isHovered && isExpanded) return ArrowDownIcon;
         if (isHovered && !isExpanded) return ArrowRightIcon;
+        // Under a receipt the outcome is already reported above; a task icon
+        // says "review" without claiming a status.
+        if (underBatchReceipt) return TaskDailyIcon;
         if (isCompleted) return completedIcon;
         if (tone === 'review') return ClockIcon;
         return allApplied ? CheckmarkCircleIcon : CancelCircleIcon;
     })();
     const headerIconClassName = (() => {
         if (isBulkRunning || hasWritingRow || isHovered) return undefined;
+        if (underBatchReceipt) return undefined;
         if (isCompleted) return completedIconClassName;
         if (tone === 'resolved') return allApplied ? 'font-color-green' : 'font-color-red';
         return undefined;

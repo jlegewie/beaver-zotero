@@ -16,7 +16,7 @@ import { allRunsAtom, toolResultsMapAtom, resumedRunIdsAtom } from '@beaver/agen
 import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
 import { streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { getHost } from '@beaver/agent-ui/host';
-import BatchRunReceipt from '@beaver/agent-ui/chat/BatchRunReceipt';
+import BatchRunReceipt, { hasBatchReceipt } from '@beaver/agent-ui/chat/BatchRunReceipt';
 
 interface AgentRunViewProps {
     run: AgentRun;
@@ -113,6 +113,9 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // ordinary run is a chain of one, so nothing changes for it.
     const chainRuns = useMemo(() => collectResumeChain(run, allRuns), [run, allRuns]);
     const showRunOutcomes = isTerminal && !wasResumed;
+    // The receipt covers the whole chain but sits above the first chain run's
+    // review block; only that block reads as the review of it.
+    const showBatchReceipt = showRunOutcomes && hasBatchReceipt(chainRuns);
 
     // Allow editing when run is in a terminal state (not actively streaming or awaiting approval)
     const canEdit = !isStreaming && isTerminal;
@@ -158,16 +161,19 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
 
 
             {/* What this answer's batch jobs ended up doing. Above the
-                review card so the two read as summary then detail: what the
-                batch did, then what there is to decide about it. */}
-            {showRunOutcomes && <BatchRunReceipt runs={chainRuns} />}
+                review card so the two read as record then review: what the
+                batch did, then the per-change review of it. */}
+            {showBatchReceipt && <BatchRunReceipt runs={chainRuns} />}
 
             {/* Agent actions (e.g., create item from citations) — client-specific
                 UI injected by the host; absent for clients without it. Actions
                 are recorded per run, so a continued answer lists each run's. */}
-            {showRunOutcomes && chainRuns.map((chainRun) => (
+            {showRunOutcomes && chainRuns.map((chainRun, index) => (
                 <React.Fragment key={chainRun.id}>
-                    {getHost().components?.pendingActionsReview({ run: chainRun }) ?? null}
+                    {getHost().components?.pendingActionsReview({
+                        run: chainRun,
+                        underBatchReceipt: showBatchReceipt && index === 0,
+                    }) ?? null}
                 </React.Fragment>
             ))}
 

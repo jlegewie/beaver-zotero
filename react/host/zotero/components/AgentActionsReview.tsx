@@ -13,13 +13,15 @@ import { useCompletedRows, useReviewRows } from './reviewChanges/useReviewRows';
 
 interface AgentActionsReviewProps {
     run: AgentRun;
+    /** A batch receipt is rendered above this block; see `ComponentsHost`. */
+    underBatchReceipt?: boolean;
 }
 
 /**
  * Displays agent actions for a terminal run: the citation imports, then the
  * changes the run left undecided, then the changes it has already written.
  */
-export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) => {
+export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run, underBatchReceipt = false }) => {
     const getAgentActionsByRun = useAtomValue(getAgentActionsByRunAtom);
     const reviewRows = useReviewRows(run.id);
     const completedRows = useCompletedRows(run.id);
@@ -64,7 +66,7 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) =
             )}
             {reviewRows.length > 0 && <ChangesCard run={run} rows={reviewRows} />}
             {showCompletedCard && (
-                <ChangesCard run={run} rows={completedRows} mode="completed" />
+                <ChangesCard run={run} rows={completedRows} mode="completed" underBatchReceipt={underBatchReceipt} />
             )}
         </div>
     );
