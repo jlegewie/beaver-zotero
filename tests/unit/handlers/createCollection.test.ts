@@ -189,6 +189,7 @@ describe('executeCreateCollectionAction', () => {
         );
         expect(res.success).toBe(true);
         expect(res.result_data?.items_added).toBe(2);
+        expect(res.result_data?.skipped_item_ids).toEqual([]);
     });
 
     it('skips an item_id whose portable library ref is unresolvable on this device', async () => {
@@ -198,5 +199,6 @@ describe('executeCreateCollectionAction', () => {
         );
         expect(res.success).toBe(true);
         expect(res.result_data?.items_added).toBe(1);
+        expect(res.result_data?.skipped_item_ids).toEqual(['g99999-ZZZZ0000']);
     });
 });
