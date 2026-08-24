@@ -28,7 +28,7 @@ import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 
 /** Rows shown before the `Show all (N)` affordance. */
-const MAX_VISIBLE_ROWS = 12;
+const MAX_VISIBLE_ROWS = 10;
 
 interface ChangesCardProps {
     run: AgentRun;
@@ -42,8 +42,9 @@ interface ChangesCardProps {
  *
  * The run's durable record, rebuilt from the thread's actions rather than from
  * session state, so reopening a thread shows what the run did and still offers
- * the undo. Nothing dismisses it: `shouldShowChangesCard` decides whether a run
- * has enough to say to be worth a card at all.
+ * the undo. Every run with changes gets one, under the same label and with the
+ * same controls, and nothing dismisses it. What the run *produced* is not in
+ * here — `ArtifactsList` has it, so nothing is reported twice.
  */
 export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows }) => {
     const [showAllRows, setShowAllRows] = useState(false);
@@ -174,14 +175,6 @@ export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows }) => {
     }, [groupId, isExpanded, rows, run.id, setToolExpanded, togglePanelVisibility]);
 
     if (rows.length === 0) return null;
-
-    // One settled row would print an aggregate heading above a row saying the
-    // same thing, so the row is the card: it already carries the icon, what
-    // changed, and the undo. A pending row keeps the heading, which is where its
-    // bulk controls and its count live.
-    if (rows.length === 1 && !hasPendingRows) {
-        return <ReviewActionRow runId={run.id} row={rows[0]} />;
-    }
 
     const { lead, trail } = getChangesCardHeading(rows);
     // A bulk apply replaces the trail: mid-run the status counts are a moving

@@ -4,8 +4,9 @@ import {
     buildReviewRows,
     getChangesCardHeading,
     hasPendingReviewRows,
+    getOpenNoteTarget,
+    isArtifactAction,
     isBulkApplicable,
-    shouldShowChangesCard,
 } from '../../../react/host/zotero/components/reviewChangeRows';
 import type { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 
@@ -42,7 +43,7 @@ describe('buildReviewRows exclusions', () => {
             action({ action_type: 'zotero_note', toolcall_id: 'call-3' }),
             action({ action_type: 'highlight_annotation', toolcall_id: 'call-4' }),
             action({ action_type: 'note_annotation', toolcall_id: 'call-5' }),
-            action({ action_type: 'create_note', toolcall_id: 'call-6' }),
+            action({ action_type: 'create_collection', toolcall_id: 'call-6' }),
         ]);
 
         expect(rows.map((row) => row.toolcallId)).toEqual(['call-1', 'call-2', 'call-6']);
@@ -225,7 +226,7 @@ describe('getChangesCardHeading trail', () => {
 
     it('counts changes of mixed kinds rather than naming them', () => {
         const rows = rowsOf([
-            action({ toolcall_id: 'call-1', action_type: 'create_note', status: 'applied' }),
+            action({ toolcall_id: 'call-1', action_type: 'create_collection', status: 'applied' }),
             action({ toolcall_id: 'call-2', action_type: 'manage_tags', status: 'applied' }),
         ]);
 
@@ -243,9 +244,9 @@ describe('getChangesCardHeading trail', () => {
     it('reports what is still pending beside what has landed', () => {
         const rows = rowsOf([
             ...Array.from({ length: 10 }, (_, index) =>
-                action({ toolcall_id: `applied-${index}`, action_type: 'create_note', status: 'applied' })),
-            action({ toolcall_id: 'call-a', action_type: 'create_note' }),
-            action({ toolcall_id: 'call-b', action_type: 'create_note' }),
+                action({ toolcall_id: `applied-${index}`, action_type: 'create_collection', status: 'applied' })),
+            action({ toolcall_id: 'call-a', action_type: 'create_collection' }),
+            action({ toolcall_id: 'call-b', action_type: 'create_collection' }),
         ]);
 
         expect(getChangesCardHeading(rows))
@@ -255,10 +256,10 @@ describe('getChangesCardHeading trail', () => {
     it('leads with failures and drops the applied count to stay short', () => {
         const rows = rowsOf([
             ...Array.from({ length: 3 }, (_, index) =>
-                action({ toolcall_id: `failed-${index}`, action_type: 'create_note', status: 'error' })),
-            action({ toolcall_id: 'call-a', action_type: 'create_note' }),
-            action({ toolcall_id: 'call-b', action_type: 'create_note' }),
-            action({ toolcall_id: 'call-c', action_type: 'create_note', status: 'applied' }),
+                action({ toolcall_id: `failed-${index}`, action_type: 'create_collection', status: 'error' })),
+            action({ toolcall_id: 'call-a', action_type: 'create_collection' }),
+            action({ toolcall_id: 'call-b', action_type: 'create_collection' }),
+            action({ toolcall_id: 'call-c', action_type: 'create_collection', status: 'applied' }),
         ]);
 
         expect(getChangesCardHeading(rows))
@@ -268,11 +269,11 @@ describe('getChangesCardHeading trail', () => {
     it('separates an errored change still in the library from an apply that wrote nothing', () => {
         const rows = rowsOf([
             // No result: the apply wrote nothing.
-            action({ toolcall_id: 'call-1', action_type: 'create_note', status: 'error' }),
+            action({ toolcall_id: 'call-1', action_type: 'create_collection', status: 'error' }),
             // A surviving result: the note is in the library, undo or ack failed.
             action({
                 toolcall_id: 'call-2',
-                action_type: 'create_note',
+                action_type: 'create_collection',
                 status: 'error',
                 result_data: { library_id: 1, zotero_key: 'NOTE1' },
             } as Partial<AgentAction>),
@@ -284,8 +285,8 @@ describe('getChangesCardHeading trail', () => {
 
     it('reports a run the user undid entirely', () => {
         const rows = rowsOf([
-            action({ toolcall_id: 'call-1', action_type: 'create_note', status: 'undone' }),
-            action({ toolcall_id: 'call-2', action_type: 'create_note', status: 'undone' }),
+            action({ toolcall_id: 'call-1', action_type: 'create_collection', status: 'undone' }),
+            action({ toolcall_id: 'call-2', action_type: 'create_collection', status: 'undone' }),
         ]);
 
         expect(getChangesCardHeading(rows))
@@ -294,8 +295,8 @@ describe('getChangesCardHeading trail', () => {
 
     it('reports a run the user refused entirely', () => {
         const rows = rowsOf([
-            action({ toolcall_id: 'call-1', action_type: 'create_note', status: 'rejected' }),
-            action({ toolcall_id: 'call-2', action_type: 'create_note', status: 'rejected' }),
+            action({ toolcall_id: 'call-1', action_type: 'create_collection', status: 'rejected' }),
+            action({ toolcall_id: 'call-2', action_type: 'create_collection', status: 'rejected' }),
         ]);
 
         expect(getChangesCardHeading(rows))
@@ -303,7 +304,7 @@ describe('getChangesCardHeading trail', () => {
     });
 
     it('counts a run that has done nothing yet', () => {
-        expect(getChangesCardHeading(buildReviewRows([action({ action_type: 'create_note' })])))
+        expect(getChangesCardHeading(buildReviewRows([action({ action_type: 'create_collection' })])))
             .toEqual({ lead: 'Library changes', trail: '1 pending' });
     });
 
@@ -452,67 +453,81 @@ describe('getChangesCardHeading counting', () => {
 
     it('names only the changes still in effect and counts the rest apart', () => {
         const rows = rowsOf([
-            action({ toolcall_id: 'call-1', action_type: 'create_note', status: 'undone' }),
-            action({ toolcall_id: 'call-2', action_type: 'create_note', status: 'applied' }),
+            action({ toolcall_id: 'call-1', action_type: 'create_collection', status: 'undone' }),
+            action({ toolcall_id: 'call-2', action_type: 'create_collection', status: 'applied' }),
         ]);
 
         expect(getChangesCardHeading(rows).trail).toBe('1 applied, 1 undone');
     });
 });
 
-describe('shouldShowChangesCard', () => {
-    it('hides a single metadata edit, which the in-stream card already shows', () => {
-        const rows = buildReviewRows([action({
-            action_type: 'edit_metadata',
-            status: 'applied',
-            proposed_data: { library_id: 1, zotero_key: 'ITEM1' },
-        })]);
-
-        expect(shouldShowChangesCard(rows)).toBe(false);
+describe('the changes / artifacts split', () => {
+    const note = () => action({ toolcall_id: 'note-1', action_type: 'create_note', status: 'applied' });
+    const edit = () => action({
+        toolcall_id: 'edit-1',
+        action_type: 'edit_metadata',
+        status: 'applied',
+        proposed_data: { library_id: 1, zotero_key: 'ITEM1' },
     });
 
-    it('shows a single created note', () => {
-        const rows = buildReviewRows([action({ action_type: 'create_note', status: 'applied' })]);
+    it('sends a created note to the artifacts surface and nowhere else', () => {
+        const actions = [note(), edit()];
 
-        expect(shouldShowChangesCard(rows)).toBe(true);
+        expect(buildReviewRows(actions).map((row) => row.toolcallId)).toEqual(['edit-1']);
+        expect(buildReviewRows(actions, { include: 'artifacts' }).map((row) => row.toolcallId))
+            .toEqual(['note-1']);
     });
 
-    it('keeps a created note once undone, so its re-apply stays reachable', () => {
-        const rows = buildReviewRows([action({ action_type: 'create_note', status: 'undone' })]);
+    it('keeps a note out of the changes heading, so nothing is counted twice', () => {
+        const rows = buildReviewRows([note(), edit()]);
 
-        expect(shouldShowChangesCard(rows)).toBe(true);
+        expect(getChangesCardHeading(rows).trail).toBe('1 edited item');
     });
 
-    it('shows a one-row batch of many units', () => {
-        const rows = buildReviewRows([action({
-            action_type: 'organize_items',
-            status: 'applied',
-            proposed_data: { item_ids: Array.from({ length: 45 }, (_, index) => index) },
-        })]);
-
-        expect(shouldShowChangesCard(rows)).toBe(true);
+    it('leaves a run that only wrote a note with no changes rows at all', () => {
+        expect(buildReviewRows([note()])).toEqual([]);
     });
 
-    it('shows a single change that is still pending', () => {
-        const rows = buildReviewRows([action({
-            action_type: 'edit_metadata',
-            proposed_data: { library_id: 1, zotero_key: 'ITEM1' },
-        })]);
+    it('holds on to a note the user deleted, rather than moving it between surfaces', () => {
+        const undone = [action({ toolcall_id: 'note-1', action_type: 'create_note', status: 'undone' })];
 
-        expect(shouldShowChangesCard(rows)).toBe(true);
+        expect(buildReviewRows(undone, { include: 'artifacts' }).map((row) => row.toolcallId))
+            .toEqual(['note-1']);
+        expect(buildReviewRows(undone)).toEqual([]);
     });
 
-    it('hides a run whose every proposal was refused', () => {
-        const rows = buildReviewRows([
-            action({ toolcall_id: 'call-1', action_type: 'create_note', status: 'rejected' }),
-            action({ toolcall_id: 'call-2', action_type: 'create_note', status: 'rejected' }),
-        ]);
+    it('offers an undecided note as an artifact, so approving it does not move it', () => {
+        const pending = [action({ toolcall_id: 'note-1', action_type: 'create_note' })];
 
-        expect(shouldShowChangesCard(rows)).toBe(false);
+        expect(buildReviewRows(pending, { include: 'artifacts' })).toHaveLength(1);
+        expect(buildReviewRows(pending)).toEqual([]);
     });
 
-    it('hides a run with nothing to report', () => {
-        expect(shouldShowChangesCard([])).toBe(false);
+    it('applies the same exclusions to both surfaces', () => {
+        const actions = [
+            action({ toolcall_id: 'citations', action_type: 'create_note', status: 'applied' }),
+            action({ toolcall_id: undefined, action_type: 'create_note', status: 'applied' }),
+            action({ toolcall_id: 'note-1', action_type: 'create_note', status: 'applied' }),
+        ];
+
+        expect(buildReviewRows(actions, { include: 'artifacts' }).map((row) => row.toolcallId))
+            .toEqual(['note-1']);
+    });
+
+    it('leaves a live approval to the in-stream card on either surface', () => {
+        const live = action({ toolcall_id: 'note-1', action_type: 'create_note' });
+
+        expect(buildReviewRows([live], {
+            include: 'artifacts',
+            liveApprovalActionIds: new Set([live.id]),
+        })).toEqual([]);
+    });
+
+    it('names the note as an artifact and ordinary changes as changes', () => {
+        expect(isArtifactAction(action({ action_type: 'create_note' }))).toBe(true);
+        expect(isArtifactAction(action({ action_type: 'edit_note' }))).toBe(false);
+        expect(isArtifactAction(action({ action_type: 'create_collection' }))).toBe(false);
+        expect(isArtifactAction(action({ action_type: 'create_item' }))).toBe(false);
     });
 });
 
@@ -520,7 +535,7 @@ describe('getChangesCardHeading applied-with-errors', () => {
     it('reports a lone errored change that is still in the library as that alone', () => {
         const rows = buildReviewRows([action({
             toolcall_id: 'call-1',
-            action_type: 'create_note',
+            action_type: 'create_collection',
             status: 'error',
             result_data: { library_id: 1, zotero_key: 'NOTE1' },
         } as Partial<AgentAction>)]);
@@ -532,10 +547,10 @@ describe('getChangesCardHeading applied-with-errors', () => {
     it('keeps an errored change out of the count of clean applies', () => {
         const rows = buildReviewRows([
             ...Array.from({ length: 9 }, (_, index) =>
-                action({ toolcall_id: `ok-${index}`, action_type: 'create_note', status: 'applied' })),
+                action({ toolcall_id: `ok-${index}`, action_type: 'create_collection', status: 'applied' })),
             action({
                 toolcall_id: 'call-x',
-                action_type: 'create_note',
+                action_type: 'create_collection',
                 status: 'error',
                 result_data: { library_id: 1, zotero_key: 'NOTE1' },
             } as Partial<AgentAction>),
@@ -555,7 +570,7 @@ describe('getChangesCardHeading zero-target actions', () => {
                 proposed_data: { item_ids: [] },
                 result_data: { items_modified: 0 },
             } as Partial<AgentAction>),
-            action({ toolcall_id: 'call-2', action_type: 'create_note', status: 'undone' }),
+            action({ toolcall_id: 'call-2', action_type: 'create_collection', status: 'undone' }),
         ]);
 
         // Without the fallback the organize row would vanish from the trail and
@@ -566,10 +581,51 @@ describe('getChangesCardHeading zero-target actions', () => {
     it('always reports pending work, so the heading agrees with the bulk buttons', () => {
         const rows = buildReviewRows([
             action({ toolcall_id: 'call-1', action_type: 'organize_items', proposed_data: { item_ids: [] } }),
-            action({ toolcall_id: 'call-2', action_type: 'create_note', status: 'applied' }),
+            action({ toolcall_id: 'call-2', action_type: 'create_collection', status: 'applied' }),
         ]);
 
         expect(hasPendingReviewRows(rows)).toBe(true);
         expect(getChangesCardHeading(rows).trail).toBe('1 pending, 1 applied');
+    });
+});
+
+describe('getOpenNoteTarget', () => {
+    const noteRow = (overrides: Partial<AgentAction>) =>
+        buildReviewRows([action({ action_type: 'create_note', ...overrides })], { include: 'artifacts' })[0];
+
+    it('opens the note a run wrote', () => {
+        const row = noteRow({
+            status: 'applied',
+            result_data: { library_id: 1, library_ref: 'user', zotero_key: 'NOTE1' },
+        } as Partial<AgentAction>);
+
+        expect(getOpenNoteTarget(row))
+            .toEqual({ library_id: 1, library_ref: 'user', zotero_key: 'NOTE1' });
+    });
+
+    it('has nothing to open before the note exists', () => {
+        expect(getOpenNoteTarget(noteRow({ status: 'pending' }))).toBeNull();
+    });
+
+    it('has nothing to open once the note has been deleted', () => {
+        expect(getOpenNoteTarget(noteRow({
+            status: 'undone',
+            result_data: { library_id: 1, zotero_key: 'NOTE1' },
+        } as Partial<AgentAction>))).toBeNull();
+    });
+
+    it('falls back to reveal when the write recorded no note key', () => {
+        expect(getOpenNoteTarget(noteRow({ status: 'applied', result_data: {} } as Partial<AgentAction>)))
+            .toBeNull();
+    });
+
+    it('is not offered for other kinds of change', () => {
+        const rows = buildReviewRows([action({
+            action_type: 'create_collection',
+            status: 'applied',
+            result_data: { library_id: 1, zotero_key: 'COLL1' },
+        } as Partial<AgentAction>)]);
+
+        expect(getOpenNoteTarget(rows[0])).toBeNull();
     });
 });

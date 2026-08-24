@@ -23,7 +23,7 @@ import {
     getAgentActionToolIcon,
 } from '../agentActionViewHelpers';
 import { ActionPreview } from '../ActionPreview';
-import type { ReviewRow } from '../reviewChangeRows';
+import { getOpenNoteTarget, type ReviewRow } from '../reviewChangeRows';
 import {
     TickIcon,
     CancelIcon,
@@ -36,7 +36,9 @@ import {
     ArrowUpRightIcon,
 } from '../../../../components/icons/icons';
 import { getZoteroItemReferenceFromAgentAction } from '../../../../agents/agentActions';
-import { getCurrentCollectionKeyForItem, revealSource } from '../../../../utils/sourceUtils';
+import { getCurrentCollectionKeyForItem, openNoteByKey, revealSource } from '../../../../utils/sourceUtils';
+import { resolveLibraryRef } from '../../../../../src/utils/libraryIdentity';
+import { notifyReferenceUnavailable } from '../../sourceActions';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
@@ -74,8 +76,9 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     const undoAgentActions = useSetAtom(undoAgentActionsAtom);
 
     // Expansion lives in the global panel state so it survives pane switches and
-    // the separate window, like every other action card. Scoped to the changes
-    // card so a tool call opened here does not open the in-stream card too.
+    // the separate window, like every other action card. Scoped to the bottom-of-
+    // run surfaces so a tool call opened here does not open the in-stream card
+    // too; one tool call is never on both of those surfaces, so one scope does.
     const expansionKey = `${runId}:changes:${row.toolcallId}`;
     const expansionState = useAtomValue(toolExpandedAtom);
     const setExpanded = useSetAtom(setToolExpandedAtom);
@@ -180,6 +183,19 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         ? getZoteroItemReferenceFromAgentAction(firstAction)
         : null;
 
+    // See `getOpenNoteTarget`: a created note is opened, not revealed, on the
+    // same glyph the in-stream card uses for it.
+    const openNoteTarget = getOpenNoteTarget(row);
+
+    const handleOpenNote = useCallback(async () => {
+        if (!openNoteTarget) return;
+        // Resolve through the device-portable library_ref so a note created in a
+        // group library on another computer opens the right local item.
+        const libraryId = resolveLibraryRef(openNoteTarget);
+        if (libraryId) await openNoteByKey(libraryId, openNoteTarget.zotero_key);
+        else notifyReferenceUnavailable('item', 'library_unavailable');
+    }, [openNoteTarget]);
+
     const handleReveal = useCallback(async () => {
         if (!revealReference) return;
         // Reveal within the current collection when the item belongs to it,
@@ -248,15 +264,15 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                 <div className="flex-1" />
 
                 <div className="display-flex flex-row items-center gap-2 mr-3 mt-010" style={{ flexShrink: 0 }}>
-                    {revealReference && !isBusy && (
-                        <Tooltip content="Show in library" showArrow singleLine>
+                    {(openNoteTarget || revealReference) && !isBusy && (
+                        <Tooltip content={openNoteTarget ? 'Open note' : 'Show in library'} showArrow singleLine>
                             <IconButton
                                 icon={ArrowUpRightIcon}
                                 variant="ghost-secondary"
                                 iconClassName="font-color-secondary scale-10"
-                                onClick={handleReveal}
+                                onClick={openNoteTarget ? handleOpenNote : handleReveal}
                                 disabled={isDisabled}
-                                ariaLabel="Show in library"
+                                ariaLabel={openNoteTarget ? 'Open note' : 'Show in library'}
                             />
                         </Tooltip>
                     )}

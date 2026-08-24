@@ -7,21 +7,26 @@ import {
     CreateItemAgentAction,
 } from '../../../agents/agentActions';
 import CreateItemAgentActionDisplay from './CreateItemAgentActionDisplay';
+import ArtifactsList from './reviewChanges/ArtifactsList';
 import ChangesCard from './reviewChanges/ChangesCard';
-import { shouldShowChangesCard } from './reviewChangeRows';
-import { useChangesRows } from './reviewChanges/useChangesRows';
+import { useArtifactRows, useChangesRows } from './reviewChanges/useRunActionRows';
 
 interface AgentActionsReviewProps {
     run: AgentRun;
 }
 
 /**
- * Displays agent actions for a terminal run: the citation imports, then the
- * card of every library change the run proposed, pending or settled.
+ * Displays agent actions for a terminal run: what it produced, then the imports
+ * it suggests, then the card of every library change it proposed, pending or
+ * settled.
+ *
+ * The three are disjoint by construction, so a run's work is never reported
+ * twice. Most runs show exactly one of them.
  */
 export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) => {
     const getAgentActionsByRun = useAtomValue(getAgentActionsByRunAtom);
     const changesRows = useChangesRows(run.id);
+    const artifactRows = useArtifactRows(run.id);
 
     // Get create item actions with toolcall_id 'citations' (from citation extraction)
     // Sort by citation count (descending) for consistent ordering
@@ -42,18 +47,22 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) =
     const hasCreateItems = createItemActions.length > 0 &&
         !createItemActions.every(a => a.status === 'rejected' || a.status === 'undone');
 
-    // A single changed unit is already the in-stream action card, except a
-    // created note — this card replaced that dedicated display.
-    const showChangesCard = shouldShowChangesCard(changesRows);
+    // Every change the run touched gets the card, whatever their number and
+    // whatever became of them: one place, one label, so "what did this do to my
+    // library" is answered the same way for every run.
+    const showChangesCard = changesRows.length > 0;
 
-    // The two displays are independent: either renders whenever the run has
-    // something for it, even with the citation import list empty.
-    if (!hasCreateItems && !showChangesCard) {
+    // The three displays are independent: each renders whenever the run has
+    // something for it, and a run commonly has something for only one.
+    if (!hasCreateItems && !showChangesCard && artifactRows.length === 0) {
         return null;
     }
 
     return (
         <div className="px-4 display-flex flex-col gap-2">
+            {/* What the run made comes first: it is the most likely thing to be
+                opened, and the answer above it has just finished describing it. */}
+            <ArtifactsList runId={run.id} rows={artifactRows} />
             {hasCreateItems && (
                 <CreateItemAgentActionDisplay
                     runId={run.id}

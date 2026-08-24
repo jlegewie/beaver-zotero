@@ -18,13 +18,70 @@ export interface ReviewRow {
 export interface BuildReviewRowsOptions {
     /** Action ids with a live approval (pendingApprovalsAtom) — those belong to the in-stream card. */
     liveApprovalActionIds?: ReadonlySet<string>;
+    /** Which half of the run's actions to build. Defaults to `'changes'`. */
+    include?: RunActionRowSet;
 }
+
+/**
+ * The two bottom-of-run surfaces an action can belong to, and never both.
+ *
+ * `'changes'` is the record of what the run did to the library; `'artifacts'`
+ * is what it produced for the user to open. Splitting them at membership rather
+ * than layering one over the other is what keeps a created note from being
+ * reported twice.
+ */
+export type RunActionRowSet = 'changes' | 'artifacts';
 
 /** These gate a run rather than propose a change, so they are never review material. */
 const GATING_ACTION_TYPES = new Set<string>(['confirm_extraction', 'confirm_external_search']);
 
 /** Citation imports have their own card. */
 const CITATIONS_TOOLCALL_ID = 'citations';
+
+/**
+ * Types whose result is a thing the user opens rather than a change to record.
+ *
+ * Deliberately narrow: a note has content worth reading, so at the bottom of a
+ * long answer it has to be reachable without scrolling back to the in-stream
+ * card. A created collection or an edited item has nothing to open and stays an
+ * ordinary change. Membership is by type and not by status, so undoing a note
+ * leaves it where the user last saw it instead of moving it to the other card.
+ */
+const ARTIFACT_ACTION_TYPES = new Set<string>(['create_note']);
+
+/** Whether this action belongs to the artifacts surface rather than the changes card. */
+export function isArtifactAction(action: AgentAction): boolean {
+    return ARTIFACT_ACTION_TYPES.has(changeTypeKey(action));
+}
+
+/** Where a row's note lives, for the surfaces that open it. */
+export interface OpenNoteTarget {
+    library_ref?: string;
+    library_id?: number;
+    zotero_key: string;
+}
+
+/**
+ * The note a row opens, or null when the row has no note to open.
+ *
+ * A created note is opened rather than revealed: its content is the point of
+ * the row, so the same glyph that shows an item in the library takes the user
+ * into the note instead. Only an applied action has one — a proposal has no
+ * note yet, and an undone one has had it deleted.
+ */
+export function getOpenNoteTarget(row: ReviewRow): OpenNoteTarget | null {
+    if (row.actions.length !== 1) return null;
+    const [action] = row.actions;
+    if (changeTypeKey(action) !== 'create_note' || action.status !== 'applied') return null;
+
+    const result = action.result_data as Record<string, any> | undefined;
+    if (!result?.zotero_key) return null;
+    return {
+        library_ref: result.library_ref,
+        library_id: result.library_id,
+        zotero_key: result.zotero_key,
+    };
+}
 
 /**
  * Types the shared executor has no apply path for: inline notes apply through
@@ -51,8 +108,9 @@ export function isBulkApplicable(action: AgentAction): boolean {
 }
 
 /**
- * Build the changes card's rows from the actions of one terminal run: one row
- * per tool call, the same unit the in-stream card renders.
+ * Build one bottom-of-run surface's rows from the actions of one terminal run:
+ * one row per tool call, the same unit the in-stream card renders. `include`
+ * picks the surface; every other exclusion here applies to both.
  *
  * Every change the run proposed belongs here whatever became of it, so the card
  * is the run's durable record and a row does not vanish out from under the click
@@ -63,7 +121,7 @@ export function buildReviewRows(
     actions: AgentAction[],
     options: BuildReviewRowsOptions = {},
 ): ReviewRow[] {
-    const { liveApprovalActionIds } = options;
+    const { liveApprovalActionIds, include = 'changes' } = options;
     const rowsByToolcall = new Map<string, ReviewRow>();
 
     // A live approval claims its whole tool call, not just the action it names:
@@ -82,6 +140,8 @@ export function buildReviewRows(
         if (GATING_ACTION_TYPES.has(action.action_type)) continue;
         if (UNAPPLIABLE_ACTION_TYPES.has(action.action_type)) continue;
         if (liveApprovalActionIds?.has(action.id)) continue;
+
+        if (isArtifactAction(action) !== (include === 'artifacts')) continue;
 
         const toolcallId = action.toolcall_id;
         if (!toolcallId || toolcallId === CITATIONS_TOOLCALL_ID) continue;
@@ -257,29 +317,6 @@ function countUnits(actions: AgentAction[]): number {
         }
     }
     return units;
-}
-
-/**
- * Whether to mount the changes card for a run.
- *
- * The card is the run's durable record, so the bar is only that it says
- * something the transcript does not already: a single changed unit is the
- * in-stream action card itself, and a run whose every proposal was refused
- * changed nothing at all.
- */
-export function shouldShowChangesCard(rows: ReviewRow[]): boolean {
-    if (rows.length === 0) return false;
-    // Anything still awaiting a decision earns a card on its own.
-    if (hasPendingReviewRows(rows)) return true;
-
-    const decided = uniqueActionsFromRows(rows).filter((action) => action.status !== 'rejected');
-    if (decided.length === 0) return false;
-
-    // Counted whatever became of the change, so undoing the last one does not
-    // take the card — and the re-apply it offers — away with it. A created note
-    // keeps its card even alone: this card replaced a dedicated display for it.
-    if (countUnits(decided) > 1) return true;
-    return decided.some((action) => changeTypeKey(action) === 'create_note');
 }
 
 /** The card's heading names the surface; its trail carries all of the state. */
