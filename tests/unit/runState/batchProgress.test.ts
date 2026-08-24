@@ -428,9 +428,13 @@ describe('selectRunBatchOutcomes', () => {
         expect(outcomes.map((b) => b.batch_id)).toEqual(['done']);
     });
 
-    it('skips a batch the backend judged too small for a progress bar', () => {
+    it('keeps a batch the backend judged too small for a progress bar', () => {
+        // Opening a batch is the model's decision; a size cutoff here would
+        // leave a run that wrote real changes with no record of them.
         const small = stamp(entry({ batch_id: 'small', status: 'completed', show_progress: false }));
-        expect(selectRunBatchOutcomes(run('r1', [request(small)]))).toEqual([]);
+        expect(
+            selectRunBatchOutcomes(run('r1', [request(small)])).map((b) => b.batch_id),
+        ).toEqual(['small']);
     });
 
     it('lists the most recent completion first, as the panel does', () => {
@@ -563,20 +567,20 @@ describe('selectTrackedBatch', () => {
         expect(result?.batch_id).toBe('b1');
     });
 
-    it('ignores batches the backend said are too small to show', () => {
+    it('tracks the flagged batch whatever size the backend judged it', () => {
         const result = selectTrackedBatch(
             stamp(
                 entry({ batch_id: 'small', show_progress: false, is_handover: true }),
                 entry({ batch_id: 'big' }),
             ),
         );
-        expect(result?.batch_id).toBe('big');
+        expect(result?.batch_id).toBe('small');
     });
 
-    it('returns null when every batch is below the threshold', () => {
+    it('tracks a lone small batch rather than drawing nothing', () => {
         expect(
-            selectTrackedBatch(stamp(entry({ batch_id: 'b1', show_progress: false }))),
-        ).toBeNull();
+            selectTrackedBatch(stamp(entry({ batch_id: 'b1', show_progress: false })))?.batch_id,
+        ).toBe('b1');
     });
 });
 
@@ -676,14 +680,15 @@ describe('selectBatchPanelGroups', () => {
         expect(groups.done.map((e) => e.batch_id)).toEqual(['b2']);
     });
 
-    it('leaves out batches the backend said are too small to show', () => {
+    it('groups every batch in the stamp, whatever its size', () => {
         const groups = selectBatchPanelGroups(
             stamp(
                 entry({ batch_id: 'big', is_handover: true }),
                 entry({ batch_id: 'small', status: 'completed', show_progress: false }),
             ),
         );
-        expect(groups.done).toEqual([]);
+        expect(groups.tracked?.batch_id).toBe('big');
+        expect(groups.done.map((e) => e.batch_id)).toEqual(['small']);
     });
 });
 
@@ -692,17 +697,33 @@ describe('tally rows', () => {
         // The backend composes the name from the `collection_names` this client
         // returns during action validation, and splits the composed label back
         // into halves — so no surface here resolves a key.
-        const tally = { label: 'Ecology', count: 23, reference: 'CHT8AIF6' };
-        const result = selectTrackedBatch(stamp(entry({ tallies: [tally] })));
-        expect(result?.tallies?.[0].label).toBe('Ecology');
-        expect(result?.tallies?.[0].reference).toBe('CHT8AIF6');
+        const row = { label: 'Ecology', count: 23, reference: 'CHT8AIF6' };
+        const result = selectTrackedBatch(
+            stamp(
+                entry({
+                    blocks: [{ heading: 'Where items are going', kind: 'destination', rows: [row] }],
+                }),
+            ),
+        );
+        expect(result?.blocks?.[0].rows?.[0].label).toBe('Ecology');
+        expect(result?.blocks?.[0].rows?.[0].reference).toBe('CHT8AIF6');
     });
 
     it('leaves a label with no identity behind it alone', () => {
         // A tag or a field name is its own identity; only `sort` has a key.
         const result = selectTrackedBatch(
-            stamp(entry({ tallies: [{ label: 'machine learning', count: 41 }] })),
+            stamp(
+                entry({
+                    blocks: [
+                        {
+                            heading: 'Tags applied',
+                            kind: 'destination',
+                            rows: [{ label: 'machine learning', count: 41 }],
+                        },
+                    ],
+                }),
+            ),
         );
-        expect(result?.tallies?.[0].reference).toBeUndefined();
+        expect(result?.blocks?.[0].rows?.[0].reference).toBeUndefined();
     });
 });

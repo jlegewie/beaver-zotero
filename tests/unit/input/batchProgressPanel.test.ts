@@ -158,7 +158,10 @@ describe('the live batch panel', () => {
         expect(drawn()?.batch_id).toBe('second');
     });
 
-    it('ignores a batch the backend did not flag as worth showing', () => {
-        expect(drawn(stamp(entry({ show_progress: false })))).toBeNull();
+    it('draws a batch the backend did not flag as worth showing', () => {
+        // The model decided this work was a batch; the panel says so.
+        expect(drawn(stamp(entry({ batch_id: 'small', show_progress: false })))?.batch_id).toBe(
+            'small',
+        );
     });
 });

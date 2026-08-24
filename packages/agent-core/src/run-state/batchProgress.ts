@@ -67,8 +67,10 @@ export interface BatchProgressEntry {
      */
     status?: BatchProgressStatus;
     /**
-     * Whether this batch is big enough to draw progress for. Decided
-     * backend-side; a client must not reimplement the rule.
+     * Whether the backend judged this batch big enough to be worth a progress
+     * bar. No surface here gates on it: a batch the model opened is a batch the
+     * user is shown, and a size cutoff only made the panel and the receipt
+     * disagree with the run they describe. Kept because it is on the wire.
      */
     show_progress?: boolean;
     /** The batch being worked, and the one the bar tracks. */
@@ -295,11 +297,7 @@ export function selectLiveBatchProgress(
 
 /** How the panel above the composer splits a stamp into its three tenses. */
 export interface BatchPanelGroups {
-    /**
-     * The batch the bar tracks, or null when nothing is worth showing — no
-     * batches, or every batch below the size the backend decided is worth a
-     * progress bar.
-     */
+    /** The batch the bar tracks, or null when the stamp holds no batches. */
     tracked: BatchProgressEntry | null;
     /**
      * Ended batches, most recent first. Never includes `tracked`.
@@ -316,16 +314,21 @@ const NO_GROUPS: BatchPanelGroups = { tracked: null, done: [], queued: [] };
 /**
  * Group a stamp the way the panel and receipt both consume it.
  *
+ * Every batch in the stamp is grouped. Whether a job was worth batching is the
+ * model's call, made when it opened one, and the prompt is where that judgement
+ * is steered — screening the small ones back out here only produced a panel and
+ * a receipt that disagreed with the run they were describing.
+ *
  * Open batches outrank ended ones for `tracked` — a stamp can flag handover on
  * the same call that ends it. `done` is most-recent-first: the ended handover
  * leads, then the rest reversed (they were worked oldest-first).
- * `{tracked} ∪ done` must cover every ended `show_progress` entry, and `done`
- * must not repeat `tracked` — {@link selectRunBatchOutcomes} relies on both.
+ * `{tracked} ∪ done` must cover every ended entry, and `done` must not repeat
+ * `tracked` — {@link selectRunBatchOutcomes} relies on both.
  */
 export function selectBatchPanelGroups(
     stamp: BatchProgressStamp | null,
 ): BatchPanelGroups {
-    const shown = stamp?.batches.filter((entry) => entry.show_progress) ?? [];
+    const shown = stamp?.batches ?? [];
     if (!shown.length) return NO_GROUPS;
     const open = shown.filter((entry) => !hasBatchEnded(entry));
     const tracked =
