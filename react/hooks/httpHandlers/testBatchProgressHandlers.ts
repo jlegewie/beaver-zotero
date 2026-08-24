@@ -5,10 +5,11 @@
  * real (credit-consuming) batch run. The stamp goes through the same selector
  * and component as a backend stamp.
  *
- * `runStatus` picks which surface an ENDED batch is previewed on: `in_progress`
- * for the panel (open batches only), `completed` for the receipt. An active
- * batch shows in the panel either way. Default `in_progress` also shows the
- * preview run's status indicator, matching a live run.
+ * `runStatus` picks which surface a batch is previewed on: `in_progress` for the
+ * panel (open batches only), `completed` for the receipt (ended batches only —
+ * a terminal run's open batch is paused, and no surface draws one). Default
+ * `in_progress` also shows the preview run's status indicator, matching a live
+ * run. An entry with `paused: true` is drawn nowhere, whatever the run status.
  *
  * The response says where the batches landed, so a caller can tell the two
  * surfaces apart without reading the DOM.

@@ -12,9 +12,11 @@ const COMPLETION_DWELL_MS = 2500;
  * Live batch progress above the composer.
  *
  * Draws the batch being worked and what is queued. Finished batches belong
- * under the run (`BatchRunReceipt`). Holds a batch this panel drew open
- * briefly after it ends so the completion tick is visible; a batch already
- * finished on mount (reload mid-run) is not held.
+ * under the run (`BatchRunReceipt`), and a batch nothing is working — paused,
+ * or left open by a run that was stopped — is drawn nowhere: `batchProgressAtom`
+ * has already dropped both. Holds a batch this panel drew open briefly after it
+ * ends so the completion tick is visible; a batch already finished on mount
+ * (reload mid-run) is not held.
  */
 const BatchProgressPanel: React.FC = () => {
     const stamp = useAtomValue(batchProgressAtom);

@@ -1,12 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
     isBatchProgressStamp,
+    selectLiveBatchProgress,
     selectTrackedBatch,
 } from '@beaver/agent-core/run-state/batchProgress';
 import type {
     BatchProgressEntry,
     BatchProgressStamp,
 } from '@beaver/agent-core/run-state/batchProgress';
+import type { AgentRun } from '@beaver/agent-core/agents/types';
 
 import sortStamp from './fixtures/batchProgress-sort.json';
 import tagStamp from './fixtures/batchProgress-tag.json';
@@ -17,6 +19,7 @@ import createNotesStamp from './fixtures/batchProgress-create_notes.json';
 import removalsOverflowStamp from './fixtures/batchProgress-removals-overflow.json';
 import failuresOverflowStamp from './fixtures/batchProgress-failures-overflow.json';
 import completedStamp from './fixtures/batchProgress-completed.json';
+import pausedStamp from './fixtures/batchProgress-paused.json';
 
 /**
  * The wire contract, against payloads the BACKEND actually produced.
@@ -40,6 +43,30 @@ const FIXTURES: Record<string, unknown> = {
     extract: extractStamp,
     create_notes: createNotesStamp,
 };
+
+/** A live run carrying `stamp` on its only tool return. */
+function liveRun(stamp: unknown): AgentRun {
+    return {
+        id: 'r1',
+        status: 'in_progress',
+        model_messages: [
+            {
+                kind: 'request',
+                run_id: 'r1',
+                instructions: '',
+                parts: [
+                    {
+                        part_kind: 'tool-return',
+                        tool_name: 'organize_items',
+                        tool_call_id: 'call-0',
+                        content: {},
+                        metadata: { batch_progress: stamp },
+                    },
+                ],
+            },
+        ],
+    } as unknown as AgentRun;
+}
 
 /** The outcome block of `kind` on an entry, or undefined. */
 function block(entry: BatchProgressEntry, kind = 'destination') {
@@ -220,5 +247,34 @@ describe('a capped list says what it hides', () => {
         const tracked = selectTrackedBatch(sortStamp as BatchProgressStamp)!;
         expect(rowsOf(tracked, 'removal').length).toBe(1);
         expect(block(tracked, 'removal')?.overflow).toBeUndefined();
+    });
+});
+
+
+describe('a paused batch, which no live surface draws', () => {
+    // Captured from a run working `b1` while `b2` sits open from an earlier
+    // turn. The flag is the whole contract: renamed backend-side, a paused
+    // batch reads as active again and the bar claims work nothing is doing.
+    const entries = (pausedStamp as BatchProgressStamp).batches;
+
+    it('flags the batch nothing is working', () => {
+        expect(entries.find((e) => e.batch_id === 'b2')!.paused).toBe(true);
+    });
+
+    it('omits the flag on the batch the run IS working', () => {
+        const worked = entries.find((e) => e.batch_id === 'b1')!;
+        expect(worked.paused).toBeUndefined();
+        expect(worked.is_handover).toBe(true);
+    });
+
+    it('is otherwise a complete record, so nothing renders half a row', () => {
+        // Paused is about whether to draw it at all, not about what it holds:
+        // the entry still has to satisfy the type guard.
+        expect(isBatchProgressStamp(pausedStamp)).toBe(true);
+    });
+
+    it('is kept out of the panel while the worked batch stays in', () => {
+        const live = selectLiveBatchProgress([liveRun(pausedStamp)]);
+        expect(live?.batches.map((e) => e.batch_id)).toEqual(['b1']);
     });
 });

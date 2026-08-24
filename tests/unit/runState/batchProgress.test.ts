@@ -316,11 +316,51 @@ describe('selectLiveBatchProgress', () => {
         expect(result?.batches).toHaveLength(1);
     });
 
-    it('keeps an open batch in the panel after its run ends', () => {
-        // Nothing has finished it, so there is no receipt to hand it to.
+    it.each(['completed', 'error', 'canceled'] as const)(
+        'drops an open batch once its run is %s',
+        (status) => {
+            // Nothing runs when no run is active, so an open batch left by one
+            // is paused — the stop that ended the run never got to say so.
+            const running = stamp(entry({ progress_primary: '40 of 184' }));
+            const result = selectLiveBatchProgress([run('r1', [request(running)], status)]);
+            expect(result?.batches).toEqual([]);
+        },
+    );
+
+    it('keeps an open batch while its run holds for an approval', () => {
         const running = stamp(entry({ progress_primary: '40 of 184' }));
-        const result = selectLiveBatchProgress([run('r1', [request(running)], 'completed')]);
+        const result = selectLiveBatchProgress([
+            run('r1', [request(running)], 'awaiting_deferred'),
+        ]);
         expect(result?.batches).toHaveLength(1);
+    });
+
+    it('drops a batch the stamp flags as paused', () => {
+        // Its run is live but working something else — an incidental edit on
+        // one of the batch's items is what re-stamped it.
+        const mixed = stamp(
+            entry({ batch_id: 'worked' }),
+            entry({ batch_id: 'paused', paused: true }),
+        );
+        const result = selectLiveBatchProgress([run('r1', [request(mixed)])]);
+        expect(result?.batches.map((b) => b.batch_id)).toEqual(['worked']);
+    });
+
+    it('draws nothing when every batch in a live run is paused', () => {
+        const paused = stamp(entry({ batch_id: 'b1', paused: true }));
+        const result = selectLiveBatchProgress([run('r1', [request(paused)])]);
+        expect(result?.batches).toEqual([]);
+        expect(selectTrackedBatch(result)).toBeNull();
+    });
+
+    it('draws a batch again once a later run resumes it', () => {
+        const paused = stamp(entry({ batch_id: 'b1', paused: true }));
+        const resumed = stamp(entry({ batch_id: 'b1', is_handover: true }));
+        const result = selectLiveBatchProgress([
+            run('r1', [request(paused)], 'canceled'),
+            run('r2', [request(resumed)]),
+        ]);
+        expect(result?.batches.map((b) => b.batch_id)).toEqual(['b1']);
     });
 
     it('drops a batch that ended before the newest run started', () => {
@@ -345,38 +385,22 @@ describe('selectLiveBatchProgress', () => {
         },
     );
 
-    it('keeps an active batch across later runs', () => {
+    it('does not carry an open batch into later runs', () => {
+        // A batch nobody resumed stays paused however many turns follow, so the
+        // bar must not sit above the composer for the rest of the thread.
         const running = stamp(entry({ progress_primary: '40 of 184' }));
         const result = selectLiveBatchProgress([
             run('r1', [request(running)], 'completed'),
             run('r2', [request(null)], 'completed'),
             run('r3', [request(null)]),
         ]);
-        expect(result?.batches[0].progress_primary).toBe('40 of 184');
-    });
-
-    it('keeps the open batches of a stamp and drops only the ended ones', () => {
-        const mixed = stamp(
-            entry({ batch_id: 'done', status: 'completed' }),
-            entry({ batch_id: 'open' }),
-        );
-        const result = selectLiveBatchProgress([
-            run('r1', [request(mixed)], 'completed'),
-            run('r2', [request(null)]),
-        ]);
-        expect(result?.batches.map((b) => b.batch_id)).toEqual(['open']);
+        expect(result?.batches).toEqual([]);
     });
 
     it('returns the stamp itself when nothing was dropped', () => {
         // Reference equality — a rebuilt stamp would re-render derived atoms.
         const running = stamp(entry());
-        const runs = [run('r1', [request(running)], 'completed'), run('r2', [request(null)])];
-        expect(selectLiveBatchProgress(runs)).toBe(selectBatchProgress(runs));
-    });
-
-    it('returns the stamp itself when a terminal run ended nothing', () => {
-        const running = stamp(entry());
-        const runs = [run('r1', [request(running)], 'completed')];
+        const runs = [run('r1', [request(running)])];
         expect(selectLiveBatchProgress(runs)).toBe(selectBatchProgress(runs));
     });
 

@@ -76,6 +76,17 @@ export interface BatchProgressEntry {
     /** The batch being worked, and the one the bar tracks. */
     is_handover?: boolean;
     /**
+     * Open, but NOT being worked by the run that stamped it: an earlier turn
+     * left it unfinished and nothing has resumed it. Nothing happens to a
+     * paused batch until the user asks for it back, so no live surface draws
+     * one — not as the tracked bar, not as a queued row.
+     *
+     * Distinct from a batch waiting its turn behind the tracked one, which
+     * carries neither this nor `is_handover` and IS being worked towards.
+     * A finished batch is never paused.
+     */
+    paused?: boolean;
+    /**
      * What the batch is doing, e.g. "Filing items". Composed backend-side.
      * Absent on older records — fall back to the headline, do not invent a title.
      */
@@ -269,30 +280,46 @@ export function hasBatchEnded(entry: BatchProgressEntry): boolean {
     return (entry.status ?? 'active') !== 'active';
 }
 
+/** Shared empty result, so a panel with nothing to draw never re-renders. */
+const NO_LIVE_BATCHES: BatchProgressStamp = { batches: [] };
+
 /**
  * Batch progress the panel above the composer should still draw, or null when
  * nothing was stamped.
  *
- * Newest stamp, with ended batches kept only while their carrying run is still
- * going — the panel holds them briefly after completion. Once that run is
- * terminal they belong to {@link selectRunBatchOutcomes}. `isRunActive` is the
- * complement of the statuses the receipt mounts for, so the two surfaces cannot
- * both draw one batch. Do not also require "newest run": a later run implies
- * the carrier finished, but if that ever stopped holding the batch would be
- * unreachable.
+ * The panel speaks for work in flight, so a batch reaches it only while
+ * something is actually doing it. Two things end that:
  *
- * Active batches always survive: they are still open.
+ * - **The carrying run is terminal.** Nothing runs when no run is active, so
+ *   the whole stamp goes: its ended batches belong to
+ *   {@link selectRunBatchOutcomes} — `isRunActive` is the complement of the
+ *   statuses the receipt mounts for, so the two surfaces cannot both draw one
+ *   batch — and its open ones are paused by definition. That covers the case a
+ *   flag cannot: a run stopped mid-batch never gets to stamp anything, so its
+ *   last word on the batch is "active" forever. Do not also require "newest
+ *   run": a later run implies the carrier finished, but if that ever stopped
+ *   holding, the batch would be unreachable.
+ * - **The stamp says the batch is paused.** Left by an earlier turn and not
+ *   resumed, so the run that stamped it is working something else. Only the
+ *   backend knows this — an incidental edit landing on a paused batch's item
+ *   credits it and re-stamps mid-run, and nothing in the entry itself would
+ *   distinguish that from progress.
+ *
+ * Ended batches are otherwise kept while their carrying run is still going —
+ * the panel holds them briefly after completion.
  */
 export function selectLiveBatchProgress(
     runs: readonly AgentRun[],
 ): BatchProgressStamp | null {
     const newest = newestStamp(runs);
     if (!newest) return null;
-    if (isRunActive(runs[newest.runIndex])) return newest.stamp;
-    const open = newest.stamp.batches.filter((entry) => !hasBatchEnded(entry));
+    if (!isRunActive(runs[newest.runIndex])) return NO_LIVE_BATCHES;
+    const worked = newest.stamp.batches.filter((entry) => !entry.paused);
     // Keep the original stamp when nothing was dropped so derived atoms stay
     // reference-equal.
-    return open.length === newest.stamp.batches.length ? newest.stamp : { batches: open };
+    return worked.length === newest.stamp.batches.length
+        ? newest.stamp
+        : { batches: worked };
 }
 
 /** How the panel above the composer splits a stamp into its three tenses. */
@@ -318,6 +345,10 @@ const NO_GROUPS: BatchPanelGroups = { tracked: null, done: [], queued: [] };
  * model's call, made when it opened one, and the prompt is where that judgement
  * is steered — screening the small ones back out here only produced a panel and
  * a receipt that disagreed with the run they were describing.
+ *
+ * Paused batches are not screened out here: {@link selectLiveBatchProgress} has
+ * already dropped them on the way to the panel, and the receipt reads only
+ * ended entries, which a paused batch never is.
  *
  * Open batches outrank ended ones for `tracked` — a stamp can flag handover on
  * the same call that ends it. `done` is most-recent-first: the ended handover

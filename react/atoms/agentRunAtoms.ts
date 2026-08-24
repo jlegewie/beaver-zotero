@@ -3226,7 +3226,9 @@ export const sendBatchApprovalResponseAtom = atom(
  * Batch progress for the open thread, or null when nothing has been stamped.
  *
  * Derived from the newest `metadata.batch_progress` via
- * `selectLiveBatchProgress` — ended batches drop as soon as the run that
- * carried them is terminal, where `BatchRunReceipt` picks them up.
+ * `selectLiveBatchProgress`, which keeps only batches something is actually
+ * working: everything drops once the run that carried the stamp is terminal —
+ * ended batches to `BatchRunReceipt`, open ones because a stopped run leaves
+ * its batch paused — as does a batch the stamp itself flags as paused.
  */
 export const batchProgressAtom = atom((get) => selectLiveBatchProgress(get(allRunsAtom)));
