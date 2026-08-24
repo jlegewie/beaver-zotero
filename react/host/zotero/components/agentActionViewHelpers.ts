@@ -153,7 +153,7 @@ export function getAgentActionToolIcon(toolName: string): React.FC<React.SVGProp
 
 /**
  * Compute the overall status for a group of actions.
- * Used for batch operations where we need a single status to display.
+ * Used for batch jobs where we need a single status to display.
  * Priority: pending > applied (even partial) > error (only if none applied) > rejected/undone
  *
  * Note: We prioritize 'applied' over 'error' when there are mixed results,

@@ -1,7 +1,7 @@
 /**
  * resolve_population handler.
  *
- * Resolves a batch operation's population — every item matching a filter
+ * Resolves a batch job's population — every item matching a filter
  * description — in a single round trip, returning ids only. The population is
  * frozen by the backend and later sliced against the returned order, so this
  * handler must never load or serialize items (that is what made the old

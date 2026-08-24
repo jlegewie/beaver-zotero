@@ -1390,7 +1390,7 @@ export interface WSListItemsResponse {
  * Request from backend for resolve_population.
  *
  * Resolves the complete set of item ids matching a filter description in one
- * round trip, so a batch operation never has to page through `list_items`.
+ * round trip, so a batch job never has to page through `list_items`.
  * Every filter is ANDed with every other one; `conditions_join_mode` sets how
  * the `conditions` list is joined among itself, and joins nothing else.
  * Filters left unset do not constrain the result, so an otherwise empty
@@ -2068,7 +2068,7 @@ export interface WSCreditConfirmationStale extends WSBaseEvent {
 export type BatchApprovalMode = 'full_access' | 'ask_each_time';
 
 /**
- * Ask the user to approve a batch operation before it starts mutating.
+ * Ask the user to approve a batch job before it starts mutating.
  *
  * One decision covers a whole batch rather than a single tool call, so this
  * renders as a run-level card. Unlike a credit confirmation it carries a
@@ -2446,8 +2446,8 @@ export const CLIENT_FEATURES = {
      * per-tool `confirm_extraction` / `confirm_external_search` approvals.
      */
     CREDIT_CONFIRMATION: 'credit_confirmation',
-    /** `batch_operations` capability (batch_start / batch_resolve). */
-    BATCH_OPERATIONS: 'batch_operations',
+    /** `batch_jobs` capability (batch_start / batch_resolve). */
+    BATCH_JOBS: 'batch_jobs',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -2479,21 +2479,21 @@ export const ZOTERO_AGENT_NAME = 'beaver';
 /**
  * Features the current Zotero plugin build always declares in the auth
  * handshake. Equals the full CLIENT_FEATURES vocabulary except
- * `batch_operations`, which is a backend rollout switch this plugin only
+ * `batch_jobs`, which is a backend rollout switch this plugin only
  * opts into in development (see `zoteroPluginFeatures`).
  */
 export const ZOTERO_PLUGIN_FEATURES: string[] = Object.values(CLIENT_FEATURES).filter(
-    (feature) => feature !== CLIENT_FEATURES.BATCH_OPERATIONS,
+    (feature) => feature !== CLIENT_FEATURES.BATCH_JOBS,
 );
 
 /**
  * Handshake feature list for this Zotero plugin build.
- * Development builds additionally declare `batch_operations` so the backend
+ * Development builds additionally declare `batch_jobs` so the backend
  * offers the deferred batch capability without shipping it to production.
  */
 export function zoteroPluginFeatures(isDevelopment: boolean): string[] {
     if (!isDevelopment) return ZOTERO_PLUGIN_FEATURES;
-    return [...ZOTERO_PLUGIN_FEATURES, CLIENT_FEATURES.BATCH_OPERATIONS];
+    return [...ZOTERO_PLUGIN_FEATURES, CLIENT_FEATURES.BATCH_JOBS];
 }
 
 /** Current library context for application state */
@@ -2860,7 +2860,7 @@ export interface WSCallbacks {
     onCreditConfirmationStale?: (event: WSCreditConfirmationStale) => void;
 
     /**
-     * Called when the backend asks the user to approve a batch operation before
+     * Called when the backend asks the user to approve a batch job before
      * it starts mutating. The frontend should render the backend-composed card
      * verbatim and send a WSBatchApprovalResponse when the user decides.
      * @param event The approval request with copy and correlation id

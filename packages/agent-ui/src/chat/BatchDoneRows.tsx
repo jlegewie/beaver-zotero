@@ -5,7 +5,7 @@ import { BatchFailureChip, BatchOutcomeBody } from './BatchOutcomeBlocks';
 
 /** Heading copied from the approval card. Keep in step with the backend string. */
 const headingLabel = (count: number): string =>
-    count === 1 ? 'Batch operation' : 'Batch operations';
+    count === 1 ? 'Batch job' : 'Batch jobs';
 
 /**
  * What names this row. Older records carry no title, so the headline stands in.
@@ -143,7 +143,7 @@ export const BatchDoneRows: React.FC<BatchDoneRowsProps> = ({ batches }) => {
             // Clip corners here so a client without Zotero's panes gets the same card.
             className="batch-run-receipt bg-senary border-popup rounded-md overflow-hidden display-flex flex-col min-w-0"
             role="group"
-            aria-label="Completed batch operations"
+            aria-label="Completed batch jobs"
         >
             {/* Match the approval card header. */}
             <div className="display-flex flex-row items-center gap-2 px-3 py-15 min-w-0 border-bottom-quinary">

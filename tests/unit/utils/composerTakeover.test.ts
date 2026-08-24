@@ -45,7 +45,7 @@ function batchApproval(id = 'approval-1'): PendingBatchApproval {
         threadId: 'thread-1',
         toolcallId: 'call-1',
         batchId: 'b1',
-        title: 'Approve batch operation',
+        title: 'Approve batch job',
         message: 'Tag every item.',
         destructiveWarning: '',
         creditNote: '',

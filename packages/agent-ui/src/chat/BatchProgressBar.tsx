@@ -36,7 +36,7 @@ export interface BatchProgressBarProps {
 }
 
 /**
- * Live progress for a batch operation, shown above the composer.
+ * Live progress for a batch job, shown above the composer.
  *
  * Collapsed: one line and a 2px segmented hairline. Expanded: goal, counts,
  * and (when the operation has one) the outcome distribution.
@@ -93,7 +93,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
             className="batch-progress-bar bg-senary border-bottom-quinary"
             style={{ position: 'relative' }}
             role="group"
-            aria-label="Batch operation progress"
+            aria-label="Batch job progress"
         >
             {/* Overlay so it does not stack on the composer's 1px top border. */}
             <div

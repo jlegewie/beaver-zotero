@@ -157,7 +157,7 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
             )}
 
 
-            {/* What this answer's batch operations ended up doing. Above the
+            {/* What this answer's batch jobs ended up doing. Above the
                 review card so the two read as summary then detail: what the
                 batch did, then what there is to decide about it. */}
             {showRunOutcomes && <BatchRunReceipt runs={chainRuns} />}

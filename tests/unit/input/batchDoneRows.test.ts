@@ -214,18 +214,18 @@ describe('the completed batch rows', () => {
     });
 
     it('names itself, having no live bar above it to do so', () => {
-        expect(render([entry({ progress_title: 'Filed items' })])).toContain('Batch operation');
+        expect(render([entry({ progress_title: 'Filed items' })])).toContain('Batch job');
     });
 
     it('matches the approval card wording, in the number the rows call for', () => {
         // Singular is a substring of plural, so `toContain` alone would pass a hard-coded plural.
         const single = render([entry({ progress_title: 'Filed items' })]);
-        expect(single).toContain('Batch operation');
-        expect(single).not.toContain('Batch operations');
+        expect(single).toContain('Batch job');
+        expect(single).not.toContain('Batch jobs');
         expect(render([
             entry({ batch_id: 'a', progress_title: 'Filed items' }),
             entry({ batch_id: 'b', progress_title: 'Tagged items' }),
-        ])).toContain('Batch operations');
+        ])).toContain('Batch jobs');
     });
 
     it('rules the rows off from one another', () => {

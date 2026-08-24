@@ -238,7 +238,7 @@ export async function getCollectionClientDateModifiedAsISOString(collection: Zot
 }
 
 /**
- * Get the clientDateModified for multiple items in a batch operation.
+ * Get the clientDateModified for multiple items in a batch job.
  * @param items Array of Zotero items or item IDs
  * @returns Map of itemID to clientDateModified string in ISO format
  */

@@ -113,7 +113,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     load_capability: WrenchIcon,
     search_tools: WrenchIcon,
 
-    // Batch operations
+    // Batch jobs
     batch_start: LayersIcon,
     batch_resolve: LayersIcon,
     batch_digest: LayersIcon,

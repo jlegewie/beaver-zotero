@@ -1,5 +1,5 @@
 import React from 'react';
-import { BatchOperationView } from '@beaver/agent-core/run-state/toolResultViews';
+import { BatchJobView } from '@beaver/agent-core/run-state/toolResultViews';
 import { Icon, SecurityWarningIcon } from '@beaver/agent-ui/icons';
 
 /**
@@ -11,7 +11,7 @@ const ACTION_HEADING = 'Requested action';
 const INSTRUCTIONS_HEADING = 'Your instructions';
 
 /**
- * Shared renderer for the {@link BatchOperationView} view model (batch_start).
+ * Shared renderer for the {@link BatchJobView} view model (batch_start).
  *
  * The read-only counterpart of the batch approval card: what the batch covers,
  * what it set out to do, what it removes or overwrites, and anything the user
@@ -25,7 +25,7 @@ const INSTRUCTIONS_HEADING = 'Your instructions';
  *
  * Host-agnostic — pure view data, no client lookups.
  */
-export const BatchOperationResultView: React.FC<{ view: BatchOperationView }> = ({ view }) => {
+export const BatchJobResultView: React.FC<{ view: BatchJobView }> = ({ view }) => {
     const scopeSecondary = view.scope_secondary?.trim();
     const destructive = view.destructive_warning?.trim();
     const instructions = view.user_instructions?.trim();
@@ -95,4 +95,4 @@ export const BatchOperationResultView: React.FC<{ view: BatchOperationView }> = 
     );
 };
 
-export default BatchOperationResultView;
+export default BatchJobResultView;

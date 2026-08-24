@@ -245,7 +245,7 @@ export interface UserQuestionView {
 }
 
 /**
- * A batch operation as it stands after a `batch_start` call — the read-only
+ * A batch job as it stands after a `batch_start` call — the read-only
  * counterpart of the batch approval card.
  *
  * Every user-facing string is composed by the backend and rendered verbatim,
@@ -253,7 +253,7 @@ export interface UserQuestionView {
  * The client must not derive prose of its own from these fields; it owns only
  * its slot headings.
  */
-export interface BatchOperationView {
+export interface BatchJobView {
     view_type: "batch_operation";
     tool_name: "batch_start";
     /** Id of the batch this call wrote. */
@@ -297,7 +297,7 @@ export type ToolResultView =
     | TagListView
     | AttachmentSearchView
     | UserQuestionView
-    | BatchOperationView;
+    | BatchJobView;
 
 // ---------------------------------------------------------------------------
 // Type guards
@@ -347,7 +347,7 @@ export function isUserQuestionView(view: ToolResultView): view is UserQuestionVi
     return view.view_type === "user_question";
 }
 
-export function isBatchOperationView(view: ToolResultView): view is BatchOperationView {
+export function isBatchJobView(view: ToolResultView): view is BatchJobView {
     return view.view_type === "batch_operation";
 }
 
