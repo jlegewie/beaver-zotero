@@ -64,7 +64,7 @@ const BatchDoneRow: React.FC<{
                     </span>
                 )}
                 {title && (
-                    <span className="font-color-secondary opacity-60 text-sm flex-none">
+                    <span className="font-color-secondary opacity-70 text-sm flex-none">
                         {batch.progress_primary}
                     </span>
                 )}
@@ -80,7 +80,7 @@ const BatchDoneRow: React.FC<{
                 {/* Goal when the title alone cannot distinguish two batches of one operation. */}
                 {batch.goal && !isExpanded && (
                     <div
-                        className="font-color-tertiary text-sm truncate"
+                        className="font-color-secondary opacity-70 text-sm truncate"
                         style={{ paddingLeft: 20 }}
                         title={batch.goal}
                     >
@@ -120,10 +120,7 @@ export const BatchDoneRows: React.FC<BatchDoneRowsProps> = ({ batches }) => {
                     icon={LayersIcon}
                     className="font-color-secondary scale-10 flex-none"
                 />
-                <div
-                    className="font-color-primary text-sm font-medium uppercase truncate"
-                    style={{ letterSpacing: '0.05em' }}
-                >
+                <div className="font-color-primary font-medium truncate">
                     {headingLabel(batches.length)}
                 </div>
             </div>
