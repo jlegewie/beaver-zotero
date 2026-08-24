@@ -217,6 +217,30 @@ During cleanup, unmount React roots **before** removing DOM (stale `Zotero.Notif
 otherwise cause SIGSEGV), and restore `Zotero.Reader.onChangeSidebarWidth` in
 `UIManager.cleanup()`.
 
+### Cross-window state: `Zotero` global vs `window`
+
+Anything that must span windows or outlive one goes on the **`Zotero` global**
+(`Zotero.Beaver`, `Zotero.__beaver*`) — it lives as long as the app. Per-window handles go on
+**that window** (`win.BeaverReact`, `win.__beaverEventBus`, `win.__beaverDisposeSupabase`, …)
+and die with it. Never park shared state on `window`: on macOS the last window can close while
+the app runs, and a second main window loads its own React bundle.
+
+**But the slot outlives the realm.** A `Zotero.__beaver*` value created by a *window's* webpack
+bundle survives that window. Chrome windows share the system compartment, so the object stays
+readable (no "can't access dead object"), yet anything realm-bound is inert — a `setTimeout`
+scheduled from a closed window never fires — and the reference pins the dead window's realm
+(leak). So:
+
+- Prefer ownership by the **plugin realm** (the esbuild bootstrap scope: `addon` /
+  `Zotero.Beaver`), which is torn down in `onShutdown()`, not by a window bundle.
+- If a webpack-realm object must be shared, record its creating window and clear or replace the
+  slot when that window unloads — on **every** unload, not only on app quit — and schedule its
+  timers with `Timer.sys.mjs`, never the window's `setTimeout`. `MuPDFWorkerClient` is the
+  reference implementation (`createdFromWindow` / `isCreatorRealmDead`, plus
+  `getRealmSafeTimers()` in `src/utils/configurePDFForBeaver.ts`).
+- Same rule for callbacks handed to app-lifetime Zotero registries (`Zotero.Notifier` observers,
+  `Zotero.Reader.onChangeSidebarWidth`): unregister them on their window's unload.
+
 ## Zotero API conventions
 
 ### Data is lazy-loaded
