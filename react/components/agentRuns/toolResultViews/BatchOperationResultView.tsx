@@ -1,6 +1,6 @@
 import React from 'react';
 import { BatchOperationView } from '@beaver/agent-core/run-state/toolResultViews';
-import { Icon, LayersIcon, SecurityWarningIcon } from '@beaver/agent-ui/icons';
+import { Icon, SecurityWarningIcon } from '@beaver/agent-ui/icons';
 
 /**
  * Labels for the slots this card lays out, as opposed to what goes in them.
@@ -29,16 +29,12 @@ export const BatchOperationResultView: React.FC<{ view: BatchOperationView }> = 
     const scopeSecondary = view.scope_secondary?.trim();
     const destructive = view.destructive_warning?.trim();
     const instructions = view.user_instructions?.trim();
-    // A batch that has ended says how; one still running says how far it got.
-    const badge = view.status_label?.trim() || view.progress_label?.trim();
-    // Only a batch nobody finished is called out; completion is not a warning.
-    const isStopped = view.status === 'cancelled';
 
     return (
         <div className="display-flex flex-col min-w-0 p-3 gap-4">
-            {/* Header: the backend's title and, opposite it, how the batch
-                ended or how far it has got — the slot the credit chip occupies
-                on the approval card, which has nothing to say after the fact. */}
+            {/* Header: what the batch covers, in the words the approval card
+                used. Nothing opposite it — the slot the credit chip occupies on
+                the approval card has nothing to say after the fact. */}
             <div className="display-flex flex-col min-w-0 gap-1">
                 {/* What the batch covers, weighted the way the approval card
                     weights it: the count is the fact, the location is context. */}

@@ -1,0 +1,1 @@
+{"batches": [{"batch_id": "b1", "operation": "create_notes", "show_progress": true, "is_handover": true, "progress_title": "Writing notes", "progress_primary": "52 of 90", "progress_secondary": "items with notes", "detail_label": "52 written \u00b7 38 to go", "goal": "Write a short summary note on each paper, in my voice", "total": 90, "resolved": 52}]}

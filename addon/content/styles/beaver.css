@@ -245,6 +245,33 @@
     border-radius: 5px 5px 0 0;
 }
 
+/* Same bleed as the pending-actions bar so it reads as the composer's top edge. */
+[id^="beaver-pane-"] .batch-progress-bar {
+    position: relative;
+    margin: -0.65rem -0.65rem 0.65rem -0.65rem;
+    border-radius: 5px 5px 0 0;
+}
+
+/* Flush stacked bars: drop the lower bar's top-corner rounding. */
+[id^="beaver-pane-"] .batch-progress-bar + .pending-actions-bar,
+[id^="beaver-pane-"] .batch-progress-bar + .high-token-usage-warning-bar {
+    border-radius: 0;
+}
+
+/* Receipt is a transcript card (`BatchDoneRows` clips its corners). No composer bleed. */
+
+/* The whole collapsed row is the disclosure control. */
+[id^="beaver-pane-"] .batch-progress-bar [role="button"]:hover,
+[id^="beaver-pane-"] .batch-run-receipt [role="button"]:hover {
+    background-color: var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .batch-progress-bar [role="button"]:focus-visible,
+[id^="beaver-pane-"] .batch-run-receipt [role="button"]:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--fill-tertiary);
+}
+
 /* High token usage warning above composer */
 [id^="beaver-pane-"] .high-token-usage-warning-bar {
     margin: -0.65rem -0.65rem 0.65rem -0.65rem;

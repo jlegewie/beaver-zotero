@@ -80,6 +80,7 @@ import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptAction, Prompt
 import {
     threadRunsAtom,
     activeRunAtom,
+    allRunsAtom,
     currentThreadIdAtom,
     updateRunWithPart,
     updateRunWithToolReturn,
@@ -162,6 +163,7 @@ import { undoEditAnnotationsAction } from '../utils/editAnnotationsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { upgradeToolReturn } from '../compat/legacyToolResults';
 import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
+import { selectLiveBatchProgress } from '@beaver/agent-core/run-state/batchProgress';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom, recordAppliedActionsAtom } from './messageUIState';
 import { currentThreadNameAtom, loadThreadAtom } from './threads';
@@ -1455,6 +1457,7 @@ export function createWSCallbacks(
                     const toolCallArgs = findToolCallArgs(store.get(activeRunAtom), event.part.tool_call_id);
                     await upgradeToolReturn(event.part, toolCallArgs);
                 }
+
             }
 
             // Update run with tool return (event.part now carries a synthesized
@@ -3232,3 +3235,12 @@ export const sendBatchApprovalResponseAtom = atom(
         set(removePendingBatchApprovalAtom, approvalId);
     }
 );
+
+/**
+ * Batch progress for the open thread, or null when nothing has been stamped.
+ *
+ * Derived from the newest `metadata.batch_progress` via
+ * `selectLiveBatchProgress` — ended batches drop as soon as the run that
+ * carried them is terminal, where `BatchRunReceipt` picks them up.
+ */
+export const batchProgressAtom = atom((get) => selectLiveBatchProgress(get(allRunsAtom)));

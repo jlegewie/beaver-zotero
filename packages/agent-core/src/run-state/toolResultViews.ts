@@ -1,3 +1,5 @@
+import type { BatchProgressEntry } from "./batchProgress";
+
 /**
  * Tool-result view models.
  *
@@ -277,6 +279,13 @@ export interface BatchOperationView {
     user_instructions?: string;
     /** How far the batch has got ("12 of 23 done"); empty before anything is recorded. */
     progress_label?: string;
+    /**
+     * The same entry the live progress bar renders, so the card the user reads
+     * back shows the counts and the distribution exactly as they watched them.
+     * Absent on cards written before it existed — the card then renders as it
+     * always did.
+     */
+    progress?: BatchProgressEntry;
 }
 
 /** The general discriminated union — discriminated by `view_type`. */
