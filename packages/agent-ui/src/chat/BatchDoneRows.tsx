@@ -113,10 +113,7 @@ const BatchDoneRow: React.FC<{
                 )}
             </div>
 
-            {/* The row's own line already carries the breakdown. */}
-            {isExpanded && (
-                <BatchOutcomeBody batch={batch} bounded={false} showTrackDetail={false} />
-            )}
+            {isExpanded && <BatchOutcomeBody batch={batch} bounded={false} />}
         </div>
     );
 };

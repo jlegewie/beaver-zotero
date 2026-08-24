@@ -13,6 +13,7 @@ import type {
 import {
     BatchOutcomeBlocks,
     BatchOutcomeBlockView,
+    BatchProgressTrack,
 } from '@beaver/agent-ui/chat/BatchOutcomeBlocks';
 
 function entry(overrides: Partial<BatchProgressEntry> = {}): BatchProgressEntry {
@@ -97,6 +98,48 @@ describe('one outcome block', () => {
             10,
         );
         expect(rendered).not.toContain('across');
+    });
+});
+
+describe('the progress track', () => {
+    it('captions the bar with the backend breakdown', () => {
+        expect(
+            text(
+                BatchProgressTrack({
+                    batch: entry({
+                        detail_label: '14 annotated · 15 no change',
+                        total: 29,
+                        resolved: 14,
+                        no_change: 15,
+                    }),
+                }),
+            ),
+        ).toContain('14 annotated · 15 no change');
+    });
+
+    it('falls back to the headline count when there is no breakdown', () => {
+        // Older records, and a just-started batch, may omit detail_label.
+        expect(
+            text(
+                BatchProgressTrack({
+                    batch: entry({ progress_primary: '0 of 29', total: 29 }),
+                }),
+            ),
+        ).toContain('0 of 29');
+    });
+
+    it('omits the caption when asked', () => {
+        expect(
+            text(
+                BatchProgressTrack({
+                    batch: entry({
+                        detail_label: '14 annotated · 15 no change',
+                        progress_primary: '29 of 29',
+                    }),
+                    showDetail: false,
+                }),
+            ),
+        ).toBe('');
     });
 });
 

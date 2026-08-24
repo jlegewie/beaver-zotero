@@ -49,6 +49,17 @@ function moreLabel(overflow: number): string {
 }
 
 /**
+ * Caption under the segmented track.
+ *
+ * Prefer the backend's breakdown; fall back to the headline count so a bar is
+ * never left unlabeled — some operations send no outcome rows beneath it, and
+ * older records omit the breakdown entirely.
+ */
+function trackCaption(batch: BatchProgressEntry): string {
+    return batch.detail_label || batch.progress_primary;
+}
+
+/**
  * The segmented progress track: changed, examined-and-left-alone, failed.
  *
  * Both kinds of decision fill the track, because both are results — a track
@@ -58,7 +69,7 @@ function moreLabel(overflow: number): string {
 export const BatchProgressTrack: React.FC<{
     batch: BatchProgressEntry;
     height?: string;
-    /** Adds the backend's breakdown line under the track. */
+    /** Adds the count / breakdown line under the track. */
     showDetail?: boolean;
 }> = ({ batch, height = '6px', showDetail = true }) => {
     const total = batch.total ?? 0;
@@ -71,6 +82,7 @@ export const BatchProgressTrack: React.FC<{
     // busiest — working out what the first slice should get.
     const isIndeterminate =
         (batch.status ?? 'active') === 'active' && resolved + noChange + failed === 0;
+    const caption = showDetail ? trackCaption(batch) : undefined;
 
     if (isIndeterminate) {
         return (
@@ -81,9 +93,7 @@ export const BatchProgressTrack: React.FC<{
                 >
                     <div className="batch-progress-indeterminate" />
                 </div>
-                {showDetail && batch.detail_label && (
-                    <div className="text-sm font-color-secondary">{batch.detail_label}</div>
-                )}
+                {caption && <div className="text-sm font-color-secondary">{caption}</div>}
             </div>
         );
     }
@@ -113,9 +123,7 @@ export const BatchProgressTrack: React.FC<{
                     }}
                 />
             </div>
-            {showDetail && batch.detail_label && (
-                <div className="text-sm font-color-secondary">{batch.detail_label}</div>
-            )}
+            {caption && <div className="text-sm font-color-secondary">{caption}</div>}
         </div>
     );
 };
@@ -305,11 +313,9 @@ export const BatchOutcomeBody: React.FC<{
      * height. The container clips instead — see `.batch-run-receipt`.
      */
     bounded?: boolean;
-    /** Draw the backend's breakdown under the track. */
-    showTrackDetail?: boolean;
     /** Appended inside the same box — what is one caller's alone. */
     children?: React.ReactNode;
-}> = ({ batch, bounded = true, showTrackDetail = true, children }) => (
+}> = ({ batch, bounded = true, children }) => (
     <div
         className="display-flex flex-col gap-5 px-3 pb-3 min-w-0"
         style={
@@ -323,7 +329,7 @@ export const BatchOutcomeBody: React.FC<{
         }
     >
         {batch.goal && <div className="font-color-secondary text-base">{batch.goal}</div>}
-        <BatchProgressTrack batch={batch} showDetail={showTrackDetail} />
+        <BatchProgressTrack batch={batch} />
         <BatchOutcomeBlocks batch={batch} />
         {children}
     </div>

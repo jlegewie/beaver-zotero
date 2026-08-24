@@ -186,8 +186,9 @@ describe('the completed batch rows', () => {
         hookState.index = 0;
         const text = renderedText(BatchDoneRows({ batches }) as React.ReactNode).join(' ');
         expect(text).toContain('File the Methods collection by topic');
-        // On the row's own line, and only there — not repeated under the track.
-        expect(text.split('151 filed · 26 left as-is · 7 failed')).toHaveLength(2);
+        // On the row's own line, and again as the track's legend — a segmented
+        // bar with no caption reads as a half-finished job.
+        expect(text.split('151 filed · 26 left as-is · 7 failed')).toHaveLength(3);
         expect(text).toContain('Where items went');
         expect(text).toContain('Ecology');
         expect(text).toContain('+ 4 more');
@@ -257,6 +258,31 @@ describe('the completed batch rows', () => {
         const text = render(batches);
         expect(text).toContain('Add missing DOIs');
         expect(text).toContain('Add missing abstracts');
+    });
+
+    it('labels the track when the batch recorded no distribution', () => {
+        // A batch with no outcome blocks has only the caption to say what the
+        // bar's segments are.
+        hookState.slots = [];
+        hookState.index = 0;
+        const batches = [
+            entry({
+                operation: 'annotate',
+                progress_title: 'Annotated',
+                progress_primary: '29 of 29',
+                detail_label: '14 annotated · 15 no change',
+                goal: 'Highlight methods and findings',
+                total: 29,
+                resolved: 14,
+                no_change: 15,
+            }),
+        ];
+        renderedText(BatchDoneRows({ batches }) as React.ReactNode);
+        hookState.slots[0].value = true;
+        hookState.index = 0;
+        const text = renderedText(BatchDoneRows({ batches }) as React.ReactNode).join(' ');
+        expect(text).toContain('Highlight methods and findings');
+        expect(text.split('14 annotated · 15 no change')).toHaveLength(3);
     });
 
     it('lets an opened row grow instead of scrolling inside itself', () => {
