@@ -479,20 +479,11 @@ export interface ComponentsHost {
      */
     agentActionInStream(props: AgentActionInStreamProps): ReactNode;
     /**
-     * Render the post-run pending-approval review block (create-item / note /
-     * annotation mutation summaries). Return null when the client has nothing to
-     * approve.
+     * Render the post-run review block for the client's library changes
+     * (create-item / note / annotation mutation summaries), pending or settled.
+     * Return null when the client has nothing to show for the run.
      */
-    pendingActionsReview(props: {
-        run: AgentRun;
-        /**
-         * True when a batch receipt (`BatchRunReceipt`) is rendered above this
-         * run's review block. The receipt already reports the outcome, so the
-         * client's completed-changes card should present itself as the review
-         * of those changes rather than restate them.
-         */
-        underBatchReceipt?: boolean;
-    }): ReactNode;
+    pendingActionsReview(props: { run: AgentRun }): ReactNode;
     /**
      * Render the icon that stands for a bibliographic item of the given type.
      *

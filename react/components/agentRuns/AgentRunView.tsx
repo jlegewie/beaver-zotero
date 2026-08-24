@@ -113,9 +113,6 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // ordinary run is a chain of one, so nothing changes for it.
     const chainRuns = useMemo(() => collectResumeChain(run, allRuns), [run, allRuns]);
     const showRunOutcomes = isTerminal && !wasResumed;
-    // The receipt is the record for every run in the chain, so each run's
-    // review block is the review of it — whichever run happened to make the
-    // writes (a continuation can finish a batch its interrupted run began).
     const showBatchReceipt = showRunOutcomes && hasBatchReceipt(chainRuns);
 
     // Allow editing when run is in a terminal state (not actively streaming or awaiting approval)
@@ -161,9 +158,9 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
             )}
 
 
-            {/* What this answer's batch jobs ended up doing. Above the
-                review card so the two read as record then review: what the
-                batch did, then the per-change review of it. */}
+            {/* What this answer's batch jobs ended up doing. Above the changes
+                card, so the two read as outcome then detail: how each batch came
+                out, then the individual changes it made. */}
             {showBatchReceipt && <BatchRunReceipt runs={chainRuns} />}
 
             {/* Agent actions (e.g., create item from citations) — client-specific
@@ -171,10 +168,7 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 are recorded per run, so a continued answer lists each run's. */}
             {showRunOutcomes && chainRuns.map((chainRun) => (
                 <React.Fragment key={chainRun.id}>
-                    {getHost().components?.pendingActionsReview({
-                        run: chainRun,
-                        underBatchReceipt: showBatchReceipt,
-                    }) ?? null}
+                    {getHost().components?.pendingActionsReview({ run: chainRun }) ?? null}
                 </React.Fragment>
             ))}
 

@@ -143,7 +143,7 @@ function toFailures(actions: AgentAction[], error: string, errorDetails?: Record
  * surface.
  *
  * A terminal run's pending action is offered by every surface that can reach it —
- * the in-stream card and the review card both show Apply — and an action stays
+ * the in-stream card and the changes card both show Apply — and an action stays
  * `pending` until its write finishes and the ack lands. Surfaces each guarding
  * only their own buttons therefore let a second click through: two applies
  * duplicate the mutation, and a reject lands on an action whose write is still

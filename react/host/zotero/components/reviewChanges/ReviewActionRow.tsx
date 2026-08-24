@@ -44,20 +44,8 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 interface ReviewActionRowProps {
     runId: string;
     row: ReviewRow;
-    /**
-     * Card the row belongs to. Part of the expansion key, so the same tool call
-     * expanded in the review card does not open in the completed card too.
-     */
-    expansionScope?: 'review' | 'completed';
     /** True while any card-level bulk operation runs — row buttons are disabled. */
     isBulkRunning?: boolean;
-    /** Retains the row in the current card snapshot before its status changes. */
-    onResolved?: (actionIds: string[]) => void;
-    /**
-     * Dismisses the row's card. Set only when the row *is* the whole card, so
-     * the dismiss belongs on the row's own control cluster.
-     */
-    onDismiss?: () => void;
     /** True when rendered inside the aggregate card; the parent draws the border/background. */
     inGroup?: boolean;
 }
@@ -73,10 +61,7 @@ const GHOST_BUTTON_STYLE: React.CSSProperties = { padding: '3px 6px' };
 export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     runId,
     row,
-    expansionScope = 'review',
     isBulkRunning = false,
-    onResolved,
-    onDismiss,
     inGroup = false,
 }) => {
     const [isProcessing, setIsProcessing] = useState(false);
@@ -89,8 +74,9 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     const undoAgentActions = useSetAtom(undoAgentActionsAtom);
 
     // Expansion lives in the global panel state so it survives pane switches and
-    // the separate window, like every other action card.
-    const expansionKey = `${runId}:${expansionScope}:${row.toolcallId}`;
+    // the separate window, like every other action card. Scoped to the changes
+    // card so a tool call opened here does not open the in-stream card too.
+    const expansionKey = `${runId}:changes:${row.toolcallId}`;
     const expansionState = useAtomValue(toolExpandedAtom);
     const setExpanded = useSetAtom(setToolExpandedAtom);
     const isExpanded = expansionState[expansionKey] ?? false;
@@ -143,35 +129,32 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         setIsUndoError(false);
         setIsProcessing(true);
         setClickedButton('approve');
-        onResolved?.(row.actions.map((action) => action.id));
         try {
             await applyAgentActions({ actions: row.actions, runId });
         } finally {
             setIsProcessing(false);
             setClickedButton(null);
         }
-    }, [isDisabled, row, runId, applyAgentActions, onResolved]);
+    }, [isDisabled, row, runId, applyAgentActions]);
 
     const handleReject = useCallback(() => {
         if (isDisabled) return;
 
-        // Retained rows may contain actions already applied or failed. Reject
-        // only the actions that still await a decision.
+        // A row can mix settled and undecided actions. Reject only the ones
+        // that still await a decision.
         const pendingActions = row.actions.filter((action) => action.status === 'pending');
         if (pendingActions.length === 0) return;
 
         setClickedButton('reject');
-        onResolved?.(pendingActions.map((action) => action.id));
         rejectAgentActions({ actions: pendingActions });
         setTimeout(() => setClickedButton(null), 100);
-    }, [isDisabled, row, rejectAgentActions, onResolved]);
+    }, [isDisabled, row, rejectAgentActions]);
 
     const handleUndo = useCallback(async () => {
         if (isDisabled) return;
 
         setIsProcessing(true);
         setClickedButton('undo');
-        onResolved?.(row.actions.map((action) => action.id));
         try {
             const result = await undoAgentActions({ actions: row.actions });
             if (result.fatalError) setIsUndoError(true);
@@ -179,7 +162,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
             setIsProcessing(false);
             setClickedButton(null);
         }
-    }, [isDisabled, row, undoAgentActions, onResolved]);
+    }, [isDisabled, row, undoAgentActions]);
 
     const handleRetry = useCallback(async () => {
         if (isUndoRetry) {
@@ -326,17 +309,6 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                                 onClick={handleApply}
                                 disabled={isDisabled}
                                 loading={isBusy && activeButton === 'approve'}
-                            />
-                        </Tooltip>
-                    )}
-
-                    {onDismiss && !isBusy && (
-                        <Tooltip content="Dismiss" showArrow singleLine>
-                            <IconButton
-                                icon={CancelIcon}
-                                variant="ghost-secondary"
-                                onClick={onDismiss}
-                                ariaLabel="Dismiss"
                             />
                         </Tooltip>
                     )}
