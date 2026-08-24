@@ -305,9 +305,11 @@ export const BatchOutcomeBody: React.FC<{
      * height. The container clips instead — see `.batch-run-receipt`.
      */
     bounded?: boolean;
+    /** Draw the backend's breakdown under the track. */
+    showTrackDetail?: boolean;
     /** Appended inside the same box — what is one caller's alone. */
     children?: React.ReactNode;
-}> = ({ batch, bounded = true, children }) => (
+}> = ({ batch, bounded = true, showTrackDetail = true, children }) => (
     <div
         className="display-flex flex-col gap-5 px-3 pb-3 min-w-0"
         style={
@@ -321,7 +323,7 @@ export const BatchOutcomeBody: React.FC<{
         }
     >
         {batch.goal && <div className="font-color-secondary text-base">{batch.goal}</div>}
-        <BatchProgressTrack batch={batch} />
+        <BatchProgressTrack batch={batch} showDetail={showTrackDetail} />
         <BatchOutcomeBlocks batch={batch} />
         {children}
     </div>

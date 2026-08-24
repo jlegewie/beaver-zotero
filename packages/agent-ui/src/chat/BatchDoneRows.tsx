@@ -7,12 +7,37 @@ import { BatchFailureChip, BatchOutcomeBody } from './BatchOutcomeBlocks';
 const headingLabel = (count: number): string =>
     count === 1 ? 'Batch operation' : 'Batch operations';
 
+/**
+ * What names this row. Older records carry no title, so the headline stands in.
+ */
+function leadLabel(batch: BatchProgressEntry): string {
+    return batch.progress_title?.trim() || batch.progress_primary;
+}
+
+/** The outcome half of the row. */
+function trailLabel(batch: BatchProgressEntry): string | undefined {
+    if (batch.detail_label) return batch.detail_label;
+    return batch.progress_title?.trim() ? batch.progress_primary : batch.progress_secondary;
+}
+
+/** Labels more than one row in the same card carries. */
+function duplicateLeadLabels(batches: readonly BatchProgressEntry[]): Set<string> {
+    const counts = new Map<string, number>();
+    for (const batch of batches) {
+        const label = leadLabel(batch);
+        counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+    return new Set([...counts].filter(([, count]) => count > 1).map(([label]) => label));
+}
+
 /** One finished batch, collapsed until opened. */
 const BatchDoneRow: React.FC<{
     batch: BatchProgressEntry;
     /** Whether a rule separates this row from the one above it. */
     ruleAbove: boolean;
-}> = ({ batch, ruleAbove }) => {
+    /** Whether to spend a second line on the goal. */
+    showGoal: boolean;
+}> = ({ batch, ruleAbove, showGoal }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const toggle = useCallback(() => setIsExpanded((open) => !open), []);
     const onKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -26,8 +51,8 @@ const BatchDoneRow: React.FC<{
     const hasFailures = (batch.failed ?? 0) > 0 || batch.status === 'failed_out';
     // Cancelled is not an outcome; a tick would claim one. Neutral icon keeps the column aligned.
     const isCancelled = batch.status === 'cancelled';
-    // Older records omit this; fall back to the headline, do not invent a title.
-    const title = batch.progress_title?.trim();
+    const lead = leadLabel(batch);
+    const trail = trailLabel(batch);
 
     return (
         <div className={['display-flex flex-col min-w-0', ruleAbove && 'border-top-quinary'].filter(Boolean).join(' ')}>
@@ -51,25 +76,24 @@ const BatchDoneRow: React.FC<{
                               : 'font-color-green'
                     }`}
                 />
-                {/* Title is the only part of the line that may truncate. */}
+                {/* Both halves may shrink, but the trail is the longer string and
+                    so gives way first. */}
                 <span
-                    className={`font-color-primary font-medium opacity-70 text-base ${title ? 'truncate' : 'flex-none'}`}
-                    title={title || undefined}
+                    className="font-color-primary font-medium opacity-70 text-base truncate min-w-0"
+                    style={{ flex: '0 1 auto' }}
+                    title={lead}
                 >
-                    {title || batch.progress_primary}
+                    {lead}
                 </span>
-                {!title && batch.progress_secondary && (
-                    <span className="font-color-secondary opacity-60 text-sm truncate">
-                        {batch.progress_secondary}
-                    </span>
-                )}
-                {title && (
-                    <span className="font-color-secondary opacity-70 text-sm flex-none">
-                        {batch.progress_primary}
-                    </span>
-                )}
+                {/* Present even when empty: it is also the spacer that pushes the
+                    chip and the chevron to the end of the row. */}
+                <span
+                    className="font-color-secondary opacity-70 text-sm truncate flex-1 min-w-0"
+                    title={trail || undefined}
+                >
+                    {trail}
+                </span>
                 <BatchFailureChip batch={batch} />
-                <div className="flex-1" />
                 <Icon
                     icon={ArrowDownIcon}
                     className="font-color-secondary flex-none scale-85 transition"
@@ -77,8 +101,8 @@ const BatchDoneRow: React.FC<{
                 />
                 </div>
 
-                {/* Goal when the title alone cannot distinguish two batches of one operation. */}
-                {batch.goal && !isExpanded && (
+                {/* Goal when the label alone cannot distinguish two batches of one operation. */}
+                {showGoal && batch.goal && !isExpanded && (
                     <div
                         className="font-color-secondary opacity-70 text-sm truncate"
                         style={{ paddingLeft: 20 }}
@@ -89,7 +113,10 @@ const BatchDoneRow: React.FC<{
                 )}
             </div>
 
-            {isExpanded && <BatchOutcomeBody batch={batch} bounded={false} />}
+            {/* The row's own line already carries the breakdown. */}
+            {isExpanded && (
+                <BatchOutcomeBody batch={batch} bounded={false} showTrackDetail={false} />
+            )}
         </div>
     );
 };
@@ -106,6 +133,10 @@ export interface BatchDoneRowsProps {
  */
 export const BatchDoneRows: React.FC<BatchDoneRowsProps> = ({ batches }) => {
     if (batches.length === 0) return null;
+
+    // Two batches of one operation share a label ("Edited items" twice), and
+    // then only the goal tells them apart.
+    const ambiguousLabels = duplicateLeadLabels(batches);
 
     return (
         <div
@@ -129,6 +160,7 @@ export const BatchDoneRows: React.FC<BatchDoneRowsProps> = ({ batches }) => {
                     key={batch.batch_id}
                     batch={batch}
                     ruleAbove={index > 0}
+                    showGoal={ambiguousLabels.has(leadLabel(batch))}
                 />
             ))}
         </div>

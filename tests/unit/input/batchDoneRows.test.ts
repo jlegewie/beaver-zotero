@@ -92,7 +92,7 @@ function renderedText(node: React.ReactNode, out: string[] = []): string[] {
 }
 
 /** The props the stack hands each row, without rendering one. */
-function rowProps(batches: BatchProgressEntry[]): { ruleAbove: boolean }[] {
+function rowProps(batches: BatchProgressEntry[]): { ruleAbove: boolean; showGoal: boolean }[] {
     hookState.slots = [];
     hookState.index = 0;
     const stack = BatchDoneRows({ batches }) as React.ReactElement<any>;
@@ -120,6 +120,21 @@ describe('the completed batch rows', () => {
         ]);
         expect(text).toContain('Filed items');
         expect(text).toContain('184 of 184');
+    });
+
+    it('states how the batch came out rather than that it reached its own total', () => {
+        // "184 of 184" is the only value "N of N" can take once a batch has
+        // ended, so the breakdown is the half of the line carrying anything.
+        const text = render([
+            entry({
+                progress_title: 'Filed items',
+                progress_primary: '184 of 184',
+                detail_label: '151 filed · 33 left as-is',
+            }),
+        ]);
+        expect(text).toContain('Filed items');
+        expect(text).toContain('151 filed · 33 left as-is');
+        expect(text).not.toContain('184 of 184');
     });
 
     it('falls back to the headline when a record carries no title', () => {
@@ -171,7 +186,8 @@ describe('the completed batch rows', () => {
         hookState.index = 0;
         const text = renderedText(BatchDoneRows({ batches }) as React.ReactNode).join(' ');
         expect(text).toContain('File the Methods collection by topic');
-        expect(text).toContain('151 filed · 26 left as-is · 7 failed');
+        // On the row's own line, and only there — not repeated under the track.
+        expect(text.split('151 filed · 26 left as-is · 7 failed')).toHaveLength(2);
         expect(text).toContain('Where items went');
         expect(text).toContain('Ecology');
         expect(text).toContain('+ 4 more');
@@ -217,6 +233,30 @@ describe('the completed batch rows', () => {
             entry({ batch_id: 'a', progress_title: 'Filed items' }),
             entry({ batch_id: 'b', progress_title: 'Tagged items' }),
         ]).map((row) => row.ruleAbove)).toEqual([false, true]);
+    });
+
+    it('keeps a row to one line when its label already identifies it', () => {
+        const batches = [
+            entry({ batch_id: 'a', progress_title: 'Filed items', goal: 'File by topic' }),
+            entry({ batch_id: 'b', progress_title: 'Tagged items', goal: 'Tag by field' }),
+        ];
+        expect(rowProps(batches).map((row) => row.showGoal)).toEqual([false, false]);
+        const text = render(batches);
+        expect(text).not.toContain('File by topic');
+        expect(text).not.toContain('Tag by field');
+    });
+
+    it('spends a second line on the goal when two rows share a label', () => {
+        // Two `edit_metadata` batches are both "Edited items"; without the goal
+        // there is nothing on the line to tell one from the other.
+        const batches = [
+            entry({ batch_id: 'a', progress_title: 'Edited items', goal: 'Add missing DOIs' }),
+            entry({ batch_id: 'b', progress_title: 'Edited items', goal: 'Add missing abstracts' }),
+        ];
+        expect(rowProps(batches).map((row) => row.showGoal)).toEqual([true, true]);
+        const text = render(batches);
+        expect(text).toContain('Add missing DOIs');
+        expect(text).toContain('Add missing abstracts');
     });
 
     it('lets an opened row grow instead of scrolling inside itself', () => {
