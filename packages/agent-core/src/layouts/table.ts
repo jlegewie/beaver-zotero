@@ -182,7 +182,14 @@ export type CellValue =
     | {
           kind: "reference";
           display_name: string;
+          /** Who it is by. Rendered under the title. */
           subtitle?: string;
+          /**
+           * Where it appeared — journal, publisher, repository. Separate from
+           * `subtitle` because a renderer sets it apart: it is emphasised
+           * differently, and a taller row gives it its own line.
+           */
+          venue?: string;
           item_type?: string;
           library_items?: ZoteroItemReference[];
       }
@@ -389,9 +396,9 @@ export function cellValueText(value: CellValue | undefined): string {
         case "select":
             return value.label;
         case "reference":
-            return value.subtitle
-                ? `${value.display_name} — ${value.subtitle}`
-                : value.display_name;
+            return [value.display_name, value.subtitle, value.venue]
+                .filter(Boolean)
+                .join(" — ");
         case "link":
             return value.label ?? value.url;
     }

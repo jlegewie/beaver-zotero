@@ -204,10 +204,15 @@ function renderCellValue(cell: Cell | undefined, column: Column): string {
             return `<span class="bt-pill bt-pill--${selectHue(value.label, column)}">${escapeHtml(value.label)}</span>`;
 
         case 'reference': {
-            const subtitle = value.subtitle
-                ? `<span class="bt-sub">${escapeHtml(value.subtitle)}</span>`
+            const authors = value.subtitle
+                ? `<span class="bt-authors">${escapeHtml(value.subtitle)}</span>`
                 : '';
-            return `<span class="bt-ref"><span class="bt-title">${escapeHtml(value.display_name)}</span>${subtitle}</span>`;
+            const venue = value.venue
+                ? `<span class="bt-venue">${escapeHtml(value.venue)}</span>`
+                : '';
+            const meta =
+                authors || venue ? `<span class="bt-sub">${authors}${venue}</span>` : '';
+            return `<span class="bt-ref"><span class="bt-title">${escapeHtml(value.display_name)}</span>${meta}</span>`;
         }
 
         case 'link': {
@@ -639,6 +644,12 @@ function renderDynamicCss(
     ] as const) {
         rules.push(
             `#${prefix}-d${key}:checked ~ .bt-scroll .bt-body { --lines: ${lines}; --title-lines: ${titleLines}; --row-h: ${height}; }`,
+            key === 't'
+                ? `#${prefix}-dt:checked ~ .bt-scroll .bt-venue { display: block; }`
+                : '',
+            key === 't'
+                ? `#${prefix}-dt:checked ~ .bt-scroll .bt-authors + .bt-venue::before { content: none; }`
+                : '',
             `#${prefix}-d${key}:checked ~ .bt-toolbar .bt-seg-${key} { background: var(--t-sel); color: var(--t-fg); }`
         );
     }
@@ -718,8 +729,11 @@ export const TABLE_CSS = `
 .bt-row { display: grid; grid-template-columns: var(--cols); align-items: start;
   min-height: var(--row-h); list-style: none; cursor: pointer; }
 .bt-row:hover { background: #fafbfc; }
-.bt-rail { display: flex; align-items: center; padding-left: 12px; color: var(--t-fade); }
-.bt-chev { width: 13px; height: 13px; display: block; transition: transform 120ms ease; }
+/* Aligned to the first line of the row rather than to the middle of the cell,
+   so the glyph sits level with the title beside it. */
+.bt-rail { display: flex; align-items: flex-start; padding-left: 12px; color: var(--t-fade); }
+.bt-chev { width: 13px; height: 13px; display: block; transition: transform 120ms ease;
+  margin-top: calc((1.45em - 13px) / 2); }
 .bt-r[open] > .bt-row .bt-chev { transform: rotate(90deg); }
 .bt-start { text-align: left; }
 .bt-end { text-align: right; }
@@ -730,8 +744,17 @@ export const TABLE_CSS = `
 .bt-ref { display: block; min-width: 0; }
 .bt-title { display: -webkit-box; -webkit-line-clamp: var(--title-lines);
   -webkit-box-orient: vertical; overflow: hidden; font-weight: 550; }
-.bt-sub { display: block; font-size: 12px; color: var(--t-fade);
+/* Closer to the title than it was: the attribution is part of the row, not a
+   footnote under it. */
+.bt-sub { display: block; font-size: 13px; color: var(--t-fade);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Italic, because it is a publication name and not another author. The
+   separator travels with the venue, so it goes when the venue takes its own
+   line at the tallest row height and in the expanded row. */
+.bt-venue { font-style: italic; }
+.bt-authors + .bt-venue::before { content: ' · '; font-style: normal; }
+.bt-d .bt-venue { display: block; }
+.bt-d .bt-authors + .bt-venue::before { content: none; }
 .bt-pill { display: inline-block; max-width: 100%; padding: 1px 8px; border-radius: 999px;
   font-size: 12px; line-height: 17px; white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; border: 1px solid transparent; }

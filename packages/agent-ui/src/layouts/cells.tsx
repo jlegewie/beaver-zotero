@@ -329,8 +329,17 @@ function ReferenceValue({
                 ) : (
                     <span className="bt-ref-title">{value.display_name}</span>
                 )}
-                {value.subtitle ? (
-                    <span className="bt-ref-subtitle">{value.subtitle}</span>
+                {value.subtitle || value.venue ? (
+                    <span className="bt-ref-meta">
+                        {value.subtitle ? (
+                            <span className="bt-ref-authors">
+                                {value.subtitle}
+                            </span>
+                        ) : null}
+                        {value.venue ? (
+                            <span className="bt-ref-venue">{value.venue}</span>
+                        ) : null}
+                    </span>
                 ) : null}
             </span>
             {reveal ? (

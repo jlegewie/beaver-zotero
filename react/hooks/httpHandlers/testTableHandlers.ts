@@ -222,9 +222,8 @@ function referenceRow(item: DemoItem, index: number, withAbstract = true): Row {
                 value: {
                     kind: 'reference',
                     display_name: item.title,
-                    subtitle: [item.creators, item.venue]
-                        .filter(Boolean)
-                        .join(' · '),
+                    subtitle: item.creators,
+                    venue: item.venue || undefined,
                     item_type: item.itemType,
                 },
                 details:
@@ -294,7 +293,8 @@ function buildSearchDemo(items: DemoItem[]): TableSpec {
                 value: {
                     kind: 'reference',
                     display_name: 'A result whose metadata failed to load',
-                    subtitle: 'openalex · demo-failed',
+                    subtitle: 'openalex',
+                    venue: 'demo-failed',
                 },
             },
             abstract: { status: 'error', error: 'No abstract available' },
@@ -309,7 +309,7 @@ function buildSearchDemo(items: DemoItem[]): TableSpec {
         columns,
         rows,
         sort: { column_id: 'cites', direction: 'desc' },
-        capabilities: { row_actions: ['reveal', 'open', 'import'] },
+        capabilities: { row_actions: ['reveal', 'import'] },
     };
 }
 
@@ -398,7 +398,7 @@ function buildExtractionDemo(items: DemoItem[]): TableSpec {
         columns,
         rows,
         capabilities: {
-            row_actions: ['reveal', 'open'],
+            row_actions: ['reveal'],
             allow_add_column: true,
             allow_add_row: true,
         },

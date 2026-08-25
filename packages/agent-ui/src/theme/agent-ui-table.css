@@ -770,9 +770,12 @@
 
 /* Rail: expand, and a row number that becomes a checkbox on hover ----------- */
 
+/* Aligned to the first line of the row, not to the middle of the cell: the
+   chevron and the title start at the same padding, so giving both boxes the
+   same line height is what puts the glyph level with the words beside it. */
 .beaver-root .bt-rail {
     display: inline-flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.1rem;
 }
 
@@ -781,7 +784,7 @@
     display: grid;
     place-items: center;
     width: 1.35rem;
-    height: 1.35rem;
+    height: var(--bt-line-h);
     padding: 0;
     border: 0;
     border-radius: 0.3rem;
@@ -816,7 +819,7 @@
     display: inline-grid;
     place-items: center;
     width: 1.3rem;
-    height: 1.35rem;
+    height: var(--bt-line-h);
 }
 
 .beaver-root .bt-rail-mark .bt-checkbox {
@@ -1128,13 +1131,38 @@
     text-decoration: underline;
 }
 
-.beaver-root .bt-ref-subtitle {
+/* Closer to the title than it was: at 0.88rem the second line read as a
+   footnote rather than as the row's attribution. */
+.beaver-root .bt-ref-meta {
+    display: block;
     color: var(--fill-tertiary);
-    font-size: 0.88rem;
+    font-size: 0.92rem;
     line-height: var(--bt-subtitle-h);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* Italic, because it is a publication name and not another author. */
+.beaver-root .bt-ref-venue {
+    font-style: italic;
+}
+
+/* Authors and venue share a line while the row is short, and the separator
+   comes with the venue so it disappears when the venue takes its own line. */
+.beaver-root .bt-ref-authors + .bt-ref-venue::before {
+    content: " · ";
+    font-style: normal;
+}
+
+.beaver-root .bt[data-density="tall"] .bt-ref-venue,
+.beaver-root .bt-detail .bt-ref-venue {
+    display: block;
+}
+
+.beaver-root .bt[data-density="tall"] .bt-ref-authors + .bt-ref-venue::before,
+.beaver-root .bt-detail .bt-ref-authors + .bt-ref-venue::before {
+    content: none;
 }
 
 .beaver-root .bt-ref-reveal {
@@ -1209,7 +1237,7 @@
     color: var(--fill-primary);
 }
 
-.beaver-root .bt-detail .bt-ref-subtitle {
+.beaver-root .bt-detail .bt-ref-meta {
     display: block;
     white-space: normal;
 }
