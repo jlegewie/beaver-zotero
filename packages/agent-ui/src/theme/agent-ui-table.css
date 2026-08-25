@@ -473,6 +473,9 @@
     --bt-subtitle-h: 1.3rem;
     /* The item-type icon in a reference cell; the header indents past it. */
     --bt-ref-icon-w: 15px;
+    /* The gutter the sort control occupies in a header, and which the values of
+       a sortable column leave beside them so the two line up. */
+    --bt-sort-w: 1.05rem;
     min-width: 0;
     font-size: 1rem;
     line-height: 1.45;
@@ -617,23 +620,30 @@
 }
 
 /*
- * The sort affordance appears on hover, so a resting header row stays quiet —
- * and it sits outside the label's box.
+ * The sort affordance appears on hover, so a resting header row stays quiet, and
+ * it sits immediately after its own label — pinned to the cell's edge instead it
+ * drifted far from short headers and landed on top of narrow ones.
  *
- * In flow it kept its width while invisible, which pushed a right-aligned
- * header label a control's width in from the edge its values line up on: the
- * Citations header read as centred over right-aligned numbers. Out of flow it
- * lands in the cell's own padding, at the same place in every column.
+ * Keeping it in flow would push a right-aligned label a control's width in from
+ * the edge its values line up on, so the values leave the same gutter
+ * (`bt-sortable-col` below). At rest that gutter is simply empty.
  */
 .beaver-root .bt-th-sort {
-    position: absolute;
-    right: -0.6rem;
-    top: 50%;
-    transform: translateY(-50%);
+    flex: 0 0 var(--bt-sort-w);
     display: inline-flex;
+    justify-content: center;
     color: var(--fill-tertiary);
     opacity: 0;
     transition: opacity 100ms ease;
+}
+
+.beaver-root .bt-td.bt-sortable-col.bt-align-end {
+    padding-right: calc(0.85rem + var(--bt-sort-w));
+}
+
+.beaver-root .bt-td.bt-sortable-col.bt-align-center {
+    padding-right: calc(0.85rem + var(--bt-sort-w));
+    padding-left: 0.85rem;
 }
 
 .beaver-root .bt-th-sortable:hover .bt-th-sort {
@@ -687,15 +697,20 @@
 }
 
 /*
- * `Column.description` is the column's question, and for an extraction column
- * it is the extraction prompt — the header is where the contract belongs, so it
- * gets a line of its own rather than a tooltip nobody opens.
+ * `Column.description` is the column's question, and for an extraction column it
+ * is the extraction prompt — the header is where the contract belongs, so it
+ * gets its own lines rather than a tooltip nobody opens.
+ *
+ * A fixed two-line box, rendered even when a column has no question: with each
+ * header sized to its own description the titles sat at five different heights.
+ * The full text is on the header's `title`.
  */
 .beaver-root .bt-th-description {
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    height: calc(2 * 1.3em);
     max-width: 22rem;
     color: var(--fill-tertiary);
     font-size: 0.8rem;
@@ -709,6 +724,13 @@
     display: flex;
     align-items: center;
     gap: 0.35rem;
+    height: 1rem;
+}
+
+/* An empty track in a column that is not filling: the row is reserved so every
+   header title keeps its baseline, but only the filling one is drawn. */
+.beaver-root .bt-th:not(.bt-th-filling) .bt-progress-track {
+    visibility: hidden;
 }
 
 .beaver-root .bt-progress-track {

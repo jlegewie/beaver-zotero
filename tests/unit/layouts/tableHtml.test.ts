@@ -219,6 +219,20 @@ describe("buildTableDocument", () => {
         expect(cssRuleCount).toBeLessThan(CSS_RULE_BUDGET);
     });
 
+    it("sheds its filters rather than break the reader's theming", () => {
+        // Wide enough that its filter rules alone would break the budget.
+        const columns = Array.from({ length: 40 }, (_, i) => ({
+            id: `c${i}`,
+            header: `Column ${i}`,
+            type: "select" as const,
+            options: Array.from({ length: 6 }, (_, j) => ({ label: `v${j}` })),
+        }));
+        const wide = renderTableHtml({ id: "w", columns, rows: [] });
+        // Sorting survives; the filter bar does not.
+        expect(wide.html).toContain("bt-sorters");
+        expect(wide.html).not.toContain("bt-fg-h");
+    });
+
     it("stays under the budget for a table with many sortable and filterable columns", () => {
         const columns = Array.from({ length: 20 }, (_, i) => ({
             id: `c${i}`,
@@ -305,13 +319,25 @@ describe("citations", () => {
         expect(markers.filter((m) => m === "1").length).toBeGreaterThan(1);
     });
 
-    it("opens the cited page, and carries what the tooltip shows", () => {
+    it("opens the cited page, and carries the card's parts", () => {
         const { html } = renderTableHtml(cited);
         expect(html).toContain('href="zotero://open/library/items/K1?page=4"');
-        const title = /class="bt-cite" title="([^"]*)"/.exec(html)![1];
+        // Kept apart so a host can lay them out the way the app does.
+        expect(html).toContain('data-cite-name="Bloom 2015"');
+        expect(html).toContain('data-cite-loc="Page 4"');
+        expect(html).toContain("a 13% performance increase");
+        expect(html).toContain("Highlights passage on page 4");
+        // …and joined into a `title` for a viewer that can show no card.
+        const title = /title="([^"]*)"[^>]*data-bt-cite/.exec(html)![1];
         expect(title).toContain("Bloom 2015");
         expect(title).toContain("Page 4");
-        expect(title).toContain("a 13% performance increase");
+    });
+
+    it("colours a marker by what it points at", () => {
+        const { html } = renderTableHtml(cited);
+        // A locator lands on a passage; a bare tag with no metadata does not.
+        expect(html).toContain("bt-cite bt-cite--locator");
+        expect(html).toContain("bt-cite bt-cite--item");
     });
 
     it("lists the cited sources so a saved table stands on its own", () => {

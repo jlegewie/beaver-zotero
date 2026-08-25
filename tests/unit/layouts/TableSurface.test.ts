@@ -333,11 +333,16 @@ describe("ExtractionTable", () => {
         expect(
             container!.querySelector(".bt-progress-label")?.textContent,
         ).toBe("2 of 3");
+        // Every header reserves the row so the titles stay on one baseline, so
+        // the filled bar is the one in the column that is actually filling.
         expect(
             container!
-                .querySelector(".bt-progress-fill")
+                .querySelector(".bt-th-filling .bt-progress-fill")
                 ?.getAttribute("style"),
         ).toContain("67%");
+        expect(
+            container!.querySelectorAll(".bt-progress-track").length,
+        ).toBeGreaterThan(1);
     });
 });
 

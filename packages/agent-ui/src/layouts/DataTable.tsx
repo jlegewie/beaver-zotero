@@ -3,6 +3,7 @@ import {
     anchorColumn,
     cellIdFor,
     isColumnFilterable,
+    isColumnSortable,
     type Column,
     type Row,
     type TableSpec,
@@ -104,6 +105,10 @@ export function DataTable({
     const hasRowActions = tableHasRowActions(table);
     const selectable = table.rows.length > 0;
     const expandable = capabilities.expandable_rows ?? true;
+    // One column with a question gives every header the same reserved block, so
+    // the titles share a baseline instead of each sitting on its own.
+    const hasQuestions = table.columns.some((c) => !!c.description);
+    const hasProgress = table.columns.some((c) => c.status === "filling");
 
     // A narrow surface carries only the primary columns; the rest are listed in
     // the row detail rather than dropped, so nothing becomes unreachable.
@@ -175,7 +180,8 @@ export function DataTable({
                                 sort={state.sort}
                                 sortable={sortable}
                                 onSort={state.toggleSort}
-                                showDescription={density !== "compact"}
+                                showDescription={hasQuestions}
+                                showProgress={hasProgress}
                                 menuItems={columnMenuItems?.(column)}
                             />
                         ))}
@@ -206,6 +212,7 @@ export function DataTable({
                             onRetryCell={onRetryCell}
                             hasRowActions={hasRowActions}
                             expandable={expandable}
+                            sortable={sortable}
                             columnCount={columnCount}
                         />
                     ))}
@@ -271,6 +278,7 @@ interface TableRowProps {
     onRetryCell?: (row: Row, column: Column) => void;
     hasRowActions: boolean;
     expandable: boolean;
+    sortable: boolean;
     columnCount: number;
 }
 
@@ -288,6 +296,7 @@ function TableRow({
     onRetryCell,
     hasRowActions,
     expandable,
+    sortable,
     columnCount,
 }: TableRowProps): React.ReactElement {
     const expanded = expandable && state.expandedRows.has(row.id);
@@ -326,6 +335,12 @@ function TableRow({
                             "bt-td",
                             `bt-align-${cellAlign(column)}`,
                             `bt-kind-${column.type}`,
+                            // The header's sort control sits after its label, so
+                            // the values leave it the same gutter and line up
+                            // with the label rather than with the control.
+                            sortable && isColumnSortable(column)
+                                ? "bt-sortable-col"
+                                : "",
                             column.id === anchorId ? "bt-td-anchor" : "",
                         ]
                             .filter(Boolean)

@@ -7,10 +7,10 @@ import {
 import {
     ArrowDownIcon,
     ArrowUpIcon,
+    ChevronIcon,
     Icon,
     InformationCircleIcon,
     MoreHorizontalIcon,
-    SortIcon,
 } from "../icons";
 import MenuButton from "../primitives/MenuButton";
 import type { MenuItem } from "../primitives/ContextMenu";
@@ -24,6 +24,8 @@ export interface ColumnHeaderCellProps {
     onSort(columnId: string): void;
     /** Full density shows the column's question under its name; compact has no room. */
     showDescription: boolean;
+    /** Reserve the progress row in every header, because one column is filling. */
+    showProgress: boolean;
     /** When it returns items, the header gains a menu (edit / re-run / remove a column). */
     menuItems?: MenuItem[];
 }
@@ -47,6 +49,7 @@ export function ColumnHeaderCell({
     sortable,
     onSort,
     showDescription,
+    showProgress,
     menuItems,
 }: ColumnHeaderCellProps): React.ReactElement {
     const canSort = sortable && isColumnSortable(column);
@@ -55,6 +58,11 @@ export function ColumnHeaderCell({
     const align = cellAlign(column);
     const progress = column.progress;
     const details = detailsText(column);
+    // The full text lives on the header itself: the visible line is clamped, and
+    // a column's question is exactly the thing a reader will want in full.
+    const hoverText = [column.description, details]
+        .filter(Boolean)
+        .join("\n\n");
 
     // No type glyph: it sat before the label and pushed it in from the edge the
     // column's values line up on, which is the one thing a header must not do.
@@ -73,7 +81,7 @@ export function ColumnHeaderCell({
                                 ? ArrowUpIcon
                                 : direction === "desc"
                                   ? ArrowDownIcon
-                                  : SortIcon
+                                  : ChevronIcon
                         }
                         size={12}
                     />
@@ -89,11 +97,12 @@ export function ColumnHeaderCell({
             // stacking context, so a popup rendered inside it can never paint
             // over the sticky rail, the anchor header or the dialog overlay —
             // and portalling out of it crashes in a Zotero chrome document.
-            title={details}
+            title={hoverText || undefined}
             className={[
                 "bt-th",
                 `bt-align-${align}`,
                 `bt-th-kind-${column.type}`,
+                column.status === "filling" ? "bt-th-filling" : "",
                 isAnchor ? "bt-th-anchor" : "",
                 canSort ? "bt-th-sortable" : "",
             ]
@@ -139,29 +148,39 @@ export function ColumnHeaderCell({
                     ) : null}
                 </div>
 
-                {showDescription && column.description ? (
-                    <div
-                        className="bt-th-description"
-                        title={column.description}
-                    >
-                        {column.description}
+                {/*
+                 * Rendered whenever the table has questions at all, empty or
+                 * not: the block reserves the same two lines in every header,
+                 * which is what keeps the column titles on one baseline rather
+                 * than each floating above a description of its own length.
+                 */}
+                {showDescription ? (
+                    <div className="bt-th-description">
+                        {column.description ?? ""}
                     </div>
                 ) : null}
 
-                {column.status === "filling" ? (
+                {/*
+                 * Reserved in every header once any column is filling: in flow
+                 * and only where it applies, the bar lifted that one header's
+                 * title a row above all the others.
+                 */}
+                {showProgress ? (
                     <div className="bt-th-progress">
                         <span className="bt-progress-track">
                             <span
                                 className="bt-progress-fill"
                                 style={{
                                     width:
-                                        progress && progress.total > 0
+                                        column.status === "filling" &&
+                                        progress &&
+                                        progress.total > 0
                                             ? `${Math.round((progress.done / progress.total) * 100)}%`
                                             : "0%",
                                 }}
                             />
                         </span>
-                        {progress ? (
+                        {column.status === "filling" && progress ? (
                             <span className="bt-progress-label">
                                 {progress.done} of {progress.total}
                             </span>

@@ -28,7 +28,9 @@ type TableSurface = Extract<WindowSurface, { kind: 'table' }>;
  * not a second implementation of them.
  */
 const renderCellText = (text: string) => (
-    <MarkdownRenderer content={text} className="bt-md" />
+    // `markdown` is what the chat's citation styling is scoped to, so the
+    // markers in a cell get the same three colours they have in a message.
+    <MarkdownRenderer content={text} className="markdown bt-md" />
 );
 
 export default function TableWindowView({ surface }: { surface: TableSurface }): React.ReactElement {

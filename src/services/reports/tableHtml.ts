@@ -63,7 +63,7 @@ import {
     requestedCitationKey,
 } from '@beaver/agent-core/citations/citationGrammar';
 import type { Citation } from '@beaver/agent-core/types/citations';
-import { countTopLevelCssRules, escapeHtml } from './reportHtml';
+import { countTopLevelCssRules, escapeHtml, CSS_RULE_BUDGET } from './reportHtml';
 
 export interface TableHtmlLinks {
     /** `zotero://select/...` for a row, or null when it cannot be revealed. */
@@ -157,6 +157,11 @@ const CHEVRON_DOWN_SVG =
 const CHEVRON_UP_SVG =
     '<svg class="bt-gl" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
     '<path d="m6 15 6-6 6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+/** Both directions at once — a sortable column at rest. */
+const SORT_BOTH_SVG =
+    '<svg class="bt-gl" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+    '<path d="m7 10 5-5 5 5M7 14l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 /**
  * How a column's values line up, and with them its header. `columnAlign`
@@ -316,10 +321,16 @@ class CitationNumbering {
 
     private marker(marker: number, citation: Citation | undefined): string {
         const href = citationHref(citation);
-        const tip = citationTooltip(citation);
+        const parts = citationParts(citation);
         const attrs = [
-            'class="bt-cite"',
-            tip ? `title="${escapeHtml(tip)}"` : '',
+            `class="bt-cite bt-cite--${citationTone(citation)}"`,
+            // The tooltip's parts, kept apart so a host can lay them out the
+            // way the app does; `title` is the fallback where none can.
+            parts.name ? `data-cite-name="${escapeHtml(parts.name)}"` : '',
+            parts.locator ? `data-cite-loc="${escapeHtml(parts.locator)}"` : '',
+            parts.preview ? `data-cite-preview="${escapeHtml(parts.preview)}"` : '',
+            parts.action ? `data-cite-action="${escapeHtml(parts.action)}"` : '',
+            parts.title ? `title="${escapeHtml(parts.title)}"` : '',
             `data-bt-cite="${marker}"`,
         ]
             .filter(Boolean)
@@ -339,13 +350,43 @@ function citationHref(citation: Citation | undefined): string | null {
     return page ? `${base}?page=${page}` : base;
 }
 
-/** What the chat's citation tooltip says, as one line of plain text. */
-function citationTooltip(citation: Citation | undefined): string | null {
-    if (!citation) return null;
+/**
+ * The three colours the app gives a citation, by what it points at: green when
+ * it carries a locator and lands on a passage, blue for an external reference,
+ * grey for a plain item citation.
+ */
+function citationTone(citation: Citation | undefined): 'locator' | 'external' | 'item' {
+    if (!citation) return 'item';
+    const ref = citation.resolved_ref ?? citation.requested_ref;
+    if (ref && ref.kind === 'external') return 'external';
+    if (citation.pages?.length || (ref && 'loc' in ref && ref.loc)) return 'locator';
+    return 'item';
+}
+
+/** What the chat's citation card shows, in the pieces it shows them in. */
+function citationParts(citation: Citation | undefined): {
+    name?: string;
+    locator?: string;
+    preview?: string;
+    action?: string;
+    title?: string;
+} {
+    if (!citation) return {};
     const name = citation.display_name ?? citation.formatted_citation;
-    const page = citation.pages?.length ? `Page ${citation.pages.join(', ')}` : '';
-    const parts = [name, page, citation.preview].filter(Boolean);
-    return parts.length ? parts.join('\n\n') : null;
+    const locator = citation.pages?.length
+        ? `Page ${citation.pages.join(', ')}`
+        : undefined;
+    // The passage as the app quotes it: trimmed, and in quotation marks so it
+    // reads as something lifted from the source rather than as prose of ours.
+    const raw = citation.preview?.replace(/\s+/g, ' ').trim();
+    const preview = raw ? `"${raw}${/[.!?"']$/.test(raw) ? '' : '…'}"` : undefined;
+    const action = locator
+        ? `Highlights passage on ${locator.toLowerCase()}`
+        : citation.filename
+          ? 'Opens the cited file'
+          : undefined;
+    const title = [name, locator, preview].filter(Boolean).join(' — ');
+    return { name, locator, preview, action, title: title || undefined };
 }
 
 // ---------------------------------------------------------------------------
@@ -549,6 +590,8 @@ export function renderTableHtml(
     const hasActions =
         !!options.linksFor && rows.some((row) => rowActions(spec, row).length > 0);
 
+    const hasQuestions = spec.columns.some((c) => !!c.description);
+
     const template = [
         RAIL_WIDTH,
         ...spec.columns.map((c) => columnWidth(c, c.id === anchor?.id)),
@@ -577,7 +620,11 @@ export function renderTableHtml(
         );
     }
 
-    const groups = controls ? filterGroups(spec, rows) : [];
+    // Every control costs rules, and past the reader's budget it stops theming
+    // the document properly — so a table wide enough to blow it loses its
+    // filters, which are far and away the most expensive, and keeps its sort.
+    const wanted = controls ? filterGroups(spec, rows) : [];
+    const groups = controls && fitsBudget(spec, prefix, wanted) ? wanted : [];
     const filterInputs = groups
         .map((group, g) =>
             group.options
@@ -640,13 +687,22 @@ export function renderTableHtml(
         '<span class="bt-c bt-rail"></span>',
         ...spec.columns.map((column, i) => {
             const sort = controls && isColumnSortable(column);
+            // One control per column, showing the state it would move to next:
+            // both directions at rest, then ascending, then descending.
             const sorter = sort
-                ? `<span class="bt-sorters"><label class="bt-so bt-sa${i}" for="${prefix}-sa${i}" title="Sort ascending">${CHEVRON_UP_SVG}</label><label class="bt-so bt-sd${i}" for="${prefix}-sd${i}" title="Sort descending">${CHEVRON_DOWN_SVG}</label></span>`
+                ? `<span class="bt-sorters"><label class="bt-so bt-so-a" for="${prefix}-sa${i}" title="Sort ascending">${SORT_BOTH_SVG}</label><label class="bt-so bt-so-d" for="${prefix}-sd${i}" title="Sort descending">${CHEVRON_UP_SVG}</label><label class="bt-so bt-so-0" for="${prefix}-s0" title="Clear sort">${CHEVRON_DOWN_SVG}</label></span>`
                 : '';
-            const description = column.description
-                ? `<span class="bt-q">${escapeHtml(column.description)}</span>`
+            // Rendered whether or not this column has a question: the block
+            // reserves the same two lines in every header, which is what keeps
+            // the titles on one baseline instead of each floating above a
+            // description of its own length.
+            const description = hasQuestions
+                ? `<span class="bt-q">${escapeHtml(column.description ?? '')}</span>`
                 : '';
-            return `<span class="bt-c bt-h bt-${cellAlign(column)} bt-hk-${column.type}${column.id === anchor?.id ? ' bt-anchor' : ''}"><span class="bt-h-top"><span class="bt-h-label">${escapeHtml(column.header)}</span>${sorter}</span>${description}</span>`;
+            const full = column.description
+                ? ` title="${escapeHtml(column.description)}"`
+                : '';
+            return `<span class="bt-c bt-h bt-h${i} bt-${cellAlign(column)} bt-hk-${column.type}${sort ? ' bt-sortable' : ''}${column.id === anchor?.id ? ' bt-anchor' : ''}"${full}><span class="bt-h-top"><span class="bt-h-label">${escapeHtml(column.header)}</span>${sorter}</span>${description}</span>`;
         }),
         hasActions ? '<span class="bt-c bt-acts-h"></span>' : '',
         '</div>',
@@ -668,7 +724,10 @@ export function renderTableHtml(
             const cells = spec.columns
                 .map((column, i) => {
                     const anchorClass = column.id === anchor?.id ? ' bt-anchor' : '';
-                    return `<span class="bt-c bt-${cellAlign(column)} bt-k-${column.type}${anchorClass}" id="${escapeHtml(row.id)}/${escapeHtml(column.id)}">${renderCellValue(row.cells[column.id], column, cites)}</span>`;
+                    const sortable =
+                        (spec.capabilities?.sortable ?? true) &&
+                        isColumnSortable(column);
+                    return `<span class="bt-c bt-${cellAlign(column)} bt-k-${column.type}${sortable ? ' bt-sortable' : ''}${anchorClass}" id="${escapeHtml(row.id)}/${escapeHtml(column.id)}">${renderCellValue(row.cells[column.id], column, cites)}</span>`;
                 })
                 .join('');
 
@@ -731,6 +790,23 @@ export function renderTableHtml(
 }
 
 /**
+ * Whether this table's controls fit under the reader's stylesheet budget.
+ *
+ * The static sheet is a fixed cost; the per-table rules grow with the columns
+ * and their categories, and a document over the budget is re-themed by a path
+ * that flattens every colour it uses.
+ */
+function fitsBudget(
+    spec: TableSpec,
+    prefix: string,
+    groups: FilterGroup[]
+): boolean {
+    const dynamic = renderDynamicCss(spec, prefix, groups).length;
+    const fixed = countTopLevelCssRules(DOCUMENT_CSS + TABLE_CSS);
+    return fixed + dynamic <= CSS_RULE_BUDGET;
+}
+
+/**
  * The cited sources, numbered as they were met.
  *
  * A table that carries citations has to carry what they refer to: the markers
@@ -773,8 +849,12 @@ function renderDynamicCss(
         rules.push(
             `#${prefix}-sa${i}:checked ~ .bt-scroll .bt-r { order: var(--o${i}); }`,
             `#${prefix}-sd${i}:checked ~ .bt-scroll .bt-r { order: var(--p${i}); }`,
-            `#${prefix}-sa${i}:checked ~ .bt-toolbar .bt-sa${i}, #${prefix}-sa${i}:checked ~ .bt-scroll .bt-sa${i} { color: var(--t-fg); }`,
-            `#${prefix}-sd${i}:checked ~ .bt-scroll .bt-sd${i} { color: var(--t-fg); }`
+            // The active column keeps its control visible without a hover, and
+            // the control offers the next state rather than the current one.
+            `#${prefix}-sa${i}:checked ~ .bt-scroll .bt-h${i} .bt-sorters, #${prefix}-sd${i}:checked ~ .bt-scroll .bt-h${i} .bt-sorters { opacity: 1; color: var(--t-fg); }`,
+            `#${prefix}-sa${i}:checked ~ .bt-scroll .bt-h${i} .bt-so-a, #${prefix}-sd${i}:checked ~ .bt-scroll .bt-h${i} .bt-so-a { display: none; }`,
+            `#${prefix}-sa${i}:checked ~ .bt-scroll .bt-h${i} .bt-so-d { display: inline-flex; }`,
+            `#${prefix}-sd${i}:checked ~ .bt-scroll .bt-h${i} .bt-so-0 { display: inline-flex; }`
         );
     });
 
@@ -873,16 +953,27 @@ export const TABLE_CSS = `
 .bt-center .bt-h-top { justify-content: center; }
 .bt-center { text-align: center; }
 .bt-h-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bt-q { display: block; font-size: 11px; font-weight: 400; line-height: 1.3;
-  color: var(--t-fade); max-width: 22rem; }
+/* A fixed two-line box, empty or not, so every header title shares a baseline.
+   The full question is on the header's title attribute. */
+.bt-q { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; height: 2.6em; font-size: 11px; font-weight: 400;
+  line-height: 1.3; color: var(--t-fade); max-width: 22rem; }
 /* Out of flow: in it the sorters kept their width while invisible, which
    pushed a right-aligned header label two controls' width in from the edge its
    values line up on. Absolute, they land in the cell's own padding, at the same
    place in every column. */
-.bt-sorters { position: absolute; right: -8px; top: 50%; transform: translateY(-50%);
-  display: inline-flex; gap: 1px; opacity: 0; transition: opacity 100ms ease; }
+/* One control, beside its own label. Pinned to the cell's edge it drifted far
+   from short headers and landed on top of narrow ones. Only the label for the
+   next state shows; the values of a sortable column leave the same gutter, so
+   the label still lines up with them. */
+.bt-sorters { flex: 0 0 15px; display: inline-flex; justify-content: center;
+  opacity: 0; transition: opacity 100ms ease; }
+.bt-so { display: none; }
+.bt-so-a { display: inline-flex; }
+.bt-c.bt-sortable.bt-end:not(.bt-h) { padding-right: 25px; }
+.bt-c.bt-sortable.bt-center:not(.bt-h) { padding-right: 25px; padding-left: 10px; }
 .bt-h:hover .bt-sorters, .bt-h:focus-within .bt-sorters { opacity: 1; }
-.bt-so { display: inline-flex; cursor: pointer; color: var(--t-fade); padding: 0; }
+.bt-so { cursor: pointer; color: var(--t-fade); padding: 0; }
 .bt-so:hover { color: var(--t-fg); }
 .bt-gl { width: 11px; height: 11px; display: block; }
 .bt-r { display: flex; flex-direction: column; border-bottom: 1px solid var(--t-rule); }
@@ -940,11 +1031,16 @@ export const TABLE_CSS = `
 .bt-d-actions { margin-top: 10px; }
 /* The citation marker, as the chat renders it: a small raised number that says
    where a claim came from and opens the cited page. */
-.bt-cite { display: inline-block; min-width: 14px; padding: 0 3px; margin-left: 2px;
-  border-radius: 4px; background: #eef1f7; color: var(--t-accent);
+/* The citation marker, coloured the way the app colours it: green where it
+   lands on a passage, blue for an external reference, grey for a plain item. */
+.bt-cite { display: inline-block; min-width: 15px; padding: 0 4px; margin-left: 2px;
+  border: 1px solid transparent; border-radius: 4px;
   font-size: 10px; line-height: 14px; font-weight: 600; text-align: center;
   text-decoration: none; vertical-align: 1px; cursor: pointer; }
-.bt-cite:hover { background: var(--t-accent); color: #fff; }
+.bt-cite--item { background: #f1f3f5; border-color: #e3e6ea; color: var(--t-mut); }
+.bt-cite--locator { background: #e7f6ec; border-color: #cbe9d5; color: #1f7a3d; }
+.bt-cite--external { background: #e8f1fd; border-color: #cfe0f7; color: #1a5aa8; }
+.bt-cite:hover { filter: brightness(0.95); }
 .bt-srcs { padding: 18px 0 0; border-top: 1px solid var(--t-line); margin-top: 14px; }
 .bt-srcs-h { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em;
   color: var(--t-fade); margin: 0 0 8px; font-weight: 650; }

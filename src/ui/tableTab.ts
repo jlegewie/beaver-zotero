@@ -189,8 +189,8 @@ function makeCitationCard(win: Window, container: Element): HTMLElement {
         'position: absolute',
         'z-index: 100',
         'display: none',
+        'width: 22rem',
         'max-width: 22rem',
-        'padding: 0.5rem 0.6rem',
         'border: 1px solid var(--color-border50)',
         'border-radius: 0.5rem',
         // Opaque: the menu material is translucent and the table showed
@@ -206,42 +206,80 @@ function makeCitationCard(win: Window, container: Element): HTMLElement {
     return card;
 }
 
-/** Fills and places the card against a marker inside the iframe. */
+/**
+ * Fills the card from the marker's own data and centres it under it.
+ *
+ * The layout is the app's citation card: the source and its locator on one row,
+ * a rule, the cited passage in quotation marks, a rule, and what a click will
+ * do. The document carries those as separate attributes rather than one string
+ * precisely so they can be laid out rather than dumped.
+ */
 function showCitationCard(
     card: HTMLElement,
     iframe: HTMLIFrameElement,
     marker: Element
 ): void {
-    const title = marker.getAttribute('title') ?? '';
-    if (!title) return;
-    // The document packs the same three parts the chat tooltip shows into
-    // `title`, separated by blank lines: source, locator, cited passage.
-    const [name, ...rest] = title.split('\n\n');
+    const name = marker.getAttribute('data-cite-name');
+    const locator = marker.getAttribute('data-cite-loc');
+    const preview = marker.getAttribute('data-cite-preview');
+    const action = marker.getAttribute('data-cite-action');
+    if (!name && !preview) return;
+
     const doc = card.ownerDocument;
+    const row = (cssText: string) => {
+        const el = doc.createElementNS(HTML_NS, 'div') as HTMLElement;
+        el.style.cssText = cssText;
+        return el;
+    };
     card.textContent = '';
 
-    const heading = doc.createElementNS(HTML_NS, 'div') as HTMLElement;
-    heading.style.cssText = 'font-weight: 600; margin-bottom: 0.2rem;';
-    heading.textContent = name;
-    card.appendChild(heading);
-
-    for (const part of rest) {
-        const line = doc.createElementNS(HTML_NS, 'div') as HTMLElement;
-        line.style.cssText =
-            'color: var(--fill-secondary); white-space: pre-wrap; overflow-wrap: anywhere;';
-        line.textContent = part;
-        card.appendChild(line);
+    if (name) {
+        const head = row(
+            'display: flex; gap: 0.75rem; align-items: baseline; padding: 0.45rem 0.6rem;'
+        );
+        const who = row('flex: 1 1 auto; font-weight: 600; min-width: 0;');
+        who.textContent = name;
+        head.appendChild(who);
+        if (locator) {
+            const where = row(
+                'flex: 0 0 auto; color: var(--fill-secondary); white-space: nowrap;'
+            );
+            where.textContent = locator;
+            head.appendChild(where);
+        }
+        card.appendChild(head);
     }
 
+    if (preview) {
+        const body = row(
+            'padding: 0.45rem 0.6rem; border-top: 1px solid var(--color-border50); color: var(--fill-secondary); overflow-wrap: anywhere;'
+        );
+        body.textContent = preview;
+        card.appendChild(body);
+    }
+
+    if (action) {
+        const foot = row(
+            'padding: 0.4rem 0.6rem; border-top: 1px solid var(--color-border50); color: var(--fill-secondary); font-size: 0.85rem;'
+        );
+        foot.textContent = action;
+        card.appendChild(foot);
+    }
+
+    // Centred under the marker, then pulled back inside the tab if that would
+    // hang it off either edge.
+    card.style.display = 'block';
     const frame = iframe.getBoundingClientRect();
     const at = marker.getBoundingClientRect();
-    const container = card.offsetParent as HTMLElement | null;
-    const origin = container?.getBoundingClientRect();
-    const left = frame.left + at.left - (origin?.left ?? 0);
-    const top = frame.top + at.bottom - (origin?.top ?? 0) + 4;
-    card.style.left = `${Math.max(4, left)}px`;
-    card.style.top = `${top}px`;
-    card.style.display = 'block';
+    const origin = (card.offsetParent as HTMLElement | null)?.getBoundingClientRect();
+    const width = card.offsetWidth;
+    const centred = frame.left + at.left + at.width / 2 - width / 2;
+    const clamped = Math.min(
+        Math.max(frame.left + 8, centred),
+        frame.right - width - 8
+    );
+    card.style.left = `${clamped - (origin?.left ?? 0)}px`;
+    card.style.top = `${frame.top + at.bottom - (origin?.top ?? 0) + 6}px`;
 }
 
 function wireLinks(
@@ -267,7 +305,16 @@ function wireLinks(
                     const marker = (event.target as Element | null)?.closest?.(
                         '[data-bt-cite]'
                     );
-                    if (marker) showCitationCard(card, iframe, marker);
+                    if (!marker) return;
+                    // The document ships a `title` for viewers that can show no
+                    // card of their own. This is not one of them, and leaving it
+                    // would put the platform's tooltip on top of ours.
+                    const native = marker.getAttribute('title');
+                    if (native !== null) {
+                        marker.setAttribute('data-cite-title', native);
+                        marker.removeAttribute('title');
+                    }
+                    showCitationCard(card, iframe, marker);
                 },
                 true
             );
