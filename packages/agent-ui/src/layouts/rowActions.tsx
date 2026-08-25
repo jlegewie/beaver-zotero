@@ -5,7 +5,7 @@ import {
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
 import { getHost, type ClientHost } from "../host";
-import { FileViewIcon, LibraryIcon } from "../icons";
+import { ArrowUpRightIcon, FileViewIcon } from "../icons";
 import IconButton from "../primitives/IconButton";
 
 /**
@@ -36,16 +36,24 @@ export function RowActionsView({
     if (ref.kind === "external") {
         // `canRender` already established both; repeated for narrowing.
         if (!ref.reference || !host.components) return null;
-        const mode = (action: (typeof actions)[number]) =>
-            actions.includes(action) ? "icon-only" : "none";
+        // A row that is not in the library gets a labelled Add — the verb, not
+        // a glyph to decode — and one already in it gets the reveal arrow.
+        // Import stays the host's to render: it is a library write, and that
+        // component is what carries it through approval and undo.
         return (
             <>
                 {host.components.externalReferenceActions({
                     item: ref.reference,
-                    buttonVariant: "ghost-secondary",
-                    importButtonMode: mode("import"),
-                    revealButtonMode: mode("reveal"),
-                    pdfButtonMode: mode("open"),
+                    buttonVariant: "surface",
+                    importButtonMode: actions.includes("import")
+                        ? "full"
+                        : "none",
+                    revealButtonMode: actions.includes("reveal")
+                        ? "icon-only"
+                        : "none",
+                    pdfButtonMode: actions.includes("open")
+                        ? "icon-only"
+                        : "none",
                     detailsButtonMode: "none",
                     webButtonMode: "none",
                     showCitationCount: false,
@@ -66,7 +74,7 @@ export function RowActionsView({
         <>
             {actions.includes("reveal") ? (
                 <IconButton
-                    icon={HostRevealIcon}
+                    icon={ArrowUpRightIcon}
                     variant="ghost-secondary"
                     ariaLabel="Reveal in library"
                     title="Reveal in library"
@@ -90,21 +98,6 @@ export function RowActionsView({
             ) : null}
         </>
     );
-}
-
-/**
- * The client's own reveal glyph where it provides one, falling back to the
- * package's. A module-level component on purpose: building it inline would
- * mint a new component type on every render, and React would tear down and
- * remount every action button whenever the table sorted or filtered.
- */
-function HostRevealIcon(
-    props: React.SVGProps<SVGSVGElement>,
-): React.ReactElement {
-    const hostIcon = getHost().components?.revealInLibraryIcon({
-        className: "bt-action-icon",
-    });
-    return <>{hostIcon ?? <LibraryIcon {...props} />}</>;
 }
 
 /**

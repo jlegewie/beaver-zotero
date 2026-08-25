@@ -126,10 +126,34 @@ function columnWidth(column: Column, isAnchor: boolean): string {
 }
 
 // ---------------------------------------------------------------------------
-// Cells
+// Glyphs
 // ---------------------------------------------------------------------------
 
-const EMPTY_CELL = '—';
+/**
+ * Inline copies of the icons the React renderer uses, so the two tables carry
+ * the same marks. Inline because the snapshot CSP admits no `chrome:` images
+ * and the document has to stand alone.
+ */
+const CHEVRON_SVG =
+    '<svg class="bt-chev" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+    '<path d="M9 6C9 6 15 10.4189 15 12C15 13.5812 9 18 9 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+const ARROW_UP_RIGHT_SVG =
+    '<svg class="bt-gl" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+    '<path d="M16.5 7.5L6 18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' +
+    '<path d="M8 6.18791C8 6.18791 16.0479 5.50949 17.2692 6.73079C18.4906 7.95209 17.812 16 17.812 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+const CHEVRON_DOWN_SVG =
+    '<svg class="bt-gl" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+    '<path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+const CHEVRON_UP_SVG =
+    '<svg class="bt-gl" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+    '<path d="m6 15 6-6 6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+// ---------------------------------------------------------------------------
+// Cells
+// ---------------------------------------------------------------------------
 
 const SELECT_HUES = ['blue', 'green', 'purple', 'orange', 'red', 'yellow', 'gray'];
 
@@ -152,8 +176,11 @@ function renderCellValue(cell: Cell | undefined, column: Column): string {
     if (cell?.status === 'error') {
         return `<span class="bt-err">${escapeHtml(cell.error ?? 'Could not be extracted')}</span>`;
     }
+    // Nothing at all, rather than a placeholder glyph: a column of em dashes
+    // reads as noise across a wide table, and the footer already counts what
+    // is missing.
     const value = cell?.value;
-    if (!value) return `<span class="bt-empty">${EMPTY_CELL}</span>`;
+    if (!value) return '<span class="bt-empty"></span>';
 
     switch (value.kind) {
         case 'text':
@@ -168,10 +195,10 @@ function renderCellValue(cell: Cell | undefined, column: Column): string {
             return `<span class="bt-num">${escapeHtml(value.display ?? value.value)}</span>`;
 
         case 'boolean':
-            // A check or a short dash — false must not look like empty.
+            // The check is the signal; false is its absence.
             return value.value
                 ? '<span class="bt-yes" title="yes">✓</span>'
-                : '<span class="bt-no" title="no">–</span>';
+                : '<span class="bt-no"></span>';
 
         case 'select':
             return `<span class="bt-pill bt-pill--${selectHue(value.label, column)}">${escapeHtml(value.label)}</span>`;
@@ -192,7 +219,7 @@ function renderCellValue(cell: Cell | undefined, column: Column): string {
         }
 
         default:
-            return `<span class="bt-empty">${EMPTY_CELL}</span>`;
+            return '<span class="bt-empty"></span>';
     }
 }
 
@@ -324,7 +351,7 @@ function renderActions(row: Row, spec: TableSpec, links?: TableHtmlOptions['link
     const open = safeHref(openUri);
     if (verbs.includes('reveal') && select) {
         parts.push(
-            `<a class="bt-act" href="${escapeHtml(select)}" title="Reveal in library" aria-label="Reveal in library">↗</a>`
+            `<a class="bt-act" href="${escapeHtml(select)}" title="Reveal in library" aria-label="Reveal in library">${ARROW_UP_RIGHT_SVG}</a>`
         );
     }
     if (verbs.includes('open') && open) {
@@ -332,6 +359,10 @@ function renderActions(row: Row, spec: TableSpec, links?: TableHtmlOptions['link
             `<a class="bt-act" href="${escapeHtml(open)}" title="Open" aria-label="Open">▤</a>`
         );
     }
+    // A row that is not in the library would take an Add button here. Nothing
+    // emits one yet: importing is a library write that needs the approval
+    // pipeline, which no static document can reach — so the space stays empty
+    // rather than carrying a control that does nothing.
     return parts.join('');
 }
 
@@ -479,7 +510,7 @@ export function renderTableHtml(
         ...spec.columns.map((column, i) => {
             const sort = controls && isColumnSortable(column);
             const sorter = sort
-                ? `<span class="bt-sorters"><label class="bt-so bt-sa${i}" for="${prefix}-sa${i}" title="Sort ascending">▲</label><label class="bt-so bt-sd${i}" for="${prefix}-sd${i}" title="Sort descending">▼</label></span>`
+                ? `<span class="bt-sorters"><label class="bt-so bt-sa${i}" for="${prefix}-sa${i}" title="Sort ascending">${CHEVRON_UP_SVG}</label><label class="bt-so bt-sd${i}" for="${prefix}-sd${i}" title="Sort descending">${CHEVRON_DOWN_SVG}</label></span>`
                 : '';
             const description = column.description
                 ? `<span class="bt-q">${escapeHtml(column.description)}</span>`
@@ -517,7 +548,7 @@ export function renderTableHtml(
             return [
                 `<details class="${classes.join(' ')}" id="${escapeHtml(row.id)}" style="${orderVars}">`,
                 '<summary class="bt-row">',
-                `<span class="bt-c bt-rail"><span class="bt-idx">${position + 1}</span></span>`,
+                `<span class="bt-c bt-rail">${CHEVRON_SVG}</span>`,
                 cells,
                 actions,
                 '</summary>',
@@ -602,16 +633,12 @@ function renderDynamicCss(
     });
 
     for (const [key, lines, titleLines, height] of [
-        ['c', 1, 1, '2.2rem'],
+        ['c', 2, 1, '3.7rem'],
         ['z', 3, 2, '5.5rem'],
         ['t', 6, 3, '9.5rem'],
     ] as const) {
         rules.push(
             `#${prefix}-d${key}:checked ~ .bt-scroll .bt-body { --lines: ${lines}; --title-lines: ${titleLines}; --row-h: ${height}; }`,
-            // At one line the subtitle is what makes the row two, so it goes.
-            key === 'c'
-                ? `#${prefix}-dc:checked ~ .bt-scroll .bt-row .bt-sub { display: none; }`
-                : '',
             `#${prefix}-d${key}:checked ~ .bt-toolbar .bt-seg-${key} { background: var(--t-sel); color: var(--t-fg); }`
         );
     }
@@ -671,25 +698,29 @@ export const TABLE_CSS = `
   position: sticky; top: 0; z-index: 3; background: #fff;
   border-bottom: 1px solid var(--t-line); order: -1; }
 .bt-c { padding: 8px 10px; min-width: 0; }
-.bt-h { font-size: 12px; font-weight: 650; color: var(--t-mut); }
+.bt-h { font-size: 14px; font-weight: 700; color: var(--t-fg); }
 .bt-h-top { display: flex; align-items: center; gap: 3px; min-width: 0; }
-.bt-end .bt-h-top { flex-direction: row-reverse; }
+/* The value alignment flips, the controls do not: a sort affordance that moves
+   from one side of a header to the other is a control you have to find twice. */
+.bt-end .bt-h-top { justify-content: flex-end; }
 .bt-h-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bt-q { display: block; font-size: 11px; font-weight: 400; line-height: 1.3;
   color: var(--t-fade); max-width: 22rem; }
-.bt-sorters { display: inline-flex; gap: 1px; flex: 0 0 auto; }
-.bt-so { font-size: 8px; line-height: 1; cursor: pointer; color: #c9cfd8; padding: 0 1px; }
-.bt-so:hover { color: var(--t-fade); }
+.bt-sorters { display: inline-flex; gap: 1px; flex: 0 0 auto;
+  opacity: 0; transition: opacity 100ms ease; }
+.bt-h:hover .bt-sorters, .bt-h:focus-within .bt-sorters { opacity: 1; }
+.bt-so { display: inline-flex; cursor: pointer; color: var(--t-fade); padding: 0; }
+.bt-so:hover { color: var(--t-fg); }
+.bt-gl { width: 11px; height: 11px; display: block; }
 .bt-r { display: flex; flex-direction: column; border-bottom: 1px solid var(--t-rule); }
 .bt-r > summary::marker { content: ''; }
 .bt-r > summary::-webkit-details-marker { display: none; }
 .bt-row { display: grid; grid-template-columns: var(--cols); align-items: start;
   min-height: var(--row-h); list-style: none; cursor: pointer; }
 .bt-row:hover { background: #fafbfc; }
-.bt-rail { display: flex; align-items: center; gap: 4px; padding-left: 12px; color: var(--t-fade); }
-.bt-idx { font-size: 11px; font-variant-numeric: tabular-nums; }
-.bt-rail::after { content: '›'; font-size: 13px; }
-.bt-r[open] > .bt-row .bt-rail::after { content: '⌄'; }
+.bt-rail { display: flex; align-items: center; padding-left: 12px; color: var(--t-fade); }
+.bt-chev { width: 13px; height: 13px; display: block; transition: transform 120ms ease; }
+.bt-r[open] > .bt-row .bt-chev { transform: rotate(90deg); }
 .bt-start { text-align: left; }
 .bt-end { text-align: right; }
 .bt-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -704,12 +735,15 @@ export const TABLE_CSS = `
 .bt-pill { display: inline-block; max-width: 100%; padding: 1px 8px; border-radius: 999px;
   font-size: 12px; line-height: 17px; white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; border: 1px solid transparent; }
-.bt-link { color: var(--t-accent); text-decoration: none; border-bottom: 1px solid var(--t-line);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block;
-  max-width: 100%; vertical-align: bottom; }
+/* Wraps rather than ellipsising: one truncated line of a DOI shows the prefix
+   every row shares and none of what tells them apart. */
+.bt-link { color: var(--t-accent); text-decoration: none; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: var(--lines); -webkit-box-orient: vertical;
+  overflow: hidden; }
 .bt-acts { display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding-right: 12px; }
-.bt-act { color: var(--t-fade); text-decoration: none; font-size: 13px; padding: 2px 4px; }
+.bt-act { display: inline-flex; color: var(--t-fade); text-decoration: none; padding: 2px 3px; }
 .bt-act:hover { color: var(--t-accent); }
+.bt-act .bt-gl { width: 14px; height: 14px; }
 .bt-d { padding: 4px 12px 14px 40px; background: #fbfcfd; }
 .bt-d-fields { display: grid; grid-template-columns: 8rem minmax(0, 1fr); gap: 5px 14px; margin: 0; }
 .bt-d-fields dt { font-size: 12px; color: var(--t-fade); }

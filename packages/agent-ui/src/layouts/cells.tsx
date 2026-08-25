@@ -14,13 +14,12 @@ import {
     AlertCircleIcon,
     ArrowUpRightIcon,
     EditIcon,
-    ExternalLinkIcon,
     FileIcon,
     Icon,
     TickIcon,
 } from "../icons";
 import IconButton from "../primitives/IconButton";
-import { EMPTY_CELL, type TextRenderer } from "./tableView";
+import { type TextRenderer } from "./tableView";
 
 /**
  * One cell, in four states that must not be confused with one another:
@@ -59,12 +58,10 @@ export function CellView({
     if (cell?.status === "error")
         return <ErrorCell message={cell.error} onRetry={onRetry} />;
 
-    if (!cell?.value)
-        return (
-            <span className="bt-empty" role="img" aria-label="Not reported">
-                {EMPTY_CELL}
-            </span>
-        );
+    // Nothing at all, rather than a placeholder glyph. A column of em dashes
+    // reads as noise across a wide table; the footer is where the count of
+    // what is missing belongs.
+    if (!cell?.value) return <span className="bt-empty" />;
 
     return (
         <span
@@ -100,7 +97,9 @@ export function CellView({
  */
 function overflowClass(value: CellValue, column: Column): string {
     if (value.kind === "reference") return "";
-    if (value.kind === "text")
+    // Prose and links both wrap: a DOI is long enough that one ellipsised line
+    // shows the prefix every row shares and none of what tells them apart.
+    if (value.kind === "text" || value.kind === "link")
         return columnWrap(column) === "clamp" ? "bt-clamp" : "bt-nowrap";
     return "bt-nowrap";
 }
@@ -191,14 +190,14 @@ export function CellValueView({
         case "boolean":
             // A check or a short dash, never a checkbox glyph: a checkbox reads
             // as editable, and false must not look like empty (an em dash).
+            // A check for true and nothing for false: the check is the signal,
+            // and a dash beside it only adds a second thing to read.
             return value.value ? (
                 <span className="bt-bool-yes" role="img" aria-label="yes">
                     <Icon icon={TickIcon} size={14} />
                 </span>
             ) : (
-                <span className="bt-bool-no" role="img" aria-label="no">
-                    –
-                </span>
+                <span className="bt-bool-no" role="img" aria-label="no" />
             );
 
         case "select":
@@ -216,20 +215,32 @@ export function CellValueView({
         case "link": {
             const label = value.label ?? value.url;
             const navigation = getHost().navigation;
+            if (!navigation)
+                return <span className="bt-link-label">{label}</span>;
+            const open = () => navigation.openExternalUrl(value.url);
+            // A span, not a button: Gecko forces a button's computed display to
+            // a flow root, which makes it an atomic box the cell's line clamp
+            // cannot cut — a long DOI then ran to three lines and took the row
+            // height with it.
             return (
-                <button
-                    type="button"
+                <span
                     className="bt-link"
+                    role="link"
+                    tabIndex={0}
                     title={value.url}
                     onClick={(e) => {
                         e.stopPropagation();
-                        navigation?.openExternalUrl(value.url);
+                        open();
                     }}
-                    disabled={!navigation}
+                    onKeyDown={(e) => {
+                        if (e.key !== "Enter" && e.key !== " ") return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        open();
+                    }}
                 >
                     <span className="bt-link-label">{label}</span>
-                    <Icon icon={ExternalLinkIcon} size={11} />
-                </button>
+                </span>
             );
         }
     }

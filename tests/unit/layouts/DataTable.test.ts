@@ -179,13 +179,15 @@ describe("DataTable", () => {
         );
         expect(rows[0].querySelector(".bt-bool-yes")).not.toBeNull();
 
-        expect(rows[1].querySelector(".bt-bool-no")).not.toBeNull();
+        // False renders the marker with no glyph — the check is the signal.
+        expect(rows[1].querySelector(".bt-bool-no")?.textContent).toBe("");
         expect(rows[1].querySelector(".bt-skeleton")).not.toBeNull();
 
-        // An absent value is itself a value ("not reported"); a failure is not.
+        // An absent value renders blank rather than a placeholder glyph; what
+        // is missing is counted in the footer instead.
         expect(
             rows[2].querySelector('[id="r3/cites"] .bt-empty')?.textContent,
-        ).toBe("—");
+        ).toBe("");
         expect(
             rows[2].querySelector(".bt-cell-error-text")?.textContent,
         ).toContain("Extraction failed");
@@ -312,11 +314,12 @@ describe("DataTable", () => {
         });
         mount(React.createElement(DataTable, { table: spec }));
 
-        // Off-library external row: import is offered, reveal is not.
+        // Off-library external row gets the labelled Add, not a bare glyph;
+        // reveal is not offered because there is nothing to reveal.
         expect(externalReferenceActions).toHaveBeenCalledWith(
             expect.objectContaining({
                 item: externalRef,
-                importButtonMode: "icon-only",
+                importButtonMode: "full",
                 revealButtonMode: "none",
             }),
         );

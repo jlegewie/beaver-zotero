@@ -309,7 +309,6 @@ function TableRow({
             >
                 <td className="bt-td bt-td-rail">
                     <RowRail
-                        index={index + 1}
                         expandable={expandable}
                         expanded={expanded}
                         detailId={detailId}
@@ -407,12 +406,11 @@ function SpanningCell({
 }
 
 /**
- * The left rail: expand, and a row number that becomes a checkbox on hover.
- * Two affordances in the space of one, which is what keeps the row's own
- * columns free of chrome.
+ * The left rail: the expander, and a checkbox that fades in on hover. No row
+ * number — in a table that sorts and filters, a position is not an identity,
+ * and it competed with the chevron for the only column that is pure chrome.
  */
 function RowRail({
-    index,
     expandable,
     expanded,
     selected,
@@ -420,7 +418,6 @@ function RowRail({
     onToggleExpand,
     onToggleSelect,
 }: {
-    index: number;
     expandable: boolean;
     expanded: boolean;
     selected: boolean;
@@ -445,9 +442,6 @@ function RowRail({
                 <span className="bt-rail-spacer" aria-hidden="true" />
             )}
             <span className={`bt-rail-mark${selected ? " bt-selected" : ""}`}>
-                <span className="bt-rail-index" aria-hidden="true">
-                    {index}
-                </span>
                 <SelectionBox
                     checked={selected}
                     label={selected ? "Deselect row" : "Select row"}

@@ -478,12 +478,14 @@
 }
 
 .beaver-root .bt[data-density="compact"] {
-    --bt-lines: 1;
+    --bt-lines: 2;
     --bt-title-lines: 1;
-    --bt-pad-y: 0.3rem;
-    /* Subtitle hidden at this density, so the anchor is a single line too.
-       The pill is the tallest thing that can sit in a cell here (1.5 + 0.6). */
-    --bt-row-h: 2.2rem;
+    --bt-pad-y: 0.35rem;
+    /* Two lines everywhere: the anchor is a title over its authors, because a
+       row you cannot attribute is not much use however short it is. Prose gets
+       the same two lines, so the row height stays one number.
+       anchor = 1.45 + 1.3 + 0.7 = 3.45; prose = 2 x 1.45 + 0.7 = 3.6. */
+    --bt-row-h: 3.7rem;
 }
 
 .beaver-root .bt[data-density="cozy"] {
@@ -579,8 +581,10 @@
     background: none;
     color: var(--fill-secondary);
     font: inherit;
-    font-size: 0.92rem;
-    font-weight: 600;
+    /* Level with the row titles in size and heavier in weight: a header that
+       reads as a caption lets the titles run away with the table. */
+    font-size: 1rem;
+    font-weight: 650;
     text-align: inherit;
     cursor: pointer;
 }
@@ -804,25 +808,18 @@
     color: var(--fill-secondary);
 }
 
+/* At rest the rail is the expander and nothing else. The checkbox fades in
+   beside it on hover, so selection stays reachable without a row number
+   competing with the chevron for a 3rem column. */
 .beaver-root .bt-rail-mark {
-    position: relative;
     flex: 0 0 auto;
     display: inline-grid;
     place-items: center;
-    width: 1.5rem;
+    width: 1.3rem;
     height: 1.35rem;
 }
 
-.beaver-root .bt-rail-index {
-    font-size: 0.8rem;
-    color: var(--fill-tertiary);
-    font-variant-numeric: tabular-nums;
-}
-
-/* Hidden with opacity, never `display: none`: the checkbox has to stay in the
-   tab order and the accessibility tree, or selection becomes mouse-only. */
 .beaver-root .bt-rail-mark .bt-checkbox {
-    position: absolute;
     opacity: 0;
     transition: opacity 100ms ease;
 }
@@ -831,12 +828,6 @@
 .beaver-root .bt-rail-mark:focus-within .bt-checkbox,
 .beaver-root .bt-rail-mark.bt-selected .bt-checkbox {
     opacity: 1;
-}
-
-.beaver-root .bt-row:hover .bt-rail-index,
-.beaver-root .bt-rail-mark:focus-within .bt-rail-index,
-.beaver-root .bt-rail-mark.bt-selected .bt-rail-index {
-    visibility: hidden;
 }
 
 .beaver-root .bt-checkbox {
@@ -1146,10 +1137,6 @@
     text-overflow: ellipsis;
 }
 
-.beaver-root .bt[data-density="compact"] .bt-ref-subtitle {
-    display: none;
-}
-
 .beaver-root .bt-ref-reveal {
     position: absolute;
     top: 0.3rem;
@@ -1165,16 +1152,7 @@
 }
 
 .beaver-root .bt-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    max-width: 100%;
-    padding: 0;
-    border: 0;
-    background: none;
     color: var(--accent-blue);
-    font: inherit;
-    text-align: left;
     cursor: pointer;
 }
 
@@ -1182,16 +1160,8 @@
     text-decoration: underline;
 }
 
-.beaver-root .bt-link:disabled {
-    color: var(--fill-secondary);
-    cursor: default;
-    text-decoration: none;
-}
-
 .beaver-root .bt-link-label {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
 }
 
 /* ==========================================================================
