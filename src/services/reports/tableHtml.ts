@@ -43,6 +43,7 @@
 import {
     anchorColumn,
     cellSortKey,
+    citationsByKey,
     columnAlign,
     isColumnFilterable,
     isColumnSortable,
@@ -56,6 +57,12 @@ import {
     type RowRef,
     type TableSpec,
 } from '@beaver/agent-core/layouts/table';
+import {
+    normalizeCitationTag,
+    parseRawCitationAttributes,
+    requestedCitationKey,
+} from '@beaver/agent-core/citations/citationGrammar';
+import type { Citation } from '@beaver/agent-core/types/citations';
 import { countTopLevelCssRules, escapeHtml } from './reportHtml';
 
 export interface TableHtmlLinks {
@@ -180,7 +187,11 @@ function safeHref(uri: string | null | undefined): string | null {
     return /^(zotero:\/\/|https:\/\/)/i.test(uri) ? uri : null;
 }
 
-function renderCellValue(cell: Cell | undefined, column: Column): string {
+function renderCellValue(
+    cell: Cell | undefined,
+    column: Column,
+    cites?: CitationNumbering
+): string {
     if (cell?.status === 'pending') {
         return '<span class="bt-pending">Filling…</span>';
     }
@@ -195,7 +206,9 @@ function renderCellValue(cell: Cell | undefined, column: Column): string {
 
     switch (value.kind) {
         case 'text':
-            return `<span class="bt-clamp">${escapeHtml(value.text)}</span>`;
+            return `<span class="bt-clamp">${
+                cites ? cites.render(value.text) : escapeHtml(value.text)
+            }</span>`;
 
         case 'number':
             return `<span class="bt-num">${escapeHtml(
@@ -237,6 +250,102 @@ function renderCellValue(cell: Cell | undefined, column: Column): string {
         default:
             return '<span class="bt-empty"></span>';
     }
+}
+
+// ---------------------------------------------------------------------------
+// Citations
+// ---------------------------------------------------------------------------
+
+const CITATION_TAG_RE = /<citation\b([^>]*?)\/?>/gi;
+
+/**
+ * Numbers every citation in the table and renders each tag as a marker.
+ *
+ * The marker is what the chat's `Citation` renders: a small superscript number
+ * that says where the claim came from, opens the cited page when clicked, and
+ * shows the source and the cited passage on hover. Here it is a `zotero://`
+ * link — which navigates on its own from a content docshell — and a native
+ * `title`, because the cell it sits in is clamped with `overflow: hidden` and
+ * would clip any card drawn inside it. A host that can do better upgrades the
+ * hover from outside the document; see `tableTab.ts`.
+ *
+ * Markers are assigned in document order across the whole table, so the same
+ * source keeps one number wherever it is cited and the bibliography reads in
+ * the order a person meets them.
+ */
+class CitationNumbering {
+    private readonly byKey: Record<string, Citation>;
+    private readonly markers = new Map<string, number>();
+    /** Every cited source, in the order its marker was assigned. */
+    readonly cited: Array<{ marker: number; key: string; citation?: Citation }> = [];
+
+    constructor(citations: Citation[] | undefined) {
+        this.byKey = citationsByKey(citations);
+    }
+
+    private markerFor(key: string): number {
+        const existing = this.markers.get(key);
+        if (existing) return existing;
+        const marker = this.markers.size + 1;
+        this.markers.set(key, marker);
+        this.cited.push({ marker, key, citation: this.byKey[key] });
+        return marker;
+    }
+
+    /** Escapes `text` and swaps each citation tag for its marker. */
+    render(text: string): string {
+        let out = '';
+        let last = 0;
+        CITATION_TAG_RE.lastIndex = 0;
+        for (const match of text.matchAll(CITATION_TAG_RE)) {
+            const at = match.index ?? 0;
+            out += escapeHtml(text.slice(last, at));
+            last = at + match[0].length;
+
+            const normalized = normalizeCitationTag(
+                parseRawCitationAttributes(match[1] || '')
+            );
+            // An unparseable tag is dropped rather than shown raw: a stray
+            // `<citation …/>` in a cell is noise the reader cannot act on.
+            if (!normalized.ok) continue;
+            const key = requestedCitationKey(normalized.ref);
+            out += this.marker(this.markerFor(key), this.byKey[key]);
+        }
+        return out + escapeHtml(text.slice(last));
+    }
+
+    private marker(marker: number, citation: Citation | undefined): string {
+        const href = citationHref(citation);
+        const tip = citationTooltip(citation);
+        const attrs = [
+            'class="bt-cite"',
+            tip ? `title="${escapeHtml(tip)}"` : '',
+            `data-bt-cite="${marker}"`,
+        ]
+            .filter(Boolean)
+            .join(' ');
+        return href
+            ? `<a ${attrs} href="${escapeHtml(href)}">${marker}</a>`
+            : `<span ${attrs}>${marker}</span>`;
+    }
+}
+
+/** `zotero://open` at the cited page, falling back to revealing the item. */
+function citationHref(citation: Citation | undefined): string | null {
+    const ref = citation?.resolved_ref ?? citation?.requested_ref;
+    if (!ref || !('zotero_key' in ref) || !ref.zotero_key) return null;
+    const page = citation?.pages?.[0];
+    const base = `zotero://open/library/items/${ref.zotero_key}`;
+    return page ? `${base}?page=${page}` : base;
+}
+
+/** What the chat's citation tooltip says, as one line of plain text. */
+function citationTooltip(citation: Citation | undefined): string | null {
+    if (!citation) return null;
+    const name = citation.display_name ?? citation.formatted_citation;
+    const page = citation.pages?.length ? `Page ${citation.pages.join(', ')}` : '';
+    const parts = [name, page, citation.preview].filter(Boolean);
+    return parts.length ? parts.join('\n\n') : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -382,7 +491,12 @@ function renderActions(row: Row, spec: TableSpec, links?: TableHtmlOptions['link
     return parts.join('');
 }
 
-function renderDetail(row: Row, spec: TableSpec, links?: TableHtmlOptions['linksFor']): string {
+function renderDetail(
+    row: Row,
+    spec: TableSpec,
+    links: TableHtmlOptions['linksFor'] | undefined,
+    cites: CitationNumbering
+): string {
     const fields = spec.columns
         .filter((column) => {
             const cell = row.cells[column.id];
@@ -392,14 +506,14 @@ function renderDetail(row: Row, spec: TableSpec, links?: TableHtmlOptions['links
             const cell = row.cells[column.id];
             const details = cell?.details
                 ? cell.details.kind === 'text'
-                    ? `<div class="bt-d-extra">${escapeHtml(cell.details.text)}</div>`
+                    ? `<div class="bt-d-extra">${cites.render(cell.details.text)}</div>`
                     : `<ul class="bt-d-list">${cell.details.items
-                          .map((item) => `<li>${escapeHtml(item)}</li>`)
+                          .map((item) => `<li>${cites.render(item)}</li>`)
                           .join('')}</ul>`
                 : '';
             return [
                 `<dt>${escapeHtml(column.header)}</dt>`,
-                `<dd>${renderCellValue(cell, column)}${details}</dd>`,
+                `<dd>${renderCellValue(cell, column, cites)}${details}</dd>`,
             ].join('');
         })
         .join('');
@@ -429,6 +543,7 @@ export function renderTableHtml(
     const prefix = options.idPrefix ?? 'bt';
     const controls = options.controls ?? true;
     const anchor = anchorColumn(spec);
+    const cites = new CitationNumbering(spec.citations);
     const rows = sortRows(spec, spec.sort);
     const ranks = sortRanks(rows, spec.columns);
     const hasActions =
@@ -553,7 +668,7 @@ export function renderTableHtml(
             const cells = spec.columns
                 .map((column, i) => {
                     const anchorClass = column.id === anchor?.id ? ' bt-anchor' : '';
-                    return `<span class="bt-c bt-${cellAlign(column)} bt-k-${column.type}${anchorClass}" id="${escapeHtml(row.id)}/${escapeHtml(column.id)}">${renderCellValue(row.cells[column.id], column)}</span>`;
+                    return `<span class="bt-c bt-${cellAlign(column)} bt-k-${column.type}${anchorClass}" id="${escapeHtml(row.id)}/${escapeHtml(column.id)}">${renderCellValue(row.cells[column.id], column, cites)}</span>`;
                 })
                 .join('');
 
@@ -568,7 +683,7 @@ export function renderTableHtml(
                 cells,
                 actions,
                 '</summary>',
-                renderDetail(row, spec, options.linksFor),
+                renderDetail(row, spec, options.linksFor, cites),
                 '</details>',
             ].join('');
         })
@@ -596,6 +711,7 @@ export function renderTableHtml(
         rows.length === 0 ? '<p class="bt-none">No rows.</p>' : '',
         '</div>',
         '</div>',
+        renderBibliography(cites),
         `<footer class="bt-foot">${escapeHtml(footerParts.join(' · '))}</footer>`,
         '</section>',
     ]
@@ -612,6 +728,32 @@ export function renderTableHtml(
             : html,
         cssRuleCount: dynamic.length,
     };
+}
+
+/**
+ * The cited sources, numbered as they were met.
+ *
+ * A table that carries citations has to carry what they refer to: the markers
+ * are only useful next to a list that says what each one is, and the list is
+ * what makes a saved table self-contained once it is away from the run that
+ * produced it.
+ */
+function renderBibliography(cites: CitationNumbering): string {
+    if (cites.cited.length === 0) return '';
+    const items = cites.cited
+        .map(({ marker, citation }) => {
+            const label =
+                citation?.formatted_citation ??
+                citation?.display_name ??
+                'Source unavailable';
+            const href = citationHref(citation);
+            const body = href
+                ? `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`
+                : escapeHtml(label);
+            return `<li id="bt-src-${marker}"><span class="bt-src-n">${marker}</span>${body}</li>`;
+        })
+        .join('');
+    return `<section class="bt-srcs"><h2 class="bt-srcs-h">Sources</h2><ol class="bt-srcs-l">${items}</ol></section>`;
 }
 
 /**
@@ -796,6 +938,22 @@ export const TABLE_CSS = `
 .bt-d-extra { margin-top: 4px; }
 .bt-d-list { margin: 4px 0 0; padding-left: 18px; }
 .bt-d-actions { margin-top: 10px; }
+/* The citation marker, as the chat renders it: a small raised number that says
+   where a claim came from and opens the cited page. */
+.bt-cite { display: inline-block; min-width: 14px; padding: 0 3px; margin-left: 2px;
+  border-radius: 4px; background: #eef1f7; color: var(--t-accent);
+  font-size: 10px; line-height: 14px; font-weight: 600; text-align: center;
+  text-decoration: none; vertical-align: 1px; cursor: pointer; }
+.bt-cite:hover { background: var(--t-accent); color: #fff; }
+.bt-srcs { padding: 18px 0 0; border-top: 1px solid var(--t-line); margin-top: 14px; }
+.bt-srcs-h { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--t-fade); margin: 0 0 8px; font-weight: 650; }
+.bt-srcs-l { list-style: none; margin: 0; padding: 0; }
+.bt-srcs-l li { display: flex; gap: 8px; padding: 4px 0; font-size: 13px; }
+.bt-src-n { flex: 0 0 auto; min-width: 16px; color: var(--t-fade);
+  font-variant-numeric: tabular-nums; }
+.bt-srcs-l a { color: var(--t-accent); text-decoration: none; }
+.bt-srcs-l a:hover { text-decoration: underline; }
 .bt-foot { padding: 8px 0 0; font-size: 12px; color: var(--t-fade); }
 .bt-none { padding: 28px 0; text-align: center; color: var(--t-fade); }
 .bt-wrap .bt-empty { color: var(--t-fade); }

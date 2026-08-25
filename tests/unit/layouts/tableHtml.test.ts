@@ -238,3 +238,114 @@ describe("buildTableDocument", () => {
         expect(TABLE_CSS).not.toContain(":checked");
     });
 });
+
+describe("citations", () => {
+    const cited: TableSpec = {
+        id: "c",
+        columns: [
+            { id: "ref", header: "Item", type: "reference" },
+            { id: "finding", header: "Finding", type: "text" },
+        ],
+        rows: [
+            {
+                id: "r1",
+                cells: {
+                    ref: {
+                        value: { kind: "reference", display_name: "Alpha" },
+                    },
+                    finding: {
+                        value: {
+                            kind: "text",
+                            text: 'Performance rose 13%. <citation id="1-K1" loc="page4"/>',
+                        },
+                    },
+                },
+            },
+            {
+                id: "r2",
+                cells: {
+                    ref: { value: { kind: "reference", display_name: "Beta" } },
+                    finding: {
+                        value: {
+                            kind: "text",
+                            // The same source again, and one with no metadata.
+                            text: 'No effect. <citation id="1-K1" loc="page4"/> <citation id="1-K9"/>',
+                        },
+                    },
+                },
+            },
+        ],
+        citations: [
+            {
+                citation_id: "c1",
+                raw_tag: '<citation id="1-K1" loc="page4"/>',
+                display_name: "Bloom 2015",
+                formatted_citation:
+                    "Bloom, N. 2015. Does working from home work?",
+                preview: "a 13% performance increase",
+                pages: [4],
+                resolved_ref: {
+                    kind: "zotero",
+                    library_id: 1,
+                    zotero_key: "K1",
+                },
+            },
+        ],
+    };
+
+    it("numbers each source once, in the order it is met", () => {
+        const { html } = renderTableHtml(cited);
+        const markers = [...html.matchAll(/data-bt-cite="(\d+)"/g)].map(
+            (m) => m[1],
+        );
+        // Each cell is rendered twice — in its row and in that row's detail —
+        // so what matters is that the repeated source kept one number and the
+        // unknown one took the next.
+        expect([...new Set(markers)]).toEqual(["1", "2"]);
+        expect(markers.filter((m) => m === "1").length).toBeGreaterThan(1);
+    });
+
+    it("opens the cited page, and carries what the tooltip shows", () => {
+        const { html } = renderTableHtml(cited);
+        expect(html).toContain('href="zotero://open/library/items/K1?page=4"');
+        const title = /class="bt-cite" title="([^"]*)"/.exec(html)![1];
+        expect(title).toContain("Bloom 2015");
+        expect(title).toContain("Page 4");
+        expect(title).toContain("a 13% performance increase");
+    });
+
+    it("lists the cited sources so a saved table stands on its own", () => {
+        const { html } = renderTableHtml(cited);
+        expect(html).toContain("Bloom, N. 2015. Does working from home work?");
+        // A tag with no metadata still gets a numbered entry rather than vanishing.
+        expect(html).toContain("Source unavailable");
+        expect([...html.matchAll(/<li id="bt-src-\d+"/g)]).toHaveLength(2);
+    });
+
+    it("drops a tag it cannot parse instead of printing it raw", () => {
+        const { html } = renderTableHtml({
+            ...cited,
+            rows: [
+                {
+                    id: "r1",
+                    cells: {
+                        finding: {
+                            value: { kind: "text", text: "Claim. <citation/>" },
+                        },
+                    },
+                },
+            ],
+        });
+        expect(html).not.toContain("&lt;citation");
+        expect(html).toContain("Claim.");
+    });
+
+    it("renders no sources section for a table without citations", () => {
+        const { html } = renderTableHtml({
+            ...cited,
+            citations: undefined,
+            rows: [],
+        });
+        expect(html).not.toContain("bt-srcs");
+    });
+});

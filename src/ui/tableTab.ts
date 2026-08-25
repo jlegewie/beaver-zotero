@@ -86,7 +86,10 @@ export function zoteroLinksFor(ref: RowRef): { selectUri?: string | null; openUr
     };
 }
 
-const openTabs = new Map<string, { win: Window; iframe: HTMLIFrameElement }>();
+const openTabs = new Map<
+    string,
+    { win: Window; iframe: HTMLIFrameElement; card?: HTMLElement }
+>();
 
 export interface OpenTableTabOptions {
     /** Tab title. Defaults to the spec's title. */
@@ -147,13 +150,14 @@ export function openTableTab(
     iframe.setAttribute('type', 'content');
     iframe.style.cssText = 'width:100%;height:100%;border:0;';
     container.appendChild(iframe);
+    const card = makeCitationCard(win, container);
     // Order matters: the listener has to be registered before the document
     // exists, or the only `load` it could catch has already gone by and the
     // links are left unwired.
     iframe.setAttribute('srcdoc', html);
-    wireLinks(iframe, win);
+    wireLinks(iframe, win, card);
 
-    openTabs.set(id, { win, iframe });
+    openTabs.set(id, { win, iframe, card });
     return id;
 }
 
@@ -168,7 +172,83 @@ export function openTableTab(
  * load the publisher's page *into the tab*, replacing the table with no way
  * back. It goes to the system browser instead.
  */
-function wireLinks(iframe: HTMLIFrameElement, win: Window): void {
+/**
+ * The hover card a citation marker gets, built in chrome rather than in the
+ * document.
+ *
+ * The document cannot draw its own: a marker sits inside a cell that is clamped
+ * with `overflow: hidden`, so any card rendered beside it is clipped by the
+ * cell it belongs to. Chrome is outside that clip, so the card is positioned
+ * over the iframe from the marker's own rectangle — which is what lets the tab
+ * show what the chat's `Citation` shows instead of a native tooltip.
+ */
+function makeCitationCard(win: Window, container: Element): HTMLElement {
+    const card = win.document.createElementNS(HTML_NS, 'div') as HTMLElement;
+    card.className = 'beaver-root bt-tab-cite-card';
+    card.style.cssText = [
+        'position: absolute',
+        'z-index: 100',
+        'display: none',
+        'max-width: 22rem',
+        'padding: 0.5rem 0.6rem',
+        'border: 1px solid var(--color-border50)',
+        'border-radius: 0.5rem',
+        // Opaque: the menu material is translucent and the table showed
+        // through the card.
+        'background: var(--material-sidepane)',
+        'box-shadow: 0 0.4rem 1.4rem rgba(0, 0, 0, 0.22)',
+        'font-size: 0.92rem',
+        'line-height: 1.4',
+        'color: var(--fill-primary)',
+        'pointer-events: none',
+    ].join(';');
+    container.appendChild(card);
+    return card;
+}
+
+/** Fills and places the card against a marker inside the iframe. */
+function showCitationCard(
+    card: HTMLElement,
+    iframe: HTMLIFrameElement,
+    marker: Element
+): void {
+    const title = marker.getAttribute('title') ?? '';
+    if (!title) return;
+    // The document packs the same three parts the chat tooltip shows into
+    // `title`, separated by blank lines: source, locator, cited passage.
+    const [name, ...rest] = title.split('\n\n');
+    const doc = card.ownerDocument;
+    card.textContent = '';
+
+    const heading = doc.createElementNS(HTML_NS, 'div') as HTMLElement;
+    heading.style.cssText = 'font-weight: 600; margin-bottom: 0.2rem;';
+    heading.textContent = name;
+    card.appendChild(heading);
+
+    for (const part of rest) {
+        const line = doc.createElementNS(HTML_NS, 'div') as HTMLElement;
+        line.style.cssText =
+            'color: var(--fill-secondary); white-space: pre-wrap; overflow-wrap: anywhere;';
+        line.textContent = part;
+        card.appendChild(line);
+    }
+
+    const frame = iframe.getBoundingClientRect();
+    const at = marker.getBoundingClientRect();
+    const container = card.offsetParent as HTMLElement | null;
+    const origin = container?.getBoundingClientRect();
+    const left = frame.left + at.left - (origin?.left ?? 0);
+    const top = frame.top + at.bottom - (origin?.top ?? 0) + 4;
+    card.style.left = `${Math.max(4, left)}px`;
+    card.style.top = `${top}px`;
+    card.style.display = 'block';
+}
+
+function wireLinks(
+    iframe: HTMLIFrameElement,
+    win: Window,
+    card?: HTMLElement
+): void {
     const wired = new WeakSet<Document>();
 
     /** Wires the current document, and reports whether it is the real one. */
@@ -180,6 +260,32 @@ function wireLinks(iframe: HTMLIFrameElement, win: Window): void {
         // each is wired at most once and only the real one ends the wait.
         if (wired.has(doc)) return ready;
         wired.add(doc);
+        if (card) {
+            doc.addEventListener(
+                'mouseover',
+                (event: Event) => {
+                    const marker = (event.target as Element | null)?.closest?.(
+                        '[data-bt-cite]'
+                    );
+                    if (marker) showCitationCard(card, iframe, marker);
+                },
+                true
+            );
+            const hide = () => {
+                card.style.display = 'none';
+            };
+            doc.addEventListener(
+                'mouseout',
+                (event: Event) => {
+                    if ((event.target as Element | null)?.closest?.('[data-bt-cite]'))
+                        hide();
+                },
+                true
+            );
+            doc.addEventListener('scroll', hide, true);
+            doc.defaultView?.addEventListener('scroll', hide, true);
+        }
+
         doc.addEventListener(
             'click',
             (event: Event) => {
@@ -230,6 +336,7 @@ export function closeTableTab(id: string, options: { skipTabClose?: boolean } = 
     // Drop the document before the container goes, so a large table is not held
     // alive by a detached iframe.
     try {
+        entry.card?.remove();
         entry.iframe.removeAttribute('srcdoc');
         entry.iframe.remove();
     } catch {

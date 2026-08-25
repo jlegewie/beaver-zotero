@@ -940,6 +940,18 @@
     font-size: 0.8em;
 }
 
+/* Cell text is rendered by the client's markdown component, which wraps its
+   output in blocks. Inside a clamped cell those must not add their own spacing,
+   or the row height stops matching the line count it was measured against. */
+.beaver-root .bt-md,
+.beaver-root .bt-md > * {
+    display: inline;
+}
+
+.beaver-root .bt-md p {
+    margin: 0;
+}
+
 /* An em dash: in an extraction table "not reported" is a finding, not a gap. */
 .beaver-root .bt-empty {
     color: var(--fill-tertiary);

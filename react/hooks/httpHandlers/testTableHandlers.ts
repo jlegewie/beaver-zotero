@@ -193,6 +193,18 @@ function yearOf(item: Zotero.Item): string {
     return parsed?.year ? String(parsed.year) : '';
 }
 
+/** The inline tag a cell carries, and the `raw_tag` its citation answers to. */
+function citationTag(item: DemoItem, index: number): string {
+    return `<citation id="${item.libraryID}-${item.key}" loc="page${index + 1}"/>`;
+}
+
+/** One sentence of an abstract, as a stand-in for an extracted field. */
+function sentence(text: string, index: number): string {
+    const parts = text.split(/(?<=\.)\s+/).filter((p) => p.trim().length > 20);
+    const picked = parts[index % Math.max(1, parts.length)] ?? text;
+    return picked.length > 150 ? `${picked.slice(0, 147)}…` : picked;
+}
+
 function textCell(text: string): Cell {
     return text ? { value: { kind: 'text', text } } : {};
 }
@@ -365,11 +377,15 @@ function buildExtractionDemo(items: DemoItem[]): TableSpec {
         row.cells.year = item.year
             ? { value: { kind: 'date', value: item.year } }
             : {};
+        // A citation tag per cell, so the marker, its tooltip and the source
+        // list all have something real to resolve against.
+        const cite = citationTag(item, i);
+        // Short, the way a real extracted field is: the citation marker rides
+        // at the end of the claim, and a paragraph long enough to be clamped
+        // would hide it.
         row.cells.sample = {
             ...textCell(
-                item.abstract
-                    ? item.abstract.split('. ').slice(0, 2).join('. ')
-                    : ''
+                item.abstract ? `${sentence(item.abstract, 0)} ${cite}` : ''
             ),
             // One hand-edited cell, so visible provenance shows up.
             provenance: i === 1 ? 'user' : undefined,
@@ -383,10 +399,12 @@ function buildExtractionDemo(items: DemoItem[]): TableSpec {
                 ? {}
                 : i === 3
                   ? { status: 'error', error: 'The PDF has no extractable text layer' }
-                  : textCell(item.abstract.slice(0, 220));
+                  : textCell(`${sentence(item.abstract, 1)} ${cite}`);
         // The filling column: the first few are done, the rest are pending.
         row.cells.retention =
-            i < 3 ? textCell(item.abstract.slice(0, 140)) : { status: 'pending' };
+            i < 3
+                ? textCell(`${sentence(item.abstract, 2)} ${cite}`)
+                : { status: 'pending' };
         return row;
     });
 
@@ -403,6 +421,34 @@ function buildExtractionDemo(items: DemoItem[]): TableSpec {
             allow_add_row: true,
         },
         cost_estimate: { per_row_credits: 1, estimated_seconds: 40 },
+        citations: items.map((item, i) => ({
+            citation_id: `${item.key}-${i}`,
+            // The tag exactly as the cells carry it, so the key the renderer
+            // derives from the text is one this citation answers to.
+            raw_tag: citationTag(item, i),
+            requested_ref: {
+                kind: 'zotero' as const,
+                library_id: item.libraryID,
+                zotero_key: item.key,
+                loc: {
+                    kind: 'page' as const,
+                    value: String(i + 1),
+                    raw: `page${i + 1}`,
+                },
+            },
+            resolved_ref: {
+                kind: 'zotero' as const,
+                library_id: item.libraryID,
+                zotero_key: item.key,
+            },
+            citation_type: 'attachment' as const,
+            display_name: `${item.creators.split(',')[0]} ${item.year}`.trim(),
+            formatted_citation: [item.creators, item.year, item.title, item.venue]
+                .filter(Boolean)
+                .join('. '),
+            preview: item.abstract.slice(0, 180),
+            pages: [i + 1],
+        })),
     };
 }
 
