@@ -471,6 +471,8 @@
        `title-lines * line-height + subtitle + 2 * pad`. */
     --bt-line-h: 1.45rem;
     --bt-subtitle-h: 1.3rem;
+    /* The item-type icon in a reference cell; the header indents past it. */
+    --bt-ref-icon-w: 15px;
     min-width: 0;
     font-size: 1rem;
     line-height: 1.45;
@@ -564,17 +566,22 @@
     min-width: 0;
 }
 
+/* Full width, so the label lines up on the same edge the values do, and
+   ellipsises inside the column instead of overflowing it. */
 .beaver-root .bt-th-top {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 0.15rem;
+    width: 100%;
     min-width: 0;
 }
 
 .beaver-root .bt-th-button {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 0.3rem;
+    width: 100%;
     min-width: 0;
     padding: 0;
     border: 0;
@@ -609,9 +616,20 @@
     white-space: nowrap;
 }
 
-/* The sort affordance appears on hover, so a resting header row stays quiet. */
+/*
+ * The sort affordance appears on hover, so a resting header row stays quiet —
+ * and it sits outside the label's box.
+ *
+ * In flow it kept its width while invisible, which pushed a right-aligned
+ * header label a control's width in from the edge its values line up on: the
+ * Citations header read as centred over right-aligned numbers. Out of flow it
+ * lands in the cell's own padding, at the same place in every column.
+ */
 .beaver-root .bt-th-sort {
-    flex: 0 0 auto;
+    position: absolute;
+    right: -0.6rem;
+    top: 50%;
+    transform: translateY(-50%);
     display: inline-flex;
     color: var(--fill-tertiary);
     opacity: 0;
@@ -654,8 +672,18 @@
     text-align: right;
 }
 
-.beaver-root .bt-align-end .bt-th-inner {
-    align-items: flex-end;
+.beaver-root .bt-align-end .bt-th-top,
+.beaver-root .bt-align-end .bt-th-button {
+    justify-content: flex-end;
+}
+
+.beaver-root .bt-align-center {
+    text-align: center;
+}
+
+.beaver-root .bt-align-center .bt-th-top,
+.beaver-root .bt-align-center .bt-th-button {
+    justify-content: center;
 }
 
 /*
@@ -927,10 +955,6 @@
     color: var(--fill-tertiary);
 }
 
-.beaver-root .bt-kind-boolean {
-    text-align: center;
-}
-
 /* A hand-edited cell says so: a repopulate must not silently overwrite one. */
 .beaver-root .bt-edited {
     border-bottom: 1px dotted var(--fill-tertiary);
@@ -1090,8 +1114,16 @@
 .beaver-root .bt-ref-icon-slot {
     flex: 0 0 auto;
     display: inline-flex;
+    width: var(--bt-ref-icon-w);
     margin-top: 0.1rem;
     color: var(--fill-tertiary);
+}
+
+/* The header of a reference column starts where its titles do, not where their
+   item icons do — the icon belongs to the value, and a header that lines up
+   with it lines up with nothing anyone reads. */
+.beaver-root .bt-th-kind-reference .bt-th-top {
+    padding-left: calc(var(--bt-ref-icon-w) + 0.4rem);
 }
 
 .beaver-root .bt-ref-body {

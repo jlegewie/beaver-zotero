@@ -1,6 +1,5 @@
 import React from "react";
 import {
-    columnAlign,
     isColumnSortable,
     type Column,
     type TableSort,
@@ -15,7 +14,7 @@ import {
 } from "../icons";
 import MenuButton from "../primitives/MenuButton";
 import type { MenuItem } from "../primitives/ContextMenu";
-import { columnTypeIcon } from "./tableView";
+import { cellAlign } from "./tableView";
 
 export interface ColumnHeaderCellProps {
     column: Column;
@@ -53,15 +52,15 @@ export function ColumnHeaderCell({
     const canSort = sortable && isColumnSortable(column);
     const direction =
         sort?.column_id === column.id ? sort.direction : undefined;
-    const align = columnAlign(column);
+    const align = cellAlign(column);
     const progress = column.progress;
     const details = detailsText(column);
 
+    // No type glyph: it sat before the label and pushed it in from the edge the
+    // column's values line up on, which is the one thing a header must not do.
+    // What kind a column is, its values already say.
     const label = (
         <>
-            <span className="bt-th-glyph" aria-hidden="true">
-                <Icon icon={columnTypeIcon(column.type)} size={12} />
-            </span>
             <span className="bt-th-label">{column.header}</span>
             {canSort ? (
                 <span
@@ -94,6 +93,7 @@ export function ColumnHeaderCell({
             className={[
                 "bt-th",
                 `bt-align-${align}`,
+                `bt-th-kind-${column.type}`,
                 isAnchor ? "bt-th-anchor" : "",
                 canSort ? "bt-th-sortable" : "",
             ]

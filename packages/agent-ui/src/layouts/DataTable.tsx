@@ -2,7 +2,6 @@ import React, { useCallback, useMemo } from "react";
 import {
     anchorColumn,
     cellIdFor,
-    columnAlign,
     isColumnFilterable,
     type Column,
     type Row,
@@ -14,6 +13,7 @@ import { CellView, DetailsView } from "./cells";
 import { ColumnHeaderCell } from "./columnHeader";
 import { RowActionsView, tableHasRowActions } from "./rowActions";
 import {
+    cellAlign,
     defaultColumnWidth,
     renderPlainText,
     tableMinWidth,
@@ -324,7 +324,7 @@ function TableRow({
                         id={cellIdFor(row.id, column.id)}
                         className={[
                             "bt-td",
-                            `bt-align-${columnAlign(column)}`,
+                            `bt-align-${cellAlign(column)}`,
                             `bt-kind-${column.type}`,
                             column.id === anchorId ? "bt-td-anchor" : "",
                         ]

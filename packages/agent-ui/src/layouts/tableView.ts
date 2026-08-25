@@ -8,7 +8,11 @@
  */
 
 import type React from "react";
-import type { Column, ColumnType } from "@beaver/agent-core/layouts/table";
+import {
+    columnAlign,
+    type Column,
+    type ColumnType,
+} from "@beaver/agent-core/layouts/table";
 import {
     ChartIcon,
     CheckmarkCircleIcon,
@@ -76,6 +80,20 @@ export function columnTypeIcon(
     }
 }
 
+/**
+ * How a column's values line up, and with them its header.
+ *
+ * `columnAlign` in agent-core answers start-or-end for sorting and export; this
+ * adds the third case the rendering needs — a boolean is a single glyph and
+ * centres under its header. Header and cell read the same function so the two
+ * can never disagree, which is the whole failure this exists to prevent.
+ */
+export function cellAlign(column: Column): "start" | "end" | "center" {
+    if (column.align) return column.align;
+    if (column.type === "boolean") return "center";
+    return columnAlign(column);
+}
+
 /** Width the rail column takes, and the floor a flexible column may shrink to. */
 const RAIL_WIDTH = "3.2rem";
 const ACTIONS_WIDTH = "6rem";
@@ -103,7 +121,9 @@ export function defaultColumnWidth(
         case "date":
             return "6.5rem";
         case "boolean":
-            return "4rem";
+            // Wide enough for a short header beside its type glyph: at 4rem
+            // the label had nowhere to go and collapsed to nothing.
+            return "5.5rem";
         case "select":
             return "9.5rem";
         case "link":

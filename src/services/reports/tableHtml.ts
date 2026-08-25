@@ -151,6 +151,17 @@ const CHEVRON_UP_SVG =
     '<svg class="bt-gl" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
     '<path d="m6 15 6-6 6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
+/**
+ * How a column's values line up, and with them its header. `columnAlign`
+ * answers start-or-end; a boolean is a single glyph and centres. Header and
+ * cell read the same function so the two can never disagree.
+ */
+function cellAlign(column: Column): 'start' | 'end' | 'center' {
+    if (column.align) return column.align;
+    if (column.type === 'boolean') return 'center';
+    return columnAlign(column);
+}
+
 // ---------------------------------------------------------------------------
 // Cells
 // ---------------------------------------------------------------------------
@@ -520,7 +531,7 @@ export function renderTableHtml(
             const description = column.description
                 ? `<span class="bt-q">${escapeHtml(column.description)}</span>`
                 : '';
-            return `<span class="bt-c bt-h bt-${columnAlign(column)}${column.id === anchor?.id ? ' bt-anchor' : ''}"><span class="bt-h-top"><span class="bt-h-label">${escapeHtml(column.header)}</span>${sorter}</span>${description}</span>`;
+            return `<span class="bt-c bt-h bt-${cellAlign(column)} bt-hk-${column.type}${column.id === anchor?.id ? ' bt-anchor' : ''}"><span class="bt-h-top"><span class="bt-h-label">${escapeHtml(column.header)}</span>${sorter}</span>${description}</span>`;
         }),
         hasActions ? '<span class="bt-c bt-acts-h"></span>' : '',
         '</div>',
@@ -542,7 +553,7 @@ export function renderTableHtml(
             const cells = spec.columns
                 .map((column, i) => {
                     const anchorClass = column.id === anchor?.id ? ' bt-anchor' : '';
-                    return `<span class="bt-c bt-${columnAlign(column)} bt-k-${column.type}${anchorClass}" id="${escapeHtml(row.id)}/${escapeHtml(column.id)}">${renderCellValue(row.cells[column.id], column)}</span>`;
+                    return `<span class="bt-c bt-${cellAlign(column)} bt-k-${column.type}${anchorClass}" id="${escapeHtml(row.id)}/${escapeHtml(column.id)}">${renderCellValue(row.cells[column.id], column)}</span>`;
                 })
                 .join('');
 
@@ -710,15 +721,24 @@ export const TABLE_CSS = `
   border-bottom: 1px solid var(--t-line); order: -1; }
 .bt-c { padding: 8px 10px; min-width: 0; }
 .bt-h { font-size: 14px; font-weight: 700; color: var(--t-fg); }
-.bt-h-top { display: flex; align-items: center; gap: 3px; min-width: 0; }
-/* The value alignment flips, the controls do not: a sort affordance that moves
-   from one side of a header to the other is a control you have to find twice. */
+/* No item icon in this rendering, so a reference header needs no indent — the
+   class is here so the two renderers stay comparable at a glance. */
+.bt-hk-reference .bt-h-label { padding-left: 0; }
+/* Full width, so the label lines up on the same edge the values do. */
+.bt-h-top { position: relative; display: flex; align-items: center; gap: 3px;
+  width: 100%; min-width: 0; }
 .bt-end .bt-h-top { justify-content: flex-end; }
+.bt-center .bt-h-top { justify-content: center; }
+.bt-center { text-align: center; }
 .bt-h-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bt-q { display: block; font-size: 11px; font-weight: 400; line-height: 1.3;
   color: var(--t-fade); max-width: 22rem; }
-.bt-sorters { display: inline-flex; gap: 1px; flex: 0 0 auto;
-  opacity: 0; transition: opacity 100ms ease; }
+/* Out of flow: in it the sorters kept their width while invisible, which
+   pushed a right-aligned header label two controls' width in from the edge its
+   values line up on. Absolute, they land in the cell's own padding, at the same
+   place in every column. */
+.bt-sorters { position: absolute; right: -8px; top: 50%; transform: translateY(-50%);
+  display: inline-flex; gap: 1px; opacity: 0; transition: opacity 100ms ease; }
 .bt-h:hover .bt-sorters, .bt-h:focus-within .bt-sorters { opacity: 1; }
 .bt-so { display: inline-flex; cursor: pointer; color: var(--t-fade); padding: 0; }
 .bt-so:hover { color: var(--t-fg); }

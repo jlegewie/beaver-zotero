@@ -461,7 +461,7 @@ describe("DataTable — density, columns and expansion", () => {
             .querySelector("table.bt-table")!
             .getAttribute("style")!;
         // Every column contributes, including a floor for the flexible one.
-        // rail 3.2 + anchor 20 + number 6.5 + select 9.5 + boolean 4 + text 14
-        expect(style).toContain("57.2rem");
+        // rail 3.2 + anchor 20 + number 6.5 + select 9.5 + boolean 5.5 + text 14
+        expect(style).toContain("58.7rem");
     });
 });
