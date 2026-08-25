@@ -154,26 +154,22 @@ export async function getCitationKeyFromItem(item: Zotero.Item): Promise<string 
     // 1. Ensure we actually have an item
     if (!item) return null;
 
-    // 2. If Better BibTeX is present, use its KeyManager API
-    if (typeof Zotero !== 'undefined'
-        && Zotero.BetterBibTeX
-        && Zotero.BetterBibTeX.KeyManager
-        && typeof Zotero.BetterBibTeX.KeyManager.get === 'function'
-    ) {
-        try {
-            const keydata = Zotero.BetterBibTeX.KeyManager.get(item.id);
-            
-            // Handle retry case (when KeyManager isn't ready)
-            if (keydata && keydata.retry) {
-                // KeyManager not ready, fall through to other methods
-            } else if (keydata && keydata.citationKey) {
+    // 2. If Better BibTeX is present, use its KeyManager API.
+    try {
+        const keyManager = typeof Zotero !== 'undefined' ? Zotero.BetterBibTeX?.KeyManager : null;
+        if (typeof keyManager?.get === 'function') {
+            const keydata = keyManager.get(item.id);
+
+            // keydata.retry means the KeyManager isn't ready yet - fall through
+            // to the other methods below.
+            if (keydata && !keydata.retry && keydata.citationKey) {
                 return keydata.citationKey;
             }
         }
-        catch (e) {
-            // Something went wrong in BBT; fall back
-            logger('getCitationKeyFromItem: BetterBibTeX KeyManager failed');
-        }
+    }
+    catch (e) {
+        // Something went wrong in BBT; fall back
+        logger('getCitationKeyFromItem: BetterBibTeX KeyManager failed');
     }
 
     // 3. Use citationKey field (Zotero beta)
