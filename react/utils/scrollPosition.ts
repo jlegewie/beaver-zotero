@@ -91,6 +91,73 @@ export function getScrollAtoms(isWindow: boolean): ScrollAtoms {
 }
 
 /**
+ * Where each container was last put by code rather than by the reader.
+ *
+ * A container cannot say who moved it. Dragging the scrollbar thumb produces a
+ * scroll event and nothing else — no wheel, no touch, no key — so on its own it
+ * is indistinguishable from auto-scroll following a response. Recording the
+ * offsets this code writes is what tells the two apart.
+ *
+ * Keyed by element and holding no reference to one, so a container belonging to
+ * a window that has since closed simply falls out.
+ */
+const programmaticScrolls = new WeakMap<HTMLElement, { scrollTop: number; settleUntil: number }>();
+
+/**
+ * How far a reported offset may sit from the one that was written and still
+ * count as the same position: sub-pixel scroll offsets on a scaled display, the
+ * rounding between a value assigned and the value reported back, and — for a
+ * caller that records the offset it computed rather than reading it back — the
+ * rounding between that and where the browser clamped to.
+ */
+const PROGRAMMATIC_SCROLL_EPSILON = 2; // pixels
+
+/**
+ * Record that this code, not the reader, just moved the container. Call it
+ * immediately after writing `scrollTop`, so the offset the container actually
+ * came to rest at — clamped, rounded — is what gets remembered.
+ *
+ * An offset rather than a flag, because scroll events are dispatched
+ * asynchronously and coalesced: a flag would be left standing by a write that
+ * moved nothing, or by two writes that produced a single event, and would then
+ * swallow the reader's next gesture. An offset cannot strand that way. It either
+ * describes where the container is or it does not, and a wrong one costs at most
+ * the single event that happens to match it.
+ *
+ * @param settleMs For a scroll this code starts but does not step itself — a
+ * smooth `scrollIntoView`, whose intermediate offsets are never ours to see —
+ * how long the browser may keep moving the container towards its destination.
+ * Every offset reported inside that window is attributed to it, so keep it to
+ * the length of the scroll: while it lasts, the reader cannot scroll away.
+ */
+export function markProgrammaticScroll(
+    container: HTMLElement,
+    settleMs = 0,
+    scrollTop?: number,
+): void {
+    programmaticScrolls.set(container, {
+        // The caller's own value when it has one. Reading `scrollTop` back
+        // straight after assigning it asks the browser to resolve the scroll
+        // there and then, which is worth avoiding on a path that runs every
+        // frame of a response; a caller that computed the offset it wrote
+        // already knows the answer to within the epsilon above.
+        scrollTop: scrollTop ?? container.scrollTop,
+        settleUntil: settleMs > 0 ? Date.now() + settleMs : 0,
+    });
+}
+
+/**
+ * Whether an offset reported by a scroll event is explained by a scroll this
+ * code performed. Anything else moved because a person moved it.
+ */
+export function wasProgrammaticScroll(container: HTMLElement, scrollTop: number): boolean {
+    const record = programmaticScrolls.get(container);
+    if (!record) return false;
+    if (record.settleUntil > Date.now()) return true;
+    return Math.abs(scrollTop - record.scrollTop) <= PROGRAMMATIC_SCROLL_EPSILON;
+}
+
+/**
  * Distance in pixels from the bottom of the container's scrollable area.
  *
  * Null when the container is not being displayed — a collapsed pane or an

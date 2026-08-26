@@ -230,11 +230,10 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
             store.set(scrolledAtom, false);
             // Clear stored scroll position to let natural scroll-to-bottom take over
             store.set(scrollPositionAtom, null);
-            // The atom is passed even though the override already decides this
-            // call: without it a scroll from the separate window would fall back
-            // to the sidebars' state, and the override is the only reason that
-            // does not show today.
-            scrollToBottom(messagesContainerRef, false, scrolledAtom);
+            // Animated: this is a discrete request to be taken to the end of a
+            // thread the reader had deliberately scrolled away from, and the
+            // motion is what shows them how far they came.
+            scrollToBottom(messagesContainerRef);
             publishScrollPosition(messagesContainerRef.current, scrollAtoms);
         }
     };

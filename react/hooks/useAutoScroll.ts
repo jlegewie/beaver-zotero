@@ -1,8 +1,14 @@
 import { useRef, useCallback, useEffect, useState, ForwardedRef, RefObject } from 'react';
 import { store } from '../store';
-import { AT_BOTTOM_EPSILON, BOTTOM_THRESHOLD, getScrollAtoms, publishDistanceFromBottom } from '../utils/scrollPosition';
+import { AT_BOTTOM_EPSILON, BOTTOM_THRESHOLD, getScrollAtoms, publishDistanceFromBottom, wasProgrammaticScroll } from '../utils/scrollPosition';
 
 const SCROLL_POSITION_UPDATE_THRESHOLD = 10; // pixels - minimum change to update scroll position atom
+
+/**
+ * Smallest backwards movement between two scroll events that counts as one.
+ * Below it are the fractional offsets a scaled display reports, not a gesture.
+ */
+const SCROLL_BACK_EPSILON = 1; // pixels
 
 interface UseAutoScrollOptions {
     /**
@@ -35,6 +41,10 @@ interface UseAutoScrollReturn {
  * auto-scroll does can be mistaken for the reader wanting out of it. Following
  * resumes when the container comes back down to its bottom.
  *
+ * Dragging the scrollbar thumb produces none of those events, only a scroll,
+ * so it is caught in the scroll handler instead — see there for how a drag is
+ * told apart from auto-scroll's own writes.
+ *
  * Two separate facts are written from here, and they answer different
  * questions — see react/utils/scrollPosition.ts:
  *
@@ -66,16 +76,21 @@ export function useAutoScroll(
     // state and the thread itself.
     const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
     const lastStoredScrollTopRef = useRef(0); // Track what we last stored in atom
+    // Where the container sat at the previous scroll event, so this one can be
+    // read as a direction rather than a position.
+    const lastObservedScrollTopRef = useRef(0);
     const lastTouchYRef = useRef<number | null>(null);
 
     const setScrollContainerRef = useCallback((node: HTMLDivElement | null) => {
         scrollContainerRef.current = node;
         setScrollContainer(node);
 
-        // The remembered-offset baseline belongs to the element it was measured
-        // on; carrying it across a swap would read the new container's first
-        // scroll event as a jump of the difference between the two.
+        // The remembered-offset baselines belong to the element they were
+        // measured on; carrying them across a swap would read the new
+        // container's first scroll event as a jump of the difference between
+        // the two.
         lastStoredScrollTopRef.current = node?.scrollTop ?? 0;
+        lastObservedScrollTopRef.current = node?.scrollTop ?? 0;
 
         if (!forwardedRef) {
             return;
@@ -91,15 +106,23 @@ export function useAutoScroll(
     /**
      * Stop following the bottom because the reader moved the container back.
      *
-     * Ignores gestures a hidden container cannot have received, and gestures on
-     * a container already scrolled as far back as it goes: an upward wheel with
-     * nothing above to reveal has not taken the reader anywhere, and latching on
-     * it would leave a short thread — one that does not fill its viewport yet —
-     * refusing to follow the response about to fill it.
+     * Ignores gestures a hidden container cannot have received.
+     *
+     * @param movedBack Whether the caller has already established that the
+     * container moved backwards. A gesture has not, so a gesture on a container
+     * already scrolled as far back as it goes is ignored too: an upward wheel
+     * with nothing above to reveal has not taken the reader anywhere, and
+     * latching on it would leave a short thread — one that does not fill its
+     * viewport yet — refusing to follow the response about to fill it. A
+     * movement that has already happened is its own evidence, including one
+     * that came to rest at the very top.
      */
-    const detachFromBottom = useCallback(() => {
+    const detachFromBottom = useCallback((movedBack = false) => {
         const container = scrollContainerRef.current;
-        if (!container || container.clientHeight === 0 || container.scrollTop <= 0) {
+        if (!container || container.clientHeight === 0) {
+            return;
+        }
+        if (!movedBack && container.scrollTop <= 0) {
             return;
         }
         store.set(scrolledAtom, true);
@@ -228,9 +251,10 @@ export function useAutoScroll(
      * Report where the container sits, and resume following once it is back at
      * the bottom.
      *
-     * Runs for every scroll event, the reader's and auto-scroll's alike, so it
-     * decides nothing about intent beyond the one thing a position can settle:
-     * the container has returned to the bottom, under whatever moved it there.
+     * Runs for every scroll event, the reader's and auto-scroll's alike. It is
+     * also the only place a scrollbar drag can be noticed, since that gesture
+     * produces no other event — so it does read intent from a scroll, but only
+     * for a movement no scroll this code performed accounts for.
      */
     const handleScroll = useCallback(() => {
         const container = scrollContainerRef.current;
@@ -244,6 +268,9 @@ export function useAutoScroll(
         if (clientHeight === 0) {
             return;
         }
+
+        const previousScrollTop = lastObservedScrollTopRef.current;
+        lastObservedScrollTopRef.current = scrollTop;
 
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
 
@@ -262,6 +289,31 @@ export function useAutoScroll(
         // intent their gesture just recorded.
         if (distanceFromBottom <= AT_BOTTOM_EPSILON) {
             store.set(scrolledAtom, false);
+        } else if (
+            scrollTop < previousScrollTop - SCROLL_BACK_EPSILON &&
+            !wasProgrammaticScroll(container, scrollTop)
+        ) {
+            // Dragging the scrollbar thumb back through the thread is the one
+            // way of moving this container that produces no wheel, touch or key
+            // event, so this is where it has to be caught. A scroll event that
+            // left the container higher than it was, at an offset none of the
+            // code that scrolls it wrote, was the reader's doing — and detaches
+            // exactly as an upward wheel does.
+            //
+            // Checked second, after the bottom, because content shrinking under
+            // a reader who is at the end clamps `scrollTop` down and looks like
+            // the same movement. Where it comes to rest separates them: a
+            // clamp leaves the container at its (new) bottom, and a reader
+            // scrolling back does not stop there.
+            //
+            // The attribution is best-effort by construction, since scroll
+            // events are dispatched after the fact: a drag whose event is
+            // overtaken by the next frame of a response reports the offset that
+            // frame pinned, and is read as ours. That costs one event of a
+            // gesture that produces many, and the next one detaches. It cannot
+            // fail the other way — see markProgrammaticScroll for why nothing
+            // here can be left latched.
+            detachFromBottom(true);
         }
 
         // Only update scroll position atom if there's a meaningful change
@@ -271,7 +323,7 @@ export function useAutoScroll(
             store.set(scrollPositionAtom, scrollTop);
             lastStoredScrollTopRef.current = scrollTop;
         }
-    }, [threshold, scrollAtoms, scrolledAtom, scrollPositionAtom]);
+    }, [threshold, scrollAtoms, scrolledAtom, scrollPositionAtom, detachFromBottom]);
 
     return {
         scrollContainerRef,

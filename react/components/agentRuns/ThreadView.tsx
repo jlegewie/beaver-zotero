@@ -3,8 +3,8 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { allRunsAtom, threadRunIdsAtom } from "@beaver/agent-core/run-state/atoms";
 import { streamQuietAtom } from "@beaver/agent-core/run-state/streamActivity";
 import { AgentRunView } from "./AgentRunView";
-import { scrollToBottom } from "../../utils/scrollToBottom";
-import { AT_BOTTOM_EPSILON, BOTTOM_THRESHOLD, getScrollAtoms, publishDistanceFromBottom, publishScrollPosition } from "../../utils/scrollPosition";
+import { pinToBottom, scrollToBottom } from "../../utils/scrollToBottom";
+import { AT_BOTTOM_EPSILON, BOTTOM_THRESHOLD, getScrollAtoms, markProgrammaticScroll, publishDistanceFromBottom, publishScrollPosition } from "../../utils/scrollPosition";
 import { currentThreadIdAtom, pendingScrollToRunAtom, isLoadingThreadAtom } from "../../atoms/threads";
 import { pendingApprovalsAtom } from "../../agents/agentActions";
 import { store } from "../../store";
@@ -129,7 +129,6 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 isAnimatingRef.current = false;
             }, ANIMATION_LOCKOUT_MS);
 
-            element.scrollIntoView({ behavior: "smooth", block: "start" });
             // Determine scroll state based on whether the target is near the bottom.
             // scrollIntoView is async (smooth), so project the final scroll position:
             // use getBoundingClientRect relative to the container to get the element's
@@ -138,6 +137,18 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             const { scrollHeight, scrollTop, clientHeight } = container;
             const elementTopInContainer = element.getBoundingClientRect().top - container.getBoundingClientRect().top + scrollTop;
             const projectedDistanceFromBottom = scrollHeight - elementTopInContainer - clientHeight;
+
+            // The browser steps this scroll, so its intermediate offsets are
+            // never written here. Claiming the whole lockout as ours keeps the
+            // scroll handler from reading the upward journey as the reader
+            // scrolling back out of the run they just navigated to. The offset
+            // recorded is where the jump is aiming, which is also where it lands
+            // unless the target sits too near the end to be brought to the top —
+            // then the browser stops short and the record describes a position
+            // the container never took. That fails safe: nothing matches it, so
+            // once the lockout expires the drag detection simply works as usual.
+            markProgrammaticScroll(container, PROTOCOL_SCROLL_LOCKOUT_MS, elementTopInContainer);
+            element.scrollIntoView({ behavior: "smooth", block: "start" });
             store.set(scrolledAtom, projectedDistanceFromBottom > BOTTOM_THRESHOLD);
             setPendingScrollToRun(null);
             return true;
@@ -192,6 +203,10 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             if (delta > RESTORE_THRESHOLD) {
                 restoredFromAtomRef.current = true;
                 container.scrollTop = targetScrollTop;
+                // A restore usually moves the container a long way back, which
+                // is the shape of a reader scrolling away. The intent is decided
+                // here instead, from the position it lands at.
+                markProgrammaticScroll(container);
 
                 // Set scroll state based on position after restore, but only
                 // when a thread was actually opened. This runs from a layout
@@ -278,6 +293,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     // pin to the new bottom
                     if (containerShrunk && wasAtBottom && !isProtocolScrollLocked()) {
                         container.scrollTop = Math.max(container.scrollHeight - currentHeight, 0);
+                        markProgrammaticScroll(container);
                     } else {
                         // Resuming only, and only at the true bottom. A resize
                         // says nothing about what the reader wants — latching
@@ -392,26 +408,18 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     store.set(scrolledAtom, false);
                 }
 
-                // Pass the correct scroll atom for this context
-                const isAnimating = scrollToBottom(
-                    scrollContainerRef as React.RefObject<HTMLElement>,
-                    undefined,
-                    scrolledAtom,
-                );
-
-                // Only an animation needs restoreScrollPosition held off, and
-                // only an animated scroll leaves anything to hold off from. The
-                // usual case while a response streams is a jump of a line or
-                // two, already applied by the time this returns — arming the
-                // lockout for it would keep the flag pinned, and its timer
-                // rearmed, for the whole response.
-                if (isAnimating) {
-                    isAnimatingRef.current = true;
-                    // Clear animation flag after animation completes (with buffer)
-                    win.setTimeout(() => {
-                        isAnimatingRef.current = false;
-                    }, ANIMATION_LOCKOUT_MS);
-                }
+                // Follow the bottom by assignment, not by animation. This effect
+                // runs on every frame of a response, and easing towards a bottom
+                // that moves again before the easing finishes is what makes a
+                // streaming thread wobble; a fresh assignment per frame simply
+                // holds the reader at the end of the text as it arrives.
+                //
+                // Nothing to arm `isAnimatingRef` for, either: the write lands
+                // before this returns, so restoreScrollPosition has no in-flight
+                // motion to stay out of the way of.
+                //
+                // Pass the correct scroll atom for this context.
+                pinToBottom(scrollContainerRef as React.RefObject<HTMLElement>, scrolledAtom);
 
                 // Deliberately not measuring again after the scroll. The jump
                 // above writes scrollTop, so a read here would be a read-after-
@@ -420,7 +428,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 // before the write, and the resize observer and the scroll event
                 // the jump produces both report from after layout, for free.
             }
-        }, [pendingRunId, isProtocolScrollLocked, runs, streamQuiet, scrollAtoms, scrolledAtom, win]);
+        }, [pendingRunId, isProtocolScrollLocked, runs, streamQuiet, scrollAtoms, scrolledAtom]);
 
         // Scroll to bottom when a new pending approval appears
         // This ensures the approval buttons are visible, even if user had scrolled up
@@ -451,11 +459,13 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                         // Reset userScrolled to allow auto-scroll
                         store.set(scrolledAtom, false);
                         
-                        // Force scroll to bottom (passing false to override userScrolled)
+                        // Animated, unlike the per-frame following above: this
+                        // happens once, when an approval appears, and can carry
+                        // a reader who was reading further up the thread a long
+                        // way down. The motion is what tells them they were
+                        // moved, and where from.
                         const isAnimating = scrollToBottom(
                             scrollContainerRef as React.RefObject<HTMLElement>,
-                            false,
-                            scrolledAtom,
                         );
 
                         // Set the animation flag only when there is an animation
