@@ -140,7 +140,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const warningThreadId = lastRun?.threadId ?? currentThreadId;
     const isHighTokenDismissed = warningThreadId ? dismissedHighTokenByThread[warningThreadId] : false;
     const showHighTokenUsageWarningMessage = getPref('showHighTokenUsageWarningMessage');
-    const threadHasHighTokenUsage = runIds.some((runId: string) => backendHighTokenUsageRuns[runId])
+    const threadHasHighTokenUsage = runIds.some(runId => backendHighTokenUsageRuns[runId])
         || (lastRequestInputTokens !== null && lastRequestInputTokens > HIGH_INPUT_TOKEN_WARNING_THRESHOLD);
     const canShowHighTokenWarning = Boolean(
         showHighTokenUsageWarningMessage &&

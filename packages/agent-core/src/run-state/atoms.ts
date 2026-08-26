@@ -139,7 +139,7 @@ export interface LastRunSummary {
     threadId: string | null;
     status: AgentRunStatus;
     origin: PromptOrigin | undefined;
-    totalUsage: RunUsage | null | undefined;
+    totalUsage: RunUsage | undefined;
 }
 
 let lastRunSummary: LastRunSummary | null = null;
@@ -268,6 +268,14 @@ export const toolResultsMapAtom = atom((get) => mergeRunToolResults(get(allRunsA
 // component actually renders, and hold their previous value when that part is
 // unchanged so jotai can skip the update. They are cached per key; the cache is
 // dropped when the thread changes (`resetRunSelectorCaches`).
+//
+// Holding a previous value is only correct while the comparator that decides to
+// hold it is total — every field the value exposes has to be compared. A
+// comparator that misses one returns a silently stale value rather than a
+// visibly wrong one, and does so only for whichever store recomputed last. Add
+// a field to one of these projections and the comparison beneath it has to grow
+// with it; where a field is compared by reference, that field must never be
+// mutated in place.
 
 const toolResultAtomCache = new Map<string, Atom<ToolResult | undefined>>();
 const runToolResultsAtomCache = new Map<string, Atom<ReadonlyMap<string, ToolResult>>>();
