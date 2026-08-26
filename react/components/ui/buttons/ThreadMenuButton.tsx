@@ -9,6 +9,7 @@ import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
 import { resolveToolCallLabelEnrichMap } from '../../../utils/toolCallLabelEnrich';
 import { allRunsAtom, runsCountAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
+import { flushPendingPartEvents } from '../../../utils/streamingPartQueue';
 import { currentThreadIdAtom, currentThreadNameAtom, newThreadAtom, recentThreadsAtom, ThreadData } from '../../../atoms/threads';
 import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
@@ -61,6 +62,10 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
      * raw library ref ("u") instead of the library name.
      */
     const getThreadContent = async (overrides?: Partial<ExtractThreadContentOptions>) => {
+        // Streamed parts are applied a frame after they arrive, so a thread
+        // copied or saved mid-response would otherwise stop a frame short of
+        // what is on screen.
+        flushPendingPartEvents();
         const { threadId, threadName } = getThreadMeta();
         const runs = store.get(allRunsAtom);
         const toolResultsMap = store.get(toolResultsMapAtom);

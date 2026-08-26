@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
-import { isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowUserScrolledAtom } from "./ui";
+import { isAtBottomAtom, isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowIsAtBottomAtom, windowUserScrolledAtom } from "./ui";
 
 import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "@beaver/agent-core/citations/atoms";
 import { maybeShowCitationTipAtom } from "./citationTip";
@@ -338,9 +338,14 @@ export const newThreadAtom = atom(
                     await set(updateReaderAttachmentAtom);
                 }
             }
-            // Reset scroll state for both sidebar and window
+            // Reset scroll state for both sidebar and window. The measured
+            // position is reset with the intent: the thread being opened has
+            // not been measured yet, and the previous thread's reading would
+            // otherwise decide whether the scroll-down button shows.
             set(userScrolledAtom, false);
             set(windowUserScrolledAtom, false);
+            set(isAtBottomAtom, true);
+            set(windowIsAtBottomAtom, true);
         } finally {
             // Always clear loading state
             set(isLoadingThreadAtom, false);
@@ -442,9 +447,14 @@ export const loadThreadAtom = atom(
                 logger(`loadThreadAtom: Error cleaning up temporary annotations: ${error}`);
             });
 
-            // Reset scroll state for both sidebar and window
+            // Reset scroll state for both sidebar and window. The measured
+            // position is reset with the intent: the thread being opened has
+            // not been measured yet, and the previous thread's reading would
+            // otherwise decide whether the scroll-down button shows.
             set(userScrolledAtom, false);
             set(windowUserScrolledAtom, false);
+            set(isAtBottomAtom, true);
+            set(windowIsAtBottomAtom, true);
             // Set the current thread ID and name
             set(currentThreadIdAtom, threadId);
             set(currentThreadNameAtom, resolvedName);

@@ -1,9 +1,7 @@
 import { useRef, useCallback, useEffect, ForwardedRef, RefObject } from 'react';
 import { store } from '../store';
-import { userScrolledAtom, windowUserScrolledAtom } from '../atoms/ui';
-import { currentThreadScrollPositionAtom, windowScrollPositionAtom } from '../atoms/threads';
+import { BOTTOM_THRESHOLD, getScrollAtoms, publishDistanceFromBottom } from '../utils/scrollPosition';
 
-const BOTTOM_THRESHOLD = 120; // pixels
 const SCROLL_POSITION_UPDATE_THRESHOLD = 10; // pixels - minimum change to update scroll position atom
 
 interface UseAutoScrollOptions {
@@ -66,8 +64,9 @@ export function useAutoScroll(
     } = options;
 
     // Select the correct atoms based on whether we're in the separate window
-    const scrolledAtom = isWindow ? windowUserScrolledAtom : userScrolledAtom;
-    const scrollPositionAtom = isWindow ? windowScrollPositionAtom : currentThreadScrollPositionAtom;
+    const scrollAtoms = getScrollAtoms(isWindow);
+    const scrolledAtom = scrollAtoms.userScrolled;
+    const scrollPositionAtom = scrollAtoms.position;
 
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
     const lastScrollTopRef = useRef(0);
@@ -129,6 +128,14 @@ export function useAutoScroll(
         }
 
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+
+        // Publish the measured position before any of the intent heuristics
+        // below, and ahead of their early returns: where the container sits is
+        // settled by this event, whatever the branching goes on to decide about
+        // what the reader meant by it. Published from the numbers already read
+        // above rather than measured again — this runs on every scroll event,
+        // including the ones auto-scroll generates for each streamed frame.
+        publishDistanceFromBottom(distanceFromBottom, scrollAtoms, threshold);
 
         // Detect content shrinkage (e.g., action row removed after confirmation).
         // When content shrinks, the browser adjusts scrollTop downward, which fires
@@ -247,7 +254,7 @@ export function useAutoScroll(
         }
         
         lastScrollTopRef.current = scrollTop;
-    }, [threshold, debounceDelay, win, scrolledAtom, scrollPositionAtom]);
+    }, [threshold, debounceDelay, win, scrollAtoms, scrolledAtom, scrollPositionAtom]);
 
     // Cleanup timers on unmount
     useEffect(() => {

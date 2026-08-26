@@ -52,6 +52,8 @@ vi.mock('../../../react/atoms/ui', async () => {
         removePopupMessagesByTypeAtom: atom(null, () => {}),
         userScrolledAtom: atom(false),
         windowUserScrolledAtom: atom(false),
+        isAtBottomAtom: atom(true),
+        windowIsAtBottomAtom: atom(true),
     };
 });
 

@@ -11,12 +11,12 @@ import { selectComposerTakeover } from '@beaver/agent-ui/chat/composerTakeover';
 import Header from "./Header"
 import { useEventSubscription } from '../hooks/useEventSubscription';
 import { ThreadView } from "./agentRuns";
-import { currentThreadScrollPositionAtom, windowScrollPositionAtom } from '../atoms/threads';
 import { isFirstRunThreadAtom, runsCountAtom } from '@beaver/agent-core/run-state/atoms';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
-import { userScrolledAtom, windowUserScrolledAtom, isSkippedFilesDialogVisibleAtom, isThreadListViewAtom } from '../atoms/ui';
+import { getScrollAtoms, publishScrollPosition } from '../utils/scrollPosition';
+import { isSkippedFilesDialogVisibleAtom, isThreadListViewAtom } from '../atoms/ui';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import ProfileLoadingPage from './pages/ProfileLoadingPage';
@@ -218,8 +218,9 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     });
 
     // Select the correct atoms based on whether we're in the separate window
-    const scrolledAtom = isWindow ? windowUserScrolledAtom : userScrolledAtom;
-    const scrollPositionAtom = isWindow ? windowScrollPositionAtom : currentThreadScrollPositionAtom;
+    const scrollAtoms = getScrollAtoms(isWindow);
+    const scrolledAtom = scrollAtoms.userScrolled;
+    const scrollPositionAtom = scrollAtoms.position;
 
     // Determine if we're in the run view (has runs) or home view (no runs)
     const isThreadView = runsCount > 0;
@@ -229,7 +230,12 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
             store.set(scrolledAtom, false);
             // Clear stored scroll position to let natural scroll-to-bottom take over
             store.set(scrollPositionAtom, null);
-            scrollToBottom(messagesContainerRef, false);
+            // The atom is passed even though the override already decides this
+            // call: without it a scroll from the separate window would fall back
+            // to the sidebars' state, and the override is the only reason that
+            // does not show today.
+            scrollToBottom(messagesContainerRef, false, scrolledAtom);
+            publishScrollPosition(messagesContainerRef.current, scrollAtoms);
         }
     };
 

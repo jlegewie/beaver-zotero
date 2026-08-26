@@ -217,8 +217,13 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         const noteWriter = getHost().noteWriter;
         if (!noteWriter) return;
         try {
-            const contentHtml = await buildRunNoteContentHtml();
+            // Read before the render below is awaited, not after. Rendering the
+            // citations yields, and the reader can open another thread while it
+            // does — leaving this looking for a run of the thread they left in
+            // the runs of the one they opened, finding nothing, and titling the
+            // note as though it had no place in a conversation.
             const responseIndex = store.get(allRunsAtom).findIndex((candidate: AgentRun) => candidate.id === messageRun.id) + 1;
+            const contentHtml = await buildRunNoteContentHtml();
             await noteWriter.saveNote({
                 contentHtml,
                 asChild,
