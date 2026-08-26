@@ -102,6 +102,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
     // so an empty field sitting above the buttons reads as something left
     // undone.
     const [wantsInstructions, setWantsInstructions] = useState(false);
+    const hasInstructions = draft.userInstructions.trim().length > 0;
     // Drives the disabled styling in the instant before the card unmounts.
     const [isDecided, setIsDecided] = useState(false);
     // The guard that actually holds. Exactly one decision may leave the
@@ -307,14 +308,16 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                         style={{ padding: '2px 6px', fontSize: '0.95rem' }}
                     />
                     <div className="flex-1" />
+                    {/* Typed instructions turn a decline into a request for
+                        different work, and the button says so. */}
                     <Button
                         variant="ghost"
-                        ariaLabel="Cancel batch job"
+                        ariaLabel={hasInstructions ? 'Cancel batch job and send instructions' : 'Cancel batch job'}
                         onClick={handleDecline}
                         disabled={isDecided}
                         className="mr-1"
                     >
-                        {approval.declineLabel}
+                        {hasInstructions ? approval.declineWithInstructionsLabel : approval.declineLabel}
                     </Button>
                     <Button
                         variant="solid"

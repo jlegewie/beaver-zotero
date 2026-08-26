@@ -2131,6 +2131,8 @@ export interface WSBatchApprovalRequest extends WSBaseEvent {
     approve_label: string;
     /** Label for the decline button */
     decline_label: string;
+    /** Label the decline button takes once the user has typed instructions */
+    decline_with_instructions_label?: string;
     /** Backend-provided docs link text; empty means no link */
     learn_more_label?: string;
     /** Docs path resolved against the client's environment-specific docs URL */

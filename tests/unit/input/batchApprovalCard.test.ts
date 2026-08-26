@@ -58,6 +58,7 @@ const SCOPE_PRIMARY = '184 items';
 const SCOPE_SECONDARY = 'in Computational Social Science and its subcollections';
 const CREDIT_CHIP = 'Asks again at 12 credits';
 const CREDIT_TOOLTIP = 'Approving raises this thread’s confirmation limit to 12 credits.';
+const DECLINE_WITH_INSTRUCTIONS = 'Send instructions';
 
 function approval(overrides: Partial<PendingBatchApproval> = {}): PendingBatchApproval {
     return {
@@ -76,6 +77,7 @@ function approval(overrides: Partial<PendingBatchApproval> = {}): PendingBatchAp
         defaultMode: 'full_access',
         approveLabel: 'Approve 184 items',
         declineLabel: 'Cancel',
+        declineWithInstructionsLabel: DECLINE_WITH_INSTRUCTIONS,
         timeoutSeconds: 180,
         ...overrides,
     };
@@ -233,8 +235,10 @@ describe('BatchApprovalCard decision payload', () => {
 
     it('carries the mode and the trimmed instructions on Cancel', () => {
         const onSubmit = vi.fn();
+        const tree = prepared(onSubmit);
 
-        findOne(prepared(onSubmit), byAriaLabel('Cancel batch job')).props.onClick();
+        expect(renderedText(tree)).toContain(DECLINE_WITH_INSTRUCTIONS);
+        findOne(tree, byAriaLabel('Cancel batch job and send instructions')).props.onClick();
 
         expect(onSubmit).toHaveBeenCalledWith({
             approved: false,
