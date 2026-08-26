@@ -294,6 +294,19 @@ describe('streamingPartQueue', () => {
         });
     });
 
+    it('does not throw out of a flush when an event cannot be applied', () => {
+        // Malformed wire data: the reducer throws on it. The flush is the first
+        // step of stopping a run, so it must not abort what follows.
+        queuePartEvent({
+            event: 'part',
+            run_id: 'run-1',
+            message_index: 0,
+            part_index: 0,
+        } as unknown as WSPartEvent);
+
+        expect(() => flushPendingPartEvents()).not.toThrow();
+    });
+
     it('applies synchronously in a window with no animation frames', () => {
         (globalThis as any).Zotero = { getMainWindow: () => ({ closed: false }) };
 

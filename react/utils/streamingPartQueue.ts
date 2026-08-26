@@ -43,24 +43,39 @@ let scheduledWindow: Window | null = null;
 let scheduledFrame: number | null = null;
 let backstopTimer: unknown = null;
 
+interface RealmSafeTimers {
+    setTimeout: (callback: () => void, delayMs: number) => unknown;
+    clearTimeout: (id: unknown) => void;
+}
+
+let resolvedFrom: unknown = null;
+let resolvedTimers: RealmSafeTimers | undefined;
+
 /**
  * Timers from the system module rather than a window, so a queue armed by a
  * window that then closes still drains (see the cross-window notes in
  * CLAUDE.md). Undefined outside Gecko, where the frame path is used alone.
+ *
+ * Resolved once per host object: this sits in the path a streaming response
+ * runs through many times a second, and the module lookup does not need
+ * repeating while the host is the same one it was resolved from.
  */
-function getRealmSafeTimers():
-    | { setTimeout: (callback: () => void, delayMs: number) => unknown; clearTimeout: (id: unknown) => void }
-    | undefined {
+function getRealmSafeTimers(): RealmSafeTimers | undefined {
+    const chromeUtils = (globalThis as any).ChromeUtils;
+    if (chromeUtils === resolvedFrom) return resolvedTimers;
+
+    resolvedFrom = chromeUtils;
     try {
         const { setTimeout: systemSetTimeout, clearTimeout: systemClearTimeout } =
-            (globalThis as any).ChromeUtils.importESModule('resource://gre/modules/Timer.sys.mjs');
-        return {
+            chromeUtils.importESModule('resource://gre/modules/Timer.sys.mjs');
+        resolvedTimers = {
             setTimeout: (callback: () => void, delayMs: number) => systemSetTimeout(callback, delayMs),
             clearTimeout: (id: unknown) => systemClearTimeout(id),
         };
     } catch {
-        return undefined;
+        resolvedTimers = undefined;
     }
+    return resolvedTimers;
 }
 
 function applyPendingEvents(): void {
@@ -152,5 +167,13 @@ export function queuePartEvent(event: WSPartEvent): void {
  */
 export function flushPendingPartEvents(): void {
     cancelScheduledFlush();
-    applyPendingEvents();
+    // Same guard as the scheduled path. Callers flush as the first step of
+    // stopping a run or switching threads, and a malformed part event must not
+    // abort the sequence that follows — that would leave the composer pinned on
+    // a run nothing goes on to archive or cancel.
+    try {
+        applyPendingEvents();
+    } catch (error) {
+        logger(`streamingPartQueue: failed to apply part events: ${error}`, 1);
+    }
 }

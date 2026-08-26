@@ -5,8 +5,12 @@ import {
     getRunToolResults,
     mergeRunToolResults,
     resetRunSelectorCaches,
+    hasWhereToStartRunAtom,
+    isFirstRunThreadAtom,
+    lastRunSummaryAtom,
     resumeChainAtom,
     resumedRunIdsAtom,
+    threadRunIdsAtom,
     runToolResultsAtom,
     threadRunsAtom,
     toolResultAtom,
@@ -276,6 +280,84 @@ describe('scoped run selectors', () => {
         });
     });
 
+    describe('thread-shape selectors', () => {
+        const streaming = (text: string) =>
+            updateRunWithPart(
+                run('run-2', [], { status: 'in_progress' }),
+                { ...textPart('run-2', text) },
+            );
+
+        beforeEach(() => {
+            store.set(threadRunsAtom, [run('run-1', [])]);
+            store.set(activeRunAtom, run('run-2', [], { status: 'in_progress' }));
+        });
+
+        it('holds the run ids while the newest run streams', () => {
+            const before = store.get(threadRunIdsAtom);
+            expect(before).toEqual(['run-1', 'run-2']);
+
+            store.set(activeRunAtom, streaming('half an answer'));
+
+            expect(store.get(threadRunIdsAtom)).toBe(before);
+        });
+
+        it('changes the run ids when a run is added', () => {
+            const before = store.get(threadRunIdsAtom);
+
+            store.set(threadRunsAtom, [run('run-1', []), run('run-3', [])]);
+
+            expect(store.get(threadRunIdsAtom)).not.toBe(before);
+        });
+
+        it('holds the last-run summary while that run streams', () => {
+            const before = store.get(lastRunSummaryAtom);
+            expect(before?.id).toBe('run-2');
+
+            store.set(activeRunAtom, streaming('half an answer'));
+
+            expect(store.get(lastRunSummaryAtom)).toBe(before);
+        });
+
+        it('changes the last-run summary when the run finishes', () => {
+            const before = store.get(lastRunSummaryAtom);
+
+            store.set(activeRunAtom, run('run-2', [], { status: 'completed' }));
+
+            const after = store.get(lastRunSummaryAtom);
+            expect(after).not.toBe(before);
+            expect(after?.status).toBe('completed');
+        });
+
+        it('is null with no runs at all', () => {
+            store.set(threadRunsAtom, []);
+            store.set(activeRunAtom, null);
+
+            expect(store.get(lastRunSummaryAtom)).toBeNull();
+        });
+
+        it('reports first-run origins as booleans that survive streaming', () => {
+            store.set(threadRunsAtom, [
+                run('run-1', [], {
+                    user_prompt: { content: 'q', is_resume: false, origin: { kind: 'where_to_start', action_id: 'a1' } },
+                } as Partial<AgentRun>),
+            ]);
+            expect(store.get(isFirstRunThreadAtom)).toBe(true);
+            expect(store.get(hasWhereToStartRunAtom)).toBe(true);
+
+            store.set(activeRunAtom, streaming('half an answer'));
+
+            // Booleans, so an unchanged answer is the same value and jotai has
+            // nothing to notify.
+            expect(store.get(isFirstRunThreadAtom)).toBe(true);
+            expect(store.get(hasWhereToStartRunAtom)).toBe(true);
+        });
+
+        it('reports no first-run origin for an ordinary thread', () => {
+            expect(store.get(isFirstRunThreadAtom)).toBe(false);
+            expect(store.get(hasWhereToStartRunAtom)).toBe(false);
+        });
+    });
+
     describe('toolResultsMapAtom', () => {
         it('still covers every run in the thread', () => {
             store.set(threadRunsAtom, [run('run-1', [toolReturn('call-1')])]);
@@ -295,20 +377,26 @@ describe('scoped run selectors', () => {
         });
 
         it('drops the held resumed-run ids too', () => {
-            store.set(threadRunsAtom, [
+            const resumeChain = () => [
                 run('run-1', []),
                 run('run-2', [], {
                     user_prompt: { content: '', is_resume: true, resumes_run_id: 'run-1' },
                 } as Partial<AgentRun>),
-            ]);
+            ];
+            store.set(threadRunsAtom, resumeChain());
             const before = store.get(resumedRunIdsAtom);
             expect(before.has('run-1')).toBe(true);
 
             resetRunSelectorCaches();
-            const fresh = createStore();
-            fresh.set(threadRunsAtom, [run('run-1', [])]);
 
-            expect(fresh.get(resumedRunIdsAtom).size).toBe(0);
+            // Same membership as before the reset — so a held Set would be
+            // handed straight back, and only a dropped one yields a new object.
+            const fresh = createStore();
+            fresh.set(threadRunsAtom, resumeChain());
+            const after = fresh.get(resumedRunIdsAtom);
+
+            expect(after.has('run-1')).toBe(true);
+            expect(after).not.toBe(before);
         });
     });
 });

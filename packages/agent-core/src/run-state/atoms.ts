@@ -11,7 +11,10 @@ import {
     ThinkingPart,
     RetryPromptPart,
     AgentRunStatus,
+    PromptOrigin,
+    RunUsage,
     isRunActive,
+    isFirstRunOrigin,
     isUnsuccessfulToolReturn,
 } from "../agents/types";
 import {
@@ -94,6 +97,82 @@ function setsAreEqual(a: Set<string>, b: Set<string>): boolean {
 export const runsCountAtom = atom((get) => get(allRunsAtom).length);
 
 /**
+ * Whether the thread was opened from a first-run surface.
+ *
+ * A boolean rather than the runs it is derived from: a component that only
+ * needs this must not re-render on every streamed update to the active run.
+ */
+export const isFirstRunThreadAtom = atom((get) =>
+    get(allRunsAtom).some((run) => isFirstRunOrigin(run.user_prompt?.origin)),
+);
+
+/** Whether any run in the thread came from the first-action launcher. */
+export const hasWhereToStartRunAtom = atom((get) =>
+    get(allRunsAtom).some((run) => run.user_prompt?.origin?.kind === 'where_to_start'),
+);
+
+/**
+ * Ids of the thread's runs, holding their array while the set of runs is
+ * unchanged — which it is for the whole of a response, however much of it has
+ * streamed in.
+ */
+let lastRunIds: string[] = [];
+export const threadRunIdsAtom = atom((get) => {
+    const ids = get(allRunsAtom).map((run) => run.id);
+    if (ids.length === lastRunIds.length && ids.every((id, index) => id === lastRunIds[index])) {
+        return lastRunIds;
+    }
+    lastRunIds = ids;
+    return ids;
+});
+
+/**
+ * What the newest run is, for a component that renders from its identity or
+ * outcome rather than its contents — the composer, above all, which would
+ * otherwise re-render on every streamed frame of the run it sits under.
+ *
+ * Holds its previous object while these fields are unchanged. Streaming text
+ * into the run changes none of them.
+ */
+export interface LastRunSummary {
+    id: string;
+    threadId: string | null;
+    status: AgentRunStatus;
+    origin: PromptOrigin | undefined;
+    totalUsage: RunUsage | null | undefined;
+}
+
+let lastRunSummary: LastRunSummary | null = null;
+export const lastRunSummaryAtom = atom((get) => {
+    const runs = get(allRunsAtom);
+    const run = runs.length > 0 ? runs[runs.length - 1] : null;
+    if (!run) {
+        lastRunSummary = null;
+        return null;
+    }
+
+    const summary: LastRunSummary = {
+        id: run.id,
+        threadId: run.thread_id,
+        status: run.status,
+        origin: run.user_prompt?.origin,
+        totalUsage: run.total_usage,
+    };
+
+    const previous = lastRunSummary;
+    if (previous
+        && previous.id === summary.id
+        && previous.threadId === summary.threadId
+        && previous.status === summary.status
+        && previous.origin === summary.origin
+        && previous.totalUsage === summary.totalUsage) {
+        return previous;
+    }
+    lastRunSummary = summary;
+    return summary;
+});
+
+/**
  * Runs of the thread by id. Built once per change so the scoped selectors below
  * cost a lookup each rather than a scan of the thread.
  */
@@ -115,6 +194,11 @@ export const isStreamingAtom = atom((get) => isRunActive(get(activeRunAtom)));
 export type ToolResult = ToolReturnPart | RetryPromptPart;
 
 const EMPTY_TOOL_RESULTS: ReadonlyMap<string, ToolResult> = new Map();
+/**
+ * The one array handed to every caller asking for the chain of a run the thread
+ * no longer holds, so an absent run does not re-render its caller each time.
+ * Shared, so never mutated or handed anywhere that would.
+ */
 const EMPTY_RUNS: AgentRun[] = [];
 
 /**
@@ -262,6 +346,8 @@ export function resetRunSelectorCaches(): void {
     resumeChainAtomCache.clear();
     resumeChainValueCache.clear();
     lastResumedRunIds = new Set<string>();
+    lastRunIds = [];
+    lastRunSummary = null;
 }
 
 /**

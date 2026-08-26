@@ -20,7 +20,7 @@ import BatchProgressPanel from './BatchProgressPanel';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToSuggestions';
-import { allRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import { hasWhereToStartRunAtom, lastRunSummaryAtom, threadRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { PromptOrigin } from '@beaver/agent-core/agents/types';
 import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
 import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, backendHighTokenUsageRunsAtom } from '../../atoms/messageUIState';
@@ -61,7 +61,13 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [selectionRestoreTick, setSelectionRestoreTick] = useState(0);
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
     const [isWebSearchEnabled, setIsWebSearchEnabled] = useAtom(isWebSearchEnabledAtom);
-    const allRuns = useAtomValue(allRunsAtom);
+    // Projections of the thread's runs rather than the runs themselves: the
+    // composer renders from the newest run's identity and outcome, not its
+    // contents, and subscribing to the runs re-renders it on every streamed
+    // frame of the response it sits under.
+    const lastRun = useAtomValue(lastRunSummaryAtom);
+    const runIds = useAtomValue(threadRunIdsAtom);
+    const hasWhereToStartRun = useAtomValue(hasWhereToStartRunAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const dismissedHighTokenByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
     const dismissHighTokenWarning = useSetAtom(dismissHighTokenWarningForThreadAtom);
@@ -129,13 +135,12 @@ const InputArea: React.FC<InputAreaProps> = ({
     // Sidebar renders AskUserQuestionPanel INSTEAD of this component, so no
     // question-mode handling is needed here.
 
-    const lastRun = allRuns.length > 0 ? allRuns[allRuns.length - 1] : null;
-    const lastRunUsage = lastRun?.total_usage;
+    const lastRunUsage = lastRun?.totalUsage;
     const lastRequestInputTokens = lastRunUsage ? getLastRequestInputTokens(lastRunUsage) : null;
-    const warningThreadId = lastRun?.thread_id ?? currentThreadId;
+    const warningThreadId = lastRun?.threadId ?? currentThreadId;
     const isHighTokenDismissed = warningThreadId ? dismissedHighTokenByThread[warningThreadId] : false;
     const showHighTokenUsageWarningMessage = getPref('showHighTokenUsageWarningMessage');
-    const threadHasHighTokenUsage = allRuns.some(r => backendHighTokenUsageRuns[r.id])
+    const threadHasHighTokenUsage = runIds.some((runId: string) => backendHighTokenUsageRuns[runId])
         || (lastRequestInputTokens !== null && lastRequestInputTokens > HIGH_INPUT_TOKEN_WARNING_THRESHOLD);
     const canShowHighTokenWarning = Boolean(
         showHighTokenUsageWarningMessage &&
@@ -162,7 +167,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     }, [setNextStepsDismissedRunIds, lastRunId]);
     // Guided next steps surface after a suggestion-card run or a "Where should
     // we start?" launcher run — both carry the context NextStepsPanel needs.
-    const lastRunOriginKind = lastRun?.user_prompt.origin?.kind;
+    const lastRunOriginKind = lastRun?.origin?.kind;
     const canShowNextSteps = Boolean(
         lastRun &&
         (lastRunOriginKind === 'first_run_card' || lastRunOriginKind === 'where_to_start') &&
@@ -176,9 +181,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
     // The follow-up run's origin
-    const firstRunBackTarget: FirstRunBackTarget = allRuns.some(
-        (r) => r.user_prompt?.origin?.kind === 'where_to_start',
-    ) ? 'launcher' : 'suggestions';
+    const firstRunBackTarget: FirstRunBackTarget = hasWhereToStartRun ? 'launcher' : 'suggestions';
 
     // Exactly one band between the batch panel and the attachment row.
     // Priority: blocked decision, then first-run guidance, then the cost warning.
@@ -509,7 +512,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 from a first-run suggestion card. Auto-dismisses on type. */}
             {composerBand === 'next-steps' && lastRun && (
                 <NextStepsPanel
-                    origin={lastRun.user_prompt.origin as Extract<PromptOrigin, { kind: 'first_run_card' | 'where_to_start' }>}
+                    origin={lastRun.origin as Extract<PromptOrigin, { kind: 'first_run_card' | 'where_to_start' }>}
                     onDismiss={handleDismissNextSteps}
                 />
             )}

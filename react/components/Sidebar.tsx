@@ -12,8 +12,7 @@ import Header from "./Header"
 import { useEventSubscription } from '../hooks/useEventSubscription';
 import { ThreadView } from "./agentRuns";
 import { currentThreadScrollPositionAtom, windowScrollPositionAtom } from '../atoms/threads';
-import { allRunsAtom } from '@beaver/agent-core/run-state/atoms';
-import { isFirstRunOrigin } from '@beaver/agent-core/agents/types';
+import { isFirstRunThreadAtom, runsCountAtom } from '@beaver/agent-core/run-state/atoms';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
@@ -157,7 +156,10 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     // a textarea. Typed as HTMLElement so `.focus()` keeps working.
     const inputRef = useRef<HTMLElement | null>(null);
     const loginEmailRef = useRef<HTMLInputElement>(null);
-    const runs = useAtomValue(allRunsAtom);
+    // Two booleans rather than the runs behind them: subscribing to the runs
+    // re-renders the whole shell on every frame of a streaming response.
+    const runsCount = useAtomValue(runsCountAtom);
+    const isFirstRunThread = useAtomValue(isFirstRunThreadAtom);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const setIsSkippedFilesDialogVisible = useSetAtom(isSkippedFilesDialogVisibleAtom);
@@ -220,7 +222,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const scrollPositionAtom = isWindow ? windowScrollPositionAtom : currentThreadScrollPositionAtom;
 
     // Determine if we're in the run view (has runs) or home view (no runs)
-    const isThreadView = runs.length > 0;
+    const isThreadView = runsCount > 0;
 
     const handleScrollToBottom = () => {
         if (messagesContainerRef.current) {
@@ -364,9 +366,6 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     };
 
     // First-run threads use a follow-up-specific composer placeholder.
-    const isFirstRunThread = runs.some(
-        (r) => isFirstRunOrigin(r.user_prompt?.origin),
-    );
     const inputPlaceholder = isFirstRunThread ? 'Ask a follow-up question' : undefined;
 
     {/* Main page */}
