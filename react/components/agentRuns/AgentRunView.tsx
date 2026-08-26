@@ -40,7 +40,13 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // as one message, so what the whole answer ended up doing belongs under its
     // last run — beside the footer, which already speaks for the chain. An
     // ordinary run is a chain of one, so nothing changes for it.
-    const chainRuns = useAtomValue(useMemo(() => resumeChainAtom(run.id), [run.id]));
+    const chainAtomValue = useAtomValue(useMemo(() => resumeChainAtom(run.id), [run.id]));
+    // Empty only if this run has left the thread while its card is still
+    // mounted. The chain is always at least the run itself.
+    const chainRuns = useMemo(
+        () => (chainAtomValue.length > 0 ? chainAtomValue : [run]),
+        [chainAtomValue, run],
+    );
     const streamingDoneRunIds = useAtomValue(streamingDoneRunIdsAtom);
     const isPostProcessing = streamingDoneRunIds.has(run.id);
     // Safe to subscribe from every run in the thread: this atom changes when a

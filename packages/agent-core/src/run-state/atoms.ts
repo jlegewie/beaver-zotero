@@ -115,6 +115,7 @@ export const isStreamingAtom = atom((get) => isRunActive(get(activeRunAtom)));
 export type ToolResult = ToolReturnPart | RetryPromptPart;
 
 const EMPTY_TOOL_RESULTS: ReadonlyMap<string, ToolResult> = new Map();
+const EMPTY_RUNS: AgentRun[] = [];
 
 /**
  * Tool results of a single run, keyed by tool_call_id.
@@ -218,14 +219,25 @@ export function runToolResultsAtom(runId: string): Atom<ReadonlyMap<string, Tool
  *
  * Holds its previous array while the chain's runs are unchanged, so a run
  * elsewhere in the thread streaming does not re-render this run's footer.
+ *
+ * Empty when the thread holds no run with this id. A caller rendering a run it
+ * already has should fall back to that run: `collectResumeChain` always returns
+ * a chain of at least the run itself, and callers rely on a non-empty chain.
  */
 export function resumeChainAtom(runId: string): Atom<AgentRun[]> {
     let cached = resumeChainAtomCache.get(runId);
     if (!cached) {
         cached = atom((get) => {
             const run = get(runsByIdAtom).get(runId);
-            const chain = run ? collectResumeChain(run, get(allRunsAtom)) : [];
+            if (!run) {
+                // The run has left the thread — a retry truncated it, or the
+                // thread changed. Drop its cached chain rather than holding its
+                // runs until the next thread switch.
+                resumeChainValueCache.delete(runId);
+                return EMPTY_RUNS;
+            }
 
+            const chain = collectResumeChain(run, get(allRunsAtom));
             const previous = resumeChainValueCache.get(runId);
             if (previous && previous.length === chain.length
                 && previous.every((entry, index) => entry === chain[index])) {
@@ -249,6 +261,7 @@ export function resetRunSelectorCaches(): void {
     runToolResultsAtomCache.clear();
     resumeChainAtomCache.clear();
     resumeChainValueCache.clear();
+    lastResumedRunIds = new Set<string>();
 }
 
 /**

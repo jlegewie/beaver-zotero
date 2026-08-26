@@ -68,6 +68,49 @@ function streamedText(): string | undefined {
     return part?.part_kind === 'text' ? part.content : undefined;
 }
 
+/**
+ * Stand-in for the system timer module the queue backstops with. Absent unless
+ * a test installs it, which is why the frame tests above see frames only.
+ */
+function fakeSystemTimers() {
+    const timers = new Map<number, () => void>();
+    let nextId = 1;
+
+    const chromeUtils = {
+        importESModule: (url: string) => {
+            if (url !== 'resource://gre/modules/Timer.sys.mjs') throw new Error(`unexpected module ${url}`);
+            return {
+                setTimeout: (callback: () => void) => {
+                    const id = nextId++;
+                    timers.set(id, callback);
+                    return id;
+                },
+                clearTimeout: (id: number) => {
+                    timers.delete(id);
+                },
+            };
+        },
+    };
+
+    return {
+        install(): void {
+            (globalThis as any).ChromeUtils = chromeUtils;
+        },
+        uninstall(): void {
+            delete (globalThis as any).ChromeUtils;
+        },
+        /** Fire every timer currently armed. */
+        run(): void {
+            const armed = [...timers.values()];
+            timers.clear();
+            for (const callback of armed) callback();
+        },
+        pending(): number {
+            return timers.size;
+        },
+    };
+}
+
 describe('streamingPartQueue', () => {
     let win: ReturnType<typeof fakeWindow>;
 
@@ -81,6 +124,7 @@ describe('streamingPartQueue', () => {
         // Never leave a queued event behind for the next test.
         flushPendingPartEvents();
         delete (globalThis as any).Zotero;
+        delete (globalThis as any).ChromeUtils;
     });
 
     it('does not apply a queued event before the frame runs', () => {
@@ -188,6 +232,66 @@ describe('streamingPartQueue', () => {
         replacement.runFrame();
 
         expect(streamedText()).toBe('Hello there');
+    });
+
+    describe('when the main window stops painting', () => {
+        let timers: ReturnType<typeof fakeSystemTimers>;
+
+        beforeEach(() => {
+            timers = fakeSystemTimers();
+            timers.install();
+        });
+
+        it('applies queued events on the backstop timer', () => {
+            queuePartEvent(textPart('Hello'));
+
+            // The window is open but delivering no frames, as a minimized or
+            // occluded one does while the reader watches the Beaver window.
+            expect(streamedText()).toBeUndefined();
+            timers.run();
+
+            expect(streamedText()).toBe('Hello');
+        });
+
+        it('does not apply the same events twice when the frame follows the backstop', () => {
+            queuePartEvent(textPart('Hello'));
+            timers.run();
+
+            let writes = 0;
+            const unsubscribe = testStore.sub(activeRunAtom, () => {
+                writes++;
+            });
+            win.runFrame();
+            unsubscribe();
+
+            expect(writes).toBe(0);
+            expect(streamedText()).toBe('Hello');
+        });
+
+        it('drops the backstop once a frame has flushed the queue', () => {
+            queuePartEvent(textPart('Hello'));
+            win.runFrame();
+
+            expect(streamedText()).toBe('Hello');
+            expect(timers.pending()).toBe(0);
+        });
+
+        it('drops the backstop on an explicit flush', () => {
+            queuePartEvent(textPart('Hello'));
+            flushPendingPartEvents();
+
+            expect(timers.pending()).toBe(0);
+            expect(streamedText()).toBe('Hello');
+        });
+
+        it('drains the queue even with no window at all', () => {
+            (globalThis as any).Zotero = { getMainWindow: () => null };
+
+            queuePartEvent(textPart('Hello'));
+            timers.run();
+
+            expect(streamedText()).toBe('Hello');
+        });
     });
 
     it('applies synchronously in a window with no animation frames', () => {

@@ -223,6 +223,26 @@ describe('scoped run selectors', () => {
         it('is empty for a run that is not in the thread', () => {
             expect(store.get(resumeChainAtom('missing'))).toEqual([]);
         });
+
+        it('holds one empty array, so an absent run does not re-render its caller', () => {
+            const selector = resumeChainAtom('missing');
+            expect(store.get(selector)).toBe(store.get(resumeChainAtom('also-missing')));
+        });
+
+        it('releases the runs of a chain that leaves the thread', () => {
+            store.set(threadRunsAtom, [run('run-1', []), resumeRun('run-2', 'run-1')]);
+            const selector = resumeChainAtom('run-2');
+            expect(store.get(selector)).toHaveLength(2);
+
+            // A retry truncates the thread back past both runs.
+            store.set(threadRunsAtom, []);
+            expect(store.get(selector)).toEqual([]);
+
+            // The chain is rebuilt from scratch if those ids ever come back,
+            // rather than served from a cache still holding the old runs.
+            store.set(threadRunsAtom, [run('run-1', []), resumeRun('run-2', 'run-1')]);
+            expect(store.get(selector)).toHaveLength(2);
+        });
     });
 
     describe('resumedRunIdsAtom', () => {
@@ -272,6 +292,23 @@ describe('scoped run selectors', () => {
             const selector = runToolResultsAtom('run-1');
             resetRunSelectorCaches();
             expect(runToolResultsAtom('run-1')).not.toBe(selector);
+        });
+
+        it('drops the held resumed-run ids too', () => {
+            store.set(threadRunsAtom, [
+                run('run-1', []),
+                run('run-2', [], {
+                    user_prompt: { content: '', is_resume: true, resumes_run_id: 'run-1' },
+                } as Partial<AgentRun>),
+            ]);
+            const before = store.get(resumedRunIdsAtom);
+            expect(before.has('run-1')).toBe(true);
+
+            resetRunSelectorCaches();
+            const fresh = createStore();
+            fresh.set(threadRunsAtom, [run('run-1', [])]);
+
+            expect(fresh.get(resumedRunIdsAtom).size).toBe(0);
         });
     });
 });

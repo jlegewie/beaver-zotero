@@ -65,7 +65,7 @@ import type {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
-import { createWSCallbacks } from '../../../react/atoms/agentRunAtoms';
+import { abandonActiveRunLocallyAtom, createWSCallbacks } from '../../../react/atoms/agentRunAtoms';
 import { store } from '../../../react/store';
 
 /** A window whose animation frames never run. */
@@ -144,6 +144,19 @@ describe('streamed parts and the other WebSocket callbacks', () => {
         } as WSRunCompleteEvent);
 
         expect(streamedText(store.get(activeRunAtom))).toBe('The whole answer.');
+    });
+
+    it('keeps the streamed text when the user stops the run mid-response', async () => {
+        await callbacks.onPart(textPart('An answer that was cut off here'));
+
+        // Stop: the run is archived as canceled and the slot is cleared, which
+        // would leave the queued text nowhere to land.
+        store.set(abandonActiveRunLocallyAtom);
+
+        const archived = store.get(threadRunsAtom);
+        expect(archived).toHaveLength(1);
+        expect(archived[0].status).toBe('canceled');
+        expect(streamedText(archived[0])).toBe('An answer that was cut off here');
     });
 
     it('applies every queued part, in the order they arrived', async () => {

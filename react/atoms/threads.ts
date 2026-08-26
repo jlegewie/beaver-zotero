@@ -451,7 +451,6 @@ export const loadThreadAtom = atom(
             set(clearExternalReferenceCacheAtom);
             set(isWebSearchEnabledAtom, false);
             set(resetCitationMarkersAtom);
-            resetRunSelectorCaches();
 
             // Clear all pending approvals/questions when loading a different thread
             set(clearAllPendingApprovalsAtom);
@@ -558,7 +557,10 @@ export const loadThreadAtom = atom(
                         logger(`loadThreadAtom: Failed to preload page labels: ${err}`, 1)
                     );
 
-                // Set agent runs
+                // Set agent runs. The scoped run selectors are dropped in the
+                // same breath: reset any earlier and the old thread's runs, still
+                // in the store while this load ran, would populate them again.
+                resetRunSelectorCaches();
                 set(threadRunsAtom, processedRuns);
 
                 // Reconcile toolcall_id mismatches between REST API and model messages
@@ -611,6 +613,7 @@ export const loadThreadAtom = atom(
                 }
             } else {
                 // No runs found, clear state
+                resetRunSelectorCaches();
                 set(threadRunsAtom, []);
                 set(threadAgentActionsAtom, []);
                 set(citationsAtom, []);
@@ -631,6 +634,7 @@ export const loadThreadAtom = atom(
             if (error instanceof ApiError && error.status === 404) {
                 logger(`loadThreadAtom: Thread ${threadId} not found, resetting to empty thread state`, 1);
                 set(currentThreadIdAtom, null);
+                resetRunSelectorCaches();
                 set(threadRunsAtom, []);
                 set(activeRunAtom, null);
                 set(threadAgentActionsAtom, []);

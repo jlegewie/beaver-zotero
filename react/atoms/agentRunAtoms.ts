@@ -2575,6 +2575,10 @@ async function startRegenerateRun(
             return;
         }
 
+        // Before the run is read or archived: whichever run this ends up
+        // touching, it must carry the streamed text queued for the frame.
+        flushPendingPartEvents();
+
         // Fold a terminal run out of the active slot into thread history
         // before the removed set is computed: a failed run being replaced
         // contributes its applied actions to the confirm dialog and its ID
@@ -2582,10 +2586,7 @@ async function startRegenerateRun(
         archiveAndClearTerminalActiveRun(get, set);
 
         // Find the run — a terminal run was archived into threadRuns above,
-        // so only a still-live run is found through the active slot. A live run
-        // is about to be canceled and resubmitted, so its queued streamed text
-        // has to be applied before it is read.
-        flushPendingPartEvents();
+        // so only a still-live run is found through the active slot.
         const threadRuns = get(threadRunsAtom);
         const activeRun = get(activeRunAtom);
 
@@ -2941,6 +2942,11 @@ export const resumeFromRunAtom = atom(
  * Store-only — does not touch the socket.
  */
 export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
+    // The run below is archived exactly as it stands and its slot is cleared,
+    // so the streamed text still sitting in the frame queue has to be applied
+    // first — after the slot is null there is nothing left to apply it to.
+    flushPendingPartEvents();
+
     // Set pending to false immediately for better UI responsiveness
     set(isWSChatPendingAtom, false);
 

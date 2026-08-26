@@ -225,7 +225,7 @@ interface ToolCallPartViewProps {
 
 /**
  * Renders a tool call with its status and result.
- * Uses toolResultsMapAtom to look up the result for this tool call.
+ * Uses toolResultAtom to look up the result for this tool call.
  * Visibility state is managed globally via searchToolVisibilityAtom.
  * Shows AgentActionView for tools with agent actions (e.g., edit_metadata).
  */

@@ -49,7 +49,14 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     // footer. Everything below therefore describes the whole chain: its text,
     // its citations, its cost, and the question that started it. An ordinary
     // run is a chain of one, so nothing changes for it.
-    const chainRuns = useAtomValue(useMemo(() => resumeChainAtom(run.id), [run.id]));
+    const chainAtomValue = useAtomValue(useMemo(() => resumeChainAtom(run.id), [run.id]));
+    // Empty only if this run has left the thread while its footer is still
+    // mounted. The chain is always at least the run itself, and everything
+    // below — `messageRun` in particular — relies on that.
+    const chainRuns = useMemo(
+        () => (chainAtomValue.length > 0 ? chainAtomValue : [run]),
+        [chainAtomValue, run],
+    );
     // Scoped to the chain rather than the thread: subscribing to every run's
     // tool results would re-render this footer on every frame of a later run's
     // response.
