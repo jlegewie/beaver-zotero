@@ -235,14 +235,20 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
             <div className={headerRowClassName}>
                 <button
                     type="button"
-                    className="variant-ghost-secondary display-flex flex-row ml-3 gap-2 min-w-0 text-left"
-                    style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
+                    className="variant-ghost-secondary display-flex flex-row items-start ml-3 gap-2 min-w-0 text-left"
+                    style={{
+                        fontSize: '0.95rem',
+                        background: 'transparent',
+                        border: 0,
+                        padding: 0,
+                        alignItems: 'flex-start',
+                    }}
                     aria-expanded={isExpanded}
                     onClick={toggleExpanded}
                     onMouseEnter={() => setIsHovered(true)}
                     onMouseLeave={() => setIsHovered(false)}
                 >
-                    <div className="display-flex items-center scale-11" style={{ flexShrink: 0 }}>
+                    <div className="display-flex items-center scale-11 mt-010" style={{ flexShrink: 0 }}>
                         <Icon icon={headerIcon} className={!isHovered ? headerIconClassName : undefined} />
                     </div>
                     <div
