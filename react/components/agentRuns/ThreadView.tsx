@@ -1,10 +1,9 @@
 import React, { useEffect, useRef, forwardRef, useLayoutEffect, useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { allRunsAtom, threadRunIdsAtom } from "@beaver/agent-core/run-state/atoms";
-import { streamQuietAtom } from "@beaver/agent-core/run-state/streamActivity";
+import { activeRunAtom, allRunsAtom, threadRunIdsAtom } from "@beaver/agent-core/run-state/atoms";
 import { AgentRunView } from "./AgentRunView";
 import { pinToBottom, scrollToBottom } from "../../utils/scrollToBottom";
-import { AT_BOTTOM_EPSILON, BOTTOM_THRESHOLD, getScrollAtoms, markProgrammaticScroll, publishDistanceFromBottom, publishScrollPosition } from "../../utils/scrollPosition";
+import { AT_BOTTOM_EPSILON, BOTTOM_THRESHOLD, getScrollAtoms, markProgrammaticScroll, measureDistanceFromBottom, publishDistanceFromBottom, publishScrollPosition } from "../../utils/scrollPosition";
 import { currentThreadIdAtom, pendingScrollToRunAtom, isLoadingThreadAtom } from "../../atoms/threads";
 import { pendingApprovalsAtom } from "../../agents/agentActions";
 import { store } from "../../store";
@@ -18,6 +17,18 @@ const ANIMATION_LOCKOUT_MS = 400; // ms - time to wait after animation before al
 const PENDING_APPROVAL_SCROLL_DELAY = 100; // ms - delay before scrolling for pending approval (allows content to render)
 const EXPANSION_SCROLL_EVAL_DELAY = 50; // ms - delay before re-evaluating scroll state after expansion toggle
 const PROTOCOL_SCROLL_LOCKOUT_MS = 800; // ms - block other scroll restorations right after protocol target jump
+/**
+ * How long after a response stops arriving its layout is still followed.
+ *
+ * A run's last act is to change its own status, and the parts of a run that
+ * only appear once it is over — the footer, the receipt, the review of what it
+ * did to the library, an error card — are laid out after that. Their resize
+ * arrives when nothing is generating any more, so without this a reader who
+ * followed a response to its end would be left above the very summary of it.
+ * Long enough for that layout, short enough that it has expired by the time a
+ * reader has read the card and reached for it.
+ */
+const TERMINAL_SETTLE_MS = 1000;
 
 type ThreadViewProps = {
     /** Optional className for styling */
@@ -38,11 +49,6 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         // unchanged. Used below to re-observe the run elements only when they
         // are actually replaced, rather than on every frame of a response.
         const runIds = useAtomValue(threadRunIdsAtom);
-        // The working indicator appears mid-response, when the provider goes
-        // quiet with text already on screen. That adds content without touching
-        // `runs`, so the scroll effect below would not see it. Safe to subscribe
-        // here: this atom flips on a wait starting and ending, not per token.
-        const streamQuiet = useAtomValue(streamQuietAtom);
         const pendingRunId = useAtomValue(pendingScrollToRunAtom);
         const isLoadingThread = useAtomValue(isLoadingThreadAtom);
         const setPendingScrollToRun = useSetAtom(pendingScrollToRunAtom);
@@ -67,6 +73,8 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         const pendingRunElementRef = useRef<HTMLDivElement | null>(null);
         // Timestamp lock to prevent post-target-jump scroll overrides
         const protocolScrollLockUntilRef = useRef(0);
+        // How long the layout that follows a finished response is still followed
+        const terminalSettleUntilRef = useRef(0);
         
         // Select the correct atoms based on whether we're in the separate window
         const scrollAtoms = getScrollAtoms(isWindow);
@@ -327,7 +335,8 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             };
         }, [restoreScrollPosition, scrollAtoms, scrolledAtom, tryScrollToPendingRun, isProtocolScrollLocked, win]);
 
-        // Keep the measured position honest while content grows.
+        // Follow the bottom, and keep the measured position honest, from the one
+        // signal that says the content changed size.
         //
         // The observer above watches the scroll container, whose box does not
         // change as messages stream into it — only its scrollable content does.
@@ -335,14 +344,128 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         // without moving `scrollTop`, so no scroll event fires, and a reader
         // sitting above the fold would otherwise keep an "at the bottom" reading
         // taken before the response began. Observing the run elements catches it
-        // at the source, including growth no atom describes — an image finishing,
-        // a code block wrapping, a card animating open.
+        // at the source, and catches it whatever caused it — a token arriving, an
+        // image finishing, a code block re-wrapping, a card animating open, the
+        // working indicator appearing part-way through a response. None of those
+        // has to be described by an atom first, and a frame in which the text
+        // changed but the height did not does no work here at all.
+        //
+        // Shrinking is the same signal, and it is why this has to be a resize and
+        // not a scroll: content shrinking under a reader who is at the end moves
+        // the bottom towards them without moving `scrollTop`, so no scroll event
+        // ever fires. It arrives here as a resize record like any other, and the
+        // resume rule below sees the container is now at its bottom.
+        //
+        // Resize records are delivered at most once per frame, after layout and
+        // before paint. Reading `scrollHeight`/`scrollTop` here is therefore free
+        // — layout is already settled, so nothing has to be recomputed to answer
+        // — and a scroll issued from here still lands in the frame that grew the
+        // content, with no intermediate state ever painted.
         useEffect(() => {
             const container = scrollContainerRef.current;
             if (!container) return;
 
             const observer = new ResizeObserver(() => {
-                publishScrollPosition(container, scrollAtoms);
+                // A pane that is mounted but not laid out yet, or one the reader
+                // collapsed, reports every offset as zero — which reads as "at
+                // the bottom" and would both publish that and clear the reader's
+                // scroll-back intent below, from a container nobody is looking
+                // at. `measureDistanceFromBottom` returns null for those.
+                const distanceFromBottom = measureDistanceFromBottom(container);
+                if (distanceFromBottom === null) return;
+
+                // Where the container sits is settled by this resize whatever the
+                // gates below decide about intent, so it is published first, and
+                // from the read already made.
+                publishDistanceFromBottom(distanceFromBottom, scrollAtoms);
+
+                // Protocol navigation owns the container until its jump has
+                // landed; the run it is heading for is usually not the last one,
+                // and following would take the reader straight back off it.
+                if (pendingRunId || isProtocolScrollLocked()) {
+                    return;
+                }
+
+                // A restore has just put the container back where the reader left
+                // this thread, and re-rendering the thread is itself a resize.
+                // Consume one record so that placement stands; the growth after
+                // it is the response, and is followed normally.
+                if (restoredFromAtomRef.current) {
+                    restoredFromAtomRef.current = false;
+                    return;
+                }
+
+                // Nothing to follow in a thread with no runs in it, and nothing
+                // the reader can have scrolled back from.
+                if (runIds.length === 0) {
+                    return;
+                }
+
+                // The same rule useAutoScroll resumes on, against the same
+                // constant: only the true bottom resumes following. Against the
+                // button's threshold instead, a reader who scrolled back a little
+                // and is still inside that band would have their intent cleared
+                // here on the next streamed frame, and be pulled to the end.
+                if (distanceFromBottom <= AT_BOTTOM_EPSILON) {
+                    store.set(scrolledAtom, false);
+                }
+
+                // Only a response in flight is followed. A resize says the
+                // content changed size, not who changed it, and when nothing is
+                // generating the only thing that changes it is the reader —
+                // opening a tool result, expanding the list of library changes.
+                // Following that would carry them to the end of the thread and
+                // take with it the very thing they just opened, which is exactly
+                // as far above the fold as it is tall. Left alone, the view stays
+                // where they put it and the scroll-down button appears, because
+                // there is now more below them.
+                //
+                // Generating, or settling immediately after it. Not merely
+                // live: a run paused on a deferred approval is still live, and
+                // is exactly when the reader is reading the cards it put in
+                // front of them — the review of a run's library changes renders
+                // on this same status, so keying both on it is what keeps a card
+                // from being shown and scrolled away in the same breath.
+                //
+                // The settle window is for the other end. A run's terminal
+                // layout is laid out after its status has already changed, so
+                // gating on the status alone would stop following a response
+                // exactly as the last of it arrived.
+                //
+                // Read rather than subscribed: this needs the value as of the
+                // resize, and subscribing would re-register the observer at the
+                // start and end of every run.
+                if (store.get(activeRunAtom)?.status === 'in_progress') {
+                    terminalSettleUntilRef.current = Date.now() + TERMINAL_SETTLE_MS;
+                } else if (Date.now() >= terminalSettleUntilRef.current) {
+                    return;
+                }
+
+                // Follow the bottom by assignment, not by animation. Content
+                // arrives many times a second and every arrival moves the bottom,
+                // so easing towards one that has moved again before the easing
+                // finishes is what makes a streaming thread wobble; a fresh
+                // assignment per record simply holds the reader at the end of the
+                // text as it arrives.
+                //
+                // Nothing to arm `isAnimatingRef` for, either: the write lands
+                // before this returns, so restoreScrollPosition has no in-flight
+                // motion to stay out of the way of.
+                //
+                // This cannot re-enter the observer. `scrollTop` is a scroll
+                // offset, not a layout property: assigning it resizes nothing, so
+                // it produces no resize record. (Content growing past the
+                // viewport can bring a scrollbar in and narrow the children,
+                // which is a real second record — but it is caused by the growth,
+                // not by the scroll, and it settles immediately, because taking
+                // the same offset again changes no width.)
+                pinToBottom(scrollContainerRef as React.RefObject<HTMLElement>, scrolledAtom);
+
+                // Deliberately not measuring again after the scroll. The jump
+                // above writes scrollTop, and a read after it is a read-after-
+                // write. The position was already published from the read before
+                // the write, and the scroll event the jump produces reports the
+                // offset it came to rest at, for free.
             });
 
             for (const child of Array.from(container.children)) {
@@ -358,77 +481,15 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             // retry drops a run and installs its replacement in one batch, so
             // the children are swapped without the count ever moving, and an
             // observer keyed on the count would sit watching detached elements.
-        }, [runIds, scrollAtoms, scrollContainerRef]);
-
-        // Scroll to bottom when runs change, and when the working indicator appears
-        // or goes away — that is content the run itself does not account for.
-        useEffect(() => {
-            if (pendingRunId || isProtocolScrollLocked()) {
-                return;
-            }
-
-            if (restoredFromAtomRef.current) {
-                restoredFromAtomRef.current = false;
-                return;
-            }
-
-            if (scrollContainerRef.current && runs.length > 0) {
-                const container = scrollContainerRef.current;
-
-                // A pane that is mounted but not laid out yet reports every
-                // offset as zero, which reads as "at the bottom" and would both
-                // publish that and clear the reader's scroll-back intent below —
-                // from a container nobody is looking at. Collapsing a pane only
-                // reaches the atoms through a MutationObserver, so this window is
-                // reachable on a tab switch mid-response.
-                if (container.clientHeight === 0) {
-                    return;
-                }
-
-                // Check if we're effectively at the bottom now (e.g. content shrunk due to retry/edit)
-                // If we are at the bottom, we should reset userScrolled to allow auto-scroll.
-                // This handles cases where the user was scrolled up, but the content size reduced
-                // such that they are now looking at the bottom. Content can shrink without moving
-                // scrollTop, which fires no scroll event, so this is the only place that notices.
-                const { scrollHeight, clientHeight, scrollTop } = container;
-                const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-
-                // Published from the read above, before the scroll below moves
-                // it: this effect runs on every frame of a response, so it is the
-                // one report that does not depend on which elements the observer
-                // happens to be watching. Free — the read is already being made.
-                publishDistanceFromBottom(distanceFromBottom, scrollAtoms);
-
-                // The same rule useAutoScroll resumes on, against the same
-                // constant: only the true bottom resumes following. Against the
-                // button's threshold instead, a reader who scrolled back a little
-                // and is still inside that band would have their intent cleared
-                // here on the next streamed frame, and be pulled to the end.
-                if (distanceFromBottom <= AT_BOTTOM_EPSILON) {
-                    store.set(scrolledAtom, false);
-                }
-
-                // Follow the bottom by assignment, not by animation. This effect
-                // runs on every frame of a response, and easing towards a bottom
-                // that moves again before the easing finishes is what makes a
-                // streaming thread wobble; a fresh assignment per frame simply
-                // holds the reader at the end of the text as it arrives.
-                //
-                // Nothing to arm `isAnimatingRef` for, either: the write lands
-                // before this returns, so restoreScrollPosition has no in-flight
-                // motion to stay out of the way of.
-                //
-                // Pass the correct scroll atom for this context.
-                pinToBottom(scrollContainerRef as React.RefObject<HTMLElement>, scrolledAtom);
-
-                // Deliberately not measuring again after the scroll. The jump
-                // above writes scrollTop, so a read here would be a read-after-
-                // write on a per-frame path — the browser has to lay out again
-                // to answer it. The position was already published from the read
-                // before the write, and the resize observer and the scroll event
-                // the jump produces both report from after layout, for free.
-            }
-        }, [pendingRunId, isProtocolScrollLocked, runs, streamQuiet, scrollAtoms, scrolledAtom]);
+            //
+            // Re-registering is also how a run being added or removed is noticed
+            // at all: observing an element delivers an initial record for it, so
+            // the swap reports the new content size the same way growth does.
+            //
+            // `pendingRunId` is in here so the gate above reads the current one.
+            // It changes only on protocol navigation, and a re-registration
+            // during one is gated by that same navigation.
+        }, [runIds, scrollAtoms, scrolledAtom, scrollContainerRef, pendingRunId, isProtocolScrollLocked]);
 
         // Scroll to bottom when a new pending approval appears
         // This ensures the approval buttons are visible, even if user had scrolled up
