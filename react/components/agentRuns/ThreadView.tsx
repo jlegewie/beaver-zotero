@@ -4,7 +4,7 @@ import { allRunsAtom, threadRunIdsAtom } from "@beaver/agent-core/run-state/atom
 import { streamQuietAtom } from "@beaver/agent-core/run-state/streamActivity";
 import { AgentRunView } from "./AgentRunView";
 import { scrollToBottom } from "../../utils/scrollToBottom";
-import { BOTTOM_THRESHOLD, getScrollAtoms, publishDistanceFromBottom, publishScrollPosition } from "../../utils/scrollPosition";
+import { AT_BOTTOM_EPSILON, BOTTOM_THRESHOLD, getScrollAtoms, publishDistanceFromBottom, publishScrollPosition } from "../../utils/scrollPosition";
 import { currentThreadIdAtom, pendingScrollToRunAtom, isLoadingThreadAtom } from "../../atoms/threads";
 import { pendingApprovalsAtom } from "../../agents/agentActions";
 import { store } from "../../store";
@@ -193,9 +193,14 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 restoredFromAtomRef.current = true;
                 container.scrollTop = targetScrollTop;
 
-                // Set scroll state based on position after restore
+                // Set scroll state based on position after restore, but only
+                // when a thread was actually opened. This runs from a layout
+                // trigger too — the reader collapsing and re-opening the pane —
+                // and there the restore describes where they had got to, not a
+                // decision to leave the response. Latching from it would stop a
+                // stream mid-flight for someone who only resized a pane.
                 const distanceFromBottom = publishScrollPosition(container, scrollAtoms);
-                if (distanceFromBottom !== null) {
+                if (distanceFromBottom !== null && isThreadSwitch) {
                     store.set(scrolledAtom, distanceFromBottom > BOTTOM_THRESHOLD);
                 }
             } else {
@@ -204,9 +209,9 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 // For small deltas (thread switch with similar position or streaming updates),
                 // re-derive the intent from where the restored thread actually sits.
                 // IMPORTANT: Only do this on thread switch!
-                // Mid-scroll this belongs to useAutoScroll, whose heuristics know
-                // the difference between the reader moving and the layout shifting
-                // under them; overwriting it from here would undo that.
+                // Mid-scroll this belongs to useAutoScroll, which latches the
+                // intent from the reader's own gestures; overwriting it from
+                // here would undo that.
                 //
                 // Both directions, not just the clear: a thread reopened part-way
                 // up is one the reader left part-way up, and leaving a stale
@@ -222,7 +227,8 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         }, [pendingRunId, isProtocolScrollLocked, scrollAtoms, scrollPositionAtom, scrolledAtom, scrollContainerRef, currentThreadId]);
 
         // Restore scroll position from atom (only for thread switching, not during streaming)
-        // Note: userScrolledAtom is managed by useAutoScroll.handleScroll, not here
+        // Note: userScrolledAtom is managed by useAutoScroll — its gesture
+        // listeners and scroll handler — not here
         useLayoutEffect(() => {
             restoreScrollPosition();
             prevThreadIdRef.current = currentThreadId;
@@ -273,10 +279,18 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     if (containerShrunk && wasAtBottom && !isProtocolScrollLocked()) {
                         container.scrollTop = Math.max(container.scrollHeight - currentHeight, 0);
                     } else {
+                        // Resuming only, and only at the true bottom. A resize
+                        // says nothing about what the reader wants — latching
+                        // intent from one would take a reader who scrolled back
+                        // a little and then resized the pane, and hand them to
+                        // auto-scroll on the next frame. Where the container now
+                        // sits is published below, which is what the scroll-down
+                        // button reads.
                         const { scrollHeight, scrollTop } = container;
                         const distanceFromBottom = scrollHeight - scrollTop - currentHeight;
-                        const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
-                        store.set(scrolledAtom, !isNearBottom);
+                        if (distanceFromBottom <= AT_BOTTOM_EPSILON) {
+                            store.set(scrolledAtom, false);
+                        }
                     }
                 }
 
@@ -356,9 +370,10 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 }
 
                 // Check if we're effectively at the bottom now (e.g. content shrunk due to retry/edit)
-                // If we are within the threshold, we should reset userScrolled to allow auto-scroll.
+                // If we are at the bottom, we should reset userScrolled to allow auto-scroll.
                 // This handles cases where the user was scrolled up, but the content size reduced
-                // such that they are now looking at the bottom.
+                // such that they are now looking at the bottom. Content can shrink without moving
+                // scrollTop, which fires no scroll event, so this is the only place that notices.
                 const { scrollHeight, clientHeight, scrollTop } = container;
                 const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
 
@@ -368,7 +383,12 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 // happens to be watching. Free — the read is already being made.
                 publishDistanceFromBottom(distanceFromBottom, scrollAtoms);
 
-                if (distanceFromBottom <= BOTTOM_THRESHOLD) {
+                // The same rule useAutoScroll resumes on, against the same
+                // constant: only the true bottom resumes following. Against the
+                // button's threshold instead, a reader who scrolled back a little
+                // and is still inside that band would have their intent cleared
+                // here on the next streamed frame, and be pulled to the end.
+                if (distanceFromBottom <= AT_BOTTOM_EPSILON) {
                     store.set(scrolledAtom, false);
                 }
 
@@ -485,8 +505,14 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 const distanceFromBottom = publishScrollPosition(container, scrollAtoms);
                 if (distanceFromBottom === null) return;
 
-                // Update scrolled state based on current position
-                store.set(scrolledAtom, distanceFromBottom > BOTTOM_THRESHOLD);
+                // Publishing the position is the point here — that is what moves
+                // the scroll-down button. Intent is only ever resumed, and only
+                // at the true bottom: collapsing a card above a reader who had
+                // scrolled back leaves them nearer the end without their having
+                // asked to go back to it.
+                if (distanceFromBottom <= AT_BOTTOM_EPSILON) {
+                    store.set(scrolledAtom, false);
+                }
             }, EXPANSION_SCROLL_EVAL_DELAY);
 
             return () => win.clearTimeout(timeoutId);

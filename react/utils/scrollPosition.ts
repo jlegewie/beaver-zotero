@@ -38,6 +38,23 @@ import { store } from '../store';
  */
 export const BOTTOM_THRESHOLD = 120; // pixels
 
+/**
+ * How close to the bottom counts as being *at* it, for the one question that
+ * needs the strict answer: may auto-scroll resume following?
+ *
+ * Deliberately not `BOTTOM_THRESHOLD`. That one is generous on purpose — it
+ * decides whether there is enough below to bother showing the scroll-down
+ * button, and a reader a screen-inch from the end does not need to be told
+ * there is more. Resuming on the same generosity would mean a reader who
+ * scrolled back a little, and is still inside the band, gets handed straight
+ * back to auto-scroll and yanked to the end.
+ *
+ * Small enough that only the true bottom qualifies, large enough to absorb what
+ * lands there honestly: fractional scroll offsets on a scaled display, and the
+ * sub-pixel rounding between `scrollHeight` and `scrollTop + clientHeight`.
+ */
+export const AT_BOTTOM_EPSILON = 8; // pixels
+
 /** Reads as the remembered offset, writes null to forget it. */
 type ScrollPositionAtom = WritableAtom<number | undefined, [number | null], void>;
 
