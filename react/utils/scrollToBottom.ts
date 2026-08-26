@@ -13,17 +13,22 @@ const MIN_PROGRESS_FOR_INTERRUPTION_CHECK = 20; // ms
  * @param containerRef Ref to the scroll container
  * @param userScrolledOverride Optional override for user scrolled state
  * @param customScrolledAtom Optional custom atom to read scrolled state from
+ * @returns Whether an animation was started. False when the container was
+ * already at (or close to) the bottom and the scroll completed synchronously,
+ * which is the common case while a response streams in — a caller that locks
+ * other scroll handling out for the length of the animation has nothing to lock
+ * out then.
  */
 export const scrollToBottom = (
     containerRef: React.RefObject<HTMLElement>,
     userScrolledOverride?: boolean,
     customScrolledAtom?: WritableAtom<boolean, [boolean], void>
-) => {
+): boolean => {
     const atomToRead = customScrolledAtom ?? userScrolledAtom;
     const userScrolled = userScrolledOverride !== undefined ? userScrolledOverride : store.get(atomToRead);
     // If user has manually scrolled, or container doesn't exist, don't auto-scroll
     if (!containerRef.current || userScrolled) {
-        return;
+        return false;
     }
     
     const container = containerRef.current;
@@ -35,7 +40,7 @@ export const scrollToBottom = (
     // Allow for small negative distance if already overscrolled by a tiny bit
     if (initialDistance < 50 && initialDistance > -5) { 
         container.scrollTop = targetScrollTop;
-        return;
+        return false;
     }
     
     // Otherwise animate scroll
@@ -94,4 +99,5 @@ export const scrollToBottom = (
     };
 
     win.requestAnimationFrame(step);
+    return true;
 };

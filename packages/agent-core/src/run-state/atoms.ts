@@ -1,4 +1,5 @@
 import { atom } from "jotai/vanilla";
+import type { Atom } from "jotai/vanilla";
 import { logger } from "../platform/logger";
 import {
     AgentRun,
@@ -21,6 +22,7 @@ import {
     WSToolCallArgsStreamEvent,
 } from "../protocol/agentProtocol";
 import { MessageAttachment, messageAttachmentKey, messageAttachmentsHaveSameIdentity } from "../types/attachments/apiTypes";
+import { collectResumeChain } from "./runResumeHelpers";
 
 // =============================================================================
 // Core Atoms
@@ -56,22 +58,50 @@ export const allRunsAtom = atom((get) => {
     return active ? [...completed, active] : completed;
 });
 
-/** Set of run IDs that were resumed (for hiding error runs that were resumed) */
+/**
+ * Set of run IDs that were resumed (for hiding error runs that were resumed).
+ *
+ * Returns the previous Set when the membership is unchanged. Every component
+ * subscribed to this atom re-renders when its value changes identity, and this
+ * atom is recomputed on every streamed update to the active run — a fresh Set
+ * each time would re-render every run in the thread per streamed frame.
+ */
+let lastResumedRunIds = new Set<string>();
 export const resumedRunIdsAtom = atom((get) => {
     const runs = get(allRunsAtom);
     const resumedIds = new Set<string>();
-    
+
     for (const run of runs) {
         if (run.user_prompt.is_resume && run.user_prompt.resumes_run_id) {
             resumedIds.add(run.user_prompt.resumes_run_id);
         }
     }
-    
+
+    if (setsAreEqual(resumedIds, lastResumedRunIds)) return lastResumedRunIds;
+    lastResumedRunIds = resumedIds;
     return resumedIds;
 });
 
+function setsAreEqual(a: Set<string>, b: Set<string>): boolean {
+    if (a.size !== b.size) return false;
+    for (const value of a) {
+        if (!b.has(value)) return false;
+    }
+    return true;
+}
+
 /** Total number of runs in the thread */
 export const runsCountAtom = atom((get) => get(allRunsAtom).length);
+
+/**
+ * Runs of the thread by id. Built once per change so the scoped selectors below
+ * cost a lookup each rather than a scan of the thread.
+ */
+const runsByIdAtom = atom((get) => {
+    const map = new Map<string, AgentRun>();
+    for (const run of get(allRunsAtom)) map.set(run.id, run);
+    return map;
+});
 
 /**
  * Whether Beaver is still generating in the open thread.
@@ -82,29 +112,144 @@ export const runsCountAtom = atom((get) => get(allRunsAtom).length);
  */
 export const isStreamingAtom = atom((get) => isRunActive(get(activeRunAtom)));
 
-/** Quick lookup of tool results by tool_call_id */
-export const toolResultsMapAtom = atom((get) => {
-    const runs = get(allRunsAtom);
-    const map = new Map<string, (ToolReturnPart | RetryPromptPart)>();
+export type ToolResult = ToolReturnPart | RetryPromptPart;
 
-    for (const run of runs) {
-        for (const msg of run.model_messages) {
-            if (msg.kind === 'request') {
-                for (const part of msg.parts) {
-                    // Allowlist, not a filter: request messages also carry
-                    // model-facing user-prompt parts that must not reach the UI
-                    // (see `isRenderableMessage`). Only add a part kind here
-                    // after deciding it is displayable.
-                    if (part.part_kind === 'tool-return' || part.part_kind === 'retry-prompt') {
-                        map.set(part.tool_call_id, part as ToolReturnPart | RetryPromptPart);
-                    }
-                }
+const EMPTY_TOOL_RESULTS: ReadonlyMap<string, ToolResult> = new Map();
+
+/**
+ * Tool results of a single run, keyed by tool_call_id.
+ *
+ * Cached on the identity of the run's `model_messages` array, which every run
+ * update replaces, so a run that has not changed returns the same Map. That
+ * stable identity is what keeps a finished run's cards from re-rendering while
+ * a later run streams.
+ */
+const runToolResultsCache = new WeakMap<ModelMessage[], Map<string, ToolResult>>();
+
+export function getRunToolResults(run: AgentRun): Map<string, ToolResult> {
+    const cached = runToolResultsCache.get(run.model_messages);
+    if (cached) return cached;
+
+    const map = new Map<string, ToolResult>();
+    for (const msg of run.model_messages) {
+        if (msg.kind !== 'request') continue;
+        for (const part of msg.parts) {
+            // Allowlist, not a filter: request messages also carry
+            // model-facing user-prompt parts that must not reach the UI
+            // (see `isRenderableMessage`). Only add a part kind here
+            // after deciding it is displayable.
+            if (part.part_kind === 'tool-return' || part.part_kind === 'retry-prompt') {
+                map.set(part.tool_call_id, part as ToolResult);
             }
         }
     }
 
+    runToolResultsCache.set(run.model_messages, map);
     return map;
-});
+}
+
+/** Merge the tool results of several runs into one lookup. */
+export function mergeRunToolResults(runs: AgentRun[]): Map<string, ToolResult> {
+    const map = new Map<string, ToolResult>();
+    for (const run of runs) {
+        for (const [toolCallId, result] of getRunToolResults(run)) {
+            map.set(toolCallId, result);
+        }
+    }
+    return map;
+}
+
+/**
+ * Quick lookup of tool results by tool_call_id, across the whole thread.
+ *
+ * Prefer a scoped selector in a component that renders during streaming:
+ * `toolResultAtom` for a single call, `runToolResultsAtom` for one run's calls.
+ * This atom's Map is rebuilt — and so changes identity — on every streamed
+ * update to the active run, which re-renders every subscriber with it.
+ */
+export const toolResultsMapAtom = atom((get) => mergeRunToolResults(get(allRunsAtom)));
+
+// =============================================================================
+// Scoped run selectors
+// =============================================================================
+//
+// Streaming replaces the active run object on every update, which cascades
+// through the atoms derived from it. A component that subscribes to one of
+// those derived atoms re-renders on every streamed frame even when nothing it
+// displays has changed — and `React.memo` cannot prevent it, because the
+// subscription re-renders the component regardless of its props.
+//
+// The selectors below narrow a subscription to the part of the run state a
+// component actually renders, and hold their previous value when that part is
+// unchanged so jotai can skip the update. They are cached per key; the cache is
+// dropped when the thread changes (`resetRunSelectorCaches`).
+
+const toolResultAtomCache = new Map<string, Atom<ToolResult | undefined>>();
+const runToolResultsAtomCache = new Map<string, Atom<ReadonlyMap<string, ToolResult>>>();
+const resumeChainAtomCache = new Map<string, Atom<AgentRun[]>>();
+const resumeChainValueCache = new Map<string, AgentRun[]>();
+
+/** The result of one tool call, or undefined while it is still running. */
+export function toolResultAtom(toolCallId: string): Atom<ToolResult | undefined> {
+    let cached = toolResultAtomCache.get(toolCallId);
+    if (!cached) {
+        cached = atom((get) => get(toolResultsMapAtom).get(toolCallId));
+        toolResultAtomCache.set(toolCallId, cached);
+    }
+    return cached;
+}
+
+/** Tool results of one run, keyed by tool_call_id. */
+export function runToolResultsAtom(runId: string): Atom<ReadonlyMap<string, ToolResult>> {
+    let cached = runToolResultsAtomCache.get(runId);
+    if (!cached) {
+        cached = atom((get) => {
+            const run = get(runsByIdAtom).get(runId);
+            return run ? getRunToolResults(run) : EMPTY_TOOL_RESULTS;
+        });
+        runToolResultsAtomCache.set(runId, cached);
+    }
+    return cached;
+}
+
+/**
+ * The resume chain ending at this run, oldest run first — see
+ * `collectResumeChain`. An ordinary run is a chain of one.
+ *
+ * Holds its previous array while the chain's runs are unchanged, so a run
+ * elsewhere in the thread streaming does not re-render this run's footer.
+ */
+export function resumeChainAtom(runId: string): Atom<AgentRun[]> {
+    let cached = resumeChainAtomCache.get(runId);
+    if (!cached) {
+        cached = atom((get) => {
+            const run = get(runsByIdAtom).get(runId);
+            const chain = run ? collectResumeChain(run, get(allRunsAtom)) : [];
+
+            const previous = resumeChainValueCache.get(runId);
+            if (previous && previous.length === chain.length
+                && previous.every((entry, index) => entry === chain[index])) {
+                return previous;
+            }
+            resumeChainValueCache.set(runId, chain);
+            return chain;
+        });
+        resumeChainAtomCache.set(runId, cached);
+    }
+    return cached;
+}
+
+/**
+ * Drop the scoped selector caches. Call when the open thread changes: the
+ * cached atoms are keyed by ids of that thread's runs and tool calls, and the
+ * resume-chain cache holds its run objects.
+ */
+export function resetRunSelectorCaches(): void {
+    toolResultAtomCache.clear();
+    runToolResultsAtomCache.clear();
+    resumeChainAtomCache.clear();
+    resumeChainValueCache.clear();
+}
 
 /**
  * Map of user attachments in all runs, keyed by the canonical
@@ -229,10 +374,21 @@ export type ToolCallStatus = 'in_progress' | 'completed' | 'error';
 /** Get the status of a tool call based on its result */
 export function getToolCallStatus(
     toolCallId: string,
-    resultsMap: Map<string, (ToolReturnPart | RetryPromptPart)>,
+    resultsMap: ReadonlyMap<string, ToolResult>,
     runStatus?: AgentRunStatus
 ): ToolCallStatus {
-    const result = resultsMap.get(toolCallId);
+    return getToolCallStatusFromResult(resultsMap.get(toolCallId), runStatus);
+}
+
+/**
+ * The same rule as `getToolCallStatus`, for a caller that already holds the
+ * call's result — a component subscribed to `toolResultAtom` rather than to the
+ * whole thread's lookup.
+ */
+export function getToolCallStatusFromResult(
+    result: ToolResult | undefined,
+    runStatus?: AgentRunStatus
+): ToolCallStatus {
     if (!result && runStatus && runStatus === 'in_progress') return 'in_progress';
     if (!result) return 'error';
 

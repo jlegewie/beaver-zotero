@@ -14,8 +14,8 @@ import { citationMapAtom, citationsByRunIdAtom, citationKeyToMarkerAtom } from '
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { CitedSource, getCitationKey } from '@beaver/agent-core/types/citations';
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
-import { toolResultsMapAtom, allRunsAtom } from '@beaver/agent-core/run-state/atoms';
-import { collectResumeChain, sumChainUsage } from '@beaver/agent-core/run-state/runResumeHelpers';
+import { allRunsAtom, mergeRunToolResults, resumeChainAtom } from '@beaver/agent-core/run-state/atoms';
+import { sumChainUsage } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { extractRunResponseContent } from '../../utils/threadContent';
 import { resolveToolCallLabelEnrichMap } from '../../utils/toolCallLabelEnrich';
 import TokenUsageDisplay from './TokenUsageDisplay';
@@ -41,9 +41,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     const citationsByRunId = useAtomValue(citationsByRunIdAtom);
     const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
-    const toolResultsMap = useAtomValue(toolResultsMapAtom);
     const citationMarkerMap = useAtomValue(citationKeyToMarkerAtom);
-    const allRuns = useAtomValue(allRunsAtom);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
     // A response that was continued after an error or an interruption spans
@@ -51,7 +49,11 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     // footer. Everything below therefore describes the whole chain: its text,
     // its citations, its cost, and the question that started it. An ordinary
     // run is a chain of one, so nothing changes for it.
-    const chainRuns = useMemo(() => collectResumeChain(run, allRuns), [run, allRuns]);
+    const chainRuns = useAtomValue(useMemo(() => resumeChainAtom(run.id), [run.id]));
+    // Scoped to the chain rather than the thread: subscribing to every run's
+    // tool results would re-render this footer on every frame of a later run's
+    // response.
+    const toolResultsMap = useMemo(() => mergeRunToolResults(chainRuns), [chainRuns]);
     // Where the message began: a continuation's own prompt is empty, and it is
     // the opening run that a link or an id should point at.
     const messageRun = chainRuns[0];
@@ -209,7 +211,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         if (!noteWriter) return;
         try {
             const contentHtml = await buildRunNoteContentHtml();
-            const responseIndex = allRuns.findIndex(r => r.id === messageRun.id) + 1;
+            const responseIndex = store.get(allRunsAtom).findIndex((candidate: AgentRun) => candidate.id === messageRun.id) + 1;
             await noteWriter.saveNote({
                 contentHtml,
                 asChild,

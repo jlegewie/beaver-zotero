@@ -17,7 +17,7 @@ import { resetMessageUIStateAtom } from "./messageUIState";
 import { checkExternalReferencesAtom } from "./externalReferences";
 import { clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "@beaver/agent-core/citations/externalReferences";
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
-import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom } from "@beaver/agent-core/run-state/atoms";
+import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom, resetRunSelectorCaches } from "@beaver/agent-core/run-state/atoms";
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
 import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
 import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
@@ -40,6 +40,7 @@ import { enrichMessageAttachmentStub } from "../types/attachments/converters";
 import { zoteroReferenceKey } from "@beaver/agent-core/types/attachments/apiTypes";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
 import type { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
+import { flushPendingPartEvents } from "../utils/streamingPartQueue";
 
 /**
  * Stores a run ID that ThreadView should scroll to after a thread finishes loading.
@@ -240,6 +241,9 @@ function confirmOpenMismatchedThread(): boolean {
  * This ensures the WebSocket connection is closed and UI state is consistent.
  */
 async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any, value?: any) => void): Promise<void> {
+    // A run canceled mid-response is archived as it stands, so it has to
+    // include the streamed text still sitting in the frame queue.
+    flushPendingPartEvents();
     const isPending = get(isWSChatPendingAtom);
     const activeRun = get(activeRunAtom);
     
@@ -319,6 +323,7 @@ export const newThreadAtom = atom(
             set(removePopupMessagesByTypeAtom, ['items_summary']);
             set(citationsAtom, []);
             set(resetCitationMarkersAtom);
+            resetRunSelectorCaches();
             set(clearComposerAtom);
             set(resetMessageUIStateAtom);
             set(clearExternalReferenceCacheAtom);
@@ -446,6 +451,7 @@ export const loadThreadAtom = atom(
             set(clearExternalReferenceCacheAtom);
             set(isWebSearchEnabledAtom, false);
             set(resetCitationMarkersAtom);
+            resetRunSelectorCaches();
 
             // Clear all pending approvals/questions when loading a different thread
             set(clearAllPendingApprovalsAtom);

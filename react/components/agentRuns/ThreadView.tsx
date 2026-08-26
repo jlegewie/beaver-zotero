@@ -310,16 +310,26 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     store.set(scrolledAtom, false);
                 }
 
-                // Set animation flag to prevent restoreScrollPosition from interfering
-                isAnimatingRef.current = true;
-                
                 // Pass the correct scroll atom for this context
-                scrollToBottom(scrollContainerRef as React.RefObject<HTMLElement>, undefined, scrolledAtom);
-                
-                // Clear animation flag after animation completes (with buffer)
-                win.setTimeout(() => {
-                    isAnimatingRef.current = false;
-                }, ANIMATION_LOCKOUT_MS);
+                const isAnimating = scrollToBottom(
+                    scrollContainerRef as React.RefObject<HTMLElement>,
+                    undefined,
+                    scrolledAtom,
+                );
+
+                // Only an animation needs restoreScrollPosition held off, and
+                // only an animated scroll leaves anything to hold off from. The
+                // usual case while a response streams is a jump of a line or
+                // two, already applied by the time this returns — arming the
+                // lockout for it would keep the flag pinned, and its timer
+                // rearmed, for the whole response.
+                if (isAnimating) {
+                    isAnimatingRef.current = true;
+                    // Clear animation flag after animation completes (with buffer)
+                    win.setTimeout(() => {
+                        isAnimatingRef.current = false;
+                    }, ANIMATION_LOCKOUT_MS);
+                }
             }
         }, [pendingRunId, isProtocolScrollLocked, runs, streamQuiet, scrolledAtom, win]);
 
@@ -352,16 +362,22 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                         // Reset userScrolled to allow auto-scroll
                         store.set(scrolledAtom, false);
                         
-                        // Set animation flag
-                        isAnimatingRef.current = true;
-                        
                         // Force scroll to bottom (passing false to override userScrolled)
-                        scrollToBottom(scrollContainerRef as React.RefObject<HTMLElement>, false, scrolledAtom);
-                        
-                        // Clear animation flag after animation completes
-                        win.setTimeout(() => {
-                            isAnimatingRef.current = false;
-                        }, ANIMATION_LOCKOUT_MS);
+                        const isAnimating = scrollToBottom(
+                            scrollContainerRef as React.RefObject<HTMLElement>,
+                            false,
+                            scrolledAtom,
+                        );
+
+                        // Set the animation flag only when there is an animation
+                        // for restoreScrollPosition to stay out of the way of.
+                        if (isAnimating) {
+                            isAnimatingRef.current = true;
+                            // Clear animation flag after animation completes
+                            win.setTimeout(() => {
+                                isAnimatingRef.current = false;
+                            }, ANIMATION_LOCKOUT_MS);
+                        }
                     }
                 }, PENDING_APPROVAL_SCROLL_DELAY);
                 

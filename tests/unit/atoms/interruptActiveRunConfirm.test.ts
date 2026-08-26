@@ -111,6 +111,7 @@ vi.mock('@beaver/agent-core/run-state/atoms', async () => {
         currentThreadIdAtom: atom<string | null>(null),
         currentThreadNameAtom: atom<string | null>(null),
         isLoadingThreadAtom: atom<boolean>(false),
+        resetRunSelectorCaches: () => {},
     };
 });
 

@@ -2,7 +2,7 @@ import React, { forwardRef, useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
 import { AgentRun, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
-import { collectResumeChain, shouldOfferResume, wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
+import { shouldOfferResume, wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
@@ -12,7 +12,7 @@ import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
 import { RunInterruptedDisplay } from './RunInterruptedDisplay';
 import { threadWarningsAtom } from '../../atoms/warnings';
-import { allRunsAtom, toolResultsMapAtom, resumedRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
+import { resumeChainAtom, runToolResultsAtom, resumedRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
 import { streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { getHost } from '@beaver/agent-ui/host';
@@ -33,8 +33,14 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     const allWarnings = useAtomValue(threadWarningsAtom);
     const runWarnings = allWarnings.filter((w) => w.run_id === run.id && w.type !== 'credit_info');
     const resumedRunIds = useAtomValue(resumedRunIdsAtom);
-    const allRuns = useAtomValue(allRunsAtom);
-    const resultsMap = useAtomValue(toolResultsMapAtom);
+    // Scoped to this run rather than the thread: a thread-wide subscription
+    // re-renders every run on every frame of a later run's response.
+    const resultsMap = useAtomValue(useMemo(() => runToolResultsAtom(run.id), [run.id]));
+    // A response continued after an interruption spans several runs but reads
+    // as one message, so what the whole answer ended up doing belongs under its
+    // last run — beside the footer, which already speaks for the chain. An
+    // ordinary run is a chain of one, so nothing changes for it.
+    const chainRuns = useAtomValue(useMemo(() => resumeChainAtom(run.id), [run.id]));
     const streamingDoneRunIds = useAtomValue(streamingDoneRunIdsAtom);
     const isPostProcessing = streamingDoneRunIds.has(run.id);
     // Safe to subscribe from every run in the thread: this atom changes when a
@@ -107,11 +113,6 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // Terminal statuses: the run is done. `awaiting_deferred` is still live (see isRunActive).
     const isTerminal = run.status === 'completed' || run.status === 'error' || run.status === 'canceled';
 
-    // A response continued after an interruption spans several runs but reads
-    // as one message, so what the whole answer ended up doing belongs under its
-    // last run — beside the footer, which already speaks for the chain. An
-    // ordinary run is a chain of one, so nothing changes for it.
-    const chainRuns = useMemo(() => collectResumeChain(run, allRuns), [run, allRuns]);
     const showRunOutcomes = isTerminal && !wasResumed;
     const showBatchReceipt = showRunOutcomes && hasBatchReceipt(chainRuns);
 

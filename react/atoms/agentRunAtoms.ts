@@ -82,7 +82,6 @@ import {
     activeRunAtom,
     allRunsAtom,
     currentThreadIdAtom,
-    updateRunWithPart,
     updateRunWithToolReturn,
     updateRunComplete,
     updateRunWithToolCallProgress,
@@ -91,6 +90,7 @@ import {
     resetRunMessages,
     wsReconnectingAtom,
     wsRetryAtom,
+    resetRunSelectorCaches,
 } from '@beaver/agent-core/run-state/atoms';
 import {
     createStreamActivityTracker,
@@ -149,6 +149,7 @@ import {
     clearAllPendingBatchApprovalsAtom,
 } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import { readCreditThreshold } from '../utils/creditThreshold';
+import { flushPendingPartEvents, queuePartEvent } from '../utils/streamingPartQueue';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { undoCreateItemAction } from '../utils/createItemActions';
@@ -1358,7 +1359,7 @@ export function createWSCallbacks(
     set: Setter,
     connectAttempts: () => number | null = () => null,
 ): WSCallbacks {
-    return {
+    return flushPartsBeforeOtherEvents({
         onReady: (data: WSReadyData) => {
             logger('WS onReady:', data, 1);
             set(isWSReadyAtom, true);
@@ -1418,8 +1419,11 @@ export function createWSCallbacks(
                     }
                 }
             }
-            // Update run with part
-            set(activeRunAtom, (prev) => prev ? updateRunWithPart(prev, event) : prev);
+            // Queued rather than applied now: the store write, and the render
+            // it triggers, happen once per animation frame however fast parts
+            // arrive. Every other callback here flushes the queue first, so
+            // ordering with the rest of the stream is unchanged.
+            queuePartEvent(event);
         },
 
         onToolReturn: async (event: WSToolReturnEvent) => {
@@ -1982,7 +1986,31 @@ export function createWSCallbacks(
                 }
             }
         }
-    };
+    });
+}
+
+/**
+ * Wrap every callback except `onPart` so it applies the queued part events
+ * before it runs.
+ *
+ * Part events are buffered for a frame (see `streamingPartQueue`), so anything
+ * else arriving on the socket — a tool return, the run completing — would
+ * otherwise see run state missing the text that arrived just before it. Wrapping
+ * the whole object rather than each handler keeps a callback added later from
+ * silently missing the flush.
+ */
+function flushPartsBeforeOtherEvents(callbacks: WSCallbacks): WSCallbacks {
+    const wrapped: Record<string, unknown> = { ...callbacks };
+
+    for (const [name, callback] of Object.entries(callbacks)) {
+        if (name === 'onPart' || typeof callback !== 'function') continue;
+        wrapped[name] = (...args: unknown[]) => {
+            flushPendingPartEvents();
+            return (callback as (...callbackArgs: unknown[]) => unknown)(...args);
+        };
+    }
+
+    return wrapped as unknown as WSCallbacks;
 }
 
 /**
@@ -2554,7 +2582,10 @@ async function startRegenerateRun(
         archiveAndClearTerminalActiveRun(get, set);
 
         // Find the run — a terminal run was archived into threadRuns above,
-        // so only a still-live run is found through the active slot.
+        // so only a still-live run is found through the active slot. A live run
+        // is about to be canceled and resubmitted, so its queued streamed text
+        // has to be applied before it is read.
+        flushPendingPartEvents();
         const threadRuns = get(threadRunsAtom);
         const activeRun = get(activeRunAtom);
 
@@ -3017,6 +3048,7 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(clearAgentActionsAtom);
     set(citationsAtom, []);
     set(resetCitationMarkersAtom);  // Reset citation markers for cleared thread
+    resetRunSelectorCaches();  // Drop scoped run selectors keyed by the cleared thread's runs
     set(clearWarningsAtom);
     // Clear pending questions so a reset never leaves the composer disabled
     // behind an unanswerable card (pending approvals are left as-is here).
