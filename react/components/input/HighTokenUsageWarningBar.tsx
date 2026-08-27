@@ -21,7 +21,7 @@ const HighTokenUsageWarningBar: React.FC<HighTokenUsageWarningBarProps> = ({
 
     return (
         <div className="high-token-usage-warning-bar display-flex flex-row items-start px-3 py-15 gap-2">
-            <Icon icon={AlertIcon} className="font-color-orange scale-10 mt-010" />
+            <Icon icon={AlertIcon} className="font-color-secondary scale-10 mt-010" />
             <span className="font-color-secondary text-sm">
                 Your conversation is long.
                 {' '}

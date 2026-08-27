@@ -113,7 +113,7 @@ const BatchDoneRow: React.FC<{
                 )}
             </div>
 
-            {isExpanded && <BatchOutcomeBody batch={batch} bounded={false} />}
+            {isExpanded && <BatchOutcomeBody batch={batch} bounded={false} revealTargets />}
         </div>
     );
 };

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+    batchOutcomeTarget,
     isBatchProgressStamp,
     readBatchProgressStamp,
     selectBatchProgress,
@@ -10,6 +11,7 @@ import {
     selectTrackedBatch,
 } from '@beaver/agent-core/run-state/batchProgress';
 import type {
+    BatchOutcomeBlock,
     BatchProgressEntry,
     BatchProgressStamp,
 } from '@beaver/agent-core/run-state/batchProgress';
@@ -749,5 +751,82 @@ describe('tally rows', () => {
             ),
         );
         expect(result?.blocks?.[0].rows?.[0].reference).toBeUndefined();
+    });
+});
+
+describe('batchOutcomeTarget', () => {
+    const block = (
+        kind: BatchOutcomeBlock['kind'],
+        rows: BatchOutcomeBlock['rows'],
+    ): BatchOutcomeBlock => ({ heading: 'Heading', kind, rows });
+
+    it('names the collection a sort row filed items into', () => {
+        expect(
+            batchOutcomeTarget(
+                'sort',
+                block('destination', [{ label: 'Ecology', count: 4, reference: 'CHT8AIF6' }]),
+                { label: 'Ecology', count: 4, reference: 'CHT8AIF6' },
+            ),
+        ).toEqual({ kind: 'collection', key: 'CHT8AIF6', name: 'Ecology' });
+    });
+
+    it('names nothing for a sort row that carries no key', () => {
+        // Name without a key cannot address a collection.
+        const row = { label: 'Ecology', count: 4 };
+        expect(batchOutcomeTarget('sort', block('destination', [row]), row)).toBeNull();
+    });
+
+    it('names the tag a tag row applied', () => {
+        const row = { label: 'methods', count: 12 };
+        expect(batchOutcomeTarget('tag', block('destination', [row]), row)).toEqual({
+            kind: 'tag',
+            name: 'methods',
+        });
+    });
+
+    it('names nothing on a removal row', () => {
+        const row = { label: 'Inbox', count: 2, reference: 'CHT8AIF6' };
+        expect(batchOutcomeTarget('sort', block('removal', [row]), row)).toBeNull();
+    });
+
+    it('names nothing on a failure row', () => {
+        const row = { label: 'No text layer', count: 3 };
+        expect(batchOutcomeTarget('extract', block('failure', [row]), row)).toBeNull();
+    });
+
+    it('carries the batch library so a tag names the one it was applied in', () => {
+        const row = { label: 'methods', count: 12 };
+        expect(batchOutcomeTarget('tag', block('destination', [row]), row, 'g900')).toEqual({
+            kind: 'tag',
+            name: 'methods',
+            libraryRef: 'g900',
+        });
+    });
+
+    it('carries it for a collection too', () => {
+        const row = { label: 'Ecology', count: 4, reference: 'CHT8AIF6' };
+        expect(batchOutcomeTarget('sort', block('destination', [row]), row, 'u')).toEqual({
+            kind: 'collection',
+            key: 'CHT8AIF6',
+            name: 'Ecology',
+            libraryRef: 'u',
+        });
+    });
+
+    it('leaves the library undefined when the batch named none', () => {
+        // A batch spanning libraries sends no ref, and an empty string is the
+        // same absence once it has been through the wire's omit-empty pass.
+        const row = { label: 'methods', count: 12 };
+        for (const ref of [undefined, '', '  ']) {
+            expect(batchOutcomeTarget('tag', block('destination', [row]), row, ref))
+                .toEqual({ kind: 'tag', name: 'methods', libraryRef: undefined });
+        }
+    });
+
+    it('names nothing for an operation that tallies by something else', () => {
+        // Field names, not library objects. Unknown operations stay null too.
+        const row = { label: 'Publisher', count: 8 };
+        expect(batchOutcomeTarget('edit_metadata', block('destination', [row]), row)).toBeNull();
+        expect(batchOutcomeTarget('brand_new_operation', block('destination', [row]), row)).toBeNull();
     });
 });

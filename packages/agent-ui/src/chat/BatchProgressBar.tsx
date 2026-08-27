@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback } from 'react';
 import type { BatchProgressEntry } from '@beaver/agent-core/run-state/batchProgress';
 import { ArrowDownIcon, Icon, LayersIcon, TickIcon } from '../icons';
 import {
@@ -8,6 +8,8 @@ import {
 } from './BatchOutcomeBlocks';
 
 const WAITING_HEADING = 'Waiting';
+/** Per-block row cap for the live panel. Hidden rows still count in "+ N more". */
+const PANEL_MAX_TALLY_ROWS = 5;
 /** Lower case: continues the line above it. */
 const QUEUE_PREFIX = 'then ';
 
@@ -33,13 +35,20 @@ export interface BatchProgressBarProps {
      * Finished batches are not here; they belong to `BatchDoneRows`.
      */
     queuedBatches?: readonly BatchProgressEntry[];
+    /**
+     * Whether the outcome body is open. The panel owns this so completion
+     * cannot close it on the user.
+     */
+    expanded?: boolean;
+    onExpandedChange?: (expanded: boolean) => void;
 }
 
 /**
  * Live progress for a batch job, shown above the composer.
  *
- * Collapsed: one line and a 2px segmented hairline. Expanded: goal, counts,
- * and (when the operation has one) the outcome distribution.
+ * Collapsed (the default): one line and a 2px segmented hairline. Expanded:
+ * goal, counts, and (when the operation has one) the outcome distribution.
+ * Expansion is owned by the caller.
  *
  * Read-only — stopping is the composer's Stop button. Silent about review
  * status: the ledger counts an item resolved once the agent has proposed the
@@ -49,16 +58,16 @@ export interface BatchProgressBarProps {
 export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
     batch,
     queuedBatches = [],
+    expanded = false,
+    onExpandedChange,
 }) => {
-    // Collapsed by default so the panel does not push the composer down mid-run.
-    const [isExpanded, setIsExpanded] = useState(false);
-    const toggle = useCallback(() => setIsExpanded((open) => !open), []);
+    const toggle = useCallback(() => onExpandedChange?.(!expanded), [expanded, onExpandedChange]);
     const onKeyDown = useCallback((e: React.KeyboardEvent) => {
         if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            setIsExpanded((open) => !open);
+            onExpandedChange?.(!expanded);
         }
-    }, []);
+    }, [expanded, onExpandedChange]);
 
     // Backend omits default-valued fields — default here, never test `=== 'active'`.
     const status = batch.status ?? 'active';
@@ -126,7 +135,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                 onKeyDown={onKeyDown}
                 role="button"
                 tabIndex={0}
-                aria-expanded={isExpanded}
+                aria-expanded={expanded}
             >
                 <div className="display-flex flex-row items-center gap-2 min-w-0">
                 <Icon icon={LayersIcon} className="font-color-secondary flex-none" />
@@ -159,7 +168,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                 <Icon
                     icon={ArrowDownIcon}
                     className="font-color-secondary flex-none scale-85 transition"
-                    style={{ transform: isExpanded ? 'rotate(180deg)' : undefined }}
+                    style={{ transform: expanded ? 'rotate(180deg)' : undefined }}
                 />
                 </div>
 
@@ -173,8 +182,8 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                 )}
             </div>
 
-            {isExpanded && (
-                <BatchOutcomeBody batch={batch}>
+            {expanded && (
+                <BatchOutcomeBody batch={batch} maxRows={PANEL_MAX_TALLY_ROWS}>
                     {queuedBatches.length > 0 && (
                         <div className="display-flex flex-col gap-1 min-w-0">
                             <BatchBlockHeading>{WAITING_HEADING}</BatchBlockHeading>

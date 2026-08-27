@@ -66,10 +66,14 @@ function renderedText(node: React.ReactNode, out: string[] = []): string[] {
     return out;
 }
 
-function render(batch: BatchProgressEntry, queuedBatches: BatchProgressEntry[]): string {
+function render(
+    batch: BatchProgressEntry,
+    queuedBatches: BatchProgressEntry[],
+    expanded = false,
+): string {
     hookState.slots = [];
     hookState.index = 0;
-    const tree = BatchProgressBar({ batch, queuedBatches }) as React.ReactNode;
+    const tree = BatchProgressBar({ batch, queuedBatches, expanded }) as React.ReactNode;
     return renderedText(tree).join(' ');
 }
 
@@ -94,5 +98,56 @@ describe('the batch progress bar queue', () => {
     it('renders the tracked batch when nothing is queued behind it', () => {
         const text = render(tracked, []);
         expect(text).toContain('Filing items');
+    });
+});
+
+function renderExpanded(batch: BatchProgressEntry): React.ReactNode {
+    hookState.slots = [];
+    hookState.index = 0;
+    return BatchProgressBar({ batch, queuedBatches: [], expanded: true }) as React.ReactNode;
+}
+
+/** The opened batch's body element, wherever it sits in the tree. */
+function outcomeBody(node: React.ReactNode): React.ReactElement<any> | null {
+    if (Array.isArray(node)) {
+        for (const child of node) {
+            const found = outcomeBody(child);
+            if (found) return found;
+        }
+        return null;
+    }
+    if (!React.isValidElement(node)) return null;
+    const props = (node as React.ReactElement<any>).props ?? {};
+    if ('bounded' in props || 'maxRows' in props) return node as React.ReactElement<any>;
+    return outcomeBody(props.children ?? null);
+}
+
+describe('the batch progress bar, opened', () => {
+    const batch = entry({
+        blocks: [
+            {
+                heading: 'Where items went',
+                kind: 'destination',
+                rows: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({
+                    label: `Collection ${n}`,
+                    count: 10 - n,
+                    reference: `KEY0000${n}`,
+                })),
+            },
+        ],
+    });
+
+    it('caps the distribution at what the strip has room for', () => {
+        const body = outcomeBody(renderExpanded(batch));
+        expect(body).not.toBeNull();
+        expect(body?.props.maxRows).toBe(5);
+    });
+
+    it('does not offer its rows as places to go', () => {
+        const body = outcomeBody(renderExpanded(batch));
+        // Assert the body was found first: `undefined?.props` is falsy too, and
+        // a walker that stopped matching would pass this test in silence.
+        expect(body).not.toBeNull();
+        expect(body?.props.revealTargets).toBeFalsy();
     });
 });
