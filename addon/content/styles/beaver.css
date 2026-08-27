@@ -1272,6 +1272,30 @@
     border-top: 1px solid var(--fill-secondary);
 }
 
+/* ───── Find in chat ───── */
+
+/* A find match. Hits are emitted as `<mark>`, which Gecko gives its own loud
+   yellow-on-black, so both rules replace that background outright and keep the
+   colour the surrounding text already has. Only a background and a radius are
+   set: anything affecting text metrics (padding, border, weight) would reflow
+   the paragraph as the user types in the find bar. The tag-yellow ramp is
+   translucent, so the tint composites over whichever surface the hit lands on
+   and stays legible in light and dark themes alike. Scoped to the pane rather
+   than to `.markdown`, because hits are also produced outside rendered
+   markdown. */
+[id^="beaver-pane-"] .beaver-find-hit {
+    background: var(--tag-yellow-tertiary);
+    color: inherit;
+    border-radius: 2px;
+}
+
+/* The one hit the user has navigated to — same hue, opaque enough to pick out at
+   a glance while the view scrolls to it. */
+[id^="beaver-pane-"] .beaver-find-hit-current {
+    background: var(--tag-yellow-secondary);
+    color: inherit;
+}
+
 /* Hover-based fade utility classes */
 [id^="beaver-pane-"] .hover-trigger { position: relative; }
 [id^="beaver-pane-"] .hover-fade { 
