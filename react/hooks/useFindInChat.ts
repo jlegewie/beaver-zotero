@@ -145,7 +145,9 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
     const isLoadingThread = useAtomValue(isLoadingThreadAtom);
     // A collapsed section renders nothing, so expanding one brings hits into a
     // thread the list was collected before — and collapsing one takes hits out
-    // from under it. These are the four toggles that gate rendered markdown.
+    // from under it. These are the four pieces of state that gate rendered
+    // markdown; a section whose expansion is local to its own component is
+    // picked up the next time the reader steps through the results.
     const toolExpansion = useAtomValue(toolExpandedAtom);
     const thinkingVisibility = useAtomValue(thinkingVisibilityAtom);
     const notePanelState = useAtomValue(notePanelStateAtom);
@@ -291,14 +293,25 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
     }, [containerRef]);
 
     const step = useCallback((delta: number) => {
-        const hits = matchesRef.current;
+        const container = containerRef.current;
+        // The thread view is unmounted and rebuilt for more than the reasons
+        // watched above — a profile refresh, a data migration — and the hits
+        // recorded before that are detached afterwards. Reading them again here
+        // costs one query per keypress and is what keeps stepping working
+        // through an unmount nothing announced.
+        let hits = matchesRef.current;
+        if (container && (hits.length === 0 || !hits[0].isConnected)) {
+            hits = collectHits(container);
+            matchesRef.current = hits;
+            setMatchCount(hits.length);
+        }
         const index = stepMatchIndex(currentIndexRef.current, hits.length, delta);
         if (index < 0) return;
         currentIndexRef.current = index;
         setCurrentIndex(index);
         setCurrentElement(hits, index);
         scrollToMatch(hits[index]);
-    }, [setCurrentElement, scrollToMatch]);
+    }, [containerRef, setCurrentElement, scrollToMatch]);
 
     const next = useCallback(() => step(1), [step]);
     const previous = useCallback(() => step(-1), [step]);
