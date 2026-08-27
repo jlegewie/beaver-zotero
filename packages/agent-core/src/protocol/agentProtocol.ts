@@ -2489,23 +2489,9 @@ export const ZOTERO_AGENT_NAME = 'beaver';
 
 /**
  * Features the current Zotero plugin build always declares in the auth
- * handshake. Equals the full CLIENT_FEATURES vocabulary except
- * `batch_jobs`, which is a backend rollout switch this plugin only
- * opts into in development (see `zoteroPluginFeatures`).
+ * handshake.
  */
-export const ZOTERO_PLUGIN_FEATURES: string[] = Object.values(CLIENT_FEATURES).filter(
-    (feature) => feature !== CLIENT_FEATURES.BATCH_JOBS,
-);
-
-/**
- * Handshake feature list for this Zotero plugin build.
- * Development builds additionally declare `batch_jobs` so the backend
- * offers the deferred batch capability without shipping it to production.
- */
-export function zoteroPluginFeatures(isDevelopment: boolean): string[] {
-    if (!isDevelopment) return ZOTERO_PLUGIN_FEATURES;
-    return [...ZOTERO_PLUGIN_FEATURES, CLIENT_FEATURES.BATCH_JOBS];
-}
+export const ZOTERO_PLUGIN_FEATURES: string[] = Object.values(CLIENT_FEATURES);
 
 /** Current library context for application state */
 export interface CurrentLibrary {
