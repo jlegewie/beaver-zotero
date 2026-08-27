@@ -255,7 +255,7 @@
 .beaver-root .font-color-red { color: var(--tag-red); opacity: 0.8; }
 .beaver-root .font-color-green { color: var(--tag-green); opacity: 0.8; }
 .beaver-root .font-color-accent-green { color: var(--accent-green); opacity: 0.8; }
-.beaver-root .font-color-orange { color: var(--tag-orange); opacity: 0.8; }
+.beaver-root .font-color-orange { color: var(--tag-orange); }
 .beaver-root .font-color-blue { color: var(--tag-blue); opacity: 0.8; }
 .beaver-root .font-color-accent-blue { color: var(--accent-blue); }
 .beaver-root .stroke-width-2 path { stroke-width: 2; }
