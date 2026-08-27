@@ -1,9 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useAtomValue } from 'jotai';
-import { isStreamingAtom, threadRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
+import { isLoadingThreadAtom, lastRunSummaryAtom, threadRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { FIND_CURRENT_CLASS, FIND_HIT_ATTR, isFindQueryActive } from '@beaver/agent-ui/chat/findContext';
 import { currentThreadIdAtom } from '../atoms/threads';
-import { thinkingVisibilityAtom, toolExpandedAtom } from '../atoms/messageUIState';
+import {
+    annotationPanelStateAtom,
+    notePanelStateAtom,
+    thinkingVisibilityAtom,
+    toolExpandedAtom,
+} from '../atoms/messageUIState';
 import { getScrollAtoms, latchIntentFromDistance, markProgrammaticScroll } from '../utils/scrollPosition';
 import { findFirstHitAtOrBelow, stepMatchIndex } from '../utils/findNavigation';
 
@@ -123,21 +128,28 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
     const [currentIndex, setCurrentIndex] = useState(-1);
     const [focusToken, setFocusToken] = useState(0);
 
-    // The thread's own content triggers: another thread opened, a run added,
-    // and a run finishing. A live run is shadowed with an empty query while it
-    // runs, so it starts producing hits only at the moment it ends.
+    // The thread's own content triggers: another thread opened, a run added, a
+    // run reaching a status where it starts rendering its answer. A streaming
+    // run is shadowed with an empty query while it streams, so it produces its
+    // hits in one go when it stops.
     //
     // The runs are watched by their ids rather than by their count: two threads
     // with the same number of runs would otherwise look unchanged, and the hit
-    // list would be left describing the thread that was just closed.
+    // list would be left describing the thread that was just closed. The last
+    // run's summary carries its status, which the count of ids does not.
+    // Loading a thread unmounts the container, so the flag that ends the load is
+    // what says the hits can be read again.
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const runIds = useAtomValue(threadRunIdsAtom);
-    const isStreaming = useAtomValue(isStreamingAtom);
-    // Collapsed sections render nothing, so expanding one can bring hits into
-    // the thread that the list was collected before. Without these the count
-    // would understate the results the reader can now see.
+    const lastRunSummary = useAtomValue(lastRunSummaryAtom);
+    const isLoadingThread = useAtomValue(isLoadingThreadAtom);
+    // A collapsed section renders nothing, so expanding one brings hits into a
+    // thread the list was collected before — and collapsing one takes hits out
+    // from under it. These are the four toggles that gate rendered markdown.
     const toolExpansion = useAtomValue(toolExpandedAtom);
     const thinkingVisibility = useAtomValue(thinkingVisibilityAtom);
+    const notePanelState = useAtomValue(notePanelStateAtom);
+    const annotationPanelState = useAtomValue(annotationPanelStateAtom);
 
     const scrollAtoms = getScrollAtoms(isWindow);
 
@@ -260,9 +272,12 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
         activeQuery,
         currentThreadId,
         runIds,
-        isStreaming,
+        lastRunSummary,
+        isLoadingThread,
         toolExpansion,
         thinkingVisibility,
+        notePanelState,
+        annotationPanelState,
         containerRef,
         setCurrentElement,
         scrollToMatch,

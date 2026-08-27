@@ -1,6 +1,6 @@
 import React, { forwardRef, useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
-import { AgentRun, ToolCallPart, isRunActive } from '@beaver/agent-core/agents/types';
+import { AgentRun, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
 import { shouldOfferResume, wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { UserRequestView } from './UserRequestView';
@@ -199,15 +199,15 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
         </div>
     );
 
-    // A live run is excluded from find highlighting: its text re-renders on
+    // A streaming run is excluded from find highlighting: its text re-renders on
     // every token, so highlighting it would re-run the markdown pipeline per
     // token and make the find bar's match count jump around while the user
-    // reads. Live rather than streaming, so the run and the find bar's own
-    // "is anything running" test agree on when hits start appearing. The empty
-    // provider shadows the thread-level query for this run's whole subtree — no
-    // prop drilling, and it renders no element of its own, so the markup is
-    // unchanged either way.
-    return isRunActive(run) ? <FindQueryProvider query="">{runCard}</FindQueryProvider> : runCard;
+    // reads. Only while it streams — a run waiting on the reader (a deferred
+    // approval) is not generating anything, and its answer is on screen to be
+    // searched like any other. The empty provider shadows the thread-level query
+    // for this run's whole subtree — no prop drilling, and it renders no element
+    // of its own, so the markup is unchanged either way.
+    return isStreaming ? <FindQueryProvider query="">{runCard}</FindQueryProvider> : runCard;
 }));
 
 AgentRunView.displayName = 'AgentRunView';
