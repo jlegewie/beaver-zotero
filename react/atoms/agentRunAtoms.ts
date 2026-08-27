@@ -76,7 +76,7 @@ import type { ExternalFileAttachment } from '@beaver/agent-core/types/attachment
 import { getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
-import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptAction, PromptOrigin, ResumeTrigger, ToolRequest, isRunActive } from '@beaver/agent-core/agents/types';
+import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptAction, PromptOrigin, ResumeTrigger, RetryTrigger, ToolRequest, isRunActive } from '@beaver/agent-core/agents/types';
 import {
     threadRunsAtom,
     activeRunAtom,
@@ -477,9 +477,18 @@ function createAgentRunShell(
     providerName?: string,
     customInstructions?: string,
     customModel?: ModelConfig['custom_model'],
-    runIdOverride?: string,
-    permissionsOverride?: Partial<ChargingPermissions>,
+    options?: {
+        runIdOverride?: string;
+        permissionsOverride?: Partial<ChargingPermissions>;
+        /**
+         * Marks the request as a retry and says who asked for it. A retry
+         * commits its removal through the truncate endpoint before getting
+         * here, so nothing else in the request identifies it as one.
+         */
+        retryTrigger?: RetryTrigger;
+    },
 ): { run: AgentRun; request: AgentRunRequest } {
+    const { runIdOverride, permissionsOverride, retryTrigger } = options ?? {};
     const runId = runIdOverride ?? uuidv4();
 
     // Get user preferences for charging permissions, then apply any partial override.
@@ -515,6 +524,7 @@ function createAgentRunShell(
         ...(modelSelectionOptions.model_id ? { model_id: modelSelectionOptions.model_id } : {}),
         ...(modelSelectionOptions.api_key ? { api_key: modelSelectionOptions.api_key } : {}),
         ...(customModel ? { custom_model: customModel } : {}),
+        ...(retryTrigger ? { retry_trigger: retryTrigger } : {}),
     };
 
     // Create the shell AgentRun for immediate UI rendering
@@ -782,6 +792,7 @@ async function startAutoRetryRun(
             model.provider,
             customInstructions,
             model.is_custom ? model.custom_model : undefined,
+            { retryTrigger: 'auto' },
         );
 
         newRunId = newRun.id;
@@ -2482,8 +2493,7 @@ export const sendWSMessageAtom = atom(
                 model?.provider,
                 customInstructions,
                 model?.is_custom ? model.custom_model : undefined,
-                runIdOverride,
-                permissionsOverride,
+                { runIdOverride, permissionsOverride },
             );
 
             // Set active run - UI now shows user message + spinner
@@ -2815,6 +2825,7 @@ async function startRegenerateRun(
             model.provider,
             customInstructions,
             model.is_custom ? model.custom_model : undefined,
+            { retryTrigger: 'user' },
         );
 
         // Set active run - UI now shows user message + spinner, which takes

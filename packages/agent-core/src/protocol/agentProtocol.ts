@@ -4,6 +4,7 @@ import { ZoteroItemReference } from '../types/zotero';
 import { ItemDataWithStatus, AttachmentDataWithStatus, ItemStub, ItemSummary, AttachmentInfo, AttachmentStub } from '../types/zotero';
 import { ReaderState, NoteState } from '../types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../agents/types';
+import type { RetryTrigger } from '../agents/types';
 import type { CustomChatModel } from '../types/customChatModel';
 import { AttachmentData, ItemData } from '../types/zotero';
 import type { BeaverExtractResult } from '../extract/schema';
@@ -2687,6 +2688,14 @@ export interface AgentRunRequest {
      * the client still held after dropping the ones it was regenerating.
      */
     retry_keep_run_ids?: string[];
+    /**
+     * Who started this retry. Set on the run request that follows a retry's
+     * truncate call, which is the only thing marking that request as a retry.
+     * Only `auto` reorders the backend's model chain, for the same reason an
+     * automatic resume does — the provider that just aborted should not lead
+     * the next attempt. Omitted on an ordinary message.
+     */
+    retry_trigger?: RetryTrigger;
     /** Pre-generated assistant message ID (optional) */
     assistant_message_id?: string;
 }

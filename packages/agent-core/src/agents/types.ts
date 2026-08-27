@@ -139,16 +139,11 @@ export interface PromptAction {
     category?: ActionCategory;
 }
 
-/**
- * Who initiated a resume request.
- *
- * `auto` is the client retrying a stream the provider aborted; the backend
- * reorders its model chain for those so the provider that just failed does not
- * lead again. `user` is a resume the user clicked, which keeps the default
- * chain — it usually follows a dropped connection or a closed client, where no
- * provider failed.
- */
+/** Who initiated a resume request. */
 export type ResumeTrigger = 'auto' | 'user';
+
+/** Who initiated a retry request. */
+export type RetryTrigger = 'auto' | 'user';
 
 /**
  * Chat message content sent by the client.
