@@ -266,7 +266,6 @@
 }
 
 [id^="beaver-pane-"] button.composer-send {
-    height: 26px;
     margin-left: 4px;
     border-radius: 999px;
 }
