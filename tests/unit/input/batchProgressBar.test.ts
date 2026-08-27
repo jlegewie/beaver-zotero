@@ -96,3 +96,61 @@ describe('the batch progress bar queue', () => {
         expect(text).toContain('Filing items');
     });
 });
+
+/**
+ * The live bar renders `BatchOutcomeBody` only once opened. The hook stand-in
+ * has no re-render, so flip the disclosure's state cell and call again.
+ */
+function renderExpanded(batch: BatchProgressEntry): React.ReactNode {
+    hookState.slots = [];
+    hookState.index = 0;
+    BatchProgressBar({ batch, queuedBatches: [] });
+    hookState.slots[0].value = true;
+    hookState.index = 0;
+    return BatchProgressBar({ batch, queuedBatches: [] }) as React.ReactNode;
+}
+
+/** The opened batch's body element, wherever it sits in the tree. */
+function outcomeBody(node: React.ReactNode): React.ReactElement<any> | null {
+    if (Array.isArray(node)) {
+        for (const child of node) {
+            const found = outcomeBody(child);
+            if (found) return found;
+        }
+        return null;
+    }
+    if (!React.isValidElement(node)) return null;
+    const props = (node as React.ReactElement<any>).props ?? {};
+    if ('bounded' in props || 'maxRows' in props) return node as React.ReactElement<any>;
+    return outcomeBody(props.children ?? null);
+}
+
+describe('the batch progress bar, opened', () => {
+    const batch = entry({
+        blocks: [
+            {
+                heading: 'Where items went',
+                kind: 'destination',
+                rows: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({
+                    label: `Collection ${n}`,
+                    count: 10 - n,
+                    reference: `KEY0000${n}`,
+                })),
+            },
+        ],
+    });
+
+    it('caps the distribution at what the strip has room for', () => {
+        const body = outcomeBody(renderExpanded(batch));
+        expect(body).not.toBeNull();
+        expect(body?.props.maxRows).toBe(5);
+    });
+
+    it('does not offer its rows as places to go', () => {
+        const body = outcomeBody(renderExpanded(batch));
+        // Assert the body was found first: `undefined?.props` is falsy too, and
+        // a walker that stopped matching would pass this test in silence.
+        expect(body).not.toBeNull();
+        expect(body?.props.revealTargets).toBeFalsy();
+    });
+});

@@ -4,7 +4,7 @@
  * Every block caps its rows, so each must report what it hid — a truncated list
  * with no count reads as a complete one. Hook-free components, called directly.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import React from 'react';
 import type {
     BatchOutcomeBlock,
@@ -15,6 +15,7 @@ import {
     BatchOutcomeBlockView,
     BatchProgressTrack,
 } from '@beaver/agent-ui/chat/BatchOutcomeBlocks';
+import { setHost } from '@beaver/agent-ui/host';
 
 function entry(overrides: Partial<BatchProgressEntry> = {}): BatchProgressEntry {
     return {
@@ -163,5 +164,130 @@ describe('the block list', () => {
         // The absence of blocks is how the backend says so; the client never
         // learns which operations those are.
         expect(BatchOutcomeBlocks({ batch: entry() })).toBeNull();
+    });
+});
+
+/** Every `BatchTallyRow` element the block rendered, in order. */
+function tallyRows(node: React.ReactNode): React.ReactElement<any>[] {
+    const element = node as React.ReactElement<any> | null;
+    if (!element) return [];
+    return (React.Children.toArray(element.props.children) as React.ReactElement<any>[]).filter(
+        (child) => React.isValidElement(child) && 'onActivate' in (child.props ?? {}),
+    );
+}
+
+describe('a block with more rows than the surface has room for', () => {
+    const block: BatchOutcomeBlock = {
+        heading: 'Tags applied',
+        kind: 'destination',
+        rows: [1, 2, 3, 4, 5, 6].map((n) => ({ label: `tag-${n}`, count: 10 - n })),
+        overflow: 3,
+    };
+
+    it('lists every row it was sent when uncapped', () => {
+        expect(tallyRows(BatchOutcomeBlockView({ block }))).toHaveLength(6);
+        expect(view(block)).toContain('+ 3 more');
+    });
+
+    it('lists only the capped rows', () => {
+        const capped = BatchOutcomeBlockView({ block, maxRows: 4 });
+        expect(tallyRows(capped).map((row) => row.props.name)).toEqual([
+            'tag-1',
+            'tag-2',
+            'tag-3',
+            'tag-4',
+        ]);
+    });
+
+    it('counts the rows it dropped alongside the ones the backend never sent', () => {
+        // 3 withheld by the backend + 2 dropped by the cap.
+        expect(text(BatchOutcomeBlockView({ block, maxRows: 4 }))).toContain('+ 5 more');
+    });
+
+    it('scales the bars against the whole block, not the part it listed', () => {
+        const capped = tallyRows(BatchOutcomeBlockView({ block, maxRows: 2 }));
+        expect(capped.every((row) => row.props.top === 9)).toBe(true);
+    });
+});
+
+describe('a row that names something in the library', () => {
+    afterEach(() => setHost({}));
+
+    const sortBlock: BatchOutcomeBlock = {
+        heading: 'Where items went',
+        kind: 'destination',
+        rows: [{ label: 'Ecology', count: 4, reference: 'CHT8AIF6' }],
+    };
+
+    it('is inert without an operation, whatever the host offers', () => {
+        setHost({ navigation: { revealBatchOutcome: () => {} } as any });
+        expect(tallyRows(BatchOutcomeBlockView({ block: sortBlock }))[0].props.onActivate)
+            .toBeUndefined();
+    });
+
+    it('is inert when the host cannot go there', () => {
+        setHost({});
+        expect(
+            tallyRows(BatchOutcomeBlockView({ block: sortBlock, operation: 'sort' }))[0].props
+                .onActivate,
+        ).toBeUndefined();
+    });
+
+    it('hands the host what the row names', () => {
+        const seen: unknown[] = [];
+        setHost({ navigation: { revealBatchOutcome: (t: unknown) => seen.push(t) } as any });
+        const row = tallyRows(BatchOutcomeBlockView({ block: sortBlock, operation: 'sort' }))[0];
+        row.props.onActivate();
+        expect(seen).toEqual([
+            { kind: 'collection', key: 'CHT8AIF6', name: 'Ecology', libraryRef: undefined },
+        ]);
+    });
+
+    it('hands the host the batch library when the batch named one', () => {
+        const seen: any[] = [];
+        setHost({ navigation: { revealBatchOutcome: (t: unknown) => seen.push(t) } as any });
+        const row = tallyRows(
+            BatchOutcomeBlockView({ block: sortBlock, operation: 'sort', libraryRef: 'g900' }),
+        )[0];
+        row.props.onActivate();
+        expect(seen[0].libraryRef).toBe('g900');
+    });
+
+    it('leaves a failure reason alone', () => {
+        setHost({ navigation: { revealBatchOutcome: () => {} } as any });
+        const rendered = BatchOutcomeBlockView({
+            block: { heading: 'Could not be read', kind: 'failure', rows: [{ label: 'No text layer', count: 2 }] },
+            operation: 'extract',
+        });
+        expect(tallyRows(rendered)).toHaveLength(0);
+    });
+});
+
+describe('the block list and the surface it draws on', () => {
+    it('offers the rows only where the surface asked for it', () => {
+        const batch = entry({
+            blocks: [
+                { heading: 'Where items went', kind: 'destination', rows: [{ label: 'Ecology', count: 4 }] },
+            ],
+        });
+        const operationOf = (node: React.ReactNode) =>
+            (React.Children.toArray((node as React.ReactElement<any>).props.children)[0] as
+                React.ReactElement<any>).props.operation;
+        expect(operationOf(BatchOutcomeBlocks({ batch }))).toBeUndefined();
+        expect(operationOf(BatchOutcomeBlocks({ batch, revealTargets: true }))).toBe('sort');
+    });
+
+    it("passes the batch's library down to its blocks", () => {
+        const batch = entry({
+            library_ref: 'g900',
+            blocks: [
+                { heading: 'Tags applied', kind: 'destination', rows: [{ label: 'methods', count: 4 }] },
+            ],
+        });
+        const block = React.Children.toArray(
+            (BatchOutcomeBlocks({ batch, revealTargets: true }) as React.ReactElement<any>).props
+                .children,
+        )[0] as React.ReactElement<any>;
+        expect(block.props.libraryRef).toBe('g900');
     });
 });
