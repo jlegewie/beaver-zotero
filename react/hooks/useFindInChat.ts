@@ -161,10 +161,12 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
     const matchesRef = useRef<HTMLElement[]>([]);
     const currentElementRef = useRef<HTMLElement | null>(null);
     const currentIndexRef = useRef(-1);
-    // The query the current hit list was collected for, so a rebuild can tell a
-    // new search (land on a fresh hit) from the same search over changed content
-    // (keep the reader where they are).
-    const collectedQueryRef = useRef('');
+    // What the current hit list was collected for, so a rebuild can tell a new
+    // search (land on a fresh hit) from the same search over changed content
+    // (keep the reader where they are). The thread is part of it: the same query
+    // in another thread is a different result set, and carrying the ordinal over
+    // would put the reader on an unrelated match without moving the view to it.
+    const collectedKeyRef = useRef<string | null>(null);
 
     // Closed means no highlighting at all, whatever is left in the input.
     const activeQuery = isOpen ? debouncedQuery : '';
@@ -224,7 +226,7 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
         setCurrentElement([], -1);
         matchesRef.current = [];
         currentIndexRef.current = -1;
-        collectedQueryRef.current = '';
+        collectedKeyRef.current = null;
         setMatchCount(0);
         setCurrentIndex(-1);
     }, [setCurrentElement]);
@@ -240,11 +242,12 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
         const hits = collectHits(container);
         matchesRef.current = hits;
 
-        const isNewQuery = collectedQueryRef.current !== activeQuery;
-        collectedQueryRef.current = activeQuery;
+        const collectedKey = `${currentThreadId ?? ''}\u0000${activeQuery}`;
+        const isNewSearch = collectedKeyRef.current !== collectedKey;
+        collectedKeyRef.current = collectedKey;
 
         let index: number;
-        if (isNewQuery) {
+        if (isNewSearch) {
             const containerTop = container.getBoundingClientRect().top;
             const offsets = hits.map(
                 (hit) => hit.getBoundingClientRect().top - containerTop + container.scrollTop,
@@ -264,9 +267,9 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
         setCurrentIndex(index);
         setCurrentElement(hits, index);
 
-        // Only a new search moves the view. A rebuild for the same query is
+        // Only a new search moves the view. A rebuild for the same search is
         // something the thread did, not something the reader asked for.
-        if (isNewQuery && index >= 0) {
+        if (isNewSearch && index >= 0) {
             scrollToMatch(hits[index]);
         }
     }, [
