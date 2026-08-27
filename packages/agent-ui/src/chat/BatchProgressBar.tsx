@@ -8,6 +8,8 @@ import {
 } from './BatchOutcomeBlocks';
 
 const WAITING_HEADING = 'Waiting';
+/** Per-block row cap for the live panel. Hidden rows still count in "+ N more". */
+const PANEL_MAX_TALLY_ROWS = 5;
 /** Lower case: continues the line above it. */
 const QUEUE_PREFIX = 'then ';
 
@@ -174,7 +176,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
             </div>
 
             {isExpanded && (
-                <BatchOutcomeBody batch={batch}>
+                <BatchOutcomeBody batch={batch} maxRows={PANEL_MAX_TALLY_ROWS}>
                     {queuedBatches.length > 0 && (
                         <div className="display-flex flex-col gap-1 min-w-0">
                             <BatchBlockHeading>{WAITING_HEADING}</BatchBlockHeading>

@@ -234,6 +234,19 @@
     opacity: 1;
 }
 
+/* Outcome row that names a place to go. Plain text until hover/focus —
+   a column of accent links would read as a menu. */
+.beaver-root .batch-outcome-target {
+    cursor: pointer;
+    text-decoration: none;
+    text-underline-offset: 2px;
+}
+
+.beaver-root .batch-outcome-target:hover,
+.beaver-root .batch-outcome-target:focus-visible {
+    text-decoration: underline;
+}
+
 /* Batch progress: the track before anything has been credited.
    A determinate track sitting at zero reads as a batch that has stalled, which
    is exactly wrong at the moment one has just been approved and the model is

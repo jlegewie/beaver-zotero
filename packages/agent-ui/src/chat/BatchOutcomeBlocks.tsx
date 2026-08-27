@@ -4,6 +4,8 @@ import type {
     BatchOutcomeTally,
     BatchProgressEntry,
 } from '@beaver/agent-core/run-state/batchProgress';
+import { batchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgress';
+import { getHost } from '../host';
 
 /**
  * The blocks that describe what a batch has actually done, shared by the live
@@ -19,6 +21,11 @@ import type {
  * to render — the backend composes a `sort` destination's name from the
  * `collection_names` the Zotero client returns while validating the action, so
  * no surface here resolves a key.
+ *
+ * Navigation is the exception: a collection or tag is a place in a client's
+ * library. Rows that name one become links when the host offers
+ * `revealBatchOutcome`; otherwise they stay plain text. See
+ * {@link batchOutcomeTarget} for which rows name what.
  */
 
 const NEW_BADGE = 'new';
@@ -134,7 +141,9 @@ export const BatchTallyRow: React.FC<{
     top: number;
     muted?: boolean;
     name: string;
-}> = ({ row, top, muted, name }) => (
+    /** Go to what this row names. Absent when it names nothing reachable. */
+    onActivate?: () => void;
+}> = ({ row, top, muted, name, onActivate }) => (
     <div className="display-flex flex-row items-center gap-2 text-sm min-w-0">
         {/* The label takes the room, not the bar: in a sidebar the name is what
             the user reads and the bar is only a shape beside it. A fixed label
@@ -143,8 +152,36 @@ export const BatchTallyRow: React.FC<{
             sits against the name it qualifies rather than drifting to the bar. */}
         <div className="display-flex flex-row items-center gap-1 flex-1 min-w-0">
             <span
-                className={`${muted ? 'font-color-secondary' : 'font-color-primary'} truncate min-w-0`}
+                className={[
+                    muted ? 'font-color-secondary' : 'font-color-primary',
+                    'truncate min-w-0',
+                    onActivate && 'batch-outcome-target',
+                ]
+                    .filter(Boolean)
+                    .join(' ')}
                 title={name}
+                role={onActivate ? 'button' : undefined}
+                // Count sits in a sibling, so the accessible name has to carry it.
+                aria-label={onActivate ? `${name}, ${row.count.toLocaleString()}` : undefined}
+                tabIndex={onActivate ? 0 : undefined}
+                onClick={
+                    onActivate
+                        ? (e) => {
+                              e.stopPropagation();
+                              onActivate();
+                          }
+                        : undefined
+                }
+                onKeyDown={
+                    onActivate
+                        ? (e) => {
+                              if (e.key !== 'Enter' && e.key !== ' ') return;
+                              e.preventDefault();
+                              e.stopPropagation();
+                              onActivate();
+                          }
+                        : undefined
+                }
             >
                 {name}
             </span>
@@ -194,12 +231,30 @@ export const BatchOutcomeBlockView: React.FC<{
     block: BatchOutcomeBlock;
     /** Items a call changed, for the memberships footnote. Destinations only. */
     resolved?: number;
-}> = ({ block, resolved = 0 }) => {
+    /** When set, destination rows that name a library object become links. */
+    operation?: string;
+    /** The batch's library, so a row can name one. See {@link batchOutcomeTarget}. */
+    libraryRef?: string;
+    /**
+     * Cap listed rows; the rest join `block.overflow` in the "+ N more"
+     * footnote. Unset lists everything sent.
+     */
+    maxRows?: number;
+}> = ({ block, resolved = 0, operation, libraryRef, maxRows }) => {
     const rows = block.rows ?? [];
     if (rows.length === 0) return null;
 
-    const overflow = block.overflow ?? 0;
+    const shown = maxRows !== undefined ? rows.slice(0, maxRows) : rows;
+    // maxRows=0 would otherwise draw a heading over an empty list.
+    if (shown.length === 0) return null;
+    // Surface-dropped rows join the ones the backend never sent.
+    const overflow = (block.overflow ?? 0) + (rows.length - shown.length);
     const total = block.total ?? 0;
+    // Scale against the full block so a cap does not rescale the bars.
+    const top = topCount(rows);
+    // Bind so a host object with state still gets its `this`.
+    const navigation = getHost().navigation;
+    const reveal = navigation?.revealBatchOutcome?.bind(navigation);
 
     // Destination rows count MEMBERSHIPS, not items — one item takes several
     // tags — so when the sum runs past the item count, say so rather than leave
@@ -213,25 +268,32 @@ export const BatchOutcomeBlockView: React.FC<{
     return (
         <div className="display-flex flex-col gap-1 min-w-0">
             <BatchBlockHeading>{block.heading}</BatchBlockHeading>
-            {rows.map((row) =>
-                block.kind === 'failure' ? (
-                    <div
-                        key={row.label}
-                        className="display-flex flex-row items-baseline gap-2 text-sm min-w-0"
-                    >
-                        <span className="font-color-secondary flex-1 min-w-0">{row.label}</span>
-                        <span className="font-color-secondary flex-none">{row.count}</span>
-                    </div>
-                ) : (
+            {shown.map((row) => {
+                if (block.kind === 'failure') {
+                    return (
+                        <div
+                            key={row.label}
+                            className="display-flex flex-row items-baseline gap-2 text-sm min-w-0"
+                        >
+                            <span className="font-color-secondary flex-1 min-w-0">{row.label}</span>
+                            <span className="font-color-secondary flex-none">{row.count}</span>
+                        </div>
+                    );
+                }
+                const target = operation
+                    ? batchOutcomeTarget(operation, block, row, libraryRef)
+                    : null;
+                return (
                     <BatchTallyRow
                         key={row.reference || row.label}
                         row={row}
-                        top={topCount(rows)}
+                        top={top}
                         muted={block.kind === 'removal'}
                         name={row.label}
+                        onActivate={target && reveal ? () => void reveal(target) : undefined}
                     />
-                ),
-            )}
+                );
+            })}
             {footnote.length > 0 && <BatchBlockFootnote>{footnote.join(' · ')}</BatchBlockFootnote>}
         </div>
     );
@@ -245,7 +307,11 @@ export const BatchOutcomeBlockView: React.FC<{
  */
 export const BatchOutcomeBlocks: React.FC<{
     batch: BatchProgressEntry;
-}> = ({ batch }) => {
+    /** Per-block row cap. See {@link BatchOutcomeBlockView}. */
+    maxRows?: number;
+    /** When true, rows that name a library object become links. */
+    revealTargets?: boolean;
+}> = ({ batch, maxRows, revealTargets }) => {
     const blocks = batch.blocks ?? [];
     if (blocks.length === 0) return null;
     return (
@@ -255,6 +321,9 @@ export const BatchOutcomeBlocks: React.FC<{
                     key={`${block.kind}-${index}`}
                     block={block}
                     resolved={batch.resolved ?? 0}
+                    operation={revealTargets ? batch.operation : undefined}
+                    libraryRef={batch.library_ref}
+                    maxRows={maxRows}
                 />
             ))}
         </>
@@ -313,9 +382,13 @@ export const BatchOutcomeBody: React.FC<{
      * height. The container clips instead — see `.batch-run-receipt`.
      */
     bounded?: boolean;
+    /** Per-block row cap. */
+    maxRows?: number;
+    /** Click a row that names a collection or tag to go there. */
+    revealTargets?: boolean;
     /** Appended inside the same box — what is one caller's alone. */
     children?: React.ReactNode;
-}> = ({ batch, bounded = true, children }) => (
+}> = ({ batch, bounded = true, maxRows, revealTargets, children }) => (
     <div
         className="display-flex flex-col gap-5 px-3 pb-3 min-w-0"
         style={
@@ -330,7 +403,7 @@ export const BatchOutcomeBody: React.FC<{
     >
         {batch.goal && <div className="font-color-secondary text-base">{batch.goal}</div>}
         <BatchProgressTrack batch={batch} />
-        <BatchOutcomeBlocks batch={batch} />
+        <BatchOutcomeBlocks batch={batch} maxRows={maxRows} revealTargets={revealTargets} />
         {children}
     </div>
 );

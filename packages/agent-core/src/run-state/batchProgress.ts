@@ -98,6 +98,9 @@ export interface BatchProgressEntry {
     /** Breakdown under the track, e.g. "76 filed · 26 left as-is · 7 to go". */
     detail_label?: string;
     goal?: string;
+    /** Portable ref (`u` / `g<groupID>`) of the one library this batch's
+     * population lives in. */
+    library_ref?: string;
     total?: number;
     resolved?: number;
     no_change?: number;
@@ -443,4 +446,35 @@ export function selectTrackedBatch(
     stamp: BatchProgressStamp | null,
 ): BatchProgressEntry | null {
     return selectBatchPanelGroups(stamp).tracked;
+}
+
+/**
+ * A library object named by an outcome row, when the client can navigate to it.
+ */
+export type BatchOutcomeTarget = { libraryRef?: string } & (
+    | { kind: 'collection'; key: string; name: string }
+    | { kind: 'tag'; name: string }
+);
+
+/**
+ * The library object an outcome row names, or `null`.
+ */
+export function batchOutcomeTarget(
+    operation: string,
+    block: BatchOutcomeBlock,
+    row: BatchOutcomeTally,
+    /** The batch's library, when it has exactly one. */
+    libraryRef?: string,
+): BatchOutcomeTarget | null {
+    if (block.kind !== 'destination') return null;
+    const name = row.label?.trim();
+    if (!name) return null;
+    const library = libraryRef?.trim() || undefined;
+    if (operation === 'sort') {
+        // Name alone cannot address a collection.
+        const key = row.reference?.trim();
+        return key ? { kind: 'collection', key, name, libraryRef: library } : null;
+    }
+    if (operation === 'tag') return { kind: 'tag', name, libraryRef: library };
+    return null;
 }
