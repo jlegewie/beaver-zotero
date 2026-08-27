@@ -55,7 +55,7 @@ export const BOTTOM_THRESHOLD = 120; // pixels
  */
 export const AT_BOTTOM_EPSILON = 8; // pixels
 
-/** Reads as the remembered offset, writes null to forget it. */
+/** The reader's remembered place in a thread. */
 type ScrollPositionAtom = WritableAtom<number | undefined, [number | null], void>;
 
 export interface ScrollAtoms {
@@ -63,7 +63,7 @@ export interface ScrollAtoms {
     isAtBottom: PrimitiveAtom<boolean>;
     /** Intent: whether the reader scrolled back and auto-scroll should stand off. */
     userScrolled: PrimitiveAtom<boolean>;
-    /** Remembered scroll offset, restored when the thread is reopened. */
+    /** Remembered place in the thread, restored when it is reopened. */
     position: ScrollPositionAtom;
 }
 
@@ -88,6 +88,28 @@ const WINDOW_ATOMS: ScrollAtoms = Object.freeze({
  */
 export function getScrollAtoms(isWindow: boolean): ScrollAtoms {
     return isWindow ? WINDOW_ATOMS : SIDEBAR_ATOMS;
+}
+
+/**
+ * Resume following the bottom: clear the reader's scroll-back intent, and
+ * forget the offset remembered for the thread.
+ */
+export function resumeFollowing(atoms: ScrollAtoms): void {
+    store.set(atoms.userScrolled, false);
+    store.set(atoms.position, null);
+}
+
+/**
+ * Decide the reader's intent from where a thread has just been put — a restore
+ * or a jump to a run — rather than from a gesture: reading back if the landing
+ * point is above the bottom band, following otherwise.
+ */
+export function latchIntentFromDistance(distance: number, atoms: ScrollAtoms): void {
+    if (distance > BOTTOM_THRESHOLD) {
+        store.set(atoms.userScrolled, true);
+    } else {
+        resumeFollowing(atoms);
+    }
 }
 
 /**

@@ -139,7 +139,10 @@ export interface ThreadData {
 export { currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom };
 
 /**
- * Atom to store the scroll position of the current thread
+ * Where the reader is in each thread, by thread id: the offset they scrolled
+ * back to. A thread with no entry is reopened at its bottom — the reader was
+ * following the response when they left it, or has never opened it — and the
+ * bottom is recorded by dropping the entry rather than storing an offset.
  */
 export const threadScrollPositionsAtom = atom<Record<string, number>>({});
 
@@ -173,7 +176,7 @@ export const currentThreadScrollPositionAtom = atom(
 );
 
 /**
- * Atom to store scroll positions for the separate window (independent from sidebar)
+ * The same, for the separate window, which scrolls independently of the sidebars.
  */
 export const windowScrollPositionsAtom = atom<Record<string, number>>({});
 

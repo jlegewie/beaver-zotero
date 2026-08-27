@@ -1,6 +1,6 @@
 import { useRef, useCallback, useEffect, useState, ForwardedRef, RefObject } from 'react';
 import { store } from '../store';
-import { AT_BOTTOM_EPSILON, BOTTOM_THRESHOLD, getScrollAtoms, publishDistanceFromBottom, wasProgrammaticScroll } from '../utils/scrollPosition';
+import { AT_BOTTOM_EPSILON, BOTTOM_THRESHOLD, getScrollAtoms, publishDistanceFromBottom, resumeFollowing, wasProgrammaticScroll } from '../utils/scrollPosition';
 
 const SCROLL_POSITION_UPDATE_THRESHOLD = 10; // pixels - minimum change to update scroll position atom
 
@@ -45,11 +45,14 @@ interface UseAutoScrollReturn {
  * so it is caught in the scroll handler instead — see there for how a drag is
  * told apart from auto-scroll's own writes.
  *
- * Two separate facts are written from here, and they answer different
+ * Three separate facts are written from here, and they answer different
  * questions — see react/utils/scrollPosition.ts:
  *
  * - the measured position (`isAtBottom`), published on every scroll event
  * - the reader's intent (`userScrolled`), latched by the gestures below
+ * - the reader's place in the thread (`position`), remembered for the next
+ *   time the thread is opened: the offset they scrolled back to, or "the
+ *   bottom" when they are following the response
  *
  * @param forwardedRef Optional ref to forward (for forwardRef components)
  * @param options Configuration options
@@ -288,7 +291,7 @@ export function useAutoScroll(
         // hides the scroll-down button, and resuming there would take away the
         // intent their gesture just recorded.
         if (distanceFromBottom <= AT_BOTTOM_EPSILON) {
-            store.set(scrolledAtom, false);
+            resumeFollowing(scrollAtoms);
         } else if (
             scrollTop < previousScrollTop - SCROLL_BACK_EPSILON &&
             !wasProgrammaticScroll(container, scrollTop)
@@ -316,12 +319,21 @@ export function useAutoScroll(
             detachFromBottom(true);
         }
 
-        // Only update scroll position atom if there's a meaningful change
-        // This reduces jitter from micro-updates during animation
-        const scrollPositionDelta = Math.abs(scrollTop - lastStoredScrollTopRef.current);
-        if (scrollPositionDelta > SCROLL_POSITION_UPDATE_THRESHOLD) {
-            store.set(scrollPositionAtom, scrollTop);
-            lastStoredScrollTopRef.current = scrollTop;
+        // Remember where the reader is in this thread, for when it is next
+        // opened.
+        if (store.get(scrolledAtom)) {
+            // The offset only matters while it changes by something visible;
+            // below that the writes are jitter from an animation. The first
+            // one after leaving the bottom is written regardless, since until
+            // then nothing has been remembered at all.
+            const scrollPositionDelta = Math.abs(scrollTop - lastStoredScrollTopRef.current);
+            if (
+                scrollPositionDelta > SCROLL_POSITION_UPDATE_THRESHOLD ||
+                store.get(scrollPositionAtom) === undefined
+            ) {
+                store.set(scrollPositionAtom, scrollTop);
+                lastStoredScrollTopRef.current = scrollTop;
+            }
         }
     }, [threshold, scrollAtoms, scrolledAtom, scrollPositionAtom, detachFromBottom]);
 

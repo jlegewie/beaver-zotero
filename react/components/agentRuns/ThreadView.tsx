@@ -3,7 +3,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { activeRunAtom, allRunsAtom, threadRunIdsAtom } from "@beaver/agent-core/run-state/atoms";
 import { AgentRunView } from "./AgentRunView";
 import { pinToBottom, scrollToBottom } from "../../utils/scrollToBottom";
-import { AT_BOTTOM_EPSILON, BOTTOM_THRESHOLD, getScrollAtoms, markProgrammaticScroll, measureDistanceFromBottom, publishDistanceFromBottom, publishScrollPosition } from "../../utils/scrollPosition";
+import { AT_BOTTOM_EPSILON, BOTTOM_THRESHOLD, getScrollAtoms, latchIntentFromDistance, markProgrammaticScroll, measureDistanceFromBottom, publishDistanceFromBottom, publishScrollPosition, resumeFollowing } from "../../utils/scrollPosition";
 import { currentThreadIdAtom, pendingScrollToRunAtom, isLoadingThreadAtom } from "../../atoms/threads";
 import { pendingApprovalsAtom } from "../../agents/agentActions";
 import { store } from "../../store";
@@ -157,7 +157,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             // once the lockout expires the drag detection simply works as usual.
             markProgrammaticScroll(container, PROTOCOL_SCROLL_LOCKOUT_MS, elementTopInContainer);
             element.scrollIntoView({ behavior: "smooth", block: "start" });
-            store.set(scrolledAtom, projectedDistanceFromBottom > BOTTOM_THRESHOLD);
+            latchIntentFromDistance(projectedDistanceFromBottom, scrollAtoms);
             setPendingScrollToRun(null);
             return true;
         }, [pendingRunId, currentThreadId, isLoadingThread, scrollContainerRef, runs, scrolledAtom, setPendingScrollToRun, win]);
@@ -200,6 +200,11 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 return;
             }
 
+            // No remembered offset means the bottom — the reader was following
+            // the response when this thread was last shown, or has never opened
+            // it. Taken from the container now rather than remembered as an
+            // offset, because the bottom has moved if the response kept
+            // arriving while the pane was closed.
             const targetScrollTop = store.get(scrollPositionAtom) ?? container.scrollHeight;
             const delta = Math.abs(container.scrollTop - targetScrollTop);
             
@@ -224,7 +229,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 // stream mid-flight for someone who only resized a pane.
                 const distanceFromBottom = publishScrollPosition(container, scrollAtoms);
                 if (distanceFromBottom !== null && isThreadSwitch) {
-                    store.set(scrolledAtom, distanceFromBottom > BOTTOM_THRESHOLD);
+                    latchIntentFromDistance(distanceFromBottom, scrollAtoms);
                 }
             } else {
                 restoredFromAtomRef.current = false;
@@ -243,7 +248,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 if (isThreadSwitch) {
                     const distanceFromBottom = publishScrollPosition(container, scrollAtoms);
                     if (distanceFromBottom !== null) {
-                        store.set(scrolledAtom, distanceFromBottom > BOTTOM_THRESHOLD);
+                        latchIntentFromDistance(distanceFromBottom, scrollAtoms);
                     }
                 }
             }
@@ -313,7 +318,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                         const { scrollHeight, scrollTop } = container;
                         const distanceFromBottom = scrollHeight - scrollTop - currentHeight;
                         if (distanceFromBottom <= AT_BOTTOM_EPSILON) {
-                            store.set(scrolledAtom, false);
+                            resumeFollowing(scrollAtoms);
                         }
                     }
                 }
@@ -407,7 +412,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 // and is still inside that band would have their intent cleared
                 // here on the next streamed frame, and be pulled to the end.
                 if (distanceFromBottom <= AT_BOTTOM_EPSILON) {
-                    store.set(scrolledAtom, false);
+                    resumeFollowing(scrollAtoms);
                 }
 
                 // Only a response in flight is followed. A resize says the
@@ -518,7 +523,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     if (scrollContainerRef.current) {
                         // Force scroll to bottom for pending approvals - user action is required
                         // Reset userScrolled to allow auto-scroll
-                        store.set(scrolledAtom, false);
+                        resumeFollowing(scrollAtoms);
                         
                         // Animated, unlike the per-frame following above: this
                         // happens once, when an approval appears, and can carry
@@ -582,7 +587,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 // scrolled back leaves them nearer the end without their having
                 // asked to go back to it.
                 if (distanceFromBottom <= AT_BOTTOM_EPSILON) {
-                    store.set(scrolledAtom, false);
+                    resumeFollowing(scrollAtoms);
                 }
             }, EXPANSION_SCROLL_EVAL_DELAY);
 
