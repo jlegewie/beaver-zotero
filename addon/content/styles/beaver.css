@@ -1953,6 +1953,74 @@
     transition: all 0.2s ease;
 }
 
+/* Arrow and streaming dots share one grid cell so they cross-fade in place
+   rather than shifting the button's content. The dots stay mounted at opacity 0
+   when idle; only the `.is-bouncing` class (which React holds through the
+   fade-out) drives the animation. */
+[id^="beaver-pane-"] .scroll-down-icons {
+    display: grid;
+    place-items: center;
+    line-height: 0;
+}
+
+[id^="beaver-pane-"] .scroll-down-icon {
+    grid-area: 1 / 1;
+    transition: opacity 0.2s ease;
+}
+
+[id^="beaver-pane-"] .scroll-down-dots {
+    opacity: 0;
+}
+
+[id^="beaver-pane-"] .scroll-down-button.is-streaming .scroll-down-arrow {
+    opacity: 0;
+}
+
+[id^="beaver-pane-"] .scroll-down-button.is-streaming .scroll-down-dots {
+    opacity: 1;
+}
+
+/* Hover always resolves back to the arrow: the button is a scroll affordance
+   first, a streaming cue second. */
+[id^="beaver-pane-"] .scroll-down-button.is-streaming:hover .scroll-down-arrow {
+    opacity: 1;
+}
+
+[id^="beaver-pane-"] .scroll-down-button.is-streaming:hover .scroll-down-dots {
+    opacity: 0;
+}
+
+[id^="beaver-pane-"] .scroll-down-dots.is-bouncing circle {
+    animation: beaverScrollDotBounce 1.05s cubic-bezier(0.33, 0, 0.33, 1) infinite;
+}
+
+[id^="beaver-pane-"] .scroll-down-dots.is-bouncing circle:nth-child(2) {
+    animation-delay: 0.12s;
+}
+
+[id^="beaver-pane-"] .scroll-down-dots.is-bouncing circle:nth-child(3) {
+    animation-delay: 0.24s;
+}
+
+/* Rests at translateY(0) for the back half of every cycle, so the dots enter and
+   leave the bounce from the steady triplet instead of jumping into it. Lengths
+   are SVG user units (viewBox is 24 wide), not CSS pixels. */
+@keyframes beaverScrollDotBounce {
+    0%, 55%, 100% {
+        transform: translateY(0);
+    }
+
+    27.5% {
+        transform: translateY(-3.5px);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    [id^="beaver-pane-"] .scroll-down-dots.is-bouncing circle {
+        animation: none;
+    }
+}
+
 /* Surface light variant */
 [id^="beaver-pane-"] .variant-surface-light {
     cursor: pointer;
