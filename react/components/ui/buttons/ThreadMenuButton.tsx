@@ -8,7 +8,8 @@ import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../../
 import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
 import { resolveToolCallLabelEnrichMap } from '../../../utils/toolCallLabelEnrich';
-import { allRunsAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
+import { allRunsAtom, runsCountAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
+import { flushPendingPartEvents } from '../../../utils/streamingPartQueue';
 import { currentThreadIdAtom, currentThreadNameAtom, newThreadAtom, recentThreadsAtom, ThreadData } from '../../../atoms/threads';
 import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
@@ -36,8 +37,11 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         if (isOpen) forceUpdate({});
     }, []);
 
-    const runs = useAtomValue(allRunsAtom);
-    const toolResultsMap = useAtomValue(toolResultsMapAtom);
+    // The menu's content is built when it is opened, so the runs and their tool
+    // results are read then rather than subscribed to — subscribing would
+    // re-render the header on every frame of a streaming response. Only the
+    // count, which decides whether the entries are enabled, is subscribed.
+    const runsCount = useAtomValue(runsCountAtom);
     const citationDataMap = useAtomValue(citationMapAtom);
     const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
@@ -58,7 +62,13 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
      * raw library ref ("u") instead of the library name.
      */
     const getThreadContent = async (overrides?: Partial<ExtractThreadContentOptions>) => {
+        // Streamed parts are applied a frame after they arrive, so a thread
+        // copied or saved mid-response would otherwise stop a frame short of
+        // what is on screen.
+        flushPendingPartEvents();
         const { threadId, threadName } = getThreadMeta();
+        const runs = store.get(allRunsAtom);
+        const toolResultsMap = store.get(toolResultsMapAtom);
         const enrichMap = await resolveToolCallLabelEnrichMap(runs, toolResultsMap);
         return extractThreadContent(runs, toolResultsMap, {
             threadId,
@@ -225,7 +235,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
     const getMenuItems = (): MenuItem[] => {
         const threadId = store.get(currentThreadIdAtom);
-        const hasRuns = runs.length > 0;
+        const hasRuns = runsCount > 0;
         const context = getZoteroTargetContextSync();
         const hasParent = context.parentReference !== null;
 

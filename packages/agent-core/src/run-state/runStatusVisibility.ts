@@ -72,7 +72,7 @@ function hasVisibleContent(run: AgentRun): boolean {
  */
 function hasInProgressToolCall(
     run: AgentRun,
-    toolResults: Map<string, ToolReturnPart | RetryPromptPart>,
+    toolResults: ReadonlyMap<string, ToolReturnPart | RetryPromptPart>,
 ): boolean {
     for (const message of run.model_messages) {
         if (message.kind !== "response") continue;
@@ -119,7 +119,7 @@ function hasInProgressToolCall(
  */
 export function shouldShowRunStatus(
     run: AgentRun,
-    toolResults: Map<string, ToolReturnPart | RetryPromptPart>,
+    toolResults: ReadonlyMap<string, ToolReturnPart | RetryPromptPart>,
     options: {
         /**
          * Whether the stream has been quiet long enough to report — see

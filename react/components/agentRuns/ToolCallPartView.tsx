@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
-import { toolResultsMapAtom, getToolCallStatus } from '@beaver/agent-core/run-state/atoms';
+import { getToolCallStatusFromResult, toolResultAtom } from '@beaver/agent-core/run-state/atoms';
 import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
 import {
     isToolResultView,
@@ -225,15 +225,16 @@ interface ToolCallPartViewProps {
 
 /**
  * Renders a tool call with its status and result.
- * Uses toolResultsMapAtom to look up the result for this tool call.
+ * Uses toolResultAtom to look up the result for this tool call.
  * Visibility state is managed globally via searchToolVisibilityAtom.
  * Shows AgentActionView for tools with agent actions (e.g., edit_metadata).
  */
 export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId, responseIndex, runStatus }) => {
-    const resultsMap = useAtomValue(toolResultsMapAtom);
-    const result = resultsMap.get(part.tool_call_id);
+    // Scoped to this call: subscribing to the thread's whole result lookup
+    // re-renders every tool card on every frame of a streaming response.
+    const result = useAtomValue(useMemo(() => toolResultAtom(part.tool_call_id), [part.tool_call_id]));
     const hasResult = result !== undefined;
-    const status = getToolCallStatus(part.tool_call_id, resultsMap, runStatus);
+    const status = getToolCallStatusFromResult(result, runStatus);
 
     // Hydrated tool-result view model — present once the call has returned.
     const rawView = result?.part_kind === 'tool-return' ? result.metadata?.view : undefined;
