@@ -82,7 +82,6 @@ import {
     activeRunAtom,
     allRunsAtom,
     currentThreadIdAtom,
-    updateRunWithPart,
     updateRunWithToolReturn,
     updateRunComplete,
     updateRunWithToolCallProgress,
@@ -91,6 +90,7 @@ import {
     resetRunMessages,
     wsReconnectingAtom,
     wsRetryAtom,
+    resetRunSelectorCaches,
 } from '@beaver/agent-core/run-state/atoms';
 import {
     createStreamActivityTracker,
@@ -149,6 +149,7 @@ import {
     clearAllPendingBatchApprovalsAtom,
 } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import { readCreditThreshold } from '../utils/creditThreshold';
+import { flushPendingPartEvents, queuePartEvent } from '../utils/streamingPartQueue';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { undoCreateItemAction } from '../utils/createItemActions';
@@ -1358,7 +1359,7 @@ export function createWSCallbacks(
     set: Setter,
     connectAttempts: () => number | null = () => null,
 ): WSCallbacks {
-    return {
+    return flushPartsBeforeOtherEvents({
         onReady: (data: WSReadyData) => {
             logger('WS onReady:', data, 1);
             set(isWSReadyAtom, true);
@@ -1418,8 +1419,11 @@ export function createWSCallbacks(
                     }
                 }
             }
-            // Update run with part
-            set(activeRunAtom, (prev) => prev ? updateRunWithPart(prev, event) : prev);
+            // Queued rather than applied now: the store write, and the render
+            // it triggers, happen once per animation frame however fast parts
+            // arrive. Every other callback here flushes the queue first, so
+            // ordering with the rest of the stream is unchanged.
+            queuePartEvent(event);
         },
 
         onToolReturn: async (event: WSToolReturnEvent) => {
@@ -1982,7 +1986,31 @@ export function createWSCallbacks(
                 }
             }
         }
-    };
+    });
+}
+
+/**
+ * Wrap every callback except `onPart` so it applies the queued part events
+ * before it runs.
+ *
+ * Part events are buffered for a frame (see `streamingPartQueue`), so anything
+ * else arriving on the socket — a tool return, the run completing — would
+ * otherwise see run state missing the text that arrived just before it. Wrapping
+ * the whole object rather than each handler keeps a callback added later from
+ * silently missing the flush.
+ */
+function flushPartsBeforeOtherEvents(callbacks: WSCallbacks): WSCallbacks {
+    const wrapped: Record<string, unknown> = { ...callbacks };
+
+    for (const [name, callback] of Object.entries(callbacks)) {
+        if (name === 'onPart' || typeof callback !== 'function') continue;
+        wrapped[name] = (...args: unknown[]) => {
+            flushPendingPartEvents();
+            return (callback as (...callbackArgs: unknown[]) => unknown)(...args);
+        };
+    }
+
+    return wrapped as unknown as WSCallbacks;
 }
 
 /**
@@ -2547,6 +2575,10 @@ async function startRegenerateRun(
             return;
         }
 
+        // Before the run is read or archived: whichever run this ends up
+        // touching, it must carry the streamed text queued for the frame.
+        flushPendingPartEvents();
+
         // Fold a terminal run out of the active slot into thread history
         // before the removed set is computed: a failed run being replaced
         // contributes its applied actions to the confirm dialog and its ID
@@ -2910,6 +2942,11 @@ export const resumeFromRunAtom = atom(
  * Store-only — does not touch the socket.
  */
 export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
+    // The run below is archived exactly as it stands and its slot is cleared,
+    // so the streamed text still sitting in the frame queue has to be applied
+    // first — after the slot is null there is nothing left to apply it to.
+    flushPendingPartEvents();
+
     // Set pending to false immediately for better UI responsiveness
     set(isWSChatPendingAtom, false);
 
@@ -3017,6 +3054,7 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(clearAgentActionsAtom);
     set(citationsAtom, []);
     set(resetCitationMarkersAtom);  // Reset citation markers for cleared thread
+    resetRunSelectorCaches();  // Drop scoped run selectors keyed by the cleared thread's runs
     set(clearWarningsAtom);
     // Clear pending questions so a reset never leaves the composer disabled
     // behind an unanswerable card (pending approvals are left as-is here).

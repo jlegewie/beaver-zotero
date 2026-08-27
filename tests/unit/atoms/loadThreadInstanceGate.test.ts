@@ -63,6 +63,8 @@ vi.mock('../../../react/atoms/ui', async () => {
         removePopupMessagesByTypeAtom: atom(null, () => {}),
         userScrolledAtom: atom(false),
         windowUserScrolledAtom: atom(false),
+        isAtBottomAtom: atom(true),
+        windowIsAtBottomAtom: atom(true),
     };
 });
 
@@ -122,6 +124,7 @@ vi.mock('@beaver/agent-core/run-state/atoms', async () => {
         currentThreadIdAtom: atom<string | null>(null),
         currentThreadNameAtom: atom<string | null>(null),
         isLoadingThreadAtom: atom<boolean>(false),
+        resetRunSelectorCaches: () => {},
     };
 });
 

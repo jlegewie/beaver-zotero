@@ -8,6 +8,7 @@ import { syncStatusAtom, syncingAtom, syncErrorAtom, syncStatusSummaryAtom, over
 import { recentThreadsAtom, currentThreadIdAtom } from "../atoms/threads"
 import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, showFileStatusDetailsAtom, userScrolledAtom, popupMessagesAtom } from "../atoms/ui"
 import { store } from "../store"
+import { flushPendingPartEvents } from "./streamingPartQueue"
 
 // Agent-related atoms
 import { threadRunsAtom, activeRunAtom, allRunsAtom, isStreamingAtom as isAgentStreamingAtom, toolResultsMapAtom } from "@beaver/agent-core/run-state/atoms"
@@ -108,6 +109,10 @@ export const atomRegistry = {
 }
 
 export const getJotaiState = () => {
+    // Streamed parts are applied a frame after they arrive, so a snapshot taken
+    // mid-response would otherwise trail the stream by a frame.
+    flushPendingPartEvents()
+
     const state: Record<string, unknown> = {}
     
     Object.entries(atomRegistry).forEach(([key, atom]) => {

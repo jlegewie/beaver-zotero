@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
-import { isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowUserScrolledAtom } from "./ui";
+import { isAtBottomAtom, isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowIsAtBottomAtom, windowUserScrolledAtom } from "./ui";
 
 import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "@beaver/agent-core/citations/atoms";
 import { maybeShowCitationTipAtom } from "./citationTip";
@@ -17,7 +17,7 @@ import { resetMessageUIStateAtom } from "./messageUIState";
 import { checkExternalReferencesAtom } from "./externalReferences";
 import { clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "@beaver/agent-core/citations/externalReferences";
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
-import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom } from "@beaver/agent-core/run-state/atoms";
+import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom, resetRunSelectorCaches } from "@beaver/agent-core/run-state/atoms";
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
 import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
 import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
@@ -40,6 +40,7 @@ import { enrichMessageAttachmentStub } from "../types/attachments/converters";
 import { zoteroReferenceKey } from "@beaver/agent-core/types/attachments/apiTypes";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
 import type { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
+import { flushPendingPartEvents } from "../utils/streamingPartQueue";
 
 /**
  * Stores a run ID that ThreadView should scroll to after a thread finishes loading.
@@ -138,7 +139,10 @@ export interface ThreadData {
 export { currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom };
 
 /**
- * Atom to store the scroll position of the current thread
+ * Where the reader is in each thread, by thread id: the offset they scrolled
+ * back to. A thread with no entry is reopened at its bottom — the reader was
+ * following the response when they left it, or has never opened it — and the
+ * bottom is recorded by dropping the entry rather than storing an offset.
  */
 export const threadScrollPositionsAtom = atom<Record<string, number>>({});
 
@@ -172,7 +176,7 @@ export const currentThreadScrollPositionAtom = atom(
 );
 
 /**
- * Atom to store scroll positions for the separate window (independent from sidebar)
+ * The same, for the separate window, which scrolls independently of the sidebars.
  */
 export const windowScrollPositionsAtom = atom<Record<string, number>>({});
 
@@ -240,6 +244,9 @@ function confirmOpenMismatchedThread(): boolean {
  * This ensures the WebSocket connection is closed and UI state is consistent.
  */
 async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any, value?: any) => void): Promise<void> {
+    // A run canceled mid-response is archived as it stands, so it has to
+    // include the streamed text still sitting in the frame queue.
+    flushPendingPartEvents();
     const isPending = get(isWSChatPendingAtom);
     const activeRun = get(activeRunAtom);
     
@@ -319,6 +326,7 @@ export const newThreadAtom = atom(
             set(removePopupMessagesByTypeAtom, ['items_summary']);
             set(citationsAtom, []);
             set(resetCitationMarkersAtom);
+            resetRunSelectorCaches();
             set(clearComposerAtom);
             set(resetMessageUIStateAtom);
             set(clearExternalReferenceCacheAtom);
@@ -333,9 +341,14 @@ export const newThreadAtom = atom(
                     await set(updateReaderAttachmentAtom);
                 }
             }
-            // Reset scroll state for both sidebar and window
+            // Reset scroll state for both sidebar and window. The measured
+            // position is reset with the intent: the thread being opened has
+            // not been measured yet, and the previous thread's reading would
+            // otherwise decide whether the scroll-down button shows.
             set(userScrolledAtom, false);
             set(windowUserScrolledAtom, false);
+            set(isAtBottomAtom, true);
+            set(windowIsAtBottomAtom, true);
         } finally {
             // Always clear loading state
             set(isLoadingThreadAtom, false);
@@ -437,9 +450,14 @@ export const loadThreadAtom = atom(
                 logger(`loadThreadAtom: Error cleaning up temporary annotations: ${error}`);
             });
 
-            // Reset scroll state for both sidebar and window
+            // Reset scroll state for both sidebar and window. The measured
+            // position is reset with the intent: the thread being opened has
+            // not been measured yet, and the previous thread's reading would
+            // otherwise decide whether the scroll-down button shows.
             set(userScrolledAtom, false);
             set(windowUserScrolledAtom, false);
+            set(isAtBottomAtom, true);
+            set(windowIsAtBottomAtom, true);
             // Set the current thread ID and name
             set(currentThreadIdAtom, threadId);
             set(currentThreadNameAtom, resolvedName);
@@ -552,7 +570,10 @@ export const loadThreadAtom = atom(
                         logger(`loadThreadAtom: Failed to preload page labels: ${err}`, 1)
                     );
 
-                // Set agent runs
+                // Set agent runs. The scoped run selectors are dropped in the
+                // same breath: reset any earlier and the old thread's runs, still
+                // in the store while this load ran, would populate them again.
+                resetRunSelectorCaches();
                 set(threadRunsAtom, processedRuns);
 
                 // Reconcile toolcall_id mismatches between REST API and model messages
@@ -605,6 +626,7 @@ export const loadThreadAtom = atom(
                 }
             } else {
                 // No runs found, clear state
+                resetRunSelectorCaches();
                 set(threadRunsAtom, []);
                 set(threadAgentActionsAtom, []);
                 set(citationsAtom, []);
@@ -625,6 +647,7 @@ export const loadThreadAtom = atom(
             if (error instanceof ApiError && error.status === 404) {
                 logger(`loadThreadAtom: Thread ${threadId} not found, resetting to empty thread state`, 1);
                 set(currentThreadIdAtom, null);
+                resetRunSelectorCaches();
                 set(threadRunsAtom, []);
                 set(activeRunAtom, null);
                 set(threadAgentActionsAtom, []);

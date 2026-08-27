@@ -25,7 +25,7 @@ interface ModelMessagesViewProps {
  *
  * Only ModelResponse messages are rendered — see `isRenderableMessage` for why
  * a ModelRequest never is. Their tool-return parts surface elsewhere, inline
- * with the matching tool call via `toolResultsMapAtom`; their user-prompt parts
+ * with the matching tool call via `toolResultAtom`; their user-prompt parts
  * have no consumer by design.
  */
 export const ModelMessagesView: React.FC<ModelMessagesViewProps> = React.memo(function ModelMessagesView({

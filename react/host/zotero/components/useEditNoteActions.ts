@@ -14,7 +14,7 @@ import {
     removeApprovalResponseIntentAtom,
     sendApprovalResponseAtom,
 } from '../../../atoms/agentRunAtoms';
-import { getToolCallStatus, toolResultsMapAtom, type ToolCallStatus } from '@beaver/agent-core/run-state/atoms';
+import { getToolCallStatusFromResult, toolResultAtom, type ToolCallStatus } from '@beaver/agent-core/run-state/atoms';
 import { openNoteAndSearchEdit, openNoteByKey } from '../../../utils/sourceUtils';
 import {
     isNoteOpenInEditor,
@@ -147,7 +147,10 @@ export function useEditNoteActions({
 }: UseEditNoteActionsOptions): EditNoteRowState {
     const toolcallId = part.tool_call_id;
 
-    const resultsMap = useAtomValue(toolResultsMapAtom);
+    // Scoped to this call: the thread's whole result lookup is rebuilt on every
+    // frame of a streaming response, and a subscription to it would re-render
+    // every note-edit row in the thread with it.
+    const toolResult = useAtomValue(useMemo(() => toolResultAtom(toolcallId), [toolcallId]));
     // Subscribe to the grouped-actions map (not the stable getter atom) so the
     // fallback path re-renders with fresh actions when an action changes.
     const actionsByToolcall = useAtomValue(agentActionsByToolcallAtom);
@@ -179,10 +182,10 @@ export function useEditNoteActions({
     const pendingApproval = precomputed
         ? precomputed.pendingApproval
         : getEffectiveEditNotePendingApproval(action, pendingApprovalFromMap);
-    const hasToolReturn = resultsMap.get(toolcallId) !== undefined;
+    const hasToolReturn = toolResult !== undefined;
     const toolCallStatus = precomputed
         ? precomputed.toolCallStatus
-        : getToolCallStatus(toolcallId, resultsMap, runStatus);
+        : getToolCallStatusFromResult(toolResult, runStatus);
 
     const parsedArgs = useMemo(
         () => part.streaming_args ?? parseEditNoteToolCallArgs(part.args),

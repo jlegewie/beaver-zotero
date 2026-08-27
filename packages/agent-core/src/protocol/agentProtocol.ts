@@ -2115,6 +2115,15 @@ export interface WSBatchApprovalRequest extends WSBaseEvent {
      */
     destructive_warning: string;
     /**
+     * What the job costs the user directly, rendered verbatim in its own
+     * block; set only for a run served by the user's own API key that is large
+     * enough to warn about, and empty for everyone else. Distinct from
+     * `credit_chip`, which quotes Beaver credits: a BYOK run's real cost is its
+     * provider's bill, which no credit figure states. Absent from a backend
+     * that predates the field.
+     */
+    cost_warning?: string;
+    /**
      * Short line about the confirmation limit approving raises, shown beside
      * the title; empty when the run has no credit ledger or the user switched
      * confirmations off, and the chip is then hidden.

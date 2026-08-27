@@ -56,6 +56,8 @@ const GOAL = 'Assign one broad topic tag to every item and remove all prior tags
 const WARNING = 'Removes every existing tag from these items';
 const SCOPE_PRIMARY = '184 items';
 const SCOPE_SECONDARY = 'in Computational Social Science and its subcollections';
+const COST_WARNING =
+    'This job runs on your own API key and makes many more model requests than a normal chat turn.';
 const CREDIT_CHIP = 'Asks again at 12 credits';
 const CREDIT_TOOLTIP = 'Approving raises this thread’s confirmation limit to 12 credits.';
 const DECLINE_WITH_INSTRUCTIONS = 'Send instructions';
@@ -72,6 +74,7 @@ function approval(overrides: Partial<PendingBatchApproval> = {}): PendingBatchAp
         scopeSecondary: SCOPE_SECONDARY,
         message: GOAL,
         destructiveWarning: WARNING,
+        costWarning: '',
         creditChip: CREDIT_CHIP,
         creditTooltip: CREDIT_TOOLTIP,
         defaultMode: 'full_access',
@@ -307,6 +310,33 @@ describe('BatchApprovalCard backend copy', () => {
 
         expect(findAll(tree, isWarningBlock)).toHaveLength(0);
         expect(renderedText(tree)).toContain(GOAL);
+    });
+
+    it('hides the cost warning when the run is not billed to the user’s own key', () => {
+        // Empty is the common case: it is set only for a BYOK run large enough
+        // to warn about, so an absent field must leave no empty block behind.
+        const tree = render(vi.fn(), { costWarning: '' });
+
+        expect(findAll(tree, isWarningBlock)).toHaveLength(1);
+        expect(renderedText(tree)).toContain(WARNING);
+    });
+
+    it('shows the cost warning in its own block beside the destructive one', () => {
+        // The two answer different questions — what you lose, what you pay —
+        // so a card carrying both must show both, verbatim and unmerged.
+        const tree = render(vi.fn(), { costWarning: COST_WARNING });
+
+        expect(findAll(tree, isWarningBlock)).toHaveLength(2);
+        const text = renderedText(tree);
+        expect(text).toContain(COST_WARNING);
+        expect(text).toContain(WARNING);
+    });
+
+    it('shows the cost warning on its own when nothing destructive was declared', () => {
+        const tree = render(vi.fn(), { destructiveWarning: '', costWarning: COST_WARNING });
+
+        expect(findAll(tree, isWarningBlock)).toHaveLength(1);
+        expect(renderedText(tree)).toContain(COST_WARNING);
     });
 
     it('hides the credit chip when the run has none', () => {

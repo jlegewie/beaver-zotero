@@ -70,9 +70,10 @@ export interface BatchApprovalCardProps {
  * reads nor writes it, and carries its own instructions field instead.
  *
  * Every word the user reads about the batch — title, scope line, goal,
- * destructive warning, credit chip, button labels — is composed by the backend
- * and rendered verbatim. This component must not derive prose from those
- * fields; the only copy it owns is the mode menu and the slot headings.
+ * destructive warning, cost warning, credit chip, button labels — is composed
+ * by the backend and rendered verbatim. This component must not derive prose
+ * from those fields; the only copy it owns is the mode menu and the slot
+ * headings.
  *
  * The scope line arrives in two halves so the card can weight them: the count
  * is the fact the decision turns on, the location is context for it. The
@@ -82,6 +83,12 @@ export interface BatchApprovalCardProps {
  * The destructive warning is model-authored and gets its own block so it reads
  * as a separate claim about what will be removed or overwritten, not as more
  * of the goal. It is hidden when the batch declared nothing destructive.
+ *
+ * The cost warning is a second, independent block: what the job costs the user
+ * directly, which only a run on their own API key has and which the credit chip
+ * cannot state. The two blocks answer different questions — what you lose, what
+ * you pay — so either, both or neither may be present, and the card never folds
+ * one into the other.
  *
  * Both answers leave the run alive: approving starts the batch, cancelling
  * cancels the batch and lets the run keep talking. Instructions travel with
@@ -235,6 +242,34 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                             {approval.destructiveWarning &&
                                 (approval.destructiveWarning.charAt(0).toUpperCase() +
                                 approval.destructiveWarning.slice(1))}
+                        </div>
+                    </div>
+                )}
+
+                {approval.costWarning && (
+                    <div
+                        className="display-flex flex-row items-start gap-2 p-2 rounded-md min-w-0"
+                        // A neutral surface, unlike the destructive block above
+                        // it. Both can appear on the same card, and two orange
+                        // blocks would read as one long alarm with neither half
+                        // landing; the icon carries the caution instead, and
+                        // the surface only sets the sentence apart from the
+                        // goal. Yellow was the other candidate and is not
+                        // usable here: the host's --tag-yellow is a swatch hue
+                        // (#ffd400) that all but disappears on a light theme.
+                        style={{
+                            backgroundColor: 'var(--fill-quinary)',
+                            border: '1px solid var(--fill-quarternary)',
+                        }}
+                        role="note"
+                        aria-label="What this batch costs on your own API key"
+                    >
+                        <Icon
+                            icon={DollarCircleIcon}
+                            className="font-color-primary scale-12 flex-none mt-1"
+                        />
+                        <div className="font-color-primary min-w-0">
+                            {approval.costWarning}
                         </div>
                     </div>
                 )}
