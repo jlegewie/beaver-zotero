@@ -23,7 +23,7 @@ import type {
     CollectionListView,
     AttachmentSearchView,
     ExternalReferenceListView,
-    BatchOperationView,
+    BatchJobView,
 } from '@beaver/agent-core/run-state/toolResultViews';
 import type { ToolCallPart } from '@beaver/agent-core/agents/types';
 
@@ -45,11 +45,11 @@ const itemListView = (count: number): ItemListView => ({
     })),
 });
 
-const batchView = (overrides: Partial<BatchOperationView> = {}): BatchOperationView => ({
+const batchView = (overrides: Partial<BatchJobView> = {}): BatchJobView => ({
     view_type: 'batch_operation',
     tool_name: 'batch_start',
     batch_id: 'b1',
-    title: 'Batch operation',
+    title: 'Batch job',
     status: 'active',
     status_label: '',
     scope_primary: '23 items',

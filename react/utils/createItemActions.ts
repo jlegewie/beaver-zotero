@@ -13,7 +13,7 @@ import { ensureItemSynced } from '../../src/utils/sync';
 import { scheduleBackgroundTask, generateTaskId, cancelTasksForItem, deduplicatedSync } from '../../src/utils/backgroundTasks';
 import { resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
 
-/** Maximum concurrent item creations in batch operations */
+/** Maximum concurrent item creations in batch jobs */
 const BATCH_CONCURRENCY_LIMIT = 3;
 
 interface ExecuteCreateItemActionOptions {

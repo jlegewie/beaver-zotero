@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, forwardRef, useLayoutEffect, useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { allRunsAtom } from "@beaver/agent-core/run-state/atoms";
+import { streamQuietAtom } from "@beaver/agent-core/run-state/streamActivity";
 import { AgentRunView } from "./AgentRunView";
 import { scrollToBottom } from "../../utils/scrollToBottom";
 import { userScrolledAtom, windowUserScrolledAtom } from "../../atoms/ui";
@@ -34,6 +35,11 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
     function ThreadView({ className, isWindow = false }: ThreadViewProps, ref: React.ForwardedRef<HTMLDivElement>) {
         const win = Zotero.getMainWindow();
         const runs = useAtomValue(allRunsAtom);
+        // The working indicator appears mid-response, when the provider goes
+        // quiet with text already on screen. That adds content without touching
+        // `runs`, so the scroll effect below would not see it. Safe to subscribe
+        // here: this atom flips on a wait starting and ending, not per token.
+        const streamQuiet = useAtomValue(streamQuietAtom);
         const pendingRunId = useAtomValue(pendingScrollToRunAtom);
         const isLoadingThread = useAtomValue(isLoadingThreadAtom);
         const setPendingScrollToRun = useSetAtom(pendingScrollToRunAtom);
@@ -278,7 +284,8 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             };
         }, [restoreScrollPosition, scrolledAtom, tryScrollToPendingRun, isProtocolScrollLocked, win]);
 
-        // Scroll to bottom when runs change
+        // Scroll to bottom when runs change, and when the working indicator appears
+        // or goes away — that is content the run itself does not account for.
         useEffect(() => {
             if (pendingRunId || isProtocolScrollLocked()) {
                 return;
@@ -314,7 +321,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     isAnimatingRef.current = false;
                 }, ANIMATION_LOCKOUT_MS);
             }
-        }, [pendingRunId, isProtocolScrollLocked, runs, scrolledAtom, win]);
+        }, [pendingRunId, isProtocolScrollLocked, runs, streamQuiet, scrolledAtom, win]);
 
         // Scroll to bottom when a new pending approval appears
         // This ensures the approval buttons are visible, even if user had scrolled up

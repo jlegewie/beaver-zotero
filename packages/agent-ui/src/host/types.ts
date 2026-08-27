@@ -6,6 +6,7 @@ import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atom
 import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import type { ToolCallPart, AgentRun, AgentRunStatus } from '@beaver/agent-core/agents/types';
 import type { AgentActionType } from '@beaver/agent-core/protocol/agentProtocol';
+import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgress';
 
 /**
  * Everything the host needs to activate (navigate to / open) a cited location.
@@ -114,6 +115,12 @@ export interface NavigationHost {
      * omit it, and action pills degrade to hover-only.
      */
     openActionSettings?(actionId: string): void;
+    /**
+     * Navigate to what a batch outcome row names (collection filed into, tag
+     * applied). The target has no library — the host resolves the name or key
+     * against the libraries it can see.
+     */
+    revealBatchOutcome?(target: BatchOutcomeTarget): void | Promise<void>;
 }
 
 /**
@@ -479,9 +486,9 @@ export interface ComponentsHost {
      */
     agentActionInStream(props: AgentActionInStreamProps): ReactNode;
     /**
-     * Render the post-run pending-approval review block (create-item / note /
-     * annotation mutation summaries). Return null when the client has nothing to
-     * approve.
+     * Render the post-run review block for the client's library changes
+     * (create-item / note / annotation mutation summaries), pending or settled.
+     * Return null when the client has nothing to show for the run.
      */
     pendingActionsReview(props: { run: AgentRun }): ReactNode;
     /**

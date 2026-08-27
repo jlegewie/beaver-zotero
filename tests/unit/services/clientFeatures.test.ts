@@ -63,7 +63,7 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // client only answers if it has the handler: a build that predates it drops the
 // event and stalls the run for the whole confirmation timeout, so the backend
 // falls back to the per-tool confirmations instead.
-// batch_operations is declaration-only because it is a backend rollout switch
+// batch_jobs is declaration-only because it is a backend rollout switch
 // for a deferred capability with no client handler: a client that does not
 // declare it sees no catalog entry. This plugin only opts in in development.
 const DECLARATION_ONLY_FEATURES = [
@@ -80,12 +80,12 @@ const DECLARATION_ONLY_FEATURES = [
     'list_collections_recursive',
     'list_tags_name_query',
     'credit_confirmation',
-    'batch_operations',
+    'batch_jobs',
 ];
 
 // Features in the vocabulary that this plugin does not declare in production.
 const DEV_ONLY_FEATURES = [
-    'batch_operations',
+    'batch_jobs',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every
@@ -180,12 +180,12 @@ describe('client feature declaration (Lane C)', () => {
         expect(ZOTERO_PLUGIN_FEATURES).toContain('citation_v2');
     });
 
-    it('declares batch_operations only in development', () => {
-        expect(ZOTERO_PLUGIN_FEATURES).not.toContain('batch_operations');
-        expect(zoteroPluginFeatures(false)).not.toContain('batch_operations');
+    it('declares batch_jobs only in development', () => {
+        expect(ZOTERO_PLUGIN_FEATURES).not.toContain('batch_jobs');
+        expect(zoteroPluginFeatures(false)).not.toContain('batch_jobs');
         expect(zoteroPluginFeatures(true)).toEqual([
             ...ZOTERO_PLUGIN_FEATURES,
-            'batch_operations',
+            'batch_jobs',
         ]);
     });
 });

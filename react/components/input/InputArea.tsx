@@ -17,6 +17,7 @@ import { selectedModelAtom, isUsingBeaverCreditsAtom } from '../../atoms/models'
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
+import BatchProgressPanel from './BatchProgressPanel';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToSuggestions';
@@ -140,12 +141,12 @@ const InputArea: React.FC<InputAreaProps> = ({
     const showHighTokenUsageWarningMessage = getPref('showHighTokenUsageWarningMessage');
     const threadHasHighTokenUsage = allRuns.some(r => backendHighTokenUsageRuns[r.id])
         || (lastRequestInputTokens !== null && lastRequestInputTokens > HIGH_INPUT_TOKEN_WARNING_THRESHOLD);
-    const shouldShowHighTokenWarning = Boolean(
+    const canShowHighTokenWarning = Boolean(
         showHighTokenUsageWarningMessage &&
-        !isAwaitingApproval &&
         warningThreadId &&
         threadHasHighTokenUsage &&
-        !isHighTokenDismissed
+        !isHighTokenDismissed &&
+        lastRequestInputTokens !== null
     );
 
     // First-run next steps — driven by persisted origin on the last run, with
@@ -166,17 +167,15 @@ const InputArea: React.FC<InputAreaProps> = ({
     // Guided next steps surface after a suggestion-card run or a "Where should
     // we start?" launcher run — both carry the context NextStepsPanel needs.
     const lastRunOriginKind = lastRun?.user_prompt.origin?.kind;
-    const showNextSteps = Boolean(
-        !isAwaitingApproval &&
+    const canShowNextSteps = Boolean(
         lastRun &&
         (lastRunOriginKind === 'first_run_card' || lastRunOriginKind === 'where_to_start') &&
         lastRun.status === 'completed' &&
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
-    const showBackToSuggestions = Boolean(
-        !isAwaitingApproval &&
+    const canShowBackToSuggestions = Boolean(
         lastRun &&
-        lastRun.user_prompt.origin?.kind === 'first_run_followup' &&
+        lastRunOriginKind === 'first_run_followup' &&
         lastRun.status === 'completed' &&
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
@@ -185,11 +184,21 @@ const InputArea: React.FC<InputAreaProps> = ({
         (r) => r.user_prompt?.origin?.kind === 'where_to_start',
     ) ? 'launcher' : 'suggestions';
 
-    // Mutual exclusion: NextSteps/BackToSuggestions take precedence over the
-    // high-token warning bar.
-    const firstRunPanelVisible = showNextSteps || showBackToSuggestions;
-    const showHighTokenWarningBar = shouldShowHighTokenWarning && !firstRunPanelVisible;
-    const canRenderHighTokenWarningBar = showHighTokenWarningBar && lastRequestInputTokens !== null;
+    // Exactly one band between the batch panel and the attachment row.
+    // Priority: blocked decision, then first-run guidance, then the cost warning.
+    // One ordered list (not a suppression clause in each predicate) so a new
+    // band takes a place here instead of stacking. Laid out lowest-priority
+    // first so the winner sits nearest the composer.
+    const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'approvals' | null =
+        isAwaitingApproval
+            ? 'approvals'
+            : canShowNextSteps
+                ? 'next-steps'
+                : canShowBackToSuggestions
+                    ? 'back-to-suggestions'
+                    : canShowHighTokenWarning
+                        ? 'high-token'
+                        : null;
 
     const {
         isSlashMenuOpen,
@@ -235,6 +244,14 @@ const InputArea: React.FC<InputAreaProps> = ({
         // Focus on mount via the Lexical handle.
         focusEditor();
     }, []);
+
+    // Approval hides the attachment row (and the Add Sources menu). Close the
+    // menu so it does not unmount still open — that flag swallows Enter.
+    useEffect(() => {
+        if (isAwaitingApproval && isAddSourcesMenuOpen) {
+            dismissAddSourcesMenu();
+        }
+    }, [dismissAddSourcesMenu, isAddSourcesMenuOpen, isAwaitingApproval]);
 
     // Consume a staged /command pill (home launcher, context menu, reader
     // toolbar). This component owns the editor handle, so the pill is inserted
@@ -474,9 +491,13 @@ const InputArea: React.FC<InputAreaProps> = ({
             onClick={handleContainerClick}
             style={{ minHeight: 'fit-content' }}
         >
-            {/* Pending actions bar - shown when awaiting approval */}
-            <PendingActionsBar />
-            {canRenderHighTokenWarningBar && (
+            {/* Live batch progress. Above the band so it stacks as: what the
+                run is doing, then what it wants from the user. */}
+            <BatchProgressPanel />
+
+            {/* One band, chosen by `composerBand`. Lowest priority first so
+                the winner sits on the composer. */}
+            {composerBand === 'high-token' && (
                 <HighTokenUsageWarningBar
                     onNewThread={(e) => {
                         e.preventDefault();
@@ -490,7 +511,7 @@ const InputArea: React.FC<InputAreaProps> = ({
 
             {/* First-run "Next steps" panel — shown after a run that originated
                 from a first-run suggestion card. Auto-dismisses on type. */}
-            {showNextSteps && lastRun && (
+            {composerBand === 'next-steps' && lastRun && (
                 <NextStepsPanel
                     origin={lastRun.user_prompt.origin as Extract<PromptOrigin, { kind: 'first_run_card' | 'where_to_start' }>}
                     onDismiss={handleDismissNextSteps}
@@ -499,14 +520,20 @@ const InputArea: React.FC<InputAreaProps> = ({
 
             {/* After a first-run follow-up run, offer a path back to the
                 originating surface (suggestion grid or launcher). */}
-            {showBackToSuggestions && (
+            {composerBand === 'back-to-suggestions' && (
                 <div className="next-steps-panel px-3 py-2">
                     <BackToSuggestions onDismiss={handleDismissNextSteps} backTarget={firstRunBackTarget} />
                 </div>
             )}
 
-            {/* Message attachments — absent entirely when nothing is attached */}
-            {!hideAttachmentMenu && <MessageAttachmentDisplay />}
+            {/* Pending approvals. Last of the bands so it sits on the composer
+                — Send becomes Reject, and the field is where rejection is written. */}
+            {composerBand === 'approvals' && <PendingActionsBar />}
+
+            {/* Message attachments — absent entirely when nothing is attached.
+                Hidden during approval: the message cannot be sent until the
+                decision is made. */}
+            {!hideAttachmentMenu && !isAwaitingApproval && <MessageAttachmentDisplay />}
 
             <SearchMenu
                 menuItems={slashMenuItems}

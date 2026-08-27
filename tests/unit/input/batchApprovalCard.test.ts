@@ -58,6 +58,7 @@ const SCOPE_PRIMARY = '184 items';
 const SCOPE_SECONDARY = 'in Computational Social Science and its subcollections';
 const CREDIT_CHIP = 'Asks again at 12 credits';
 const CREDIT_TOOLTIP = 'Approving raises this thread’s confirmation limit to 12 credits.';
+const DECLINE_WITH_INSTRUCTIONS = 'Send instructions';
 
 function approval(overrides: Partial<PendingBatchApproval> = {}): PendingBatchApproval {
     return {
@@ -66,7 +67,7 @@ function approval(overrides: Partial<PendingBatchApproval> = {}): PendingBatchAp
         threadId: 'thread-1',
         toolcallId: 'call-1',
         batchId: 'b1',
-        title: 'Batch operation',
+        title: 'Batch job',
         scopePrimary: SCOPE_PRIMARY,
         scopeSecondary: SCOPE_SECONDARY,
         message: GOAL,
@@ -76,6 +77,7 @@ function approval(overrides: Partial<PendingBatchApproval> = {}): PendingBatchAp
         defaultMode: 'full_access',
         approveLabel: 'Approve 184 items',
         declineLabel: 'Cancel',
+        declineWithInstructionsLabel: DECLINE_WITH_INSTRUCTIONS,
         timeoutSeconds: 180,
         ...overrides,
     };
@@ -159,7 +161,7 @@ describe('BatchApprovalCard one-decision guard', () => {
     it('sends the approval once when Approve is clicked', () => {
         const onSubmit = vi.fn();
 
-        findOne(render(onSubmit), byAriaLabel('Approve batch operation')).props.onClick();
+        findOne(render(onSubmit), byAriaLabel('Approve batch job')).props.onClick();
 
         expect(onSubmit).toHaveBeenCalledTimes(1);
         expect(onSubmit).toHaveBeenCalledWith({
@@ -171,7 +173,7 @@ describe('BatchApprovalCard one-decision guard', () => {
 
     it('sends one decision when Approve is clicked twice before the re-render', () => {
         const onSubmit = vi.fn();
-        const approve = findOne(render(onSubmit), byAriaLabel('Approve batch operation')).props.onClick;
+        const approve = findOne(render(onSubmit), byAriaLabel('Approve batch job')).props.onClick;
 
         approve();
         approve();
@@ -183,8 +185,8 @@ describe('BatchApprovalCard one-decision guard', () => {
         const onSubmit = vi.fn();
         const tree = render(onSubmit);
 
-        findOne(tree, byAriaLabel('Approve batch operation')).props.onClick();
-        findOne(tree, byAriaLabel('Cancel batch operation')).props.onClick();
+        findOne(tree, byAriaLabel('Approve batch job')).props.onClick();
+        findOne(tree, byAriaLabel('Cancel batch job')).props.onClick();
 
         expect(onSubmit).toHaveBeenCalledTimes(1);
         expect(onSubmit).toHaveBeenCalledWith({
@@ -198,7 +200,7 @@ describe('BatchApprovalCard one-decision guard', () => {
         const onSubmit = vi.fn();
         const tree = renderWithInstructions(onSubmit);
 
-        findOne(tree, byAriaLabel('Approve batch operation')).props.onClick();
+        findOne(tree, byAriaLabel('Approve batch job')).props.onClick();
         findOne(tree, isTextarea).props.onKeyDown(ENTER);
 
         expect(onSubmit).toHaveBeenCalledTimes(1);
@@ -222,7 +224,7 @@ describe('BatchApprovalCard decision payload', () => {
     it('carries the mode and the trimmed instructions on Approve', () => {
         const onSubmit = vi.fn();
 
-        findOne(prepared(onSubmit), byAriaLabel('Approve batch operation')).props.onClick();
+        findOne(prepared(onSubmit), byAriaLabel('Approve batch job')).props.onClick();
 
         expect(onSubmit).toHaveBeenCalledWith({
             approved: true,
@@ -233,8 +235,10 @@ describe('BatchApprovalCard decision payload', () => {
 
     it('carries the mode and the trimmed instructions on Cancel', () => {
         const onSubmit = vi.fn();
+        const tree = prepared(onSubmit);
 
-        findOne(prepared(onSubmit), byAriaLabel('Cancel batch operation')).props.onClick();
+        expect(renderedText(tree)).toContain(DECLINE_WITH_INSTRUCTIONS);
+        findOne(tree, byAriaLabel('Cancel batch job and send instructions')).props.onClick();
 
         expect(onSubmit).toHaveBeenCalledWith({
             approved: false,
@@ -248,7 +252,7 @@ describe('BatchApprovalCard decision payload', () => {
 
         findOne(
             render(onSubmit, { defaultMode: 'ask_each_time' }),
-            byAriaLabel('Approve batch operation'),
+            byAriaLabel('Approve batch job'),
         ).props.onClick();
 
         expect(onSubmit).toHaveBeenCalledWith({
@@ -350,7 +354,7 @@ describe('BatchApprovalCard instructions disclosure', () => {
     it('decides with no instructions when the field was never opened', () => {
         const onSubmit = vi.fn();
 
-        findOne(render(onSubmit), byAriaLabel('Approve batch operation')).props.onClick();
+        findOne(render(onSubmit), byAriaLabel('Approve batch job')).props.onClick();
 
         expect(onSubmit).toHaveBeenCalledWith({
             approved: true,

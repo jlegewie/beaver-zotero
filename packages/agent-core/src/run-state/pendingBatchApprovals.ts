@@ -80,6 +80,8 @@ export interface PendingBatchApproval {
     approveLabel: string;
     /** Decline button label, rendered verbatim */
     declineLabel: string;
+    /** Decline button label once instructions have been typed */
+    declineWithInstructionsLabel: string;
     /** Backend-provided docs link text */
     learnMoreLabel?: string;
     /** Docs path resolved against the client's environment-specific docs URL */
@@ -117,6 +119,8 @@ export const addPendingBatchApprovalAtom = atom(
                 defaultMode: event.default_mode,
                 approveLabel: event.approve_label,
                 declineLabel: event.decline_label,
+                declineWithInstructionsLabel:
+                    event.decline_with_instructions_label || event.decline_label,
                 learnMoreLabel: event.learn_more_label,
                 learnMorePath: event.learn_more_path,
                 timeoutSeconds: event.timeout_seconds,

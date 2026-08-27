@@ -1390,10 +1390,11 @@ export interface WSListItemsResponse {
  * Request from backend for resolve_population.
  *
  * Resolves the complete set of item ids matching a filter description in one
- * round trip, so a batch operation never has to page through `list_items`.
- * Every filter is ANDed (the join mode is always `all`); filters left unset do
- * not constrain the result, so an otherwise empty request selects the whole
- * library.
+ * round trip, so a batch job never has to page through `list_items`.
+ * Every filter is ANDed with every other one; `conditions_join_mode` sets how
+ * the `conditions` list is joined among itself, and joins nothing else.
+ * Filters left unset do not constrain the result, so an otherwise empty
+ * request selects the whole library.
  */
 export interface WSResolvePopulationRequest extends WSBaseEvent {
     event: 'resolve_population_request';
@@ -1413,8 +1414,26 @@ export interface WSResolvePopulationRequest extends WSBaseEvent {
     unfiled: boolean;
     /** Only items that carry no tags. */
     untagged: boolean;
-    /** Additional search conditions, ANDed with the other filters. */
+    /** Additional search conditions, joined per `conditions_join_mode` and ANDed with the other filters. */
     conditions: ZoteroSearchCondition[];
+    /**
+     * How the entries of `conditions` are joined with each other. 'all' ANDs
+     * them; 'any' ORs them, so an item matches when it satisfies at least one.
+     * Absent or unrecognized = 'all'.
+     *
+     * It joins the `conditions` list ALONE. `collection_keys`, `tags`,
+     * `unfiled`, `untagged`, `has_attachments` and `item_category` stay ANDed
+     * with the conditions group and with each other, so 'any' can only be used
+     * to widen within `conditions`.
+     *
+     * Under 'any' the list may not contain a `unfiled`, `retracted`,
+     * `publications` or `feed` condition: Zotero applies each of those as a
+     * search-wide flag rather than as a matchable condition, so it would be
+     * ANDed with the other entries instead of ORed with them. Such a request
+     * is rejected with `invalid_request` rather than resolved to a population
+     * narrower than described.
+     */
+    conditions_join_mode?: 'all' | 'any' | null;
     /** 'regular' = bibliographic items, 'attachment' = child attachments. */
     item_category: 'regular' | 'attachment';
     /** Filter regular items by attachment presence; null = no filter. */
@@ -1438,6 +1457,24 @@ export interface WSResolvePopulationResponse {
     item_ids: string[];
     /** True number of matches, counted before truncation. */
     total_count: number;
+    /**
+     * Number of bibliographic items the filters matched, counted before any
+     * attachment population is derived from them and before truncation.
+     *
+     * Under `item_category: 'regular'` it equals `total_count`. Under
+     * `item_category: 'attachment'` the two answer different questions:
+     * `total_count` counts the attachments hanging off the matched items, so it
+     * can be larger than this one, and it is 0 whenever none of the matched
+     * items has an attachment. This count is therefore what separates "the
+     * filters matched nothing" from "the filters matched, but none of the
+     * matches has an attachment" — two cases that call for opposite
+     * corrections. It says nothing about whether an attachment's file is
+     * present on disk: an attachment record is counted either way.
+     *
+     * Set on every successful resolution; absent from a failure and from a
+     * provider that predates the field.
+     */
+    matched_item_count?: number | null;
     /** True when total_count exceeded max_items and item_ids was cut short. */
     truncated: boolean;
     /**
@@ -1453,14 +1490,28 @@ export interface WSResolvePopulationResponse {
      */
     library_name?: string | null;
     collection_names?: string[] | null;
+    /**
+     * The join mode actually applied to the request's `conditions`. Set on
+     * every successful resolution, and absent from a failure.
+     *
+     * A caller that asked for 'any' must check it: a provider that predates the
+     * field answers without it, having resolved the population under 'all' —
+     * strictly narrower than what was asked for, and otherwise indistinguishable
+     * from a correct answer.
+     */
+    conditions_join_mode?: 'all' | 'any' | null;
     error?: string | null;
     error_code?: string | null;
     /** Available libraries (only included when error_code is 'library_not_found') */
     available_libraries?: AvailableLibraryInfo[] | null;
     /**
-     * Non-fatal warnings (e.g. conditions Zotero rejected and the handler
-     * dropped). A dropped filter WIDENS the population, so the caller must
-     * treat any warning as a failed resolution rather than acting on the ids.
+     * Unused by this response: a condition Zotero refuses fails the whole
+     * resolution with `error_code: 'invalid_condition'` instead. The population
+     * is about to be mutated, so a filter that could not be applied as
+     * described has to produce an answer that cannot be acted on — no ids —
+     * rather than ids the caller is trusted to discard.
+     *
+     * Kept so a caller that also reads older answers can still see them.
      */
     warnings?: string[] | null;
 }
@@ -2017,7 +2068,7 @@ export interface WSCreditConfirmationStale extends WSBaseEvent {
 export type BatchApprovalMode = 'full_access' | 'ask_each_time';
 
 /**
- * Ask the user to approve a batch operation before it starts mutating.
+ * Ask the user to approve a batch job before it starts mutating.
  *
  * One decision covers a whole batch rather than a single tool call, so this
  * renders as a run-level card. Unlike a credit confirmation it carries a
@@ -2080,6 +2131,8 @@ export interface WSBatchApprovalRequest extends WSBaseEvent {
     approve_label: string;
     /** Label for the decline button */
     decline_label: string;
+    /** Label the decline button takes once the user has typed instructions */
+    decline_with_instructions_label?: string;
     /** Backend-provided docs link text; empty means no link */
     learn_more_label?: string;
     /** Docs path resolved against the client's environment-specific docs URL */
@@ -2395,8 +2448,8 @@ export const CLIENT_FEATURES = {
      * per-tool `confirm_extraction` / `confirm_external_search` approvals.
      */
     CREDIT_CONFIRMATION: 'credit_confirmation',
-    /** `batch_operations` capability (batch_start / batch_resolve). */
-    BATCH_OPERATIONS: 'batch_operations',
+    /** `batch_jobs` capability (batch_start / batch_resolve). */
+    BATCH_JOBS: 'batch_jobs',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -2428,21 +2481,21 @@ export const ZOTERO_AGENT_NAME = 'beaver';
 /**
  * Features the current Zotero plugin build always declares in the auth
  * handshake. Equals the full CLIENT_FEATURES vocabulary except
- * `batch_operations`, which is a backend rollout switch this plugin only
+ * `batch_jobs`, which is a backend rollout switch this plugin only
  * opts into in development (see `zoteroPluginFeatures`).
  */
 export const ZOTERO_PLUGIN_FEATURES: string[] = Object.values(CLIENT_FEATURES).filter(
-    (feature) => feature !== CLIENT_FEATURES.BATCH_OPERATIONS,
+    (feature) => feature !== CLIENT_FEATURES.BATCH_JOBS,
 );
 
 /**
  * Handshake feature list for this Zotero plugin build.
- * Development builds additionally declare `batch_operations` so the backend
+ * Development builds additionally declare `batch_jobs` so the backend
  * offers the deferred batch capability without shipping it to production.
  */
 export function zoteroPluginFeatures(isDevelopment: boolean): string[] {
     if (!isDevelopment) return ZOTERO_PLUGIN_FEATURES;
-    return [...ZOTERO_PLUGIN_FEATURES, CLIENT_FEATURES.BATCH_OPERATIONS];
+    return [...ZOTERO_PLUGIN_FEATURES, CLIENT_FEATURES.BATCH_JOBS];
 }
 
 /** Current library context for application state */
@@ -2809,7 +2862,7 @@ export interface WSCallbacks {
     onCreditConfirmationStale?: (event: WSCreditConfirmationStale) => void;
 
     /**
-     * Called when the backend asks the user to approve a batch operation before
+     * Called when the backend asks the user to approve a batch job before
      * it starts mutating. The frontend should render the backend-composed card
      * verbatim and send a WSBatchApprovalResponse when the user decides.
      * @param event The approval request with copy and correlation id

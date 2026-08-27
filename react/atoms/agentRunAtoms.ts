@@ -80,6 +80,7 @@ import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptAction, Prompt
 import {
     threadRunsAtom,
     activeRunAtom,
+    allRunsAtom,
     currentThreadIdAtom,
     updateRunWithPart,
     updateRunWithToolReturn,
@@ -162,8 +163,9 @@ import { undoEditAnnotationsAction } from '../utils/editAnnotationsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { upgradeToolReturn } from '../compat/legacyToolResults';
 import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
+import { selectLiveBatchProgress } from '@beaver/agent-core/run-state/batchProgress';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
-import { backendHighTokenUsageRunsAtom, recordAppliedActionsAtom } from './messageUIState';
+import { backendHighTokenUsageRunsAtom } from './messageUIState';
 import { currentThreadNameAtom, loadThreadAtom } from './threads';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '@beaver/agent-core/run-state/toolLabels';
@@ -1250,18 +1252,6 @@ function findToolCallArgs(
     return null;
 }
 
-/**
- * Ids of the actions a live run has already written to Zotero, for the
- * completed-changes card. Only the WS handlers call this: an action arrives
- * `applied` because the run executed it — the user approved it while it was
- * streaming, or an always-apply permission let it run unattended. Thread
- * hydration loads actions through a different atom, so reopening a thread
- * cannot rebuild the card from history. See `sessionAppliedActionIdsAtom`.
- */
-function appliedActionIds(actions: AgentAction[]): string[] {
-    return actions.filter((action) => action.status === 'applied').map((action) => action.id);
-}
-
 function surfaceAndDiagnoseConnectionFailure(
     set: Setter,
     runId: string,
@@ -1455,6 +1445,7 @@ export function createWSCallbacks(
                     const toolCallArgs = findToolCallArgs(store.get(activeRunAtom), event.part.tool_call_id);
                     await upgradeToolReturn(event.part, toolCallArgs);
                 }
+
             }
 
             // Update run with tool return (event.part now carries a synthesized
@@ -1551,7 +1542,6 @@ export function createWSCallbacks(
                 logger(`WS onRunComplete: Processing ${event.agent_actions.length} agent actions`, 1);
                 const actions = event.agent_actions.map(toAgentAction);
                 set(addAgentActionsAtom, actions);
-                set(recordAppliedActionsAtom, appliedActionIds(actions));
                 // Load item data for agent actions
                 await loadItemDataForAgentActions(actions).catch(err => 
                     logger(`WS onRunComplete: Failed to load item data for agent actions: ${err}`, 1)
@@ -1757,7 +1747,6 @@ export function createWSCallbacks(
             }, 1);
             const actions = event.actions.map(toAgentAction);
             set(upsertAgentActionsAtom, actions);
-            set(recordAppliedActionsAtom, appliedActionIds(actions));
             
             // Mark external references as imported for applied create_items actions
             // This handles cases where actions are applied via PendingActionsBar
@@ -3232,3 +3221,14 @@ export const sendBatchApprovalResponseAtom = atom(
         set(removePendingBatchApprovalAtom, approvalId);
     }
 );
+
+/**
+ * Batch progress for the open thread, or null when nothing has been stamped.
+ *
+ * Derived from the newest `metadata.batch_progress` via
+ * `selectLiveBatchProgress`, which keeps only batches something is actually
+ * working: everything drops once the run that carried the stamp is terminal —
+ * ended batches to `BatchRunReceipt`, open ones because a stopped run leaves
+ * its batch paused — as does a batch the stamp itself flags as paused.
+ */
+export const batchProgressAtom = atom((get) => selectLiveBatchProgress(get(allRunsAtom)));

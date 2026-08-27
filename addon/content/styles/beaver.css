@@ -345,6 +345,34 @@
     border-radius: calc(var(--composer-radius) - 1px) calc(var(--composer-radius) - 1px) 0 0;
 }
 
+/* Same bleed as the pending-actions bar so it reads as the composer's top edge. */
+[id^="beaver-pane-"] .batch-progress-bar {
+    position: relative;
+    margin: -0.65rem -0.65rem 0.65rem -0.65rem;
+    border-radius: 5px 5px 0 0;
+}
+
+/* Flush stacked bars: drop the lower bar's top-corner rounding. */
+[id^="beaver-pane-"] .batch-progress-bar + .pending-actions-bar,
+[id^="beaver-pane-"] .batch-progress-bar + .high-token-usage-warning-bar {
+    border-radius: 0;
+}
+
+/* Receipt is a transcript card (`BatchDoneRows` clips its corners). No composer bleed. */
+
+/* Disclosure hover. Skip `.batch-outcome-target` — nested buttons with their
+   own underline, not a second disclosure. */
+[id^="beaver-pane-"] .batch-progress-bar [role="button"]:not(.batch-outcome-target):hover,
+[id^="beaver-pane-"] .batch-run-receipt [role="button"]:not(.batch-outcome-target):hover {
+    background-color: var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .batch-progress-bar [role="button"]:not(.batch-outcome-target):focus-visible,
+[id^="beaver-pane-"] .batch-run-receipt [role="button"]:not(.batch-outcome-target):focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--fill-tertiary);
+}
+
 /* High token usage warning above composer */
 [id^="beaver-pane-"] .high-token-usage-warning-bar {
     margin: calc(-1 * var(--composer-pad-top)) calc(-1 * var(--composer-pad-x)) var(--composer-pad-top);

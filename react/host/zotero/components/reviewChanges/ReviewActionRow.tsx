@@ -23,7 +23,7 @@ import {
     getAgentActionToolIcon,
 } from '../agentActionViewHelpers';
 import { ActionPreview } from '../ActionPreview';
-import type { ReviewRow } from '../reviewChangeRows';
+import { getOpenNoteTarget, type ReviewRow } from '../reviewChangeRows';
 import {
     TickIcon,
     CancelIcon,
@@ -36,7 +36,9 @@ import {
     ArrowUpRightIcon,
 } from '../../../../components/icons/icons';
 import { getZoteroItemReferenceFromAgentAction } from '../../../../agents/agentActions';
-import { getCurrentCollectionKeyForItem, revealSource } from '../../../../utils/sourceUtils';
+import { getCurrentCollectionKeyForItem, openNoteByKey, revealSource } from '../../../../utils/sourceUtils';
+import { resolveLibraryRef } from '../../../../../src/utils/libraryIdentity';
+import { notifyReferenceUnavailable } from '../../sourceActions';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
@@ -44,20 +46,8 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 interface ReviewActionRowProps {
     runId: string;
     row: ReviewRow;
-    /**
-     * Card the row belongs to. Part of the expansion key, so the same tool call
-     * expanded in the review card does not open in the completed card too.
-     */
-    expansionScope?: 'review' | 'completed';
     /** True while any card-level bulk operation runs — row buttons are disabled. */
     isBulkRunning?: boolean;
-    /** Retains the row in the current card snapshot before its status changes. */
-    onResolved?: (actionIds: string[]) => void;
-    /**
-     * Dismisses the row's card. Set only when the row *is* the whole card, so
-     * the dismiss belongs on the row's own control cluster.
-     */
-    onDismiss?: () => void;
     /** True when rendered inside the aggregate card; the parent draws the border/background. */
     inGroup?: boolean;
 }
@@ -73,10 +63,7 @@ const GHOST_BUTTON_STYLE: React.CSSProperties = { padding: '3px 6px' };
 export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     runId,
     row,
-    expansionScope = 'review',
     isBulkRunning = false,
-    onResolved,
-    onDismiss,
     inGroup = false,
 }) => {
     const [isProcessing, setIsProcessing] = useState(false);
@@ -89,8 +76,10 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     const undoAgentActions = useSetAtom(undoAgentActionsAtom);
 
     // Expansion lives in the global panel state so it survives pane switches and
-    // the separate window, like every other action card.
-    const expansionKey = `${runId}:${expansionScope}:${row.toolcallId}`;
+    // the separate window, like every other action card. Scoped to the bottom-of-
+    // run surfaces so a tool call opened here does not open the in-stream card
+    // too; one tool call is never on both of those surfaces, so one scope does.
+    const expansionKey = `${runId}:changes:${row.toolcallId}`;
     const expansionState = useAtomValue(toolExpandedAtom);
     const setExpanded = useSetAtom(setToolExpandedAtom);
     const isExpanded = expansionState[expansionKey] ?? false;
@@ -143,35 +132,32 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         setIsUndoError(false);
         setIsProcessing(true);
         setClickedButton('approve');
-        onResolved?.(row.actions.map((action) => action.id));
         try {
             await applyAgentActions({ actions: row.actions, runId });
         } finally {
             setIsProcessing(false);
             setClickedButton(null);
         }
-    }, [isDisabled, row, runId, applyAgentActions, onResolved]);
+    }, [isDisabled, row, runId, applyAgentActions]);
 
     const handleReject = useCallback(() => {
         if (isDisabled) return;
 
-        // Retained rows may contain actions already applied or failed. Reject
-        // only the actions that still await a decision.
+        // A row can mix settled and undecided actions. Reject only the ones
+        // that still await a decision.
         const pendingActions = row.actions.filter((action) => action.status === 'pending');
         if (pendingActions.length === 0) return;
 
         setClickedButton('reject');
-        onResolved?.(pendingActions.map((action) => action.id));
         rejectAgentActions({ actions: pendingActions });
         setTimeout(() => setClickedButton(null), 100);
-    }, [isDisabled, row, rejectAgentActions, onResolved]);
+    }, [isDisabled, row, rejectAgentActions]);
 
     const handleUndo = useCallback(async () => {
         if (isDisabled) return;
 
         setIsProcessing(true);
         setClickedButton('undo');
-        onResolved?.(row.actions.map((action) => action.id));
         try {
             const result = await undoAgentActions({ actions: row.actions });
             if (result.fatalError) setIsUndoError(true);
@@ -179,7 +165,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
             setIsProcessing(false);
             setClickedButton(null);
         }
-    }, [isDisabled, row, undoAgentActions, onResolved]);
+    }, [isDisabled, row, undoAgentActions]);
 
     const handleRetry = useCallback(async () => {
         if (isUndoRetry) {
@@ -196,6 +182,19 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     const revealReference = row.actions.length === 1
         ? getZoteroItemReferenceFromAgentAction(firstAction)
         : null;
+
+    // See `getOpenNoteTarget`: a created note is opened, not revealed, on the
+    // same glyph the in-stream card uses for it.
+    const openNoteTarget = getOpenNoteTarget(row);
+
+    const handleOpenNote = useCallback(async () => {
+        if (!openNoteTarget) return;
+        // Resolve through the device-portable library_ref so a note created in a
+        // group library on another computer opens the right local item.
+        const libraryId = resolveLibraryRef(openNoteTarget);
+        if (libraryId) await openNoteByKey(libraryId, openNoteTarget.zotero_key);
+        else notifyReferenceUnavailable('item', 'library_unavailable');
+    }, [openNoteTarget]);
 
     const handleReveal = useCallback(async () => {
         if (!revealReference) return;
@@ -236,14 +235,20 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
             <div className={headerRowClassName}>
                 <button
                     type="button"
-                    className="variant-ghost-secondary display-flex flex-row ml-3 gap-2 min-w-0 text-left"
-                    style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
+                    className="variant-ghost-secondary display-flex flex-row items-start ml-3 gap-2 min-w-0 text-left"
+                    style={{
+                        fontSize: '0.95rem',
+                        background: 'transparent',
+                        border: 0,
+                        padding: 0,
+                        alignItems: 'flex-start',
+                    }}
                     aria-expanded={isExpanded}
                     onClick={toggleExpanded}
                     onMouseEnter={() => setIsHovered(true)}
                     onMouseLeave={() => setIsHovered(false)}
                 >
-                    <div className="display-flex items-center scale-11" style={{ flexShrink: 0 }}>
+                    <div className="display-flex items-center scale-11 mt-010" style={{ flexShrink: 0 }}>
                         <Icon icon={headerIcon} className={!isHovered ? headerIconClassName : undefined} />
                     </div>
                     <div
@@ -265,15 +270,15 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                 <div className="flex-1" />
 
                 <div className="display-flex flex-row items-center gap-2 mr-3 mt-010" style={{ flexShrink: 0 }}>
-                    {revealReference && !isBusy && (
-                        <Tooltip content="Show in library" showArrow singleLine>
+                    {(openNoteTarget || revealReference) && !isBusy && (
+                        <Tooltip content={openNoteTarget ? 'Open note' : 'Show in library'} showArrow singleLine>
                             <IconButton
                                 icon={ArrowUpRightIcon}
                                 variant="ghost-secondary"
                                 iconClassName="font-color-secondary scale-10"
-                                onClick={handleReveal}
+                                onClick={openNoteTarget ? handleOpenNote : handleReveal}
                                 disabled={isDisabled}
-                                ariaLabel="Show in library"
+                                ariaLabel={openNoteTarget ? 'Open note' : 'Show in library'}
                             />
                         </Tooltip>
                     )}
@@ -326,17 +331,6 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                                 onClick={handleApply}
                                 disabled={isDisabled}
                                 loading={isBusy && activeButton === 'approve'}
-                            />
-                        </Tooltip>
-                    )}
-
-                    {onDismiss && !isBusy && (
-                        <Tooltip content="Dismiss" showArrow singleLine>
-                            <IconButton
-                                icon={CancelIcon}
-                                variant="ghost-secondary"
-                                onClick={onDismiss}
-                                ariaLabel="Dismiss"
                             />
                         </Tooltip>
                     )}

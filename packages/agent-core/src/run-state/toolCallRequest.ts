@@ -159,8 +159,8 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     external_search: 'Web search',
     lookup_work: 'Lookup work',
 
-    // Batch operations
-    batch_start: 'Batch operations',
+    // Batch jobs
+    batch_start: 'Batch job',
     batch_resolve: 'Skipping items',
     batch_digest: 'Recording findings',
 

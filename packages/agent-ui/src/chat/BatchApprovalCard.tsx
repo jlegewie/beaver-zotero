@@ -62,7 +62,7 @@ export interface BatchApprovalCardProps {
 }
 
 /**
- * The approval card for a pending batch operation.
+ * The approval card for a pending batch job.
  *
  * Takes the place of the client's composer while the run blocks on the
  * decision, so the request sits where the user is already looking and cannot
@@ -102,6 +102,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
     // so an empty field sitting above the buttons reads as something left
     // undone.
     const [wantsInstructions, setWantsInstructions] = useState(false);
+    const hasInstructions = draft.userInstructions.trim().length > 0;
     // Drives the disabled styling in the instant before the card unmounts.
     const [isDecided, setIsDecided] = useState(false);
     // The guard that actually holds. Exactly one decision may leave the
@@ -128,7 +129,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
             className="user-message-display"
             style={{ minHeight: 'fit-content', padding: '0.8rem' }}
             role="group"
-            aria-label="Batch operation approval"
+            aria-label="Batch job approval"
             // The instructions field can take focus but nothing here announces
             // itself, so this is what tells a screen reader the run has stopped
             // and is waiting on a decision.
@@ -307,18 +308,20 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                         style={{ padding: '2px 6px', fontSize: '0.95rem' }}
                     />
                     <div className="flex-1" />
+                    {/* Typed instructions turn a decline into a request for
+                        different work, and the button says so. */}
                     <Button
                         variant="ghost"
-                        ariaLabel="Cancel batch operation"
+                        ariaLabel={hasInstructions ? 'Cancel batch job and send instructions' : 'Cancel batch job'}
                         onClick={handleDecline}
                         disabled={isDecided}
                         className="mr-1"
                     >
-                        {approval.declineLabel}
+                        {hasInstructions ? approval.declineWithInstructionsLabel : approval.declineLabel}
                     </Button>
                     <Button
                         variant="solid"
-                        ariaLabel="Approve batch operation"
+                        ariaLabel="Approve batch job"
                         style={{ padding: '3px 5px' }}
                         onClick={handleApprove}
                         disabled={isDecided}
