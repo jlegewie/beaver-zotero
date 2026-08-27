@@ -90,6 +90,17 @@ export function FindQueryProvider({ query, children }: FindQueryProviderProps) {
 }
 
 /**
+ * Whether a raw query is one that should highlight anything.
+ *
+ * The single definition of the gate. The find bar asks it to decide whether to
+ * show a result count, and `useFindQuery` applies it to every renderer, so the
+ * bar can never claim results for a query the renderers ignore.
+ */
+export function isFindQueryActive(query: string): boolean {
+    return query.trim().length > 0 && query.length >= FIND_MIN_QUERY_LENGTH;
+}
+
+/**
  * The active find query, or `''` when nothing should be highlighted — no
  * provider above, a whitespace-only query, or one shorter than
  * `FIND_MIN_QUERY_LENGTH`.
@@ -100,6 +111,5 @@ export function FindQueryProvider({ query, children }: FindQueryProviderProps) {
  */
 export function useFindQuery(): string {
     const query = useContext(FindQueryContext);
-    if (!query.trim()) return '';
-    return query.length >= FIND_MIN_QUERY_LENGTH ? query : '';
+    return isFindQueryActive(query) ? query : '';
 }
