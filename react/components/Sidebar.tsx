@@ -130,6 +130,7 @@ const SidebarShell = ({
             onFind
             && (event.key === 'f' || event.key === 'F')
             && !event.altKey
+            && !event.shiftKey
             && (Zotero.isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)
         ) {
             event.preventDefault();

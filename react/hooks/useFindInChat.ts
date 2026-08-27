@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useAtomValue } from 'jotai';
-import { isStreamingAtom, runsCountAtom } from '@beaver/agent-core/run-state/atoms';
+import { isStreamingAtom, threadRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { FIND_CURRENT_CLASS, FIND_HIT_ATTR, isFindQueryActive } from '@beaver/agent-ui/chat/findContext';
 import { currentThreadIdAtom } from '../atoms/threads';
 import { thinkingVisibilityAtom, toolExpandedAtom } from '../atoms/messageUIState';
@@ -41,8 +41,8 @@ export interface FindInChatControls {
     /** Open the bar, or refocus and select its input when it is already open. */
     open: () => void;
     /**
-     * Whether there is a find session to open at all. False outside the main
-     * thread view — the loading, login and onboarding pages render no chat.
+     * Whether a find session exists to open. False only where no provider is
+     * above — the loading, login and onboarding pages, which render no chat.
      */
     isAvailable: boolean;
 }
@@ -124,10 +124,14 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
     const [focusToken, setFocusToken] = useState(0);
 
     // The thread's own content triggers: another thread opened, a run added,
-    // and a run finishing. A streaming run is shadowed with an empty query while
-    // it runs, so it starts producing hits only at the moment it ends.
+    // and a run finishing. A live run is shadowed with an empty query while it
+    // runs, so it starts producing hits only at the moment it ends.
+    //
+    // The runs are watched by their ids rather than by their count: two threads
+    // with the same number of runs would otherwise look unchanged, and the hit
+    // list would be left describing the thread that was just closed.
     const currentThreadId = useAtomValue(currentThreadIdAtom);
-    const runsCount = useAtomValue(runsCountAtom);
+    const runIds = useAtomValue(threadRunIdsAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
     // Collapsed sections render nothing, so expanding one can bring hits into
     // the thread that the list was collected before. Without these the count
@@ -167,7 +171,7 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
     const setCurrentElement = useCallback((hits: HTMLElement[], index: number) => {
         const container = containerRef.current;
         if (container) clearCurrentClass(container);
-        const element = index >= 0 ? hits[index] : undefined;
+        const element = index >= 0 && hits[index]?.isConnected ? hits[index] : undefined;
         element?.classList.add(FIND_CURRENT_CLASS);
         currentElementRef.current = element ?? null;
     }, [containerRef]);
@@ -185,6 +189,9 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
     const scrollToMatch = useCallback((element: HTMLElement) => {
         const container = containerRef.current;
         if (!container || container.clientHeight === 0) return;
+        // A hit the thread has since re-rendered away measures as a zero rect,
+        // which would scroll the container to an offset that means nothing.
+        if (!element.isConnected) return;
 
         const elementTop = element.getBoundingClientRect().top
             - container.getBoundingClientRect().top
@@ -252,7 +259,7 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
         isOpen,
         activeQuery,
         currentThreadId,
-        runsCount,
+        runIds,
         isStreaming,
         toolExpansion,
         thinkingVisibility,
@@ -286,6 +293,14 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
         // The query itself survives, so reopening offers it again for editing.
         setIsOpen(false);
     }, [clearMatches]);
+
+    // A thread with no runs renders no bar — "New chat" while the bar is open is
+    // the usual way there. Ending the session there too stops it from coming
+    // back, carrying the previous thread's query, the moment the first run of
+    // the new thread appears.
+    useEffect(() => {
+        if (isOpen && runIds.length === 0) close();
+    }, [isOpen, runIds, close]);
 
     const open = useCallback(() => {
         setIsOpen(true);
