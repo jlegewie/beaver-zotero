@@ -10,7 +10,6 @@ import { userAtom } from '../../../atoms/auth';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { getDateGroup } from '../../../utils/dateUtils';
 import { getPref } from '../../../../src/utils/prefs';
-import { clearThreadListCache } from '../../ThreadListView';
 import { clearRecentChatsCache } from '../../RecentChats';
 
 interface ThreadsMenuProps {
@@ -159,7 +158,6 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
             }
             // Refresh the threads list
             setThreads((prev) => prev.filter(thread => thread.id !== threadId));
-            clearThreadListCache();
             clearRecentChatsCache(threadId);
         } catch (error) {
             console.error('Error deleting thread:', error);
@@ -193,7 +191,6 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
             setThreads(prev => prev.map(thread =>
                 thread.id === threadId ? { ...thread, name: newName } : thread
             ));
-            clearThreadListCache();
             clearRecentChatsCache();
         } catch (error) {
             console.error('Error renaming thread:', error);

@@ -1,45 +1,44 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { SearchIcon, EditIcon, DeleteIcon, TickIcon, CancelIcon } from './icons/icons';
+import { SearchIcon, EditIcon, DeleteIcon, TickIcon, CancelIcon, PinIcon, PinOffIcon } from './icons/icons';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { isThreadListViewAtom, threadListFilterAtom, showAllThreadInstancesAtom } from '../atoms/ui';
 import { ThreadData, loadThreadAtom, newThreadAtom } from '../atoms/threads';
+import {
+    threadEntitiesAtom,
+    threadViewsAtom,
+    threadViewKey,
+    resolveThreadView,
+    selectPinnedThreads,
+    loadThreadPageAtom,
+    loadMoreThreadsAtom,
+    loadPinnedThreadsAtom,
+    loadThreadsByItemAtom,
+    setThreadPinnedAtom,
+    updateThreadAtom,
+    removeThreadAtom,
+    EMPTY_THREAD_VIEW,
+} from '../atoms/threadList';
 import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { userAtom } from '../atoms/auth';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
-import { threadService, isThreadAgentMismatch } from '@beaver/agent-core/transport/threadService';
+import { threadService } from '@beaver/agent-core/transport/threadService';
 import { currentZoteroInstanceRef } from '../../src/utils/zoteroUtils';
 import { getDateGroup } from '../utils/dateUtils';
 import { formatTimeAgo } from '../utils/formatTimeAgo';
 import { buildThreadItemFilter } from '../utils/threadItemFilter';
-import { deduplicateByThread, threadModelToThreadData, isThreadInstanceMismatch } from '../utils/threadMatches';
+import { isThreadInstanceMismatch } from '../utils/threadMatches';
 import Button from '@beaver/agent-ui/primitives/Button';
 import { ChipButton } from './agentRuns/requestChips/ChipButton';
 import { CSSIcon, CSSItemTypeIcon } from './icons/zotero';
 import ThreadFilterMenu from './ui/menus/ThreadFilterMenu';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { clearRecentChatsCache } from './RecentChats';
-import { isTransientNetworkError } from '../utils/isTransientNetworkError';
-
-type FetchError = { offline: boolean } | null;
 
 interface ThreadListViewProps {
     isWindow?: boolean;
 }
-
-interface CacheEntry {
-    threads: ThreadData[];
-    hasMore: boolean;
-    nextCursor: string | null;
-    timestamp: number;
-    // Last known count of threads hidden by instance scoping for this variant;
-    // null when the response didn't carry one (search, later pages).
-    otherInstanceCount?: number | null;
-}
-
-const PAGE_SIZE = 15;
-const CACHE_TTL = 60_000; // 1 minute
 
 // Marks a chat created in a different Zotero install. Always says "Zotero" —
 // a bare "account" would read as the user's Beaver account, which never
@@ -48,27 +47,8 @@ const CACHE_TTL = 60_000; // 1 minute
 const FOREIGN_THREAD_LABEL = 'Other Zotero profile';
 const FOREIGN_THREAD_TITLE = 'Created in a different Zotero account or profile';
 
-/**
- * Cache key for a thread-list fetch. Includes the live instance identity so
- * enabling/logging into Zotero (or switching accounts) cannot reuse a prior
- * identity's scoped results under the same "scoped" bucket.
- */
-function threadListCacheKey(
-    userId: string,
-    query: string,
-    showAll: boolean,
-    scope: { zoteroUserId?: string | null; zoteroLocalId?: string | null } | null | undefined
-): string {
-    if (showAll) return `${userId}:${query}:all`;
-    return `${userId}:${query}:scoped:${scope?.zoteroUserId ?? ''}:${scope?.zoteroLocalId ?? ''}`;
-}
-
-// Module-level cache: persists across mount/unmount cycles
-const searchCache = new Map<string, CacheEntry>();
-
-export function clearThreadListCache() {
-    searchCache.clear();
-}
+/** Stable identity for "no rows", so the memos below are not invalidated per render. */
+const EMPTY_THREADS: ThreadData[] = [];
 
 const highlightMatch = (text: string, query: string): React.ReactNode => {
     const idx = text.toLowerCase().indexOf(query.toLowerCase());
@@ -107,37 +87,37 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     const setFilter = useSetAtom(threadListFilterAtom);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
 
-    const [threads, setThreads] = useState<ThreadData[]>([]);
-    const [isLoading, setIsLoading] = useState(false);
-    const [hasMore, setHasMore] = useState(false);
-    const [nextCursor, setNextCursor] = useState<string | null>(null);
-    const [fetchError, setFetchError] = useState<FetchError>(null);
+    // The normalized store. Every surface renders from these two, which is what
+    // keeps this list, the separate window's list and the header menu in step
+    // without any of them notifying the others.
+    const entities = useAtomValue(threadEntitiesAtom);
+    const views = useAtomValue(threadViewsAtom);
+    const loadPage = useSetAtom(loadThreadPageAtom);
+    const loadMore = useSetAtom(loadMoreThreadsAtom);
+    const loadPinned = useSetAtom(loadPinnedThreadsAtom);
+    const loadByItem = useSetAtom(loadThreadsByItemAtom);
+    const setThreadPinned = useSetAtom(setThreadPinnedAtom);
+    const updateThread = useSetAtom(updateThreadAtom);
+    const removeThread = useSetAtom(removeThreadAtom);
 
     // Instance scoping: hide threads stamped by other Zotero accounts/installs
-    // by default; "Show all" reveals them. Read live — the Zotero account id
-    // can appear/disappear when the user logs in or out without remounting.
-    const instanceRef = currentZoteroInstanceRef();
-    // Global so the choice survives closing and reopening the thread list.
+    // by default; "Show all" reveals them. Global so the choice survives closing
+    // and reopening the thread list.
     const showAllInstances = useAtomValue(showAllThreadInstancesAtom);
     const setShowAllInstances = useSetAtom(showAllThreadInstancesAtom);
-    // Read inside fetch callbacks (kept out of their deps so toggling in
-    // item-filtered mode doesn't trigger a needless by-item refetch). Seeded
-    // from the atom so the first fetch after a remount honors a prior opt-out.
-    const showAllInstancesRef = useRef(showAllInstances);
-    const [otherInstanceCount, setOtherInstanceCount] = useState<number | null>(null);
 
     const [searchQuery, setSearchQuery] = useState('');
     const [activeQuery, setActiveQuery] = useState('');
-    const activeQueryRef = useRef('');
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    // Guards against a stale in-flight fetch (e.g. from a filter that was
-    // just replaced or cleared) overwriting state set by a newer one.
-    const fetchSeqRef = useRef(0);
 
     const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState('');
     const [isSavingRename, setIsSavingRename] = useState(false);
     const [hoveredThreadId, setHoveredThreadId] = useState<string | null>(null);
+    // Rows with a pin/unpin request in flight. A second activation would race
+    // the first with no ordering guarantee, and the row moves out from under
+    // the cursor the moment the first one applies.
+    const [pendingPinIds, setPendingPinIds] = useState<Set<string>>(() => new Set());
 
     const containerRef = useRef<HTMLDivElement | null>(null);
     const menuPortalContainer = containerRef.current?.closest('[id^="beaver-react-root-"], #beaver-pane-window') as HTMLElement | null;
@@ -149,166 +129,102 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         setTimeout(() => searchInputRef.current?.focus(), 5);
     };
 
-    useEffect(() => {
-        activeQueryRef.current = activeQuery;
-    }, [activeQuery]);
+    // Read live — the Zotero account id can appear or disappear when the user
+    // logs in or out without this component remounting. Memoized on its values
+    // because the helper returns a fresh object each call.
+    const liveInstance = currentZoteroInstanceRef();
+    const instanceUserId = liveInstance?.zoteroUserId ?? null;
+    const instanceLocalId = liveInstance?.zoteroLocalId ?? null;
+    const instanceRef = useMemo(
+        () => (instanceUserId === null && instanceLocalId === null
+            ? null
+            : { zoteroUserId: instanceUserId, zoteroLocalId: instanceLocalId }),
+        [instanceUserId, instanceLocalId]
+    );
+    const scope = showAllInstances ? undefined : (instanceRef ?? undefined);
 
-    // Keeps the ref honest if the atom is changed outside this component.
-    useEffect(() => {
-        showAllInstancesRef.current = showAllInstances;
-    }, [showAllInstances]);
+    const isForeign = useCallback(
+        (thread: ThreadData) => isThreadInstanceMismatch(instanceRef, {
+            zoteroUserId: thread.zoteroUserId, zoteroLocalId: thread.zoteroLocalId,
+        }),
+        [instanceRef]
+    );
+    // What the pinned query covers. Showing all profiles fetches unscoped, so
+    // the response is authoritative about every chat and nothing is foreign —
+    // the reconciliation and the group must agree on that, or one would hide a
+    // chat the other just unpinned.
+    const pinnedIsForeign = useMemo(
+        () => (showAllInstances ? () => false : isForeign),
+        [showAllInstances, isForeign]
+    );
 
-    // Fetch threads (initial load or after search)
-    const fetchThreads = useCallback(async (query: string) => {
+    // Which view this render is showing. Search, item filter and instance scope
+    // each produce a different one, so a response can only ever land in the view
+    // that asked for it.
+    const viewKey = useMemo(
+        () => (user
+            ? threadViewKey({ userId: user.id, query: filter ? '' : activeQuery, showAll: showAllInstances, scope: instanceRef, filter })
+            : ''),
+        [user, activeQuery, showAllInstances, instanceRef, filter]
+    );
+    const view = views.get(viewKey) ?? EMPTY_THREAD_VIEW;
+
+    const isLoading = view.status === 'loading';
+    const fetchError = view.error;
+
+    // Load this view. Item-filtered mode answers a different question, so it
+    // uses its own loader; both merge into the same entity store.
+    useEffect(() => {
         if (!user) return;
-
-        // Invalidate any earlier request before taking a synchronous path
-        // (such as a cache hit) so stale results cannot overwrite it later.
-        const seq = ++fetchSeqRef.current;
-
         if (filter) {
-            // Exclusions can change (Beaver Preferences) while the view is
-            // open, so re-check at fetch time instead of trusting the atom.
+            // Exclusions can change (Beaver Preferences) while the view is open,
+            // so re-check at load time instead of trusting a stale atom.
             if (!searchableLibraryIds.includes(filter.libraryId)) {
-                // Do not leave item-filtered rows visible after removing the
-                // filter chip. The atom update below triggers the unfiltered
-                // fetch on the next render.
-                setThreads([]);
-                setHasMore(false);
-                setNextCursor(null);
-                setFetchError(null);
-                setIsLoading(true);
                 setFilter(null);
                 return;
             }
-
-            setThreads([]);
-            setIsLoading(true);
-            try {
-                const matches = await threadService.findThreadsByItem(
-                    { libraryId: filter.libraryId, libraryRef: filter.libraryRef },
-                    filter.keys,
-                    'both'
-                );
-                // The by-item route takes no agent scope, so drop another
-                // client's threads here (the other lists are scoped server-side).
-                const deduped = deduplicateByThread(matches.filter(m => !isThreadAgentMismatch(m)));
-                if (seq === fetchSeqRef.current) {
-                    setThreads(deduped);
-                    setHasMore(false);
-                    setNextCursor(null);
-                    setFetchError(null);
-                }
-            } catch (error) {
-                console.error('Error fetching threads by item:', error);
-                if (seq === fetchSeqRef.current) {
-                    if (isTransientNetworkError(error)) {
-                        const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-                        setFetchError({ offline });
-                    } else {
-                        setFetchError(null);
-                    }
-                }
-            } finally {
-                if (seq === fetchSeqRef.current) setIsLoading(false);
-            }
+            loadByItem({ key: viewKey, filter });
             return;
         }
+        loadPage({
+            key: viewKey,
+            query: activeQuery,
+            scope,
+            // Only a scoped first page can report how many threads scoping hides.
+            includeOtherCount: scope !== undefined,
+        });
+    }, [user, viewKey, filter, activeQuery, scope, searchableLibraryIds, loadPage, loadByItem, setFilter]);
 
-        const showAll = showAllInstancesRef.current;
-        // Live identity for every fetch — do not close over a mount-time snapshot.
-        const liveInstance = currentZoteroInstanceRef();
-        const scope = showAll ? undefined : (liveInstance ?? undefined);
-        const cacheKey = threadListCacheKey(user.id, query, showAll, liveInstance);
-
-        // Check cache with TTL
-        const cached = searchCache.get(cacheKey);
-        if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-            setThreads(cached.threads);
-            setHasMore(cached.hasMore);
-            setNextCursor(cached.nextCursor);
-            // Retain the last known count when this variant has none cached.
-            if (cached.otherInstanceCount != null) setOtherInstanceCount(cached.otherInstanceCount);
-            setFetchError(null);
-            setIsLoading(false);
-            return;
-        }
-
-        setIsLoading(true);
-        try {
-            const response = query
-                ? await threadService.searchThreads(query, PAGE_SIZE, null, scope)
-                // Only the scoped first page can report how many threads the
-                // scoping hides.
-                : await threadService.getPaginatedThreads(PAGE_SIZE, null, scope, scope !== undefined);
-            const mapped = response.data.map(threadModelToThreadData);
-            if (seq === fetchSeqRef.current) {
-                setThreads(mapped);
-                setNextCursor(response.next_cursor);
-                setHasMore(response.has_more);
-                // Search responses carry no count — retain the last known one.
-                if (response.other_instance_count != null) {
-                    setOtherInstanceCount(response.other_instance_count);
-                }
-            }
-            searchCache.set(cacheKey, {
-                threads: mapped,
-                hasMore: response.has_more,
-                nextCursor: response.next_cursor,
-                timestamp: Date.now(),
-                otherInstanceCount: response.other_instance_count ?? null,
-            });
-            if (seq === fetchSeqRef.current) setFetchError(null);
-        } catch (error) {
-            console.error('Error fetching threads:', error);
-            if (seq === fetchSeqRef.current) {
-                if (isTransientNetworkError(error)) {
-                    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-                    setFetchError({ offline });
-                } else {
-                    setFetchError(null);
-                }
-            }
-        } finally {
-            if (seq === fetchSeqRef.current) setIsLoading(false);
-        }
-    }, [user, filter, searchableLibraryIds]);
-
-    // Toggle between the scoped and all-instances list. Unfiltered mode
-    // refetches (cache-hit when warm); item-filtered mode only flips the
-    // display partition of the already-fetched matches.
-    const toggleShowAllInstances = (next: boolean) => {
-        showAllInstancesRef.current = next;
-        setShowAllInstances(next);
-        if (!filter) fetchThreads(activeQueryRef.current);
-    };
-
-    // Initial fetch, and refetch (with the in-progress query) whenever the
-    // filter is set/cleared/switched.
+    // Pinned chats reach further back than the paginated window, so they are a
+    // second discovery query into the same view. Only the plain list shows the
+    // group, so only it needs them.
+    const showPinnedGroup = !activeQuery && !filter;
     useEffect(() => {
-        fetchThreads(activeQueryRef.current);
-    }, [fetchThreads]);
+        if (!user || !showPinnedGroup) return;
+        loadPinned({ key: viewKey, scope, isForeign: pinnedIsForeign });
+    }, [user, showPinnedGroup, viewKey, scope, pinnedIsForeign, loadPinned]);
 
     // Debounced search
     useEffect(() => {
-        if (debounceRef.current) {
-            clearTimeout(debounceRef.current);
-        }
+        if (debounceRef.current) clearTimeout(debounceRef.current);
         if (searchQuery === activeQuery) return;
 
-        debounceRef.current = setTimeout(() => {
-            setActiveQuery(searchQuery);
-            // Filtered mode searches the already-fetched set client-side —
-            // no network call or cache invalidation needed.
-            if (!filter) fetchThreads(searchQuery);
-        }, 400);
-
+        debounceRef.current = setTimeout(() => setActiveQuery(searchQuery), 400);
         return () => {
-            if (debounceRef.current) {
-                clearTimeout(debounceRef.current);
-            }
+            if (debounceRef.current) clearTimeout(debounceRef.current);
         };
-    }, [searchQuery, activeQuery, filter, fetchThreads]);
+    }, [searchQuery, activeQuery]);
+
+    /** Reloads the current view from the server, ignoring its freshness. */
+    const reloadView = useCallback(() => {
+        if (!user) return;
+        if (filter) {
+            loadByItem({ key: viewKey, filter, force: true });
+            return;
+        }
+        loadPage({ key: viewKey, query: activeQuery, scope, includeOtherCount: scope !== undefined, force: true });
+        if (showPinnedGroup) loadPinned({ key: viewKey, scope, isForeign: pinnedIsForeign, force: true });
+    }, [user, filter, viewKey, activeQuery, scope, showPinnedGroup, pinnedIsForeign, loadPage, loadByItem, loadPinned]);
 
     const handleSearchKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Escape') {
@@ -317,21 +233,13 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             return;
         }
         if (e.key === 'Enter') {
-            if (debounceRef.current) {
-                clearTimeout(debounceRef.current);
+            if (debounceRef.current) clearTimeout(debounceRef.current);
+            if (searchQuery !== activeQuery) {
+                setActiveQuery(searchQuery);
+            } else {
+                // Already showing this query — Enter asks for fresh results.
+                reloadView();
             }
-            setActiveQuery(searchQuery);
-            if (filter) return;
-            // Invalidate cache for this query to get fresh results on Enter
-            if (user) {
-                searchCache.delete(threadListCacheKey(
-                    user.id,
-                    searchQuery,
-                    showAllInstancesRef.current,
-                    currentZoteroInstanceRef()
-                ));
-            }
-            fetchThreads(searchQuery);
         }
     };
 
@@ -341,48 +249,8 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         focusSearchInput();
     };
 
-    // Load more
-    const loadMoreThreads = async () => {
-        if (!user || isLoading || filter) return;
-
-        const seq = ++fetchSeqRef.current;
-        setIsLoading(true);
-        try {
-            const showAll = showAllInstancesRef.current;
-            const liveInstance = currentZoteroInstanceRef();
-            const scope = showAll ? undefined : (liveInstance ?? undefined);
-            const cacheKey = threadListCacheKey(user.id, activeQuery, showAll, liveInstance);
-            let response;
-            if (activeQuery) {
-                response = await threadService.searchThreads(activeQuery, PAGE_SIZE, nextCursor, scope);
-            } else {
-                response = await threadService.getPaginatedThreads(PAGE_SIZE, nextCursor, scope);
-            }
-            const mapped = response.data.map(threadModelToThreadData);
-            const combined = [...threads, ...mapped];
-            if (seq === fetchSeqRef.current) {
-                setThreads(combined);
-                setNextCursor(response.next_cursor);
-                setHasMore(response.has_more);
-            }
-            searchCache.set(cacheKey, {
-                threads: combined,
-                hasMore: response.has_more,
-                nextCursor: response.next_cursor,
-                timestamp: Date.now(),
-                // Later pages carry no count — keep the variant's last known one.
-                otherInstanceCount: searchCache.get(cacheKey)?.otherInstanceCount ?? null,
-            });
-            if (seq === fetchSeqRef.current) setFetchError(null);
-        } catch (error) {
-            console.error('Error loading more threads:', error);
-            if (seq === fetchSeqRef.current && isTransientNetworkError(error)) {
-                const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-                setFetchError({ offline });
-            }
-        } finally {
-            if (seq === fetchSeqRef.current) setIsLoading(false);
-        }
+    const toggleShowAllInstances = (next: boolean) => {
+        setShowAllInstances(next);
     };
 
     // Thread actions
@@ -411,6 +279,26 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         }
     };
 
+    /**
+     * Pins or unpins a chat. The store owns the optimistic write and its
+     * rollback; this only guards against a second click while the first is in
+     * flight and keeps the other surfaces' caches honest.
+     */
+    const handleTogglePin = async (thread: ThreadData) => {
+        if (pendingPinIds.has(thread.id)) return;
+        setPendingPinIds(prev => new Set(prev).add(thread.id));
+        try {
+            const ok = await setThreadPinned({ threadId: thread.id, pinned: !thread.isPinned, viewKey });
+            if (ok) clearRecentChatsCache();
+        } finally {
+            setPendingPinIds(prev => {
+                const next = new Set(prev);
+                next.delete(thread.id);
+                return next;
+            });
+        }
+    };
+
     const handleDelete = async (threadId: string) => {
         const buttonIndex = Zotero.Prompt.confirm({
             window: Zotero.getMainWindow(),
@@ -424,15 +312,17 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
 
         try {
             await threadService.deleteThread(threadId);
-            setThreads(prev => prev.filter(t => t.id !== threadId));
-            // Invalidate caches
-            searchCache.clear();
             clearRecentChatsCache(threadId);
-            // If deleting the current thread, create a new one. The user already
-            // confirmed the delete above, so skip the active-run confirmation.
+            // Switch away first when this is the open chat: forgetting the
+            // entity while it is still `currentThreadId` makes the header's pin
+            // state read "unknown" and fire a GET for a chat that is gone.
+            // The user already confirmed the delete, so skip the run confirm.
             if (threadId === currentThreadId) {
                 await newThread({ skipActiveRunConfirm: true });
             }
+            // One removal: every view resolves ids through the entity map and
+            // drops what it cannot find, so no id set needs touching.
+            removeThread(threadId);
         } catch (error) {
             console.error('Error deleting thread:', error);
         }
@@ -456,11 +346,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         setIsSavingRename(true);
         try {
             await threadService.renameThread(threadId, newName);
-            setThreads(prev => prev.map(t =>
-                t.id === threadId ? { ...t, name: newName } : t
-            ));
-            // Invalidate caches
-            searchCache.clear();
+            updateThread({ id: threadId, update: t => ({ ...t, name: newName }) });
             clearRecentChatsCache();
         } catch (error) {
             console.error('Error renaming thread:', error);
@@ -481,20 +367,24 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         }
     };
 
+    // ---- Derivations -------------------------------------------------------
+
+    /** The view's rows, newest first, with dead ids dropped. */
+    const rows = useMemo(() => resolveThreadView(view, entities), [view, entities]);
+
     // Item-filtered mode fetches unscoped and partitions client-side (the
-    // deduplicated match set is bounded); unfiltered mode is server-scoped, so
-    // no partition is needed there.
+    // deduplicated match set is bounded); the other modes are server-scoped.
     const filteredMismatchCount = useMemo(
         () => filter
-            ? threads.filter(t => isThreadInstanceMismatch(instanceRef, {
+            ? rows.filter(t => isThreadInstanceMismatch(instanceRef, {
                 zoteroUserId: t.zoteroUserId, zoteroLocalId: t.zoteroLocalId,
             })).length
             : 0,
-        [filter, threads, instanceRef]
+        [filter, rows, instanceRef]
     );
 
-    const displayedThreads = useMemo(() => {
-        let visible = threads;
+    const visibleRows = useMemo(() => {
+        let visible = rows;
         if (filter && !showAllInstances) {
             visible = visible.filter(t => !isThreadInstanceMismatch(instanceRef, {
                 zoteroUserId: t.zoteroUserId, zoteroLocalId: t.zoteroLocalId,
@@ -504,11 +394,34 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             visible = visible.filter(t => (t.name || 'Unnamed conversation').toLowerCase().includes(activeQuery.toLowerCase()));
         }
         return visible;
-    }, [filter, activeQuery, threads, showAllInstances, instanceRef]);
+    }, [filter, activeQuery, rows, showAllInstances, instanceRef]);
+
+    // The Pinned group is taken over every known chat, not over this view's
+    // window: pinning from a search or from the header menu must show up here
+    // even when the paginated query has not reached that chat. The date groups
+    // below are the window minus whatever the group took, so a chat still
+    // cannot render twice. A search shows only its results, and an item filter
+    // answers "chats about X", so neither shows the group.
+    const pinnedThreads = useMemo(
+        () => (showPinnedGroup ? selectPinnedThreads(entities, pinnedIsForeign) : EMPTY_THREADS),
+        [showPinnedGroup, entities, pinnedIsForeign]
+    );
+    const displayedThreads = useMemo(
+        () => (showPinnedGroup ? visibleRows.filter(t => !t.isPinned) : visibleRows),
+        [showPinnedGroup, visibleRows]
+    );
+    const hasVisibleRows = visibleRows.length > 0;
 
     // Threads hidden by instance scoping: exact client-side count when
-    // item-filtered, the backend-reported count otherwise.
-    const hiddenInstanceCount = filter ? filteredMismatchCount : (otherInstanceCount ?? 0);
+    // item-filtered, the backend-reported count otherwise. Only a scoped first
+    // page carries one, so a search view never has its own — fall back to the
+    // plain view's, which is what the escape hatch below is about anyway.
+    const baseViewKey = useMemo(
+        () => (user ? threadViewKey({ userId: user.id, showAll: showAllInstances, scope: instanceRef }) : ''),
+        [user, showAllInstances, instanceRef]
+    );
+    const reportedOtherCount = view.otherInstanceCount ?? views.get(baseViewKey)?.otherInstanceCount ?? 0;
+    const hiddenInstanceCount = filter ? filteredMismatchCount : reportedOtherCount;
     // Whether the escape hatch out of instance scoping should be offered.
     const canShowHidden = !isLoading && !showAllInstances && hiddenInstanceCount > 0;
     // Search responses carry no count, so the retained one describes the
@@ -527,6 +440,136 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             : `You have ${hiddenInstanceCount} chats that were created in a different Zotero profile. Beaver keeps chat history separate for each one.`;
 
     const groupedThreads = groupThreadsByDate(displayedThreads);
+
+    /**
+     * One chat row. Shared by the pinned group and the date groups so both
+     * carry the same hover actions, rename mode and foreign-profile badge.
+     */
+    const renderThreadRow = (thread: ThreadData) => {
+        const threadName = thread.name || 'Unnamed conversation';
+        const isCurrent = thread.id === currentThreadId;
+        const isEditing = editingThreadId === thread.id;
+        const isHovered = hoveredThreadId === thread.id;
+        // Only ever true while showing all instances — the scoped
+        // list contains no foreign threads to label.
+        const isForeign = isThreadInstanceMismatch(instanceRef, {
+            zoteroUserId: thread.zoteroUserId, zoteroLocalId: thread.zoteroLocalId,
+        });
+
+        return (
+            <div
+                key={thread.id}
+                className={`thread-list-item ${isEditing ? 'thread-list-item-editing' : ''} ${isHovered ? 'thread-list-item-hovered' : ''}`}
+                role={isEditing ? undefined : 'button'}
+                tabIndex={isEditing ? undefined : 0}
+                aria-label={isEditing ? undefined : `${threadName}, ${formatTimeAgo(thread.updatedAt)}${isCurrent ? ', current chat' : ''}${thread.isPinned ? ', pinned' : ''}${isForeign ? `, ${FOREIGN_THREAD_TITLE}` : ''}`}
+                onClick={() => {
+                    if (!isEditing) {
+                        handleSelectThread(thread);
+                    }
+                }}
+                onKeyDown={isEditing ? undefined : (e) => {
+                    // Ignore keys bubbling up from nested controls
+                    // (e.g. the Rename/Delete buttons) so they keep
+                    // their own keyboard activation.
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleSelectThread(thread);
+                    }
+                }}
+                onMouseEnter={() => setHoveredThreadId(thread.id)}
+                onMouseLeave={() => setHoveredThreadId(null)}
+            >
+                <div className="flex-1 min-w-0">
+                    {isEditing ? (
+                        <input
+                            type="text"
+                            className="thread-rename-input"
+                            value={editingName}
+                            onChange={e => setEditingName(e.target.value)}
+                            onKeyDown={e => handleRenameKeyDown(e, thread.id)}
+                            onClick={e => e.stopPropagation()}
+                            autoFocus
+                        />
+                    ) : (
+                        <div className="thread-list-item-name truncate">
+                            {activeQuery ? highlightMatch(threadName, activeQuery) : threadName}
+                        </div>
+                    )}
+                    <div className="thread-list-item-time">
+                        {formatTimeAgo(thread.updatedAt)}{isCurrent && ' (current chat)'}
+                        {isForeign && (
+                            <span className="thread-list-item-badge" title={FOREIGN_THREAD_TITLE}>
+                                {FOREIGN_THREAD_LABEL}
+                            </span>
+                        )}
+                    </div>
+                </div>
+                <div className="thread-list-item-actions">
+                    {isEditing ? (
+                        <div className="display-flex gap-2">
+                            <IconButton
+                                icon={CancelIcon}
+                                variant="ghost-secondary"
+                                onClick={e => {
+                                    e.stopPropagation();
+                                    handleCancelRename();
+                                }}
+                                className="scale-90"
+                                ariaLabel="Cancel rename"
+                            />
+                            <IconButton
+                                icon={TickIcon}
+                                variant="ghost-secondary"
+                                onClick={e => {
+                                    e.stopPropagation();
+                                    handleConfirmRename(thread.id);
+                                }}
+                                className="scale-11"
+                                ariaLabel="Confirm rename"
+                                loading={isSavingRename}
+                            />
+                        </div>
+                    ) : (
+                        <div className="display-flex gap-3">
+                            <IconButton
+                                icon={thread.isPinned ? PinOffIcon : PinIcon}
+                                variant="ghost-secondary"
+                                onClick={e => {
+                                    e.stopPropagation();
+                                    handleTogglePin(thread);
+                                }}
+                                className="scale-95"
+                                ariaLabel={thread.isPinned ? 'Unpin chat' : 'Pin chat'}
+                                disabled={pendingPinIds.has(thread.id)}
+                            />
+                            <IconButton
+                                icon={EditIcon}
+                                variant="ghost-secondary"
+                                onClick={e => {
+                                    e.stopPropagation();
+                                    handleStartRename(thread.id, threadName);
+                                }}
+                                className="scale-95"
+                                ariaLabel="Rename thread"
+                            />
+                            <IconButton
+                                icon={DeleteIcon}
+                                variant="ghost-secondary"
+                                onClick={e => {
+                                    e.stopPropagation();
+                                    handleDelete(thread.id);
+                                }}
+                                className="scale-95"
+                                ariaLabel="Delete thread"
+                            />
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    };
 
     return (
         <div className="display-flex flex-col flex-1 min-h-0" ref={containerRef}>
@@ -621,131 +664,23 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
 
             {/* Thread list */}
             <div className="flex-1 overflow-y-auto px-1">
+                {pinnedThreads.length > 0 && (
+                    <div>
+                        <div className="thread-group-header">Pinned</div>
+                        {pinnedThreads.map(renderThreadRow)}
+                    </div>
+                )}
                 {Object.entries(groupedThreads).map(([groupName, groupThreads]) => {
                     if (groupThreads.length === 0) return null;
                     return (
                         <div key={groupName}>
                             <div className="thread-group-header">{groupName}</div>
-                            {groupThreads.map(thread => {
-                                const threadName = thread.name || 'Unnamed conversation';
-                                const isCurrent = thread.id === currentThreadId;
-                                const isEditing = editingThreadId === thread.id;
-                                const isHovered = hoveredThreadId === thread.id;
-                                // Only ever true while showing all instances — the scoped
-                                // list contains no foreign threads to label.
-                                const isForeign = isThreadInstanceMismatch(instanceRef, {
-                                    zoteroUserId: thread.zoteroUserId, zoteroLocalId: thread.zoteroLocalId,
-                                });
-
-                                return (
-                                    <div
-                                        key={thread.id}
-                                        className={`thread-list-item ${isEditing ? 'thread-list-item-editing' : ''} ${isHovered ? 'thread-list-item-hovered' : ''}`}
-                                        role={isEditing ? undefined : 'button'}
-                                        tabIndex={isEditing ? undefined : 0}
-                                        aria-label={isEditing ? undefined : `${threadName}, ${formatTimeAgo(thread.updatedAt)}${isCurrent ? ', current chat' : ''}${isForeign ? `, ${FOREIGN_THREAD_TITLE}` : ''}`}
-                                        onClick={() => {
-                                            if (!isEditing) {
-                                                handleSelectThread(thread);
-                                            }
-                                        }}
-                                        onKeyDown={isEditing ? undefined : (e) => {
-                                            // Ignore keys bubbling up from nested controls
-                                            // (e.g. the Rename/Delete buttons) so they keep
-                                            // their own keyboard activation.
-                                            if (e.target !== e.currentTarget) return;
-                                            if (e.key === 'Enter' || e.key === ' ') {
-                                                e.preventDefault();
-                                                handleSelectThread(thread);
-                                            }
-                                        }}
-                                        onMouseEnter={() => setHoveredThreadId(thread.id)}
-                                        onMouseLeave={() => setHoveredThreadId(null)}
-                                    >
-                                        <div className="flex-1 min-w-0">
-                                            {isEditing ? (
-                                                <input
-                                                    type="text"
-                                                    className="thread-rename-input"
-                                                    value={editingName}
-                                                    onChange={e => setEditingName(e.target.value)}
-                                                    onKeyDown={e => handleRenameKeyDown(e, thread.id)}
-                                                    onClick={e => e.stopPropagation()}
-                                                    autoFocus
-                                                />
-                                            ) : (
-                                                <div className="thread-list-item-name truncate">
-                                                    {activeQuery ? highlightMatch(threadName, activeQuery) : threadName}
-                                                </div>
-                                            )}
-                                            <div className="thread-list-item-time">
-                                                {formatTimeAgo(thread.updatedAt)}{isCurrent && ' (current chat)'}
-                                                {isForeign && (
-                                                    <span className="thread-list-item-badge" title={FOREIGN_THREAD_TITLE}>
-                                                        {FOREIGN_THREAD_LABEL}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
-                                        <div className="thread-list-item-actions">
-                                            {isEditing ? (
-                                                <div className="display-flex gap-2">
-                                                    <IconButton
-                                                        icon={CancelIcon}
-                                                        variant="ghost-secondary"
-                                                        onClick={e => {
-                                                            e.stopPropagation();
-                                                            handleCancelRename();
-                                                        }}
-                                                        className="scale-90"
-                                                        ariaLabel="Cancel rename"
-                                                    />
-                                                    <IconButton
-                                                        icon={TickIcon}
-                                                        variant="ghost-secondary"
-                                                        onClick={e => {
-                                                            e.stopPropagation();
-                                                            handleConfirmRename(thread.id);
-                                                        }}
-                                                        className="scale-11"
-                                                        ariaLabel="Confirm rename"
-                                                        loading={isSavingRename}
-                                                    />
-                                                </div>
-                                            ) : (
-                                                <div className="display-flex gap-3">
-                                                    <IconButton
-                                                        icon={EditIcon}
-                                                        variant="ghost-secondary"
-                                                        onClick={e => {
-                                                            e.stopPropagation();
-                                                            handleStartRename(thread.id, threadName);
-                                                        }}
-                                                        className="scale-95"
-                                                        ariaLabel="Rename thread"
-                                                    />
-                                                    <IconButton
-                                                        icon={DeleteIcon}
-                                                        variant="ghost-secondary"
-                                                        onClick={e => {
-                                                            e.stopPropagation();
-                                                            handleDelete(thread.id);
-                                                        }}
-                                                        className="scale-95"
-                                                        ariaLabel="Delete thread"
-                                                    />
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                );
-                            })}
+                            {groupThreads.map(renderThreadRow)}
                         </div>
                     );
                 })}
-
                 {/* Network error state — replaces empty state when fetch failed transiently */}
-                {!isLoading && displayedThreads.length === 0 && fetchError && (
+                {!isLoading && !hasVisibleRows && fetchError && (
                     <div className="display-flex flex-col items-center justify-center gap-2 py-6 text-center px-3 mt-2">
                         <span className="font-color-primary font-semibold text-sm">
                             {fetchError.offline ? "You're offline" : "Couldn't load chats"}
@@ -757,7 +692,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                         </span>
                         <Button
                             variant="outline"
-                            onClick={() => fetchThreads(activeQuery)}
+                            onClick={reloadView}
                             disabled={isLoading}
                             type="button"
                             loading={isLoading}
@@ -770,7 +705,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                 {/* Empty state — prominent variant. With nothing else on screen
                     the hidden chats are the whole story, so they get the full
                     explanation plus the escape hatch instead of a footer note. */}
-                {!isLoading && displayedThreads.length === 0 && !fetchError && canShowHidden && (
+                {!isLoading && !hasVisibleRows && !fetchError && canShowHidden && (
                     <div className="display-flex flex-col items-center justify-center gap-3 py-6 text-center px-3 mt-2">
                         <span className="font-color-primary font-semibold text-base">
                             {activeQuery ? 'No matching chats' : filter ? `No chats about ${filter.label}` : 'No chats on this Zotero profile'}
@@ -790,7 +725,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                 )}
 
                 {/* Empty state */}
-                {!isLoading && displayedThreads.length === 0 && !fetchError && !canShowHidden && (
+                {!isLoading && !hasVisibleRows && !fetchError && !canShowHidden && (
                     <div className="display-flex items-center justify-center py-6">
                         <span className="font-color-tertiary text-sm">
                             {activeQuery ? 'No matching chats' : filter ? `No chats about ${filter.label}` : 'No chats yet'}
@@ -799,21 +734,21 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                 )}
 
                 {/* Loading spinner */}
-                {isLoading && displayedThreads.length === 0 && (
+                {isLoading && !hasVisibleRows && (
                     <div className="display-flex items-center justify-center py-6">
                         <Spinner size={18} />
                     </div>
                 )}
 
                 {/* Inline network error — when we already have some threads but a refresh / load-more failed */}
-                {displayedThreads.length > 0 && fetchError && !isLoading && (
+                {hasVisibleRows && fetchError && !isLoading && (
                     <div className="display-flex items-center gap-2 px-3 py-2">
                         <span className="font-color-tertiary text-sm flex-1">
                             {fetchError.offline ? "You're offline." : "Couldn't reach the server."}
                         </span>
                         <Button
                             variant="outline"
-                            onClick={() => fetchThreads(activeQuery)}
+                            onClick={reloadView}
                             disabled={isLoading}
                             type="button"
                         >
@@ -823,11 +758,11 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                 )}
 
                 {/* Show more */}
-                {hasMore && !fetchError && (
+                {view.hasMore && !fetchError && (
                     <div className="display-flex justify-start p-2 ml-2 pb-3">
                         <Button
                             variant="outline"
-                            onClick={loadMoreThreads}
+                            onClick={() => loadMore({ key: viewKey, query: activeQuery, scope })}
                             disabled={isLoading}
                             type="button"
                             loading={isLoading}
@@ -841,7 +776,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             {/* Footer: instance-scoping escape hatch. Outside the scroll area so
                 it stays visible, and only while the list has rows — an empty
                 list gets the prominent variant above instead. */}
-            {canShowHidden && displayedThreads.length > 0 && (
+            {canShowHidden && hasVisibleRows && (
                 <div className="thread-filter-footer-note">
                     {hiddenCountSummary}
                     {' · '}

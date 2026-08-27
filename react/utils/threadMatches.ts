@@ -5,7 +5,7 @@ import type { ThreadData } from '../atoms/threads';
  * realtime feed select exactly these columns rather than full rows). */
 type ThreadDataSource = Pick<
     ThreadModel,
-    'id' | 'name' | 'created_at' | 'updated_at' | 'zotero_user_id' | 'zotero_local_id'
+    'id' | 'name' | 'created_at' | 'updated_at' | 'zotero_user_id' | 'zotero_local_id' | 'starred' | 'agent_name'
 >;
 
 /**
@@ -21,6 +21,9 @@ export function threadModelToThreadData(thread: ThreadDataSource): ThreadData {
         updatedAt: thread.updated_at,
         zoteroUserId: thread.zotero_user_id ?? null,
         zoteroLocalId: thread.zotero_local_id ?? null,
+        // Wire field is `starred`; the UI calls it "pinned".
+        isPinned: thread.starred ?? false,
+        agentName: thread.agent_name ?? null,
     };
 }
 

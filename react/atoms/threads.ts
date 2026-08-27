@@ -9,7 +9,8 @@ import { agentService } from "@beaver/agent-core/transport/agentService";
 import { threadService, ZoteroInstanceRef } from "@beaver/agent-core/transport/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes, currentZoteroInstanceRef } from "../../src/utils/zoteroUtils";
-import { isThreadInstanceMismatch } from "../utils/threadMatches";
+import { isThreadInstanceMismatch, threadModelToThreadData } from "../utils/threadMatches";
+import { upsertThreadsAtom, threadWriteStampAtom } from "./threadList";
 import { getHost } from '@beaver/agent-ui/host';
 import { logger } from "@beaver/agent-core/platform/logger";
 import { ApiError } from "@beaver/agent-core/types/apiErrors";
@@ -131,6 +132,18 @@ export interface ThreadData {
     // masquerade as unattributed and bypass the mismatch confirm.
     zoteroUserId?: string | null;
     zoteroLocalId?: string | null;
+    /**
+     * Whether the user pinned this chat to the top of the history list. The
+     * wire field is `starred` (backend column and route vocabulary); every
+     * user-facing string says "pinned".
+     */
+    isPinned: boolean;
+    /**
+     * Agent the thread belongs to. Absent from a backend that predates the
+     * field. Needed so a scoped response is not treated as authoritative about
+     * another agent's threads.
+     */
+    agentName?: string | null;
 }
 
 // Thread messages and attachments
@@ -212,6 +225,7 @@ export const windowScrollPositionAtom = atom(
 
 // Atom to store recent threads
 export const recentThreadsAtom = atom<ThreadData[]>([]);
+
 
 /**
  * Ask the user to confirm interrupting the currently streaming run.
@@ -402,6 +416,10 @@ export const loadThreadAtom = atom(
         const statefulChat = getPref('statefulChat');
         let identity = threadIdentity;
         let resolvedName = threadName ?? null;
+        // Captured before the fetch: a response that lands after a sign-out
+        // must not repopulate the store for the previous account, and one that
+        // predates a pin toggle must not write its stale flag back.
+        const threadWriteStamp = get(threadWriteStampAtom);
         if (identity === undefined && statefulChat) {
             try {
                 const thread = await threadService.getThread(threadId);
@@ -410,6 +428,10 @@ export const loadThreadAtom = atom(
                     zoteroLocalId: thread.zotero_local_id ?? null,
                 };
                 resolvedName = resolvedName ?? (thread.name || null);
+                // Feed the thread store: this is the one fetch a deep-linked
+                // chat gets, and the chat lists and the header's pin entry all
+                // read their state from there.
+                set(upsertThreadsAtom, { threads: [threadModelToThreadData(thread)], stamp: threadWriteStamp });
             } catch (error) {
                 // An unknown identity must abort rather than degrade to
                 // "matching": without it we cannot decide whether applied

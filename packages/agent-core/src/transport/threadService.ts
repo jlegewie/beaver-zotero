@@ -13,6 +13,8 @@ export interface ThreadModel {
     id: string;
     user_id: string;
     name?: string;
+    // The pin flag. Named `starred` because that is the column and route
+    // vocabulary the backend shipped with; the UI calls it "pinned".
     starred?: boolean;
     created_at: string;
     updated_at: string;
@@ -346,18 +348,26 @@ export class ThreadService extends ApiService {
     }
 
     /**
-     * Fetches all starred threads, sorted by most recently updated
+     * Fetches the user's starred ("pinned") threads, sorted by most recently
+     * updated. Unpaginated — the whole set is meant to be rendered as one
+     * pinned section above the paginated list — so `limit` bounds it instead.
+     *
+     * @param limit Maximum number of threads to return (1-200)
+     * @param scope Optional instance identity; when provided, results are
+     *   scoped to threads matching it plus unattributed (NULL/NULL) threads.
+     *   Pass the same scope the list itself uses, or a thread hidden from the
+     *   list reappears in its pinned section.
      * @returns Promise with the list of starred threads
      */
-    async getStarredThreads(): Promise<ThreadModel[]> {
-        const params = new URLSearchParams();
+    async getStarredThreads(limit: number = 50, scope?: ZoteroInstanceRef): Promise<ThreadModel[]> {
+        const params = new URLSearchParams({ limit: String(limit) });
+        appendInstanceScopeParams(params, scope);
         appendAgentScopeParam(params);
-        const query = params.toString();
-        return this.get<ThreadModel[]>(`/api/v1/threads/starred${query ? `?${query}` : ''}`);
+        return this.get<ThreadModel[]>(`/api/v1/threads/starred?${params.toString()}`);
     }
 
     /**
-     * Stars a thread
+     * Stars ("pins") a thread
      * @param threadId The ID of the thread to star
      * @returns Promise with the updated thread data
      */
@@ -366,7 +376,7 @@ export class ThreadService extends ApiService {
     }
 
     /**
-     * Unstars a thread
+     * Unstars ("unpins") a thread
      * @param threadId The ID of the thread to unstar
      * @returns Promise with the updated thread data
      */
