@@ -66,10 +66,14 @@ function renderedText(node: React.ReactNode, out: string[] = []): string[] {
     return out;
 }
 
-function render(batch: BatchProgressEntry, queuedBatches: BatchProgressEntry[]): string {
+function render(
+    batch: BatchProgressEntry,
+    queuedBatches: BatchProgressEntry[],
+    expanded = false,
+): string {
     hookState.slots = [];
     hookState.index = 0;
-    const tree = BatchProgressBar({ batch, queuedBatches }) as React.ReactNode;
+    const tree = BatchProgressBar({ batch, queuedBatches, expanded }) as React.ReactNode;
     return renderedText(tree).join(' ');
 }
 
@@ -97,17 +101,10 @@ describe('the batch progress bar queue', () => {
     });
 });
 
-/**
- * The live bar renders `BatchOutcomeBody` only once opened. The hook stand-in
- * has no re-render, so flip the disclosure's state cell and call again.
- */
 function renderExpanded(batch: BatchProgressEntry): React.ReactNode {
     hookState.slots = [];
     hookState.index = 0;
-    BatchProgressBar({ batch, queuedBatches: [] });
-    hookState.slots[0].value = true;
-    hookState.index = 0;
-    return BatchProgressBar({ batch, queuedBatches: [] }) as React.ReactNode;
+    return BatchProgressBar({ batch, queuedBatches: [], expanded: true }) as React.ReactNode;
 }
 
 /** The opened batch's body element, wherever it sits in the tree. */

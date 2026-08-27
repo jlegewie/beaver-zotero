@@ -1,5 +1,6 @@
 /**
- * Live batch panel above the composer: draws what is running, not what has finished.
+ * Live batch panel above the composer: draws what is running, holds a finished
+ * batch briefly, and keeps an expanded leftover until the user closes it.
  *
  * Hook stand-in rather than mounted (jsdom is not loaded). Effects run
  * synchronously; re-render is manual.
@@ -147,6 +148,47 @@ describe('the live batch panel', () => {
 
         render(null);
         expect(drawn()).toBeNull();
+    });
+
+    it('stays expanded when a batch the user is looking at ends', () => {
+        render(stamp(entry()))!.props.onExpandedChange(true);
+        const ended = render(stamp(entry({ status: 'completed', progress_primary: '184 of 184' })));
+        expect(ended?.props.expanded).toBe(true);
+        expect(ended?.props.batch.progress_primary).toBe('184 of 184');
+    });
+
+    it('keeps an expanded batch after the stamp is gone, until the user closes it', () => {
+        render(stamp(entry()))!.props.onExpandedChange(true);
+        render(stamp(entry({ status: 'completed' })));
+        expect(drawn(null)?.status).toBe('completed');
+        expect(render()?.props.expanded).toBe(true);
+
+        render()!.props.onExpandedChange(false);
+        expect(drawn()).toBeNull();
+    });
+
+    it('drops an expanded batch when the run stops before the batch ends', () => {
+        render(stamp(entry()))!.props.onExpandedChange(true);
+        expect(drawn()?.progress_primary).toBe('109 of 184');
+        expect(drawn(null)).toBeNull();
+    });
+
+    it('still dwells after the user collapses a completed batch the run is still carrying', () => {
+        render(stamp(entry()))!.props.onExpandedChange(true);
+        render(stamp(entry({ status: 'completed' })));
+        render()!.props.onExpandedChange(false);
+        expect(drawn()?.status).toBe('completed');
+
+        vi.advanceTimersByTime(3000);
+        expect(drawn()).toBeNull();
+    });
+
+    it('keeps a batch the user opened during the dwell after the stamp is gone', () => {
+        expect(drawn(stamp(entry()))?.batch_id).toBe('b1');
+        render(stamp(entry({ status: 'completed' })));
+        render()!.props.onExpandedChange(true);
+
+        expect(drawn(null)?.status).toBe('completed');
     });
 
     it('drops what it is holding as soon as the next batch opens', () => {
