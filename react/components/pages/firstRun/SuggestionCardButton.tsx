@@ -52,7 +52,7 @@ const SuggestionCardButton: React.FC<SuggestionCardButtonProps> = ({ card, permi
         }
     };
 
-    const baseClass = 'p-3 rounded-md first-run-card';
+    const baseClass = 'p-3 rounded-card first-run-card';
     const emphasisClass = 'bg-quinary border-card';
     const interactionClass = isPending ? 'pointer-events-none opacity-60' : 'cursor-pointer';
 

@@ -203,7 +203,7 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
             </div>
 
             {/* List */}
-            <div className="display-flex flex-col rounded-md border-card">
+            <div className="display-flex flex-col rounded-card border-card">
                 {selectedLibraries.length === 0 ? (
                     <div className="p-2 text-sm font-color-tertiary">No libraries selected yet.</div>
                 ) : (

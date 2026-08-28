@@ -721,7 +721,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
     return (
         <div
-            className="agent-action-view agent-action-group rounded-md flex flex-col min-w-0 border-card mb-2"
+            className="agent-action-view agent-action-group rounded-card flex flex-col min-w-0 border-card mb-2"
             data-edit-count={editCount}
             data-note-key={resolvedTarget ? `${resolvedTarget.libraryId}-${resolvedTarget.zoteroKey}` : 'pending'}
         >

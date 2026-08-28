@@ -138,7 +138,7 @@ export const BatchDoneRows: React.FC<BatchDoneRowsProps> = ({ batches }) => {
     return (
         <div
             // Clip corners here so a client without Zotero's panes gets the same card.
-            className="batch-run-receipt bg-senary border-card rounded-md overflow-hidden display-flex flex-col min-w-0"
+            className="batch-run-receipt bg-senary border-card rounded-card overflow-hidden display-flex flex-col min-w-0"
             role="group"
             aria-label="Completed batch jobs"
         >

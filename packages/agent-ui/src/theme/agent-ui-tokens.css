@@ -142,7 +142,17 @@
     --beaver-border-default: var(--fill-quarternary); /* flat fallback, see @supports */
     --beaver-border-strong: var(--fill-quarternary);
 
-    /* Geometry */
+    /* Geometry — two axes.
+       `sm`/`md`/`lg`/`xl` is the general-purpose corner scale the `.rounded-*`
+       utility classes expose, in rem so it tracks the pinned root font size.
+       `control`/`card`/`pill` are named roles for recurring shapes: the buttons
+       of a control row, a card level with the composer, and a fully rounded
+       button. Reach for a role when the shape is the point, the scale when the
+       corner is incidental. */
+    --beaver-radius-sm: 0.125rem;
+    --beaver-radius-md: 0.375rem;
+    --beaver-radius-lg: 0.5rem;
+    --beaver-radius-xl: 0.75rem;
     --beaver-radius-control: 6px;
     --beaver-radius-card: 10px;
     --beaver-radius-pill: 999px;

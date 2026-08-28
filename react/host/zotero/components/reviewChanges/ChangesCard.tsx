@@ -200,7 +200,7 @@ export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows }) => {
     const hiddenPendingCount = orderedRows.slice(visibleRows.length).filter((row) => !row.resolved).length;
 
     return (
-        <div className="border-card rounded-md display-flex flex-col min-w-0">
+        <div className="border-card rounded-card display-flex flex-col min-w-0">
             <div
                 className={`display-flex flex-row py-15 bg-senary items-center min-w-0 ${isExpanded ? 'border-bottom-quinary' : ''}`}
             >

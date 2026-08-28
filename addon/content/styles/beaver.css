@@ -241,7 +241,7 @@
  * down this file, irrespective of source order. */
 [id^="beaver-pane-"] .composer-controls button {
     height: 26px;
-    border-radius: 6px;
+    border-radius: var(--beaver-radius-control);
 }
 
 /* Icon-only controls are square. `Icon` defaults to 1em, so an icon that is
@@ -267,7 +267,7 @@
 
 [id^="beaver-pane-"] button.composer-send {
     margin-left: 4px;
-    border-radius: 999px;
+    border-radius: var(--beaver-radius-pill);
 }
 
 /* Disabled Send greys out rather than fading the accent, which at
@@ -297,7 +297,7 @@
     height: 26px;
     margin-left: 4px;
     padding: 0 10px;
-    border-radius: 999px;
+    border-radius: var(--beaver-radius-pill);
 }
 
 /* The popup message card (PopupMessageItem), which renders either over the main

@@ -42,7 +42,7 @@ export const ArtifactsList: React.FC<ArtifactsListProps> = ({ runId, rows }) => 
     const visibleRows = showAllRows ? rows : rows.slice(0, MAX_VISIBLE_ROWS);
 
     return (
-        <div className="border-card rounded-md bg-senary overflow-hidden display-flex flex-col min-w-0">
+        <div className="border-card rounded-card bg-senary overflow-hidden display-flex flex-col min-w-0">
             {visibleRows.map((row, idx) => (
                 <div key={row.toolcallId} className={idx > 0 ? 'border-top-quinary' : undefined}>
                     <ReviewActionRow runId={runId} row={row} inGroup />
