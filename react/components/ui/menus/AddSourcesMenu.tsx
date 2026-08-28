@@ -540,7 +540,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
                     aria-expanded={isMenuOpen}
                     disabled={disabled}
                 >
-                    <Icon icon={PlusSignIcon} size={18} />
+                    <Icon icon={PlusSignIcon} size={18} className="scale-12" />
                 </button>
             </Tooltip>
             <SearchMenu

@@ -131,8 +131,10 @@
     --beaver-fill-hover: var(--fill-quinary);
     /* A bar docked to the top edge of a raised card — a pending-approvals or
        progress strip. It reads as inset against the card without being a
-       surface of its own, so it tints rather than covers. */
-    --beaver-fill-bar: var(--fill-quinary);
+       surface of its own, so it tints rather than covers. Senary is one rung
+       below hover/chip: enough to mark the strip, not enough to compete with
+       the card's own step off the pane. */
+    --beaver-fill-bar: var(--fill-senary);
     /* Chips (inline badges and pills) sit inside cards as often as directly on
        the pane, so the fill must be translucent and tint whatever is behind it
        rather than cover it. `--fill-quinary` is the rung that composites on the

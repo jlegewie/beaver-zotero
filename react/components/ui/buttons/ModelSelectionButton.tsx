@@ -276,7 +276,7 @@ const ModelSelectionButton: React.FC<{
             </div>
             <MenuButton
                 menuItems={menuItems}
-                variant="ghost-secondary"
+                variant="ghost"
                 customContent={agentComponent}
                 buttonLabel={getButtonLabel()}
                 rightIcon={ArrowDownIcon}

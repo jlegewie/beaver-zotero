@@ -1631,12 +1631,12 @@
 [id^="beaver-pane-"] .variant-ghost {
     cursor: pointer;
     border: 0px solid transparent;
-    border-radius: 4px;
+    border-radius: 5px;
     transition: all 0.2s ease-in-out;
     font-size: 0.9rem;
     background-color: transparent;
     color: var(--fill-secondary);
-    padding: 2px 6px;
+    padding: 4px 6px;
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -1644,7 +1644,7 @@
 
 [id^="beaver-pane-"] .variant-ghost:hover {
     color: var(--fill-primary);
-    background-color: var(--fill-senary);
+    background-color: var(--fill-quinary);
 }
 
 [id^="beaver-pane-"] .variant-ghost:disabled {

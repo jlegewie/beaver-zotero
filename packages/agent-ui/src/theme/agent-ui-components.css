@@ -350,11 +350,16 @@
 }
 
 /* Chips for whatever is attached to the message being composed. Mounted only
- * when there is something to show. */
+ * when there is something to show. Chips have their own height, so they need
+ * less inset than a text line: pull toward the card edge by the extra
+ * `--beaver-card-pad-top`, leaving `--beaver-card-pad-bottom`. The same pull
+ * tightens the gap after a `.composer-docked-bar` (its bottom margin is the
+ * card's top pad; the negative here subtracts the extra). */
 .beaver-root .composer-attachments {
     display: flex;
     flex-wrap: wrap;
     gap: 5px;
+    margin-top: calc(-1 * var(--beaver-card-pad-top) + var(--beaver-card-pad-bottom));
     margin-bottom: 0.75rem;
 }
 
@@ -365,8 +370,9 @@
     flex-direction: row;
     align-items: center;
     gap: 4px;
-    margin-top: 0.8rem;
+    margin-top: 0.5rem;
     margin-right: -0.2rem;
+    margin-left: -0.2rem;
 }
 
 /* One height and one hover shape for every control in the row, whatever
@@ -374,7 +380,7 @@
  * `.variant-*` rules, whichever sheet they are in and whatever order it
  * loads in. */
 .beaver-root .composer-controls button {
-    height: 26px;
+    /* height: 26px; */
     border-radius: var(--beaver-radius-control);
 }
 
