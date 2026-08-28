@@ -1,14 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
-import { isLoadingThreadAtom, lastRunSummaryAtom, threadRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
+import { runsCountAtom } from '@beaver/agent-core/run-state/atoms';
 import { FIND_CURRENT_CLASS, FIND_HIT_ATTR, isFindQueryActive } from '@beaver/agent-ui/chat/findContext';
 import { currentThreadIdAtom } from '../atoms/threads';
-import {
-    annotationPanelStateAtom,
-    notePanelStateAtom,
-    thinkingVisibilityAtom,
-    toolExpandedAtom,
-} from '../atoms/messageUIState';
 import { getScrollAtoms, latchIntentFromDistance, markProgrammaticScroll } from '../utils/scrollPosition';
 import { findFirstHitAtOrBelow, stepMatchIndex } from '../utils/findNavigation';
 
@@ -20,19 +14,45 @@ import { findFirstHitAtOrBelow, stepMatchIndex } from '../utils/findNavigation';
  */
 const FIND_DEBOUNCE_MS = 200;
 
+/** What a rendered find hit looks like in the document. */
+const HIT_SELECTOR = `mark[${FIND_HIT_ATTR}]`;
+
 /** Every hit inside `container`, in document order. */
 function collectHits(container: HTMLElement): HTMLElement[] {
     const hits: HTMLElement[] = [];
-    container.querySelectorAll(`mark[${FIND_HIT_ATTR}]`).forEach((node) => {
-        if (node) hits.push(node as HTMLElement);
-    });
+    container.querySelectorAll<HTMLElement>(HIT_SELECTOR).forEach((hit) => hits.push(hit));
     return hits;
+}
+
+/** Whether any of `nodes` is a hit or contains one. */
+function holdsHit(nodes: NodeList): boolean {
+    for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
+        // Text nodes cannot be or contain an element.
+        if (node.nodeType !== 1) continue;
+        const element = node as Element;
+        if (element.matches(HIT_SELECTOR) || element.querySelector(HIT_SELECTOR)) return true;
+    }
+    return false;
+}
+
+/**
+ * Whether a batch of mutations changed which hits the thread holds.
+ *
+ * The thread mutates constantly for reasons that have nothing to do with the
+ * result set — a response streaming in, a tooltip mounting under the pointer —
+ * and re-reading the whole thread for each of those would put a full-document
+ * query on the hover path. A hit can only enter or leave by an element being
+ * inserted or removed, so that is what is asked.
+ */
+function batchTouchesHits(records: MutationRecord[]): boolean {
+    return records.some((record) => holdsHit(record.addedNodes) || holdsHit(record.removedNodes));
 }
 
 /** Take the current-hit class off everything inside `container` that still has it. */
 function clearCurrentClass(container: HTMLElement): void {
     container.querySelectorAll(`.${FIND_CURRENT_CLASS}`).forEach((node) => {
-        (node as Element | null)?.classList.remove(FIND_CURRENT_CLASS);
+        node.classList.remove(FIND_CURRENT_CLASS);
     });
 }
 
@@ -71,8 +91,13 @@ export function useFindInChatControls(): FindInChatControls {
 }
 
 export interface UseFindInChatOptions {
-    /** The thread's scroll container — the element hits are collected from and scrolled within. */
-    containerRef: RefObject<HTMLElement | null>;
+    /**
+     * The thread's scroll container — the element hits are collected from and
+     * scrolled within. The element itself rather than a ref: the session has to
+     * re-read the thread whenever the container is replaced, and a ref
+     * assignment notifies nobody.
+     */
+    container: HTMLElement | null;
     /** Whether this surface is the separate Beaver window, which scrolls independently. */
     isWindow: boolean;
 }
@@ -120,7 +145,7 @@ export interface FindInChatState {
  * they emitted are the only description of the result set that is guaranteed to
  * agree with what the reader can see.
  */
-export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions): FindInChatState {
+export function useFindInChat({ container, isWindow }: UseFindInChatOptions): FindInChatState {
     const [isOpen, setIsOpen] = useState(false);
     const [query, setQuery] = useState('');
     const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -128,30 +153,12 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
     const [currentIndex, setCurrentIndex] = useState(-1);
     const [focusToken, setFocusToken] = useState(0);
 
-    // The thread's own content triggers: another thread opened, a run added, a
-    // run reaching a status where it starts rendering its answer. A streaming
-    // run is shadowed with an empty query while it streams, so it produces its
-    // hits in one go when it stops.
-    //
-    // The runs are watched by their ids rather than by their count: two threads
-    // with the same number of runs would otherwise look unchanged, and the hit
-    // list would be left describing the thread that was just closed. The last
-    // run's summary carries its status, which the count of ids does not.
-    // Loading a thread unmounts the container, so the flag that ends the load is
-    // what says the hits can be read again.
+    // Which thread is open decides what counts as a fresh search, and a thread
+    // with no runs has no bar to keep open. Nothing else about the thread is
+    // subscribed to here — what the DOM holds is observed rather than predicted
+    // (see the rebuild effect below).
     const currentThreadId = useAtomValue(currentThreadIdAtom);
-    const runIds = useAtomValue(threadRunIdsAtom);
-    const lastRunSummary = useAtomValue(lastRunSummaryAtom);
-    const isLoadingThread = useAtomValue(isLoadingThreadAtom);
-    // A collapsed section renders nothing, so expanding one brings hits into a
-    // thread the list was collected before — and collapsing one takes hits out
-    // from under it. These are the four pieces of state that gate rendered
-    // markdown; a section whose expansion is local to its own component is
-    // picked up the next time the reader steps through the results.
-    const toolExpansion = useAtomValue(toolExpandedAtom);
-    const thinkingVisibility = useAtomValue(thinkingVisibilityAtom);
-    const notePanelState = useAtomValue(notePanelStateAtom);
-    const annotationPanelState = useAtomValue(annotationPanelStateAtom);
+    const runsCount = useAtomValue(runsCountAtom);
 
     const scrollAtoms = getScrollAtoms(isWindow);
 
@@ -185,12 +192,11 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
      * reuse an element that was current, and it would keep the class.
      */
     const setCurrentElement = useCallback((hits: HTMLElement[], index: number) => {
-        const container = containerRef.current;
         if (container) clearCurrentClass(container);
         const element = index >= 0 && hits[index]?.isConnected ? hits[index] : undefined;
         element?.classList.add(FIND_CURRENT_CLASS);
         currentElementRef.current = element ?? null;
-    }, [containerRef]);
+    }, [container]);
 
     /**
      * Bring a hit to roughly the middle of the container.
@@ -203,7 +209,6 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
      * `latchIntentFromDistance` records what landing here means for following.
      */
     const scrollToMatch = useCallback((element: HTMLElement) => {
-        const container = containerRef.current;
         if (!container || container.clientHeight === 0) return;
         // A hit the thread has since re-rendered away measures as a zero rect,
         // which would scroll the container to an offset that means nothing.
@@ -219,7 +224,7 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
         container.scrollTop = scrollTop;
         markProgrammaticScroll(container, 0, scrollTop);
         latchIntentFromDistance(container.scrollHeight - scrollTop - container.clientHeight, scrollAtoms);
-    }, [containerRef, scrollAtoms]);
+    }, [container, scrollAtoms]);
 
     /** Forget the result set and take the highlight off the thread. */
     const clearMatches = useCallback(() => {
@@ -231,13 +236,18 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
         setCurrentIndex(-1);
     }, [setCurrentElement]);
 
-    // Rebuild the hit list after any render that could have changed it: the
-    // query reaching the renderers, a run added, a run finishing. An observer
-    // over the whole thread would fire on every frame of a response for a list
-    // that cannot change until it ends.
-    useEffect(() => {
-        const container = containerRef.current;
-        if (!isOpen || !container) return;
+    /**
+     * Read the thread's hits and place the reader among them.
+     *
+     * The list is whatever the document holds now: a query change, a run
+     * finishing, a collapsed section opened — every one of them ends as marks
+     * appearing or disappearing, so the DOM is the one signal that covers them
+     * all. Predicting them from state instead means enumerating every toggle
+     * that gates rendered text, and missing the ones that are local to a
+     * component.
+     */
+    const rebuild = useCallback(() => {
+        if (!container) return;
 
         const hits = collectHits(container);
         matchesRef.current = hits;
@@ -272,49 +282,54 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
         if (isNewSearch && index >= 0) {
             scrollToMatch(hits[index]);
         }
-    }, [
-        isOpen,
-        activeQuery,
-        currentThreadId,
-        runIds,
-        lastRunSummary,
-        isLoadingThread,
-        toolExpansion,
-        thinkingVisibility,
-        notePanelState,
-        annotationPanelState,
-        containerRef,
-        setCurrentElement,
-        scrollToMatch,
-    ]);
+    }, [container, activeQuery, currentThreadId, setCurrentElement, scrollToMatch]);
 
-    // A surface that goes away leaves no highlight behind. Only the DOM is
-    // touched here — the state it belonged to is going with the component.
+    // Read the thread once, then again whenever a hit enters or leaves it.
+    //
+    // Every way that can happen — the query reaching the renderers, a run
+    // finishing and being highlighted for the first time, a collapsed section
+    // opened or closed — ends as a `<mark>` being inserted or removed, so the
+    // document is asked instead of every piece of state that might have caused
+    // one. `batchTouchesHits` is what keeps that cheap: a streaming run holds no
+    // hits (it renders with an empty query), so its per-frame churn is filtered
+    // out, and so is a tooltip mounting under the pointer.
+    //
+    // Only `childList` is observed. The current-hit class is an attribute this
+    // hook writes itself, so observing attributes would have it answer its own
+    // writes.
+    useEffect(() => {
+        if (!isOpen || !container) return;
+
+        rebuild();
+
+        const win = container.ownerDocument.defaultView;
+        if (!win) return;
+
+        const observer = new win.MutationObserver((records) => {
+            if (batchTouchesHits(records)) rebuild();
+        });
+        observer.observe(container, { childList: true, subtree: true });
+        // The observer belongs to the window that created it, which on macOS can
+        // close while the app keeps running.
+        return () => observer.disconnect();
+    }, [isOpen, container, rebuild]);
+
+    // A container that goes away leaves no highlight behind. Only the DOM is
+    // touched here — the state it belonged to is replaced by the rebuild that
+    // follows, or is going with the component.
     useEffect(() => () => {
-        const container = containerRef.current;
         if (container) clearCurrentClass(container);
-    }, [containerRef]);
+    }, [container]);
 
     const step = useCallback((delta: number) => {
-        const container = containerRef.current;
-        // The thread view is unmounted and rebuilt for more than the reasons
-        // watched above — a profile refresh, a data migration — and the hits
-        // recorded before that are detached afterwards. Reading them again here
-        // costs one query per keypress and is what keeps stepping working
-        // through an unmount nothing announced.
-        let hits = matchesRef.current;
-        if (container && (hits.length === 0 || !hits[0].isConnected)) {
-            hits = collectHits(container);
-            matchesRef.current = hits;
-            setMatchCount(hits.length);
-        }
+        const hits = matchesRef.current;
         const index = stepMatchIndex(currentIndexRef.current, hits.length, delta);
         if (index < 0) return;
         currentIndexRef.current = index;
         setCurrentIndex(index);
         setCurrentElement(hits, index);
         scrollToMatch(hits[index]);
-    }, [containerRef, setCurrentElement, scrollToMatch]);
+    }, [setCurrentElement, scrollToMatch]);
 
     const next = useCallback(() => step(1), [step]);
     const previous = useCallback(() => step(-1), [step]);
@@ -330,8 +345,8 @@ export function useFindInChat({ containerRef, isWindow }: UseFindInChatOptions):
     // back, carrying the previous thread's query, the moment the first run of
     // the new thread appears.
     useEffect(() => {
-        if (isOpen && runIds.length === 0) close();
-    }, [isOpen, runIds, close]);
+        if (isOpen && runsCount === 0) close();
+    }, [isOpen, runsCount, close]);
 
     const open = useCallback(() => {
         setIsOpen(true);

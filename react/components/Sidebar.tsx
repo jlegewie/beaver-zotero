@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useEffect, type ReactNode } from 'react';
+import React, { useCallback, useMemo, useRef, useState, useEffect, type ReactNode } from 'react';
 import InputArea from "./input/InputArea"
 import AskUserQuestionPanel from "./input/AskUserQuestionPanel"
 import BatchApprovalPanel from "./input/BatchApprovalPanel"
@@ -186,7 +186,15 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     // re-renders the whole shell on every frame of a streaming response.
     const runsCount = useAtomValue(runsCountAtom);
     const isFirstRunThread = useAtomValue(isFirstRunThreadAtom);
-    const messagesContainerRef = useRef<HTMLDivElement>(null);
+    const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+    // The same element as the ref, held in state so find-in-chat can re-read the
+    // thread when the container is replaced — a thread load unmounts it, and a
+    // ref assignment notifies nobody.
+    const [messagesContainer, setMessagesContainer] = useState<HTMLDivElement | null>(null);
+    const setMessagesContainerRef = useCallback((node: HTMLDivElement | null) => {
+        messagesContainerRef.current = node;
+        setMessagesContainer(node);
+    }, []);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const setIsSkippedFilesDialogVisible = useSetAtom(isSkippedFilesDialogVisibleAtom);
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
@@ -237,7 +245,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     // Find in chat. Component state, not an atom: one Jotai store is shared by
     // the sidebars and the separate Beaver window, so an atom would put every
     // surface on the same query and the same current match.
-    const find = useFindInChat({ containerRef: messagesContainerRef, isWindow });
+    const find = useFindInChat({ container: messagesContainer, isWindow });
 
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
@@ -436,7 +444,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                         it does without find-in-chat. */}
                     {isThreadView ? (
                         <FindQueryProvider query={find.activeQuery}>
-                            <ThreadView ref={messagesContainerRef} isWindow={isWindow} />
+                            <ThreadView ref={setMessagesContainerRef} isWindow={isWindow} />
                         </FindQueryProvider>
                     ) : (
                         <HomePage isWindow={isWindow} inputRef={inputRef} />
