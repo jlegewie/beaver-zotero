@@ -226,6 +226,29 @@
     min-height: 1.5rem;
 }
 
+/* Bars docked to the composer's top edge. The geometry — the bleed that cancels
+   the card's padding, and the top-corner radius — comes from
+   `.composer-docked-bar` (agent-ui-components.css), which each of these also
+   wears. Only what they paint is here, because only these three components are
+   Zotero's; the batch progress bar is shared, so its fill lives beside the
+   geometry. */
+
+/* Pending approvals. */
+[id^="beaver-pane-"] .pending-actions-bar {
+    background-color: var(--beaver-fill-bar);
+}
+
+/* High token usage warning. */
+[id^="beaver-pane-"] .high-token-usage-warning-bar {
+    background-color: var(--tag-yellow-senary);
+    border-bottom: 1px solid var(--fill-quinary);
+}
+
+/* First-run "Next steps" panel. */
+[id^="beaver-pane-"] .next-steps-panel {
+    border-bottom: 1px solid var(--fill-quarternary);
+}
+
 /* Disclosure hover, shared by the batch progress bar and the run receipt. The
    bar's own surface and its bleed into the composer's top edge live in
    agent-ui-components.css, with the composer whose padding they cancel; the

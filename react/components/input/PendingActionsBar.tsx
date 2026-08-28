@@ -56,7 +56,7 @@ const PendingActionsBar: React.FC = () => {
         : `${pendingCount} Pending Approvals`;
 
     return (
-        <div className="pending-actions-bar display-flex flex-row items-center px-3 py-2 border-bottom-quinary gap-2">
+        <div className="composer-docked-bar pending-actions-bar display-flex flex-row items-center px-3 py-2 border-bottom-quinary gap-2">
             {/* Left side: Count */}
             <span className="font-color-primary text-sm">{label}</span>
 

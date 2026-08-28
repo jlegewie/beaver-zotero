@@ -99,7 +99,7 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
     };
 
     return (
-        <div className="next-steps-panel px-4 py-3">
+        <div className="composer-docked-bar next-steps-panel px-4 py-3">
             <div className="display-flex flex-col gap-15">
                 <div className="display-flex flex-row items-center justify-between gap-2">
                     <div

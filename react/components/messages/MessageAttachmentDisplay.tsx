@@ -75,17 +75,6 @@ const MessageAttachmentDisplay = () => {
         [overflowCount, overflowMessageItems],
     );
 
-    const hasAttachments =
-        filteredMessageItems.length > 0 ||
-        selectedLibraries.length > 0 ||
-        selectedCollections.length > 0 ||
-        currentTagSelections.length > 0 ||
-        currentMessageCollections.length > 0 ||
-        currentMessageExternalFiles.length > 0 ||
-        Boolean(currentReaderAttachment) ||
-        Boolean(currentNoteItem) ||
-        Boolean(readerTextSelection);
-
     // Count of editable (removable) context items currently attached. Excludes
     // the non-removable reader attachment and note tab item.
     const removableContextCount =
@@ -96,6 +85,13 @@ const MessageAttachmentDisplay = () => {
         currentMessageCollections.length +
         currentMessageExternalFiles.length +
         (readerTextSelection ? 1 : 0);
+
+    // The removable count plus the two chips that cannot be removed, so a new
+    // attachment kind only has to be added to the count above.
+    const hasAttachments =
+        removableContextCount > 0 ||
+        Boolean(currentReaderAttachment) ||
+        Boolean(currentNoteItem);
 
     // Offer "Remove all" only when there is more than one removable item
     const handleRemoveAll = removableContextCount > 1

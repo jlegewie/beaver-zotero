@@ -335,24 +335,16 @@
  * fills go. The recipe itself lives in agent-ui-tokens.css, as
  * --beaver-surface-raised, so every raised surface shares it.
  *
- * The local --composer-* properties are aliases of the shared tokens: anything
- * that docks to the card's top edge cancels the padding with them — see
- * .pending-actions-bar below.
- *
- * A client that wants a different card geometry must retarget
- * --beaver-card-pad-* / --beaver-radius-card rather than override the padding
- * and border-radius declarations here. Overriding the declarations leaves the
- * aliases advertising this sheet's values, and every docked bar then bleeds by
- * the wrong amount with a corner cut for the wrong radius. */
+ * A client that wants a different card geometry retargets --beaver-card-pad-*
+ * / --beaver-radius-card rather than overriding the declarations here:
+ * .composer-docked-bar below reads the same tokens to cancel this padding, so
+ * an overridden declaration would leave every docked bar bleeding by the wrong
+ * amount with a corner cut for the wrong radius. */
 .beaver-root .user-message-display {
-    --composer-pad-x: var(--beaver-card-pad-x);
-    --composer-pad-top: var(--beaver-card-pad-top);
-    --composer-pad-bottom: var(--beaver-card-pad-bottom);
-    --composer-radius: var(--beaver-radius-card);
     position: relative;
-    padding: var(--composer-pad-top) var(--composer-pad-x) var(--composer-pad-bottom);
+    padding: var(--beaver-card-pad-top) var(--beaver-card-pad-x) var(--beaver-card-pad-bottom);
     border: 1px solid var(--beaver-border-default);
-    border-radius: var(--composer-radius);
+    border-radius: var(--beaver-radius-card);
     background-color: var(--beaver-surface-raised);
     user-select: text;
 }
@@ -396,19 +388,18 @@
     justify-content: center;
 }
 
-.beaver-root button.composer-send {
-    width: 24px;
-    height: 24px;
-    padding: 0;
-    justify-content: center;
-}
-
+/* Web search takes its icon size from the button, per the rule above. */
 .beaver-root button.composer-web-search {
     font-size: 15px;
 }
 
+/* Send is a touch larger than the row's square buttons, and fully rounded. */
 .beaver-root button.composer-send {
+    width: 24px;
+    height: 24px;
     margin-left: 4px;
+    padding: 0;
+    justify-content: center;
     border-radius: var(--beaver-radius-pill);
 }
 
@@ -436,7 +427,6 @@
 /* Reject sits in Send's slot while an approval is pending, and matches its
  * pill shape rather than the square buttons elsewhere in the row. */
 .beaver-root button.composer-reject {
-    height: 26px;
     margin-left: 4px;
     padding: 0 10px;
     border-radius: var(--beaver-radius-pill);
@@ -444,45 +434,31 @@
 
 /* ───── Bars docked to the composer's top edge ───── */
 
-/* Each of these cancels the card's padding with the `--composer-*` aliases the
-   composer declares, so it renders as the card's own top edge rather than as a
-   strip floating above it. Reading those aliases is what ties them to the
-   composer: same bleed, same top-corner radius, different fill. */
+/* One geometry, worn by every bar that docks to the card: cancel the card's
+   padding so the bar renders as the card's own top edge rather than a strip
+   floating above it, and repeat the card's corner less its 1px border.
 
-/* Pending Actions Bar - shows when agent actions await approval */
-.beaver-root .pending-actions-bar {
-    margin: calc(-1 * var(--composer-pad-top)) calc(-1 * var(--composer-pad-x)) var(--composer-pad-top);
-    border-radius: calc(var(--composer-radius) - 1px) calc(var(--composer-radius) - 1px) 0 0;
-    background-color: var(--beaver-fill-bar);
+   Only the geometry is shared. Each bar's fill belongs to the sheet that owns
+   the component wearing it — this package styles `.batch-progress-bar` because
+   `BatchProgressBar` lives here; the Zotero-only bars are filled in
+   `beaver.css`.
+
+   Bars stack flush: the upper bar's positive bottom margin collapses against
+   the lower bar's negative top margin, and the lower one drops its rounding so
+   the pair reads as a single edge. */
+.beaver-root .composer-docked-bar {
+    margin: calc(-1 * var(--beaver-card-pad-top)) calc(-1 * var(--beaver-card-pad-x)) var(--beaver-card-pad-top);
+    border-radius: calc(var(--beaver-radius-card) - 1px) calc(var(--beaver-radius-card) - 1px) 0 0;
 }
 
-/* Same bleed as the pending-actions bar so it reads as the composer's top edge.
-   No `position` here: BatchProgressBar sets it inline, which wins anyway. */
-.beaver-root .batch-progress-bar {
-    margin: calc(-1 * var(--composer-pad-top)) calc(-1 * var(--composer-pad-x)) var(--composer-pad-top);
-    border-radius: calc(var(--composer-radius) - 1px) calc(var(--composer-radius) - 1px) 0 0;
-    background-color: var(--beaver-fill-bar);
-}
-
-/* Flush stacked bars: drop the lower bar's top-corner rounding. */
-.beaver-root .batch-progress-bar + .pending-actions-bar,
-.beaver-root .batch-progress-bar + .high-token-usage-warning-bar {
+.beaver-root .composer-docked-bar + .composer-docked-bar {
     border-radius: 0;
 }
 
-/* High token usage warning above composer */
-.beaver-root .high-token-usage-warning-bar {
-    margin: calc(-1 * var(--composer-pad-top)) calc(-1 * var(--composer-pad-x)) var(--composer-pad-top);
-    border-radius: calc(var(--composer-radius) - 1px) calc(var(--composer-radius) - 1px) 0 0;
-    background-color: var(--tag-yellow-senary);
-    border-bottom: 1px solid var(--fill-quinary);
-}
-
-/* First-run "Next steps" panel above composer */
-.beaver-root .next-steps-panel {
-    margin: calc(-1 * var(--composer-pad-top)) calc(-1 * var(--composer-pad-x)) var(--composer-pad-top);
-    border-radius: calc(var(--composer-radius) - 1px) calc(var(--composer-radius) - 1px) 0 0;
-    border-bottom: 1px solid var(--fill-quarternary);
+/* Live batch progress. No `position` here: BatchProgressBar sets it inline,
+   which wins anyway. */
+.beaver-root .batch-progress-bar {
+    background-color: var(--beaver-fill-bar);
 }
 
 /* ───── The editor field ───── */

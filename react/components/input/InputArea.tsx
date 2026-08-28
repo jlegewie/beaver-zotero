@@ -524,7 +524,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             {/* After a first-run follow-up run, offer a path back to the
                 originating surface (suggestion grid or launcher). */}
             {composerBand === 'back-to-suggestions' && (
-                <div className="next-steps-panel px-3 py-2">
+                <div className="composer-docked-bar next-steps-panel px-3 py-2">
                     <BackToSuggestions onDismiss={handleDismissNextSteps} backTarget={firstRunBackTarget} />
                 </div>
             )}

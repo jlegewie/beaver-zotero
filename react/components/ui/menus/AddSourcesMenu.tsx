@@ -126,7 +126,6 @@ export interface AddSourcesMenuProps {
     /** Clear the typed query but leave the menu open (entering a submenu). */
     onResetQuery: () => void;
     menuPortalContainer?: HTMLElement | null;
-    onAfterMenuInitialFocus?: () => void;
     disabled?: boolean;
     verticalPosition?: 'above' | 'below';
 }
@@ -142,7 +141,6 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     onCommit,
     onResetQuery,
     menuPortalContainer,
-    onAfterMenuInitialFocus,
     disabled = false,
     verticalPosition = 'above',
 }, ref) {
@@ -530,6 +528,10 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         <>
             <Tooltip content="Add Sources" showArrow singleLine>
                 <button
+                    // The control row lives inside the composer's <form>, so a
+                    // button with no type would default to submit and send the
+                    // message on the way to opening the menu.
+                    type="button"
                     className="variant-ghost composer-add-sources"
                     ref={buttonRef}
                     onClick={handleButtonClick}
@@ -538,7 +540,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
                     aria-expanded={isMenuOpen}
                     disabled={disabled}
                 >
-                    <Icon icon={PlusSignIcon} size={18} className="scale-13"/>
+                    <Icon icon={PlusSignIcon} size={18} />
                 </button>
             </Tooltip>
             <SearchMenu
@@ -564,7 +566,6 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
                 // a real input to move out of.
                 selectOnTab={!ownsSearchField}
                 portalContainer={menuPortalContainer}
-                onAfterInitialFocus={onAfterMenuInitialFocus}
             />
         </>
     );
