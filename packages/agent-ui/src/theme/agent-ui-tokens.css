@@ -129,7 +129,10 @@
     /* Fills — translucent, composite onto whichever surface they sit on */
     --beaver-fill-subtle: var(--fill-senary);
     --beaver-fill-hover: var(--fill-quinary);
-    --beaver-fill-active: var(--fill-quarternary);
+    /* A bar docked to the top edge of a raised card — a pending-approvals or
+       progress strip. It reads as inset against the card without being a
+       surface of its own, so it tints rather than covers. */
+    --beaver-fill-bar: var(--fill-quinary);
     /* Chips (inline badges and pills) sit inside cards as often as directly on
        the pane, so the fill must be translucent and tint whatever is behind it
        rather than cover it. `--fill-quinary` is the rung that composites on the

@@ -11,8 +11,10 @@
  *                            contract of platform tokens Zotero supplies.
  *   agent-ui-utilities.css   the utility layer, scoped `.beaver-root`.
  *   agent-ui-components.css  shared component rules — the sign-in surface, the
- *                            link vocabulary, and `@keyframes spin`, which the
- *                            `.animate-spin` rule below still resolves by name.
+ *                            link vocabulary, the composer and the bars that
+ *                            dock to it, the editor field, the tooltip family,
+ *                            and `@keyframes spin`, which the `.animate-spin`
+ *                            rule below still resolves by name.
  *
  * `.beaver-root` sits on every element that carries a `beaver-pane-*` id, so
  * `.beaver-root .foo` matches exactly what `[id^="beaver-pane-"] .foo` matched.
@@ -581,7 +583,7 @@
     justify-content: space-between;
     gap: 8px;
     padding: 8px 12px;
-    background-color: var(--beaver-fill-hover);
+    background-color: var(--beaver-fill-bar);
     border-bottom: 1px solid var(--beaver-border-strong);
 }
 

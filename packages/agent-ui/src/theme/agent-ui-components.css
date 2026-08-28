@@ -337,7 +337,13 @@
  *
  * The local --composer-* properties are aliases of the shared tokens: anything
  * that docks to the card's top edge cancels the padding with them — see
- * .pending-actions-bar below. */
+ * .pending-actions-bar below.
+ *
+ * A client that wants a different card geometry must retarget
+ * --beaver-card-pad-* / --beaver-radius-card rather than override the padding
+ * and border-radius declarations here. Overriding the declarations leaves the
+ * aliases advertising this sheet's values, and every docked bar then bleeds by
+ * the wrong amount with a corner cut for the wrong radius. */
 .beaver-root .user-message-display {
     --composer-pad-x: var(--beaver-card-pad-x);
     --composer-pad-top: var(--beaver-card-pad-top);
@@ -352,8 +358,7 @@
 }
 
 /* Chips for whatever is attached to the message being composed. Mounted only
- * when there is something to show — the "+" that used to live here moved into
- * the control row. */
+ * when there is something to show. */
 .beaver-root .composer-attachments {
     display: flex;
     flex-wrap: wrap;
@@ -448,7 +453,7 @@
 .beaver-root .pending-actions-bar {
     margin: calc(-1 * var(--composer-pad-top)) calc(-1 * var(--composer-pad-x)) var(--composer-pad-top);
     border-radius: calc(var(--composer-radius) - 1px) calc(var(--composer-radius) - 1px) 0 0;
-    background-color: var(--beaver-fill-hover);
+    background-color: var(--beaver-fill-bar);
 }
 
 /* Same bleed as the pending-actions bar so it reads as the composer's top edge.
@@ -456,7 +461,7 @@
 .beaver-root .batch-progress-bar {
     margin: calc(-1 * var(--composer-pad-top)) calc(-1 * var(--composer-pad-x)) var(--composer-pad-top);
     border-radius: calc(var(--composer-radius) - 1px) calc(var(--composer-radius) - 1px) 0 0;
-    background-color: var(--beaver-fill-hover);
+    background-color: var(--beaver-fill-bar);
 }
 
 /* Flush stacked bars: drop the lower bar's top-corner rounding. */
@@ -478,7 +483,6 @@
     margin: calc(-1 * var(--composer-pad-top)) calc(-1 * var(--composer-pad-x)) var(--composer-pad-top);
     border-radius: calc(var(--composer-radius) - 1px) calc(var(--composer-radius) - 1px) 0 0;
     border-bottom: 1px solid var(--fill-quarternary);
-    /* background-color: var(--material-mix-quarternary); */
 }
 
 /* ───── The editor field ───── */
@@ -497,10 +501,8 @@
     font-family: system-ui, -apple-system, sans-serif;
     width: 100%;
     font-size: 13px;
-    /* color: var(--fill-secondary); */
     background-color: transparent;
     border: 0px solid transparent;
-    /* border-radius: 8px; */
     outline: none;
     caret-color: var(--fill-primary);
     resize: none;
@@ -540,29 +542,6 @@
    The keyframes live here for the same reason `spin` does at the top of this
    file: names resolve across every author sheet in the document, so a client
    rule animating `tooltipFadeIn` keeps working. */
-
-.beaver-root .tooltip-container {
-    position: absolute;
-    z-index: 1000;
-    padding: 4px 8px;
-    border-radius: 4px;
-    background-color: var(--beaver-surface-overlay);
-    box-shadow: var(--beaver-shadow-overlay);
-    font-size: 0.85rem;
-    line-height: 1.4;
-    max-width: 250px;
-    word-wrap: break-word;
-    pointer-events: none;
-    color: var(--fill-secondary);
-    border: 1px solid var(--beaver-border-strong);
-    transform: translateX(-50%);
-    white-space: normal;
-}
-
-.beaver-root .tooltip-container.whitespace-nowrap {
-    white-space: nowrap;
-    max-width: none;
-}
 
 /* Arrow styles with border */
 .beaver-root .tooltip-arrow {
