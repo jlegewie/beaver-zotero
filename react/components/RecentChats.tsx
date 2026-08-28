@@ -250,8 +250,9 @@ const RecentChats: React.FC = () => {
         return () => { cancelled = true; };
     }, [fetchRecentChats]);
 
-    // Register callback so external callers (ThreadListView, ThreadsMenu) can
-    // remove a deleted thread from our local state without a full re-fetch.
+    // Register callback so external callers (ThreadListView, the header's
+    // chat-actions menu) can remove a deleted thread from our local state
+    // without a full re-fetch.
     useEffect(() => {
         const unregister = registerRecentChatsRemover((id: string) => {
             setThreads(prev => prev.filter(t => t.id !== id));

@@ -380,9 +380,11 @@ export class ApiService {
     /**
     * Performs a PATCH request
     */
-    async patch<T>(endpoint: string, body: any): Promise<T> {
-        const response = await this.request(endpoint, 'PATCH', body);
-        return await this.parseJsonResponse<T>(response, 'PATCH');
+    async patch<T>(endpoint: string, body: any, options?: RequestOptions): Promise<T> {
+        return withDeadline(options, async (deadline) => {
+            const response = await this.request(endpoint, 'PATCH', body, deadline);
+            return await this.parseJsonResponse<T>(response, 'PATCH');
+        });
     }
     
     /**

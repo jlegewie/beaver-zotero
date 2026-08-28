@@ -16,6 +16,8 @@ import {
     loadPinnedThreadsAtom,
     loadThreadsByItemAtom,
     setThreadPinnedAtom,
+    pinsPendingAtom,
+    isPinPending,
     updateThreadAtom,
     removeThreadAtom,
     EMPTY_THREAD_VIEW,
@@ -97,6 +99,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     const loadPinned = useSetAtom(loadPinnedThreadsAtom);
     const loadByItem = useSetAtom(loadThreadsByItemAtom);
     const setThreadPinned = useSetAtom(setThreadPinnedAtom);
+    const pinsPending = useAtomValue(pinsPendingAtom);
     const updateThread = useSetAtom(updateThreadAtom);
     const removeThread = useSetAtom(removeThreadAtom);
 
@@ -114,10 +117,6 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     const [editingName, setEditingName] = useState('');
     const [isSavingRename, setIsSavingRename] = useState(false);
     const [hoveredThreadId, setHoveredThreadId] = useState<string | null>(null);
-    // Rows with a pin/unpin request in flight. A second activation would race
-    // the first with no ordering guarantee, and the row moves out from under
-    // the cursor the moment the first one applies.
-    const [pendingPinIds, setPendingPinIds] = useState<Set<string>>(() => new Set());
 
     const containerRef = useRef<HTMLDivElement | null>(null);
     const menuPortalContainer = containerRef.current?.closest('[id^="beaver-react-root-"], #beaver-pane-window') as HTMLElement | null;
@@ -143,20 +142,6 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     );
     const scope = showAllInstances ? undefined : (instanceRef ?? undefined);
 
-    const isForeign = useCallback(
-        (thread: ThreadData) => isThreadInstanceMismatch(instanceRef, {
-            zoteroUserId: thread.zoteroUserId, zoteroLocalId: thread.zoteroLocalId,
-        }),
-        [instanceRef]
-    );
-    // What the pinned query covers. Showing all profiles fetches unscoped, so
-    // the response is authoritative about every chat and nothing is foreign —
-    // the reconciliation and the group must agree on that, or one would hide a
-    // chat the other just unpinned.
-    const pinnedIsForeign = useMemo(
-        () => (showAllInstances ? () => false : isForeign),
-        [showAllInstances, isForeign]
-    );
 
     // Which view this render is showing. Search, item filter and instance scope
     // each produce a different one, so a response can only ever land in the view
@@ -201,8 +186,8 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     const showPinnedGroup = !activeQuery && !filter;
     useEffect(() => {
         if (!user || !showPinnedGroup) return;
-        loadPinned({ key: viewKey, scope, isForeign: pinnedIsForeign });
-    }, [user, showPinnedGroup, viewKey, scope, pinnedIsForeign, loadPinned]);
+        loadPinned({ key: viewKey, scope });
+    }, [user, showPinnedGroup, viewKey, scope, loadPinned]);
 
     // Debounced search
     useEffect(() => {
@@ -223,8 +208,8 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             return;
         }
         loadPage({ key: viewKey, query: activeQuery, scope, includeOtherCount: scope !== undefined, force: true });
-        if (showPinnedGroup) loadPinned({ key: viewKey, scope, isForeign: pinnedIsForeign, force: true });
-    }, [user, filter, viewKey, activeQuery, scope, showPinnedGroup, pinnedIsForeign, loadPage, loadByItem, loadPinned]);
+        if (showPinnedGroup) loadPinned({ key: viewKey, scope, force: true });
+    }, [user, filter, viewKey, activeQuery, scope, showPinnedGroup, loadPage, loadByItem, loadPinned]);
 
     const handleSearchKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Escape') {
@@ -280,23 +265,11 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     };
 
     /**
-     * Pins or unpins a chat. The store owns the optimistic write and its
-     * rollback; this only guards against a second click while the first is in
-     * flight and keeps the other surfaces' caches honest.
+     * Pins or unpins a chat. The store owns the optimistic write, its rollback
+     * and the one-toggle-at-a-time guard, so this is just the call.
      */
-    const handleTogglePin = async (thread: ThreadData) => {
-        if (pendingPinIds.has(thread.id)) return;
-        setPendingPinIds(prev => new Set(prev).add(thread.id));
-        try {
-            const ok = await setThreadPinned({ threadId: thread.id, pinned: !thread.isPinned, viewKey });
-            if (ok) clearRecentChatsCache();
-        } finally {
-            setPendingPinIds(prev => {
-                const next = new Set(prev);
-                next.delete(thread.id);
-                return next;
-            });
-        }
+    const handleTogglePin = (thread: ThreadData) => {
+        void setThreadPinned({ threadId: thread.id, pinned: !thread.isPinned, viewKey });
     };
 
     const handleDelete = async (threadId: string) => {
@@ -403,8 +376,8 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     // cannot render twice. A search shows only its results, and an item filter
     // answers "chats about X", so neither shows the group.
     const pinnedThreads = useMemo(
-        () => (showPinnedGroup ? selectPinnedThreads(entities, pinnedIsForeign) : EMPTY_THREADS),
-        [showPinnedGroup, entities, pinnedIsForeign]
+        () => (showPinnedGroup ? selectPinnedThreads(entities, scope) : EMPTY_THREADS),
+        [showPinnedGroup, entities, scope]
     );
     const displayedThreads = useMemo(
         () => (showPinnedGroup ? visibleRows.filter(t => !t.isPinned) : visibleRows),
@@ -542,7 +515,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                 }}
                                 className="scale-95"
                                 ariaLabel={thread.isPinned ? 'Unpin chat' : 'Pin chat'}
-                                disabled={pendingPinIds.has(thread.id)}
+                                disabled={isPinPending(pinsPending, thread.id)}
                             />
                             <IconButton
                                 icon={EditIcon}

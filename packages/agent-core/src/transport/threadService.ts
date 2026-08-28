@@ -151,6 +151,15 @@ function isRetryableTruncateFailure(error: unknown): boolean {
 const TRUNCATE_TIMEOUT_MS = 15000;
 
 /**
+ * Pin/unpin holds the chat's pin controls disabled until it settles, so a
+ * connection that never closes would leave them that way for the session.
+ *
+ * The client-side lock that tracks these requests must outlive this — see
+ * `PIN_LOCK_TTL_MS` in `react/atoms/threadList.ts`.
+ */
+const PIN_TIMEOUT_MS = 15000;
+
+/**
  * Thread-specific API service that extends the base API service
  */
 export class ThreadService extends ApiService {
@@ -359,7 +368,7 @@ export class ThreadService extends ApiService {
      *   list reappears in its pinned section.
      * @returns Promise with the list of starred threads
      */
-    async getStarredThreads(limit: number = 50, scope?: ZoteroInstanceRef): Promise<ThreadModel[]> {
+    async getStarredThreads(limit: number, scope?: ZoteroInstanceRef): Promise<ThreadModel[]> {
         const params = new URLSearchParams({ limit: String(limit) });
         appendInstanceScopeParams(params, scope);
         appendAgentScopeParam(params);
@@ -372,7 +381,7 @@ export class ThreadService extends ApiService {
      * @returns Promise with the updated thread data
      */
     async starThread(threadId: string): Promise<ThreadModel> {
-        return this.patch<ThreadModel>(`/api/v1/threads/${threadId}/star`, {});
+        return this.patch<ThreadModel>(`/api/v1/threads/${threadId}/star`, {}, { timeoutMs: PIN_TIMEOUT_MS });
     }
 
     /**
@@ -381,7 +390,7 @@ export class ThreadService extends ApiService {
      * @returns Promise with the updated thread data
      */
     async unstarThread(threadId: string): Promise<ThreadModel> {
-        return this.patch<ThreadModel>(`/api/v1/threads/${threadId}/unstar`, {});
+        return this.patch<ThreadModel>(`/api/v1/threads/${threadId}/unstar`, {}, { timeoutMs: PIN_TIMEOUT_MS });
     }
 }
 

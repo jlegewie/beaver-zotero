@@ -16,6 +16,8 @@ import {
     setThreadPinnedAtom,
     upsertThreadsAtom,
     threadWriteStampAtom,
+    pinsPendingAtom,
+    isPinPending,
     threadViewKey,
     updateThreadAtom,
     removeThreadAtom,
@@ -55,7 +57,9 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     const upsertThreads = useSetAtom(upsertThreadsAtom);
     const updateThread = useSetAtom(updateThreadAtom);
     const removeThread = useSetAtom(removeThreadAtom);
-    const [isPinning, setIsPinning] = useState(false);
+    // Shared with the list's pin buttons, so the two surfaces cannot fire
+    // concurrent toggles for the same chat.
+    const pinsPending = useAtomValue(pinsPendingAtom);
 
     /**
      * Loads the open chat into the thread store when it is not there yet — a
@@ -259,32 +263,27 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
      * Pins or unpins the open chat, moving it into or out of the pinned group
      * at the top of the chat history.
      */
-    const handleTogglePin = async () => {
+    const handleTogglePin = () => {
         const currentId = store.get(currentThreadIdAtom);
-        if (!currentId || isPinned === null || isPinning) return;
+        if (!currentId || isPinned === null) return;
 
-        setIsPinning(true);
-        try {
-            // The plain list's view key, so an unpin here retains the row in the
-            // window exactly as the row-level unpin does. Without it the two
-            // paths to one action behave differently: this one would drop a
-            // chat the paginated window never held.
-            const currentUser = store.get(userAtom);
-            const viewKey = currentUser
-                ? threadViewKey({
-                    userId: currentUser.id,
-                    showAll: store.get(showAllThreadInstancesAtom),
-                    scope: currentZoteroInstanceRef(),
-                })
-                : undefined;
-            // The store owns the optimistic write and its rollback, and every
-            // surface renders from it — so a list open behind this menu (the
-            // overlay leaves the header reachable) updates without being told.
-            const ok = await setThreadPinned({ threadId: currentId, pinned: !isPinned, viewKey });
-            if (ok) clearRecentChatsCache();
-        } finally {
-            setIsPinning(false);
-        }
+        // The plain list's view key, so an unpin here retains the row in the
+        // window exactly as the row-level unpin does. Without it the two paths
+        // to one action behave differently: this one would drop a chat the
+        // paginated window never held.
+        const currentUser = store.get(userAtom);
+        const viewKey = currentUser
+            ? threadViewKey({
+                userId: currentUser.id,
+                showAll: store.get(showAllThreadInstancesAtom),
+                scope: currentZoteroInstanceRef(),
+            })
+            : undefined;
+        // The store owns the optimistic write, its rollback and the
+        // one-toggle-at-a-time guard, and every surface renders from it — so a
+        // list open behind this menu (the overlay leaves the header reachable)
+        // updates without being told.
+        void setThreadPinned({ threadId: currentId, pinned: !isPinned, viewKey });
     };
 
     const handleDeleteChat = async () => {
@@ -353,7 +352,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
             {
                 label: isPinned ? 'Unpin chat' : 'Pin chat',
                 onClick: handleTogglePin,
-                disabled: !threadId || isPinned === null || isPinning,
+                disabled: !threadId || isPinned === null || isPinPending(pinsPending, threadId),
             },
             {
                 label: 'Rename chat',

@@ -193,7 +193,7 @@ describe('ThreadService agent scoping', () => {
     });
 
     it('scopes the starred list to the registered agent', async () => {
-        await service.getStarredThreads();
+        await service.getStarredThreads(50);
         expect(params().get('agent_name')).toBe('beaver');
     });
 
@@ -201,7 +201,7 @@ describe('ThreadService agent scoping', () => {
         setThreadAgentName(null);
         await service.getPaginatedThreads(10);
         expect(params().has('agent_name')).toBe(false);
-        await service.getStarredThreads();
+        await service.getStarredThreads(50);
         expect(params().has('agent_name')).toBe(false);
     });
 

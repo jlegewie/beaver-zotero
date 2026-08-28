@@ -226,7 +226,6 @@ export const windowScrollPositionAtom = atom(
 // Atom to store recent threads
 export const recentThreadsAtom = atom<ThreadData[]>([]);
 
-
 /**
  * Ask the user to confirm interrupting the currently streaming run.
  * Returns true if the user confirmed (or there was nothing to confirm).

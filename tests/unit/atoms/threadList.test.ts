@@ -39,6 +39,9 @@ import {
     upsertThreadsAtom,
     removeThreadAtom,
     resetThreadStoreAtom,
+    pinsPendingAtom,
+    isPinPending,
+    PIN_LOCK_TTL_MS,
     threadStoreGenerationAtom,
     threadWriteStampAtom,
     currentThreadPinnedAtom,
@@ -85,7 +88,6 @@ let keySeq = 0;
  */
 const nextKey = () => `user-1|test-${++keySeq}||scoped::`;
 
-const never = () => false;
 const gen = (store: ReturnType<typeof createStore>) => store.get(threadStoreGenerationAtom);
 
 beforeEach(() => {
@@ -155,7 +157,7 @@ describe('the pinned group is derived from entities, not from a view window', ()
         getPaginatedThreadsMock.mockResolvedValue(page([row('recent')]));
         getStarredThreadsMock.mockResolvedValue([]);
         await store.set(loadThreadPageAtom, { key: baseKey, query: '', includeOtherCount: false });
-        await store.set(loadPinnedThreadsAtom, { key: baseKey, isForeign: never });
+        await store.set(loadPinnedThreadsAtom, { key: baseKey });
 
         // A search reaches an old chat and the user pins it.
         searchThreadsMock.mockResolvedValue(page([row('old', { updated_at: '2025-01-01T00:00:00Z' })]));
@@ -165,7 +167,7 @@ describe('the pinned group is derived from entities, not from a view window', ()
 
         // Back on the plain view — whose window still does not contain it — the
         // pinned group must show it anyway.
-        const pinned = selectPinnedThreads(store.get(threadEntitiesAtom), never);
+        const pinned = selectPinnedThreads(store.get(threadEntitiesAtom), undefined);
         expect(pinned.map(p => p.id)).toEqual(['old']);
         expect(store.get(threadViewsAtom).get(baseKey)!.ids).not.toContain('old');
     });
@@ -177,9 +179,10 @@ describe('the pinned group is derived from entities, not from a view window', ()
             entity('theirs', { isPinned: true, zoteroLocalId: 'THEM' }),
         ] });
 
-        const isForeign = (t: ThreadData) => t.zoteroLocalId === 'THEM';
-        expect(selectPinnedThreads(store.get(threadEntitiesAtom), isForeign).map(p => p.id)).toEqual(['mine']);
-        expect(selectPinnedThreads(store.get(threadEntitiesAtom), never).map(p => p.id).sort()).toEqual(['mine', 'theirs']);
+        const scope = { zoteroUserId: null, zoteroLocalId: 'ME' };
+        expect(selectPinnedThreads(store.get(threadEntitiesAtom), scope).map(p => p.id)).toEqual(['mine']);
+        // Undefined scope is "all profiles": nothing is foreign.
+        expect(selectPinnedThreads(store.get(threadEntitiesAtom), undefined).map(p => p.id).sort()).toEqual(['mine', 'theirs']);
     });
 
     it('sorts newest first regardless of discovery order', () => {
@@ -188,7 +191,7 @@ describe('the pinned group is derived from entities, not from a view window', ()
             entity('old', { isPinned: true, updatedAt: '2025-01-01T00:00:00Z' }),
             entity('new', { isPinned: true, updatedAt: '2026-01-01T00:00:00Z' }),
         ] });
-        expect(selectPinnedThreads(store.get(threadEntitiesAtom), never).map(p => p.id)).toEqual(['new', 'old']);
+        expect(selectPinnedThreads(store.get(threadEntitiesAtom), undefined).map(p => p.id)).toEqual(['new', 'old']);
     });
 });
 
@@ -253,7 +256,7 @@ describe('a view id set is a window, and a first page re-establishes it', () => 
         unstarThreadMock.mockResolvedValue({});
 
         await store.set(loadThreadPageAtom, { key, query: '', includeOtherCount: false });
-        await store.set(loadPinnedThreadsAtom, { key, isForeign: never });
+        await store.set(loadPinnedThreadsAtom, { key });
         // The pinned query feeds entities only — the window is untouched.
         expect(store.get(threadViewsAtom).get(key)!.ids).toEqual(['recent']);
 
@@ -328,7 +331,7 @@ describe('view isolation and freshness', () => {
         getStarredThreadsMock.mockResolvedValue([]);
 
         await store.set(loadThreadPageAtom, { key, query: '', includeOtherCount: false });
-        await store.set(loadPinnedThreadsAtom, { key, isForeign: never });
+        await store.set(loadPinnedThreadsAtom, { key });
         expect(getStarredThreadsMock).toHaveBeenCalledTimes(1);
 
         // Age the pinned query past its TTL while leaving the page's `loadedAt`
@@ -341,7 +344,7 @@ describe('view isolation and freshness', () => {
             loadedAt: Date.now(),
         }));
 
-        await store.set(loadPinnedThreadsAtom, { key, isForeign: never });
+        await store.set(loadPinnedThreadsAtom, { key });
         expect(getStarredThreadsMock).toHaveBeenCalledTimes(2);
     });
 });
@@ -360,6 +363,108 @@ describe('setThreadPinnedAtom', () => {
         resolveStar({});
         expect(await pending).toBe(true);
         expect(store.get(threadEntitiesAtom).get('a')!.isPinned).toBe(true);
+    });
+
+    it('refuses a second toggle for the same chat while one is in flight', async () => {
+        const store = createStore();
+        store.set(upsertThreadsAtom, { threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
+        let resolveStar: (v: unknown) => void = () => {};
+        starThreadMock.mockImplementationOnce(() => new Promise(r => { resolveStar = r; }));
+
+        const first = store.set(setThreadPinnedAtom, { threadId: 'a', pinned: true });
+        expect(isPinPending(store.get(pinsPendingAtom), 'a')).toBe(true);
+
+        // The row's pin button and the header menu both target the same chat;
+        // two PATCHes racing would have no ordering guarantee.
+        const second = await store.set(setThreadPinnedAtom, { threadId: 'a', pinned: false });
+        expect(second).toBe(false);
+        expect(starThreadMock).toHaveBeenCalledTimes(1);
+        expect(unstarThreadMock).not.toHaveBeenCalled();
+        expect(store.get(threadEntitiesAtom).get('a')!.isPinned).toBe(true);
+
+        resolveStar({});
+        await first;
+        // The slot drains, so the chat can be toggled again.
+        expect(isPinPending(store.get(pinsPendingAtom), 'a')).toBe(false);
+    });
+
+    it('ignores a lock whose owning window is gone, instead of disabling the chat forever', async () => {
+        const store = createStore();
+        store.set(upsertThreadsAtom, { threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
+        // A claim left behind by a window that closed mid-request: its promise
+        // continuation and its deadline both died with that realm, so nothing
+        // will ever remove this entry.
+        store.set(pinsPendingAtom, new Map([['a', { claimedAt: Date.now() - PIN_LOCK_TTL_MS - 1, token: -1 }]]));
+        starThreadMock.mockResolvedValue({});
+
+        expect(isPinPending(store.get(pinsPendingAtom), 'a')).toBe(false);
+        expect(await store.set(setThreadPinnedAtom, { threadId: 'a', pinned: true })).toBe(true);
+        expect(store.get(threadEntitiesAtom).get('a')!.isPinned).toBe(true);
+    });
+
+    it('sweeps expired locks when a new one is claimed, and keeps live ones', async () => {
+        const store = createStore();
+        store.set(upsertThreadsAtom, { threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
+        store.set(pinsPendingAtom, new Map([
+            ['stale', { claimedAt: Date.now() - PIN_LOCK_TTL_MS - 1, token: -1 }],
+            ['live', { claimedAt: Date.now(), token: -2 }],
+        ]));
+        starThreadMock.mockResolvedValue({});
+
+        await store.set(setThreadPinnedAtom, { threadId: 'a', pinned: true });
+
+        // Otherwise an abandoned entry sits in the app-lifetime store for the
+        // rest of the session…
+        expect(store.get(pinsPendingAtom).has('stale')).toBe(false);
+        // …but a sweep that took live locks with it would free chats whose
+        // requests are still outstanding.
+        expect(store.get(pinsPendingAtom).has('live')).toBe(true);
+    });
+
+    it('does not roll back or release once its lock has been taken over', async () => {
+        const store = createStore();
+        store.set(upsertThreadsAtom, { threads: [entity('x')], stamp: { generation: 0, pinSeq: 0 } });
+
+        // A toggle whose window closed: it never settles on its own.
+        let rejectAbandoned: (e: unknown) => void = () => {};
+        starThreadMock.mockImplementationOnce(() => new Promise((_, rej) => { rejectAbandoned = rej; }));
+        const abandoned = store.set(setThreadPinnedAtom, { threadId: 'x', pinned: true });
+
+        // Its lock ages out…
+        const pins = store.get(pinsPendingAtom);
+        store.set(pinsPendingAtom, new Map([
+            ['x', { ...pins.get('x')!, claimedAt: Date.now() - PIN_LOCK_TTL_MS - 1 }],
+        ]));
+
+        // …a second toggle runs to completion, releasing its own lock…
+        unstarThreadMock.mockResolvedValue({});
+        await store.set(setThreadPinnedAtom, { threadId: 'x', pinned: false });
+
+        // …and a third takes the chat over and is left IN FLIGHT. Three toggles
+        // are needed, not two: the abandoned call pinned, so its rollback would
+        // write `false` — with only one intervening toggle the chat would
+        // already be `false` and the assertion below could not tell a fired
+        // rollback from a skipped one. This third one puts the chat back to
+        // `true` *and* leaves a lock under a different token, so the entity
+        // assertion covers the `catch` guard and the lock assertion covers the
+        // `finally` guard.
+        let resolveTakeover: (v: unknown) => void = () => {};
+        starThreadMock.mockImplementationOnce(() => new Promise(r => { resolveTakeover = r; }));
+        const takeover = store.set(setThreadPinnedAtom, { threadId: 'x', pinned: true });
+        expect(store.get(threadEntitiesAtom).get('x')!.isPinned).toBe(true);
+
+        // The abandoned request finally errors. It must neither invert what the
+        // takeover optimistically wrote, nor release the takeover's lock.
+        rejectAbandoned(new Error('window closed'));
+        await abandoned;
+
+        expect(store.get(threadEntitiesAtom).get('x')!.isPinned).toBe(true);
+        expect(isPinPending(store.get(pinsPendingAtom), 'x')).toBe(true);
+
+        // And the takeover still owns its lock well enough to release it.
+        resolveTakeover({});
+        await takeover;
+        expect(isPinPending(store.get(pinsPendingAtom), 'x')).toBe(false);
     });
 
     it('rolls back when the backend rejects', async () => {
@@ -429,7 +534,7 @@ describe('the pinned query reconciles what it is authoritative about', () => {
         // The server now reports only one of them as pinned.
         getStarredThreadsMock.mockResolvedValue([row('still', { starred: true })]);
 
-        await store.set(loadPinnedThreadsAtom, { key, isForeign: never });
+        await store.set(loadPinnedThreadsAtom, { key });
 
         expect(store.get(threadEntitiesAtom).get('gone')!.isPinned).toBe(false);
         expect(store.get(threadEntitiesAtom).get('still')!.isPinned).toBe(true);
@@ -447,7 +552,7 @@ describe('the pinned query reconciles what it is authoritative about', () => {
         // A scoped response says nothing about chats outside its scope.
         await store.set(loadPinnedThreadsAtom, {
             key,
-            isForeign: (t: ThreadData) => t.zoteroLocalId === 'THEM',
+            scope: { zoteroUserId: null, zoteroLocalId: 'ME' },
         });
 
         expect(store.get(threadEntitiesAtom).get('theirs')!.isPinned).toBe(true);
@@ -462,7 +567,7 @@ describe('the pinned query reconciles what it is authoritative about', () => {
             Array.from({ length: MAX_PINNED }, (_, i) => row(`p${i}`, { starred: true }))
         );
 
-        await store.set(loadPinnedThreadsAtom, { key, isForeign: never });
+        await store.set(loadPinnedThreadsAtom, { key });
 
         expect(store.get(threadEntitiesAtom).get('beyond-cap')!.isPinned).toBe(true);
     });
@@ -478,7 +583,7 @@ describe('the pinned query reconciles what it is authoritative about', () => {
         getStarredThreadsMock.mockImplementationOnce(() => new Promise(r => { resolveStarred = r; }));
         unstarThreadMock.mockResolvedValue({});
 
-        const pending = store.set(loadPinnedThreadsAtom, { key, isForeign: never });
+        const pending = store.set(loadPinnedThreadsAtom, { key });
         // The user unpins X after the request went out, so the response still
         // reports X as pinned. The upsert must not write that flag back.
         await store.set(setThreadPinnedAtom, { threadId: 'x', pinned: false });
@@ -496,7 +601,7 @@ describe('the pinned query reconciles what it is authoritative about', () => {
         getStarredThreadsMock.mockImplementationOnce(() => new Promise(r => { resolveStarred = r; }));
         starThreadMock.mockResolvedValue({});
 
-        const pending = store.set(loadPinnedThreadsAtom, { key, isForeign: never });
+        const pending = store.set(loadPinnedThreadsAtom, { key });
         // The user pins X after the request went out, so the response predates it.
         await store.set(setThreadPinnedAtom, { threadId: 'x', pinned: true });
         resolveStarred([]);

@@ -330,6 +330,22 @@ describe('ApiService version headers', () => {
         expect(fetchMock.mock.calls[0][1].signal).toBeUndefined();
     });
 
+    // PATCH gained a deadline for pin/unpin, which hold a UI control disabled
+    // until they settle. Without the `deadline` reaching `request`, the wrapper
+    // still compiles and the call still succeeds — only the bound is lost.
+    it('honours a deadline on PATCH', async () => {
+        respondWithStalledBody(200, 'OK');
+
+        await expect(service.patch('/api/v1/threads/t1/star', {}, { timeoutMs: 20 }))
+            .rejects.toBeInstanceOf(SessionRefreshError);
+        expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
+    });
+
+    it('leaves PATCH unbounded when no deadline is given', async () => {
+        await expect(service.patch('/api/v1/threads/t1/star', {})).resolves.toEqual({ ok: true });
+        expect(fetchMock.mock.calls[0][1].signal).toBeUndefined();
+    });
+
     // getAuthHeaders() awaits supabase.auth.getSession() before any fetch
     // exists, so a stalled auth lookup never observes the abort signal —
     // only the deadline race can stop the caller from waiting on it.
