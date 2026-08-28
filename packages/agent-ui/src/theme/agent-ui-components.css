@@ -475,10 +475,12 @@
     border-radius: 0;
 }
 
-/* Live batch progress. No `position` here: BatchProgressBar sets it inline,
-   which wins anyway. */
+/* Live batch progress. `overflow` clips the hairline to the bar's top radius;
+   without it the sweep is a sharp rectangle hanging over the corner. No
+   `position` here: BatchProgressBar sets it inline, which wins anyway. */
 .beaver-root .batch-progress-bar {
     background-color: var(--beaver-fill-bar);
+    overflow: hidden;
 }
 
 /* ───── The editor field ───── */
