@@ -14,6 +14,8 @@ import {
 } from '../../utils/citationPreprocessing';
 import { processPartialContent } from '../../utils/markdownPartialContent';
 import { getHost } from '@beaver/agent-ui/host';
+import { useFindQuery } from '@beaver/agent-ui/chat/findContext';
+import { rehypeFindHighlight } from '@beaver/agent-ui/chat/rehypeFindHighlight';
 
 const citationDataAttributes = [
     'data-library-id', 'dataLibraryId',
@@ -148,6 +150,9 @@ function MarkdownLink({ href, children, title, ...props }: any) {
     );
 }
 
+/** The rehype plugin list ReactMarkdown accepts, named so it can be built up. */
+type RehypePlugins = NonNullable<React.ComponentProps<typeof ReactMarkdown>['rehypePlugins']>;
+
 type Segment =
     | { type: 'markdown', content: string }
     | { type: 'note', data: StreamingNoteBlock };
@@ -276,6 +281,31 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function Ma
     runId,
     enableNoteBlocks = true
 }) {
+    // Highlighting of find-in-chat matches. `''` whenever there is no find
+    // session, so the no-query path renders exactly what it rendered before
+    // find-in-chat existed. Never highlight an export render: that content is on
+    // its way into a Zotero note, and a <mark> must not be saved with it.
+    const activeFindQuery = useFindQuery();
+    const findQuery = exportRendering ? '' : activeFindQuery;
+
+    // ReactMarkdown re-parses whenever this list changes identity, so it is
+    // memoized: an unrelated parent re-render must not re-parse, and a query
+    // change must re-parse exactly once. The parsing happens after the
+    // `processedSegments` memo below, which is why that one stays independent of
+    // the query.
+    const rehypePlugins = React.useMemo(() => {
+        const plugins: RehypePlugins = [
+            rehypeRaw,
+            [rehypeSanitize, customSchema],
+            exportRendering ? rehypeZoteroMath : rehypeKatex,
+        ];
+        // Always last. The transformer inserts markup the sanitize schema does
+        // not allow, so sanitizing after it would strip the highlights, and it
+        // can only recognize (and skip) KaTeX output once KaTeX has produced it.
+        if (findQuery) plugins.push([rehypeFindHighlight, findQuery]);
+        return plugins;
+    }, [findQuery, exportRendering]);
+
     // Heavy preprocessing: skip when content/flags are unchanged (e.g. parent re-render).
     const processedSegments = React.useMemo(() => {
         const processedContent = processPartialContent(content, exportRendering);
@@ -327,7 +357,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function Ma
                     <div key={`markdown-${index}`} className={className}>
                         <ReactMarkdown
                             remarkPlugins={[remarkMath, remarkGfm]}
-                            rehypePlugins={[rehypeRaw, [rehypeSanitize, customSchema], exportRendering ? rehypeZoteroMath : rehypeKatex]}
+                            rehypePlugins={rehypePlugins}
                             urlTransform={urlTransform}
                             components={{
                                 // @ts-expect-error - Custom component not in ReactMarkdown types

@@ -286,3 +286,29 @@
         transition: none !important;
     }
 }
+
+/* ───── Find in chat ───── */
+
+/* A find match. Hits are emitted as `<mark>` by the shared highlighters, which
+   Gecko gives its own loud yellow-on-black, so both rules replace that
+   background outright and keep the colour the surrounding text already has.
+   Only a background and a radius are set: anything affecting text metrics
+   (padding, border, weight) would reflow the paragraph as the query is typed.
+   The tag ramps are translucent, so the tint composites over whichever surface
+   the hit lands on and stays legible in light and dark themes alike. */
+.beaver-root .beaver-find-hit {
+    background: var(--tag-yellow-tertiary);
+    color: inherit;
+    border-radius: 2px;
+}
+
+/* The one hit the reader has navigated to. A different hue rather than a
+   stronger rung of the same one: two opacities of one colour read as "darker
+   yellow", which is hard to pick out of a page of yellow, while the hue shift
+   is legible at a glance and survives being scrolled past. Orange stops at the
+   middle rung — the opaque one composites dark enough that inherited body text
+   loses its contrast against it on a dark theme. */
+.beaver-root .beaver-find-hit-current {
+    background: var(--tag-orange-secondary);
+    color: inherit;
+}

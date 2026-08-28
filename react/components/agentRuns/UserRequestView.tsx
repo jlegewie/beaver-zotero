@@ -13,7 +13,9 @@ import { selectedModelAtom } from '../../atoms/models';
 import { isStreamingAtom } from '@beaver/agent-core/run-state/atoms';
 import { actionsAtom, buildEditedPromptActionsAtom } from '../../atoms/actions';
 import { ensurePromptActionTokens, promptActionsToDescriptors, type SlashCommandDescriptor } from '@beaver/agent-ui/composer/slashCommands';
-import { renderContentWithSlashPills } from './slashCommandRendering';
+import { hasProseFindMatch, renderContentWithSlashPills } from './slashCommandRendering';
+import { useFindQuery } from '@beaver/agent-ui/chat/findContext';
+import { highlightText } from '@beaver/agent-ui/chat/highlightText';
 import { LexicalEditorInput, LexicalEditorInputHandle } from '@beaver/agent-ui/composer/LexicalEditorInput';
 import { useSlashMenu } from '../../hooks/useSlashMenu';
 import { useActionPopupResolver } from '../../hooks/useActionPopupResolver';
@@ -84,6 +86,23 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     // Editing is only allowed when canEdit is true AND no run is streaming
     const canEditNow = canEdit && !isStreaming;
 
+    // Find-in-chat: `''` unless a find session is highlighting this thread.
+    const findQuery = useFindQuery();
+    // Whether this message holds at least one hit. Measured over the same
+    // string the body renders, and with the same pill rule, so this can never
+    // disagree with the highlighting the renderers produce.
+    const hasFindMatch = useMemo(
+        () => hasProseFindMatch(displayContent, userPrompt.actions ?? [], findQuery),
+        [displayContent, userPrompt.actions, findQuery],
+    );
+    // A hit past the fold would otherwise be highlighted, counted by the find
+    // bar, and unreachable: the message body is clamped and does not scroll. So
+    // a matching message drops its clamp for as long as the query stands.
+    // Editing is excluded — the display keeps its box (invisible, behind the
+    // absolutely positioned overlay), and an unclamped one would push the run's
+    // layout open behind the editor.
+    const releaseHeightClamp = hasFindMatch && !isEditing;
+
     const {
         isMenuOpen: isSelectionMenuOpen,
         menuPosition: selectionMenuPosition,
@@ -118,13 +137,18 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         attachTargets: false,
     });
 
-    // Check if content needs fade effect
+    // Check if content needs fade effect.
+    // This stays a pure measurement of "the content overflows", never of "the
+    // clamp is on": `scrollHeight` reports the untruncated height whether or not
+    // the max height applies, so releasing the clamp cannot flip the flag and
+    // the fade returns unchanged once the query is cleared. `findQuery` is a
+    // dependency only because highlighting re-renders the body.
     useEffect(() => {
         if (contentRef.current) {
             const contentHeight = contentRef.current.scrollHeight;
             setNeedsFade(contentHeight > maxContentHeight);
         }
-    }, [displayContent, maxContentHeight]);
+    }, [displayContent, maxContentHeight, findQuery]);
 
     // Handle click outside to close edit mode
     useEffect(() => {
@@ -312,11 +336,12 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                     <RequestChips userPrompt={userPrompt} />
                 )}
 
-                {/* Message content with max height and fade */}
+                {/* Message content with max height and fade (both released
+                    while a find hit is showing, so the hit can be scrolled to) */}
                 <div
-                    className={`-ml-1 user-select-text user-request-content border-transparent ${needsFade ? 'user-request-content-fade' : ''}`}
+                    className={`-ml-1 user-select-text user-request-content border-transparent ${needsFade && !releaseHeightClamp ? 'user-request-content-fade' : ''}`}
                     style={{
-                        maxHeight: `${maxContentHeight}px`,
+                        maxHeight: releaseHeightClamp ? undefined : `${maxContentHeight}px`,
                         overflow: 'hidden',
                         whiteSpace: 'pre-wrap',
                         display: 'block'
@@ -325,8 +350,8 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                     onContextMenu={handleContextMenu}
                 >
                     {userPrompt.actions?.length
-                        ? renderContentWithSlashPills(displayContent, userPrompt.actions)
-                        : displayContent}
+                        ? renderContentWithSlashPills(displayContent, userPrompt.actions, findQuery)
+                        : highlightText(displayContent, findQuery)}
                 </div>
 
                 {/* Retry in flight: the edited prompt was submitted and its

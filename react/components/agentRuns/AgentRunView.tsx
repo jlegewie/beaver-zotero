@@ -14,9 +14,10 @@ import { RunInterruptedDisplay } from './RunInterruptedDisplay';
 import { threadWarningsAtom } from '../../atoms/warnings';
 import { resumeChainAtom, runToolResultsAtom, resumedRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
-import { streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
+import { autoReplacementPendingRunIdsAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { getHost } from '@beaver/agent-ui/host';
 import BatchRunReceipt, { hasBatchReceipt } from '@beaver/agent-ui/chat/BatchRunReceipt';
+import { FindQueryProvider } from '@beaver/agent-ui/chat/findContext';
 
 interface AgentRunViewProps {
     run: AgentRun;
@@ -57,6 +58,10 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // footer give way to the continuation's, and it shows the subtle resume
     // line instead. Covers a failed run and an interrupted one alike.
     const wasResumed = wasRunContinued(run, resumedRunIds);
+
+    // A run the client is already replacing on its own. Its error card is
+    // suppressed until the replacement lands.
+    const autoReplacementPending = useAtomValue(autoReplacementPendingRunIdsAtom).has(run.id);
 
     // A run that was cut off (Beaver closed, connection dropped, server
     // restarted) rather than finished or stopped by the user gets an offer to
@@ -125,7 +130,7 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // Allow editing when run is in a terminal state (not actively streaming or awaiting approval)
     const canEdit = !isStreaming && isTerminal;
 
-    return (
+    const runCard = (
         <div id={`run-${run.id}`} className="display-flex flex-col gap-4" ref={ref}>
             {/* User's message */}
             {showUserMessage && <UserRequestView userPrompt={run.user_prompt} runId={run.id} canEdit={canEdit} />}
@@ -150,7 +155,7 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
             />
 
             {/* Error display (includes retry/resume buttons) - hide if run was resumed */}
-            {hasError && run.error && !wasResumed && (
+            {hasError && run.error && !wasResumed && !autoReplacementPending && (
                 <RunErrorDisplay runId={run.id} error={run.error} isLastRun={isLastRun} />
             )}
 
@@ -197,6 +202,16 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
 
         </div>
     );
+
+    // A streaming run is excluded from find highlighting: its text re-renders on
+    // every token, so highlighting it would re-run the markdown pipeline per
+    // token and make the find bar's match count jump around while the user
+    // reads. Only while it streams — a run waiting on the reader (a deferred
+    // approval) is not generating anything, and its answer is on screen to be
+    // searched like any other. The empty provider shadows the thread-level query
+    // for this run's whole subtree — no prop drilling, and it renders no element
+    // of its own, so the markup is unchanged either way.
+    return isStreaming ? <FindQueryProvider query="">{runCard}</FindQueryProvider> : runCard;
 }));
 
 AgentRunView.displayName = 'AgentRunView';
