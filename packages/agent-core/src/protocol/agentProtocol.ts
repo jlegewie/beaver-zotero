@@ -190,15 +190,6 @@ export interface WSErrorEvent extends WSBaseEvent {
     try_auto_resume?: boolean;
     /** show the beaver credits button */
     has_beaver_fallback?: boolean;
-    /**
-     * Whether the run had high input token usage (backend-assessed).
-     *
-     * On this frame rather than `run_complete` since CLIENT_FEATURES.CITATIONS_EVENT:
-     * a run that failed still has this to say about the conversation, and it is the
-     * only source for a failed run — the composer's own fallback reads
-     * `lastRun.total_usage`, which a failed run does not have.
-     */
-    high_token_usage?: boolean;
 }
 
 /** Warning event for non-fatal issues */
