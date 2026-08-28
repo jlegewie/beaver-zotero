@@ -207,6 +207,7 @@
     --composer-pad-top: var(--beaver-card-pad-top);
     --composer-pad-bottom: var(--beaver-card-pad-bottom);
     --composer-radius: var(--beaver-radius-card);
+    position: relative;
     padding: var(--composer-pad-top) var(--composer-pad-x) var(--composer-pad-bottom);
     border: 1px solid var(--beaver-border-default);
     border-radius: var(--composer-radius);
@@ -332,22 +333,19 @@
     min-height: 1.5rem;
 }
 
-/* Drag and Drop Styles */
-[id^="beaver-pane-"] .user-message-display {
-    position: relative;
-}
-
 /* Pending Actions Bar - shows when agent actions await approval */
 [id^="beaver-pane-"] .pending-actions-bar {
     margin: calc(-1 * var(--composer-pad-top)) calc(-1 * var(--composer-pad-x)) var(--composer-pad-top);
     border-radius: calc(var(--composer-radius) - 1px) calc(var(--composer-radius) - 1px) 0 0;
+    background-color: var(--beaver-fill-hover);
 }
 
-/* Same bleed as the pending-actions bar so it reads as the composer's top edge. */
+/* Same bleed as the pending-actions bar so it reads as the composer's top edge.
+   No `position` here: BatchProgressBar sets it inline, which wins anyway. */
 [id^="beaver-pane-"] .batch-progress-bar {
-    position: relative;
-    margin: -0.65rem -0.65rem 0.65rem -0.65rem;
-    border-radius: 5px 5px 0 0;
+    margin: calc(-1 * var(--composer-pad-top)) calc(-1 * var(--composer-pad-x)) var(--composer-pad-top);
+    border-radius: calc(var(--composer-radius) - 1px) calc(var(--composer-radius) - 1px) 0 0;
+    background-color: var(--beaver-fill-hover);
 }
 
 /* Flush stacked bars: drop the lower bar's top-corner rounding. */
