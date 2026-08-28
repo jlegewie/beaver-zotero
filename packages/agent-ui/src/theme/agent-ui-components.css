@@ -335,6 +335,13 @@
  * fills go. The recipe itself lives in agent-ui-tokens.css, as
  * --beaver-surface-raised, so every raised surface shares it.
  *
+ * Top and bottom pads are intentionally different: extra top for a text line,
+ * tighter bottom because the control row already fills that edge. Docked bars
+ * and attachment chips cancel the extra top via negative margins keyed to the
+ * same tokens — do not equalize this shorthand, or every docked child has to
+ * re-compensate. A display card with no chips and no control row opts out
+ * with .user-message-display-text.
+ *
  * A client that wants a different card geometry retargets --beaver-card-pad-*
  * / --beaver-radius-card rather than overriding the declarations here:
  * .composer-docked-bar below reads the same tokens to cancel this padding, so
@@ -347,6 +354,13 @@
     border-radius: var(--beaver-radius-card);
     background-color: var(--beaver-surface-raised);
     user-select: text;
+}
+
+/* Display-only card whose first content is a text line (no chips to pull
+ * toward the edge, no control row to fill the bottom). Matches the bottom
+ * inset so the text does not sit in a top-heavy box. */
+.beaver-root .user-message-display-text {
+    padding-top: var(--beaver-card-pad-bottom);
 }
 
 /* Chips for whatever is attached to the message being composed. Mounted only

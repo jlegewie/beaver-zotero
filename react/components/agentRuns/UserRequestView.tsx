@@ -324,6 +324,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                 id={`user-request-${runId}`}
                 className={`
                     user-message-display user-request-view
+                    ${!hasFiltersOrAttachments ? 'user-message-display-text' : ''}
                     ${isHovered && !isEditing ? 'user-request-view-hover' : ''}
                     ${isEditing ? 'user-request-view-editing' : ''}
                 `}
