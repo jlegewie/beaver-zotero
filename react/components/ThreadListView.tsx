@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { SearchIcon, EditIcon, DeleteIcon, TickIcon, CancelIcon, PinIcon, PinOffIcon } from './icons/icons';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
@@ -121,6 +121,25 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     const containerRef = useRef<HTMLDivElement | null>(null);
     const menuPortalContainer = containerRef.current?.closest('[id^="beaver-react-root-"], #beaver-pane-window') as HTMLElement | null;
     const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+    // Last known pointer position inside this list, so hover can be re-resolved
+    // without a mouse move. Pinning, unpinning or deleting reorders the rows
+    // under a stationary cursor and no mouseenter follows, which would
+    // otherwise leave the row now under the pointer without its hover actions.
+    const pointerRef = useRef<{ x: number; y: number } | null>(null);
+
+    /** Points `hoveredThreadId` at whatever row currently sits under the pointer. */
+    const syncHoverToPointer = useCallback(() => {
+        const pointer = pointerRef.current;
+        const container = containerRef.current;
+        if (!pointer || !container) return;
+        const target = container.ownerDocument?.elementFromPoint(pointer.x, pointer.y) as HTMLElement | null;
+        const row = target?.closest('.thread-list-item') as HTMLElement | null;
+        // Both sidebars can render this list into one document, so ignore a row
+        // that belongs to the other one.
+        const threadId = row && container.contains(row) ? (row.dataset.threadId ?? null) : null;
+        setHoveredThreadId(prev => (prev === threadId ? prev : threadId));
+    }, []);
 
     // The filter menu's own search input holds focus while the menu is open
     // and nothing restores it on close, so refocus after the close settles.
@@ -385,6 +404,16 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     );
     const hasVisibleRows = visibleRows.length > 0;
 
+    // The rendered order, as a value that only changes when a row is added,
+    // removed or moved — the moments a stationary pointer lands on a new row.
+    const rowOrderKey = useMemo(
+        () => `${pinnedThreads.map(t => t.id).join(',')}|${displayedThreads.map(t => t.id).join(',')}`,
+        [pinnedThreads, displayedThreads]
+    );
+    useLayoutEffect(() => {
+        syncHoverToPointer();
+    }, [rowOrderKey, syncHoverToPointer]);
+
     // Threads hidden by instance scoping: exact client-side count when
     // item-filtered, the backend-reported count otherwise. Only a scoped first
     // page carries one, so a search view never has its own — fall back to the
@@ -433,6 +462,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         return (
             <div
                 key={thread.id}
+                data-thread-id={thread.id}
                 className={`thread-list-item ${isEditing ? 'thread-list-item-editing' : ''} ${isHovered ? 'thread-list-item-hovered' : ''}`}
                 role={isEditing ? undefined : 'button'}
                 tabIndex={isEditing ? undefined : 0}
@@ -546,7 +576,12 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     };
 
     return (
-        <div className="display-flex flex-col flex-1 min-h-0" ref={containerRef}>
+        <div
+            className="display-flex flex-col flex-1 min-h-0"
+            ref={containerRef}
+            onMouseMove={e => { pointerRef.current = { x: e.clientX, y: e.clientY }; }}
+            onMouseLeave={() => { pointerRef.current = null; }}
+        >
             {/* Title */}
             <div className="thread-overlay-title mb-1">Chats</div>
 
