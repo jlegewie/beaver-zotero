@@ -4,6 +4,7 @@ import { ZoteroItemReference } from '../types/zotero';
 import { ItemDataWithStatus, AttachmentDataWithStatus, ItemStub, ItemSummary, AttachmentInfo, AttachmentStub } from '../types/zotero';
 import { ReaderState, NoteState } from '../types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../agents/types';
+import type { RetryTrigger } from '../agents/types';
 import type { CustomChatModel } from '../types/customChatModel';
 import { AttachmentData, ItemData } from '../types/zotero';
 import type { BeaverExtractResult } from '../extract/schema';
@@ -2489,23 +2490,9 @@ export const ZOTERO_AGENT_NAME = 'beaver';
 
 /**
  * Features the current Zotero plugin build always declares in the auth
- * handshake. Equals the full CLIENT_FEATURES vocabulary except
- * `batch_jobs`, which is a backend rollout switch this plugin only
- * opts into in development (see `zoteroPluginFeatures`).
+ * handshake.
  */
-export const ZOTERO_PLUGIN_FEATURES: string[] = Object.values(CLIENT_FEATURES).filter(
-    (feature) => feature !== CLIENT_FEATURES.BATCH_JOBS,
-);
-
-/**
- * Handshake feature list for this Zotero plugin build.
- * Development builds additionally declare `batch_jobs` so the backend
- * offers the deferred batch capability without shipping it to production.
- */
-export function zoteroPluginFeatures(isDevelopment: boolean): string[] {
-    if (!isDevelopment) return ZOTERO_PLUGIN_FEATURES;
-    return [...ZOTERO_PLUGIN_FEATURES, CLIENT_FEATURES.BATCH_JOBS];
-}
+export const ZOTERO_PLUGIN_FEATURES: string[] = Object.values(CLIENT_FEATURES);
 
 /** Current library context for application state */
 export interface CurrentLibrary {
@@ -2701,6 +2688,14 @@ export interface AgentRunRequest {
      * the client still held after dropping the ones it was regenerating.
      */
     retry_keep_run_ids?: string[];
+    /**
+     * Who started this retry. Set on the run request that follows a retry's
+     * truncate call, which is the only thing marking that request as a retry.
+     * Only `auto` reorders the backend's model chain, for the same reason an
+     * automatic resume does — the provider that just aborted should not lead
+     * the next attempt. Omitted on an ordinary message.
+     */
+    retry_trigger?: RetryTrigger;
     /** Pre-generated assistant message ID (optional) */
     assistant_message_id?: string;
 }

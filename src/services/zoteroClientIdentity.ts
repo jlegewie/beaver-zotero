@@ -6,8 +6,7 @@
  * fields, and registers itself as the default via `setClientIdentityProvider`.
  */
 
-import { getRuntimeAdapter } from '@beaver/agent-core/platform/runtime';
-import { ZOTERO_PLUGIN_CLIENT_TYPE, zoteroPluginFeatures } from '@beaver/agent-core/protocol/agentProtocol';
+import { ZOTERO_PLUGIN_CLIENT_TYPE, ZOTERO_PLUGIN_FEATURES } from '@beaver/agent-core/protocol/agentProtocol';
 import { ClientIdentity, setClientIdentityProvider } from '@beaver/agent-core/transport/clientIdentity';
 import { searchableLibraryIdsAtom } from '../../react/atoms/profile';
 import { store } from '../../react/store';
@@ -17,7 +16,7 @@ function resolveZoteroClientIdentity(): ClientIdentity {
     return {
         frontendVersion: Zotero.Beaver?.pluginVersion || '',
         clientType: ZOTERO_PLUGIN_CLIENT_TYPE,
-        clientFeatures: zoteroPluginFeatures(getRuntimeAdapter().isDevelopment()),
+        clientFeatures: ZOTERO_PLUGIN_FEATURES,
         zoteroInstance: buildZoteroInstanceWire(store.get(searchableLibraryIdsAtom)),
     };
 }

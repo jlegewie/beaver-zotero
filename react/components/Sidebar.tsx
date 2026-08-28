@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useEffect, type ReactNode } from 'react';
+import React, { useCallback, useMemo, useRef, useState, useEffect, type ReactNode } from 'react';
 import InputArea from "./input/InputArea"
 import AskUserQuestionPanel from "./input/AskUserQuestionPanel"
 import BatchApprovalPanel from "./input/BatchApprovalPanel"
@@ -54,6 +54,9 @@ import WhereToStartPage from './pages/WhereToStartPage';
 import { whereToStartVisibleAtom } from '../atoms/whereToStart';
 import ScreenReaderRunAnnouncer from './agentRuns/ScreenReaderRunAnnouncer';
 import { getFirstRunSelectionVariant } from '../utils/firstRunSelection';
+import { FindQueryProvider } from '@beaver/agent-ui/chat/findContext';
+import { FindInChatControlsProvider, useFindInChat } from '../hooks/useFindInChat';
+import FindBar from './ui/FindBar';
 
 interface SidebarProps {
     location: 'library' | 'reader';
@@ -65,6 +68,8 @@ interface SidebarShellProps {
     className?: string;
     id?: string;
     isWindow: boolean;
+    /** Opens the find bar on ⌘F / Ctrl+F. Omitted where there is no thread to search. */
+    onFind?: () => void;
 }
 
 /**
@@ -110,9 +115,30 @@ const SidebarShell = ({
     className = "bg-sidepane h-full w-full display-flex flex-col min-w-0 relative",
     id,
     isWindow,
+    onFind,
 }: SidebarShellProps) => {
     const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-        if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey || event.defaultPrevented) {
+        if (event.defaultPrevented) {
+            return;
+        }
+
+        // ⌘F / Ctrl+F while focus is anywhere inside Beaver. The main Zotero
+        // window binds the same chord to its quick-search box (key_find →
+        // cmd_find), so the default has to be suppressed or focus leaves Beaver
+        // the moment the bar opens.
+        if (
+            onFind
+            && (event.key === 'f' || event.key === 'F')
+            && !event.altKey
+            && !event.shiftKey
+            && (Zotero.isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)
+        ) {
+            event.preventDefault();
+            onFind();
+            return;
+        }
+
+        if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey) {
             return;
         }
 
@@ -160,7 +186,15 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     // re-renders the whole shell on every frame of a streaming response.
     const runsCount = useAtomValue(runsCountAtom);
     const isFirstRunThread = useAtomValue(isFirstRunThreadAtom);
-    const messagesContainerRef = useRef<HTMLDivElement>(null);
+    const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+    // The same element as the ref, held in state so find-in-chat can re-read the
+    // thread when the container is replaced — a thread load unmounts it, and a
+    // ref assignment notifies nobody.
+    const [messagesContainer, setMessagesContainer] = useState<HTMLDivElement | null>(null);
+    const setMessagesContainerRef = useCallback((node: HTMLDivElement | null) => {
+        messagesContainerRef.current = node;
+        setMessagesContainer(node);
+    }, []);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const setIsSkippedFilesDialogVisible = useSetAtom(isSkippedFilesDialogVisibleAtom);
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
@@ -207,6 +241,11 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         creditConfirmations: pendingCreditConfirmationsMap,
         questions: pendingQuestionsMap,
     });
+
+    // Find in chat. Component state, not an atom: one Jotai store is shared by
+    // the sidebars and the separate Beaver window, so an atom would put every
+    // surface on the same query and the same current match.
+    const find = useFindInChat({ container: messagesContainer, isWindow });
 
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
@@ -375,76 +414,98 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
 
     {/* Main page */}
     return (
-        <SidebarShell isWindow={isWindow}>
-            <ScreenReaderRunAnnouncer inputRef={inputRef} surface={isWindow ? 'window' : 'sidebar'} />
+        <FindInChatControlsProvider value={find.controls}>
+            <SidebarShell isWindow={isWindow} onFind={isThreadView ? find.open : undefined}>
+                <ScreenReaderRunAnnouncer inputRef={inputRef} surface={isWindow ? 'window' : 'sidebar'} />
 
-            {/* Header */}
-            <Header isWindow={isWindow} />
+                {/* Header */}
+                <Header isWindow={isWindow} />
 
-            {/* Content area - relative container for overlay positioning */}
-            <div className="flex-1 min-h-0 display-flex flex-col relative overflow-hidden">
-                {/* Thread view with agent runs */}
-                {isThreadView ? (
-                    <ThreadView ref={messagesContainerRef} isWindow={isWindow} />
-                ) : (
-                    <HomePage isWindow={isWindow} inputRef={inputRef} />
-                )}
+                {/* Content area - relative container for overlay positioning */}
+                <div className="flex-1 min-h-0 display-flex flex-col relative overflow-hidden">
+                    {/* Find bar - overlays the top of the thread area */}
+                    {isThreadView && find.isOpen && (
+                        <FindBar
+                            query={find.query}
+                            isQueryActive={find.isQueryActive}
+                            matchCount={find.matchCount}
+                            currentIndex={find.currentIndex}
+                            focusToken={find.focusToken}
+                            onQueryChange={find.setQuery}
+                            onNext={find.next}
+                            onPrevious={find.previous}
+                            onClose={find.close}
+                        />
+                    )}
 
-                {/* Prompt area (footer) - only in thread view */}
-                {isThreadView && (
-                    <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
-                        <PopupOverlayContainer />
-                        <ScrollDownButton onClick={handleScrollToBottom} isWindow={isWindow} />
-                        {composerTakeover.kind === 'batch-approval' ? (
-                            // key resets local decision state per approval request
-                            <BatchApprovalPanel
-                                key={composerTakeover.approval.approvalId}
-                                approval={composerTakeover.approval}
-                            />
-                        ) : composerTakeover.kind === 'credit-confirmation' ? (
-                            // key resets local decision state per confirmation
-                            <CreditConfirmationPanel
-                                key={composerTakeover.confirmation.confirmationId}
-                                confirmation={composerTakeover.confirmation}
-                            />
-                        ) : composerTakeover.kind === 'question' ? (
-                            // key resets local answer state per question request
-                            <AskUserQuestionPanel
-                                key={composerTakeover.question.questionId}
-                                pendingQuestion={composerTakeover.question}
-                            />
-                        ) : (
-                            <DragDropWrapper>
-                                <InputArea inputRef={inputRef} placeholder={inputPlaceholder} />
-                            </DragDropWrapper>
-                        )}
-                    </div>
-                )}
+                    {/* Thread view with agent runs. The find query reaches the
+                        message renderers from here, and is empty whenever the bar is
+                        closed — a closed bar leaves the thread rendering exactly as
+                        it does without find-in-chat. */}
+                    {isThreadView ? (
+                        <FindQueryProvider query={find.activeQuery}>
+                            <ThreadView ref={setMessagesContainerRef} isWindow={isWindow} />
+                        </FindQueryProvider>
+                    ) : (
+                        <HomePage isWindow={isWindow} inputRef={inputRef} />
+                    )}
 
-                {/* Thread list overlay */}
-                {isThreadListView && (
-                    <div className="thread-overlay-container">
-                        <div className="thread-overlay-backdrop" onClick={handleCloseThreadList} />
-                        <div className="thread-overlay-panel">
-                            <ThreadListView isWindow={isWindow} />
+                    {/* Prompt area (footer) - only in thread view */}
+                    {isThreadView && (
+                        <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
+                            <PopupOverlayContainer />
+                            <ScrollDownButton onClick={handleScrollToBottom} isWindow={isWindow} />
+                            {composerTakeover.kind === 'batch-approval' ? (
+                                // key resets local decision state per approval request
+                                <BatchApprovalPanel
+                                    key={composerTakeover.approval.approvalId}
+                                    approval={composerTakeover.approval}
+                                />
+                            ) : composerTakeover.kind === 'credit-confirmation' ? (
+                                // key resets local decision state per confirmation
+                                <CreditConfirmationPanel
+                                    key={composerTakeover.confirmation.confirmationId}
+                                    confirmation={composerTakeover.confirmation}
+                                />
+                            ) : composerTakeover.kind === 'question' ? (
+                                // key resets local answer state per question request
+                                <AskUserQuestionPanel
+                                    key={composerTakeover.question.questionId}
+                                    pendingQuestion={composerTakeover.question}
+                                />
+                            ) : (
+                                <DragDropWrapper>
+                                    <InputArea inputRef={inputRef} placeholder={inputPlaceholder} />
+                                </DragDropWrapper>
+                            )}
                         </div>
+                    )}
+
+                    {/* Thread list overlay */}
+                    {isThreadListView && (
+                        <div className="thread-overlay-container">
+                            <div className="thread-overlay-backdrop" onClick={handleCloseThreadList} />
+                            <div className="thread-overlay-panel">
+                                <ThreadListView isWindow={isWindow} />
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* Embedding index status bar - visible while indexing */}
+                <EmbeddingIndexBar />
+
+                {/* Credit info bar - always visible at bottom */}
+                {creditInfoWarning && (
+                    <div className="flex-none px-2 pb-1 -mt-3">
+                        <CreditInfoBar warning={creditInfoWarning} />
                     </div>
                 )}
-            </div>
 
-            {/* Embedding index status bar - visible while indexing */}
-            <EmbeddingIndexBar />
-
-            {/* Credit info bar - always visible at bottom */}
-            {creditInfoWarning && (
-                <div className="flex-none px-2 pb-1 -mt-3">
-                    <CreditInfoBar warning={creditInfoWarning} />
-                </div>
-            )}
-
-            {/* Dialog Container */}
-            <DialogContainer />
-        </SidebarShell>
+                {/* Dialog Container */}
+                <DialogContainer />
+            </SidebarShell>
+        </FindInChatControlsProvider>
     );
 };
 
