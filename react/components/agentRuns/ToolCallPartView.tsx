@@ -445,7 +445,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             id={`tool-${part.tool_call_id}`}
             className={`
                 rounded-md flex flex-col min-w-0
-                ${effectiveExpanded ? 'border-popup' : 'border-transparent'}
+                ${effectiveExpanded ? 'border-card' : 'border-transparent'}
                 ${hasExpandedResult ? 'mb-2' : ''}
             `}
         >

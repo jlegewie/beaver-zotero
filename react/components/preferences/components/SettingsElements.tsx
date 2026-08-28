@@ -25,7 +25,7 @@ export const SectionDescription: React.FC<{ children: React.ReactNode }> = ({ ch
 
 /** Card container for grouping related settings */
 export const SettingsGroup: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
-    <div className={`display-flex flex-col rounded-lg border-popup overflow-hidden ${className}`}>
+    <div className={`display-flex flex-col rounded-lg border-card overflow-hidden ${className}`}>
         {children}
     </div>
 );

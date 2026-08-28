@@ -50,7 +50,7 @@ export const ThinkingPartView: React.FC<ThinkingPartViewProps> = ({
         <div
             className={`
                 rounded-md flex flex-col min-w-0
-                ${isExpanded ? 'border-popup mb-2' : 'border-transparent'}
+                ${isExpanded ? 'border-card mb-2' : 'border-transparent'}
             `}
         >
             <div

@@ -255,7 +255,7 @@ const ExcludedLibrariesList: React.FC = () => {
                     </div>
                 )}
 
-                <div className="display-flex flex-col rounded-md border-popup">
+                <div className="display-flex flex-col rounded-md border-card">
                     {excludedRows.length === 0 ? (
                         <div className="p-2 text-base font-color-secondary">
                             No libraries excluded.

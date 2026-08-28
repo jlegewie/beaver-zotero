@@ -461,7 +461,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         };
 
         return (
-            <div className="agent-action-view rounded-md flex flex-col min-w-0 border-popup mb-2">
+            <div className="agent-action-view rounded-md flex flex-col min-w-0 border-card mb-2">
                 <div className="display-flex flex-row py-15 bg-senary border-bottom-quinary">
                     <div
                         className="variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left mt-015"
@@ -489,7 +489,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     }
 
     return (
-        <div className="agent-action-view rounded-md flex flex-col min-w-0 border-popup mb-2">
+        <div className="agent-action-view rounded-md flex flex-col min-w-0 border-card mb-2">
             <div
                 className={`
                     display-flex flex-row py-15 bg-senary items-start

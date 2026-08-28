@@ -130,6 +130,12 @@
     --beaver-fill-subtle: var(--fill-senary);
     --beaver-fill-hover: var(--fill-quinary);
     --beaver-fill-active: var(--fill-quarternary);
+    /* Chips (inline badges and pills) sit inside cards as often as directly on
+       the pane, so the fill must be translucent and tint whatever is behind it
+       rather than cover it. `--fill-quinary` is the rung that composites on the
+       pane ground to the same colour the opaque `--material-mix-quarternary`
+       resolves to, so a chip on the ground reads identically either way. */
+    --beaver-fill-chip: var(--fill-quinary);
 
     /* Borders, by weight */
     --beaver-border-subtle: var(--fill-quinary);

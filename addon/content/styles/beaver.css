@@ -300,9 +300,12 @@
     border-radius: 999px;
 }
 
-/* Source Preview Container */
+/* The popup message card (PopupMessageItem), which renders either over the main
+   Zotero window or inside the pane. It floats either way, so it takes the
+   overlay surface — though the component also sets background and border
+   inline, which is what actually paints. */
 [id^="beaver-pane-"] .source-preview {
-    background-color: var(--material-mix-quarternary);
+    background-color: var(--beaver-surface-overlay);
     color: var(--fill-secondary);
     /* border: 1px solid var(--fill-quinary); */
     border-radius: 6px;
@@ -326,8 +329,7 @@
 }
 
 [id^="beaver-pane-"] .source-content {
-    background-color: var(--material-mix-quarternary);
-    /* background-color: var(--material-sidepane); */
+    background-color: var(--beaver-fill-subtle);
     border-radius: 8px;
     overflow-y: auto;
     min-height: 1.5rem;
@@ -720,7 +722,7 @@
 }
 
 [id^="beaver-pane-"] .custom-prompt-card:hover:not(.custom-prompt-card-editing) {
-    background-color: var(--material-mix-quarternary);
+    background-color: var(--beaver-fill-hover);
 }
 
 [id^="beaver-pane-"] .custom-prompt-edit-textarea {
@@ -742,7 +744,7 @@
 }
 
 [id^="beaver-pane-"] .action-card:hover:not(.action-card-editing) {
-    background-color: var(--material-mix-quarternary);
+    background-color: var(--beaver-fill-hover);
 }
 
 /* Action Card — edit mode: header bar spans full width, so drop card padding */
@@ -760,8 +762,8 @@
     justify-content: space-between;
     gap: 8px;
     padding: 8px 12px;
-    background-color: var(--material-mix-quarternary);
-    border-bottom: 1px solid var(--fill-quarternary);
+    background-color: var(--beaver-fill-hover);
+    border-bottom: 1px solid var(--beaver-border-strong);
 }
 
 [id^="beaver-pane-"] .action-edit-body {
@@ -879,7 +881,7 @@
 
 [id^="beaver-pane-"] .create-annotations-preview-row:hover,
 [id^="beaver-pane-"] .edit-annotations-preview-row:hover {
-    background-color: var(--material-mix-quarternary);
+    background-color: var(--beaver-fill-hover);
 }
 
 /* Preview text: 2-line clamp */
@@ -913,9 +915,9 @@
     line-height: 1;
     padding: 2px 6px;
     border-radius: 4px;
-    background-color: var(--material-mix-quarternary);
+    background-color: var(--beaver-fill-chip);
     color: var(--fill-secondary);
-    border: 1px solid var(--fill-quinary);
+    border: 1px solid var(--beaver-border-subtle);
     white-space: nowrap;
     flex-shrink: 0;
 }
@@ -1051,9 +1053,6 @@
 [id^="beaver-pane-"] .variant-ghost:hover .font-color-purple,
 [id^="beaver-pane-"] .variant-ghost-secondary:hover .font-color-purple,
 [id^="beaver-pane-"] .icon-button:hover .font-color-purple { color: var(--tag-purple); opacity: 1; }
-
-/* Beats `.chat-input`'s transparent background on SearchMenu's filter field. */
-[id^="beaver-pane-"] .bg-quaternary { background-color: var(--material-mix-quarternary); }
 
 /* Menu items use roving focus, so replace the browser outline with Beaver's menu highlight. */
 [id^="beaver-pane-"] .beaver-menu-item:focus {
@@ -1384,10 +1383,10 @@
     width: 280px;
     max-width: calc(100% - 24px);
     padding: 3px 4px 3px 8px;
-    background-color: var(--material-sidepane);
-    border: 1px solid var(--fill-quinary);
+    background-color: var(--beaver-surface-overlay);
+    border: 1px solid var(--beaver-border-strong);
     border-radius: 6px;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.16);
+    box-shadow: var(--beaver-shadow-overlay);
 }
 
 [id^="beaver-pane-"] .beaver-find-bar-icon {
@@ -1461,15 +1460,15 @@
     z-index: 1000;
     padding: 4px 8px;
     border-radius: 4px;
-    background-color: var(--material-mix-quarternary);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    background-color: var(--beaver-surface-overlay);
+    box-shadow: var(--beaver-shadow-overlay);
     font-size: 0.85rem;
     line-height: 1.4;
     max-width: 250px;
     word-wrap: break-word;
     pointer-events: none;
     color: var(--fill-secondary);
-    border: 1px solid var(--fill-quarternary);
+    border: 1px solid var(--beaver-border-strong);
     transform: translateX(-50%);
     white-space: normal;
 }
@@ -1491,7 +1490,7 @@
     top: -6px;
     border-left: 6px solid transparent;
     border-right: 6px solid transparent;
-    border-bottom: 6px solid var(--fill-quarternary);
+    border-bottom: 6px solid var(--beaver-border-strong);
 }
 
 [id^="beaver-pane-"] .tooltip-arrow-bottom::after {
@@ -1501,14 +1500,14 @@
     top: 1px;
     border-left: 5px solid transparent;
     border-right: 5px solid transparent;
-    border-bottom: 5px solid var(--material-mix-quarternary);
+    border-bottom: 5px solid var(--beaver-surface-overlay);
 }
 
 [id^="beaver-pane-"] .tooltip-arrow-top {
     bottom: -6px;
     border-left: 6px solid transparent;
     border-right: 6px solid transparent;
-    border-top: 6px solid var(--fill-quarternary);
+    border-top: 6px solid var(--beaver-border-strong);
 }
 
 [id^="beaver-pane-"] .tooltip-arrow-top::after {
@@ -1518,7 +1517,7 @@
     bottom: 1px;
     border-left: 5px solid transparent;
     border-right: 5px solid transparent;
-    border-top: 5px solid var(--material-mix-quarternary);
+    border-top: 5px solid var(--beaver-surface-overlay);
 }
 
 @keyframes tooltipFadeIn {
@@ -2093,7 +2092,7 @@
 /* Scroll down button */
 [id^="beaver-pane-"] .scroll-down-button {
     transform: translateY(-29px);
-    background: var(--material-mix-quarternary);
+    background: var(--beaver-surface-overlay);
     border: 1px solid var(--color-border50);
     border-radius: 50%;
     width: 2rem;
@@ -2484,9 +2483,9 @@
     top: 0;
     bottom: 0;
     width: 90%;
-    background-color: var(--material-sidepane);
+    background-color: var(--beaver-surface-ground);
     box-shadow: -6px 0 26px rgba(0, 0, 0, 0.175);
-    border-left: 1px solid var(--fill-quinary);
+    border-left: 1px solid var(--beaver-border-default);
     display: flex;
     flex-direction: column;
 }
@@ -2514,8 +2513,8 @@
 [id^="beaver-pane-"] .thread-search-input {
     width: 100%;
     padding: 6px 28px 6px 28px;
-    background: var(--fill-senary);
-    border: 1px solid var(--fill-quinary);
+    background: var(--beaver-fill-subtle);
+    border: 1px solid var(--beaver-border-subtle);
     border-radius: 6px;
     color: var(--fill-primary);
     font-size: 1rem;

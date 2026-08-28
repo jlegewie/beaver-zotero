@@ -220,7 +220,7 @@ const SyncedLibraries: React.FC = () => {
             </div>
 
             {/* List */}
-            <div className="display-flex flex-col rounded-md border-popup">
+            <div className="display-flex flex-col rounded-md border-card">
                 {libraries.length === 0 ? (
                     <div className="p-2 text-sm font-color-tertiary">No libraries selected yet.</div>
                 ) : (

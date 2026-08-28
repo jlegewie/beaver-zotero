@@ -36,7 +36,7 @@ const ExternalReferenceDetailsDialog: React.FC = () => {
     return (
         <div 
             ref={containerRef}
-            className="relative display-flex flex-col rounded-md bg-quaternary shadow-md shadow-md-top overflow-hidden"
+            className="relative display-flex flex-col rounded-md bg-overlay shadow-md shadow-md-top overflow-hidden"
             style={{ width: '90%', maxHeight: '80vh' }}
             onClick={(e) => e.stopPropagation()}
         >

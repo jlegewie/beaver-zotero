@@ -645,7 +645,7 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
     return (
         <div
             id={`tool-${toolCallId}`}
-            className="border-popup rounded-md display-flex flex-col min-w-0"
+            className="border-card rounded-md display-flex flex-col min-w-0"
         >
             {/* Header */}
             <div

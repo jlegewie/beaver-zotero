@@ -533,7 +533,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                     }
                 }}
                 placeholder={placeholder}
-                className="w-full bg-quaternary font-color-primary outline-none chat-input"
+                className="w-full font-color-primary outline-none chat-input"
                 style={{ fontSize: '12px' }}
                 aria-label="Search"
             />
@@ -543,7 +543,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     const menu = (
         <div
             ref={menuRef}
-            className={`bg-quaternary border-popup rounded-md outline-none z-1000 shadow-md display-flex flex-col ${className}`}
+            className={`bg-overlay border-popup rounded-md outline-none z-1000 shadow-md display-flex flex-col ${className}`}
             style={{
                 position: useFixedPosition ? 'fixed' : 'absolute',
                 top: adjustedPosition.y,

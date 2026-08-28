@@ -338,6 +338,13 @@
 .beaver-root .bg-tertiary { background-color: var(--fill-tertiary); }
 .beaver-root .bg-quinary { background-color: var(--fill-quinary); }
 .beaver-root .bg-senary { background-color: var(--fill-senary); }
+/* Opaque surface for anything that floats above the pane: menus, tooltips,
+   popovers, modal scrims. */
+.beaver-root .bg-overlay { background-color: var(--beaver-surface-overlay); }
+/* Opaque surface for a card sitting on the pane, level with the composer. */
+.beaver-root .bg-raised { background-color: var(--beaver-surface-raised); }
+/* Translucent fill for inline badges and pills, which sit inside cards. */
+.beaver-root .bg-chip { background-color: var(--beaver-fill-chip); }
 
 /* Rounded corners */
 .beaver-root .rounded-sm { border-radius: 0.125rem; }
@@ -354,7 +361,11 @@
 .beaver-root .border-bottom-quarternary { border-bottom: 1px solid var(--fill-quarternary); }
 .beaver-root .border-quinary { border: 1px solid var(--fill-quinary); }
 .beaver-root .border-quarternary { border: 1px solid var(--material-mix-quarternary); }
-.beaver-root .border-popup { border: 1px solid var(--fill-quarternary); }
+/* `.border-popup` outlines overlays — menus, tooltips, dialogs — which sit on
+   their own surface and need the stronger edge. `.border-card` outlines inline
+   cards, which carry the same border weight as the composer. */
+.beaver-root .border-popup { border: 1px solid var(--beaver-border-strong); }
+.beaver-root .border-card { border: 1px solid var(--beaver-border-default); }
 .beaver-root .border-top-popup { border-top: 1px solid var(--fill-quarternary); }
 .beaver-root .border-transparent { border: 1px solid transparent; }
 .beaver-root .border-error { border: 1px solid var(--tag-red-tertiary); }
