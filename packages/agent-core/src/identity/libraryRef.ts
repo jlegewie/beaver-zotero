@@ -167,14 +167,18 @@ export function resolveLibraryRefForLibraryID(libraryID: number): string | null 
 
 /**
  * Builds the model-facing object id from an already-structured reference,
- * preferring its stored `library_ref` over the device-local `library_id`.
+ * preferring a valid stored `library_ref` over the device-local `library_id`.
+ * Malformed refs retain the legacy numeric fallback used during resolution.
  */
 export function modelObjectIdFromReference(ref: {
     library_id: number;
     library_ref?: string | null;
     zotero_key: string;
 }): string {
-    return `${ref.library_ref ?? ref.library_id}-${ref.zotero_key}`;
+    const libraryPrefix = ref.library_ref && LIBRARY_REF_PATTERN.test(ref.library_ref)
+        ? ref.library_ref
+        : ref.library_id;
+    return `${libraryPrefix}-${ref.zotero_key}`;
 }
 
 export type WriteTargetLibraryResolution =
