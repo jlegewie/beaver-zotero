@@ -167,7 +167,7 @@ import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
 import { selectLiveBatchProgress } from '@beaver/agent-core/run-state/batchProgress';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom } from './messageUIState';
-import { currentThreadNameAtom, loadThreadAtom } from './threads';
+import { currentThreadNameAtom, loadThreadAtom, threadNavigationSeqAtom } from './threads';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '@beaver/agent-core/run-state/toolLabels';
 import {
@@ -464,6 +464,62 @@ async function truncateThreadOnServer(
     }
 }
 
+/** What an abandoned automatic retry tells the user. */
+const AUTO_RETRY_ABANDONED_TEXT =
+    'Beaver was retrying a failed response when you switched chats, so the retry was not sent. '
+    + 'Reopen that chat to see where it stands.';
+
+/** What an abandoned user-initiated retry tells the user. */
+const USER_RETRY_ABANDONED_TEXT =
+    'You switched chats while the retry was starting, so it was not sent. '
+    + 'Reopen that chat to see where it stands and retry from there.';
+
+/**
+ * Give up a replacement whose chat the user has left, and say so.
+ *
+ * Returns true when the caller must stop.
+ */
+function abandonReplacementIfThreadChanged(
+    get: Getter,
+    set: Setter,
+    options: {
+        navSeqBeforeAwait: number;
+        pendingRetryRunId: string;
+        logPrefix: string;
+        popupText: string;
+    },
+): boolean {
+    const current = get(threadNavigationSeqAtom);
+    if (current === options.navSeqBeforeAwait) return false;
+    logger(
+        `${options.logPrefix}: chat changed while the replacement was in flight ` +
+            `(navigation ${options.navSeqBeforeAwait} -> ${current}) — abandoning it`,
+        1,
+    );
+    // Release only what this replacement still owns, and the retry lock is the
+    // proof of ownership: `retryCommitInFlight` blocks every send while it is
+    // held, so nothing newer can have taken the composer's pending flag out
+    // from under it.
+    //
+    // Before the lock is taken — the check that runs as soon as the replaced
+    // run is cancelled — neither belongs to this replacement. The pending flag
+    // there is the cancelled run's, and the navigation doing the abandoning
+    // clears that itself on its way out of the chat. Clearing it here instead
+    // would re-enable the composer over a run the user has since started in the
+    // chat they moved to, and let them send a second one on top of it.
+    if (get(retryPendingRunIdAtom) === options.pendingRetryRunId) {
+        set(retryPendingRunIdAtom, null);
+        set(isWSChatPendingAtom, false);
+    }
+    set(addPopupMessageAtom, {
+        type: 'warning',
+        title: 'Retry not sent',
+        text: options.popupText,
+        expire: true,
+    });
+    return true;
+}
+
 /**
  * Create the initial AgentRun shell when user presses send.
  * This happens BEFORE WebSocket connection.
@@ -682,6 +738,10 @@ async function startAutoRetryRun(
     let newRunId: string | null = null;
 
     try {
+        // Which chat this replacement belongs to, captured before every await
+        // in the function. See `abandonReplacementIfThreadChanged`.
+        const navSeqBeforeAwait = get(threadNavigationSeqAtom);
+
         const model = get(selectedModelAtom);
         if (!model) {
             logger(`${logPrefix}: No model selected`, 1);
@@ -712,11 +772,11 @@ async function startAutoRetryRun(
             return;
         }
 
+        // Null for a first run that died before the backend named the thread.
+        // Nothing is persisted to truncate then, and the replacement opens the
+        // thread the same way the original request would have — the same shape
+        // the user-driven retry allows.
         const threadId = get(currentThreadIdAtom) || failedRun.thread_id;
-        if (!threadId) {
-            logger(`${logPrefix}: No thread ID found`, 1);
-            return;
-        }
 
         // Walk back to the original user message — resume runs carry an empty
         // user_prompt.content, so we need the root to preserve the question.
@@ -725,49 +785,73 @@ async function startAutoRetryRun(
         const truncateFromIndex = chainRootIndex >= 0 ? chainRootIndex : threadRuns.length;
         const runIdsToRemove = threadRuns.slice(truncateFromIndex).map(r => r.id);
 
-        // The failed run's error card shows a loading state while the
-        // truncate round trip runs; every exit below clears it (the catch
-        // handles the throw on a failed POST).
+        // The failed run keeps its card while the truncate round trip runs,
+        // with the status indicator in place of the error it suppresses (see
+        // `autoReplacementPendingRunIdsAtom`); every exit below clears the
+        // pending state (the catch handles the throw on a failed POST).
         set(retryPendingRunIdAtom, failedRunId);
         set(isWSChatPendingAtom, true);
 
-        // Commit the removal on the backend before anything local changes.
-        // Skipped when nothing was removed (nothing persisted to delete).
         if (runIdsToRemove.length > 0) {
-            const expectedTailRunId =
-                truncateFromIndex > 0 ? threadRuns[truncateFromIndex - 1].id : null;
-            const outcome = await truncateThreadOnServer(
-                threadId,
-                runIdsToRemove,
-                expectedTailRunId,
-                logPrefix,
-            );
-            if (outcome === 'refused') {
-                // The thread was rewritten by another client. There is no
-                // user decision to retry against a history this client has
-                // never seen — reload instead, so the UI shows the thread
-                // whole (including the failed run's error card, from which
-                // the user can retry deliberately).
-                set(retryPendingRunIdAtom, null);
-                set(isWSChatPendingAtom, false);
-                set(addPopupMessageAtom, {
-                    type: 'warning',
-                    title: 'Chat changed elsewhere',
-                    text: 'This chat was changed somewhere else, so the failed run was not retried automatically. Reloading the chat.',
-                    expire: true,
-                });
-                await set(loadThreadAtom, {
-                    user_id: userId,
+            // Commit the removal on the backend before anything local changes.
+            // A thread the backend never named has nothing persisted to
+            // truncate, but its runs still have to leave the local view.
+            if (threadId) {
+                const expectedTailRunId =
+                    truncateFromIndex > 0 ? threadRuns[truncateFromIndex - 1].id : null;
+                const outcome = await truncateThreadOnServer(
                     threadId,
-                    skipInstanceMismatchConfirm: true,
-                });
-                return;
-            }
-            if (outcome === 'failed') {
-                throw new Error('Failed to automatically retry run');
+                    runIdsToRemove,
+                    expectedTailRunId,
+                    logPrefix,
+                );
+                if (abandonReplacementIfThreadChanged(get, set, {
+                    navSeqBeforeAwait,
+                    pendingRetryRunId: failedRunId,
+                    logPrefix,
+                    popupText: AUTO_RETRY_ABANDONED_TEXT,
+                })) {
+                    return;
+                }
+                if (outcome === 'refused') {
+                    // The thread was rewritten by another client. There is no
+                    // user decision to retry against a history this client has
+                    // never seen — reload instead, so the UI shows the thread
+                    // whole (including the failed run's error card, from which
+                    // the user can retry deliberately).
+                    set(retryPendingRunIdAtom, null);
+                    set(isWSChatPendingAtom, false);
+                    set(addPopupMessageAtom, {
+                        type: 'warning',
+                        title: 'Chat changed elsewhere',
+                        text: 'This chat was changed somewhere else, so the failed run was not retried automatically. Reloading the chat.',
+                        expire: true,
+                    });
+                    await set(loadThreadAtom, {
+                        user_id: userId,
+                        threadId,
+                        skipInstanceMismatchConfirm: true,
+                    });
+                    return;
+                }
+                if (outcome === 'failed') {
+                    throw new Error('Failed to automatically retry run');
+                }
             }
 
             await cleanupTemporaryAnnotationsForRunReplacement(logPrefix);
+
+            // Re-checked after the cleanup, which is the last await before the
+            // writes — and the only one on the path where the thread was never
+            // named and no POST was made.
+            if (abandonReplacementIfThreadChanged(get, set, {
+                navSeqBeforeAwait,
+                pendingRetryRunId: failedRunId,
+                logPrefix,
+                popupText: AUTO_RETRY_ABANDONED_TEXT,
+            })) {
+                return;
+            }
 
             set(threadRunsAtom, prev => prev.filter(r => !runIdsToRemove.includes(r.id)));
             set(threadAgentActionsAtom, prev => prev.filter(a => !runIdsToRemove.includes(a.run_id)));
@@ -1552,7 +1636,15 @@ export function createWSCallbacks(
             // Clear retry state when run completes
             set(wsRetryAtom, null);
 
-            // Store transient backend flags (not persisted on AgentRun)
+            // Store transient backend flags (not persisted on AgentRun).
+            // The only frame that carries this flag, failed and canceled runs
+            // included: a run that ends with partial output still gets a
+            // run_complete ahead of its error frame, and that frame reports the
+            // usage. (Not a run the socket dropped — but there is nobody left to
+            // warn there.) Keyed by run id in an atom that never consults run
+            // status, so a failed run drives the same composer warning a
+            // finished one does — the composer's own fallback reads
+            // `total_usage`, which a failed run has none of.
             if (event.high_token_usage) {
                 set(backendHighTokenUsageRunsAtom, (prev) => ({ ...prev, [event.run_id]: true }));
             }
@@ -1680,16 +1772,6 @@ export function createWSCallbacks(
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearAllPendingBatchApprovalsAtom);
             set(clearRunApprovalPolicyAtom);
-
-            // Run quality flag for a run that did not complete. Keyed by run id
-            // in an atom that never consults run status, so a failed run drives
-            // the same composer warning a finished one does — the composer's
-            // own fallback reads `total_usage`, which a failed run has none of.
-            // Defensive: the backend carries this on the `run_complete` frame it
-            // sends ahead of the error, so `onRunComplete` normally has it first.
-            if (errorRunId && event.high_token_usage) {
-                set(backendHighTokenUsageRunsAtom, (prev) => ({ ...prev, [errorRunId]: true }));
-            }
 
             if (
                 event.try_auto_resume &&
@@ -2580,6 +2662,13 @@ async function startRegenerateRun(
     let newRunId: string | null = null;
 
     try {
+        // Which chat this replacement belongs to. Must precede every await in
+        // the function — retrying a still-live run cancels it first, and a
+        // sequence captured after that flush would already carry a switch made
+        // during it, blinding every later check. See
+        // `abandonReplacementIfThreadChanged`.
+        const navSeqBeforeAwait = get(threadNavigationSeqAtom);
+
         // Get current model
         const model = get(selectedModelAtom);
         if (!model) {
@@ -2626,6 +2715,21 @@ async function startRegenerateRun(
             // composer guard keeps blocking new sends during the flush.
             set(activeRunAtom, null);
             await agentService.cancel();
+
+            // The earliest await in this function, and everything after it
+            // reads live state: the thread id the truncate is addressed to,
+            // and the applied actions the undo dialog lists. Checking only
+            // after the POST would let a switch made during this flush put
+            // that dialog in front of the new chat and aim the removal at it.
+            // Ahead of the clear below, which abandoning does for itself.
+            if (abandonReplacementIfThreadChanged(get, set, {
+                navSeqBeforeAwait,
+                pendingRetryRunId: runId,
+                logPrefix,
+                popupText: USER_RETRY_ABANDONED_TEXT,
+            })) {
+                return;
+            }
             set(isWSChatPendingAtom, false);
         }
 
@@ -2654,7 +2758,10 @@ async function startRegenerateRun(
             }
         }
 
-        // Get thread ID from the target run (may not be set in currentThreadIdAtom yet)
+        // Get thread ID from the target run (may not be set in currentThreadIdAtom yet).
+        // Deliberately read after the cancel above: a first run's `thread` event
+        // can land during that flush, and reading earlier would miss the id and
+        // leave the run stranded server-side.
         const threadId = get(currentThreadIdAtom) || targetRun.thread_id;
 
         // Runs the retry replaces: the target and everything after it. A live
@@ -2757,6 +2864,14 @@ async function startRegenerateRun(
                 expectedTailRunId,
                 logPrefix,
             );
+            if (abandonReplacementIfThreadChanged(get, set, {
+                navSeqBeforeAwait,
+                pendingRetryRunId: runId,
+                logPrefix,
+                popupText: USER_RETRY_ABANDONED_TEXT,
+            })) {
+                return;
+            }
             if (outcome === 'failed') {
                 set(retryPendingRunIdAtom, null);
                 set(isWSChatPendingAtom, false);
@@ -2798,6 +2913,18 @@ async function startRegenerateRun(
 
         await cleanupTemporaryAnnotationsForRunReplacement(logPrefix);
 
+        // Re-checked after the undo and the cleanup: the undo awaits one Zotero
+        // operation per applied action, so it is the longest window in this
+        // function and the easiest one to switch chats in.
+        if (abandonReplacementIfThreadChanged(get, set, {
+            navSeqBeforeAwait,
+            pendingRetryRunId: runId,
+            logPrefix,
+            popupText: USER_RETRY_ABANDONED_TEXT,
+        })) {
+            return;
+        }
+
         // Truncate runs - keep only runs before the target
         set(threadRunsAtom, (prev) =>
             prev.filter(r => !runIdsToRemove.includes(r.id))
@@ -2834,7 +2961,12 @@ async function startRegenerateRun(
             model.provider,
             customInstructions,
             model.is_custom ? model.custom_model : undefined,
-            { retryTrigger: 'user' },
+            // A retry re-asks the same question, and the trigger is what tells
+            // the backend a person asked for it. An edited prompt is a new
+            // question that happens to replace the old turn, so it is not one:
+            // reporting it as a retry would count it among the runs that stand
+            // in for a failed one.
+            { retryTrigger: editedPrompt ? undefined : 'user' },
         );
 
         // Set active run - UI now shows user message + spinner, which takes

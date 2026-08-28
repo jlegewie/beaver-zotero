@@ -8,13 +8,14 @@ import { createStore } from 'jotai';
 
 const cancelMock = vi.fn();
 const getThreadRunsMock = vi.fn();
+const getThreadMock = vi.fn();
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
     agentRunService: { getThreadRuns: (...args: unknown[]) => getThreadRunsMock(...args) },
     agentService: { cancel: (...args: unknown[]) => cancelMock(...args) },
 }));
 
 vi.mock('@beaver/agent-core/transport/threadService', () => ({
-    threadService: { getThread: vi.fn() },
+    threadService: { getThread: (...args: unknown[]) => getThreadMock(...args) },
 }));
 
 vi.mock('../../../src/utils/zoteroUtils', () => ({
@@ -170,7 +171,12 @@ vi.mock('../../../src/utils/libraryIdentity', () => ({
     resolveItemReference: vi.fn(async () => ({ status: 'not_found' })),
 }));
 
-import { newThreadAtom, loadThreadAtom, currentThreadIdAtom } from '../../../react/atoms/threads';
+import {
+    newThreadAtom,
+    loadThreadAtom,
+    currentThreadIdAtom,
+    threadNavigationSeqAtom,
+} from '../../../react/atoms/threads';
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { isWSChatPendingAtom } from '../../../react/atoms/agentRunAtoms';
 
@@ -196,6 +202,7 @@ describe('interrupt-active-run confirm', () => {
         getPrefMock.mockReturnValue(false);
         confirmMock.mockReturnValue(true);
         getThreadRunsMock.mockResolvedValue({ runs: [], agent_actions: [] });
+        getThreadMock.mockResolvedValue({ name: 'Thread', zotero_user_id: '111', zotero_local_id: 'CURKEY' });
     });
 
     describe('newThreadAtom', () => {
@@ -270,6 +277,99 @@ describe('interrupt-active-run confirm', () => {
 
             expect(confirmMock).toHaveBeenCalledTimes(1);
             expect(confirmMock.mock.calls[0][0]).toMatchObject({ title: 'Switch chat?' });
+        });
+    });
+
+    /**
+     * Work started in one chat asks this counter whether it has been left
+     * behind. The thread id cannot answer: a new chat opened from an unnamed
+     * first run leaves it null on both sides, and a load writes it only after
+     * its own awaits.
+     */
+    describe('threadNavigationSeqAtom', () => {
+        it('counts a new chat even when the thread id does not change', async () => {
+            store.set(currentThreadIdAtom, null);
+            const before = store.get(threadNavigationSeqAtom);
+
+            await store.set(newThreadAtom, { skipAutoPopulate: true });
+
+            expect(store.get(currentThreadIdAtom)).toBeNull();
+            expect(store.get(threadNavigationSeqAtom)).toBe(before + 1);
+        });
+
+        it('counts a load', async () => {
+            const before = store.get(threadNavigationSeqAtom);
+
+            await store.set(loadThreadAtom, loadArgs);
+
+            expect(store.get(threadNavigationSeqAtom)).toBe(before + 1);
+        });
+
+        it('counts before the identity preflight, not after it', async () => {
+            // The preflight is a network round trip, and the confirm the user
+            // just cleared is added to it. A count taken after would leave a
+            // retry that finishes inside that window free to act on the chat
+            // being left.
+            getPrefMock.mockImplementation((k: string) => k === 'statefulChat');
+            const before = store.get(threadNavigationSeqAtom);
+            let seqAtFetch: number | null = null;
+            getThreadMock.mockImplementation(async () => {
+                seqAtFetch = store.get(threadNavigationSeqAtom);
+                return { name: 'Thread', zotero_user_id: '111', zotero_local_id: 'CURKEY' };
+            });
+
+            await store.set(loadThreadAtom, {
+                user_id: 'u1',
+                threadId: 'thread-1',
+                skipInstanceMismatchConfirm: true,
+            });
+
+            expect(getThreadMock).toHaveBeenCalled();
+            expect(seqAtFetch).toBe(before + 1);
+        });
+
+        it('still counts a load that aborts after the user committed', async () => {
+            // The accepted cost of counting at the commit point: work already
+            // abandoned cannot be un-abandoned when the load later fails. Safe
+            // direction — see the atom's own note.
+            getPrefMock.mockImplementation((k: string) => k === 'statefulChat');
+            getThreadMock.mockRejectedValue(new Error('offline'));
+            const before = store.get(threadNavigationSeqAtom);
+
+            const loaded = await store.set(loadThreadAtom, {
+                user_id: 'u1',
+                threadId: 'thread-1',
+            });
+
+            expect(loaded).toBe(false);
+            expect(store.get(threadNavigationSeqAtom)).toBe(before + 1);
+        });
+
+        it('does not count a navigation the user declined', async () => {
+            confirmMock.mockReturnValue(false);
+            store.set(activeRunAtom, run('in_progress'));
+            const before = store.get(threadNavigationSeqAtom);
+
+            await store.set(newThreadAtom, { skipAutoPopulate: true });
+            await store.set(loadThreadAtom, loadArgs);
+
+            expect(confirmMock).toHaveBeenCalledTimes(2);
+            expect(store.get(threadNavigationSeqAtom)).toBe(before);
+        });
+
+        it('moves before the new chat state does', async () => {
+            store.set(currentThreadIdAtom, 'thread-0');
+            const seenWhenIdChanged: number[] = [];
+            store.sub(currentThreadIdAtom, () => {
+                seenWhenIdChanged.push(store.get(threadNavigationSeqAtom));
+            });
+            const before = store.get(threadNavigationSeqAtom);
+
+            await store.set(loadThreadAtom, loadArgs);
+
+            // Already incremented by the time the id is written, so nothing can
+            // observe the new chat under the old count.
+            expect(seenWhenIdChanged).toContain(before + 1);
         });
     });
 });

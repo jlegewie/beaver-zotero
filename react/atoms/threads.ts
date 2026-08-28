@@ -276,6 +276,12 @@ async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any,
 }
 
 /**
+ * Counts chat navigations, so work started in one chat can tell it has been
+ * left behind.
+ */
+export const threadNavigationSeqAtom = atom(0);
+
+/**
  * Atom to create a new thread
  */
 export const newThreadAtom = atom(
@@ -295,6 +301,8 @@ export const newThreadAtom = atom(
             }
             set(isLoadingThreadAtom, true);
         }
+        // The user has committed to leaving. See threadNavigationSeqAtom.
+        set(threadNavigationSeqAtom, (seq) => seq + 1);
 
         try {
             // Cancel any active run before switching threads
@@ -395,6 +403,11 @@ export const loadThreadAtom = atom(
 
         // Show loading state immediately for instant UI feedback
         set(isLoadingThreadAtom, true);
+        // The user has committed to leaving, and everything below this point —
+        // starting with the identity preflight's round trip — is time in which
+        // work belonging to the chat being left must not finish and act. See
+        // threadNavigationSeqAtom.
+        set(threadNavigationSeqAtom, (seq) => seq + 1);
 
         // Resolve the thread's instance identity (and name, from the same
         // request) BEFORE any thread-state mutation, so a canceled mismatch

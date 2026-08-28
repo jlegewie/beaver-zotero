@@ -60,7 +60,8 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     const wasResumed = wasRunContinued(run, resumedRunIds);
 
     // A run the client is already replacing on its own. Its error card is
-    // suppressed until the replacement lands.
+    // suppressed until the replacement lands — the failure is about to be
+    // undone, and flashing it up would report a problem the reader never had.
     const autoReplacementPending = useAtomValue(autoReplacementPendingRunIdsAtom).has(run.id);
 
     // A run that was cut off (Beaver closed, connection dropped, server
@@ -87,7 +88,12 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
         () => shouldShowRunStatus(run, resultsMap, { isStreamQuiet }),
         [run, resultsMap, isStreamQuiet],
     );
-    const showStatusIndicator = isLastRun && runHasNothingToShow;
+    // The replacement is not instant: an auto-retry commits the failed run's
+    // removal on the backend first, and that round trip would otherwise leave
+    // the card with a suppressed error, no spinner, and nothing to say the
+    // client is working. The run's own status is terminal, so this is the one
+    // wait `shouldShowRunStatus` cannot see.
+    const showStatusIndicator = isLastRun && (runHasNothingToShow || autoReplacementPending);
 
     // Where the visible wait started, so the indicator can count it up. Null
     // while the run has produced nothing yet: there is no event to count from,
@@ -152,6 +158,11 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 showStatusIndicator={showStatusIndicator}
                 status={run.status}
                 waitingSince={waitingSince}
+                // The pending signal covers an auto-resume too, but only the
+                // auto-retry has a wait to label: a resume installs its
+                // replacement in the same synchronous batch, so the failed run
+                // has stopped being the last one before anything renders.
+                statusIdleLabel={autoReplacementPending ? 'Retrying' : undefined}
             />
 
             {/* Error display (includes retry/resume buttons) - hide if run was resumed */}
