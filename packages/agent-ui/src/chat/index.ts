@@ -58,3 +58,18 @@ export type { CreditConfirmationCardProps, CreditDecisionHandlers } from './Cred
 
 export { selectComposerTakeover } from './composerTakeover';
 export type { ComposerTakeover, ComposerTakeoverInput } from './composerTakeover';
+
+export {
+    FIND_CURRENT_CLASS,
+    FIND_HIT_ATTR,
+    FIND_HIT_CLASS,
+    FIND_MIN_QUERY_LENGTH,
+    FindQueryProvider,
+    findMatchRanges,
+    useFindQuery,
+} from './findContext';
+export type { FindMatchRange, FindQueryProviderProps } from './findContext';
+
+export { highlightText } from './highlightText';
+
+export { rehypeFindHighlight } from './rehypeFindHighlight';

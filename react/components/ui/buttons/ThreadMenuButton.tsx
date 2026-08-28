@@ -21,6 +21,7 @@ import { prepareCitationRenderContext } from '../../../utils/citationRenderConte
 import { threadService } from '@beaver/agent-core/transport/threadService';
 import { clearRecentChatsCache } from '../../RecentChats';
 import { clearThreadListCache } from '../../ThreadListView';
+import { useFindInChatControls } from '../../../hooks/useFindInChat';
 
 interface ThreadMenuButtonProps {
     className?: string;
@@ -42,6 +43,9 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     // re-render the header on every frame of a streaming response. Only the
     // count, which decides whether the entries are enabled, is subscribed.
     const runsCount = useAtomValue(runsCountAtom);
+    // Its own context, not the find query: this button must not re-render while
+    // the reader types in the find bar.
+    const findControls = useFindInChatControls();
     const citationDataMap = useAtomValue(citationMapAtom);
     const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
@@ -240,6 +244,18 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         const hasParent = context.parentReference !== null;
 
         const items: MenuItem[] = [
+            {
+                // MenuItem carries no shortcut field, so the ⌘F / Ctrl+F chord
+                // that also opens the bar is not shown here.
+                label: 'Find in chat',
+                onClick: findControls.open,
+                disabled: !hasRuns || !findControls.isAvailable,
+            },
+            {
+                label: 'find-in-chat-divider',
+                onClick: () => {},
+                isDivider: true,
+            },
             {
                 label: 'Copy entire chat',
                 onClick: handleCopyThread,
