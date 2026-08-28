@@ -265,8 +265,8 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     };
 
     /**
-     * Pins or unpins a chat. The store owns the optimistic write, its rollback
-     * and the one-toggle-at-a-time guard, so this is just the call.
+     * Pins or unpins a chat. The store owns confirmation/reconciliation and the
+     * one-toggle-at-a-time guard, so this is just the call.
      */
     const handleTogglePin = (thread: ThreadData) => {
         void setThreadPinned({ threadId: thread.id, pinned: !thread.isPinned, viewKey });
@@ -428,6 +428,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         const isForeign = isThreadInstanceMismatch(instanceRef, {
             zoteroUserId: thread.zoteroUserId, zoteroLocalId: thread.zoteroLocalId,
         });
+        const pinPending = isPinPending(pinsPending, thread.id);
 
         return (
             <div
@@ -489,7 +490,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                     e.stopPropagation();
                                     handleCancelRename();
                                 }}
-                                className="scale-90"
+                                className="scale-10"
                                 ariaLabel="Cancel rename"
                             />
                             <IconButton
@@ -499,7 +500,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                     e.stopPropagation();
                                     handleConfirmRename(thread.id);
                                 }}
-                                className="scale-11"
+                                className="scale-12"
                                 ariaLabel="Confirm rename"
                                 loading={isSavingRename}
                             />
@@ -513,9 +514,9 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                     e.stopPropagation();
                                     handleTogglePin(thread);
                                 }}
-                                className="scale-95"
+                                className="scale-11"
                                 ariaLabel={thread.isPinned ? 'Unpin chat' : 'Pin chat'}
-                                disabled={isPinPending(pinsPending, thread.id)}
+                                loading={pinPending}
                             />
                             <IconButton
                                 icon={EditIcon}
@@ -524,7 +525,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                     e.stopPropagation();
                                     handleStartRename(thread.id, threadName);
                                 }}
-                                className="scale-95"
+                                className="scale-11"
                                 ariaLabel="Rename thread"
                             />
                             <IconButton
@@ -534,7 +535,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                     e.stopPropagation();
                                     handleDelete(thread.id);
                                 }}
-                                className="scale-95"
+                                className="scale-11"
                                 ariaLabel="Delete thread"
                             />
                         </div>

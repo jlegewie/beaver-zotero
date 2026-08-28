@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
+import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { MoreHorizontalIcon } from '../../icons/icons';
 import { copyToClipboard } from '../../../utils/clipboard';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../../utils/citationRenderers';
@@ -279,10 +280,8 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
                 scope: currentZoteroInstanceRef(),
             })
             : undefined;
-        // The store owns the optimistic write, its rollback and the
-        // one-toggle-at-a-time guard, and every surface renders from it — so a
-        // list open behind this menu (the overlay leaves the header reachable)
-        // updates without being told.
+        // The store owns confirmation/reconciliation and the shared
+        // one-toggle-at-a-time guard.
         void setThreadPinned({ threadId: currentId, pinned: !isPinned, viewKey });
     };
 
@@ -322,6 +321,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         const hasRuns = runsCount > 0;
         const context = getZoteroTargetContextSync();
         const hasParent = context.parentReference !== null;
+        const pinPending = !!threadId && isPinPending(pinsPending, threadId);
 
         const items: MenuItem[] = [
             {
@@ -352,7 +352,13 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
             {
                 label: isPinned ? 'Unpin chat' : 'Pin chat',
                 onClick: handleTogglePin,
-                disabled: !threadId || isPinned === null || isPinPending(pinsPending, threadId),
+                disabled: !threadId || isPinned === null || pinPending,
+                customContent: pinPending ? (
+                    <span className="display-flex items-center gap-2">
+                        <Spinner size={14} />
+                        <span>{isPinned ? 'Unpinning chat' : 'Pinning chat'}</span>
+                    </span>
+                ) : undefined,
             },
             {
                 label: 'Rename chat',

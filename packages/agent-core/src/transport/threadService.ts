@@ -159,6 +159,9 @@ const TRUNCATE_TIMEOUT_MS = 15000;
  */
 const PIN_TIMEOUT_MS = 15000;
 
+/** Leave enough room inside PIN_LOCK_TTL_MS for an ambiguous PATCH to be read back. */
+export const PIN_RECONCILE_TIMEOUT_MS = 10000;
+
 /**
  * Thread-specific API service that extends the base API service
  */
@@ -184,8 +187,8 @@ export class ThreadService extends ApiService {
      * @param threadId The ID of the thread to fetch
      * @returns Promise with the thread data
      */
-    async getThread(threadId: string): Promise<ThreadModel> {
-        return this.get<ThreadModel>(`/api/v1/threads/${threadId}`);
+    async getThread(threadId: string, options?: { timeoutMs?: number }): Promise<ThreadModel> {
+        return this.get<ThreadModel>(`/api/v1/threads/${threadId}`, options);
     }
 
     /**

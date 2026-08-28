@@ -1,7 +1,11 @@
 import { atom } from 'jotai';
 import type { Getter, Setter } from 'jotai';
 import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
-import { threadService, isThreadAgentMismatch } from '@beaver/agent-core/transport/threadService';
+import {
+    threadService,
+    isThreadAgentMismatch,
+    PIN_RECONCILE_TIMEOUT_MS,
+} from '@beaver/agent-core/transport/threadService';
 import type { ZoteroInstanceRef } from '@beaver/agent-core/transport/threadService';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { deduplicateByThread, threadModelToThreadData, isThreadInstanceMismatch } from '../utils/threadMatches';
@@ -34,9 +38,8 @@ import type { ThreadItemFilter } from './ui';
  *   back exactly the split this module exists to remove — a chat pinned from a
  *   search would not appear in the group until the window happened to reach it.
  * - Every mutation is a functional update on a single entity that **no-ops when
- *   the entity is absent**, which is what stops an optimistic rollback from
- *   resurrecting a deleted chat or dropping a live one without either case
- *   being special-cased.
+ *   the entity is absent**, which stops a late response from resurrecting a
+ *   deleted chat or dropping a live one without either case being special-cased.
  *
  * Views resolve ids through the entity map at render and drop unknown ones, so
  * deleting a chat is one entity removal; ids left behind in id sets are inert.
@@ -585,18 +588,13 @@ export const loadThreadsByItemAtom = atom(
  * entity, so one write reaches the sidebar list, the separate window's list and
  * the header menu together.
  *
- * Applied optimistically — the row it moves sits under the cursor, so waiting a
- * round trip before anything moves reads as a dropped click — and rolled back
- * on failure — but only while this call still holds the chat's lock. Do not
- * remove that check: {@link updateThreadAtom}'s no-op-on-absent-entity only
- * protects a *deleted* chat, not a live one that a later toggle has since
- * settled, and an abandoned request can outlive its own lock (see
- * {@link pinsPendingAtom}).
+ * The entity is updated only after the backend confirms the mutation. While it
+ * is in flight, every pin control for the chat renders its shared pending lock
+ * as a spinner. A transient failure is ambiguous — the PATCH may have committed
+ * before its response stalled — so it is read back before the lock is released.
  *
- * @returns true when the backend accepted the change; false when it rejected
- *   it, when a toggle for this chat was already in flight so nothing was sent,
- *   or when this call's lock had been taken over, in which case the rejection
- *   was observed but nothing was rolled back
+ * @returns true when the confirmed backend state matches the requested state;
+ *   false when it does not, cannot be confirmed, or no request was sent
  */
 export const setThreadPinnedAtom = atom(
     null,
@@ -621,39 +619,52 @@ export const setThreadPinnedAtom = atom(
 
         const generation = get(threadStoreGenerationAtom);
         set(pinMutationSeqAtom, get(pinMutationSeqAtom) + 1);
-        set(updateThreadAtom, { id: threadId, update: (t) => ({ ...t, isPinned: pinned }) });
-        // Unpinning a chat the pinned group reached but the paginated window
-        // never did would otherwise drop it off screen mid-click. Keep it in
-        // the window until the next reload, which then honestly re-establishes
-        // what the window contains.
-        if (!pinned && viewKey) {
-            patchView(get, set, viewKey, generation, (v) => ({ ...v, ids: mergeIds(v.ids, [threadId]) }));
-        }
-        try {
-            if (pinned) {
-                await threadService.starThread(threadId);
-            } else {
-                await threadService.unstarThread(threadId);
+        const canApply = () => stillOwnsLock() && get(threadStoreGenerationAtom) === generation;
+        const applyConfirmedState = (confirmedPinned: boolean) => {
+            if (!canApply()) return;
+            set(updateThreadAtom, {
+                id: threadId,
+                update: (t) => ({ ...t, isPinned: confirmedPinned }),
+            });
+            // An unpinned chat that only the pinned query reached would
+            // otherwise disappear from under the cursor when confirmation
+            // moves it out of that group.
+            if (!confirmedPinned && viewKey) {
+                patchView(get, set, viewKey, generation, (v) => ({
+                    ...v,
+                    ids: mergeIds(v.ids, [threadId]),
+                }));
             }
-            return true;
+        };
+        try {
+            const thread = pinned
+                ? await threadService.starThread(threadId)
+                : await threadService.unstarThread(threadId);
+            if (!canApply()) return false;
+            // Older backends may omit `starred`; a successful absolute-set
+            // route still confirms the requested state in that case.
+            const confirmedPinned = thread.starred ?? pinned;
+            applyConfirmedState(confirmedPinned);
+            return confirmedPinned === pinned;
         } catch (error) {
             logger(`setThreadPinnedAtom: ${error}`, 1);
-            // Roll back only while this call still owns the lock. A request
-            // whose window closed can settle long after its lock expired and
-            // another toggle has come and gone; rolling back then would invert
-            // a pin the user has since set, against a server that agrees with
-            // the user. This is the same staleness discipline the entity and
-            // view writes already follow.
-            //
-            // What skipping costs: this call's own optimistic write is left
-            // standing against a server that rejected it. The next pinned query
-            // clears it — `reconcilePinnedFlags` for a failed pin,
-            // `upsertThreadsAtom` restoring the server row for a failed unpin —
-            // except when that response is truncated, which is the documented
-            // `MAX_PINNED` limitation.
-            if (stillOwnsLock()) {
-                set(pinMutationSeqAtom, get(pinMutationSeqAtom) + 1);
-                set(updateThreadAtom, { id: threadId, update: (t) => ({ ...t, isPinned: !pinned }) });
+            if (isTransientNetworkError(error) && canApply()) {
+                try {
+                    const thread = await threadService.getThread(threadId, {
+                        timeoutMs: PIN_RECONCILE_TIMEOUT_MS,
+                    });
+                    // A legacy response that omits `starred` cannot tell us
+                    // whether the timed-out mutation committed. Preserve the
+                    // last confirmed UI state until a later authoritative
+                    // response includes the flag.
+                    if (typeof thread.starred !== 'boolean') return false;
+                    const confirmedPinned = thread.starred;
+                    if (!canApply()) return false;
+                    applyConfirmedState(confirmedPinned);
+                    return confirmedPinned === pinned;
+                } catch (reconcileError) {
+                    logger(`setThreadPinnedAtom reconciliation: ${reconcileError}`, 1);
+                }
             }
             return false;
         } finally {

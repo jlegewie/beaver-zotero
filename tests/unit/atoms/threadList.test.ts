@@ -8,6 +8,7 @@ import { createStore } from 'jotai';
 const getPaginatedThreadsMock = vi.fn();
 const searchThreadsMock = vi.fn();
 const getStarredThreadsMock = vi.fn();
+const getThreadMock = vi.fn();
 const starThreadMock = vi.fn();
 const unstarThreadMock = vi.fn();
 const findThreadsByItemMock = vi.fn();
@@ -17,11 +18,13 @@ vi.mock('@beaver/agent-core/transport/threadService', () => ({
         getPaginatedThreads: (...a: unknown[]) => getPaginatedThreadsMock(...a),
         searchThreads: (...a: unknown[]) => searchThreadsMock(...a),
         getStarredThreads: (...a: unknown[]) => getStarredThreadsMock(...a),
+        getThread: (...a: unknown[]) => getThreadMock(...a),
         starThread: (...a: unknown[]) => starThreadMock(...a),
         unstarThread: (...a: unknown[]) => unstarThreadMock(...a),
         findThreadsByItem: (...a: unknown[]) => findThreadsByItemMock(...a),
     },
     isThreadAgentMismatch: () => false,
+    PIN_RECONCILE_TIMEOUT_MS: 10_000,
 }));
 
 import {
@@ -49,6 +52,7 @@ import {
     EMPTY_THREAD_VIEW,
 } from '../../../react/atoms/threadList';
 import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
+import { SessionRefreshError } from '@beaver/agent-core/types/apiErrors';
 import type { ThreadData } from '../../../react/atoms/threads';
 
 /** A backend row (snake_case wire shape). */
@@ -350,15 +354,15 @@ describe('view isolation and freshness', () => {
 });
 
 describe('setThreadPinnedAtom', () => {
-    it('applies the change before the request resolves', async () => {
+    it('keeps the confirmed state while the request is pending', async () => {
         const store = createStore();
         store.set(upsertThreadsAtom, { threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
         let resolveStar: (v: unknown) => void = () => {};
         starThreadMock.mockImplementationOnce(() => new Promise(r => { resolveStar = r; }));
 
         const pending = store.set(setThreadPinnedAtom, { threadId: 'a', pinned: true });
-        // Optimistic: true while the request is still outstanding.
-        expect(store.get(threadEntitiesAtom).get('a')!.isPinned).toBe(true);
+        expect(store.get(threadEntitiesAtom).get('a')!.isPinned).toBe(false);
+        expect(isPinPending(store.get(pinsPendingAtom), 'a')).toBe(true);
 
         resolveStar({});
         expect(await pending).toBe(true);
@@ -380,7 +384,7 @@ describe('setThreadPinnedAtom', () => {
         expect(second).toBe(false);
         expect(starThreadMock).toHaveBeenCalledTimes(1);
         expect(unstarThreadMock).not.toHaveBeenCalled();
-        expect(store.get(threadEntitiesAtom).get('a')!.isPinned).toBe(true);
+        expect(store.get(threadEntitiesAtom).get('a')!.isPinned).toBe(false);
 
         resolveStar({});
         await first;
@@ -421,7 +425,7 @@ describe('setThreadPinnedAtom', () => {
         expect(store.get(pinsPendingAtom).has('live')).toBe(true);
     });
 
-    it('does not roll back or release once its lock has been taken over', async () => {
+    it('does not write or release once its lock has been taken over', async () => {
         const store = createStore();
         store.set(upsertThreadsAtom, { threads: [entity('x')], stamp: { generation: 0, pinSeq: 0 } });
 
@@ -440,34 +444,30 @@ describe('setThreadPinnedAtom', () => {
         unstarThreadMock.mockResolvedValue({});
         await store.set(setThreadPinnedAtom, { threadId: 'x', pinned: false });
 
-        // …and a third takes the chat over and is left IN FLIGHT. Three toggles
-        // are needed, not two: the abandoned call pinned, so its rollback would
-        // write `false` — with only one intervening toggle the chat would
-        // already be `false` and the assertion below could not tell a fired
-        // rollback from a skipped one. This third one puts the chat back to
-        // `true` *and* leaves a lock under a different token, so the entity
-        // assertion covers the `catch` guard and the lock assertion covers the
-        // `finally` guard.
+        // …and a third takes the chat over and is left in flight. Its different
+        // token lets the entity assertion cover the stale catch guard and the
+        // lock assertion cover the stale finally guard.
         let resolveTakeover: (v: unknown) => void = () => {};
         starThreadMock.mockImplementationOnce(() => new Promise(r => { resolveTakeover = r; }));
         const takeover = store.set(setThreadPinnedAtom, { threadId: 'x', pinned: true });
-        expect(store.get(threadEntitiesAtom).get('x')!.isPinned).toBe(true);
+        expect(store.get(threadEntitiesAtom).get('x')!.isPinned).toBe(false);
 
-        // The abandoned request finally errors. It must neither invert what the
-        // takeover optimistically wrote, nor release the takeover's lock.
+        // The abandoned request finally errors. It must neither write nor
+        // release the takeover's lock.
         rejectAbandoned(new Error('window closed'));
         await abandoned;
 
-        expect(store.get(threadEntitiesAtom).get('x')!.isPinned).toBe(true);
+        expect(store.get(threadEntitiesAtom).get('x')!.isPinned).toBe(false);
         expect(isPinPending(store.get(pinsPendingAtom), 'x')).toBe(true);
 
         // And the takeover still owns its lock well enough to release it.
         resolveTakeover({});
         await takeover;
+        expect(store.get(threadEntitiesAtom).get('x')!.isPinned).toBe(true);
         expect(isPinPending(store.get(pinsPendingAtom), 'x')).toBe(false);
     });
 
-    it('rolls back when the backend rejects', async () => {
+    it('keeps the confirmed state when the backend rejects', async () => {
         const store = createStore();
         store.set(upsertThreadsAtom, { threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
         starThreadMock.mockRejectedValue(new Error('boom'));
@@ -475,6 +475,77 @@ describe('setThreadPinnedAtom', () => {
         expect(await store.set(setThreadPinnedAtom, { threadId: 'a', pinned: true })).toBe(false);
         expect(store.get(threadEntitiesAtom).get('a')!.isPinned).toBe(false);
     });
+
+    it('uses the state returned by a successful mutation', async () => {
+        const store = createStore();
+        store.set(upsertThreadsAtom, { threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
+        starThreadMock.mockResolvedValue(row('a', { starred: false }));
+
+        expect(await store.set(setThreadPinnedAtom, { threadId: 'a', pinned: true })).toBe(false);
+        expect(store.get(threadEntitiesAtom).get('a')!.isPinned).toBe(false);
+    });
+
+    it('reconciles a transient failure when the PATCH committed', async () => {
+        const store = createStore();
+        store.set(upsertThreadsAtom, { threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
+        starThreadMock.mockRejectedValue(new SessionRefreshError('timed out'));
+        getThreadMock.mockResolvedValue(row('a', { starred: true }));
+
+        expect(await store.set(setThreadPinnedAtom, { threadId: 'a', pinned: true })).toBe(true);
+        expect(getThreadMock).toHaveBeenCalledWith('a', { timeoutMs: 10_000 });
+        expect(store.get(threadEntitiesAtom).get('a')!.isPinned).toBe(true);
+    });
+
+    it('keeps the old state when reconciliation shows the PATCH did not commit', async () => {
+        const store = createStore();
+        store.set(upsertThreadsAtom, { threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
+        starThreadMock.mockRejectedValue(new SessionRefreshError('timed out'));
+        getThreadMock.mockResolvedValue(row('a', { starred: false }));
+
+        expect(await store.set(setThreadPinnedAtom, { threadId: 'a', pinned: true })).toBe(false);
+        expect(store.get(threadEntitiesAtom).get('a')!.isPinned).toBe(false);
+    });
+
+    it('keeps the old state when an ambiguous failure cannot be reconciled', async () => {
+        const store = createStore();
+        store.set(upsertThreadsAtom, {
+            threads: [entity('a', { isPinned: true })],
+            stamp: { generation: 0, pinSeq: 0 },
+        });
+        unstarThreadMock.mockRejectedValue(new SessionRefreshError('timed out'));
+        getThreadMock.mockRejectedValue(new SessionRefreshError('still offline'));
+
+        expect(await store.set(setThreadPinnedAtom, { threadId: 'a', pinned: false })).toBe(false);
+        expect(store.get(threadEntitiesAtom).get('a')!.isPinned).toBe(true);
+        expect(isPinPending(store.get(pinsPendingAtom), 'a')).toBe(false);
+    });
+
+    it.each([
+        { initialPinned: false, requestedPinned: true },
+        { initialPinned: true, requestedPinned: false },
+    ])(
+        'treats a reconciliation response without starred as unknown',
+        async ({ initialPinned, requestedPinned }) => {
+            const store = createStore();
+            store.set(upsertThreadsAtom, {
+                threads: [entity('a', { isPinned: initialPinned })],
+                stamp: { generation: 0, pinSeq: 0 },
+            });
+            const timeout = new SessionRefreshError('timed out');
+            if (requestedPinned) {
+                starThreadMock.mockRejectedValue(timeout);
+            } else {
+                unstarThreadMock.mockRejectedValue(timeout);
+            }
+            getThreadMock.mockResolvedValue(row('a', { starred: undefined }));
+
+            expect(await store.set(setThreadPinnedAtom, {
+                threadId: 'a',
+                pinned: requestedPinned,
+            })).toBe(false);
+            expect(store.get(threadEntitiesAtom).get('a')!.isPinned).toBe(initialPinned);
+        },
+    );
 
     it('does not resurrect a chat deleted while the request was in flight', async () => {
         const store = createStore();

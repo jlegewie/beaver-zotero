@@ -14,7 +14,11 @@ vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: mockSupabase,
 }));
 
-import { SessionExpiredError, SessionRefreshError } from '@beaver/agent-core/types/apiErrors';
+import {
+    RequestTimeoutError,
+    SessionExpiredError,
+    SessionRefreshError,
+} from '@beaver/agent-core/types/apiErrors';
 import { ApiService } from '@beaver/agent-core/transport/apiService';
 import { getRuntimeAdapter, setRuntimeAdapter, type RuntimeAdapter } from '@beaver/agent-core/platform/runtime';
 
@@ -357,6 +361,29 @@ describe('ApiService version headers', () => {
         expect(fetchMock).not.toHaveBeenCalled();
     });
 
+    it('does not dispatch a PATCH when auth finishes after its deadline', async () => {
+        let resolveSession: (value: unknown) => void = () => {};
+        mockSupabase.auth.getSession.mockReturnValue(new Promise(resolve => {
+            resolveSession = resolve;
+        }));
+
+        await expect(service.patch('/api/v1/threads/t1/star', {}, { timeoutMs: 20 }))
+            .rejects.toBeInstanceOf(RequestTimeoutError);
+
+        resolveSession({
+            data: {
+                session: {
+                    access_token: 'late-token',
+                    expires_at: Math.floor(Date.now() / 1000) + 3600,
+                },
+            },
+            error: null,
+        });
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     // Same gap on the 401 retry path: refreshAccessToken() awaits
     // supabase.auth.refreshSession(), which also never sees the signal.
     it('rejects with SessionRefreshError when the 401 refresh stalls', async () => {
@@ -370,6 +397,30 @@ describe('ApiService version headers', () => {
 
         await expect(service.get('/api/v1/status', { timeoutMs: 20 }))
             .rejects.toBeInstanceOf(SessionRefreshError);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not retry when a 401 refresh finishes after the deadline', async () => {
+        fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+            detail: 'token has expired',
+        }), {
+            status: 401,
+            statusText: 'Unauthorized',
+        }));
+        let resolveRefresh: (value: unknown) => void = () => {};
+        mockSupabase.auth.refreshSession.mockReturnValue(new Promise(resolve => {
+            resolveRefresh = resolve;
+        }));
+
+        await expect(service.patch('/api/v1/threads/t1/star', {}, { timeoutMs: 20 }))
+            .rejects.toBeInstanceOf(RequestTimeoutError);
+
+        resolveRefresh({
+            data: { session: { access_token: 'late-token' } },
+            error: null,
+        });
+        await new Promise(resolve => setTimeout(resolve, 0));
+
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
