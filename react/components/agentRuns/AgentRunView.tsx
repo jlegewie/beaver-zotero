@@ -14,7 +14,7 @@ import { RunInterruptedDisplay } from './RunInterruptedDisplay';
 import { threadWarningsAtom } from '../../atoms/warnings';
 import { resumeChainAtom, runToolResultsAtom, resumedRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
-import { streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
+import { autoReplacementPendingRunIdsAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { getHost } from '@beaver/agent-ui/host';
 import BatchRunReceipt, { hasBatchReceipt } from '@beaver/agent-ui/chat/BatchRunReceipt';
 
@@ -57,6 +57,10 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // footer give way to the continuation's, and it shows the subtle resume
     // line instead. Covers a failed run and an interrupted one alike.
     const wasResumed = wasRunContinued(run, resumedRunIds);
+
+    // A run the client is already replacing on its own. Its error card is
+    // suppressed until the replacement lands.
+    const autoReplacementPending = useAtomValue(autoReplacementPendingRunIdsAtom).has(run.id);
 
     // A run that was cut off (Beaver closed, connection dropped, server
     // restarted) rather than finished or stopped by the user gets an offer to
@@ -150,7 +154,7 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
             />
 
             {/* Error display (includes retry/resume buttons) - hide if run was resumed */}
-            {hasError && run.error && !wasResumed && (
+            {hasError && run.error && !wasResumed && !autoReplacementPending && (
                 <RunErrorDisplay runId={run.id} error={run.error} isLastRun={isLastRun} />
             )}
 

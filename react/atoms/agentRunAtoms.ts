@@ -1189,8 +1189,17 @@ export const wsErrorAtom = atom<WSErrorEvent | null>(null);
 /** Last warning from WebSocket */
 export const wsWarningAtom = atom<WSWarningEvent | null>(null);
 
-/** Deduplicates concurrent auto-resume/auto-retry scheduling for the same run. */
+/**
+ * Runs whose automatic replacement — an auto-resume or an auto-retry — has been
+ * scheduled and has not finished. Added when `onError` decides to replace the
+ * run, removed once the replacement has started or given up.
+ */
 const scheduledAutoResumeRunIdsAtom = atom<Set<string>>(new Set<string>());
+
+/** Read-only view of the runs currently being replaced automatically. */
+export const autoReplacementPendingRunIdsAtom = atom(
+    (get) => get(scheduledAutoResumeRunIdsAtom),
+);
 
 // =============================================================================
 // Action Atoms
