@@ -1,8 +1,9 @@
 /*
- * Component rules for the sign-in surface, plus the link vocabulary it shares
- * with the rest of the render layer.
+ * Component rules for the sign-in surface, the composer and the bars docked to
+ * it, the editor field, tooltips, and the link vocabulary they share with the
+ * rest of the render layer.
  *
- * The first component sheet in this package. Tokens say what the colours are and
+ * The component sheet for this package. Tokens say what the colours are and
  * the utility layer is the vocabulary a component is written in; this is neither
  * — it is a handful of named things (a primary button, a text field, a code box)
  * that have to look the same in every client because they are the same control.
@@ -311,4 +312,314 @@
 .beaver-root .beaver-find-hit-current {
     background: var(--tag-orange-secondary);
     color: inherit;
+}
+
+/* ───── The composer ───── */
+
+/* The card the message is composed in, and the control row under its editor.
+   Three of the cards that stand in for the composer — BatchApprovalCard,
+   AskUserQuestionCard, CreditConfirmationCard — are shared components in this
+   package, so the surface all four wear has to be here too.
+
+   Every button rule below qualifies its class with the `button` element. That
+   is deliberate: it is what beats the `.variant-*` family a client sheet
+   defines, whatever order the sheets load in. */
+
+/* The composer surface, shared with the cards that stand in for it (user
+ * request, approval, credit confirmation, ask-user-question).
+ *
+ * The card sits on the pane ground (--beaver-surface-ground) and is one
+ * 60%-strength quarternary step away from it: #eaeaea on #f2f2f2 in a light
+ * theme, #353535 on #303030 in a dark one. So it darkens against a light
+ * ground and lightens against a dark one, which is the direction Zotero's own
+ * fills go. The recipe itself lives in agent-ui-tokens.css, as
+ * --beaver-surface-raised, so every raised surface shares it.
+ *
+ * The local --composer-* properties are aliases of the shared tokens: anything
+ * that docks to the card's top edge cancels the padding with them — see
+ * .pending-actions-bar below. */
+.beaver-root .user-message-display {
+    --composer-pad-x: var(--beaver-card-pad-x);
+    --composer-pad-top: var(--beaver-card-pad-top);
+    --composer-pad-bottom: var(--beaver-card-pad-bottom);
+    --composer-radius: var(--beaver-radius-card);
+    position: relative;
+    padding: var(--composer-pad-top) var(--composer-pad-x) var(--composer-pad-bottom);
+    border: 1px solid var(--beaver-border-default);
+    border-radius: var(--composer-radius);
+    background-color: var(--beaver-surface-raised);
+    user-select: text;
+}
+
+/* Chips for whatever is attached to the message being composed. Mounted only
+ * when there is something to show — the "+" that used to live here moved into
+ * the control row. */
+.beaver-root .composer-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-bottom: 0.75rem;
+}
+
+/* Control row under the editor: add sources and the model on the left, web
+ * search and send after the flexible gap. */
+.beaver-root .composer-controls {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    margin-top: 0.8rem;
+    margin-right: -0.2rem;
+}
+
+/* One height and one hover shape for every control in the row, whatever
+ * variant it carries. The element selector is what beats the client's
+ * `.variant-*` rules, whichever sheet they are in and whatever order it
+ * loads in. */
+.beaver-root .composer-controls button {
+    height: 26px;
+    border-radius: var(--beaver-radius-control);
+}
+
+/* Icon-only controls are square. `Icon` defaults to 1em, so an icon that is
+ * not given an explicit size follows the button's font-size. */
+.beaver-root .composer-controls button.composer-add-sources,
+.beaver-root .composer-controls button.composer-web-search {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    justify-content: center;
+}
+
+.beaver-root button.composer-send {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    justify-content: center;
+}
+
+.beaver-root button.composer-web-search {
+    font-size: 15px;
+}
+
+.beaver-root button.composer-send {
+    margin-left: 4px;
+    border-radius: var(--beaver-radius-pill);
+}
+
+/* Disabled Send greys out rather than fading the accent, which at
+ * .variant-solid's 0.5 opacity still reads as an available button. */
+.beaver-root button.composer-send:disabled {
+    background-color: var(--fill-quarternary);
+    border-color: transparent;
+    color: var(--fill-tertiary);
+    opacity: 1;
+}
+
+/* Send carries an arrow rather than a label, so it needs a real icon size
+ * instead of .variant-solid's 1em. */
+.beaver-root button.composer-send svg {
+    width: 16px;
+    height: 16px;
+}
+
+.beaver-root button.composer-send.composer-send-stop svg {
+    width: 13px;
+    height: 13px;
+}
+
+/* Reject sits in Send's slot while an approval is pending, and matches its
+ * pill shape rather than the square buttons elsewhere in the row. */
+.beaver-root button.composer-reject {
+    height: 26px;
+    margin-left: 4px;
+    padding: 0 10px;
+    border-radius: var(--beaver-radius-pill);
+}
+
+/* ───── Bars docked to the composer's top edge ───── */
+
+/* Each of these cancels the card's padding with the `--composer-*` aliases the
+   composer declares, so it renders as the card's own top edge rather than as a
+   strip floating above it. Reading those aliases is what ties them to the
+   composer: same bleed, same top-corner radius, different fill. */
+
+/* Pending Actions Bar - shows when agent actions await approval */
+.beaver-root .pending-actions-bar {
+    margin: calc(-1 * var(--composer-pad-top)) calc(-1 * var(--composer-pad-x)) var(--composer-pad-top);
+    border-radius: calc(var(--composer-radius) - 1px) calc(var(--composer-radius) - 1px) 0 0;
+    background-color: var(--beaver-fill-hover);
+}
+
+/* Same bleed as the pending-actions bar so it reads as the composer's top edge.
+   No `position` here: BatchProgressBar sets it inline, which wins anyway. */
+.beaver-root .batch-progress-bar {
+    margin: calc(-1 * var(--composer-pad-top)) calc(-1 * var(--composer-pad-x)) var(--composer-pad-top);
+    border-radius: calc(var(--composer-radius) - 1px) calc(var(--composer-radius) - 1px) 0 0;
+    background-color: var(--beaver-fill-hover);
+}
+
+/* Flush stacked bars: drop the lower bar's top-corner rounding. */
+.beaver-root .batch-progress-bar + .pending-actions-bar,
+.beaver-root .batch-progress-bar + .high-token-usage-warning-bar {
+    border-radius: 0;
+}
+
+/* High token usage warning above composer */
+.beaver-root .high-token-usage-warning-bar {
+    margin: calc(-1 * var(--composer-pad-top)) calc(-1 * var(--composer-pad-x)) var(--composer-pad-top);
+    border-radius: calc(var(--composer-radius) - 1px) calc(var(--composer-radius) - 1px) 0 0;
+    background-color: var(--tag-yellow-senary);
+    border-bottom: 1px solid var(--fill-quinary);
+}
+
+/* First-run "Next steps" panel above composer */
+.beaver-root .next-steps-panel {
+    margin: calc(-1 * var(--composer-pad-top)) calc(-1 * var(--composer-pad-x)) var(--composer-pad-top);
+    border-radius: calc(var(--composer-radius) - 1px) calc(var(--composer-radius) - 1px) 0 0;
+    border-bottom: 1px solid var(--fill-quarternary);
+    /* background-color: var(--material-mix-quarternary); */
+}
+
+/* ───── The editor field ───── */
+
+/* Typography and sizing for whatever text is typed into. It is worn by the
+   Lexical contenteditable, by the plain textareas and inputs that stand in for
+   it, and by the search field of the mention and slash menus, so it stays
+   deliberately thin — type, caret, and a height band, with the chrome
+   properties zeroed out so the host's own form styling does not show through.
+
+   Both places a client is expected to override it work by loading later:
+   `.text-base` replaces the literal 13px, and the client's contenteditable rule
+   replaces the height band. */
+
+.beaver-root .chat-input {
+    font-family: system-ui, -apple-system, sans-serif;
+    width: 100%;
+    font-size: 13px;
+    /* color: var(--fill-secondary); */
+    background-color: transparent;
+    border: 0px solid transparent;
+    /* border-radius: 8px; */
+    outline: none;
+    caret-color: var(--fill-primary);
+    resize: none;
+    padding: 1px 0;
+    line-height: 1.25;
+    height: calc(1.25em + 3px);
+    min-height: calc(1.25em + 2px);
+    max-height: 12.5em;
+    /* transition: all .2s ease-in-out; */
+    /* overflow-y: auto; */
+}
+
+.beaver-root .chat-input:focus {
+    border-color: var(--fill-quarternary);
+    box-shadow: 0 0 0 0px transparent;
+    background-color: transparent !important;
+    border: 0px solid transparent !important;
+    border-bottom-color: transparent !important;
+    background-image: none !important;
+}
+
+.beaver-root .chat-input:hover {
+    background-color: transparent !important;
+}
+
+.beaver-root .chat-input::placeholder {
+    color: var(--fill-tertiary);
+}
+
+/* ───── Tooltips ───── */
+
+/* The floating box, the arrow that points back at the trigger, and the fade-in
+   that brings it up. The arrow is drawn by three shared components (Tooltip,
+   ContextMenu, SlashCommandHoverCardPlugin), and the rest of the vocabulary is
+   kept beside it rather than split across sheets.
+
+   The keyframes live here for the same reason `spin` does at the top of this
+   file: names resolve across every author sheet in the document, so a client
+   rule animating `tooltipFadeIn` keeps working. */
+
+.beaver-root .tooltip-container {
+    position: absolute;
+    z-index: 1000;
+    padding: 4px 8px;
+    border-radius: 4px;
+    background-color: var(--beaver-surface-overlay);
+    box-shadow: var(--beaver-shadow-overlay);
+    font-size: 0.85rem;
+    line-height: 1.4;
+    max-width: 250px;
+    word-wrap: break-word;
+    pointer-events: none;
+    color: var(--fill-secondary);
+    border: 1px solid var(--beaver-border-strong);
+    transform: translateX(-50%);
+    white-space: normal;
+}
+
+.beaver-root .tooltip-container.whitespace-nowrap {
+    white-space: nowrap;
+    max-width: none;
+}
+
+/* Arrow styles with border */
+.beaver-root .tooltip-arrow {
+    position: absolute;
+    width: 0;
+    height: 0;
+    transform: translateX(-50%);
+}
+
+.beaver-root .tooltip-arrow-bottom {
+    top: -6px;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 6px solid var(--beaver-border-strong);
+}
+
+.beaver-root .tooltip-arrow-bottom::after {
+    content: '';
+    position: absolute;
+    left: -5px;
+    top: 1px;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-bottom: 5px solid var(--beaver-surface-overlay);
+}
+
+.beaver-root .tooltip-arrow-top {
+    bottom: -6px;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 6px solid var(--beaver-border-strong);
+}
+
+.beaver-root .tooltip-arrow-top::after {
+    content: '';
+    position: absolute;
+    left: -5px;
+    bottom: 1px;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 5px solid var(--beaver-surface-overlay);
+}
+
+@keyframes tooltipFadeIn {
+    from { opacity: 0; transform: translateY(5px) translateX(-50%); }
+    to { opacity: 1; transform: translateY(0) translateX(-50%); }
+}
+
+@keyframes tooltipFadeInTop {
+    from { opacity: 0; transform: translateY(-5px) translateX(-50%); }
+    to { opacity: 1; transform: translateY(0) translateX(-50%); }
+}
+
+.beaver-root .tooltip-fade-in-bottom {
+    animation: tooltipFadeIn 0.2s ease-in-out forwards;
+}
+
+.beaver-root .tooltip-fade-in-top {
+    animation: tooltipFadeInTop 0.2s ease-in-out forwards;
 }
