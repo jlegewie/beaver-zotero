@@ -192,26 +192,25 @@
 /* The composer surface, shared with the cards that stand in for it (user
  * request, approval, credit confirmation, ask-user-question).
  *
- * The pane behind it is --material-sidepane, so the card is mixed from
- * --material-background towards that ground rather than given a fill of its
- * own: in a light theme it lands above the pane (#fafafa on #f2f2f2), in a
- * dark one below it (#252525 on #303030), which is what Zotero's own inputs
- * do. The flat --material-sidepane before it is the fallback for a renderer
- * without color-mix().
+ * The card sits on the pane ground (--beaver-surface-ground) and is one
+ * 60%-strength quarternary step away from it: #eaeaea on #f2f2f2 in a light
+ * theme, #353535 on #303030 in a dark one. So it darkens against a light
+ * ground and lightens against a dark one, which is the direction Zotero's own
+ * fills go. The recipe itself lives in agent-ui-tokens.css, as
+ * --beaver-surface-raised, so every raised surface shares it.
  *
- * Anything that docks to the card's top edge cancels the padding with the
- * same custom properties — see .pending-actions-bar below. */
+ * The local --composer-* properties are aliases of the shared tokens: anything
+ * that docks to the card's top edge cancels the padding with them — see
+ * .pending-actions-bar below. */
 [id^="beaver-pane-"] .user-message-display {
-    --composer-pad-x: 0.8rem;
-    --composer-pad-top: 0.85rem;
-    --composer-pad-bottom: 0.5rem;
-    --composer-radius: 10px;
+    --composer-pad-x: var(--beaver-card-pad-x);
+    --composer-pad-top: var(--beaver-card-pad-top);
+    --composer-pad-bottom: var(--beaver-card-pad-bottom);
+    --composer-radius: var(--beaver-radius-card);
     padding: var(--composer-pad-top) var(--composer-pad-x) var(--composer-pad-bottom);
-    border: 1px solid color-mix(in srgb, var(--material-mix-quarternary) 50%, var(--fill-quarternary));
+    border: 1px solid var(--beaver-border-default);
     border-radius: var(--composer-radius);
-    background-color: var(--material-sidepane);
-    /* background-color: color-mix(in srgb, var(--material-background) 60%, var(--material-sidepane)); */
-    background-color: color-mix(in srgb, var(--material-mix-quarternary) 60%, var(--material-sidepane));
+    background-color: var(--beaver-surface-raised);
     user-select: text;
 }
 
