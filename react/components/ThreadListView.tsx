@@ -490,7 +490,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                     e.stopPropagation();
                                     handleCancelRename();
                                 }}
-                                className="scale-10"
+                                className="scale-90"
                                 ariaLabel="Cancel rename"
                             />
                             <IconButton
