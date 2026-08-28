@@ -4,8 +4,9 @@ import { BeaverAgentPrompt } from '@beaver/agent-core/agents/types';
 import ContextMenu from '@beaver/agent-ui/primitives/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { RequestChips } from './requestChips';
-import { EditIcon, Spinner } from '../icons/icons';
+import { EditIcon, Spinner, ArrowUpLineIcon } from '../icons/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import SearchMenu from '@beaver/agent-ui/primitives/SearchMenu';
 import { regenerateWithEditedPromptAtom, isWSChatPendingAtom, retryPendingRunIdAtom } from '../../atoms/agentRunAtoms';
@@ -419,7 +420,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
 
                     {/* Lexical editor input */}
                     <form onSubmit={handleSubmit} className="display-flex flex-col">
-                        <div className="mb-2 -ml-1">
+                        <div className="mb-2">
                             <LexicalEditorInput
                                 ref={editorHandleRef}
                                 value={editedContent}
@@ -438,29 +439,27 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                             />
                         </div>
 
-                        {/* Button Row */}
-                        <div className="display-flex flex-row items-center pt-2">
+                        {/* Control row — the composer's, minus the controls
+                            that do not apply to an edit (no attachments to
+                            add, no web-search toggle). */}
+                        <div className="composer-controls">
                             <ModelSelectionButton inputRef={editInputRef} focusInput={focusEditor} />
                             <div className="flex-1" />
-                            <div className="display-flex flex-row items-center gap-4">
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    style={{ padding: '2px 5px' }}
-                                    onClick={() => setIsEditing(false)}
-                                >
-                                    Cancel
-                                </Button>
-                                <Button
-                                    type="submit"
-                                    variant="solid"
-                                    style={{ padding: '2px 5px' }}
-                                    onClick={handleSubmit}
-                                    disabled={editedContent.length === 0 || isPending || !selectedModel || isSlashMenuOpen}
-                                >
-                                    <span>Send <span className="opacity-50">⏎</span></span>
-                                </Button>
-                            </div>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                onClick={() => setIsEditing(false)}
+                            >
+                                Cancel
+                            </Button>
+                            <IconButton
+                                icon={ArrowUpLineIcon}
+                                variant="solid"
+                                className="composer-send"
+                                ariaLabel="Send edited message"
+                                onClick={handleSubmit}
+                                disabled={editedContent.length === 0 || isPending || !selectedModel || isSlashMenuOpen}
+                            />
                         </div>
                     </form>
                 </div>

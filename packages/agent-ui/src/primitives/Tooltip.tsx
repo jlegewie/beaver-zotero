@@ -242,7 +242,7 @@ const Tooltip: React.FC<TooltipProps> = ({
         <span
             ref={tooltipRef}
             className={`
-                bg-quaternary rounded-md shadow-md fixed z-100000 border-popup block
+                bg-overlay rounded-md shadow-md fixed z-100000 border-popup block
                 ${position.placement === 'bottom' ? 'tooltip-fade-in-bottom' : 'tooltip-fade-in-top'}
                 ${classNames}
             `}

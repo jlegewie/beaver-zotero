@@ -162,7 +162,7 @@ const Swatch: React.FC<{ color: string }> = ({ color }) => (
 );
 
 const CHANGE_CHIP_CLASS =
-    'inline-flex items-center gap-1 text-xs px-2 py-05 rounded-md bg-quaternary font-color-secondary border-quinary';
+    'inline-flex items-center gap-1 text-xs px-2 py-05 rounded-md bg-chip font-color-secondary border-quinary';
 
 /** Compact change label shown above the annotations it applies to. */
 const ChangeChip: React.FC<{

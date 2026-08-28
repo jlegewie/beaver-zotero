@@ -109,7 +109,7 @@ const ResetPasswordPage: React.FC = () => {
         </div>
 
         {/* Card */}
-        <div className="w-90 rounded-lg border-quinary p-4 bg-quaternary">
+        <div className="w-90 rounded-lg border-quinary p-4 bg-raised">
           {isRecoveryFlow ? (
             <form onSubmit={handleUpdatePassword} className="display-flex flex-col gap-3">
               <label className="font-sm" htmlFor="password">

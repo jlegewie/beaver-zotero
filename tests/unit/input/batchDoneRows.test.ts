@@ -211,7 +211,7 @@ describe('the completed batch rows', () => {
         const stack = BatchDoneRows({ batches: [entry({ progress_title: 'Filed items' })] }) as
             React.ReactElement<any>;
         expect(stack.props.className).toContain('batch-run-receipt');
-        expect(stack.props.className).toContain('rounded-md');
+        expect(stack.props.className).toContain('rounded-card');
     });
 
     it('names itself, having no live bar above it to do so', () => {

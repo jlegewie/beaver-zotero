@@ -78,6 +78,7 @@
     "./src/icons/ArrowLeftIcon.tsx",
     "./src/icons/ArrowRightIcon.tsx",
     "./src/icons/ArrowUpIcon.tsx",
+    "./src/icons/ArrowUpLineIcon.tsx",
     "./src/icons/ArrowUpRightIcon.tsx",
     "./src/icons/AttachmentIcon.tsx",
     "./src/icons/AuthorGroupIcon.tsx",

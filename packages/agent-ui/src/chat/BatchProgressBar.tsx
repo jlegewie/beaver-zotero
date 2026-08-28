@@ -99,7 +99,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
 
     return (
         <div
-            className="batch-progress-bar bg-senary border-bottom-quinary"
+            className="composer-docked-bar batch-progress-bar border-bottom-quinary"
             style={{ position: 'relative' }}
             role="group"
             aria-label="Batch job progress"

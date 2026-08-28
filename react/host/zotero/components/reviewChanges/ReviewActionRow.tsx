@@ -223,7 +223,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
 
     const containerClassName = inGroup
         ? 'display-flex flex-col min-w-0'
-        : 'border-popup rounded-md display-flex flex-col min-w-0';
+        : 'border-card rounded-card display-flex flex-col min-w-0';
     const headerRowClassName = [
         'display-flex flex-row items-center py-15 gap-1',
         inGroup ? '' : 'bg-senary',

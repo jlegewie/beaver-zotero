@@ -2,7 +2,7 @@ import React from 'react';
 
 const SuggestionCardSkeleton: React.FC = () => {
     return (
-        <div className="p-3 rounded-md bg-senary first-run-skeleton-card">
+        <div className="p-3 rounded-card bg-senary first-run-skeleton-card">
             <style>
                 {`
                 @keyframes firstRunSkeletonShimmer {
