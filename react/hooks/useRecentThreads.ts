@@ -20,13 +20,15 @@ export const useRecentThreads = (): void => {
         // Skip if user is not authenticated
         if (!isAuthenticated || !user) return;
 
-        // Initial fetch of recent threads. The identity columns must be part of
-        // the select: rows in recentThreadsAtom flow into thread-open paths,
-        // and identity-less rows would read as unattributed (never mismatched).
+        // Initial fetch of recent threads. This select must list every column
+        // `threadModelToThreadData` reads: rows in recentThreadsAtom flow into
+        // thread-open paths, identity-less rows would read as unattributed
+        // (never mismatched), and a missing `starred` would read as unpinned —
+        // disagreeing with the realtime payloads below, which carry whole rows.
         const fetchRecentThreads = async () => {
             const { data, error } = await supabase
                 .from('threads')
-                .select('id, name, created_at, updated_at, zotero_user_id, zotero_local_id')
+                .select('id, name, created_at, updated_at, zotero_user_id, zotero_local_id, starred, agent_name')
                 .eq('user_id', user.id)
                 .order('updated_at', { ascending: false })
                 .limit(MAX_THREADS);

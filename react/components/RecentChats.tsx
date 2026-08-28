@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { isThreadListViewAtom, isLibraryTabAtom, selectedZoteroTabIdAtom, hasPopupMessagesAtom, threadListFilterAtom, ThreadItemFilter } from '../atoms/ui';
 import { ThreadData, loadThreadAtom } from '../atoms/threads';
+import { upsertThreadsAtom, threadWriteStampAtom } from '../atoms/threadList';
 import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { threadService, isThreadAgentMismatch } from '@beaver/agent-core/transport/threadService';
@@ -89,6 +90,8 @@ const RecentChats: React.FC = () => {
     const selectedTabId = useAtomValue(selectedZoteroTabIdAtom);
     const setIsThreadListView = useSetAtom(isThreadListViewAtom);
     const loadThread = useSetAtom(loadThreadAtom);
+    const upsertThreads = useSetAtom(upsertThreadsAtom);
+    const jotaiStore = useStore();
     const setFilter = useSetAtom(threadListFilterAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const hasPopupMessages = useAtomValue(hasPopupMessagesAtom);
@@ -104,6 +107,10 @@ const RecentChats: React.FC = () => {
 
     const fetchRecentChats = useCallback(async (isCancelled: () => boolean) => {
         if (!user) return;
+        // Read at call time, not subscribed: the stamp must be the value as
+        // of this request, and subscribing would re-run this effect on every
+        // pin toggle anywhere in the app.
+        const stampAtFetch = jotaiStore.get(threadWriteStampAtom);
 
         // Read reader/note info synchronously from Zotero APIs
         // instead of waiting for the async zoteroContextAtom update chain
@@ -213,6 +220,11 @@ const RecentChats: React.FC = () => {
             if (isCancelled()) return;
             setThreads(resultThreads);
             setContextType(resultContextType);
+            // Into the shared thread store too: opening one of these chats then
+            // needs no extra fetch to know whether it is pinned. The generation
+            // was read before the fetch, so a response arriving after a
+            // sign-out is dropped rather than repopulating the store.
+            upsertThreads({ threads: resultThreads, stamp: stampAtFetch });
 
             recentCache.set(cacheKey, {
                 threads: resultThreads,
@@ -228,7 +240,7 @@ const RecentChats: React.FC = () => {
                 setIsFetching(false);
             }
         }
-    }, [user, isLibraryTab, selectedTabId, searchableLibraryIds]);
+    }, [user, isLibraryTab, selectedTabId, searchableLibraryIds, upsertThreads, jotaiStore]);
 
     // Fetch on mount and when context changes (e.g. library ↔ reader tab switch)
     useEffect(() => {
@@ -238,8 +250,9 @@ const RecentChats: React.FC = () => {
         return () => { cancelled = true; };
     }, [fetchRecentChats]);
 
-    // Register callback so external callers (ThreadListView, ThreadsMenu) can
-    // remove a deleted thread from our local state without a full re-fetch.
+    // Register callback so external callers (ThreadListView, the header's
+    // chat-actions menu) can remove a deleted thread from our local state
+    // without a full re-fetch.
     useEffect(() => {
         const unregister = registerRecentChatsRemover((id: string) => {
             setThreads(prev => prev.filter(t => t.id !== id));
