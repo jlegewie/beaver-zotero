@@ -6,6 +6,8 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { 
   selectedModelAtom,
   availableModelsAtom,
+  isModelSelectionAvailableAtom,
+  modelMenuGroupsAtom,
   updateSelectedModelAtom,
   validateSelectedModelAtom,
 } from '../../../atoms/models';
@@ -77,6 +79,13 @@ const ModelSelectionButton: React.FC<{
 }> = ({ inputRef, focusInput, disabled = false }) => {
     const selectedModel = useAtomValue(selectedModelAtom);
     const availableModels = useAtomValue(availableModelsAtom);
+    // The sections below, and whether there are enough rows across them to be
+    // worth a menu. Both come from `modelMenuGroupsAtom`, which the composer
+    // also reads to decide whether to fill this button's slot — so the slot
+    // cannot end up empty or filled twice.
+    const { included: included_models, custom: custom_models, byok: byok_models } =
+        useAtomValue(modelMenuGroupsAtom);
+    const isModelSelectionAvailable = useAtomValue(isModelSelectionAvailableAtom);
     const liveRegionRef = useRef<HTMLDivElement | null>(null);
     const previousSelectedKeyRef = useRef<string | null>(null);
     const hasInitializedSelectionRef = useRef(false);
@@ -86,9 +95,6 @@ const ModelSelectionButton: React.FC<{
     const updateSelectedModel = useSetAtom(updateSelectedModelAtom);
     const validateSelectedModel = useSetAtom(validateSelectedModelAtom);
     const selectedKey = selectedModel ? getModelSelectionKey(selectedModel) : null;
-    const custom_models = useMemo(() => availableModels.filter((model) => model.is_custom), [availableModels]);
-    const included_models = useMemo(() => availableModels.filter((model) => model.allow_app_key && model.is_enabled && !model.is_custom) || [], [availableModels]);
-    const byok_models = useMemo(() => availableModels.filter((model) => model.allow_byok && model.is_enabled && !model.is_custom), [availableModels]);
     const selectedModelAccessibleLabel = getAccessibleModelLabel(
         selectedModel,
         !!selectedModel && included_models.length === 1 && isBeaverModel(selectedModel),
@@ -147,7 +153,9 @@ const ModelSelectionButton: React.FC<{
     const menuItems = useMemo((): MenuItem[] => {
         const items: MenuItem[] = [];
 
-        included_models.sort((a, b) => a.name.localeCompare(b.name)).forEach((model) => {
+        // Copy before sorting: these arrays are the derived atom's cached value,
+        // and sorting in place would reorder it for every other reader.
+        [...included_models].sort((a, b) => a.name.localeCompare(b.name)).forEach((model) => {
             // Create a model variant with access_mode set to 'app_key'
             const modelWithAccessMode = { ...model, access_mode: 'app_key' as const };
             const modelKey = getModelSelectionKey(modelWithAccessMode);
@@ -205,7 +213,7 @@ const ModelSelectionButton: React.FC<{
                 onClick: () => {},
             });
 
-            byok_models.sort((a, b) => a.name.localeCompare(b.name)).forEach((model) => {
+            [...byok_models].sort((a, b) => a.name.localeCompare(b.name)).forEach((model) => {
                 // Create a model variant with access_mode set to 'byok'
                 const modelWithAccessMode = { ...model, access_mode: 'byok' as const };
                 const modelKey = getModelSelectionKey(modelWithAccessMode);
@@ -259,7 +267,7 @@ const ModelSelectionButton: React.FC<{
         maxWidth: '250px',
     };
 
-    if (menuItems.length <= 1) {
+    if (!isModelSelectionAvailable) {
         return null;
     }
 

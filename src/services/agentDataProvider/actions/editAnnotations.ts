@@ -33,7 +33,7 @@ import {
     refreshMovedAnnotationsInOpenReaders,
     unsetTrashedAnnotationsInOpenReaders,
 } from "../../annotations/readerSync";
-import { checkLibraryExcluded, getDeferredToolPreference } from "../utils";
+import { checkLibraryExcluded, getDeferredToolPreference, hasFullLibraryAccess } from "../utils";
 import { checkAborted, TimeoutContext, TimeoutError } from "../timeout";
 import {
     prepareRelocation,
@@ -982,11 +982,16 @@ function turnedDestructive(
  * applies anything on its own, so raising a card buys no safety — which is why
  * a delete inherits that choice from the annotations group rather than
  * defaulting to a prompt the user opted out of.
+ *
+ * The composer's "Full access" grant sits above all of it: the user asked for
+ * every action to apply on its own, so a destructive edit is not escalated
+ * back to a prompt.
  */
 function resolvePreference(
     data: EditAnnotationsProposedData,
     targets: ResolvedTarget[],
 ): DeferredToolPreference {
+    if (hasFullLibraryAccess()) return "always_apply";
     if (data.operation === "delete") {
         const deletionPreference = getDeferredToolPreference(
             "delete_annotations",

@@ -172,12 +172,14 @@ import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreat
 import { extractZoteroReferencesFromToolCall } from '@beaver/agent-core/run-state/toolLabels';
 import {
     clearRunApprovalPolicyAtom,
+    getActionToolGroup,
     getPendingApprovalIdsForToolGroup,
     getToolGroup,
     grantToolGroupForRunAtom,
     isActionApprovedForCurrentRun,
     runApprovalPolicyAtom,
 } from './runApprovalPolicy';
+import { hasFullLibraryAccessAtom } from './libraryPermission';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { store } from '../store';
@@ -1916,7 +1918,22 @@ export function createWSCallbacks(
 
             // A grant can be selected while other validation requests are
             // already in flight. Catch those requests here even though future
-            // validations will return always_apply directly.
+            // validations will return always_apply directly. The same race
+            // applies to the composer's standing "Full access" grant, which is
+            // scoped to library-modifying tools: a request with no tool group
+            // of its own is never answered by it — that covers the
+            // backend-managed confirm_extraction / confirm_external_search
+            // approvals, which are about spend and off-device access rather
+            // than library writes, as well as a legacy cost confirmation.
+            if (
+                store.get(hasFullLibraryAccessAtom)
+                && getActionToolGroup(event.action_type, event.action_data) !== null
+            ) {
+                logger(`Auto-approving ${event.action_type} — full library access is enabled`, 1);
+                agentService.sendApprovalResponse(event.action_id, true);
+                return;
+            }
+
             const runPolicy = store.get(runApprovalPolicyAtom);
             const activeRunId = store.get(activeRunAtom)?.id ?? null;
             if (isActionApprovedForCurrentRun(

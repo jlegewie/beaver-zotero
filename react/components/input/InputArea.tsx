@@ -8,12 +8,14 @@ import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/ag
 import Button from '@beaver/agent-ui/primitives/Button';
 import SearchMenu from '@beaver/agent-ui/primitives/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
+import LibraryPermissionButton from '../ui/buttons/LibraryPermissionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
 import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryTabAtom, isWebSearchAllowedAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
 import { currentNoteItemAtom } from '../../atoms/zoteroContext';
-import { selectedModelAtom, isUsingBeaverCreditsAtom } from '../../atoms/models';
+import { selectedModelAtom, isUsingBeaverCreditsAtom, isModelSelectionAvailableAtom } from '../../atoms/models';
+import { libraryPermissionModeAtom } from '../../atoms/libraryPermission';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
@@ -34,8 +36,17 @@ import { useAddSourcesMenu, AddSourcesMenuHandle } from '@beaver/agent-ui/compos
 import { useComposerPasteHandlers } from '../../hooks/useComposerPasteHandlers';
 import { useActionPopupResolver } from '../../hooks/useActionPopupResolver';
 import { sendComposedMessageAtom } from '../../atoms/actions';
+import { useElementWidth } from '../../hooks/useElementWidth';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
+
+/**
+ * The narrowest control row that still has room for the permission menu's
+ * label. Below it the trigger drops to its icon, so a sidebar dragged narrow
+ * loses the word rather than the control. Only consulted where the menu can
+ * carry a label at all — beside the model selector it is always icon-only.
+ */
+const PERMISSION_LABEL_MIN_ROW_WIDTH = 250;
 
 interface InputAreaProps {
     // Kept for backward-compat with callers that only need `.focus()`.
@@ -135,6 +146,39 @@ const InputArea: React.FC<InputAreaProps> = ({
     // Reject stands in for Send only once there are instructions to reject
     // with; an approval pending against an empty composer leaves Stop in place.
     const showRejectButton = isAwaitingApproval && messageContent.trim().length > 0;
+
+    // Where the library-permission menu goes. The model selector hides itself
+    // when there is nothing to choose between, and the permission menu takes
+    // the slot it leaves rather than the row keeping a gap.
+    const isModelSelectionAvailable = useAtomValue(isModelSelectionAvailableAtom);
+    const showsModelSelector = !hideModelSelector && isModelSelectionAvailable;
+    const [libraryPermissionMode, setLibraryPermissionMode] = useAtom(libraryPermissionModeAtom);
+    // The control row's own width, not the window's: the sidebar is dragged.
+    const [controlsRef, controlsWidth] = useElementWidth<HTMLDivElement>();
+    // Icon-only beside the model selector, where the row is already full, and
+    // in the model selector's slot until the row is measured wide enough for
+    // the label. An unmeasured row is treated as narrow, so the label appears
+    // once there is known room for it rather than overflowing and retreating.
+    const isPermissionMenuIconOnly = showsModelSelector
+        || controlsWidth === null
+        || controlsWidth < PERMISSION_LABEL_MIN_ROW_WIDTH;
+    const libraryPermissionButton = (
+        <LibraryPermissionButton
+            mode={libraryPermissionMode}
+            onChange={setLibraryPermissionMode}
+            iconOnly={isPermissionMenuIconOnly}
+            disabled={isAwaitingApproval}
+            // Matches whichever control it sits by: the model selector's ghost
+            // in its slot, web search's quieter one out on the right. The box
+            // comes from the variant, and from the composer row's square-control
+            // rule once `composer-permission-icon` is on.
+            variant={showsModelSelector ? 'ghost-secondary' : 'ghost'}
+            className={isPermissionMenuIconOnly
+                ? 'composer-permission composer-permission-icon'
+                : 'composer-permission'}
+            onAfterClose={focusEditor}
+        />
+    );
     // Note: while an ask_user_question request is pending (and no approval is),
     // Sidebar renders AskUserQuestionPanel INSTEAD of this component, so no
     // question-mode handling is needed here.
@@ -594,9 +638,11 @@ const InputArea: React.FC<InputAreaProps> = ({
                     />
                 </div>
 
-                {/* Control row: add sources and the model on the left, web
-                    search and send after the flexible gap. */}
-                <div className="composer-controls">
+                {/* Control row: add sources and the model on the left, the
+                    permission menu, web search and send after the flexible
+                    gap. The permission menu moves left into the model
+                    selector's slot when there is no model to choose. */}
+                <div className="composer-controls" ref={controlsRef}>
                     {!hideAttachmentMenu && (
                         <AddSourcesMenu
                             ref={addSourcesMenuRef}
@@ -614,10 +660,17 @@ const InputArea: React.FC<InputAreaProps> = ({
                             verticalPosition={verticalPosition}
                         />
                     )}
+                    {/* Mounted whenever the composer offers a model at all, so
+                        its selection-validation effect keeps running even in the
+                        renders where it draws nothing. It returns null on the
+                        same atom `showsModelSelector` reads, so exactly one of
+                        these two fills the slot. */}
                     {!hideModelSelector && (
                         <ModelSelectionButton inputRef={inputRef} focusInput={focusEditor} disabled={isAwaitingApproval} />
                     )}
+                    {!showsModelSelector && libraryPermissionButton}
                     <div className="flex-1" />
+                    {showsModelSelector && libraryPermissionButton}
                     <span id={webSearchDescriptionId} className="sr-only">
                         {webSearchDescription}
                     </span>

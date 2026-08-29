@@ -19,6 +19,7 @@ vi.mock("../../../src/utils/libraryIdentity", () => ({
 
 let deferredPreference = "always_apply";
 let deletionGrantedForRun = false;
+let fullLibraryAccess = false;
 let excludedLibraryId: number | null = null;
 const preferenceLookups: string[] = [];
 vi.mock("../../../src/services/agentDataProvider/utils", () => ({
@@ -35,6 +36,7 @@ vi.mock("../../../src/services/agentDataProvider/utils", () => ({
             return deletionGrantedForRun ? "always_apply" : "always_ask";
         return deferredPreference;
     },
+    hasFullLibraryAccess: () => fullLibraryAccess,
 }));
 
 /** The placement a successfully prepared move writes onto the annotation. */
@@ -212,6 +214,7 @@ beforeEach(() => {
     refreshMovedAnnotationsInOpenReaders.mockClear();
     deferredPreference = "always_apply";
     deletionGrantedForRun = false;
+    fullLibraryAccess = false;
     excludedLibraryId = null;
     items.clear();
     items.set("AAA", annotation("AAA"));
@@ -720,6 +723,23 @@ describe("edit_annotations approval policy", () => {
             operation: "delete",
             annotation_refs: refs("AAA"),
         });
+
+        expect(response.preference).toBe("always_apply");
+    });
+
+    it.each([
+        ["a delete", { operation: "delete", annotation_refs: refs("AAA") }],
+        [
+            "a destructive edit",
+            { edits: [{ annotation_refs: refs("AAA"), changes: { comment: "new" } }] },
+        ],
+    ])("applies %s under full library access", async (_label, request) => {
+        // The composer's standing grant sits above the destructive carve-outs:
+        // the user asked for every action to apply, so neither the deletion
+        // group nor an overwritten comment is escalated back to a card.
+        fullLibraryAccess = true;
+
+        const response = await validate(request as any);
 
         expect(response.preference).toBe("always_apply");
     });

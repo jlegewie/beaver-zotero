@@ -25,6 +25,7 @@ import { addPopupMessageAtom } from '../../../react/utils/popupMessageUtils';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
 import { DeferredToolPreference, type AttachmentRowResult } from '@beaver/agent-core/protocol/agentProtocol';
 import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
+import { hasFullLibraryAccessAtom } from '../../../react/atoms/libraryPermission';
 import {
     isActionApprovedForCurrentRun,
     runApprovalPolicyAtom,
@@ -1613,6 +1614,20 @@ export function validateLibraryAccess(libraryIdOrName: number | string | null | 
 }
 
 /**
+ * Whether the composer's standing "Full access" grant is in force.
+ *
+ * Reading it never throws for a caller: an unavailable store means no grant.
+ */
+export function hasFullLibraryAccess(): boolean {
+    try {
+        return store.get(hasFullLibraryAccessAtom);
+    } catch (error) {
+        logger(`hasFullLibraryAccess: Failed to read permission mode: ${error}`, 1);
+        return false;
+    }
+}
+
+/**
  * Get the user's preference for a deferred tool.
  * Reads from Zotero prefs with a two-level structure:
  * - toolToGroup: Maps tool names to group names
@@ -1621,12 +1636,21 @@ export function validateLibraryAccess(libraryIdOrName: number | string | null | 
  * Merges stored prefs with the defaults from deferredToolPreferences.ts
  * so that newly added tools (e.g. create_note) use their configured
  * default even before the user saves any preference change.
+ *
+ * The composer's "Full access" mode short-circuits all of it: it is an explicit
+ * standing grant for the session, so every deferred tool applies on its own,
+ * including the groups (annotation deletion, destructive note rewrites) that
+ * have no Preferences row and would otherwise always ask.
  */
 export function getDeferredToolPreference(
     toolName: string,
     actionData?: Record<string, any>,
 ): DeferredToolPreference {
     try {
+        if (store.get(hasFullLibraryAccessAtom)) {
+            return 'always_apply';
+        }
+
         const runPolicy = store.get(runApprovalPolicyAtom);
         const activeRunId = store.get(activeRunAtom)?.id ?? null;
         if (isActionApprovedForCurrentRun(runPolicy, activeRunId, toolName, actionData)) {

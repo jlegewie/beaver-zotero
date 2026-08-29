@@ -2,12 +2,9 @@ import React from 'react';
 import PermissionMenu, { PermissionMenuOption } from '@beaver/agent-ui/primitives/PermissionMenu';
 import HandIcon from '@beaver/agent-ui/icons/HandIcon';
 import SecurityWarningIcon from '@beaver/agent-ui/icons/SecurityWarningIcon';
+import type { LibraryPermissionMode } from '../../../atoms/libraryPermission';
 
-/**
- * How much Beaver may change in the library on its own: ask before every write,
- * or apply writes as they come.
- */
-export type LibraryPermissionMode = 'ask' | 'full_access';
+export type { LibraryPermissionMode };
 
 export const LIBRARY_PERMISSION_HEADING = 'How should library changes be approved?';
 
@@ -18,18 +15,28 @@ export const LIBRARY_PERMISSION_HEADING = 'How should library changes be approve
 export const LIBRARY_PERMISSION_OPTIONS: readonly PermissionMenuOption<LibraryPermissionMode>[] = [
     {
         value: 'ask',
-        label: 'Ask for approval',
-        description: 'Review every change before it is applied',
+        label: 'Ask permission',
+        description: 'Follow the approval settings in Preferences',
         icon: HandIcon,
     },
     {
         value: 'full_access',
         label: 'Full access',
-        description: 'Edit items, collections, and annotations without asking',
+        // Names the blast radius rather than the common case: this mode also
+        // overrides the approval settings in Preferences and the two changes
+        // that otherwise always ask — deleting annotations, and rewriting a
+        // note wholesale.
+        description: 'Apply every change, including deletions and note rewrites, without asking',
         icon: SecurityWarningIcon,
         tone: 'warning',
     },
 ];
+
+/** The trigger's tooltip in either layout: what the active mode means. */
+const LIBRARY_PERMISSION_TOOLTIPS: Record<LibraryPermissionMode, string> = {
+    ask: 'Beaver asks before it changes your library',
+    full_access: 'Beaver changes your library without asking',
+};
 
 interface LibraryPermissionButtonProps {
     mode: LibraryPermissionMode;
@@ -37,6 +44,8 @@ interface LibraryPermissionButtonProps {
     disabled?: boolean;
     /** Render the trigger as its icon alone, for a tight toolbar. */
     iconOnly?: boolean;
+    /** Button variant, so the trigger can match whichever control it sits by. */
+    variant?: string;
     className?: string;
     style?: React.CSSProperties;
     onAfterClose?: () => void;
@@ -53,6 +62,7 @@ const LibraryPermissionButton: React.FC<LibraryPermissionButtonProps> = ({
     onChange,
     disabled = false,
     iconOnly = false,
+    variant,
     className,
     style,
     onAfterClose,
@@ -64,9 +74,10 @@ const LibraryPermissionButton: React.FC<LibraryPermissionButtonProps> = ({
         heading={LIBRARY_PERMISSION_HEADING}
         disabled={disabled}
         iconOnly={iconOnly}
+        variant={variant}
         className={className}
-        style={style ?? { padding: '2px 6px', fontSize: '0.80rem' }}
-        tooltipContent="How library changes are approved"
+        style={style}
+        tooltipContent={LIBRARY_PERMISSION_TOOLTIPS[mode]}
         onAfterClose={onAfterClose}
     />
 );

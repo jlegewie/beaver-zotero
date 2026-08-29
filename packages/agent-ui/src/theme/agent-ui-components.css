@@ -399,17 +399,22 @@
 }
 
 /* Icon-only controls are square. `Icon` defaults to 1em, so an icon that is
- * not given an explicit size follows the button's font-size. */
+ * not given an explicit size follows the button's font-size. The permission
+ * menu is square only while it is showing its icon alone; with a label it keeps
+ * its variant's own box. */
 .beaver-root .composer-controls button.composer-add-sources,
-.beaver-root .composer-controls button.composer-web-search {
+.beaver-root .composer-controls button.composer-web-search,
+.beaver-root .composer-controls button.composer-permission-icon {
     width: 22px;
     height: 22px;
     padding: 0;
     justify-content: center;
 }
 
-/* Web search takes its icon size from the button, per the rule above. */
-.beaver-root button.composer-web-search {
+/* Web search and the icon-only permission menu take their icon size from the
+ * button, per the rule above. */
+.beaver-root button.composer-web-search,
+.beaver-root button.composer-permission-icon {
     font-size: 15px;
 }
 

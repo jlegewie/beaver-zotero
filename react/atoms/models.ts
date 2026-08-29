@@ -136,6 +136,46 @@ export const availableModelsAtom = atom(
 
 
 /**
+ * The available models split into the three sections the model menu shows.
+ *
+ * The single source for both what the menu lists and whether it is worth
+ * showing at all, so the menu and the composer that fills its slot cannot
+ * disagree about the second.
+ */
+export const modelMenuGroupsAtom = atom(
+    get => {
+        const availableModels = get(availableModelsAtom);
+        return {
+            included: availableModels.filter(
+                (model) => model.allow_app_key && model.is_enabled && !model.is_custom,
+            ),
+            custom: availableModels.filter((model) => model.is_custom),
+            byok: availableModels.filter(
+                (model) => model.allow_byok && model.is_enabled && !model.is_custom,
+            ),
+        };
+    }
+);
+
+/**
+ * Whether the model menu has anything to choose between.
+ *
+ * Counts the rows the menu would draw, so a section header counts too: a lone
+ * custom or BYOK model still arrives under one, and the menu is worth opening.
+ * `ModelSelectionButton` hides itself exactly when this is false, and the
+ * composer puts the library-permission menu in the slot it leaves.
+ */
+export const isModelSelectionAvailableAtom = atom(
+    get => {
+        const { included, custom, byok } = get(modelMenuGroupsAtom);
+        const rows = included.length
+            + (custom.length > 0 ? custom.length + 1 : 0)
+            + (byok.length > 0 ? byok.length + 1 : 0);
+        return rows > 1;
+    }
+);
+
+/**
  * Derived atom that returns the default Beaver model from the available models
  */
 export const beaverDefaultModelAtom = atom<ModelConfig | null>(
