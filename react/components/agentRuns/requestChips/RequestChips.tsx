@@ -7,8 +7,10 @@ import {
     ItemMetadataAttachment,
     NoteAttachment,
     SourceAttachment,
+    messageAttachmentKey,
+    zoteroReferenceKey,
 } from '@beaver/agent-core/types/attachments/apiTypes';
-import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import type { ZoteroCollection, ZoteroItemReference, ZoteroTag } from '@beaver/agent-core/types/zotero';
 import { EXTERNAL_LIBRARY_ID } from '../../../../src/services/externalFiles';
 import {
     AnnotationChip,
@@ -22,6 +24,28 @@ import {
 import type { ChipPopupSubtitle } from '@beaver/agent-ui/chat/ChipPopup';
 
 const EMPTY_ATTACHMENTS: NonNullable<BeaverAgentPrompt['attachments']> = [];
+
+/** Identifies one chip for removal while editing. */
+export type RequestChipRef =
+    | { kind: 'attachment'; key: string }
+    | { kind: 'library'; libraryId: number }
+    | { kind: 'collection'; key: string }
+    | { kind: 'tag'; key: string };
+
+export function requestFilterCollectionKey(collection: ZoteroCollection): string {
+    return zoteroReferenceKey(collection);
+}
+
+export function requestFilterTagKey(tag: ZoteroTag): string {
+    return `${tag.libraryId}-${tag.id}-${tag.tag}`;
+}
+
+/** Chip-row edit mode: hover "x" and right-click Remove on every chip. */
+export interface RequestChipsEditing {
+    onRemove: (ref: RequestChipRef) => void;
+    /** "Remove all" in the context menu; omit when only one chip is present. */
+    onRemoveAll?: () => void;
+}
 
 function refKey(ref: ZoteroItemReference): string {
     return `${ref.library_id}-${ref.zotero_key}`;
@@ -87,8 +111,20 @@ function noteSubtitle(att: NoteAttachment): ChipPopupSubtitle {
     return att.parent_key ? { text: 'Attached note' } : { text: 'Standalone note' };
 }
 
-export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) {
+export function RequestChips({
+    userPrompt,
+    editing,
+}: {
+    userPrompt: BeaverAgentPrompt;
+    editing?: RequestChipsEditing;
+}) {
     const attachments = userPrompt.attachments ?? EMPTY_ATTACHMENTS;
+
+    // Undefined in read-only mode, which leaves chips without an "x" or menu.
+    const removeConfig = (ref: RequestChipRef) =>
+        editing
+            ? { onRemove: () => editing.onRemove(ref), onRemoveAll: editing.onRemoveAll }
+            : undefined;
 
     return (
         <div className="composer-attachments">
@@ -97,11 +133,12 @@ export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) 
                     key={library.library_id}
                     libraryId={library.library_id}
                     name={library.name}
+                    remove={removeConfig({ kind: 'library', libraryId: library.library_id })}
                 />
             ))}
             {userPrompt.filters?.collections?.map((collection) => (
                     <CollectionChip
-                        key={`${collection.library_id}-${collection.zotero_key}`}
+                        key={requestFilterCollectionKey(collection)}
                         name={collection.name}
                         collectionRef={{
                             library_id: collection.library_id,
@@ -109,12 +146,19 @@ export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) 
                             library_ref: collection.library_ref,
                         }}
                         isFilter={true}
+                        remove={removeConfig({ kind: 'collection', key: requestFilterCollectionKey(collection) })}
                     />
             ))}
             {userPrompt.filters?.tags?.map((tag) => (
-                <TagChip key={`${tag.libraryId}-${tag.id}-${tag.tag}`} tag={tag.tag} color={tag.color} />
+                <TagChip
+                    key={requestFilterTagKey(tag)}
+                    tag={tag.tag}
+                    color={tag.color}
+                    remove={removeConfig({ kind: 'tag', key: requestFilterTagKey(tag) })}
+                />
             ))}
             {attachments.map((att) => {
+                const attachmentRemove = removeConfig({ kind: 'attachment', key: messageAttachmentKey(att) });
                 switch (att.type) {
                     case 'item': {
                         const ref = attachmentRef(att);
@@ -126,6 +170,7 @@ export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) 
                                 itemType={att.item?.item_type}
                                 label={itemStubLabel(att)}
                                 subtitle={itemStubSubtitle(att)}
+                                remove={attachmentRemove}
                             />
                         );
                     }
@@ -139,6 +184,7 @@ export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) 
                                 contentKind={att.attachment?.content_kind}
                                 label={sourceStubLabel(att)}
                                 subtitle={sourceSubtitle(att)}
+                                remove={attachmentRemove}
                             />
                         );
                     }
@@ -155,6 +201,7 @@ export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) 
                                 annotationType={annotation.annotation_type}
                                 color={annotation.color}
                                 title={annotationTitle(annotation)}
+                                remove={attachmentRemove}
                             />
                         );
                     }
@@ -170,6 +217,7 @@ export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) 
                                 }}
                                 title={note.title}
                                 subtitle={noteSubtitle(note)}
+                                remove={attachmentRemove}
                             />
                         );
                     }
@@ -184,6 +232,7 @@ export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) 
                                     zotero_key: collection.zotero_key,
                                     library_ref: collection.library_ref,
                                 }}
+                                remove={attachmentRemove}
                             />
                         );
                     }
@@ -195,6 +244,7 @@ export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) 
                                 extKey={file.ext_key}
                                 filename={file.filename}
                                 contentKind={file.content_kind}
+                                remove={attachmentRemove}
                             />
                         );
                     }

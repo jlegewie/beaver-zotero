@@ -243,6 +243,36 @@ export function messageAttachmentLookupKeys(attachment: MessageAttachment): stri
 }
 
 /**
+ * Lookup aliases namespaced by object kind. Collections and items are separate
+ * Zotero key namespaces, so the same key in the same library can name both; a
+ * bare-key merge would let an attached item swallow a collection that merely
+ * shares its key.
+ */
+function mergeLookupKeys(attachment: MessageAttachment): string[] {
+    const namespace = attachment.type === 'collection' ? 'collection' : 'item';
+    return messageAttachmentLookupKeys(attachment).map((key) => `${namespace}:${key}`);
+}
+
+/**
+ * Append `added` onto `existing`, skipping anything already present under any
+ * {@link messageAttachmentLookupKeys} alias.
+ */
+export function mergeMessageAttachments(
+    existing: MessageAttachment[],
+    added: MessageAttachment[],
+): MessageAttachment[] {
+    const keys = new Set(existing.flatMap(mergeLookupKeys));
+    const merged = [...existing];
+    for (const attachment of added) {
+        const aliases = mergeLookupKeys(attachment);
+        if (aliases.some((key) => keys.has(key))) continue;
+        aliases.forEach((key) => keys.add(key));
+        merged.push(attachment);
+    }
+    return merged;
+}
+
+/**
  * Whether two attachments identify the same object. When both carry portable
  * identity it is authoritative; the numeric fallback is only used when at
  * least one side is a legacy record without `library_ref`.

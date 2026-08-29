@@ -1,10 +1,13 @@
-import type { ReactNode } from 'react';
+import type { MutableRefObject, ReactNode } from 'react';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { CitationRef } from '@beaver/agent-core/citations/citationGrammar';
 import type { Citation, PartLocation } from '@beaver/agent-core/types/citations';
 import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
-import type { ToolCallPart, AgentRun, AgentRunStatus } from '@beaver/agent-core/agents/types';
+import type { ToolCallPart, AgentRun, AgentRunStatus, MessageSearchFilters } from '@beaver/agent-core/agents/types';
+import type { MessageAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
+import type { MenuPosition, SearchMenuCloseReason } from '../primitives/SearchMenu';
+import type { AddSourcesMenuHandle, AddSourcesQuerySource } from '../composer/useAddSourcesMenu';
 import type { AgentActionType } from '@beaver/agent-core/protocol/agentProtocol';
 import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgress';
 
@@ -458,6 +461,52 @@ export type AgentActionInStreamProps =
     };
 
 /**
+ * Host-rendered "+" picker for a user message being edited.
+ *
+ * Library search, collection/tag browse, and file pick are client-specific, so
+ * the shared overlay owns only the attachment/filter data and hands the picker
+ * to the host. Chip removal stays on the shared chip row.
+ */
+export interface RequestSourcesMenuProps {
+    attachments: MessageAttachment[];
+    filters: MessageSearchFilters | null;
+    /** Attach what the user picked; the caller dedupes against `attachments`. */
+    onAddAttachments(attachments: MessageAttachment[]): void;
+    /** Detach one attachment, keyed by `messageAttachmentKey`. */
+    onRemoveAttachment(attachmentKey: string): void;
+    onFiltersChange(filters: MessageSearchFilters): void;
+    /**
+     * True while a pick is still being staged (file copy, item load, filter
+     * serialize). The overlay holds sending so a submit in that window cannot
+     * regenerate without what the user just picked.
+     */
+    onPendingChange?(isPending: boolean): void;
+
+    // Menu state, owned by the caller so a typed `@` can open the picker with
+    // the editor as its search box (same as the composer). Produced by
+    // `useAddSourcesMenu`; only the picker itself is client-specific.
+    isMenuOpen: boolean;
+    menuPosition: MenuPosition;
+    searchQuery: string;
+    /** Whether the query comes from the editor (typed `@`) or the menu's field. */
+    querySource: AddSourcesQuerySource;
+    onQueryChange(query: string): void;
+    onOpen(position: MenuPosition): void;
+    /** Close without consuming the typed `@query` (Escape, click outside). */
+    onDismiss(reason: SearchMenuCloseReason): void;
+    /** Close because something was picked — the typed `@query` is consumed. */
+    onCommit(): void;
+    /** Clear the typed query but leave the menu open (entering a submenu). */
+    onResetQuery(): void;
+    /** Receives the open menu so the caller can step back out of a submenu. */
+    menuRef: MutableRefObject<AddSourcesMenuHandle | null>;
+
+    menuPortalContainer?: HTMLElement | null;
+    disabled?: boolean;
+    verticalPosition?: 'above' | 'below';
+}
+
+/**
  * Host-provided, client-specific UI components.
  *
  * Unlike the other slices (which inject *behavior*), this slice injects *UI* for
@@ -511,6 +560,12 @@ export interface ComponentsHost {
      * null falls back to the package's generic library icon.
      */
     revealInLibraryIcon(props: { className?: string }): ReactNode;
+    /**
+     * Render the "+" picker for a user message being edited. Optional — a
+     * client with no library to pick from omits it, and the overlay then only
+     * lets the user remove what is already attached.
+     */
+    requestSourcesMenu?(props: RequestSourcesMenuProps): ReactNode;
 }
 
 /**

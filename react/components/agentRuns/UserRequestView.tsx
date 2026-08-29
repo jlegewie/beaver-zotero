@@ -1,9 +1,20 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { BeaverAgentPrompt } from '@beaver/agent-core/agents/types';
+import { BeaverAgentPrompt, MessageSearchFilters } from '@beaver/agent-core/agents/types';
+import {
+    messageAttachmentKey,
+    mergeMessageAttachments,
+    type MessageAttachment,
+} from '@beaver/agent-core/types/attachments/apiTypes';
 import ContextMenu from '@beaver/agent-ui/primitives/ContextMenu';
+import { getHost } from '@beaver/agent-ui/host';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
-import { RequestChips } from './requestChips';
+import {
+    RequestChips,
+    requestFilterCollectionKey,
+    requestFilterTagKey,
+    type RequestChipRef,
+} from './requestChips';
 import { EditIcon, Spinner, ArrowUpLineIcon } from '../icons/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
@@ -13,12 +24,14 @@ import { regenerateWithEditedPromptAtom, isWSChatPendingAtom, retryPendingRunIdA
 import { selectedModelAtom } from '../../atoms/models';
 import { isStreamingAtom } from '@beaver/agent-core/run-state/atoms';
 import { actionsAtom, buildEditedPromptActionsAtom } from '../../atoms/actions';
+import { clearPromptEditDraftAtom, promptEditDraftsAtom, setPromptEditDraftAtom } from '../../atoms/promptEdits';
 import { ensurePromptActionTokens, promptActionsToDescriptors, type SlashCommandDescriptor } from '@beaver/agent-ui/composer/slashCommands';
 import { hasProseFindMatch, renderContentWithSlashPills } from './slashCommandRendering';
 import { useFindQuery } from '@beaver/agent-ui/chat/findContext';
 import { highlightText } from '@beaver/agent-ui/chat/highlightText';
 import { LexicalEditorInput, LexicalEditorInputHandle } from '@beaver/agent-ui/composer/LexicalEditorInput';
 import { useSlashMenu } from '../../hooks/useSlashMenu';
+import { useAddSourcesMenu, AddSourcesMenuHandle } from '@beaver/agent-ui/composer/useAddSourcesMenu';
 import { useActionPopupResolver } from '../../hooks/useActionPopupResolver';
 
 interface UserRequestViewProps {
@@ -28,6 +41,47 @@ interface UserRequestViewProps {
     maxContentHeight?: number;
     /** Whether the user can edit the prompt (should match AgentRunFooter visibility) */
     canEdit?: boolean;
+}
+
+const EMPTY_ATTACHMENTS: MessageAttachment[] = [];
+
+function filterChipCount(filters: MessageSearchFilters | null): number {
+    if (!filters) return 0;
+    return (filters.libraries?.length ?? 0)
+        + (filters.collections?.length ?? 0)
+        + (filters.tags?.length ?? 0);
+}
+
+/**
+ * Identity of the chips on a prompt. Tracks which chips are present, not their
+ * contents — used only to tell a dirty edit from an untouched one.
+ */
+function attachmentIdentity(
+    attachments: MessageAttachment[],
+    filters: MessageSearchFilters | null,
+): string {
+    return [
+        attachments.map(messageAttachmentKey).join(','),
+        (filters?.libraries ?? []).map((library) => library.library_id).join(','),
+        (filters?.collections ?? []).map(requestFilterCollectionKey).join(','),
+        (filters?.tags ?? []).map(requestFilterTagKey).join(','),
+    ].join(';');
+}
+
+/**
+ * Identity of a message's `/command` pills. Deduped and sorted so it tracks
+ * which actions the message invokes, not token position. `persisted` is part
+ * of the identity: removing and reinserting a pill rebinds the action even
+ * though the token text is unchanged.
+ */
+function pillIdentity(pills: SlashCommandDescriptor[]): string {
+    const signatures = pills.map((pill) => `${pill.commandName}:${pill.actionId}:${pill.persisted ? 1 : 0}`);
+    return [...new Set(signatures)].sort().join(',');
+}
+
+function normalizeFilters(filters: MessageSearchFilters | null): MessageSearchFilters | undefined {
+    if (!filters || filterChipCount(filters) === 0) return undefined;
+    return filters;
 }
 
 /**
@@ -42,7 +96,11 @@ interface UserRequestViewProps {
  * The edit overlay uses the same Lexical editor as the chat input: persisted
  * `/command` tokens are rebuilt as pill nodes from the prompt's `actions`
  * field (pills whose action no longer exists render greyed out), and the
- * slash menu is available for adding new action pills.
+ * slash menu is available for adding new action pills. Attachments and
+ * filters are editable too (remove on chips, "+" picker via the host).
+ *
+ * Unsubmitted edits are stashed per message (`promptEditDraftsAtom`) and
+ * restored when the overlay reopens — it closes on incidental click or scroll.
  */
 export const UserRequestView: React.FC<UserRequestViewProps> = ({
     userPrompt,
@@ -63,7 +121,14 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     const [isHovered, setIsHovered] = useState(false);
     const [editedContent, setEditedContent] = useState(userPrompt.content);
     const [editedPills, setEditedPills] = useState<SlashCommandDescriptor[]>([]);
+    const [editedAttachments, setEditedAttachments] = useState<MessageAttachment[]>(EMPTY_ATTACHMENTS);
+    const [editedFilters, setEditedFilters] = useState<MessageSearchFilters | null>(null);
     const [needsFade, setNeedsFade] = useState(false);
+    // Hold sending while a pick is still being staged (file copy, item load).
+    const [isStagingSources, setIsStagingSources] = useState(false);
+    // Shown in place of the sent message while a submitted edit commits, so
+    // closing the overlay does not flash the old text and chips back.
+    const [submittedPrompt, setSubmittedPrompt] = useState<BeaverAgentPrompt | null>(null);
 
     // Atoms
     const regenerateWithEditedPrompt = useSetAtom(regenerateWithEditedPromptAtom);
@@ -76,6 +141,9 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     // (truncate POST + undo), before the replacement run replaces this view.
     const isRetryPending = useAtomValue(retryPendingRunIdAtom) === runId;
     const allActions = useAtomValue(actionsAtom);
+    const promptEditDraft = useAtomValue(promptEditDraftsAtom)[runId] ?? null;
+    const setPromptEditDraft = useSetAtom(setPromptEditDraftAtom);
+    const clearPromptEditDraft = useSetAtom(clearPromptEditDraftAtom);
     // Supplies the edit overlay's /command pill hover cards with the live
     // action definitions, matching the chat composer.
     const resolveAction = useActionPopupResolver();
@@ -121,6 +189,12 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         editorHandleRef.current?.insertSlashCommand(descriptor, queryLength);
     }, []);
 
+    // Lets a menu consume the `@query` / `/query` it used as its search box.
+    const deleteTrailingQuery = useCallback((length: number) => {
+        editorHandleRef.current?.deleteTrailingQuery(length);
+    }, []);
+    const addSourcesMenuRef = useRef<AddSourcesMenuHandle | null>(null);
+
     const {
         isSlashMenuOpen,
         slashMenuPosition,
@@ -138,6 +212,29 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         attachTargets: false,
     });
 
+    // Typed `@` opens the picker with the editor as its search box (same as
+    // the composer). The "+" button opens the same menu with its own field.
+    const {
+        isOpen: isAddSourcesMenuOpen,
+        position: addSourcesMenuPosition,
+        query: addSourcesSearchQuery,
+        querySource: addSourcesQuerySource,
+        setQuery: setAddSourcesSearchQuery,
+        openFromButton: openAddSourcesMenu,
+        handleTrigger: handleAddSourcesTrigger,
+        handleChange: handleAddSourcesChange,
+        handleKeyDown: handleAddSourcesKeyDown,
+        dismiss: dismissAddSourcesMenu,
+        commit: commitAddSourcesMenu,
+        resetQuery: resetAddSourcesQuery,
+    } = useAddSourcesMenu({
+        verticalPosition: 'below',
+        deleteTrailingQuery,
+        focusEditor,
+        setMessageContent: setEditedContent,
+        menuRef: addSourcesMenuRef,
+    });
+
     // Check if content needs fade effect.
     // This stays a pure measurement of "the content overflows", never of "the
     // clamp is on": `scrollHeight` reports the untruncated height whether or not
@@ -150,6 +247,51 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             setNeedsFade(contentHeight > maxContentHeight);
         }
     }, [displayContent, maxContentHeight, findQuery]);
+
+    const sentPillIdentity = useMemo(
+        () => pillIdentity(promptActionsToDescriptors(userPrompt.actions, allActions)),
+        [userPrompt.actions, allActions],
+    );
+
+    // Whether the edit differs from the message as sent (drives stash vs drop).
+    const isDirty = useCallback((
+        content: string,
+        pills: SlashCommandDescriptor[],
+        attachments: MessageAttachment[],
+        filters: MessageSearchFilters | null,
+    ) => (
+        content !== displayContent
+        || pillIdentity(pills) !== sentPillIdentity
+        || attachmentIdentity(attachments, filters)
+            !== attachmentIdentity(userPrompt.attachments ?? EMPTY_ATTACHMENTS, userPrompt.filters ?? null)
+    ), [displayContent, sentPillIdentity, userPrompt.attachments, userPrompt.filters]);
+
+    const stashEdits = useCallback((content: string, pills: SlashCommandDescriptor[]) => {
+        if (isDirty(content, pills, editedAttachments, editedFilters)) {
+            setPromptEditDraft({
+                runId,
+                draft: { content, pills, attachments: editedAttachments, filters: editedFilters },
+            });
+        } else {
+            clearPromptEditDraft(runId);
+        }
+    }, [clearPromptEditDraft, editedAttachments, editedFilters, isDirty, runId, setPromptEditDraft]);
+
+    /** Close the overlay, stashing dirty edits. Used by incidental closes
+     *  (click outside, Escape, scrolled out of view) — not Cancel. */
+    const closeAndStash = useCallback(() => {
+        // Text typed with an input method is withheld until its composition
+        // ends; publish it so it is stashed rather than lost.
+        const content = editorHandleRef.current?.flushPendingText() ?? editedContent;
+        const pills = editorHandleRef.current?.getSlashCommands() ?? editedPills;
+        stashEdits(content, pills);
+        setIsEditing(false);
+    }, [editedContent, editedPills, stashEdits]);
+
+    // The listeners below are registered once per edit session but must run the
+    // current closure, which changes with every keystroke.
+    const closeAndStashRef = useRef(closeAndStash);
+    closeAndStashRef.current = closeAndStash;
 
     // Handle click outside to close edit mode
     useEffect(() => {
@@ -173,8 +315,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                 return;
             }
 
-            setIsEditing(false);
-            setEditedContent(displayContent);
+            closeAndStashRef.current();
         };
 
         // Use capture phase to catch events before they bubble
@@ -182,7 +323,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         return () => {
             doc.removeEventListener('mousedown', handleClickOutside, true);
         };
-    }, [isEditing, displayContent]);
+    }, [isEditing]);
 
     // Close edit mode when scrolled out of view
     useEffect(() => {
@@ -192,7 +333,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             ([entry]) => {
                 // Close if the element is not intersecting (out of view)
                 if (!entry.isIntersecting) {
-                    setIsEditing(false);
+                    closeAndStashRef.current();
                 }
             },
             {
@@ -217,28 +358,44 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         }
     }, [isEditing]);
 
+    const shownPrompt = submittedPrompt ?? userPrompt;
+    const shownContent = useMemo(
+        () => (submittedPrompt
+            ? ensurePromptActionTokens(submittedPrompt.content, submittedPrompt.actions)
+            : displayContent),
+        [submittedPrompt, displayContent],
+    );
+
     // Check if we have content to display in the filters/attachments section
     const hasFiltersOrAttachments =
-        (userPrompt.attachments?.length ?? 0) > 0 ||
-        (userPrompt.filters?.libraries?.length ?? 0) > 0 ||
-        (userPrompt.filters?.collections?.length ?? 0) > 0 ||
-        (userPrompt.filters?.tags?.length ?? 0) > 0;
+        (shownPrompt.attachments?.length ?? 0) > 0 ||
+        (shownPrompt.filters?.libraries?.length ?? 0) > 0 ||
+        (shownPrompt.filters?.collections?.length ?? 0) > 0 ||
+        (shownPrompt.filters?.tags?.length ?? 0) > 0;
 
     const handleClick = useCallback((e: React.MouseEvent) => {
         // Gecko dispatches click for non-primary buttons too, so a right-click
         // (e.g. opening a chip's context menu) must not enter edit mode and
         // hide the view.
         if (e.button !== 0) return;
+        // A submitted edit is already committing; do not reopen it.
+        if (isRetryPending || submittedPrompt) return;
         if (!isEditing && canEditNow) {
             // Content and pills must be staged BEFORE the editor mounts: the
             // editor materializes /command tokens as pill nodes only while
             // syncing the content string in, so pills arriving a commit later
             // would leave the tokens as plain text.
-            setEditedContent(displayContent);
-            setEditedPills(promptActionsToDescriptors(userPrompt.actions, allActions));
+            setEditedContent(promptEditDraft ? promptEditDraft.content : displayContent);
+            setEditedPills(promptEditDraft
+                ? promptEditDraft.pills
+                : promptActionsToDescriptors(userPrompt.actions, allActions));
+            setEditedAttachments(promptEditDraft
+                ? promptEditDraft.attachments
+                : (userPrompt.attachments ?? EMPTY_ATTACHMENTS));
+            setEditedFilters(promptEditDraft ? promptEditDraft.filters : (userPrompt.filters ?? null));
             setIsEditing(true);
         }
-    }, [isEditing, canEditNow, displayContent, userPrompt.actions, allActions]);
+    }, [isEditing, canEditNow, isRetryPending, submittedPrompt, displayContent, promptEditDraft, userPrompt.actions, userPrompt.attachments, userPrompt.filters, allActions]);
 
     // After the slash menu consumed an editor change (open/close/query), the
     // menu re-render can clobber the caret in Zotero's chrome document; put it
@@ -251,6 +408,12 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     }, []);
 
     const handleEditorChange = useCallback((value: string) => {
+        // An open Add Sources menu owns keystrokes, so `/` in its query is a
+        // search term, not an actions trigger.
+        if (handleAddSourcesChange(value)) {
+            queueCaretToEnd(value.length);
+            return;
+        }
         if (handleSlashMenuChange(value)) {
             queueCaretToEnd(value.length);
             return;
@@ -260,8 +423,56 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             queueCaretToEnd(value.length);
             return;
         }
+        if (inputEl && handleAddSourcesTrigger(value, inputEl.getBoundingClientRect())) {
+            queueCaretToEnd(value.length);
+            return;
+        }
         setEditedContent(value);
-    }, [handleSlashMenuChange, handleSlashTrigger, queueCaretToEnd]);
+    }, [
+        handleAddSourcesChange,
+        handleAddSourcesTrigger,
+        handleSlashMenuChange,
+        handleSlashTrigger,
+        queueCaretToEnd,
+    ]);
+
+    const handleAddAttachments = useCallback((added: MessageAttachment[]) => {
+        setEditedAttachments((prev) => mergeMessageAttachments(prev, added));
+    }, []);
+
+    const handleRemoveAttachment = useCallback((attachmentKey: string) => {
+        setEditedAttachments((prev) => prev.filter((a) => messageAttachmentKey(a) !== attachmentKey));
+    }, []);
+
+    const handleRemoveChip = useCallback((ref: RequestChipRef) => {
+        if (ref.kind === 'attachment') {
+            handleRemoveAttachment(ref.key);
+            return;
+        }
+        setEditedFilters((prev) => {
+            if (!prev) return prev;
+            const next: MessageSearchFilters = ref.kind === 'library'
+                ? { ...prev, libraries: (prev.libraries ?? []).filter((l) => l.library_id !== ref.libraryId) }
+                : ref.kind === 'collection'
+                    ? { ...prev, collections: (prev.collections ?? []).filter((c) => requestFilterCollectionKey(c) !== ref.key) }
+                    : { ...prev, tags: (prev.tags ?? []).filter((t) => requestFilterTagKey(t) !== ref.key) };
+            return normalizeFilters(next) ?? null;
+        });
+    }, [handleRemoveAttachment]);
+
+    const handleRemoveAllChips = useCallback(() => {
+        setEditedAttachments(EMPTY_ATTACHMENTS);
+        setEditedFilters(null);
+    }, []);
+
+    const editableChipCount = editedAttachments.length + filterChipCount(editedFilters);
+
+    // RequestChips takes a prompt; only attachments and filters are read.
+    const editedChipPrompt = useMemo<BeaverAgentPrompt>(() => ({
+        ...userPrompt,
+        attachments: editedAttachments,
+        filters: editedFilters ?? undefined,
+    }), [userPrompt, editedAttachments, editedFilters]);
 
     const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent) => {
         e.preventDefault();
@@ -270,7 +481,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         // commits it. Publish anything still withheld so saving right after the
         // commit keeps the committed text (see flushPendingText).
         const content = editorHandleRef.current?.flushPendingText() ?? editedContent;
-        if (isPending || content.length === 0) return;
+        if (isPending || content.length === 0 || isStagingSources) return;
 
         // Build the edited prompt from the editor's pills: surviving pills
         // reuse their persisted wire action, new pills resolve like a fresh
@@ -280,42 +491,109 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         const result = await buildEditedPromptActions({
             pills,
             persistedActions: userPrompt.actions,
-            existingAttachments: userPrompt.attachments,
+            // Dedup against the edited attachment list, not the sent one, so
+            // a kept chip is not duplicated and a removed chip is not restored.
+            existingAttachments: editedAttachments,
         });
         if (!result) return; // Cannot run right now — a popup explains why
+
+        const attachments = mergeMessageAttachments(editedAttachments, result.addedAttachments);
 
         const editedPrompt: BeaverAgentPrompt = {
             ...userPrompt,
             content,
             actions: result.actions,
-            attachments: result.addedAttachments.length > 0
-                ? [...(userPrompt.attachments ?? []), ...result.addedAttachments]
-                : userPrompt.attachments,
+            attachments: attachments.length > 0 ? attachments : undefined,
+            filters: normalizeFilters(editedFilters),
         };
 
+        // Stash rather than clear: regeneration can still bail out (undo-confirm
+        // Cancel, failed truncate, chat switch). A successful truncate drops
+        // the stash with the removed runs, so nothing clears it here.
+        stashEdits(content, pills);
+        setSubmittedPrompt(editedPrompt);
         setIsEditing(false);
         await regenerateWithEditedPrompt({ runId, editedPrompt });
-    }, [isPending, editedContent, userPrompt, runId, regenerateWithEditedPrompt, buildEditedPromptActions]);
+        // Regeneration bailed out and this message is still the thread's. On
+        // the committed path this component is already gone.
+        setSubmittedPrompt(null);
+    }, [
+        isPending,
+        isStagingSources,
+        editedContent,
+        editedAttachments,
+        editedFilters,
+        userPrompt,
+        runId,
+        regenerateWithEditedPrompt,
+        buildEditedPromptActions,
+        stashEdits,
+    ]);
+
+    /** Cancel is the one close that discards the stash. */
+    const handleCancel = useCallback(() => {
+        clearPromptEditDraft(runId);
+        setIsEditing(false);
+    }, [clearPromptEditDraft, runId]);
 
     // Enter in the editor submits (Shift+Enter inserts a newline; handled by
-    // the editor). Suppressed while the slash menu owns the keyboard.
+    // the editor). Suppressed while a slash or Add Sources menu owns the keyboard.
     const handleEditorSubmit = useCallback(() => {
-        if (isPending || isSlashMenuOpen) return;
+        if (isPending || isSlashMenuOpen || isStagingSources) return;
+        if (isAddSourcesMenuOpen) return;
         const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
         handleSubmit(fakeEvent);
-    }, [isPending, isSlashMenuOpen, handleSubmit]);
+    }, [isPending, isSlashMenuOpen, isAddSourcesMenuOpen, isStagingSources, handleSubmit]);
 
     const handleEditorKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-        // While the slash menu is open it owns navigation/selection keys
-        // (including Escape, which closes just the menu).
+        // While a menu is open it owns navigation/selection keys (including
+        // Escape, which closes just that menu).
+        if (handleAddSourcesKeyDown(e)) return;
         if (handleSlashMenuKeyDown(e)) return;
         if (e.key === 'Escape') {
             e.preventDefault();
-            setIsEditing(false);
+            closeAndStash();
         }
-    }, [handleSlashMenuKeyDown]);
+    }, [handleAddSourcesKeyDown, handleSlashMenuKeyDown, closeAndStash]);
 
-    const menuPortalContainer = editInputRef.current?.closest('[id^="beaver-react-root-"], #beaver-pane-window') as HTMLElement | null;
+    // The editor's element is not attached on the render that opens the
+    // overlay, so fall back to this view's own container, which is.
+    const menuPortalContainer = (editInputRef.current ?? containerRef.current)
+        ?.closest('[id^="beaver-react-root-"], #beaver-pane-window') as HTMLElement | null;
+
+    const sourcesMenu = isEditing
+        ? getHost().components?.requestSourcesMenu?.({
+            attachments: editedAttachments,
+            filters: editedFilters,
+            onAddAttachments: handleAddAttachments,
+            onRemoveAttachment: handleRemoveAttachment,
+            onFiltersChange: setEditedFilters,
+            onPendingChange: setIsStagingSources,
+            isMenuOpen: isAddSourcesMenuOpen,
+            menuPosition: addSourcesMenuPosition,
+            searchQuery: addSourcesSearchQuery,
+            querySource: addSourcesQuerySource,
+            onQueryChange: setAddSourcesSearchQuery,
+            onOpen: openAddSourcesMenu,
+            onDismiss: dismissAddSourcesMenu,
+            onCommit: commitAddSourcesMenu,
+            onResetQuery: resetAddSourcesQuery,
+            menuRef: addSourcesMenuRef,
+            menuPortalContainer,
+            verticalPosition: 'below',
+        })
+        : null;
+
+    // Corner badge: spinner while a retry/stream blocks editing, accent pencil
+    // when unsent edits are stashed (visible without hover), else hover-to-edit.
+    const hasStashedEdits = Boolean(promptEditDraft);
+    const editAffordance: 'none' | 'spinner' | 'edit' | 'stashed' =
+        isEditing ? 'none'
+            : (isRetryPending || submittedPrompt) ? 'spinner'
+                : hasStashedEdits ? 'stashed'
+                    : !canEditNow ? (isHovered ? 'spinner' : 'none')
+                        : isHovered ? 'edit'
+                            : 'none';
 
     return (
         <div className="px-3 py-1 relative" ref={containerRef}>
@@ -335,7 +613,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             >
                 {/* Message attachments and filters */}
                 {hasFiltersOrAttachments && (
-                    <RequestChips userPrompt={userPrompt} />
+                    <RequestChips userPrompt={shownPrompt} />
                 )}
 
                 {/* Message content with max height and fade (both released
@@ -351,28 +629,19 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                     ref={contentRef}
                     onContextMenu={handleContextMenu}
                 >
-                    {userPrompt.actions?.length
-                        ? renderContentWithSlashPills(displayContent, userPrompt.actions, findQuery)
-                        : highlightText(displayContent, findQuery)}
+                    {shownPrompt.actions?.length
+                        ? renderContentWithSlashPills(shownContent, shownPrompt.actions, findQuery)
+                        : highlightText(shownContent, findQuery)}
                 </div>
 
-                {/* Retry in flight: the edited prompt was submitted and its
-                    removal is being committed on the backend. */}
-                {isRetryPending && !isEditing && (
-                    <div className="user-request-edit-icon mb-075">
-                        <Spinner size={12} />
-                    </div>
-                )}
-
-                {/* Edit icon (visible on hover) */}
-                {isHovered && !isEditing && !isRetryPending && canEditNow && (
-                    <div className="user-request-edit-icon mb-075">
-                        <EditIcon width={12} height={12} />
-                    </div>
-                )}
-                {isHovered && !isEditing && !isRetryPending && !canEditNow && (
-                    <div className="user-request-edit-icon mb-075">
-                        <Spinner size={12} />
+                {editAffordance !== 'none' && (
+                    <div
+                        className={`user-request-edit-icon mb-075 ${editAffordance === 'stashed' ? 'user-request-edit-icon-stashed' : ''}`}
+                        title={editAffordance === 'stashed' ? 'Unsent edits. Click to continue editing' : undefined}
+                    >
+                        {editAffordance === 'spinner'
+                            ? <Spinner size={12} />
+                            : <EditIcon width={12} height={12} />}
                     </div>
                 )}
 
@@ -393,9 +662,14 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                     className="user-request-edit-overlay user-message-display"
                     onClick={(e) => e.stopPropagation()}
                 >
-                    {/* Attachments and filters display (read-only) */}
-                    {hasFiltersOrAttachments && (
-                        <RequestChips userPrompt={userPrompt} />
+                    {editableChipCount > 0 && (
+                        <RequestChips
+                            userPrompt={editedChipPrompt}
+                            editing={{
+                                onRemove: handleRemoveChip,
+                                onRemoveAll: editableChipCount > 1 ? handleRemoveAllChips : undefined,
+                            }}
+                        />
                     )}
 
                     {/* Slash-command menu (opened by typing "/") */}
@@ -432,8 +706,16 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                                 resolveAction={resolveAction}
                                 placeholder="Edit your message..."
                                 ariaLabel="Edit message"
+                                // The `@` menu has no search field of its own.
+                                inlineHint={
+                                    isAddSourcesMenuOpen
+                                    && addSourcesQuerySource === 'editor'
+                                    && addSourcesSearchQuery.length === 0
+                                        ? 'Type to search'
+                                        : null
+                                }
                                 onKeyDown={handleEditorKeyDown}
-                                suspendKeyboardNavigation={isSlashMenuOpen}
+                                suspendKeyboardNavigation={isSlashMenuOpen || isAddSourcesMenuOpen}
                                 onContentEditableRef={(el) => {
                                     editInputRef.current = el;
                                 }}
@@ -441,15 +723,15 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                         </div>
 
                         {/* Control row — the composer's, minus the controls
-                            that do not apply to an edit (no attachments to
-                            add, no web-search toggle). */}
+                            that do not apply to an edit (no web-search toggle). */}
                         <div className="composer-controls">
+                            {sourcesMenu}
                             <ModelSelectionButton inputRef={editInputRef} focusInput={focusEditor} />
                             <div className="flex-1" />
                             <Button
                                 type="button"
                                 variant="ghost"
-                                onClick={() => setIsEditing(false)}
+                                onClick={handleCancel}
                             >
                                 Cancel
                             </Button>
@@ -459,7 +741,13 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                                 className="composer-send"
                                 ariaLabel="Send edited message"
                                 onClick={handleSubmit}
-                                disabled={editedContent.length === 0 || isPending || !selectedModel || isSlashMenuOpen}
+                                disabled={
+                                    editedContent.length === 0
+                                    || isPending
+                                    || isStagingSources
+                                    || !selectedModel
+                                    || isSlashMenuOpen
+                                }
                             />
                         </div>
                     </form>
