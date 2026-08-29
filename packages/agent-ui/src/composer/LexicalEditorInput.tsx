@@ -51,7 +51,7 @@ import {
     registerImeTrace,
     type ImeCompositionTracker,
 } from './imeComposition';
-import { collapsesToRangeEnd } from './caretNavigation';
+import { collapsesToRangeEnd, getFocusRect } from './caretNavigation';
 import { SlashCommandHoverCardPlugin } from './SlashCommandHoverCardPlugin';
 import {
     $getFlatSelectionOffsets,
@@ -193,37 +193,6 @@ function getDomFlatSelectionOffsets(root: HTMLElement, sel: Selection): { anchor
     }
     if (anchor === null || focus === null) return null;
     return { anchor, focus };
-}
-
-/** Client rect of the selection's moving edge (its focus point). A collapsed
- *  range has no client rect at some node boundaries, so widen it by one
- *  character before falling back to the containing element's box. */
-function getFocusRect(sel: Selection): DOMRect | null {
-    const node = sel.focusNode;
-    const doc = node?.ownerDocument;
-    if (!node || !doc) return null;
-    const offset = sel.focusOffset;
-    const range = doc.createRange();
-    try {
-        range.setStart(node, offset);
-        range.setEnd(node, offset);
-    } catch {
-        return null;
-    }
-    let rect: DOMRect | null = range.getClientRects()?.[0] ?? null;
-    if (!rect && node.nodeType === Node.TEXT_NODE) {
-        const length = (node as Text).length;
-        try {
-            if (offset < length) range.setEnd(node, offset + 1);
-            else if (offset > 0) range.setStart(node, offset - 1);
-            rect = range.getClientRects()?.[0] ?? null;
-        } catch { /* the offsets may not be addressable */ }
-    }
-    if (!rect) {
-        const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
-        rect = el?.getBoundingClientRect() ?? null;
-    }
-    return rect;
 }
 
 /** Scroll the caret (the selection's moving edge) back into view inside the

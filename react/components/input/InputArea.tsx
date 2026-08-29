@@ -336,7 +336,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             inputEl &&
             !isAwaitingApproval &&
             !hideAttachmentMenu &&
-            handleAddSourcesTrigger(value, inputEl.getBoundingClientRect())
+            handleAddSourcesTrigger(value, inputEl)
         ) {
             queueSelectionRestore(value.length, false);
             return;
