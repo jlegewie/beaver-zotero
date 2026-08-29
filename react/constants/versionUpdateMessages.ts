@@ -548,7 +548,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         footer: `<a href="https://www.beaverapp.ai/docs/credits">Learn more</a>. These changes do not impact BYOK users.`,
     },
     {
-        version: "0.24.0-beta.1",
+        version: "0.24.0-beta.2",
         title: "Batch jobs: Sort, tag, extract, and annotate across hundreds of papers",
         steps: [
             {
@@ -560,11 +560,11 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
                 description: "Beaver now shows a summary of all library changes at the bottom of every response.",
             },
             {
-                title: "Improved performance",
-                description: "Long answers stream smoother and scrolling during streaming works more reliably.",
+                title: "Pinned chats, search in chats and more",
+                description: "You can now pin chats to the top of the chat list and search an open chat for keywords.",
             },
         ],
-        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.24.0-beta.1" target='_blank'>Full changelog</a>`,
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.24.0-beta.2" target='_blank'>Full changelog</a>`,
     },
 
 ];
