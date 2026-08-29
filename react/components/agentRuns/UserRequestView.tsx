@@ -211,6 +211,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         editorHandleRef.current?.deleteTrailingQuery(length);
     }, []);
     const addSourcesMenuRef = useRef<AddSourcesMenuHandle | null>(null);
+    const requestSourcesMenu = getHost().components?.requestSourcesMenu;
 
     const {
         isSlashMenuOpen,
@@ -429,7 +430,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     const handleEditorChange = useCallback((value: string) => {
         // An open Add Sources menu owns keystrokes, so `/` in its query is a
         // search term, not an actions trigger.
-        if (handleAddSourcesChange(value)) {
+        if (requestSourcesMenu && handleAddSourcesChange(value)) {
             queueCaretToEnd(value.length);
             return;
         }
@@ -442,7 +443,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             queueCaretToEnd(value.length);
             return;
         }
-        if (inputEl && handleAddSourcesTrigger(value, inputEl.getBoundingClientRect())) {
+        if (requestSourcesMenu && inputEl && handleAddSourcesTrigger(value, inputEl.getBoundingClientRect())) {
             queueCaretToEnd(value.length);
             return;
         }
@@ -453,6 +454,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         handleSlashMenuChange,
         handleSlashTrigger,
         queueCaretToEnd,
+        requestSourcesMenu,
     ]);
 
     /**
@@ -587,13 +589,13 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     const handleEditorKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
         // While a menu is open it owns navigation/selection keys (including
         // Escape, which closes just that menu).
-        if (handleAddSourcesKeyDown(e)) return;
+        if (requestSourcesMenu && handleAddSourcesKeyDown(e)) return;
         if (handleSlashMenuKeyDown(e)) return;
         if (e.key === 'Escape') {
             e.preventDefault();
             closeAndStash();
         }
-    }, [handleAddSourcesKeyDown, handleSlashMenuKeyDown, closeAndStash]);
+    }, [requestSourcesMenu, handleAddSourcesKeyDown, handleSlashMenuKeyDown, closeAndStash]);
 
     // The editor's element is not attached on the render that opens the
     // overlay, so fall back to this view's own container, which is.
@@ -601,7 +603,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         ?.closest('[id^="beaver-react-root-"], #beaver-pane-window') as HTMLElement | null;
 
     const sourcesMenu = isEditing
-        ? getHost().components?.requestSourcesMenu?.({
+        ? requestSourcesMenu?.({
             attachments: editedAttachments,
             filters: editedFilters,
             onAddAttachments: handleAddAttachments,
