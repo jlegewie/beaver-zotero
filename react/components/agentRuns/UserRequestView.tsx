@@ -115,6 +115,11 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     // the editor's imperative handle.
     const editInputRef = useRef<HTMLElement | null>(null);
     const editorHandleRef = useRef<LexicalEditorInputHandle | null>(null);
+    // The text the overlay opened on. The editor focuses with the caret at the
+    // end of it, so the first `@` or `/` of an edit follows a character the user
+    // did not type; both menus take this to lift their word-boundary guard for
+    // that keystroke (see `matchSourcesTrigger`). Nothing rewrites the message.
+    const editBaselineRef = useRef('');
 
     // Edit mode state
     const [isEditing, setIsEditing] = useState(false);
@@ -404,7 +409,9 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             // editor materializes /command tokens as pill nodes only while
             // syncing the content string in, so pills arriving a commit later
             // would leave the tokens as plain text.
-            setEditedContent(promptEditDraft ? promptEditDraft.content : displayContent);
+            const openingContent = promptEditDraft ? promptEditDraft.content : displayContent;
+            editBaselineRef.current = openingContent;
+            setEditedContent(openingContent);
             setEditedPills(promptEditDraft
                 ? promptEditDraft.pills
                 : promptActionsToDescriptors(userPrompt.actions, allActions));
@@ -439,11 +446,11 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             return;
         }
         const inputEl = editInputRef.current;
-        if (inputEl && handleSlashTrigger(value, inputEl.getBoundingClientRect())) {
+        if (inputEl && handleSlashTrigger(value, inputEl.getBoundingClientRect(), editBaselineRef.current)) {
             queueCaretToEnd(value.length);
             return;
         }
-        if (requestSourcesMenu && inputEl && handleAddSourcesTrigger(value, inputEl)) {
+        if (requestSourcesMenu && inputEl && handleAddSourcesTrigger(value, inputEl, editBaselineRef.current)) {
             queueCaretToEnd(value.length);
             return;
         }

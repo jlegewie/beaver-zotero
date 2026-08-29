@@ -25,6 +25,27 @@ describe('matchSourcesTrigger', () => {
     it('ignores text with no @ at all', () => {
         expect(matchSourcesTrigger('summarize this')).toBeNull();
     });
+
+    // A prompt-edit overlay seeds the editor with the sent message and focuses
+    // with the caret at its end, so the first keystroke of an edit follows a
+    // word character the user did not type.
+    it('opens on an @ appended to the untouched baseline', () => {
+        expect(matchSourcesTrigger('summarize this paper@', 'summarize this paper'))
+            .toEqual({ prefix: 'summarize this paper' });
+    });
+
+    it('applies the word guard again once the user has typed', () => {
+        expect(matchSourcesTrigger('summarize this paper now@', 'summarize this paper')).toBeNull();
+    });
+
+    it('still opens after a space typed past the baseline', () => {
+        expect(matchSourcesTrigger('summarize this paper @', 'summarize this paper'))
+            .toEqual({ prefix: 'summarize this paper ' });
+    });
+
+    it('leaves an email typed into a baselined editor alone', () => {
+        expect(matchSourcesTrigger('write to joscha@', 'summarize this paper')).toBeNull();
+    });
 });
 
 describe('queryForOpenTrigger', () => {

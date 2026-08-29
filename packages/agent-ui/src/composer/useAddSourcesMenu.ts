@@ -31,11 +31,13 @@ export interface OpenTrigger {
  * Only a word-initial `@` counts, so an email address typed into the composer
  * stays plain text. Returns null when the value does not end in such an `@`.
  */
-export function matchSourcesTrigger(value: string): { prefix: string } | null {
+export function matchSourcesTrigger(value: string, baseline = ''): { prefix: string } | null {
     if (!value.endsWith(TRIGGER)) return null;
-    const charBefore = value.length > 1 ? value[value.length - 2] : null;
+    const prefix = value.slice(0, -1);
+    if (prefix === baseline) return { prefix };
+    const charBefore = prefix.length > 0 ? prefix[prefix.length - 1] : null;
     if (charBefore !== null && charBefore !== ' ' && charBefore !== '\n') return null;
-    return { prefix: value.slice(0, -1) };
+    return { prefix };
 }
 
 /**
@@ -178,9 +180,12 @@ export function useAddSourcesMenu({
      * horizontally on the caret, so in a wide composer it opens at the `@` the
      * user just typed rather than at the far-away left edge. Falls back to that
      * edge when the caret has no measurable rect.
+     *
+     * `baseline` relaxes the word-boundary guard for a first keystroke — see
+     * {@link matchSourcesTrigger}.
      */
-    const handleTrigger = useCallback((value: string, editorRoot: HTMLElement): boolean => {
-        const match = matchSourcesTrigger(value);
+    const handleTrigger = useCallback((value: string, editorRoot: HTMLElement, baseline?: string): boolean => {
+        const match = matchSourcesTrigger(value, baseline);
         if (!match) return false;
         const rect = editorRoot.getBoundingClientRect();
         const caretRect = getCaretRectWithin(editorRoot);
