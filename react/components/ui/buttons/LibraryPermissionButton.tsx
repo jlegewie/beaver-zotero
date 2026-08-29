@@ -26,7 +26,7 @@ export const LIBRARY_PERMISSION_OPTIONS: readonly PermissionMenuOption<LibraryPe
         // overrides the approval settings in Preferences and the two changes
         // that otherwise always ask — deleting annotations, and rewriting a
         // note wholesale.
-        description: 'Apply every change, including deletions and note rewrites, without asking',
+        description: 'Apply every change including deletions without asking',
         icon: SecurityWarningIcon,
         tone: 'warning',
     },
