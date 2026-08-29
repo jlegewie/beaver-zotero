@@ -348,7 +348,7 @@
 
 /* Unsent edits: accent-colored pencil, visible without hover. */
 [id^="beaver-pane-"] .user-request-edit-icon-stashed {
-    color: var(--tag-blue);
+    color: var(--accent-blue);
     opacity: 1;
 }
 
