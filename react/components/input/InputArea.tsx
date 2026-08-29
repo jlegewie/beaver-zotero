@@ -177,6 +177,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 ? 'composer-permission composer-permission-icon'
                 : 'composer-permission'}
             onAfterClose={focusEditor}
+            style={libraryPermissionMode == 'ask' ? {'opacity': 0.7} : {}}
         />
     );
     // Note: while an ask_user_question request is pending (and no approval is),
