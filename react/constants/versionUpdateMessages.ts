@@ -547,6 +547,25 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         inPanel: true,
         footer: `<a href="https://www.beaverapp.ai/docs/credits">Learn more</a>. These changes do not impact BYOK users.`,
     },
+    {
+        version: "0.24.0-beta.1",
+        title: "Batch jobs: Sort, tag, extract, and annotate across hundreds of papers",
+        steps: [
+            {
+                title: "Batch jobs",
+                description: "Sort or tag a thousand items in a single request. Annotate, summarize or extract findings across hundreds of papers. Beaver now supports batch jobs that efficiently process large numbers of items.",
+            },
+            {
+                title: "Review library changes",
+                description: "Beaver now shows a summary of all library changes at the bottom of every response.",
+            },
+            {
+                title: "Pinned chats, search in chats and more",
+                description: "You can now pin chats to the top of the chat list and search an open chat for keywords.",
+            },
+        ],
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.24.0-beta.2" target='_blank'>Full changelog</a>`,
+    },
 
 ];
 

@@ -159,6 +159,8 @@ export interface CreateCollectionResultData {
     collection_key: string;
     /** Number of items added to the collection (if any were requested) */
     items_added?: number;
+    /** Requested item_ids that were not added */
+    skipped_item_ids?: string[];
 }
 
 // =============================================================================

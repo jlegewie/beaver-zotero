@@ -435,7 +435,7 @@ async function validateEditNoteBatchAction(
         return validateError(request.request_id, `Library not available for note: ${library_ref || library_id}-${zotero_key}`, 'library_unavailable');
     }
     if (resolved.status === 'not_found') {
-        return validateError(request.request_id, `Item not found: ${library_id}-${zotero_key}`, 'item_not_found');
+        return validateError(request.request_id, `Item not found: ${modelObjectIdFromReference({ library_id, library_ref, zotero_key })}`, 'item_not_found');
     }
     const item = resolved.item;
     const resolvedLibraryId = item.libraryID;
@@ -475,7 +475,7 @@ async function validateEditNoteBatchAction(
     }
 
     if (!rawHtml || rawHtml.trim() === '') {
-        return validateError(request.request_id, `Note ${resolvedLibraryId}-${zotero_key} is empty`, 'empty_note');
+        return validateError(request.request_id, `Note ${modelObjectIdFromReference({ library_id: resolvedLibraryId, library_ref, zotero_key })} is empty`, 'empty_note');
     }
 
     // Simplify ONCE.
@@ -624,7 +624,7 @@ async function executeEditNoteBatchAction(
             request.request_id,
             resolved.status === 'library_unavailable'
                 ? `Library not available for note: ${library_ref || library_id}-${zotero_key}`
-                : `Item not found: ${library_id}-${zotero_key}`,
+                : `Item not found: ${modelObjectIdFromReference({ library_id, library_ref, zotero_key })}`,
             resolved.status === 'library_unavailable' ? 'library_unavailable' : 'item_not_found',
         );
     }

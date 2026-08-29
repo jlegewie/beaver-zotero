@@ -17,10 +17,10 @@ function notifyExternalFileUnavailable(): void {
 }
 
 /**
- * A navigation target (item, collection, annotation, saved action) that was
- * rendered from persisted run history but no longer exists on this computer.
+ * A navigation target (item, collection, annotation, saved action, tag) that
+ * was rendered from persisted run history but no longer exists on this computer.
  */
-export type UnavailableReferenceKind = 'item' | 'collection' | 'annotation' | 'action';
+export type UnavailableReferenceKind = 'item' | 'collection' | 'annotation' | 'action' | 'tag';
 export type UnavailableReferenceCause = 'missing' | 'library_unavailable';
 
 const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: string; text: string }> = {
@@ -40,6 +40,10 @@ const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: stri
         title: 'Action Not Found',
         text: 'This action is not available on this computer. It may have been deleted or created on another device.',
     },
+    tag: {
+        title: 'Tag Not Available',
+        text: 'This tag is no longer on any item in your Zotero libraries. It may have been renamed or removed.',
+    },
 };
 
 const LIBRARY_UNAVAILABLE_COPY: Record<Exclude<UnavailableReferenceKind, 'action'>, { title: string; text: string }> = {
@@ -54,6 +58,10 @@ const LIBRARY_UNAVAILABLE_COPY: Record<Exclude<UnavailableReferenceKind, 'action
     annotation: {
         title: 'Annotation Not Available',
         text: "This annotation is in a library that isn't available on this computer. It may be a group library you haven't joined on this device.",
+    },
+    tag: {
+        title: 'Tag Not Available',
+        text: "This tag was applied in a library that isn't available on this computer. It may be a group library you haven't joined on this device.",
     },
 };
 
@@ -81,6 +89,23 @@ export function notifyReferenceUnavailable(
         });
     } catch (e) {
         logger(`notifyReferenceUnavailable: failed to surface popup: ${e}`, 2);
+    }
+}
+
+/**
+ * Say why a tag could not be opened when the answer is "it is in more than one
+ * library and this result does not say which".
+ */
+export function notifyTagAmbiguous(tagName: string): void {
+    try {
+        store.set(addPopupMessageAtom, {
+            id: 'tag-ambiguous',
+            type: 'warning',
+            title: 'Tag in Several Libraries',
+            text: `"${tagName}" is used in more than one library, and this result does not record which one. Open the library you want and filter by the tag there.`,
+        });
+    } catch (e) {
+        logger(`notifyTagAmbiguous: failed to surface popup: ${e}`, 2);
     }
 }
 

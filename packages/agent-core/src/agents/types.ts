@@ -139,6 +139,12 @@ export interface PromptAction {
     category?: ActionCategory;
 }
 
+/** Who initiated a resume request. */
+export type ResumeTrigger = 'auto' | 'user';
+
+/** Who initiated a retry request. */
+export type RetryTrigger = 'auto' | 'user';
+
 /**
  * Chat message content sent by the client.
  * Contains all user input for a chat completion request.
@@ -158,6 +164,8 @@ export interface BeaverAgentPrompt {
     is_resume?: boolean;
     /** The run ID this request resumes (for resume requests) */
     resumes_run_id?: string;
+    /** Who started the resume; only 'auto' reorders the backend model chain */
+    resume_trigger?: ResumeTrigger;
     /** Custom system instructions for this request */
     custom_instructions?: string;
     /** Where this prompt came from */

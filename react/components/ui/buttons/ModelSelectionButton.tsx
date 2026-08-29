@@ -13,6 +13,11 @@ import type { ModelConfig } from '../../../atoms/models';
 
 const MAX_MODEL_NAME_LENGTH = 25;
 
+// The trigger is the tightest place a model name appears, and the vendor adds
+// nothing there — the menu it opens still shows every name in full. Applied to
+// the trigger label only.
+const VENDOR_PREFIX = /^Claude\s+/i;
+
 const getModelSelectionKey = (model: Pick<ModelConfig, 'id' | 'access_mode'>) => {
     return `${model.id}:${model.access_mode || 'app_key'}`;
 };
@@ -227,9 +232,10 @@ const ModelSelectionButton: React.FC<{
 
     const getButtonLabel = () => {
         if (!selectedModel) return 'None Selected';
-        return selectedModel && selectedModel.name.length > MAX_MODEL_NAME_LENGTH
-            ? `${selectedModel.name.slice(0, (MAX_MODEL_NAME_LENGTH - 2))}...`
-            : selectedModel?.name || '';
+        const name = selectedModel.name.replace(VENDOR_PREFIX, '');
+        return name.length > MAX_MODEL_NAME_LENGTH
+            ? `${name.slice(0, (MAX_MODEL_NAME_LENGTH - 2))}...`
+            : name;
     };
 
     const handleAfterClose = () => {
@@ -249,8 +255,7 @@ const ModelSelectionButton: React.FC<{
     );
 
     const dynamicStyle = {
-        padding: '2px 0px',
-        fontSize: '0.80rem',
+        fontSize: '0.9rem',
         maxWidth: '250px',
     };
 
@@ -271,7 +276,7 @@ const ModelSelectionButton: React.FC<{
             </div>
             <MenuButton
                 menuItems={menuItems}
-                variant="ghost-secondary"
+                variant="ghost"
                 customContent={agentComponent}
                 buttonLabel={getButtonLabel()}
                 rightIcon={ArrowDownIcon}

@@ -27,6 +27,7 @@ import {
     isProfileLoadedAtom,
     profileSyncStatusAtom,
 } from '../atoms/profile';
+import { resetThreadStoreAtom } from '../atoms/threadList';
 import { store } from '../store';
 
 // Track if auth listener has been initialized globally
@@ -103,6 +104,16 @@ export function useAuth() {
         // Account switch: if the user.id actually changed (and there was a prior user),
         // clear the previous profile so the new user's fetch in useProfileSync starts clean.
         // Without this, the prior profile briefly renders before the new fetch lands.
+        // Forget the previous account's chats on ANY change of signed-in user,
+        // including null -> B. The thread store lives on the app-lifetime Jotai
+        // store, and the pinned group scans every entity rather than an
+        // account-keyed view, so a leftover chat would render to whoever signs
+        // in next. Deliberately wider than the profile reset below, which only
+        // needs to fire when one account replaces another.
+        if (currentUserId !== newUserId) {
+            store.set(resetThreadStoreAtom);
+        }
+
         if (currentUserId && newUserId && currentUserId !== newUserId) {
             logger(`auth: user changed (${currentUserId} -> ${newUserId}); clearing previous profile state`);
             setProfileWithPlan(null);

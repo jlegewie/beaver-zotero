@@ -105,7 +105,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
     const validCitations = citations.filter(citation => !citation.invalid);
 
     return (
-        <div className="mt-2 rounded-md border border-popup">
+        <div className="mt-2 rounded-card border border-card">
             <div className="space-y-3">
                 {validCitations.map((citation, index) => {
                     const isExternal = isExternalCitation(citation);

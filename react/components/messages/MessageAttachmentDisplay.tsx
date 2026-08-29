@@ -5,9 +5,6 @@ import { currentNoteItemAtom } from '../../atoms/zoteroContext';
 import { removePopupMessagesByTypeAtom } from '../../atoms/ui';
 import { TextSelectionButton } from '../input/TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
-import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
-import { AddSourcesMenuHandle, AddSourcesQuerySource } from '@beaver/agent-ui/composer/useAddSourcesMenu';
-import { SearchMenuCloseReason } from '@beaver/agent-ui/primitives/SearchMenu';
 import { LibraryButton } from '../library/LibraryButton';
 import { CollectionButton } from '../library/CollectionButton';
 import { TagButton } from '../library/TagButton';
@@ -20,39 +17,14 @@ import { buildItemsSummaryListPopup } from '../input/MessageItemChipPopup';
 
 const MAX_ATTACHMENTS = 4;
 
-const MessageAttachmentDisplay = ({
-    isAddAttachmentMenuOpen,
-    menuPosition,
-    addSourcesSearchQuery,
-    addSourcesQuerySource,
-    onAddSourcesQueryChange,
-    onOpenAddSourcesMenu,
-    onDismissAddSourcesMenu,
-    onCommitAddSourcesMenu,
-    onResetAddSourcesQuery,
-    addSourcesMenuRef,
-    menuPortalContainer,
-    onAfterMenuInitialFocus,
-    disabled = false,
-    verticalPosition = 'above',
-}: {
-    isAddAttachmentMenuOpen: boolean;
-    menuPosition: { x: number; y: number };
-    /** The Add Sources menu's search query. */
-    addSourcesSearchQuery: string;
-    /** Whether that query is typed in the chat editor or in the menu itself. */
-    addSourcesQuerySource: AddSourcesQuerySource;
-    onAddSourcesQueryChange: (query: string) => void;
-    onOpenAddSourcesMenu: (menuPosition: { x: number; y: number }) => void;
-    onDismissAddSourcesMenu: (reason: SearchMenuCloseReason) => void;
-    onCommitAddSourcesMenu: () => void;
-    onResetAddSourcesQuery: () => void;
-    addSourcesMenuRef?: React.Ref<AddSourcesMenuHandle>;
-    menuPortalContainer?: HTMLElement | null;
-    onAfterMenuInitialFocus?: () => void;
-    disabled?: boolean;
-    verticalPosition?: 'above' | 'below';
-}) => {
+/**
+ * The chips for whatever is attached to the message being composed.
+ *
+ * Renders nothing when there is nothing attached — the "+" that used to
+ * anchor this row moved into the composer's control row, so an empty row has
+ * no reason to occupy a line.
+ */
+const MessageAttachmentDisplay = () => {
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const currentNoteItem = useAtomValue(currentNoteItemAtom);
     const readerTextSelection = useAtomValue(readerTextSelectionAtom);
@@ -114,6 +86,13 @@ const MessageAttachmentDisplay = ({
         currentMessageExternalFiles.length +
         (readerTextSelection ? 1 : 0);
 
+    // The removable count plus the two chips that cannot be removed, so a new
+    // attachment kind only has to be added to the count above.
+    const hasAttachments =
+        removableContextCount > 0 ||
+        Boolean(currentReaderAttachment) ||
+        Boolean(currentNoteItem);
+
     // Offer "Remove all" only when there is more than one removable item
     const handleRemoveAll = removableContextCount > 1
         ? () => {
@@ -122,35 +101,10 @@ const MessageAttachmentDisplay = ({
         }
         : undefined;
 
-    return (
-        <div className="display-flex flex-wrap gap-col-3 gap-row-2 mb-2">
-            <AddSourcesMenu
-                showText={
-                    currentMessageItems.length == 0 &&
-                    !currentReaderAttachment &&
-                    !currentNoteItem &&
-                    selectedLibraries.length == 0 &&
-                    selectedCollections.length == 0 &&
-                    currentTagSelections.length == 0 &&
-                    currentMessageExternalFiles.length == 0 &&
-                    currentMessageCollections.length == 0
-                }
-                ref={addSourcesMenuRef}
-                isMenuOpen={isAddAttachmentMenuOpen}
-                menuPosition={menuPosition}
-                searchQuery={addSourcesSearchQuery}
-                querySource={addSourcesQuerySource}
-                onQueryChange={onAddSourcesQueryChange}
-                onOpen={onOpenAddSourcesMenu}
-                onDismiss={onDismissAddSourcesMenu}
-                onCommit={onCommitAddSourcesMenu}
-                onResetQuery={onResetAddSourcesQuery}
-                menuPortalContainer={menuPortalContainer}
-                onAfterMenuInitialFocus={onAfterMenuInitialFocus}
-                disabled={disabled}
-                verticalPosition={verticalPosition}
-            />
+    if (!hasAttachments) return null;
 
+    return (
+        <div className="composer-attachments">
             {/* Selected Libraries */}
             {selectedLibraries.map(library => (
                 <LibraryButton key={library.libraryID} library={library} onRemoveAll={handleRemoveAll} />

@@ -13,6 +13,8 @@ export interface ThreadModel {
     id: string;
     user_id: string;
     name?: string;
+    // The pin flag. Named `starred` because that is the column and route
+    // vocabulary the backend shipped with; the UI calls it "pinned".
     starred?: boolean;
     created_at: string;
     updated_at: string;
@@ -154,6 +156,18 @@ function isRetryableTruncateFailure(error: unknown): boolean {
 const TRUNCATE_TIMEOUT_MS = 15000;
 
 /**
+ * Pin/unpin holds the chat's pin controls disabled until it settles, so a
+ * connection that never closes would leave them that way for the session.
+ *
+ * The client-side lock that tracks these requests must outlive this — see
+ * `PIN_LOCK_TTL_MS` in `react/atoms/threadList.ts`.
+ */
+const PIN_TIMEOUT_MS = 15000;
+
+/** Leave enough room inside PIN_LOCK_TTL_MS for an ambiguous PATCH to be read back. */
+export const PIN_RECONCILE_TIMEOUT_MS = 10000;
+
+/**
  * Thread-specific API service that extends the base API service
  */
 export class ThreadService extends ApiService {
@@ -178,8 +192,8 @@ export class ThreadService extends ApiService {
      * @param threadId The ID of the thread to fetch
      * @returns Promise with the thread data
      */
-    async getThread(threadId: string): Promise<ThreadModel> {
-        return this.get<ThreadModel>(`/api/v1/threads/${threadId}`);
+    async getThread(threadId: string, options?: { timeoutMs?: number }): Promise<ThreadModel> {
+        return this.get<ThreadModel>(`/api/v1/threads/${threadId}`, options);
     }
 
     /**
@@ -351,32 +365,40 @@ export class ThreadService extends ApiService {
     }
 
     /**
-     * Fetches all starred threads, sorted by most recently updated
+     * Fetches the user's starred ("pinned") threads, sorted by most recently
+     * updated. Unpaginated — the whole set is meant to be rendered as one
+     * pinned section above the paginated list — so `limit` bounds it instead.
+     *
+     * @param limit Maximum number of threads to return (1-200)
+     * @param scope Optional instance identity; when provided, results are
+     *   scoped to threads matching it plus unattributed (NULL/NULL) threads.
+     *   Pass the same scope the list itself uses, or a thread hidden from the
+     *   list reappears in its pinned section.
      * @returns Promise with the list of starred threads
      */
-    async getStarredThreads(): Promise<ThreadModel[]> {
-        const params = new URLSearchParams();
+    async getStarredThreads(limit: number, scope?: ZoteroInstanceRef): Promise<ThreadModel[]> {
+        const params = new URLSearchParams({ limit: String(limit) });
+        appendInstanceScopeParams(params, scope);
         appendAgentScopeParam(params);
-        const query = params.toString();
-        return this.get<ThreadModel[]>(`/api/v1/threads/starred${query ? `?${query}` : ''}`);
+        return this.get<ThreadModel[]>(`/api/v1/threads/starred?${params.toString()}`);
     }
 
     /**
-     * Stars a thread
+     * Stars ("pins") a thread
      * @param threadId The ID of the thread to star
      * @returns Promise with the updated thread data
      */
     async starThread(threadId: string): Promise<ThreadModel> {
-        return this.patch<ThreadModel>(`/api/v1/threads/${threadId}/star`, {});
+        return this.patch<ThreadModel>(`/api/v1/threads/${threadId}/star`, {}, { timeoutMs: PIN_TIMEOUT_MS });
     }
 
     /**
-     * Unstars a thread
+     * Unstars ("unpins") a thread
      * @param threadId The ID of the thread to unstar
      * @returns Promise with the updated thread data
      */
     async unstarThread(threadId: string): Promise<ThreadModel> {
-        return this.patch<ThreadModel>(`/api/v1/threads/${threadId}/unstar`, {});
+        return this.patch<ThreadModel>(`/api/v1/threads/${threadId}/unstar`, {}, { timeoutMs: PIN_TIMEOUT_MS });
     }
 }
 

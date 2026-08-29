@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
-import { toolResultsMapAtom, getToolCallStatus } from '@beaver/agent-core/run-state/atoms';
+import { getToolCallStatusFromResult, toolResultAtom } from '@beaver/agent-core/run-state/atoms';
 import {
     AgentAction,
     getAgentActionsByToolcallAtom,
@@ -357,9 +357,10 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
     const isHighlightAnnotationPart = isHighlightAnnotationToolResult(part.tool_name);
     const isNoteAnnotationPart = isNoteAnnotationToolResult(part.tool_name);
 
-    // Get tool call status from results
-    const resultsMap = useAtomValue(toolResultsMapAtom);
-    const status = getToolCallStatus(toolCallId, resultsMap, runStatus);
+    // Get tool call status from this call's result. Scoped to the call so the
+    // card does not re-render on every frame of a streaming response.
+    const result = useAtomValue(useMemo(() => toolResultAtom(toolCallId), [toolCallId]));
+    const status = getToolCallStatusFromResult(result, runStatus);
     const isInProgress = status === 'in_progress';
     const isCompleted = status === 'completed';
     const isError = status === 'error';
@@ -644,7 +645,7 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
     return (
         <div
             id={`tool-${toolCallId}`}
-            className="border-popup rounded-md display-flex flex-col min-w-0"
+            className="border-card rounded-card display-flex flex-col min-w-0"
         >
             {/* Header */}
             <div

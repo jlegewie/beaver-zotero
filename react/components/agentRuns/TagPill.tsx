@@ -7,7 +7,7 @@ import { Icon, TagIcon } from '../icons/icons';
  */
 export const TagPill: React.FC<{ name: string; strike?: boolean }> = ({ name, strike }) => (
     <span
-        className="inline-flex items-center gap-1 text-xs px-2 py-05 rounded-md bg-quaternary font-color-secondary border-quinary"
+        className="inline-flex items-center gap-1 text-xs px-2 py-05 rounded-md bg-chip font-color-secondary border-quinary"
         style={strike ? { textDecoration: 'line-through' } : undefined}
     >
         <span className="display-flex">

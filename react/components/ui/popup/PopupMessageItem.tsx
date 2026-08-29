@@ -85,8 +85,8 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
     switch (message.type) {
         case 'error':
             fontColor = 'font-color-red';
-            backgroundColor = 'var(--material-mix-quarternary)';
-            borderColor = 'var(--fill-quinary)';
+            backgroundColor = 'var(--beaver-surface-overlay)';
+            borderColor = 'var(--beaver-border-strong)';
             break;
         case 'info':
         case 'warning':
@@ -95,8 +95,8 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
         case 'version_update':
         default:
             fontColor = 'font-color-primary';
-            backgroundColor = 'var(--material-mix-quarternary)';
-            borderColor = 'var(--fill-quinary)';
+            backgroundColor = 'var(--beaver-surface-overlay)';
+            borderColor = 'var(--beaver-border-strong)';
             break;
     }
 

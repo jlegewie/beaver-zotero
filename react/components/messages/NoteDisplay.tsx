@@ -369,7 +369,7 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, runId, messageId, expor
 
     return (
         <div
-            className="border-popup rounded-md display-flex flex-col min-w-0"
+            className="border-card rounded-card display-flex flex-col min-w-0"
         >
             <NoteHeader
                 status={status}

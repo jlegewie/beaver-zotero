@@ -120,7 +120,7 @@ const PlanCards: React.FC<{ plans: PlanInfo[], subscribe: (sku: string) => Promi
                     return (
                         <div
                             key={plan.sku}
-                            className="display-flex flex-1 flex-col rounded-md border-popup bg-senary p-4"
+                            className="display-flex flex-1 flex-col rounded-card border-card bg-senary p-4"
                         >
                             <div className="display-flex flex-row items-center gap-2" style={{ marginBottom: '4px' }}>
                                 <span className="text-base font-color-primary font-bold">{plan.name}</span>
@@ -244,7 +244,7 @@ const BillingSection: React.FC = () => {
             </div>
 
             {/* --- Section 1: Plan Card --- */}
-            <div className="display-flex flex-col rounded-lg overflow-hidden border-popup bg-senary p-5">
+            <div className="display-flex flex-col rounded-card overflow-hidden border-card bg-senary p-5">
                 {isPastDue && (
                     <div
                         className="display-flex flex-row items-center gap-3 mb-3 rounded-md"

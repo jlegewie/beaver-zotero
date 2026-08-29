@@ -193,7 +193,7 @@ describe('ThreadService agent scoping', () => {
     });
 
     it('scopes the starred list to the registered agent', async () => {
-        await service.getStarredThreads();
+        await service.getStarredThreads(50);
         expect(params().get('agent_name')).toBe('beaver');
     });
 
@@ -201,8 +201,15 @@ describe('ThreadService agent scoping', () => {
         setThreadAgentName(null);
         await service.getPaginatedThreads(10);
         expect(params().has('agent_name')).toBe(false);
-        await service.getStarredThreads();
-        expect(lastEndpoint).toBe('/api/v1/threads/starred');
+        await service.getStarredThreads(50);
+        expect(params().has('agent_name')).toBe(false);
+    });
+
+    it('scopes the starred list to the Zotero instance, like the paginated list', async () => {
+        await service.getStarredThreads(25, { zoteroUserId: '123', zoteroLocalId: 'LOCAL' });
+        expect(params().get('zotero_user_id')).toBe('123');
+        expect(params().get('zotero_local_id')).toBe('LOCAL');
+        expect(params().get('limit')).toBe('25');
     });
 
     it('does not scope by-item lookups server-side', async () => {

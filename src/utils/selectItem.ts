@@ -199,3 +199,90 @@ export async function selectCollection(collection: Zotero.Collection) {
         return false;
     }
 }
+
+/**
+ * How a tag filter ended, for a caller that has to explain itself to the user.
+ */
+export type TagFilterOutcome = 'filtered' | 'not_found' | 'ambiguous' | 'unavailable';
+
+/**
+ * Every library holding a tag, in no particular order.
+ */
+async function libraryIDsForTag(tagName: string): Promise<number[]> {
+    const tagID = Zotero.Tags.getID(tagName);
+    if (!tagID) return [];
+    const libraryIDs: number[] = [];
+    await Zotero.DB.queryAsync(
+        'SELECT DISTINCT libraryID FROM itemTags JOIN items USING (itemID) '
+            + 'WHERE tagID=? AND itemID NOT IN (SELECT itemID FROM deletedItems)',
+        [tagID],
+        {
+            // The returned rows are a Proxy that yields nothing outside the main
+            // window scope; collect by column index instead.
+            onRow: (row: any) => {
+                libraryIDs.push(row.getResultByIndex(0));
+            },
+        },
+    );
+    return libraryIDs;
+}
+
+/**
+ * Filter the Zotero items view by a tag, in the library that holds it.
+ * @param tagName - Tag to filter by.
+ * @param libraryId - Library whose view to filter. Omit only when the caller
+ * genuinely does not know: the library is then derived from the tag, and one
+ * held by several libraries reports `ambiguous` rather than being guessed at.
+ * @returns How it ended — see {@link TagFilterOutcome}.
+ */
+export async function selectTagFilter(
+    tagName: string,
+    libraryId?: number,
+): Promise<TagFilterOutcome> {
+    const zoteroPane = Zotero.getActiveZoteroPane();
+    // Checked before anything is resolved, so a caller is never told a tag is
+    // missing when the truth is that there is no pane to show it in.
+    if (!zoteroPane) return 'unavailable';
+    try {
+        // Resolved even when the caller named a library, because naming one is not the same as being right about it: a persisted result can name a tag that has since been renamed, deleted, or left only in another library, and `handleTagSelected` takes any string — the view would just come back empty with nothing said about why.
+        const libraryIDs = await libraryIDsForTag(tagName);
+        let targetLibraryId: number;
+        if (libraryId !== undefined) {
+            if (!libraryIDs.includes(libraryId)) return 'not_found';
+            targetLibraryId = libraryId;
+        } else {
+            if (libraryIDs.length === 0) return 'not_found';
+            // No honest way to choose between them: picking the biggest, or the
+            // one on screen, both send the user somewhere nobody asked for.
+            if (libraryIDs.length > 1) return 'ambiguous';
+            targetLibraryId = libraryIDs[0];
+        }
+        // Switch to the library tab so the filter is visible when the user is
+        // currently viewing a reader or note tab.
+        Zotero.getMainWindow()?.Zotero_Tabs?.select('zotero-pane');
+        if (zoteroPane.collectionsView) {
+            await zoteroPane.collectionsView.selectLibrary(targetLibraryId);
+        }
+        // Zotero tears down the tag selector (sets it to null) while its pane is
+        // collapsed, so reveal it first. Otherwise the filter would never be
+        // applied for users who keep the tag selector hidden.
+        if (!zoteroPane.tagSelectorShown?.() && typeof zoteroPane.toggleTagSelector === 'function') {
+            await zoteroPane.toggleTagSelector();
+        }
+        if (zoteroPane.tagSelector) {
+            zoteroPane.tagSelector.clearTagSelection();
+            zoteroPane.tagSelector.handleTagSelected(tagName);
+            return 'filtered';
+        }
+        if (zoteroPane.itemsView) {
+            // Fallback if the selector still isn't available: filter the items
+            // view directly so the action is never a silent no-op.
+            await zoteroPane.itemsView.setFilter('tags', new Set([tagName]));
+            return 'filtered';
+        }
+        return 'unavailable';
+    } catch (error) {
+        logger(`Error filtering library by tag: ${error}`, 2);
+        return 'unavailable';
+    }
+}

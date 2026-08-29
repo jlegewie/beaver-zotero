@@ -13,6 +13,13 @@ interface ModelMessagesViewProps {
     showStatusIndicator?: boolean;
     /** The run status (required when showStatusIndicator is true) */
     status: AgentRunStatus;
+    /**
+     * When the wait the indicator is reporting began, in epoch ms, or null when
+     * the run has produced nothing to date it from.
+     */
+    waitingSince?: number | null;
+    /** What the status indicator says while nothing more specific applies. */
+    statusIdleLabel?: string;
 }
 
 /**
@@ -20,7 +27,7 @@ interface ModelMessagesViewProps {
  *
  * Only ModelResponse messages are rendered — see `isRenderableMessage` for why
  * a ModelRequest never is. Their tool-return parts surface elsewhere, inline
- * with the matching tool call via `toolResultsMapAtom`; their user-prompt parts
+ * with the matching tool call via `toolResultAtom`; their user-prompt parts
  * have no consumer by design.
  */
 export const ModelMessagesView: React.FC<ModelMessagesViewProps> = React.memo(function ModelMessagesView({
@@ -29,17 +36,28 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = React.memo(fu
     isStreaming,
     showStatusIndicator,
     status,
+    waitingSince,
+    statusIdleLabel,
 }) {
     // Don't render anything if there's no content to show
     if (messages.length === 0 && !showStatusIndicator) {
         return null;
     }
 
-    const lastMessageHasToolCall = messages[messages.length - 1]?.parts.some(
+    const lastMessage = messages[messages.length - 1];
+    const lastMessageHasToolCall = lastMessage?.parts.some(
         part =>
             part.part_kind === 'tool-call' ||
                 part.part_kind === 'tool-return' ||
                 part.part_kind === 'retry-prompt'
+        );
+    // Preamble text has no bottom margin, and the indicator's own padding is
+    // tighter than the tool-call block that usually follows a sentence. Match
+    // that gap when this wait is sitting under text rather than a card.
+    const followsText =
+        lastMessage?.kind === 'response' &&
+        lastMessage.parts.some(
+            (part) => part.part_kind === 'text' && part.content.trim() !== '',
         );
 
     return (
@@ -79,7 +97,14 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = React.memo(fu
             })}
             {/* Status indicator rendered inside the same container for smooth transitions */}
             {showStatusIndicator && status && (
-                <RunStatusIndicator status={status} runId={runId} lastMessageHasToolCall={lastMessageHasToolCall} />
+                <RunStatusIndicator
+                    status={status}
+                    runId={runId}
+                    lastMessageHasToolCall={lastMessageHasToolCall}
+                    followsText={followsText}
+                    waitingSince={waitingSince}
+                    idleLabel={statusIdleLabel}
+                />
             )}
         </div>
     );

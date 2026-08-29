@@ -1,15 +1,17 @@
 import type { NavigationHost, AttachmentMatchNavigation } from '@beaver/agent-ui/host/types';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { AttachmentMatchTarget } from '@beaver/agent-core/run-state/toolResultTypes';
+import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgress';
 import { revealSource, openSource as openZoteroSource } from '../../utils/sourceUtils';
-import { selectCollection, selectLibrary } from '../../../src/utils/selectItem';
+import { selectCollection, selectLibrary, selectTagFilter } from '../../../src/utils/selectItem';
 import { activateCitation } from './citationActivation';
-import { launchExternalFile, notifyReferenceUnavailable } from './sourceActions';
+import { launchExternalFile, notifyReferenceUnavailable, notifyTagAmbiguous } from './sourceActions';
 import { navigateToAnnotation } from '../../utils/readerUtils';
 import { navigateToAttachmentMatch as navigateToAttachmentMatchImpl } from '../../utils/attachmentMatchNavigation';
 import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 import { getMergedActions } from '../../types/actionStorage';
 import { resolveItemReference, resolveLibraryRef } from '../../../src/utils/libraryIdentity';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 /**
  * Whether a referenced item still exists in the Zotero library. History-rendered
@@ -25,6 +27,33 @@ function resolveItemID(ref: ZoteroItemReference): { itemID: number; libraryID: n
     } catch {
         return null;
     }
+}
+
+/**
+ * The batch's library as a local id: `null` when it named none, `'unavailable'`
+ * when it named one this computer does not have.
+ */
+function batchLibraryID(libraryRef?: string): number | null | 'unavailable' {
+    if (!libraryRef) return null;
+    return resolveLibraryRef({ library_ref: libraryRef }) ?? 'unavailable';
+}
+
+/**
+ * Find a collection by key, in one library or across all of them.
+ *
+ * Scanning is safe where the batch named no library: keys are per-library but
+ * random 8-character strings, so a collision is not a practical concern.
+ */
+function findCollectionByKey(key: string, libraryID: number | null): Zotero.Collection | null {
+    const libraryIDs = libraryID
+        ? [libraryID]
+        : Zotero.Libraries.getAll().map((library) => library.libraryID);
+    for (const id of libraryIDs) {
+        // Returns false when this library holds no such collection.
+        const found = Zotero.Collections.getByLibraryAndKey(id, key);
+        if (found) return found as Zotero.Collection;
+    }
+    return null;
 }
 
 /**
@@ -104,6 +133,35 @@ export const zoteroNavigation: NavigationHost = {
         });
     },
     launchExternalFile,
+    async revealBatchOutcome(target: BatchOutcomeTarget): Promise<void> {
+        // Click handler: an uncaught throw here is a silent dead row.
+        try {
+            const library = batchLibraryID(target.libraryRef);
+            if (target.kind === 'collection') {
+                if (library === 'unavailable') {
+                    notifyReferenceUnavailable('collection', 'library_unavailable');
+                    return;
+                }
+                const collection = findCollectionByKey(target.key, library);
+                // Trashed collections still resolve but cannot be selected.
+                if (collection && (await selectCollection(collection))) return;
+                notifyReferenceUnavailable('collection');
+                return;
+            }
+            if (library === 'unavailable') {
+                notifyReferenceUnavailable('tag', 'library_unavailable');
+                return;
+            }
+            // A batch that resolved to one library says which, and a tag name means nothing without one.
+            const outcome = await selectTagFilter(target.name, library ?? undefined);
+            if (outcome === 'filtered') return;
+            if (outcome === 'ambiguous') notifyTagAmbiguous(target.name);
+            else notifyReferenceUnavailable('tag');
+        } catch (error) {
+            logger(`revealBatchOutcome: failed to reveal ${target.kind}: ${error}`, 2);
+            notifyReferenceUnavailable(target.kind);
+        }
+    },
     openActionSettings(actionId: string): void {
         // Pills in chat history carry send-time action ids that may not exist
         // here: the action can be deleted, or it was a custom action created

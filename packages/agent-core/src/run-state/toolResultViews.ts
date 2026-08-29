@@ -1,3 +1,5 @@
+import type { BatchProgressEntry } from "./batchProgress";
+
 /**
  * Tool-result view models.
  *
@@ -243,7 +245,7 @@ export interface UserQuestionView {
 }
 
 /**
- * A batch operation as it stands after a `batch_start` call — the read-only
+ * A batch job as it stands after a `batch_start` call — the read-only
  * counterpart of the batch approval card.
  *
  * Every user-facing string is composed by the backend and rendered verbatim,
@@ -251,7 +253,7 @@ export interface UserQuestionView {
  * The client must not derive prose of its own from these fields; it owns only
  * its slot headings.
  */
-export interface BatchOperationView {
+export interface BatchJobView {
     view_type: "batch_operation";
     tool_name: "batch_start";
     /** Id of the batch this call wrote. */
@@ -277,6 +279,13 @@ export interface BatchOperationView {
     user_instructions?: string;
     /** How far the batch has got ("12 of 23 done"); empty before anything is recorded. */
     progress_label?: string;
+    /**
+     * The same entry the live progress bar renders, so the card the user reads
+     * back shows the counts and the distribution exactly as they watched them.
+     * Absent on cards written before it existed — the card then renders as it
+     * always did.
+     */
+    progress?: BatchProgressEntry;
 }
 
 /** The general discriminated union — discriminated by `view_type`. */
@@ -288,7 +297,7 @@ export type ToolResultView =
     | TagListView
     | AttachmentSearchView
     | UserQuestionView
-    | BatchOperationView;
+    | BatchJobView;
 
 // ---------------------------------------------------------------------------
 // Type guards
@@ -338,7 +347,7 @@ export function isUserQuestionView(view: ToolResultView): view is UserQuestionVi
     return view.view_type === "user_question";
 }
 
-export function isBatchOperationView(view: ToolResultView): view is BatchOperationView {
+export function isBatchJobView(view: ToolResultView): view is BatchJobView {
     return view.view_type === "batch_operation";
 }
 

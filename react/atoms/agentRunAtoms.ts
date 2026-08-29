@@ -51,7 +51,8 @@ import { getPref } from '../../src/utils/prefs';
 import { saveInterruptedThread } from '../../src/utils/interruptedThreadPrefs';
 import { MessageAttachment, SourceAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import type { ZoteroCollection } from '@beaver/agent-core/types/zotero';
-import { toMessageAttachment } from '../types/attachments/converters';
+import { toMessageAttachment, externalFileRecordToAttachment } from '../types/attachments/converters';
+import { promptEditDraftsAtom } from './promptEdits';
 import { safeStub, serializeAttachmentStub, serializeCollection, serializeItemStub, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { SubscriptionStatus, ProcessingMode } from '@beaver/agent-core/types/profile';
 import {
@@ -72,16 +73,15 @@ import {
 import { isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { currentNoteItemAtom } from './zoteroContext';
 import { isAnnotationAttachment, messageAttachmentKey, zoteroReferenceLookupKeys } from '@beaver/agent-core/types/attachments/apiTypes';
-import type { ExternalFileAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import { getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
-import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptAction, PromptOrigin, ToolRequest, isRunActive } from '@beaver/agent-core/agents/types';
+import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptAction, PromptOrigin, ResumeTrigger, RetryTrigger, ToolRequest, isRunActive } from '@beaver/agent-core/agents/types';
 import {
     threadRunsAtom,
     activeRunAtom,
+    allRunsAtom,
     currentThreadIdAtom,
-    updateRunWithPart,
     updateRunWithToolReturn,
     updateRunComplete,
     updateRunWithToolCallProgress,
@@ -90,7 +90,12 @@ import {
     resetRunMessages,
     wsReconnectingAtom,
     wsRetryAtom,
+    resetRunSelectorCaches,
 } from '@beaver/agent-core/run-state/atoms';
+import {
+    createStreamActivityTracker,
+    streamQuietAtom,
+} from '@beaver/agent-core/run-state/streamActivity';
 import { userIdAtom } from './auth';
 import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import { maybeShowCitationTipAtom } from './citationTip';
@@ -144,6 +149,7 @@ import {
     clearAllPendingBatchApprovalsAtom,
 } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import { readCreditThreshold } from '../utils/creditThreshold';
+import { flushPendingPartEvents, queuePartEvent } from '../utils/streamingPartQueue';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { undoCreateItemAction } from '../utils/createItemActions';
@@ -158,9 +164,10 @@ import { undoEditAnnotationsAction } from '../utils/editAnnotationsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { upgradeToolReturn } from '../compat/legacyToolResults';
 import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
+import { selectLiveBatchProgress } from '@beaver/agent-core/run-state/batchProgress';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
-import { backendHighTokenUsageRunsAtom, recordAppliedActionsAtom } from './messageUIState';
-import { currentThreadNameAtom, loadThreadAtom } from './threads';
+import { backendHighTokenUsageRunsAtom } from './messageUIState';
+import { currentThreadNameAtom, loadThreadAtom, threadNavigationSeqAtom } from './threads';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '@beaver/agent-core/run-state/toolLabels';
 import {
@@ -457,6 +464,62 @@ async function truncateThreadOnServer(
     }
 }
 
+/** What an abandoned automatic retry tells the user. */
+const AUTO_RETRY_ABANDONED_TEXT =
+    'Beaver was retrying a failed response when you switched chats, so the retry was not sent. '
+    + 'Reopen that chat to see where it stands.';
+
+/** What an abandoned user-initiated retry tells the user. */
+const USER_RETRY_ABANDONED_TEXT =
+    'You switched chats while the retry was starting, so it was not sent. '
+    + 'Reopen that chat to see where it stands and retry from there.';
+
+/**
+ * Give up a replacement whose chat the user has left, and say so.
+ *
+ * Returns true when the caller must stop.
+ */
+function abandonReplacementIfThreadChanged(
+    get: Getter,
+    set: Setter,
+    options: {
+        navSeqBeforeAwait: number;
+        pendingRetryRunId: string;
+        logPrefix: string;
+        popupText: string;
+    },
+): boolean {
+    const current = get(threadNavigationSeqAtom);
+    if (current === options.navSeqBeforeAwait) return false;
+    logger(
+        `${options.logPrefix}: chat changed while the replacement was in flight ` +
+            `(navigation ${options.navSeqBeforeAwait} -> ${current}) — abandoning it`,
+        1,
+    );
+    // Release only what this replacement still owns, and the retry lock is the
+    // proof of ownership: `retryCommitInFlight` blocks every send while it is
+    // held, so nothing newer can have taken the composer's pending flag out
+    // from under it.
+    //
+    // Before the lock is taken — the check that runs as soon as the replaced
+    // run is cancelled — neither belongs to this replacement. The pending flag
+    // there is the cancelled run's, and the navigation doing the abandoning
+    // clears that itself on its way out of the chat. Clearing it here instead
+    // would re-enable the composer over a run the user has since started in the
+    // chat they moved to, and let them send a second one on top of it.
+    if (get(retryPendingRunIdAtom) === options.pendingRetryRunId) {
+        set(retryPendingRunIdAtom, null);
+        set(isWSChatPendingAtom, false);
+    }
+    set(addPopupMessageAtom, {
+        type: 'warning',
+        title: 'Retry not sent',
+        text: options.popupText,
+        expire: true,
+    });
+    return true;
+}
+
 /**
  * Create the initial AgentRun shell when user presses send.
  * This happens BEFORE WebSocket connection.
@@ -470,9 +533,18 @@ function createAgentRunShell(
     providerName?: string,
     customInstructions?: string,
     customModel?: ModelConfig['custom_model'],
-    runIdOverride?: string,
-    permissionsOverride?: Partial<ChargingPermissions>,
+    options?: {
+        runIdOverride?: string;
+        permissionsOverride?: Partial<ChargingPermissions>;
+        /**
+         * Marks the request as a retry and says who asked for it. A retry
+         * commits its removal through the truncate endpoint before getting
+         * here, so nothing else in the request identifies it as one.
+         */
+        retryTrigger?: RetryTrigger;
+    },
 ): { run: AgentRun; request: AgentRunRequest } {
+    const { runIdOverride, permissionsOverride, retryTrigger } = options ?? {};
     const runId = runIdOverride ?? uuidv4();
 
     // Get user preferences for charging permissions, then apply any partial override.
@@ -508,6 +580,7 @@ function createAgentRunShell(
         ...(modelSelectionOptions.model_id ? { model_id: modelSelectionOptions.model_id } : {}),
         ...(modelSelectionOptions.api_key ? { api_key: modelSelectionOptions.api_key } : {}),
         ...(customModel ? { custom_model: customModel } : {}),
+        ...(retryTrigger ? { retry_trigger: retryTrigger } : {}),
     };
 
     // Create the shell AgentRun for immediate UI rendering
@@ -531,6 +604,12 @@ function createAgentRunShell(
 
 type StartResumeRunOptions = {
     requireResumable: boolean;
+    /**
+     * Who is asking. Sent to the backend, which reorders its model chain only
+     * for `auto` — a user-clicked resume usually follows a dropped connection
+     * or a closed client, where no provider failed.
+     */
+    trigger: ResumeTrigger;
     logPrefix: string;
     failureErrorType: string;
     failureMessage: string;
@@ -605,6 +684,7 @@ async function startResumeRun(
             content: '',
             is_resume: true,
             resumes_run_id: failedRunId,
+            resume_trigger: options.trigger,
         };
 
         const { run: newRun, request } = createAgentRunShell(
@@ -658,6 +738,10 @@ async function startAutoRetryRun(
     let newRunId: string | null = null;
 
     try {
+        // Which chat this replacement belongs to, captured before every await
+        // in the function. See `abandonReplacementIfThreadChanged`.
+        const navSeqBeforeAwait = get(threadNavigationSeqAtom);
+
         const model = get(selectedModelAtom);
         if (!model) {
             logger(`${logPrefix}: No model selected`, 1);
@@ -688,11 +772,11 @@ async function startAutoRetryRun(
             return;
         }
 
+        // Null for a first run that died before the backend named the thread.
+        // Nothing is persisted to truncate then, and the replacement opens the
+        // thread the same way the original request would have — the same shape
+        // the user-driven retry allows.
         const threadId = get(currentThreadIdAtom) || failedRun.thread_id;
-        if (!threadId) {
-            logger(`${logPrefix}: No thread ID found`, 1);
-            return;
-        }
 
         // Walk back to the original user message — resume runs carry an empty
         // user_prompt.content, so we need the root to preserve the question.
@@ -701,49 +785,73 @@ async function startAutoRetryRun(
         const truncateFromIndex = chainRootIndex >= 0 ? chainRootIndex : threadRuns.length;
         const runIdsToRemove = threadRuns.slice(truncateFromIndex).map(r => r.id);
 
-        // The failed run's error card shows a loading state while the
-        // truncate round trip runs; every exit below clears it (the catch
-        // handles the throw on a failed POST).
+        // The failed run keeps its card while the truncate round trip runs,
+        // with the status indicator in place of the error it suppresses (see
+        // `autoReplacementPendingRunIdsAtom`); every exit below clears the
+        // pending state (the catch handles the throw on a failed POST).
         set(retryPendingRunIdAtom, failedRunId);
         set(isWSChatPendingAtom, true);
 
-        // Commit the removal on the backend before anything local changes.
-        // Skipped when nothing was removed (nothing persisted to delete).
         if (runIdsToRemove.length > 0) {
-            const expectedTailRunId =
-                truncateFromIndex > 0 ? threadRuns[truncateFromIndex - 1].id : null;
-            const outcome = await truncateThreadOnServer(
-                threadId,
-                runIdsToRemove,
-                expectedTailRunId,
-                logPrefix,
-            );
-            if (outcome === 'refused') {
-                // The thread was rewritten by another client. There is no
-                // user decision to retry against a history this client has
-                // never seen — reload instead, so the UI shows the thread
-                // whole (including the failed run's error card, from which
-                // the user can retry deliberately).
-                set(retryPendingRunIdAtom, null);
-                set(isWSChatPendingAtom, false);
-                set(addPopupMessageAtom, {
-                    type: 'warning',
-                    title: 'Chat changed elsewhere',
-                    text: 'This chat was changed somewhere else, so the failed run was not retried automatically. Reloading the chat.',
-                    expire: true,
-                });
-                await set(loadThreadAtom, {
-                    user_id: userId,
+            // Commit the removal on the backend before anything local changes.
+            // A thread the backend never named has nothing persisted to
+            // truncate, but its runs still have to leave the local view.
+            if (threadId) {
+                const expectedTailRunId =
+                    truncateFromIndex > 0 ? threadRuns[truncateFromIndex - 1].id : null;
+                const outcome = await truncateThreadOnServer(
                     threadId,
-                    skipInstanceMismatchConfirm: true,
-                });
-                return;
-            }
-            if (outcome === 'failed') {
-                throw new Error('Failed to automatically retry run');
+                    runIdsToRemove,
+                    expectedTailRunId,
+                    logPrefix,
+                );
+                if (abandonReplacementIfThreadChanged(get, set, {
+                    navSeqBeforeAwait,
+                    pendingRetryRunId: failedRunId,
+                    logPrefix,
+                    popupText: AUTO_RETRY_ABANDONED_TEXT,
+                })) {
+                    return;
+                }
+                if (outcome === 'refused') {
+                    // The thread was rewritten by another client. There is no
+                    // user decision to retry against a history this client has
+                    // never seen — reload instead, so the UI shows the thread
+                    // whole (including the failed run's error card, from which
+                    // the user can retry deliberately).
+                    set(retryPendingRunIdAtom, null);
+                    set(isWSChatPendingAtom, false);
+                    set(addPopupMessageAtom, {
+                        type: 'warning',
+                        title: 'Chat changed elsewhere',
+                        text: 'This chat was changed somewhere else, so the failed run was not retried automatically. Reloading the chat.',
+                        expire: true,
+                    });
+                    await set(loadThreadAtom, {
+                        user_id: userId,
+                        threadId,
+                        skipInstanceMismatchConfirm: true,
+                    });
+                    return;
+                }
+                if (outcome === 'failed') {
+                    throw new Error('Failed to automatically retry run');
+                }
             }
 
             await cleanupTemporaryAnnotationsForRunReplacement(logPrefix);
+
+            // Re-checked after the cleanup, which is the last await before the
+            // writes — and the only one on the path where the thread was never
+            // named and no POST was made.
+            if (abandonReplacementIfThreadChanged(get, set, {
+                navSeqBeforeAwait,
+                pendingRetryRunId: failedRunId,
+                logPrefix,
+                popupText: AUTO_RETRY_ABANDONED_TEXT,
+            })) {
+                return;
+            }
 
             set(threadRunsAtom, prev => prev.filter(r => !runIdsToRemove.includes(r.id)));
             set(threadAgentActionsAtom, prev => prev.filter(a => !runIdsToRemove.includes(a.run_id)));
@@ -768,6 +876,7 @@ async function startAutoRetryRun(
             model.provider,
             customInstructions,
             model.is_custom ? model.custom_model : undefined,
+            { retryTrigger: 'auto' },
         );
 
         newRunId = newRun.id;
@@ -1164,12 +1273,35 @@ export const wsErrorAtom = atom<WSErrorEvent | null>(null);
 /** Last warning from WebSocket */
 export const wsWarningAtom = atom<WSWarningEvent | null>(null);
 
-/** Deduplicates concurrent auto-resume/auto-retry scheduling for the same run. */
+/**
+ * Runs whose automatic replacement — an auto-resume or an auto-retry — has been
+ * scheduled and has not finished. Added when `onError` decides to replace the
+ * run, removed once the replacement has started or given up.
+ */
 const scheduledAutoResumeRunIdsAtom = atom<Set<string>>(new Set<string>());
+
+/** Read-only view of the runs currently being replaced automatically. */
+export const autoReplacementPendingRunIdsAtom = atom(
+    (get) => get(scheduledAutoResumeRunIdsAtom),
+);
 
 // =============================================================================
 // Action Atoms
 // =============================================================================
+
+/**
+ * The one tracker measuring how long the stream has been quiet.
+ *
+ * Module-level rather than mounted with a component: the events it measures
+ * arrive at these handlers whether or not anything is on screen, and a tracker
+ * that had to be mounted would silently stop measuring in any window state that
+ * failed to mount it. Every handler below that advances a run calls it — one
+ * left out would make its event look like more silence, which is exactly the
+ * false report this exists to prevent.
+ */
+const streamActivity = createStreamActivityTracker({
+    publish: (state) => store.set(streamQuietAtom, state),
+});
 
 /**
  * Reset all WebSocket state atoms
@@ -1185,6 +1317,7 @@ export const resetWSStateAtom = atom(null, (_get, set) => {
     set(wsRetryAtom, null);
     set(wsReconnectingAtom, null);
     set(streamingDoneRunIdsAtom, new Set<string>());
+    streamActivity.reset();
 });
 
 /**
@@ -1222,18 +1355,6 @@ function findToolCallArgs(
         }
     }
     return null;
-}
-
-/**
- * Ids of the actions a live run has already written to Zotero, for the
- * completed-changes card. Only the WS handlers call this: an action arrives
- * `applied` because the run executed it — the user approved it while it was
- * streaming, or an always-apply permission let it run unattended. Thread
- * hydration loads actions through a different atom, so reopening a thread
- * cannot rebuild the card from history. See `sessionAppliedActionIdsAtom`.
- */
-function appliedActionIds(actions: AgentAction[]): string[] {
-    return actions.filter((action) => action.status === 'applied').map((action) => action.id);
 }
 
 function surfaceAndDiagnoseConnectionFailure(
@@ -1342,7 +1463,7 @@ export function createWSCallbacks(
     set: Setter,
     connectAttempts: () => number | null = () => null,
 ): WSCallbacks {
-    return {
+    return flushPartsBeforeOtherEvents({
         onReady: (data: WSReadyData) => {
             logger('WS onReady:', data, 1);
             set(isWSReadyAtom, true);
@@ -1377,6 +1498,9 @@ export function createWSCallbacks(
         },
 
         onPart: async (event: WSPartEvent) => {
+            // Stamped before the item-data load below, not after: the wait this
+            // reports is the provider's, and our own lookup is not silence.
+            streamActivity.noteActivity(event.run_id);
             // Load item data for tool call
             if (event.part.part_kind === "tool-call") {
                 logger(`WS onPart (${event.part.part_kind}):`, {
@@ -1399,11 +1523,15 @@ export function createWSCallbacks(
                     }
                 }
             }
-            // Update run with part
-            set(activeRunAtom, (prev) => prev ? updateRunWithPart(prev, event) : prev);
+            // Queued rather than applied now: the store write, and the render
+            // it triggers, happen once per animation frame however fast parts
+            // arrive. Every other callback here flushes the queue first, so
+            // ordering with the rest of the stream is unchanged.
+            queuePartEvent(event);
         },
 
         onToolReturn: async (event: WSToolReturnEvent) => {
+            streamActivity.noteActivity(event.run_id);
             logger('WS onToolReturn:', {
                 runId: event.run_id,
                 messageIndex: event.message_index,
@@ -1425,6 +1553,7 @@ export function createWSCallbacks(
                     const toolCallArgs = findToolCallArgs(store.get(activeRunAtom), event.part.tool_call_id);
                     await upgradeToolReturn(event.part, toolCallArgs);
                 }
+
             }
 
             // Update run with tool return (event.part now carries a synthesized
@@ -1468,16 +1597,22 @@ export function createWSCallbacks(
         },
 
         onToolCallProgress: (event: WSToolCallProgressEvent) => {
+            streamActivity.noteActivity(event.run_id);
             logger(`WS onToolCallProgress: ${event.run_id} - ${event.tool_call_id} - ${event.progress}`, 1);
             set(activeRunAtom, (prev) => prev ? updateRunWithToolCallProgress(prev, event) : prev);
         },
 
         onToolCallArgsStream: (event: WSToolCallArgsStreamEvent) => {
+            streamActivity.noteActivity(event.run_id);
             set(activeRunAtom, (prev) => prev ? updateRunWithToolCallArgsStream(prev, event) : prev);
         },
 
         onStreamingDone: (event: WSStreamingDoneEvent) => {
             logger('WS onStreamingDone:', { runId: event.run_id }, 1);
+            // The model is done; what is left is the citation lookup, and the
+            // footer reports that. Stop measuring rather than counting it as a
+            // gap the model is sitting in.
+            streamActivity.reset();
             set(streamingDoneRunIdsAtom, (prev) => new Set([...prev, event.run_id]));
         },
 
@@ -1501,7 +1636,15 @@ export function createWSCallbacks(
             // Clear retry state when run completes
             set(wsRetryAtom, null);
 
-            // Store transient backend flags (not persisted on AgentRun)
+            // Store transient backend flags (not persisted on AgentRun).
+            // The only frame that carries this flag, failed and canceled runs
+            // included: a run that ends with partial output still gets a
+            // run_complete ahead of its error frame, and that frame reports the
+            // usage. (Not a run the socket dropped — but there is nobody left to
+            // warn there.) Keyed by run id in an atom that never consults run
+            // status, so a failed run drives the same composer warning a
+            // finished one does — the composer's own fallback reads
+            // `total_usage`, which a failed run has none of.
             if (event.high_token_usage) {
                 set(backendHighTokenUsageRunsAtom, (prev) => ({ ...prev, [event.run_id]: true }));
             }
@@ -1515,7 +1658,6 @@ export function createWSCallbacks(
                 logger(`WS onRunComplete: Processing ${event.agent_actions.length} agent actions`, 1);
                 const actions = event.agent_actions.map(toAgentAction);
                 set(addAgentActionsAtom, actions);
-                set(recordAppliedActionsAtom, appliedActionIds(actions));
                 // Load item data for agent actions
                 await loadItemDataForAgentActions(actions).catch(err => 
                     logger(`WS onRunComplete: Failed to load item data for agent actions: ${err}`, 1)
@@ -1570,6 +1712,7 @@ export function createWSCallbacks(
 
         onDone: () => {
             logger('WS onDone: Request fully complete', 1);
+            streamActivity.reset();
 
             // Clear any remaining streaming-done state (safety net)
             set(streamingDoneRunIdsAtom, new Set<string>());
@@ -1603,6 +1746,7 @@ export function createWSCallbacks(
 
             // Clear streaming-done state
             set(streamingDoneRunIdsAtom, new Set<string>());
+            streamActivity.reset();
 
             // The connect loop in executeWSRequest reads this atom to tell a
             // server application error from a transport failure. Leaving it
@@ -1628,16 +1772,6 @@ export function createWSCallbacks(
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearAllPendingBatchApprovalsAtom);
             set(clearRunApprovalPolicyAtom);
-
-            // Run quality flag for a run that did not complete. Keyed by run id
-            // in an atom that never consults run status, so a failed run drives
-            // the same composer warning a finished one does — the composer's
-            // own fallback reads `total_usage`, which a failed run has none of.
-            // Defensive: the backend carries this on the `run_complete` frame it
-            // sends ahead of the error, so `onRunComplete` normally has it first.
-            if (errorRunId && event.high_token_usage) {
-                set(backendHighTokenUsageRunsAtom, (prev) => ({ ...prev, [errorRunId]: true }));
-            }
 
             if (
                 event.try_auto_resume &&
@@ -1700,6 +1834,11 @@ export function createWSCallbacks(
                 waitSeconds: event.wait_seconds,
             });
 
+            // A new wait, dated from the retry: `noteActivity` would drop an
+            // already-showing indicator for a second, and leaving the old clock
+            // would count seconds from the last token rather than from now.
+            streamActivity.startWait(event.run_id);
+
             // If reset is true, clear any partial content that was streamed
             if (event.reset) {
                 logger(`WS onRetry: resetting run messages for run ${event.run_id}`, 1);
@@ -1714,7 +1853,6 @@ export function createWSCallbacks(
             }, 1);
             const actions = event.actions.map(toAgentAction);
             set(upsertAgentActionsAtom, actions);
-            set(recordAppliedActionsAtom, appliedActionIds(actions));
             
             // Mark external references as imported for applied create_items actions
             // This handles cases where actions are applied via PendingActionsBar
@@ -1902,6 +2040,7 @@ export function createWSCallbacks(
             }
             // Clear streaming-done state (connection lost during post-processing)
             set(streamingDoneRunIdsAtom, new Set<string>());
+            streamActivity.reset();
             // Clear pending approvals and dismiss diff preview (connection lost)
             set(clearAllPendingApprovalsAtom);
             set(clearAllPendingQuestionsAtom);
@@ -1949,7 +2088,31 @@ export function createWSCallbacks(
                 }
             }
         }
-    };
+    });
+}
+
+/**
+ * Wrap every callback except `onPart` so it applies the queued part events
+ * before it runs.
+ *
+ * Part events are buffered for a frame (see `streamingPartQueue`), so anything
+ * else arriving on the socket — a tool return, the run completing — would
+ * otherwise see run state missing the text that arrived just before it. Wrapping
+ * the whole object rather than each handler keeps a callback added later from
+ * silently missing the flush.
+ */
+function flushPartsBeforeOtherEvents(callbacks: WSCallbacks): WSCallbacks {
+    const wrapped: Record<string, unknown> = { ...callbacks };
+
+    for (const [name, callback] of Object.entries(callbacks)) {
+        if (name === 'onPart' || typeof callback !== 'function') continue;
+        wrapped[name] = (...args: unknown[]) => {
+            flushPendingPartEvents();
+            return (callback as (...callbackArgs: unknown[]) => unknown)(...args);
+        };
+    }
+
+    return wrapped as unknown as WSCallbacks;
 }
 
 /**
@@ -2257,17 +2420,7 @@ export const sendWSMessageAtom = atom(
                 });
                 continue;
             }
-            const externalAttachment: ExternalFileAttachment = {
-                type: 'external_file',
-                ext_key: file.extKey,
-                filename: file.filename,
-                content_kind: file.contentKind,
-                mime_type: file.mimeType,
-                file_size: file.fileSize,
-                ...(file.pageCount ? { page_count: file.pageCount } : {}),
-                date_added: new Date(file.createdAt).toISOString(),
-            };
-            attachments.push(externalAttachment);
+            attachments.push(externalFileRecordToAttachment(file));
         }
 
         // Add the current reader attachment as a source if it is not already in
@@ -2421,8 +2574,7 @@ export const sendWSMessageAtom = atom(
                 model?.provider,
                 customInstructions,
                 model?.is_custom ? model.custom_model : undefined,
-                runIdOverride,
-                permissionsOverride,
+                { runIdOverride, permissionsOverride },
             );
 
             // Set active run - UI now shows user message + spinner
@@ -2500,6 +2652,13 @@ async function startRegenerateRun(
     let newRunId: string | null = null;
 
     try {
+        // Which chat this replacement belongs to. Must precede every await in
+        // the function — retrying a still-live run cancels it first, and a
+        // sequence captured after that flush would already carry a switch made
+        // during it, blinding every later check. See
+        // `abandonReplacementIfThreadChanged`.
+        const navSeqBeforeAwait = get(threadNavigationSeqAtom);
+
         // Get current model
         const model = get(selectedModelAtom);
         if (!model) {
@@ -2513,6 +2672,10 @@ async function startRegenerateRun(
             logger(`${logPrefix}: No user ID found`, 1);
             return;
         }
+
+        // Before the run is read or archived: whichever run this ends up
+        // touching, it must carry the streamed text queued for the frame.
+        flushPendingPartEvents();
 
         // Fold a terminal run out of the active slot into thread history
         // before the removed set is computed: a failed run being replaced
@@ -2542,6 +2705,21 @@ async function startRegenerateRun(
             // composer guard keeps blocking new sends during the flush.
             set(activeRunAtom, null);
             await agentService.cancel();
+
+            // The earliest await in this function, and everything after it
+            // reads live state: the thread id the truncate is addressed to,
+            // and the applied actions the undo dialog lists. Checking only
+            // after the POST would let a switch made during this flush put
+            // that dialog in front of the new chat and aim the removal at it.
+            // Ahead of the clear below, which abandoning does for itself.
+            if (abandonReplacementIfThreadChanged(get, set, {
+                navSeqBeforeAwait,
+                pendingRetryRunId: runId,
+                logPrefix,
+                popupText: USER_RETRY_ABANDONED_TEXT,
+            })) {
+                return;
+            }
             set(isWSChatPendingAtom, false);
         }
 
@@ -2570,7 +2748,10 @@ async function startRegenerateRun(
             }
         }
 
-        // Get thread ID from the target run (may not be set in currentThreadIdAtom yet)
+        // Get thread ID from the target run (may not be set in currentThreadIdAtom yet).
+        // Deliberately read after the cancel above: a first run's `thread` event
+        // can land during that flush, and reading earlier would miss the id and
+        // leave the run stranded server-side.
         const threadId = get(currentThreadIdAtom) || targetRun.thread_id;
 
         // Runs the retry replaces: the target and everything after it. A live
@@ -2673,6 +2854,14 @@ async function startRegenerateRun(
                 expectedTailRunId,
                 logPrefix,
             );
+            if (abandonReplacementIfThreadChanged(get, set, {
+                navSeqBeforeAwait,
+                pendingRetryRunId: runId,
+                logPrefix,
+                popupText: USER_RETRY_ABANDONED_TEXT,
+            })) {
+                return;
+            }
             if (outcome === 'failed') {
                 set(retryPendingRunIdAtom, null);
                 set(isWSChatPendingAtom, false);
@@ -2714,6 +2903,18 @@ async function startRegenerateRun(
 
         await cleanupTemporaryAnnotationsForRunReplacement(logPrefix);
 
+        // Re-checked after the undo and the cleanup: the undo awaits one Zotero
+        // operation per applied action, so it is the longest window in this
+        // function and the easiest one to switch chats in.
+        if (abandonReplacementIfThreadChanged(get, set, {
+            navSeqBeforeAwait,
+            pendingRetryRunId: runId,
+            logPrefix,
+            popupText: USER_RETRY_ABANDONED_TEXT,
+        })) {
+            return;
+        }
+
         // Truncate runs - keep only runs before the target
         set(threadRunsAtom, (prev) =>
             prev.filter(r => !runIdsToRemove.includes(r.id))
@@ -2723,6 +2924,19 @@ async function startRegenerateRun(
         set(threadAgentActionsAtom, (prev) =>
             prev.filter(a => !runIdsToRemove.includes(a.run_id))
         );
+
+        // Drop stashed edits for removed runs; those messages are gone.
+        set(promptEditDraftsAtom, (prev) => {
+            const next = { ...prev };
+            let changed = false;
+            for (const id of runIdsToRemove) {
+                if (id in next) {
+                    delete next[id];
+                    changed = true;
+                }
+            }
+            return changed ? next : prev;
+        });
 
         // Clear citations for removed runs
         set(citationsAtom, (prev) =>
@@ -2750,6 +2964,12 @@ async function startRegenerateRun(
             model.provider,
             customInstructions,
             model.is_custom ? model.custom_model : undefined,
+            // A retry re-asks the same question, and the trigger is what tells
+            // the backend a person asked for it. An edited prompt is a new
+            // question that happens to replace the old turn, so it is not one:
+            // reporting it as a retry would count it among the runs that stand
+            // in for a failed one.
+            { retryTrigger: editedPrompt ? undefined : 'user' },
         );
 
         // Set active run - UI now shows user message + spinner, which takes
@@ -2822,6 +3042,7 @@ export const autoResumeErroredRunAtom = atom(
         try {
             await startResumeRun(get, set, failedRunId, {
                 requireResumable: false,
+                trigger: 'auto',
                 logPrefix: 'autoResumeErroredRunAtom',
                 failureErrorType: 'auto_resume_error',
                 failureMessage: 'Failed to automatically resume run',
@@ -2863,6 +3084,7 @@ export const resumeFromRunAtom = atom(
     async (get, set, failedRunId: string) => {
         await startResumeRun(get, set, failedRunId, {
             requireResumable: true,
+            trigger: 'user',
             logPrefix: 'resumeFromRunAtom',
             failureErrorType: 'resume_error',
             failureMessage: 'Failed to resume run',
@@ -2875,6 +3097,11 @@ export const resumeFromRunAtom = atom(
  * Store-only — does not touch the socket.
  */
 export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
+    // The run below is archived exactly as it stands and its slot is cleared,
+    // so the streamed text still sitting in the frame queue has to be applied
+    // first — after the slot is null there is nothing left to apply it to.
+    flushPendingPartEvents();
+
     // Set pending to false immediately for better UI responsiveness
     set(isWSChatPendingAtom, false);
 
@@ -2902,6 +3129,7 @@ export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
 
     // Clear streaming-done state (abandoned during post-processing)
     set(streamingDoneRunIdsAtom, new Set<string>());
+    streamActivity.reset();
 });
 
 /**
@@ -2981,6 +3209,7 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(clearAgentActionsAtom);
     set(citationsAtom, []);
     set(resetCitationMarkersAtom);  // Reset citation markers for cleared thread
+    resetRunSelectorCaches();  // Drop scoped run selectors keyed by the cleared thread's runs
     set(clearWarningsAtom);
     // Clear pending questions so a reset never leaves the composer disabled
     // behind an unanswerable card (pending approvals are left as-is here).
@@ -3185,3 +3414,14 @@ export const sendBatchApprovalResponseAtom = atom(
         set(removePendingBatchApprovalAtom, approvalId);
     }
 );
+
+/**
+ * Batch progress for the open thread, or null when nothing has been stamped.
+ *
+ * Derived from the newest `metadata.batch_progress` via
+ * `selectLiveBatchProgress`, which keeps only batches something is actually
+ * working: everything drops once the run that carried the stamp is terminal —
+ * ended batches to `BatchRunReceipt`, open ones because a stopped run leaves
+ * its batch paused — as does a batch the stamp itself flags as paused.
+ */
+export const batchProgressAtom = atom((get) => selectLiveBatchProgress(get(allRunsAtom)));

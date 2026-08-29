@@ -156,6 +156,10 @@ if (!parsed.options.lib || nonEsLibs.length > 0) {
 // so listing it as a root would only cost the orphan signal that catches it
 // dropping out of the closure.
 //
+// `run-state/streamActivity.ts` is a root too: it measures a gap in the stream
+// from the events a client's own transport handlers see, so the client drives it
+// and nothing inside the package has those handlers to call it from.
+//
 // `citations/atoms.ts` is a root on the same rule: it is the citation render
 // state a client reads and writes directly, and nothing else in the package
 // imports it. So is `transport/otp.ts`: a client's sign-in form calls it, and
@@ -179,6 +183,7 @@ const entryPaths = [
   "src/transport/clients/zoteroLibraryService.ts",
   "src/run-state/askUserQuestionAnswers.ts",
   "src/run-state/batchApprovalAnswers.ts",
+  "src/run-state/batchProgress.ts",
   "src/run-state/toolResultViews.ts",
   "src/run-state/toolResultTypes.ts",
   "src/run-state/toolCallRequest.ts",
@@ -191,6 +196,7 @@ const entryPaths = [
   "src/run-state/runErrorCopy.ts",
   "src/run-state/runStatusCopy.ts",
   "src/run-state/runStatusVisibility.ts",
+  "src/run-state/streamActivity.ts",
   "src/citations/atoms.ts",
   "src/citations/externalReferences.ts",
 ].map((p) => path.join(pkgDir, p));

@@ -255,7 +255,7 @@
 .beaver-root .font-color-red { color: var(--tag-red); opacity: 0.8; }
 .beaver-root .font-color-green { color: var(--tag-green); opacity: 0.8; }
 .beaver-root .font-color-accent-green { color: var(--accent-green); opacity: 0.8; }
-.beaver-root .font-color-orange { color: var(--tag-orange); opacity: 0.8; }
+.beaver-root .font-color-orange { color: var(--tag-orange); }
 .beaver-root .font-color-blue { color: var(--tag-blue); opacity: 0.8; }
 .beaver-root .font-color-accent-blue { color: var(--accent-blue); }
 .beaver-root .stroke-width-2 path { stroke-width: 2; }
@@ -338,12 +338,32 @@
 .beaver-root .bg-tertiary { background-color: var(--fill-tertiary); }
 .beaver-root .bg-quinary { background-color: var(--fill-quinary); }
 .beaver-root .bg-senary { background-color: var(--fill-senary); }
+/* Opaque surface for anything that floats above the pane: menus, tooltips,
+   popovers, modal scrims. */
+.beaver-root .bg-overlay { background-color: var(--beaver-surface-overlay); }
+/* Opaque surface for a card sitting on the pane, level with the composer. */
+.beaver-root .bg-raised { background-color: var(--beaver-surface-raised); }
+/* Translucent fill for inline badges and pills, which sit inside cards. */
+.beaver-root .bg-chip { background-color: var(--beaver-fill-chip); }
 
-/* Rounded corners */
-.beaver-root .rounded-sm { border-radius: 0.125rem; }
-.beaver-root .rounded-md { border-radius: 0.375rem; }
-.beaver-root .rounded-lg { border-radius: 0.5rem; }
-.beaver-root .rounded-xl { border-radius: 0.75rem; }
+/* Rounded corners. The general-purpose scale, plus `.rounded-card` for the
+   inline cards that sit at the composer's width and share its corner. */
+.beaver-root .rounded-sm { border-radius: var(--beaver-radius-sm); }
+.beaver-root .rounded-md { border-radius: var(--beaver-radius-md); }
+.beaver-root .rounded-lg { border-radius: var(--beaver-radius-lg); }
+.beaver-root .rounded-xl { border-radius: var(--beaver-radius-xl); }
+.beaver-root .rounded-card { border-radius: var(--beaver-radius-card); }
+/* A card's header and footer rows carry their own fill, which would square off
+   the corner the card just rounded. Clip them to the card's inner radius — the
+   card's own radius less its 1px border. */
+.beaver-root .rounded-card > .bg-senary:first-child {
+    border-top-left-radius: calc(var(--beaver-radius-card) - 1px);
+    border-top-right-radius: calc(var(--beaver-radius-card) - 1px);
+}
+.beaver-root .rounded-card > .bg-senary:last-child {
+    border-bottom-left-radius: calc(var(--beaver-radius-card) - 1px);
+    border-bottom-right-radius: calc(var(--beaver-radius-card) - 1px);
+}
 
 /* Borders */
 .beaver-root .border-left-quinary { border-left: 1px solid var(--fill-quinary); }
@@ -354,7 +374,11 @@
 .beaver-root .border-bottom-quarternary { border-bottom: 1px solid var(--fill-quarternary); }
 .beaver-root .border-quinary { border: 1px solid var(--fill-quinary); }
 .beaver-root .border-quarternary { border: 1px solid var(--material-mix-quarternary); }
-.beaver-root .border-popup { border: 1px solid var(--fill-quarternary); }
+/* `.border-popup` outlines overlays — menus, tooltips, dialogs — which sit on
+   their own surface and need the stronger edge. `.border-card` outlines inline
+   cards, which carry the same border weight as the composer. */
+.beaver-root .border-popup { border: 1px solid var(--beaver-border-strong); }
+.beaver-root .border-card { border: 1px solid var(--beaver-border-default); }
 .beaver-root .border-top-popup { border-top: 1px solid var(--fill-quarternary); }
 .beaver-root .border-transparent { border: 1px solid transparent; }
 .beaver-root .border-error { border: 1px solid var(--tag-red-tertiary); }

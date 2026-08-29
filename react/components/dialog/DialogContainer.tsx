@@ -72,7 +72,7 @@ const DialogContainer: React.FC = () => {
         >
             {/* Overlay backdrop */}
             <div
-                className="absolute inset-0 opacity-80 bg-quaternary"
+                className="absolute inset-0 opacity-80 bg-overlay"
             />
             {/* Dialog container */}
             <div className="absolute inset-0 display-flex items-center justify-center shadow-lg">

@@ -1,5 +1,5 @@
 import { AuthApiError, AuthError, AuthSessionMissingError, isAuthRetryableFetchError } from '@supabase/supabase-js';
-import { ApiError, ServerError, SessionExpiredError, SessionRefreshError } from '../types/apiErrors';
+import { ApiError, RequestTimeoutError, ServerError, SessionExpiredError, SessionRefreshError } from '../types/apiErrors';
 import { logger } from '../platform/logger';
 import { supabase } from './supabaseClient';
 import { recordBackendHttpSuccess } from './backendReachability';
@@ -58,7 +58,7 @@ async function withDeadline<T>(
     const deadline: RequestDeadline = { controller: new AbortController(), timeoutMs };
     // Built once so both the timeout race and the abort-reclassification
     // below throw the exact same error.
-    const timeoutError = new SessionRefreshError(`Request timed out after ${timeoutMs}ms`, 0, 'Network Error');
+    const timeoutError = new RequestTimeoutError(`Request timed out after ${timeoutMs}ms`);
 
     let onAbort: () => void = () => {};
     const timedOut = new Promise<never>((_, reject) => {
@@ -211,8 +211,17 @@ export class ApiService {
             ? `${method}: ${endpoint} ${bodyText}`
             : `${method}: ${endpoint}`;
 
+        // Supabase auth calls do not accept our AbortSignal. Do not let one
+        // that finishes after the caller's deadline dispatch a request late.
+        const throwIfDeadlineExpired = () => {
+            if (deadline?.controller.signal.aborted) {
+                throw new RequestTimeoutError(`Request timed out after ${deadline.timeoutMs}ms`);
+            }
+        };
+
         const makeRequest = async (headers: Record<string, string>): Promise<Response> => {
             try {
+                throwIfDeadlineExpired();
                 return await fetch(`${this.baseUrl}${endpoint}`, {
                     method,
                     headers: { ...headers, ...options?.headers },
@@ -240,12 +249,14 @@ export class ApiService {
         };
 
         let headers = await this.getAuthHeaders();
+        throwIfDeadlineExpired();
         logger(logMessage);
 
         let response = await makeRequest(headers);
         if (response.status === 401) {
             logger(`${method}: Received 401 for ${endpoint}. Refreshing session and retrying once.`, 2);
             const refreshedToken = await this.refreshAccessToken(`${method} ${endpoint}`);
+            throwIfDeadlineExpired();
             headers = this.buildAuthHeaders(refreshedToken);
             response = await makeRequest(headers);
 
@@ -400,9 +411,11 @@ export class ApiService {
     /**
     * Performs a PATCH request
     */
-    async patch<T>(endpoint: string, body: any): Promise<T> {
-        const response = await this.request(endpoint, 'PATCH', body);
-        return await this.parseJsonResponse<T>(response, 'PATCH');
+    async patch<T>(endpoint: string, body: any, options?: RequestOptions): Promise<T> {
+        return withDeadline(options, async (deadline) => {
+            const response = await this.request(endpoint, 'PATCH', body, deadline);
+            return await this.parseJsonResponse<T>(response, 'PATCH');
+        });
     }
     
     /**

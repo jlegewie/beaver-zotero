@@ -57,6 +57,20 @@ export class SessionRefreshError extends ApiError {
 }
 
 /**
+ * The caller stopped waiting for a request whose outcome may be unknown.
+ *
+ * This remains a SessionRefreshError subtype so existing transient-network
+ * handling continues to apply, while mutation callers can distinguish a
+ * deadline from a definite server rejection and reconcile before updating UI.
+ */
+export class RequestTimeoutError extends SessionRefreshError {
+    constructor(message?: string) {
+        super(message || 'Request timed out', 0, 'Network Error');
+        this.name = 'RequestTimeoutError';
+    }
+}
+
+/**
  * Error thrown for server-side errors
  */
 export class ServerError extends Error {

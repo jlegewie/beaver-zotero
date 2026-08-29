@@ -31,6 +31,12 @@ vi.mock('../../../src/utils/itemDescription', () => ({
     getItemDescription: vi.fn((item: any) => `Description ${item.key}`),
 }));
 
+// The reference line has its own suite (utils/itemReference.test.ts); here it
+// only has to be distinguishable from the description.
+vi.mock('../../../src/utils/itemReference', () => ({
+    formatItemReference: vi.fn((item: any) => `Reference ${item.key}`),
+}));
+
 vi.mock('../../../src/utils/zoteroSerializers', () => ({
     getYearFromItem: (item: any) => item.year,
     serializeItem: mocks.serializeItem,
@@ -82,6 +88,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
 }));
 
 import { handleItemQuickSearchRequest } from '../../../src/services/agentDataProvider/handleItemQuickSearchRequest';
+import { formatItemReference } from '../../../src/utils/itemReference';
 
 /** A regular, non-trashed item the handler will accept. */
 function searchHit(libraryID: number, key: string, overrides: Record<string, any> = {}) {
@@ -134,7 +141,6 @@ beforeEach(() => {
     scoreSearchResult.mockReturnValue(1);
     const zotero = (globalThis as any).Zotero;
     zotero.Items = { ...(zotero.Items ?? {}), loadDataTypes: vi.fn(async () => {}) };
-    zotero.Beaver = { citationService: { formatBibliography: vi.fn(() => 'Legewie, J. (2014).') } };
 });
 
 describe('handleItemQuickSearchRequest projection', () => {
@@ -156,7 +162,7 @@ describe('handleItemQuickSearchRequest projection', () => {
                 description: 'Description AAAAAAAA',
                 title: 'Title AAAAAAAA',
                 year: 2014,
-                formatted_citation: undefined,
+                formatted_citation: 'Reference AAAAAAAA',
                 has_attachment: true,
                 score: 1,
             },
@@ -164,28 +170,25 @@ describe('handleItemQuickSearchRequest projection', () => {
         expect(res.total_count).toBe(1);
     });
 
-    it('does not run the citation engine for a page of results', async () => {
-        // Rendering a CSL entry costs hundreds of milliseconds per row, so a
-        // page must never trigger one unless it was asked for by name.
+    it('renders a citation for every hit on the page', async () => {
         quickSearchItems.mockImplementation(async (libraryId: number) =>
             searchResult(libraryId === 1 ? [searchHit(1, 'AAAAAAAA'), searchHit(1, 'BBBBBBBB')] : [])
         );
 
         const res = await handleItemQuickSearchRequest(request());
 
-        expect((Zotero as any).Beaver.citationService.formatBibliography).not.toHaveBeenCalled();
-        expect(res.items.every((hit: any) => hit.formatted_citation === undefined)).toBe(true);
+        expect(formatItemReference).toHaveBeenCalledTimes(2);
+        expect(res.items.every((hit: any) => typeof hit.formatted_citation === 'string')).toBe(true);
     });
 
-    it('renders a citation per hit when include_citation is set', async () => {
+    it('carries both the citation and the shorter description per hit', async () => {
         quickSearchItems.mockImplementation(async (libraryId: number) =>
             searchResult(libraryId === 1 ? [searchHit(1, 'AAAAAAAA')] : [])
         );
 
-        const res = await handleItemQuickSearchRequest(request({ include_citation: true }));
+        const res = await handleItemQuickSearchRequest(request());
 
-        expect((res.items[0] as any).formatted_citation).toBe('Legewie, J. (2014).');
-        // The cheap line is still served, so a caller never has to choose.
+        expect((res.items[0] as any).formatted_citation).toBe('Reference AAAAAAAA');
         expect((res.items[0] as any).description).toBe('Description AAAAAAAA');
     });
 

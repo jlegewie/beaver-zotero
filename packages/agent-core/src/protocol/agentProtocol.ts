@@ -4,6 +4,7 @@ import { ZoteroItemReference } from '../types/zotero';
 import { ItemDataWithStatus, AttachmentDataWithStatus, ItemStub, ItemSummary, AttachmentInfo, AttachmentStub } from '../types/zotero';
 import { ReaderState, NoteState } from '../types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../agents/types';
+import type { RetryTrigger } from '../agents/types';
 import type { CustomChatModel } from '../types/customChatModel';
 import { AttachmentData, ItemData } from '../types/zotero';
 import type { BeaverExtractResult } from '../extract/schema';
@@ -189,15 +190,6 @@ export interface WSErrorEvent extends WSBaseEvent {
     try_auto_resume?: boolean;
     /** show the beaver credits button */
     has_beaver_fallback?: boolean;
-    /**
-     * Whether the run had high input token usage (backend-assessed).
-     *
-     * On this frame rather than `run_complete` since CLIENT_FEATURES.CITATIONS_EVENT:
-     * a run that failed still has this to say about the conversation, and it is the
-     * only source for a failed run — the composer's own fallback reads
-     * `lastRun.total_usage`, which a failed run does not have.
-     */
-    high_token_usage?: boolean;
 }
 
 /** Warning event for non-fatal issues */
@@ -738,20 +730,12 @@ export interface QuickSearchHit {
     display_name: string;
     /**
      * Second line for the row: title and publication context, or the parent
-     * relationship for a note or attachment. Composed from Zotero's fields —
-     * cheap enough to serve for a whole page, unlike `formatted_citation`.
+     * relationship for a note or attachment. Shorter than `formatted_citation`.
      */
     description?: string;
     title?: string;
     year?: number;
-    /**
-     * Formatted bibliography entry, for a hover card.
-     *
-     * Only present when the request set `include_citation`. Rendering one runs
-     * the CSL engine per item, which costs hundreds of milliseconds and is far
-     * too slow for a page of results — ask for it for a single item the user
-     * actually paused on, and use `description` everywhere else.
-     */
+    /** One-line bibliographic reference */
     formatted_citation?: string;
     /** Whether the item has at least one child attachment */
     has_attachment?: boolean;
@@ -788,15 +772,6 @@ export interface WSItemQuickSearchRequest extends WSBaseEvent {
     // Options
     /** What each hit carries. Default 'compact'. */
     detail?: QuickSearchDetail;
-    /**
-     * Also render `formatted_citation` on each hit. Default false.
-     *
-     * Off by default because it runs the CSL engine once per row, which costs
-     * hundreds of milliseconds per item — enough to make a picker unusable.
-     * `description` carries the same information cheaply; reach for this only
-     * when a real bibliography entry is required.
-     */
-    include_citation?: boolean;
     /** Maximum number of results to return. Default 20. */
     limit?: number;
     /** Number of results to skip for pagination. Default 0. */
@@ -1465,28 +1440,50 @@ export interface WSListItemsResponse {
  * Request from backend for resolve_population.
  *
  * Resolves the complete set of item ids matching a filter description in one
- * round trip, so a batch operation never has to page through `list_items`.
- * Every filter is ANDed (the join mode is always `all`); filters left unset do
- * not constrain the result, so an otherwise empty request selects the whole
- * library.
+ * round trip, so a batch job never has to page through `list_items`.
+ * Every filter is ANDed with every other one; `conditions_join_mode` sets how
+ * the `conditions` list is joined among itself, and joins nothing else.
+ * Filters left unset do not constrain the result, so an otherwise empty
+ * request selects the whole library.
  */
 export interface WSResolvePopulationRequest extends WSBaseEvent {
     event: 'resolve_population_request';
     request_id: string;
     /** Library id or name. Null/absent = the user's default library. */
     library_id?: number | string | null;
-    /** Bare collection key (never library-qualified); the backend down-converts. */
-    collection_key?: string | null;
-    /** Include items from subcollections when scoped to a collection. */
+    /**
+     * Bare collection keys (never library-qualified); the backend
+     * down-converts. ORed: an item matches when it is in ANY of them.
+     */
+    collection_keys?: string[] | null;
+    /** Include items from subcollections of every scoped collection. */
     recursive: boolean;
-    /** Exact tag the items must carry. */
-    tag?: string | null;
+    /** Exact tag names. ORed: an item matches when it carries ANY of them. */
+    tags?: string[] | null;
     /** Only items that belong to no collection. */
     unfiled: boolean;
     /** Only items that carry no tags. */
     untagged: boolean;
-    /** Additional search conditions, ANDed with the other filters. */
+    /** Additional search conditions, joined per `conditions_join_mode` and ANDed with the other filters. */
     conditions: ZoteroSearchCondition[];
+    /**
+     * How the entries of `conditions` are joined with each other. 'all' ANDs
+     * them; 'any' ORs them, so an item matches when it satisfies at least one.
+     * Absent or unrecognized = 'all'.
+     *
+     * It joins the `conditions` list ALONE. `collection_keys`, `tags`,
+     * `unfiled`, `untagged`, `has_attachments` and `item_category` stay ANDed
+     * with the conditions group and with each other, so 'any' can only be used
+     * to widen within `conditions`.
+     *
+     * Under 'any' the list may not contain a `unfiled`, `retracted`,
+     * `publications` or `feed` condition: Zotero applies each of those as a
+     * search-wide flag rather than as a matchable condition, so it would be
+     * ANDed with the other entries instead of ORed with them. Such a request
+     * is rejected with `invalid_request` rather than resolved to a population
+     * narrower than described.
+     */
+    conditions_join_mode?: 'all' | 'any' | null;
     /** 'regular' = bibliographic items, 'attachment' = child attachments. */
     item_category: 'regular' | 'attachment';
     /** Filter regular items by attachment presence; null = no filter. */
@@ -1510,24 +1507,61 @@ export interface WSResolvePopulationResponse {
     item_ids: string[];
     /** True number of matches, counted before truncation. */
     total_count: number;
+    /**
+     * Number of bibliographic items the filters matched, counted before any
+     * attachment population is derived from them and before truncation.
+     *
+     * Under `item_category: 'regular'` it equals `total_count`. Under
+     * `item_category: 'attachment'` the two answer different questions:
+     * `total_count` counts the attachments hanging off the matched items, so it
+     * can be larger than this one, and it is 0 whenever none of the matched
+     * items has an attachment. This count is therefore what separates "the
+     * filters matched nothing" from "the filters matched, but none of the
+     * matches has an attachment" — two cases that call for opposite
+     * corrections. It says nothing about whether an attachment's file is
+     * present on disk: an attachment record is counted either way.
+     *
+     * Set on every successful resolution; absent from a failure and from a
+     * provider that predates the field.
+     */
+    matched_item_count?: number | null;
     /** True when total_count exceeded max_items and item_ids was cut short. */
     truncated: boolean;
     /**
-     * Display names of the library and collection the filters resolved
+     * Display names of the library and collections the filters resolved
      * against. The approval card names the population's location from these
      * and says nothing about it when they are absent, so omitting them costs
      * the user the WHERE half of what they are approving.
+     *
+     * `collection_names` is in the order `collection_keys` named them, and is
+     * answered in full or not at all — the card cannot state the place from a
+     * partial list, because the collections it skipped are part of the
+     * population too.
      */
     library_name?: string | null;
-    collection_name?: string | null;
+    collection_names?: string[] | null;
+    /**
+     * The join mode actually applied to the request's `conditions`. Set on
+     * every successful resolution, and absent from a failure.
+     *
+     * A caller that asked for 'any' must check it: a provider that predates the
+     * field answers without it, having resolved the population under 'all' —
+     * strictly narrower than what was asked for, and otherwise indistinguishable
+     * from a correct answer.
+     */
+    conditions_join_mode?: 'all' | 'any' | null;
     error?: string | null;
     error_code?: string | null;
     /** Available libraries (only included when error_code is 'library_not_found') */
     available_libraries?: AvailableLibraryInfo[] | null;
     /**
-     * Non-fatal warnings (e.g. conditions Zotero rejected and the handler
-     * dropped). A dropped filter WIDENS the population, so the caller must
-     * treat any warning as a failed resolution rather than acting on the ids.
+     * Unused by this response: a condition Zotero refuses fails the whole
+     * resolution with `error_code: 'invalid_condition'` instead. The population
+     * is about to be mutated, so a filter that could not be applied as
+     * described has to produce an answer that cannot be acted on — no ids —
+     * rather than ids the caller is trusted to discard.
+     *
+     * Kept so a caller that also reads older answers can still see them.
      */
     warnings?: string[] | null;
 }
@@ -1548,14 +1582,6 @@ export interface WSGetMetadataRequest extends WSBaseEvent {
      * payloads have no place in that projection.
      */
     detail?: ItemProjectionDetail;
-    /**
-     * Also render `formatted_citation` on each compact row. Default false;
-     * ignored when `detail` is 'full', which always carries one.
-     *
-     * This is the op to ask for a real bibliography entry — for one item the
-     * user paused on, not for a list. See `QuickSearchHit.formatted_citation`.
-     */
-    include_citation?: boolean;
 }
 
 /** Response to get_metadata request */
@@ -1913,6 +1939,8 @@ export interface WSAgentActionValidateResponse {
      * instead of the original request action_data.
      */
     normalized_action_data?: Record<string, any>;
+    /** Display names of the collections the action touches */
+    collection_names?: Record<string, string>;
     preference: DeferredToolPreference;
     /** Optional warnings surfaced during validation */
     warnings?: string[];
@@ -2090,7 +2118,7 @@ export interface WSCreditConfirmationStale extends WSBaseEvent {
 export type BatchApprovalMode = 'full_access' | 'ask_each_time';
 
 /**
- * Ask the user to approve a batch operation before it starts mutating.
+ * Ask the user to approve a batch job before it starts mutating.
  *
  * One decision covers a whole batch rather than a single tool call, so this
  * renders as a run-level card. Unlike a credit confirmation it carries a
@@ -2137,6 +2165,15 @@ export interface WSBatchApprovalRequest extends WSBaseEvent {
      */
     destructive_warning: string;
     /**
+     * What the job costs the user directly, rendered verbatim in its own
+     * block; set only for a run served by the user's own API key that is large
+     * enough to warn about, and empty for everyone else. Distinct from
+     * `credit_chip`, which quotes Beaver credits: a BYOK run's real cost is its
+     * provider's bill, which no credit figure states. Absent from a backend
+     * that predates the field.
+     */
+    cost_warning?: string;
+    /**
      * Short line about the confirmation limit approving raises, shown beside
      * the title; empty when the run has no credit ledger or the user switched
      * confirmations off, and the chip is then hidden.
@@ -2153,6 +2190,8 @@ export interface WSBatchApprovalRequest extends WSBaseEvent {
     approve_label: string;
     /** Label for the decline button */
     decline_label: string;
+    /** Label the decline button takes once the user has typed instructions */
+    decline_with_instructions_label?: string;
     /** Backend-provided docs link text; empty means no link */
     learn_more_label?: string;
     /** Docs path resolved against the client's environment-specific docs URL */
@@ -2469,8 +2508,8 @@ export const CLIENT_FEATURES = {
      * per-tool `confirm_extraction` / `confirm_external_search` approvals.
      */
     CREDIT_CONFIRMATION: 'credit_confirmation',
-    /** `batch_operations` capability (batch_start / batch_resolve). */
-    BATCH_OPERATIONS: 'batch_operations',
+    /** `batch_jobs` capability (batch_start / batch_resolve). */
+    BATCH_JOBS: 'batch_jobs',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -2501,23 +2540,9 @@ export const ZOTERO_AGENT_NAME = 'beaver';
 
 /**
  * Features the current Zotero plugin build always declares in the auth
- * handshake. Equals the full CLIENT_FEATURES vocabulary except
- * `batch_operations`, which is a backend rollout switch this plugin only
- * opts into in development (see `zoteroPluginFeatures`).
+ * handshake.
  */
-export const ZOTERO_PLUGIN_FEATURES: string[] = Object.values(CLIENT_FEATURES).filter(
-    (feature) => feature !== CLIENT_FEATURES.BATCH_OPERATIONS,
-);
-
-/**
- * Handshake feature list for this Zotero plugin build.
- * Development builds additionally declare `batch_operations` so the backend
- * offers the deferred batch capability without shipping it to production.
- */
-export function zoteroPluginFeatures(isDevelopment: boolean): string[] {
-    if (!isDevelopment) return ZOTERO_PLUGIN_FEATURES;
-    return [...ZOTERO_PLUGIN_FEATURES, CLIENT_FEATURES.BATCH_OPERATIONS];
-}
+export const ZOTERO_PLUGIN_FEATURES: string[] = Object.values(CLIENT_FEATURES);
 
 /** Current library context for application state */
 export interface CurrentLibrary {
@@ -2713,6 +2738,14 @@ export interface AgentRunRequest {
      * the client still held after dropping the ones it was regenerating.
      */
     retry_keep_run_ids?: string[];
+    /**
+     * Who started this retry. Set on the run request that follows a retry's
+     * truncate call, which is the only thing marking that request as a retry.
+     * Only `auto` reorders the backend's model chain, for the same reason an
+     * automatic resume does — the provider that just aborted should not lead
+     * the next attempt. Omitted on an ordinary message.
+     */
+    retry_trigger?: RetryTrigger;
     /** Pre-generated assistant message ID (optional) */
     assistant_message_id?: string;
 }
@@ -2883,7 +2916,7 @@ export interface WSCallbacks {
     onCreditConfirmationStale?: (event: WSCreditConfirmationStale) => void;
 
     /**
-     * Called when the backend asks the user to approve a batch operation before
+     * Called when the backend asks the user to approve a batch job before
      * it starts mutating. The frontend should render the backend-composed card
      * verbatim and send a WSBatchApprovalResponse when the user decides.
      * @param event The approval request with copy and correlation id

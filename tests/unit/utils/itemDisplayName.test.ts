@@ -32,6 +32,15 @@ describe('getItemDisplayName', () => {
         expect(name).toBe('Legewie and DiPrete 2014');
     });
 
+    it('strips the bidi isolates Zotero wraps around a two-creator string', () => {
+        const name = getItemDisplayName(item({
+            firstCreator: '\u2068Figures\u2069 and \u2068Legewie\u2069',
+            getField: (field: string) => (field === 'date' ? '2019' : ''),
+        }));
+
+        expect(name).toBe('Figures and Legewie 2019');
+    });
+
     it('labels an annotation with its highlighted text', () => {
         // An annotation has no creators and no title, so without its own branch
         // it falls through to the creator path and reads "Unknown Author".

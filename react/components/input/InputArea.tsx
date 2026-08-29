@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { StopIcon, GlobalSearchIcon } from '../icons/icons';
+import { StopIcon, GlobalSearchIcon, ArrowUpLineIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
 import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom } from '../../atoms/messageComposition';
@@ -9,6 +9,7 @@ import Button from '@beaver/agent-ui/primitives/Button';
 import SearchMenu from '@beaver/agent-ui/primitives/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
+import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryTabAtom, isWebSearchAllowedAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
 import { currentNoteItemAtom } from '../../atoms/zoteroContext';
@@ -16,10 +17,11 @@ import { selectedModelAtom, isUsingBeaverCreditsAtom } from '../../atoms/models'
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
+import BatchProgressPanel from './BatchProgressPanel';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToSuggestions';
-import { allRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import { hasWhereToStartRunAtom, lastRunSummaryAtom, threadRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { PromptOrigin } from '@beaver/agent-core/agents/types';
 import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
 import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, backendHighTokenUsageRunsAtom } from '../../atoms/messageUIState';
@@ -60,7 +62,13 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [selectionRestoreTick, setSelectionRestoreTick] = useState(0);
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
     const [isWebSearchEnabled, setIsWebSearchEnabled] = useAtom(isWebSearchEnabledAtom);
-    const allRuns = useAtomValue(allRunsAtom);
+    // Projections of the thread's runs rather than the runs themselves: the
+    // composer renders from the newest run's identity and outcome, not its
+    // contents, and subscribing to the runs re-renders it on every streamed
+    // frame of the response it sits under.
+    const lastRun = useAtomValue(lastRunSummaryAtom);
+    const runIds = useAtomValue(threadRunIdsAtom);
+    const hasWhereToStartRun = useAtomValue(hasWhereToStartRunAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const dismissedHighTokenByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
     const dismissHighTokenWarning = useSetAtom(dismissHighTokenWarningForThreadAtom);
@@ -124,24 +132,26 @@ const InputArea: React.FC<InputAreaProps> = ({
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const removePendingApproval = useSetAtom(removePendingApprovalAtom);
     const isAwaitingApproval = pendingApprovalsMap.size > 0;
+    // Reject stands in for Send only once there are instructions to reject
+    // with; an approval pending against an empty composer leaves Stop in place.
+    const showRejectButton = isAwaitingApproval && messageContent.trim().length > 0;
     // Note: while an ask_user_question request is pending (and no approval is),
     // Sidebar renders AskUserQuestionPanel INSTEAD of this component, so no
     // question-mode handling is needed here.
 
-    const lastRun = allRuns.length > 0 ? allRuns[allRuns.length - 1] : null;
-    const lastRunUsage = lastRun?.total_usage;
+    const lastRunUsage = lastRun?.totalUsage;
     const lastRequestInputTokens = lastRunUsage ? getLastRequestInputTokens(lastRunUsage) : null;
-    const warningThreadId = lastRun?.thread_id ?? currentThreadId;
+    const warningThreadId = lastRun?.threadId ?? currentThreadId;
     const isHighTokenDismissed = warningThreadId ? dismissedHighTokenByThread[warningThreadId] : false;
     const showHighTokenUsageWarningMessage = getPref('showHighTokenUsageWarningMessage');
-    const threadHasHighTokenUsage = allRuns.some(r => backendHighTokenUsageRuns[r.id])
+    const threadHasHighTokenUsage = runIds.some(runId => backendHighTokenUsageRuns[runId])
         || (lastRequestInputTokens !== null && lastRequestInputTokens > HIGH_INPUT_TOKEN_WARNING_THRESHOLD);
-    const shouldShowHighTokenWarning = Boolean(
+    const canShowHighTokenWarning = Boolean(
         showHighTokenUsageWarningMessage &&
-        !isAwaitingApproval &&
         warningThreadId &&
         threadHasHighTokenUsage &&
-        !isHighTokenDismissed
+        !isHighTokenDismissed &&
+        lastRequestInputTokens !== null
     );
 
     // First-run next steps — driven by persisted origin on the last run, with
@@ -161,31 +171,37 @@ const InputArea: React.FC<InputAreaProps> = ({
     }, [setNextStepsDismissedRunIds, lastRunId]);
     // Guided next steps surface after a suggestion-card run or a "Where should
     // we start?" launcher run — both carry the context NextStepsPanel needs.
-    const lastRunOriginKind = lastRun?.user_prompt.origin?.kind;
-    const showNextSteps = Boolean(
-        !isAwaitingApproval &&
+    const lastRunOriginKind = lastRun?.origin?.kind;
+    const canShowNextSteps = Boolean(
         lastRun &&
         (lastRunOriginKind === 'first_run_card' || lastRunOriginKind === 'where_to_start') &&
         lastRun.status === 'completed' &&
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
-    const showBackToSuggestions = Boolean(
-        !isAwaitingApproval &&
+    const canShowBackToSuggestions = Boolean(
         lastRun &&
-        lastRun.user_prompt.origin?.kind === 'first_run_followup' &&
+        lastRunOriginKind === 'first_run_followup' &&
         lastRun.status === 'completed' &&
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
     // The follow-up run's origin
-    const firstRunBackTarget: FirstRunBackTarget = allRuns.some(
-        (r) => r.user_prompt?.origin?.kind === 'where_to_start',
-    ) ? 'launcher' : 'suggestions';
+    const firstRunBackTarget: FirstRunBackTarget = hasWhereToStartRun ? 'launcher' : 'suggestions';
 
-    // Mutual exclusion: NextSteps/BackToSuggestions take precedence over the
-    // high-token warning bar.
-    const firstRunPanelVisible = showNextSteps || showBackToSuggestions;
-    const showHighTokenWarningBar = shouldShowHighTokenWarning && !firstRunPanelVisible;
-    const canRenderHighTokenWarningBar = showHighTokenWarningBar && lastRequestInputTokens !== null;
+    // Exactly one band between the batch panel and the attachment row.
+    // Priority: blocked decision, then first-run guidance, then the cost warning.
+    // One ordered list (not a suppression clause in each predicate) so a new
+    // band takes a place here instead of stacking. Laid out lowest-priority
+    // first so the winner sits nearest the composer.
+    const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'approvals' | null =
+        isAwaitingApproval
+            ? 'approvals'
+            : canShowNextSteps
+                ? 'next-steps'
+                : canShowBackToSuggestions
+                    ? 'back-to-suggestions'
+                    : canShowHighTokenWarning
+                        ? 'high-token'
+                        : null;
 
     const {
         isSlashMenuOpen,
@@ -231,6 +247,14 @@ const InputArea: React.FC<InputAreaProps> = ({
         // Focus on mount via the Lexical handle.
         focusEditor();
     }, []);
+
+    // Approval hides the attachment row (and the Add Sources menu). Close the
+    // menu so it does not unmount still open — that flag swallows Enter.
+    useEffect(() => {
+        if (isAwaitingApproval && isAddSourcesMenuOpen) {
+            dismissAddSourcesMenu();
+        }
+    }, [dismissAddSourcesMenu, isAddSourcesMenuOpen, isAwaitingApproval]);
 
     // Consume a staged /command pill (home launcher, context menu, reader
     // toolbar). This component owns the editor handle, so the pill is inserted
@@ -312,7 +336,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             inputEl &&
             !isAwaitingApproval &&
             !hideAttachmentMenu &&
-            handleAddSourcesTrigger(value, inputEl.getBoundingClientRect())
+            handleAddSourcesTrigger(value, inputEl)
         ) {
             queueSelectionRestore(value.length, false);
             return;
@@ -344,7 +368,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     }, [handleAddSourcesKeyDown, handleSlashMenuKeyDown, newThread]);
 
     const handleSubmit = async (
-        e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
+        e: React.FormEvent<HTMLFormElement> | React.MouseEvent
     ) => {
         e.preventDefault();
         // Guard against double submission
@@ -470,9 +494,13 @@ const InputArea: React.FC<InputAreaProps> = ({
             onClick={handleContainerClick}
             style={{ minHeight: 'fit-content' }}
         >
-            {/* Pending actions bar - shown when awaiting approval */}
-            <PendingActionsBar />
-            {canRenderHighTokenWarningBar && (
+            {/* Live batch progress. Above the band so it stacks as: what the
+                run is doing, then what it wants from the user. */}
+            <BatchProgressPanel />
+
+            {/* One band, chosen by `composerBand`. Lowest priority first so
+                the winner sits on the composer. */}
+            {composerBand === 'high-token' && (
                 <HighTokenUsageWarningBar
                     onNewThread={(e) => {
                         e.preventDefault();
@@ -486,39 +514,29 @@ const InputArea: React.FC<InputAreaProps> = ({
 
             {/* First-run "Next steps" panel — shown after a run that originated
                 from a first-run suggestion card. Auto-dismisses on type. */}
-            {showNextSteps && lastRun && (
+            {composerBand === 'next-steps' && lastRun && (
                 <NextStepsPanel
-                    origin={lastRun.user_prompt.origin as Extract<PromptOrigin, { kind: 'first_run_card' | 'where_to_start' }>}
+                    origin={lastRun.origin as Extract<PromptOrigin, { kind: 'first_run_card' | 'where_to_start' }>}
                     onDismiss={handleDismissNextSteps}
                 />
             )}
 
             {/* After a first-run follow-up run, offer a path back to the
                 originating surface (suggestion grid or launcher). */}
-            {showBackToSuggestions && (
-                <div className="next-steps-panel px-3 py-2">
+            {composerBand === 'back-to-suggestions' && (
+                <div className="composer-docked-bar next-steps-panel px-3 py-2">
                     <BackToSuggestions onDismiss={handleDismissNextSteps} backTarget={firstRunBackTarget} />
                 </div>
             )}
 
-            {/* Message attachments */}
-            {!hideAttachmentMenu && (
-                <MessageAttachmentDisplay
-                    isAddAttachmentMenuOpen={isAddSourcesMenuOpen}
-                    menuPosition={addSourcesMenuPosition}
-                    addSourcesSearchQuery={addSourcesSearchQuery}
-                    addSourcesQuerySource={addSourcesQuerySource}
-                    onAddSourcesQueryChange={setAddSourcesSearchQuery}
-                    onOpenAddSourcesMenu={openAddSourcesMenu}
-                    onDismissAddSourcesMenu={dismissAddSourcesMenu}
-                    onCommitAddSourcesMenu={commitAddSourcesMenu}
-                    onResetAddSourcesQuery={resetAddSourcesQuery}
-                    addSourcesMenuRef={addSourcesMenuRef}
-                    menuPortalContainer={menuPortalContainer}
-                    disabled={isAwaitingApproval}
-                    verticalPosition={verticalPosition}
-                />
-            )}
+            {/* Pending approvals. Last of the bands so it sits on the composer
+                — Send becomes Reject, and the field is where rejection is written. */}
+            {composerBand === 'approvals' && <PendingActionsBar />}
+
+            {/* Message attachments — absent entirely when nothing is attached.
+                Hidden during approval: the message cannot be sent until the
+                decision is made. */}
+            {!hideAttachmentMenu && !isAwaitingApproval && <MessageAttachmentDisplay />}
 
             <SearchMenu
                 menuItems={slashMenuItems}
@@ -543,7 +561,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             {/* Input Form */}
             <form onSubmit={handleSubmit} className="display-flex flex-col">
                 {/* Message Input - Lexical-backed rich input with inline pills */}
-                <div className="mb-2 -ml-1">
+                <div className="mb-2">
                     <LexicalEditorInput
                         ref={editorHandleRef}
                         value={messageContent}
@@ -576,94 +594,107 @@ const InputArea: React.FC<InputAreaProps> = ({
                     />
                 </div>
 
-                {/* Button Row */}
-                <div className="display-flex flex-row items-center pt-2">
+                {/* Control row: add sources and the model on the left, web
+                    search and send after the flexible gap. */}
+                <div className="composer-controls">
+                    {!hideAttachmentMenu && (
+                        <AddSourcesMenu
+                            ref={addSourcesMenuRef}
+                            isMenuOpen={isAddSourcesMenuOpen}
+                            menuPosition={addSourcesMenuPosition}
+                            searchQuery={addSourcesSearchQuery}
+                            querySource={addSourcesQuerySource}
+                            onQueryChange={setAddSourcesSearchQuery}
+                            onOpen={openAddSourcesMenu}
+                            onDismiss={dismissAddSourcesMenu}
+                            onCommit={commitAddSourcesMenu}
+                            onResetQuery={resetAddSourcesQuery}
+                            menuPortalContainer={menuPortalContainer}
+                            disabled={isAwaitingApproval}
+                            verticalPosition={verticalPosition}
+                        />
+                    )}
                     {!hideModelSelector && (
                         <ModelSelectionButton inputRef={inputRef} focusInput={focusEditor} disabled={isAwaitingApproval} />
                     )}
                     <div className="flex-1" />
-                    <div className="display-flex flex-row items-center gap-4">
-                        <span id={webSearchDescriptionId} className="sr-only">
-                            {webSearchDescription}
-                        </span>
-                        <Tooltip
-                            key={String(isWebSearchAllowed)}
-                            content={webSearchTooltipContent}
-                            padding={false}
-                            width={!isWebSearchAllowed ? '250px' : isWebSearchEnabled ? '220px' : '190px'}
-                            customContent={
-                                !isWebSearchAllowed ? (
-                                    <div className="px-2 py-1 display-flex flex-col gap-1">
-                                        <span className="text-base font-color-secondary font-medium">Web search requires Beaver credits</span>
-                                        <span className="text-sm font-color-tertiary">Use a Beaver model, or enable Plus Tools in Settings → API Keys</span>
-                                    </div>
-                                ) : isWebSearchEnabled ? (
-                                    <div className="px-2 py-1 display-flex flex-col gap-1">
-                                        <span className="text-base font-color-secondary font-medium">Stop requesting web search</span>
-                                        <span className="text-sm font-color-tertiary">May still search the web when helpful</span>
-                                    </div>
-                                ) : (
-                                    <div className="px-2 py-1 display-flex flex-col gap-1">
-                                        <span className="text-base font-color-secondary font-medium">Request web search</span>
-                                        <span className="text-sm font-color-tertiary">May search the web either way</span>
-                                    </div>
-                                )
-                            }
-                        >
-                            <IconButton
-                                icon={GlobalSearchIcon}
-                                variant="ghost-secondary"
-                                className="scale-12 mt-015"
-                                iconClassName={isWebSearchEnabled ? 'font-color-accent-blue stroke-width-2' : ''}
-                                ariaLabel="Web search"
-                                ariaPressed={isWebSearchEnabled}
-                                ariaDescribedBy={webSearchDescriptionId}
-                                onClick={handleWebSearchToggle}
-                                disabled={isAwaitingApproval || !isWebSearchAllowed}
-                            />
-                        </Tooltip>
+                    <span id={webSearchDescriptionId} className="sr-only">
+                        {webSearchDescription}
+                    </span>
+                    <Tooltip
+                        key={String(isWebSearchAllowed)}
+                        content={webSearchTooltipContent}
+                        padding={false}
+                        width={!isWebSearchAllowed ? '250px' : isWebSearchEnabled ? '220px' : '190px'}
+                        customContent={
+                            !isWebSearchAllowed ? (
+                                <div className="px-2 py-1 display-flex flex-col gap-1">
+                                    <span className="text-base font-color-secondary font-medium">Web search requires Beaver credits</span>
+                                    <span className="text-sm font-color-tertiary">Use a Beaver model, or enable Plus Tools in Settings → API Keys</span>
+                                </div>
+                            ) : isWebSearchEnabled ? (
+                                <div className="px-2 py-1 display-flex flex-col gap-1">
+                                    <span className="text-base font-color-secondary font-medium">Stop requesting web search</span>
+                                    <span className="text-sm font-color-tertiary">May still search the web when helpful</span>
+                                </div>
+                            ) : (
+                                <div className="px-2 py-1 display-flex flex-col gap-1">
+                                    <span className="text-base font-color-secondary font-medium">Request web search</span>
+                                    <span className="text-sm font-color-tertiary">May search the web either way</span>
+                                </div>
+                            )
+                        }
+                    >
+                        <IconButton
+                            icon={GlobalSearchIcon}
+                            variant="ghost-secondary"
+                            className="composer-web-search"
+                            iconClassName={isWebSearchEnabled ? 'font-color-accent-blue stroke-width-2' : ''}
+                            ariaLabel="Web search"
+                            ariaPressed={isWebSearchEnabled}
+                            ariaDescribedBy={webSearchDescriptionId}
+                            onClick={handleWebSearchToggle}
+                            disabled={isAwaitingApproval || !isWebSearchAllowed}
+                        />
+                    </Tooltip>
+
+                    {/* Send, and the two things that take its place: Stop while
+                        a run is live, Reject once there are instructions to
+                        reject a pending approval with. */}
+                    {showRejectButton ? (
                         <Button
-                            rightIcon={isPending && !(isAwaitingApproval && messageContent.trim().length > 0) ? StopIcon : undefined}
-                            ariaLabel={
-                                isAwaitingApproval && messageContent.trim().length > 0
-                                    ? pendingApprovalsMap.size > 1 ? 'Reject all proposed actions' : 'Reject proposed action'
-                                    : isPending
-                                        ? 'Stop generating'
-                                        : 'Send message'
-                            }
                             type="button"
-                            variant={
-                                (
-                                    (isPending && !(isAwaitingApproval && messageContent.trim().length > 0)) ||
-                                    (isAwaitingApproval && messageContent.trim().length > 0)
-                                )
-                                ? 'surface' : 'solid'
-                            }
-                            style={{ padding: '2px 5px' }}
-                            onClick={
-                                isAwaitingApproval && messageContent.trim().length > 0
-                                    ? handleRejectWithInstructions
-                                    : (isPending
-                                        ? (e) => handleStop(e as any)
-                                        : handleSubmit)
-                            }
+                            variant="surface"
+                            className="composer-reject"
+                            ariaLabel={pendingApprovalsMap.size > 1 ? 'Reject all proposed actions' : 'Reject proposed action'}
+                            onClick={handleRejectWithInstructions}
+                        >
+                            {pendingApprovalsMap.size > 1 ? 'Reject All' : 'Reject'}
+                        </Button>
+                    ) : isPending ? (
+                        <IconButton
+                            icon={StopIcon}
+                            variant="surface"
+                            className="composer-send composer-send-stop"
+                            ariaLabel="Stop generating"
+                            onClick={handleStop}
+                        />
+                    ) : (
+                        <IconButton
+                            icon={ArrowUpLineIcon}
+                            variant="solid"
+                            className="composer-send"
+                            ariaLabel="Send message"
+                            onClick={handleSubmit}
                             disabled={
-                                // When awaiting approval with text, never disable (Reject button)
-                                // When awaiting approval without text, never disable (Stop button)
-                                // Otherwise, disable if no content and not pending, or no model selected
+                                // Awaiting approval without instructions: left
+                                // live, as it was before the row was rebuilt.
                                 isAwaitingApproval
                                     ? false
-                                    : ((messageContent.length === 0 && !isPending) || !selectedModel || isSlashMenuOpen || isAttachingFiles)
+                                    : (messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles)
                             }
-                        >
-                            {isAwaitingApproval && messageContent.trim().length > 0
-                                ? pendingApprovalsMap.size > 1 ? 'Reject All' : 'Reject'
-                                : isPending
-                                    ? 'Stop'
-                                    : (<span>Send <span className="opacity-50">⏎</span></span>)
-                            }
-                        </Button>
-                    </div>
+                        />
+                    )}
                 </div>
             </form>
         </div>

@@ -12,6 +12,7 @@ import { ItemSearchFrontendResultItem, QuickSearchHit } from '@beaver/agent-core
 import { serializeItem, getYearFromItem } from '../../utils/zoteroSerializers';
 import { getItemDisplayName } from '../../utils/itemDisplayName';
 import { getItemDescription } from '../../utils/itemDescription';
+import { formatItemReference } from '../../utils/itemReference';
 import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 import { TimingAccumulator } from '../../utils/timing';
 import { prepareAttachmentInfoBatchData, processAttachmentInfoBatch } from './utils';
@@ -108,12 +109,6 @@ export interface QuickSearchHitOptions {
      * to explain.
      */
     score?: number;
-    /**
-     * Also render `formatted_citation`. Off by default: it runs the CSL engine
-     * per item at hundreds of milliseconds a row, which is the whole cost this
-     * projection exists to avoid. `description` covers the same ground cheaply.
-     */
-    includeCitation?: boolean;
 }
 
 /**
@@ -131,7 +126,7 @@ export function toQuickSearchHit(
     item: Zotero.Item,
     options: QuickSearchHitOptions = {}
 ): QuickSearchHit {
-    const { score, includeCitation = false } = options;
+    const { score } = options;
 
     let hasAttachment: boolean | undefined;
     try {
@@ -150,13 +145,16 @@ export function toQuickSearchHit(
         description = undefined;
     }
 
-    // Only a regular item has a bibliography entry. A note or an attachment
-    // formats as something like "“PDF.” n.d.", which is worse for a hover card
-    // than having no body at all.
+    // Notes and attachments format as "PDF (n.d.). Attachment.", which is
+    // worse for a hover card than having no body at all.
+    //
+    // Guarded like `description` above, and for the same reason: this path
+    // serializes a whole page without a per-item catch, so one unreadable item
+    // must cost its own hover card rather than the entire response.
     let formattedCitation: string | undefined;
-    if (includeCitation && item.isRegularItem()) {
+    if (item.isRegularItem()) {
         try {
-            formattedCitation = Zotero.Beaver?.citationService?.formatBibliography(item) || undefined;
+            formattedCitation = formatItemReference(item) || undefined;
         } catch {
             formattedCitation = undefined;
         }

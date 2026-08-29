@@ -172,7 +172,7 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
                             {tagsToAdd.map((tag, index) => (
                                 <span
                                     key={`add-${index}`}
-                                    className="inline-flex items-center gap-1 text-xs px-2 py-05 rounded-md bg-quaternary font-color-secondary border-quinary"
+                                    className="inline-flex items-center gap-1 text-xs px-2 py-05 rounded-md bg-chip font-color-secondary border-quinary"
                                 >
                                     {tag}
                                 </span>
@@ -192,7 +192,7 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
                             {tagsToRemove.map((tag, index) => (
                                 <span
                                     key={`remove-${index}`}
-                                    className="inline-flex items-center gap-1 text-xs px-2 py-05 rounded-md bg-quaternary font-color-secondary border-quinary"
+                                    className="inline-flex items-center gap-1 text-xs px-2 py-05 rounded-md bg-chip font-color-secondary border-quinary"
                                 >
                                     {tag}
                                 </span>

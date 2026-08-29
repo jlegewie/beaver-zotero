@@ -1,6 +1,6 @@
 import React from 'react';
-import { BatchOperationView } from '@beaver/agent-core/run-state/toolResultViews';
-import { Icon, LayersIcon, SecurityWarningIcon } from '@beaver/agent-ui/icons';
+import { BatchJobView } from '@beaver/agent-core/run-state/toolResultViews';
+import { Icon, SecurityWarningIcon } from '@beaver/agent-ui/icons';
 
 /**
  * Labels for the slots this card lays out, as opposed to what goes in them.
@@ -11,7 +11,7 @@ const ACTION_HEADING = 'Requested action';
 const INSTRUCTIONS_HEADING = 'Your instructions';
 
 /**
- * Shared renderer for the {@link BatchOperationView} view model (batch_start).
+ * Shared renderer for the {@link BatchJobView} view model (batch_start).
  *
  * The read-only counterpart of the batch approval card: what the batch covers,
  * what it set out to do, what it removes or overwrites, and anything the user
@@ -25,20 +25,16 @@ const INSTRUCTIONS_HEADING = 'Your instructions';
  *
  * Host-agnostic — pure view data, no client lookups.
  */
-export const BatchOperationResultView: React.FC<{ view: BatchOperationView }> = ({ view }) => {
+export const BatchJobResultView: React.FC<{ view: BatchJobView }> = ({ view }) => {
     const scopeSecondary = view.scope_secondary?.trim();
     const destructive = view.destructive_warning?.trim();
     const instructions = view.user_instructions?.trim();
-    // A batch that has ended says how; one still running says how far it got.
-    const badge = view.status_label?.trim() || view.progress_label?.trim();
-    // Only a batch nobody finished is called out; completion is not a warning.
-    const isStopped = view.status === 'cancelled';
 
     return (
         <div className="display-flex flex-col min-w-0 p-3 gap-4">
-            {/* Header: the backend's title and, opposite it, how the batch
-                ended or how far it has got — the slot the credit chip occupies
-                on the approval card, which has nothing to say after the fact. */}
+            {/* Header: what the batch covers, in the words the approval card
+                used. Nothing opposite it — the slot the credit chip occupies on
+                the approval card has nothing to say after the fact. */}
             <div className="display-flex flex-col min-w-0 gap-1">
                 {/* What the batch covers, weighted the way the approval card
                     weights it: the count is the fact, the location is context. */}
@@ -99,4 +95,4 @@ export const BatchOperationResultView: React.FC<{ view: BatchOperationView }> = 
     );
 };
 
-export default BatchOperationResultView;
+export default BatchJobResultView;

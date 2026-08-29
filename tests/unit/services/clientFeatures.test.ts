@@ -4,7 +4,6 @@ import {
     CLIENT_FEATURES,
     ZOTERO_PLUGIN_CLIENT_TYPE,
     ZOTERO_PLUGIN_FEATURES,
-    zoteroPluginFeatures,
 } from '@beaver/agent-core/protocol/agentProtocol';
 
 // Guards the client-feature handshake (Lane C).
@@ -63,9 +62,8 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // client only answers if it has the handler: a build that predates it drops the
 // event and stalls the run for the whole confirmation timeout, so the backend
 // falls back to the per-tool confirmations instead.
-// batch_operations is declaration-only because it is a backend rollout switch
-// for a deferred capability with no client handler: a client that does not
-// declare it sees no catalog entry. This plugin only opts in in development.
+// batch_jobs is declaration-only because it gates a deferred capability with
+// no client handler: a client that does not declare it sees no catalog entry.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'ask_user_question',
@@ -80,12 +78,7 @@ const DECLARATION_ONLY_FEATURES = [
     'list_collections_recursive',
     'list_tags_name_query',
     'credit_confirmation',
-    'batch_operations',
-];
-
-// Features in the vocabulary that this plugin does not declare in production.
-const DEV_ONLY_FEATURES = [
-    'batch_operations',
+    'batch_jobs',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every
@@ -147,10 +140,10 @@ function featuresFromVersion(version: string): string[] {
 
 // Expected declared set for the current production build: everything the
 // backend grants a client of this version, plus the declaration-only features
-// this plugin always ships — excluding the development-only rollout switches.
+// this plugin always ships.
 const EXPECTED_DECLARED_FEATURES = [
     ...featuresFromVersion(CURRENT_VERSION),
-    ...DECLARATION_ONLY_FEATURES.filter((f) => !DEV_ONLY_FEATURES.includes(f)),
+    ...DECLARATION_ONLY_FEATURES,
 ].sort();
 
 describe('client feature declaration (Lane C)', () => {
@@ -180,13 +173,8 @@ describe('client feature declaration (Lane C)', () => {
         expect(ZOTERO_PLUGIN_FEATURES).toContain('citation_v2');
     });
 
-    it('declares batch_operations only in development', () => {
-        expect(ZOTERO_PLUGIN_FEATURES).not.toContain('batch_operations');
-        expect(zoteroPluginFeatures(false)).not.toContain('batch_operations');
-        expect(zoteroPluginFeatures(true)).toEqual([
-            ...ZOTERO_PLUGIN_FEATURES,
-            'batch_operations',
-        ]);
+    it('always declares batch_jobs', () => {
+        expect(ZOTERO_PLUGIN_FEATURES).toContain('batch_jobs');
     });
 });
 

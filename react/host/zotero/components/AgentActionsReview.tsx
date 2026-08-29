@@ -7,22 +7,26 @@ import {
     CreateItemAgentAction,
 } from '../../../agents/agentActions';
 import CreateItemAgentActionDisplay from './CreateItemAgentActionDisplay';
+import ArtifactsList from './reviewChanges/ArtifactsList';
 import ChangesCard from './reviewChanges/ChangesCard';
-import { shouldShowCompletedCard } from './reviewChangeRows';
-import { useCompletedRows, useReviewRows } from './reviewChanges/useReviewRows';
+import { useArtifactRows, useChangesRows } from './reviewChanges/useRunActionRows';
 
 interface AgentActionsReviewProps {
     run: AgentRun;
 }
 
 /**
- * Displays agent actions for a terminal run: the citation imports, then the
- * changes the run left undecided, then the changes it has already written.
+ * Displays agent actions for a terminal run: what it produced, then the imports
+ * it suggests, then the card of every library change it proposed, pending or
+ * settled.
+ *
+ * The three are disjoint by construction, so a run's work is never reported
+ * twice. Most runs show exactly one of them.
  */
 export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) => {
     const getAgentActionsByRun = useAtomValue(getAgentActionsByRunAtom);
-    const reviewRows = useReviewRows(run.id);
-    const completedRows = useCompletedRows(run.id);
+    const changesRows = useChangesRows(run.id);
+    const artifactRows = useArtifactRows(run.id);
 
     // Get create item actions with toolcall_id 'citations' (from citation extraction)
     // Sort by citation count (descending) for consistent ordering
@@ -43,29 +47,29 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) =
     const hasCreateItems = createItemActions.length > 0 &&
         !createItemActions.every(a => a.status === 'rejected' || a.status === 'undone');
 
-    // A single changed unit is already the in-stream action card, except a
-    // created note — this card replaced that dedicated display. A 1-row batch
-    // of many units still uses the one-row rendering inside ChangesCard.
-    const showCompletedCard = shouldShowCompletedCard(completedRows);
+    // Every change the run touched gets the card, whatever their number and
+    // whatever became of them: one place, one label, so "what did this do to my
+    // library" is answered the same way for every run.
+    const showChangesCard = changesRows.length > 0;
 
-    // The two change cards are independent displays: either renders whenever the
-    // run has rows for it, even with the citation import list empty.
-    if (!hasCreateItems && reviewRows.length === 0 && !showCompletedCard) {
+    // The three displays are independent: each renders whenever the run has
+    // something for it, and a run commonly has something for only one.
+    if (!hasCreateItems && !showChangesCard && artifactRows.length === 0) {
         return null;
     }
 
     return (
         <div className="px-4 display-flex flex-col gap-2">
+            {/* What the run made comes first: it is the most likely thing to be
+                opened, and the answer above it has just finished describing it. */}
+            <ArtifactsList runId={run.id} rows={artifactRows} />
             {hasCreateItems && (
                 <CreateItemAgentActionDisplay
                     runId={run.id}
                     actions={createItemActions}
                 />
             )}
-            {reviewRows.length > 0 && <ChangesCard run={run} rows={reviewRows} />}
-            {showCompletedCard && (
-                <ChangesCard run={run} rows={completedRows} mode="completed" />
-            )}
+            {showChangesCard && <ChangesCard run={run} rows={changesRows} />}
         </div>
     );
 };

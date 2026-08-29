@@ -33,8 +33,43 @@ export type { AskUserQuestionCardProps } from './AskUserQuestionCard';
 export { default as BatchApprovalCard } from './BatchApprovalCard';
 export type { BatchApprovalCardProps } from './BatchApprovalCard';
 
+export { default as BatchProgressBar } from './BatchProgressBar';
+export type { BatchProgressBarProps } from './BatchProgressBar';
+
+export { default as BatchDoneRows } from './BatchDoneRows';
+export type { BatchDoneRowsProps } from './BatchDoneRows';
+
+export { default as BatchRunReceipt, hasBatchReceipt } from './BatchRunReceipt';
+export type { BatchRunReceiptProps } from './BatchRunReceipt';
+
+export {
+    BatchBlockFootnote,
+    BatchBlockHeading,
+    BatchFailureChip,
+    BatchOutcomeBlocks,
+    BatchOutcomeBlockView,
+    BatchOutcomeBody,
+    BatchProgressTrack,
+    BatchTallyRow,
+} from './BatchOutcomeBlocks';
+
 export { default as CreditConfirmationCard, createCreditDecisionHandlers } from './CreditConfirmationCard';
 export type { CreditConfirmationCardProps, CreditDecisionHandlers } from './CreditConfirmationCard';
 
 export { selectComposerTakeover } from './composerTakeover';
 export type { ComposerTakeover, ComposerTakeoverInput } from './composerTakeover';
+
+export {
+    FIND_CURRENT_CLASS,
+    FIND_HIT_ATTR,
+    FIND_HIT_CLASS,
+    FIND_MIN_QUERY_LENGTH,
+    FindQueryProvider,
+    findMatchRanges,
+    useFindQuery,
+} from './findContext';
+export type { FindMatchRange, FindQueryProviderProps } from './findContext';
+
+export { highlightText } from './highlightText';
+
+export { rehypeFindHighlight } from './rehypeFindHighlight';

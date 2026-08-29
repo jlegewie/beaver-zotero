@@ -12,7 +12,7 @@ import {
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
-import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
+import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 
 
 /**
@@ -370,7 +370,7 @@ async function validateEditMetadataAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Item not found: ${library_id}-${zotero_key}`,
+            error: `Item not found: ${modelObjectIdFromReference({ library_id, library_ref, zotero_key })}`,
             error_code: 'item_not_found',
             preference: 'always_ask',
         };
@@ -602,7 +602,7 @@ async function executeEditMetadataAction(
             success: false,
             error: resolved.status === 'library_unavailable'
                 ? `Library not available for item: ${library_ref || library_id}-${zotero_key}`
-                : `Item not found: ${library_id}-${zotero_key}`,
+                : `Item not found: ${modelObjectIdFromReference({ library_id, library_ref, zotero_key })}`,
             error_code: resolved.status === 'library_unavailable' ? 'library_unavailable' : 'item_not_found',
         };
     }

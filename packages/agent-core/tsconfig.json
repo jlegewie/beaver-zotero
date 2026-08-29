@@ -105,6 +105,7 @@
     // client needs to turn an agent run into render state.
     "./src/run-state/askUserQuestionAnswers.ts",
     "./src/run-state/batchApprovalAnswers.ts",
+    "./src/run-state/batchProgress.ts",
     "./src/run-state/toolResultViews.ts",
     "./src/run-state/toolResultTypes.ts",
     "./src/run-state/toolCallRequest.ts",
@@ -117,6 +118,7 @@
     "./src/run-state/toolLabels.ts",
     "./src/run-state/runErrorCopy.ts",
     "./src/run-state/runStatusCopy.ts",
-    "./src/run-state/runStatusVisibility.ts"
+    "./src/run-state/runStatusVisibility.ts",
+    "./src/run-state/streamActivity.ts"
   ]
 }
