@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import { useAtomValue, useSetAtom } from 'jotai';
 import { BeaverAgentPrompt, MessageSearchFilters } from '@beaver/agent-core/agents/types';
 import {
-    messageAttachmentKey,
+    messageAttachmentIdentity,
     mergeMessageAttachments,
     type MessageAttachment,
 } from '@beaver/agent-core/types/attachments/apiTypes';
@@ -61,7 +61,7 @@ function attachmentIdentity(
     filters: MessageSearchFilters | null,
 ): string {
     return [
-        attachments.map(messageAttachmentKey).join(','),
+        attachments.map(messageAttachmentIdentity).join(','),
         (filters?.libraries ?? []).map((library) => library.library_id).join(','),
         (filters?.collections ?? []).map(requestFilterCollectionKey).join(','),
         (filters?.tags ?? []).map(requestFilterTagKey).join(','),
@@ -129,6 +129,27 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     // Shown in place of the sent message while a submitted edit commits, so
     // closing the overlay does not flash the old text and chips back.
     const [submittedPrompt, setSubmittedPrompt] = useState<BeaverAgentPrompt | null>(null);
+
+    // Identifies the edit session, bumped when one opens AND when one ends, so
+    // the id on screen never names a session that is over. Staging a pick is
+    // asynchronous and outlives the overlay, so the picker hands this back on
+    // completion and `routeToSession` decides where the result belongs.
+    const [editSessionId, setEditSessionId] = useState(0);
+    const editSessionIdRef = useRef(0);
+    const bumpEditSession = useCallback(() => {
+        editSessionIdRef.current += 1;
+        setEditSessionId(editSessionIdRef.current);
+    }, []);
+    // The session that just ended and what became of it. Carries the edit
+    // itself because the editor is unmounted by the time a late pick lands.
+    const endedSessionRef = useRef<{
+        id: number;
+        outcome: 'stashed' | 'discarded';
+        content: string;
+        pills: SlashCommandDescriptor[];
+        attachments: MessageAttachment[];
+        filters: MessageSearchFilters | null;
+    } | null>(null);
 
     // Atoms
     const regenerateWithEditedPrompt = useSetAtom(regenerateWithEditedPromptAtom);
@@ -277,6 +298,23 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         }
     }, [clearPromptEditDraft, editedAttachments, editedFilters, isDirty, runId, setPromptEditDraft]);
 
+    /** End the current session, recording where a pick still in flight lands. */
+    const endEditSession = useCallback((
+        outcome: 'stashed' | 'discarded',
+        content: string,
+        pills: SlashCommandDescriptor[],
+    ) => {
+        endedSessionRef.current = {
+            id: editSessionIdRef.current,
+            outcome,
+            content,
+            pills,
+            attachments: editedAttachments,
+            filters: editedFilters,
+        };
+        bumpEditSession();
+    }, [bumpEditSession, editedAttachments, editedFilters]);
+
     /** Close the overlay, stashing dirty edits. Used by incidental closes
      *  (click outside, Escape, scrolled out of view) — not Cancel. */
     const closeAndStash = useCallback(() => {
@@ -285,8 +323,9 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         const content = editorHandleRef.current?.flushPendingText() ?? editedContent;
         const pills = editorHandleRef.current?.getSlashCommands() ?? editedPills;
         stashEdits(content, pills);
+        endEditSession('stashed', content, pills);
         setIsEditing(false);
-    }, [editedContent, editedPills, stashEdits]);
+    }, [editedContent, editedPills, endEditSession, stashEdits]);
 
     // The listeners below are registered once per edit session but must run the
     // current closure, which changes with every keystroke.
@@ -393,9 +432,10 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                 ? promptEditDraft.attachments
                 : (userPrompt.attachments ?? EMPTY_ATTACHMENTS));
             setEditedFilters(promptEditDraft ? promptEditDraft.filters : (userPrompt.filters ?? null));
+            bumpEditSession();
             setIsEditing(true);
         }
-    }, [isEditing, canEditNow, isRetryPending, submittedPrompt, displayContent, promptEditDraft, userPrompt.actions, userPrompt.attachments, userPrompt.filters, allActions]);
+    }, [isEditing, canEditNow, isRetryPending, submittedPrompt, displayContent, promptEditDraft, userPrompt.actions, userPrompt.attachments, userPrompt.filters, allActions, bumpEditSession]);
 
     // After the slash menu consumed an editor change (open/close/query), the
     // menu re-render can clobber the caret in Zotero's chrome document; put it
@@ -436,12 +476,72 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         queueCaretToEnd,
     ]);
 
-    const handleAddAttachments = useCallback((added: MessageAttachment[]) => {
-        setEditedAttachments((prev) => mergeMessageAttachments(prev, added));
-    }, []);
+    /**
+     * Route a pick that has finished staging.
+     *
+     * Staging is asynchronous and outlives the overlay, so a pick can land
+     * after the session that started it ended. It belongs to that session, not
+     * to whatever is on screen now: one whose session was stashed is folded
+     * into that stash (so reopening shows it), and one whose session the user
+     * cancelled or sent is dropped.
+     */
+    const routeToSession = useCallback((
+        sessionId: number,
+        apply: (state: { attachments: MessageAttachment[]; filters: MessageSearchFilters | null }) => void,
+    ) => {
+        if (sessionId === editSessionIdRef.current) {
+            apply({ attachments: editedAttachments, filters: editedFilters });
+            return;
+        }
+        const ended = endedSessionRef.current;
+        if (!ended || ended.id !== sessionId || ended.outcome !== 'stashed') return;
+        apply(ended);
+    }, [editedAttachments, editedFilters]);
+
+    const handleAddAttachments = useCallback((added: MessageAttachment[], sessionId: number) => {
+        routeToSession(sessionId, (state) => {
+            if (state === endedSessionRef.current) {
+                // The session is over: accumulate onto its stash directly, since
+                // the local edit state no longer backs anything on screen.
+                const ended = endedSessionRef.current;
+                ended.attachments = mergeMessageAttachments(ended.attachments, added);
+                setPromptEditDraft({
+                    runId,
+                    draft: {
+                        content: ended.content,
+                        pills: ended.pills,
+                        attachments: ended.attachments,
+                        filters: ended.filters,
+                    },
+                });
+                return;
+            }
+            setEditedAttachments((prev) => mergeMessageAttachments(prev, added));
+        });
+    }, [routeToSession, runId, setPromptEditDraft]);
+
+    const handleFiltersChange = useCallback((filters: MessageSearchFilters, sessionId: number) => {
+        routeToSession(sessionId, (state) => {
+            if (state === endedSessionRef.current) {
+                const ended = endedSessionRef.current;
+                ended.filters = filters;
+                setPromptEditDraft({
+                    runId,
+                    draft: {
+                        content: ended.content,
+                        pills: ended.pills,
+                        attachments: ended.attachments,
+                        filters: ended.filters,
+                    },
+                });
+                return;
+            }
+            setEditedFilters(filters);
+        });
+    }, [routeToSession, runId, setPromptEditDraft]);
 
     const handleRemoveAttachment = useCallback((attachmentKey: string) => {
-        setEditedAttachments((prev) => prev.filter((a) => messageAttachmentKey(a) !== attachmentKey));
+        setEditedAttachments((prev) => prev.filter((a) => messageAttachmentIdentity(a) !== attachmentKey));
     }, []);
 
     const handleRemoveChip = useCallback((ref: RequestChipRef) => {
@@ -511,6 +611,9 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         // Cancel, failed truncate, chat switch). A successful truncate drops
         // the stash with the removed runs, so nothing clears it here.
         stashEdits(content, pills);
+        // A pick cannot still be staging (sending is held for that), so nothing
+        // is in flight to route — but the session is over either way.
+        endEditSession('discarded', content, pills);
         setSubmittedPrompt(editedPrompt);
         setIsEditing(false);
         await regenerateWithEditedPrompt({ runId, editedPrompt });
@@ -528,13 +631,18 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         regenerateWithEditedPrompt,
         buildEditedPromptActions,
         stashEdits,
+        endEditSession,
     ]);
 
-    /** Cancel is the one close that discards the stash. */
+    /** Cancel is the one close that discards the stash — and with it any pick
+     *  still being staged, which the user has just said they do not want. */
     const handleCancel = useCallback(() => {
         clearPromptEditDraft(runId);
+        const content = editorHandleRef.current?.flushPendingText() ?? editedContent;
+        const pills = editorHandleRef.current?.getSlashCommands() ?? editedPills;
+        endEditSession('discarded', content, pills);
         setIsEditing(false);
-    }, [clearPromptEditDraft, runId]);
+    }, [clearPromptEditDraft, editedContent, editedPills, endEditSession, runId]);
 
     // Enter in the editor submits (Shift+Enter inserts a newline; handled by
     // the editor). Suppressed while a slash or Add Sources menu owns the keyboard.
@@ -567,8 +675,9 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             filters: editedFilters,
             onAddAttachments: handleAddAttachments,
             onRemoveAttachment: handleRemoveAttachment,
-            onFiltersChange: setEditedFilters,
+            onFiltersChange: handleFiltersChange,
             onPendingChange: setIsStagingSources,
+            editSessionId,
             isMenuOpen: isAddSourcesMenuOpen,
             menuPosition: addSourcesMenuPosition,
             searchQuery: addSourcesSearchQuery,

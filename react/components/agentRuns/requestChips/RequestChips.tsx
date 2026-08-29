@@ -7,7 +7,7 @@ import {
     ItemMetadataAttachment,
     NoteAttachment,
     SourceAttachment,
-    messageAttachmentKey,
+    messageAttachmentIdentity,
     zoteroReferenceKey,
 } from '@beaver/agent-core/types/attachments/apiTypes';
 import type { ZoteroCollection, ZoteroItemReference, ZoteroTag } from '@beaver/agent-core/types/zotero';
@@ -158,7 +158,7 @@ export function RequestChips({
                 />
             ))}
             {attachments.map((att) => {
-                const attachmentRemove = removeConfig({ kind: 'attachment', key: messageAttachmentKey(att) });
+                const attachmentRemove = removeConfig({ kind: 'attachment', key: messageAttachmentIdentity(att) });
                 switch (att.type) {
                     case 'item': {
                         const ref = attachmentRef(att);

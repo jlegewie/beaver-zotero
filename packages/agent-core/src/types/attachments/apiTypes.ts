@@ -243,14 +243,41 @@ export function messageAttachmentLookupKeys(attachment: MessageAttachment): stri
 }
 
 /**
- * Lookup aliases namespaced by object kind. Collections and items are separate
- * Zotero key namespaces, so the same key in the same library can name both; a
- * bare-key merge would let an attached item swallow a collection that merely
- * shares its key.
+ * The Zotero key namespace an attachment's key belongs to. Collections and
+ * items are separate namespaces, so the same key in the same library can name
+ * both; any comparison that decides "same attachment?" has to account for that,
+ * or an attached item swallows a collection that merely shares its key.
  */
-function mergeLookupKeys(attachment: MessageAttachment): string[] {
-    const namespace = attachment.type === 'collection' ? 'collection' : 'item';
+function attachmentNamespace(attachment: MessageAttachment): string {
+    return attachment.type === 'collection' ? 'collection' : 'item';
+}
+
+/**
+ * Canonical identity for an attachment: {@link messageAttachmentKey} qualified
+ * by object kind. Use this, not the bare key, wherever two attachments are
+ * compared for being the same object.
+ */
+export function messageAttachmentIdentity(attachment: MessageAttachment): string {
+    return `${attachmentNamespace(attachment)}:${messageAttachmentKey(attachment)}`;
+}
+
+/**
+ * Every identity alias for an attachment, qualified by object kind — the
+ * kind-aware companion to {@link messageAttachmentLookupKeys}, so a record
+ * written before portable library refs still matches.
+ */
+export function messageAttachmentIdentityKeys(attachment: MessageAttachment): string[] {
+    const namespace = attachmentNamespace(attachment);
     return messageAttachmentLookupKeys(attachment).map((key) => `${namespace}:${key}`);
+}
+
+/** Kind-qualified identity aliases for a Zotero *item* reference (never a collection). */
+export function zoteroItemIdentityKeys(ref: {
+    library_id: number;
+    zotero_key: string;
+    library_ref?: string | null;
+}): string[] {
+    return zoteroReferenceLookupKeys(ref).map((key) => `item:${key}`);
 }
 
 /**
@@ -261,10 +288,10 @@ export function mergeMessageAttachments(
     existing: MessageAttachment[],
     added: MessageAttachment[],
 ): MessageAttachment[] {
-    const keys = new Set(existing.flatMap(mergeLookupKeys));
+    const keys = new Set(existing.flatMap(messageAttachmentIdentityKeys));
     const merged = [...existing];
     for (const attachment of added) {
-        const aliases = mergeLookupKeys(attachment);
+        const aliases = messageAttachmentIdentityKeys(attachment);
         if (aliases.some((key) => keys.has(key))) continue;
         aliases.forEach((key) => keys.add(key));
         merged.push(attachment);

@@ -470,11 +470,22 @@ export type AgentActionInStreamProps =
 export interface RequestSourcesMenuProps {
     attachments: MessageAttachment[];
     filters: MessageSearchFilters | null;
-    /** Attach what the user picked; the caller dedupes against `attachments`. */
-    onAddAttachments(attachments: MessageAttachment[]): void;
-    /** Detach one attachment, keyed by `messageAttachmentKey`. */
+    /**
+     * Identifies the edit session these props belong to. Opaque: the picker
+     * captures it when it starts staging a pick and hands it back on
+     * completion, so the caller can tell a pick that belongs to the session on
+     * screen from one that outlived the session that started it.
+     */
+    editSessionId: number;
+    /**
+     * Attach what the user picked; the caller dedupes against `attachments`.
+     * The id is the one that was current when staging began.
+     */
+    onAddAttachments(attachments: MessageAttachment[], editSessionId: number): void;
+    /** Detach one attachment, keyed by `messageAttachmentIdentity`. */
     onRemoveAttachment(attachmentKey: string): void;
-    onFiltersChange(filters: MessageSearchFilters): void;
+    /** Replace the search filters (see `onAddAttachments` for the id). */
+    onFiltersChange(filters: MessageSearchFilters, editSessionId: number): void;
     /**
      * True while a pick is still being staged (file copy, item load, filter
      * serialize). The overlay holds sending so a submit in that window cannot

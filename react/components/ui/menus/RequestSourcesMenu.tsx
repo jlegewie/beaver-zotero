@@ -3,9 +3,9 @@ import { useAtomValue } from 'jotai';
 import type { MessageSearchFilters } from '@beaver/agent-core/agents/types';
 import type { ZoteroCollection } from '@beaver/agent-core/types/zotero';
 import {
-    messageAttachmentKey,
-    messageAttachmentLookupKeys,
-    zoteroReferenceLookupKeys,
+    messageAttachmentIdentity,
+    messageAttachmentIdentityKeys,
+    zoteroItemIdentityKeys,
 } from '@beaver/agent-core/types/attachments/apiTypes';
 import type { RequestSourcesMenuProps } from '@beaver/agent-ui/host/types';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -29,6 +29,7 @@ import { loadFullItemData } from '../../../../src/utils/zoteroUtils';
 export function RequestSourcesMenu({
     attachments,
     filters,
+    editSessionId,
     onAddAttachments,
     onRemoveAttachment,
     onFiltersChange,
@@ -69,17 +70,17 @@ export function RequestSourcesMenu({
         }
     }, []);
 
-    // Portable and legacy aliases, so a chip persisted before portable library
-    // refs still matches the item the menu offers.
+    // Portable and legacy aliases, qualified by object kind so a collection
+    // filter is never mistaken for an item that happens to share its key.
     const attachedKeys = useMemo(() => {
         const keys = new Set<string>();
         for (const attachment of attachments) {
-            for (const key of messageAttachmentLookupKeys(attachment)) keys.add(key);
+            for (const key of messageAttachmentIdentityKeys(attachment)) keys.add(key);
         }
         return keys;
     }, [attachments]);
 
-    const itemLookupKeys = useCallback((item: Zotero.Item) => zoteroReferenceLookupKeys({
+    const itemLookupKeys = useCallback((item: Zotero.Item) => zoteroItemIdentityKeys({
         library_id: item.libraryID,
         zotero_key: item.key,
         library_ref: libraryRefForLibraryID(item.libraryID),
@@ -93,6 +94,9 @@ export function RequestSourcesMenu({
     const addItem = useCallback((item: Zotero.Item) => {
         // Never stage an item from a library the user excluded from Beaver.
         if (!searchableLibraryIds.includes(item.libraryID)) return;
+        // Captured before the await: the overlay can close while this runs, and
+        // the caller decides where a pick that outlived its session belongs.
+        const session = editSessionId;
         void trackPending(async () => {
             // toMessageAttachment reads fields, creators and note content,
             // which lazy loading may not have populated yet.
@@ -103,30 +107,31 @@ export function RequestSourcesMenu({
             });
             const attachment = toMessageAttachment(item);
             if (!attachment) return;
-            onAddAttachments([attachment]);
+            onAddAttachments([attachment], session);
         });
-    }, [onAddAttachments, searchableLibraryIds, trackPending]);
+    }, [editSessionId, onAddAttachments, searchableLibraryIds, trackPending]);
 
     const removeItem = useCallback((item: Zotero.Item) => {
         const key = itemLookupKeys(item).find((candidate) => attachedKeys.has(candidate));
         if (!key) return;
-        // Report under the attachment's own key (the match may be a legacy alias).
+        // Report under the attachment's own identity (the match may be a legacy alias).
         const attachment = attachments.find((candidate) =>
-            messageAttachmentLookupKeys(candidate).includes(key));
-        if (attachment) onRemoveAttachment(messageAttachmentKey(attachment));
+            messageAttachmentIdentityKeys(candidate).includes(key));
+        if (attachment) onRemoveAttachment(messageAttachmentIdentity(attachment));
     }, [attachments, attachedKeys, itemLookupKeys, onRemoveAttachment]);
 
     const attachFiles = useCallback((paths: string[]) => {
+        const session = editSessionId;
         void trackPending(async () => {
             await attachExternalFiles(paths, {
                 // Bypass the composer: its staging area belongs to the message
                 // being typed, not the one being edited.
                 onAttached: (records) => {
-                    onAddAttachments(records.map(externalFileRecordToAttachment));
+                    onAddAttachments(records.map(externalFileRecordToAttachment), session);
                 },
             });
         });
-    }, [attachExternalFiles, onAddAttachments, trackPending]);
+    }, [attachExternalFiles, editSessionId, onAddAttachments, trackPending]);
 
     // The picker works in local Zotero ids; the message stores serialized
     // libraries/collections/tags. A collection with no local id (deleted, or in
@@ -184,6 +189,9 @@ export function RequestSourcesMenu({
             const next = updater(filterStateRef.current);
             filterStateRef.current = next;
             const pickId = ++filterSequenceRef.current;
+            // See addItem: captured before the await, since the overlay can
+            // close while the collections are being serialized.
+            const session = editSessionId;
             void trackPending(async () => {
                 const libraries = next.libraryIds
                     .map((id) => Zotero.Libraries.get(id))
@@ -214,10 +222,10 @@ export function RequestSourcesMenu({
                 };
                 if (pickId !== filterSequenceRef.current) return;
                 publishedFiltersRef.current = serialized;
-                onFiltersChange(serialized);
+                onFiltersChange(serialized, session);
             });
         },
-        [onFiltersChange, trackPending, unresolvedCollections],
+        [editSessionId, onFiltersChange, trackPending, unresolvedCollections],
     );
 
     const target = useMemo<AddSourcesTarget>(() => ({
