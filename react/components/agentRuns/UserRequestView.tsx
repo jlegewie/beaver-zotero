@@ -443,7 +443,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             queueCaretToEnd(value.length);
             return;
         }
-        if (requestSourcesMenu && inputEl && handleAddSourcesTrigger(value, inputEl.getBoundingClientRect())) {
+        if (requestSourcesMenu && inputEl && handleAddSourcesTrigger(value, inputEl)) {
             queueCaretToEnd(value.length);
             return;
         }
