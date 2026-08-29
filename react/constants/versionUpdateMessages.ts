@@ -548,7 +548,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         footer: `<a href="https://www.beaverapp.ai/docs/credits">Learn more</a>. These changes do not impact BYOK users.`,
     },
     {
-        version: "0.24.0-beta.2",
+        version: "0.24.0-beta.1",
         title: "Batch jobs: Sort, tag, extract, and annotate across hundreds of papers",
         steps: [
             {
