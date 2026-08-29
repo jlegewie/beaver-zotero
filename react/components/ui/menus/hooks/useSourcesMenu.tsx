@@ -84,7 +84,7 @@ export const useSourcesMenu = ({
         // Already-attached items are excluded: the input-area chips are the
         // "what's attached" affordance, so the menu lists only addable items.
         const notAlreadyAttached = (item: Zotero.Item) =>
-            !sourceMenuItemContext.currentMessageItems.some((existing) => existing.id === item.id);
+            !sourceMenuItemContext.isAttached(item);
 
         // A group of item rows, optionally headed. 'above' menus display the
         // array reversed, so the header follows its rows there to land above

@@ -5,8 +5,10 @@ import {
     NoteAttachment,
     Annotation,
     AnnotationPosition,
-    ItemMetadataAttachment
+    ItemMetadataAttachment,
+    ExternalFileAttachment
 } from '@beaver/agent-core/types/attachments/apiTypes';
+import type { ExternalFileRecord } from '../../../src/services/database';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { safeStub, serializeAttachmentStub, serializeItemStub } from '../../../src/utils/zoteroSerializers';
 import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
@@ -80,6 +82,23 @@ export function toMessageAttachment(item: Zotero.Item): MessageAttachment | null
     } else {
         return null;
     }
+}
+
+/**
+ * Wire attachment for a file the user attached from disk. Metadata only — the
+ * content stays local and is served on demand through the read/view paths.
+ */
+export function externalFileRecordToAttachment(record: ExternalFileRecord): ExternalFileAttachment {
+    return {
+        type: 'external_file',
+        ext_key: record.extKey,
+        filename: record.filename,
+        content_kind: record.contentKind,
+        mime_type: record.mimeType,
+        file_size: record.fileSize,
+        ...(record.pageCount ? { page_count: record.pageCount } : {}),
+        date_added: new Date(record.createdAt).toISOString(),
+    };
 }
 
 /**

@@ -307,6 +307,7 @@
        position:fixed descendants, which displaces the inline context menus
        rendered by the attachment chips. */
     border-color: var(--fill-quarternary);
+    background-color: var(--beaver-surface-overlay);
 }
 
 [id^="beaver-pane-"] .user-request-view-editing {
@@ -342,6 +343,12 @@
 }
 
 [id^="beaver-pane-"] .user-request-view-hover .user-request-edit-icon {
+    opacity: 1;
+}
+
+/* Unsent edits: accent-colored pencil, visible without hover. */
+[id^="beaver-pane-"] .user-request-edit-icon-stashed {
+    color: var(--accent-blue);
     opacity: 1;
 }
 

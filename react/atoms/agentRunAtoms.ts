@@ -51,7 +51,8 @@ import { getPref } from '../../src/utils/prefs';
 import { saveInterruptedThread } from '../../src/utils/interruptedThreadPrefs';
 import { MessageAttachment, SourceAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import type { ZoteroCollection } from '@beaver/agent-core/types/zotero';
-import { toMessageAttachment } from '../types/attachments/converters';
+import { toMessageAttachment, externalFileRecordToAttachment } from '../types/attachments/converters';
+import { promptEditDraftsAtom } from './promptEdits';
 import { safeStub, serializeAttachmentStub, serializeCollection, serializeItemStub, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { SubscriptionStatus, ProcessingMode } from '@beaver/agent-core/types/profile';
 import {
@@ -72,7 +73,6 @@ import {
 import { isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { currentNoteItemAtom } from './zoteroContext';
 import { isAnnotationAttachment, messageAttachmentKey, zoteroReferenceLookupKeys } from '@beaver/agent-core/types/attachments/apiTypes';
-import type { ExternalFileAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import { getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
@@ -2420,17 +2420,7 @@ export const sendWSMessageAtom = atom(
                 });
                 continue;
             }
-            const externalAttachment: ExternalFileAttachment = {
-                type: 'external_file',
-                ext_key: file.extKey,
-                filename: file.filename,
-                content_kind: file.contentKind,
-                mime_type: file.mimeType,
-                file_size: file.fileSize,
-                ...(file.pageCount ? { page_count: file.pageCount } : {}),
-                date_added: new Date(file.createdAt).toISOString(),
-            };
-            attachments.push(externalAttachment);
+            attachments.push(externalFileRecordToAttachment(file));
         }
 
         // Add the current reader attachment as a source if it is not already in
@@ -2934,6 +2924,19 @@ async function startRegenerateRun(
         set(threadAgentActionsAtom, (prev) =>
             prev.filter(a => !runIdsToRemove.includes(a.run_id))
         );
+
+        // Drop stashed edits for removed runs; those messages are gone.
+        set(promptEditDraftsAtom, (prev) => {
+            const next = { ...prev };
+            let changed = false;
+            for (const id of runIdsToRemove) {
+                if (id in next) {
+                    delete next[id];
+                    changed = true;
+                }
+            }
+            return changed ? next : prev;
+        });
 
         // Clear citations for removed runs
         set(citationsAtom, (prev) =>

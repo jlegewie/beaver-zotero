@@ -10,7 +10,13 @@ import { highlightQuery } from './highlightQuery';
  * Context for creating source menu items
  */
 export interface SourceMenuItemContext {
-    currentMessageItems: Zotero.Item[];
+    /**
+     * Whether the item is already attached. A predicate rather than the attached
+     * list: the message-edit overlay's attachments are wire records, not
+     * `Zotero.Item`s. Keep it referentially stable across keystrokes — the menu
+     * hooks use the containing context as a fetch-effect dependency.
+     */
+    isAttached: (item: Zotero.Item) => boolean;
     onAdd: (item: Zotero.Item) => void;
     onRemove: (item: Zotero.Item) => void;
 }
@@ -56,22 +62,20 @@ export async function createSourceMenuItem(
     /** Active search query, for highlighting what matched. */
     searchQuery = ''
 ): Promise<SearchMenuItem> {
-    const { currentMessageItems, onAdd, onRemove } = context;
+    const { isAttached, onAdd, onRemove } = context;
     
     const title = item.getDisplayTitle();
     
     // Determine item status
     const { valid: isValid } = await isValidZoteroItem(item);
-    const isInCurrentMessageItems = currentMessageItems.some(
-        (i) => i.id === item.id
-    );
+    const isInCurrentMessageItems = isAttached(item);
 
     // Handle menu item click
     const handleMenuItemClick = async () => {
         if (!isValid) return;
         
         // Check if source already exists
-        const exists = currentMessageItems.some((i) => i.id === item.id);
+        const exists = isAttached(item);
         
         // Add or remove source
         if (!exists) {
@@ -244,12 +248,10 @@ export async function createNoteMenuItem(
     /** Active search query, for highlighting what matched. */
     searchQuery = ''
 ): Promise<SearchMenuItem> {
-    const { currentMessageItems, onAdd, onRemove } = context;
+    const { isAttached, onAdd, onRemove } = context;
 
     const title = note.getNoteTitle() || 'Untitled Note';
-    const isInCurrentMessageItems = currentMessageItems.some(
-        (i) => i.id === note.id
-    );
+    const isInCurrentMessageItems = isAttached(note);
 
     // Get secondary text: parent info for child notes, content snippet for standalone
     let secondaryText = '';
@@ -278,7 +280,7 @@ export async function createNoteMenuItem(
     }
 
     const handleMenuItemClick = async () => {
-        const exists = currentMessageItems.some((i) => i.id === note.id);
+        const exists = isAttached(note);
         if (!exists) {
             onAdd(note);
         } else {
