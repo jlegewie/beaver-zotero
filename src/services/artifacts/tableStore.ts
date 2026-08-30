@@ -166,9 +166,13 @@ export interface TableWriteOk {
     /** True when this write replaced the version it found instead of adding one. */
     collapsed: boolean;
     /**
-     * False when the post-commit item save did not land. The table on disk is
-     * still the new one; only Zotero's own bookkeeping is behind — see
-     * {@link markForUpload}.
+     * False when a step *after* the commit point did not land: the version
+     * file a collapsing write rewrites, the version log, or the item save.
+     *
+     * The table on disk is the new one either way — that is what makes this a
+     * flag rather than a rejection — and what is behind is bookkeeping the next
+     * {@link openTable} reconciles (the log) or the next write repeats (the
+     * upload mark, see {@link markForUpload}).
      */
     saved: boolean;
     /** The spec as stored: `key`, `version` and `spec_version` stamped in. */
@@ -914,11 +918,19 @@ export async function createTable(
  * 7. Queue full-text indexing, mark the attachment for upload and save the
  *    item. Zotero schedules auto-sync off data-object notifications, not off
  *    file writes, so without this the change sits unsynced until something
- *    unrelated triggers a sync — see {@link markForUpload}. It is bookkeeping
- *    *after* the state has changed, so a failure here is reported as
- *    `saved: false` rather than as a failed write: a caller that retried would
- *    apply its mutations twice.
+ *    unrelated triggers a sync — see {@link markForUpload}.
  * 8. Release the lock and announce the change.
+ *
+ * ## Nothing after step 5 may reject
+ *
+ * Steps 6 and 7 — and the version file a *collapsing* write defers past the
+ * document — run when the table on disk is already the new one. So they are not
+ * allowed to fail the call in either of the two ways they could: not by
+ * crashing (the next open reconciles what they left behind) and not by
+ * throwing, which is the worse half, because it tells the caller the write did
+ * not happen while it did. A retrying agent would then apply its mutations to
+ * an already-mutated table. They report through `saved: false` instead, and the
+ * call still succeeds.
  *
  * ## What `expectedVersion` does and does not guard
  *
@@ -1048,25 +1060,51 @@ async function commitWrite(
         );
     }
 
-    if (collapse) {
-        // The version file is already referenced by the log, so it goes last.
-        await writeAtomic(htmlPath, document.html, temp);
-        await writeAtomic(versionPath, serialized, temp);
-    } else {
+    if (!collapse) {
         // Nothing points at this number yet, so a crash between the two leaves
         // a file the next open deletes as garbage and a table nobody touched.
+        // Still before the commit point, so a failure here is a failed write.
         await writeAtomic(versionPath, serialized, temp);
-        await writeAtomic(htmlPath, document.html, temp);
+    }
+    await writeAtomic(htmlPath, document.html, temp);
+
+    // ---- past the commit point ------------------------------------------
+    // The table on disk is the new one from here down, so nothing below may
+    // reject: a caller told the write failed would apply its mutations again,
+    // onto a table that already has them. Every remaining step reports through
+    // `saved` instead, and everything it can leave behind is something the next
+    // `openTable` reconciles.
+    let saved = true;
+    const bookkeepingFailed = (step: string, error: unknown): void => {
+        saved = false;
+        logger(
+            `tableStore: ${ref.key} v${version} was committed but ${step} failed: ${String(error)}`,
+            1
+        );
+    };
+
+    if (collapse) {
+        // The version file is already referenced by the log, so it goes last.
+        try {
+            await writeAtomic(versionPath, serialized, temp);
+        } catch (error) {
+            bookkeepingFailed('rewriting its version file', error);
+        }
     }
 
-    const pruned = await commitHistory(item, mergeEntry(versions, entry));
+    let pruned: number[] = [];
+    try {
+        pruned = await commitHistory(item, mergeEntry(versions, entry));
+    } catch (error) {
+        bookkeepingFailed('rewriting the version log', error);
+    }
 
     // The recovery shadow: what this device wrote, kept outside the storage
     // directory so it survives that directory being replaced by a sync
-    // conflict resolution. Logged and dropped on failure, like the full-text
-    // queueing below — the table is already committed, and a caller that
-    // retried because the bookkeeping failed would apply its mutations twice.
-    // It does not affect `saved`, which is Zotero's bookkeeping, not ours.
+    // conflict resolution. Logged and dropped on failure, and the one
+    // post-commit step that stays out of `saved`: it is insurance held beside
+    // the table rather than part of it, and its absence changes nothing about
+    // the table the caller was handed.
     await recordTableShadow(ref, version, serialized, entry.sha256).catch((error) =>
         logger(
             `tableStore: could not record the recovery shadow for ${ref.key}: ${String(error)}`,
@@ -1074,19 +1112,12 @@ async function commitWrite(
         )
     );
 
-    let saved = true;
     try {
         await queueTableFullText(item);
         markForUpload(item);
         await item.saveTx();
     } catch (error) {
-        // Past the commit point: the table on disk is already the new one, so
-        // failing the call would make a caller retry mutations that landed.
-        saved = false;
-        logger(
-            `tableStore: ${ref.key} was written but its item save failed: ${String(error)}`,
-            1
-        );
+        bookkeepingFailed('its item save', error);
     }
 
     return {

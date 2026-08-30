@@ -583,11 +583,26 @@ function rowFilterClasses(
     return classes;
 }
 
-function renderActions(row: Row, spec: TableSpec, links?: TableHtmlOptions['linksFor']): string {
-    if (!links || !row.ref) return '';
+/**
+ * The action links for one row, resolved once.
+ *
+ * `linksFor` consults live Zotero state, so it is asked once per row and the
+ * answer is handed to both places that need it — the actions cell and the
+ * expanded detail — rather than being asked again for each.
+ */
+function resolveRowLinks(
+    row: Row,
+    links: TableHtmlOptions['linksFor'] | undefined
+): TableHtmlLinks | null {
+    if (!links || !row.ref) return null;
+    return links(row.ref, row) ?? {};
+}
+
+function renderActions(row: Row, spec: TableSpec, links: TableHtmlLinks | null): string {
+    if (!links) return '';
     const verbs = rowActions(spec, row);
     if (verbs.length === 0) return '';
-    const { selectUri, openUri } = links(row.ref, row) ?? {};
+    const { selectUri, openUri } = links;
 
     const parts: string[] = [];
     const select = safeHref(selectUri);
@@ -612,7 +627,7 @@ function renderActions(row: Row, spec: TableSpec, links?: TableHtmlOptions['link
 function renderDetail(
     row: Row,
     spec: TableSpec,
-    links: TableHtmlOptions['linksFor'] | undefined,
+    links: TableHtmlLinks | null,
     cites: CitationNumbering
 ): string {
     const fields = spec.columns
@@ -809,8 +824,12 @@ export function renderTableHtml(
                 })
                 .join('');
 
+            // Asked once, used twice: the actions cell and the detail below it
+            // show the same links, and `linksFor` is a live Zotero lookup.
+            const rowLinks = resolveRowLinks(row, options.linksFor);
+
             const actions = hasActions
-                ? `<span class="bt-c bt-acts">${renderActions(row, spec, options.linksFor)}</span>`
+                ? `<span class="bt-c bt-acts">${renderActions(row, spec, rowLinks)}</span>`
                 : '';
 
             return [
@@ -820,7 +839,7 @@ export function renderTableHtml(
                 cells,
                 actions,
                 '</summary>',
-                renderDetail(row, spec, options.linksFor, cites),
+                renderDetail(row, spec, rowLinks, cites),
                 '</details>',
             ].join('');
         })

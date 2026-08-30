@@ -27,6 +27,11 @@ import type { RowRef } from '@beaver/agent-core/layouts/table';
  * registry, must exist in the **esbuild bundle only**. A stateless helper
  * living in a stateful module is how a second copy of that registry gets
  * created.
+ *
+ * **Best effort throughout.** This runs once per row inside `buildTableDocument`,
+ * which every write goes through, so a lookup that throws here would abort the
+ * write with an error naming none of it. Every step is therefore guarded and
+ * degrades to a missing link.
  */
 export function zoteroLinksFor(ref: RowRef): { selectUri?: string | null; openUri?: string | null } {
     if (ref.kind !== 'item') return {};
@@ -41,16 +46,34 @@ export function zoteroLinksFor(ref: RowRef): { selectUri?: string | null; openUr
         // A library that no longer resolves still gets a select URI for the
         // user library; the worst case is a link that reveals nothing.
     }
-    const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
-    const hasFile =
-        item && typeof (item as Zotero.Item).getAttachments === 'function'
-            ? (item as Zotero.Item).getAttachments().length > 0
-            : false;
 
     return {
         selectUri: `zotero://select/${scope}/items/${key}`,
-        openUri: hasFile ? `zotero://open/${scope}/items/${key}` : null,
+        openUri: hasOpenableFile(libraryID, key) ? `zotero://open/${scope}/items/${key}` : null,
     };
+}
+
+/**
+ * Whether the row's item has a file the reader could open.
+ *
+ * `getAttachments()` throws in two ordinary cases: the item *is* an attachment,
+ * and its child items are not loaded — which is true of any item nothing has
+ * touched this session. Neither can be pre-empted here: this is synchronous and
+ * called per row while a document renders, so there is no point at which the
+ * `childItems` load that `tableItemPane.ts` does before its own
+ * `getAnnotations()` call could be awaited. A row whose item cannot be asked
+ * simply gets no open link.
+ */
+function hasOpenableFile(libraryID: number, key: string): boolean {
+    try {
+        const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
+        if (!item || typeof (item as Zotero.Item).getAttachments !== 'function') {
+            return false;
+        }
+        return (item as Zotero.Item).getAttachments().length > 0;
+    } catch {
+        return false;
+    }
 }
 
 export function openTableLink(href: string): void {

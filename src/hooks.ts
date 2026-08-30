@@ -37,6 +37,7 @@ import {
 } from "./ui/tableItemPane";
 import {
     registerTablesApi,
+    unregisterTableShadowRestore,
     unregisterTablesApi,
 } from "./services/artifacts/tablesApiHost";
 import { setActionClient } from "@beaver/agent-core/types/actions";
@@ -601,6 +602,12 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // app-lifetime Zotero.Reader singleton, pinning the closed window's
         // compartment. It is re-installed on the next sidebar open.
         restoreReaderSidebarWidthHandler();
+
+        // Same reason: the React bundle published the table restore hook from
+        // this window and has no teardown of its own, so the closure over its
+        // `tableStore` module would outlive the window on an app-lifetime
+        // global. The next window's bundle re-publishes it on load.
+        unregisterTableShadowRestore();
 
         if (!shouldRunGlobalCleanup) {
             ztoolkit.log("onMainWindowUnload: Last window closed but app still running, skipping global cleanup");

@@ -67,6 +67,7 @@ import {
     type TableHistory,
     type TableWriteResult,
 } from '../../../src/services/artifacts/tableStore';
+import { readTableSectionData } from '../../../src/ui/tableItemPane';
 
 // ---------------------------------------------------------------------------
 // A temp profile and a temp storage directory
@@ -305,6 +306,7 @@ beforeEach(async () => {
         attachmentLinkMode: savedZotero.Attachments.LINK_MODE_IMPORTED_URL,
         attachmentContentType: 'text/html',
         isAttachment: () => true,
+        isFileAttachment: () => true,
         isTopLevelItem: () => true,
         hasTag: (name: string) => name === TABLE_TAG,
         getField: (field: string) =>
@@ -407,6 +409,46 @@ describe('recording what this device wrote', () => {
         // One row for version 2, holding the newest content, not two.
         expect(entries.map((entry) => entry.version)).toEqual([2, 1]);
         expect(entries[0].sha256).toBe(collapsed.entry.sha256);
+    });
+
+    it('leaves one payload per version when a run collapses onto its own', async () => {
+        await createTable({ spec: demoSpec('v1') });
+        // The case the collapse rule exists for: a run filling a column cell by
+        // cell. Every write has different bytes and so a different
+        // content-addressed name, while the row it replaces keeps one path.
+        for (const text of ['a', 'b', 'c', 'd', 'e']) {
+            expectOk(await writeTable(ref, demoSpec(text), { actor: 'agent', run_id: 'run-1' }));
+        }
+
+        const entries = await readTableShadow(ref);
+        expect(entries.map((entry) => entry.version)).toEqual([2, 1]);
+
+        // Rows are not enough: the budget is computed from rows, so a payload
+        // no row names is invisible to it and nothing else under the profile
+        // would ever collect it.
+        const onDisk = await readdir(
+            join(profileDir, 'beaver', 'table-shadow', String(LIBRARY_ID))
+        );
+        expect(onDisk).toHaveLength(entries.length);
+        for (const entry of entries) {
+            expect(existsSync(entry.payloadPath!)).toBe(true);
+        }
+    });
+
+    it('keeps a payload a retained version still points at', async () => {
+        // A collapsing write that produces the bytes the version already holds
+        // reuses the file. The row's path does not change, so the deletion rule
+        // must recognise it as still referenced rather than take it away.
+        await createTable({ spec: demoSpec('One') });
+        expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'agent', run_id: 'run-1' }));
+        const before = await readTableShadow(ref);
+        const payload = before.find((entry) => entry.version === 2)!.payloadPath!;
+
+        expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'agent', run_id: 'run-1' }));
+
+        const after = await readTableShadow(ref);
+        expect(after.find((entry) => entry.version === 2)!.payloadPath).toBe(payload);
+        expect(existsSync(payload)).toBe(true);
     });
 
     it('does not fail a write when the shadow cannot be recorded', async () => {
@@ -611,5 +653,99 @@ describe('restoring this device\'s version', () => {
             ok: false,
             code: 'no_shadow',
         });
+    });
+});
+
+// ---------------------------------------------------------------------------
+// The item-pane section
+// ---------------------------------------------------------------------------
+
+/**
+ * The section reaches the same verdict the store does, because it has to: it is
+ * the surface that tells the user another device replaced their work, and it
+ * runs on every table they select.
+ */
+describe('what the item-pane section reports', () => {
+    /**
+     * Commits a version and loses the log write, which is what an interrupted
+     * write leaves behind: the document is the new version, the log is a
+     * version behind it, and the next open repairs that silently.
+     */
+    async function commitWithoutTheLog(text: string): Promise<void> {
+        const move = (globalThis as any).IOUtils.move;
+        (globalThis as any).IOUtils.move = async (from: string, to: string) => {
+            if (to === sidecar('history.json')) throw new Error('disk is full');
+            return move(from, to);
+        };
+        try {
+            expectOk(await writeTable(ref, demoSpec(text), { actor: 'user' }));
+        } finally {
+            (globalThis as any).IOUtils.move = move;
+        }
+    }
+
+    it('says nothing when a write landed but its log entry did not', async () => {
+        await createTable({ spec: demoSpec('One') });
+        expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+        await commitWithoutTheLog('Three');
+
+        // The log's word for the tip is 2 and this device wrote 3 — which,
+        // taken from the log, reads as a table that went backwards. It did not:
+        // the document is at 3.
+        expect((await readHistory()).tip).toBe(2);
+        expect((await lastTableShadow(ref))!.version).toBe(3);
+        expect(await storedVersion()).toBe(3);
+
+        const data = await readTableSectionData(item);
+        expect(data.fields.conflict).toBeNull();
+    });
+
+    it('reports a table a sync conflict really did take back', async () => {
+        await createTable({ spec: demoSpec('One') });
+        expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+        expectOk(await writeTable(ref, demoSpec('Three'), { actor: 'user' }));
+
+        await resolveConflictTowardRemote(demoSpec('Theirs'), 2);
+
+        const data = await readTableSectionData(item);
+        expect(data.fields.conflict).toMatchObject({
+            reason: 'behind',
+            documentVersion: 2,
+            shadowVersion: 3,
+            restorable: true,
+        });
+    });
+
+    it('reports two devices that numbered the same edit in parallel', async () => {
+        await createTable({ spec: demoSpec('One') });
+        expectOk(await writeTable(ref, demoSpec('Mine'), { actor: 'user' }));
+
+        await resolveConflictTowardRemote(demoSpec('Theirs'), 2);
+
+        const data = await readTableSectionData(item);
+        expect(data.fields.conflict).toMatchObject({
+            reason: 'diverged',
+            documentVersion: 2,
+            shadowVersion: 2,
+        });
+    });
+
+    it('says nothing on an ordinary table, without reading the document', async () => {
+        await createTable({ spec: demoSpec('One') });
+        expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+
+        const reads: string[] = [];
+        const getContentsAsync = (globalThis as any).Zotero.File.getContentsAsync;
+        (globalThis as any).Zotero.File.getContentsAsync = async (path: string) => {
+            reads.push(path);
+            return getContentsAsync(path);
+        };
+
+        const data = await readTableSectionData(item);
+
+        expect(data.fields.conflict).toBeNull();
+        // The log answered it. Parsing the megabyte of JSON in the document on
+        // every selection is the cost this screen exists to avoid.
+        expect(reads).not.toContain(htmlPath);
     });
 });

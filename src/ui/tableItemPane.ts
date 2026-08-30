@@ -19,8 +19,10 @@
  * The version log's tip entry carries the `summarize()` of the spec that was
  * written ({@link readTableHistory}), so the section reads counts without
  * parsing the megabyte of JSON embedded in the document. Only a table with no
- * usable log falls back to reading the spec. The arithmetic and the wording
- * live in `tableItemPaneModel.ts`, which is pure; this file is the Zotero half:
+ * usable log falls back to reading the spec — and a table the log gives reason
+ * to suspect a sync conflict on, because that claim is the document's to make
+ * and not the log's. The arithmetic and the wording live in
+ * `tableItemPaneModel.ts`, which is pure; this file is the Zotero half:
  * registration, reading, DOM, and the buttons.
  *
  * ## Constraints
@@ -57,6 +59,8 @@ import { getTablesApi } from '../services/artifacts/tablesApi';
 import {
     detectTableSyncConflict,
     lastTableShadow,
+    tableSpecHash,
+    type TableShadowEntry,
 } from '../services/artifacts/recoveryShadow';
 import {
     buildTableSectionFields,
@@ -253,6 +257,9 @@ export async function readTableSectionData(
         annotationDates: await annotationDates(item),
     };
     let reason: string | null = null;
+    // The spec, when the fallback below already had to read it. Handed to the
+    // conflict check so it never reads the document twice.
+    let documentSpec: TableSpec | null = null;
 
     const history = await readTableHistory(item);
     input.history = history.versions;
@@ -265,6 +272,7 @@ export async function readTableSectionData(
     } else {
         const read = await readTableItemSpec(item);
         if (read.ok) {
+            documentSpec = read.spec;
             input.summary = summarize(read.spec);
             input.source = 'spec';
             input.version =
@@ -275,7 +283,14 @@ export async function readTableSectionData(
         }
     }
 
-    input.conflict = await readTableConflict(item, input.version, tip?.sha256, tip?.version);
+    const logVersion = tip ? Math.max(history.tip, tip.version) : null;
+    input.conflict = await readTableConflict(item, {
+        logVersion,
+        // Paired with a version only when the log's own two answers agree about
+        // which version is the tip.
+        logSha256: tip && tip.version === logVersion ? (tip.sha256 ?? null) : null,
+        spec: documentSpec,
+    });
 
     let hasFile = false;
     try {
@@ -287,40 +302,76 @@ export async function readTableSectionData(
     return { fields: buildTableSectionFields(input), reason, hasFile };
 }
 
+/** What the section already knows about the table when it asks about a conflict. */
+interface ConflictSources {
+    /** The version log's tip, or null when it has no usable entry. */
+    logVersion: number | null;
+    /** The tip's digest, when it is the digest of `logVersion`. */
+    logSha256: string | null;
+    /** The document's spec, when the section already read it. */
+    spec: TableSpec | null;
+}
+
 /**
  * Whether this table went backwards under this device.
  *
- * Answered from the version log rather than from the document, so the section
- * still never parses the megabyte of JSON the file carries: the log's tip entry
- * records the digest of the spec that was written, and a sync conflict replaces
- * the log along with everything else in the storage directory, so the tip is
- * the *other* device's word about the table this device is now looking at.
+ * **The document decides.** It is the store's commit point, so it — not the log
+ * — is the authority on what version a table is at, and it is what the store's
+ * own check compares against. Judging the log instead reports a conflict on an
+ * ordinary interrupted write: a commit that landed before its log entry did
+ * leaves a log one version behind, which is a state the next open silently
+ * repairs, and calling it "another device replaced your table" is exactly the
+ * false positive `recoveryShadow.ts` says is worse than the loss it warns about.
  *
- * The digest is paired with a version only when the log's own two answers agree
- * about which version is the tip. When they do not, the comparison falls back to
- * version numbers alone — which is the half that catches a real loss, and never
- * on its own reports one that did not happen.
+ * The log still keeps this cheap. It is never *ahead* of the document — the
+ * document is written first — so a log level with or above the shadow rules a
+ * conflict out on its own, and the common case answers without parsing the
+ * megabyte of JSON in the file. Only a log that would raise the alarm is worth
+ * reading the document for, and then the document's answer is the one reported.
  */
 async function readTableConflict(
     item: Zotero.Item,
-    version: number | null,
-    tipSha256: string | undefined,
-    tipVersion: number | undefined
+    sources: ConflictSources
 ): Promise<TableSectionConflict | null> {
-    if (typeof version !== 'number' || version <= 0) return null;
     try {
         const shadow = await lastTableShadow({
             libraryID: item.libraryID,
             key: item.key,
         });
-        return detectTableSyncConflict(shadow, {
-            version,
-            sha256: tipVersion === version ? (tipSha256 ?? null) : null,
+        if (!shadow) return null;
+
+        // Already read, so there is nothing cheaper to screen with.
+        if (sources.spec) return await judgeDocument(shadow, sources.spec);
+
+        if (typeof sources.logVersion !== 'number' || sources.logVersion <= 0) {
+            return null;
+        }
+        const screened = detectTableSyncConflict(shadow, {
+            version: sources.logVersion,
+            sha256: sources.logSha256,
         });
+        if (!screened) return null;
+
+        const read = await readTableItemSpec(item);
+        // A document that cannot be read cannot support the claim, and the
+        // section says nothing rather than repeating the log's word for it.
+        return read.ok ? await judgeDocument(shadow, read.spec) : null;
     } catch (error) {
         logger(`tableItemPane: could not read the recovery shadow: ${String(error)}`, 2);
         return null;
     }
+}
+
+/** The shadow against the document, the way the store compares them. */
+async function judgeDocument(
+    shadow: TableShadowEntry,
+    spec: TableSpec
+): Promise<TableSectionConflict | null> {
+    const version = typeof spec.version === 'number' ? spec.version : 0;
+    // Hashed only when the numbers are equal, because that is the only case the
+    // digest decides.
+    const sha256 = version === shadow.version ? await tableSpecHash(spec) : null;
+    return detectTableSyncConflict(shadow, { version, sha256 });
 }
 
 // ---------------------------------------------------------------------------

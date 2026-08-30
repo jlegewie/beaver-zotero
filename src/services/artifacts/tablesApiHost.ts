@@ -87,11 +87,26 @@ export function registerTablesApi(): void {
 /**
  * Withdraws it, so a torn-down bundle's closures are not reachable from the
  * global and a caller sees "not up" instead of calling into a dead realm.
+ *
+ * Plugin teardown only. The esbuild half is registered once, at startup, so a
+ * window closing while the app keeps running must *not* come through here —
+ * that path withdraws only the React half, {@link unregisterTableShadowRestore}.
  */
 export function unregisterTablesApi(): void {
     setTablesApi(null);
-    // The shadow's write half too. The React bundle publishes it but has no
-    // teardown of its own, and its closure would otherwise outlive its realm;
-    // a reopened window re-runs that bundle's entry point and re-publishes it.
+    unregisterTableShadowRestore();
+}
+
+/**
+ * Withdraws the shadow's write half on its own.
+ *
+ * The React bundle publishes it from its entry point and has no teardown of its
+ * own, so the closure — which holds that bundle's `tableStore` module and
+ * therefore its whole realm — has to be dropped by the window teardown that
+ * outlives it. That is not only plugin shutdown: on macOS the last window can
+ * close while the app keeps running, and the slot would otherwise pin the dead
+ * realm indefinitely. The next window's bundle re-publishes it on load.
+ */
+export function unregisterTableShadowRestore(): void {
     setTableShadowRestore(null);
 }

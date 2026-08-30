@@ -329,6 +329,48 @@ describe('writeTable', () => {
         expect((await readHistory()).tip).toBe(2);
     });
 
+    it('reports a version log that could not be written without failing the write', async () => {
+        // A full or read-only disk, hit only by the log. The document has
+        // already landed at that point, so rejecting would tell the caller its
+        // mutations did not apply when they did — and a retrying agent would
+        // apply them to a table that already has them.
+        expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+
+        const move = (globalThis as any).IOUtils.move;
+        (globalThis as any).IOUtils.move = async (from: string, to: string) => {
+            if (to === sidecar('history.json')) throw new Error('disk is full');
+            return move(from, to);
+        };
+
+        const written = expectOk(await writeTable(ref, demoSpec('Three'), { actor: 'user' }));
+
+        expect(written.saved).toBe(false);
+        expect(written.version).toBe(3);
+        expect(await storedVersion()).toBe(3);
+        // The log is behind the document, which is the state openTable repairs.
+        expect((await readHistory()).tip).toBe(2);
+    });
+
+    it('reports a collapsing write whose version file could not be rewritten', async () => {
+        await writeTable(ref, demoSpec('Two'), { actor: 'agent', run_id: 'run-1' });
+
+        // A collapsing write writes its version file *after* the document, so
+        // this failure is past the commit point too.
+        const move = (globalThis as any).IOUtils.move;
+        (globalThis as any).IOUtils.move = async (from: string, to: string) => {
+            if (to === sidecar('v2.json')) throw new Error('disk is full');
+            return move(from, to);
+        };
+
+        const written = expectOk(
+            await writeTable(ref, demoSpec('Three'), { actor: 'agent', run_id: 'run-1' })
+        );
+
+        expect(written.saved).toBe(false);
+        expect(written.collapsed).toBe(true);
+        expect(await storedVersion()).toBe(2);
+    });
+
     it('records a summary and a digest of the spec it wrote', async () => {
         const written = expectOk(
             await writeTable(ref, demoSpec(), { actor: 'user', change: 'Renamed' })

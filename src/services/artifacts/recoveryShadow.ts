@@ -265,6 +265,15 @@ export async function recordTableShadow(
     }
 
     try {
+        // What this version pointed at before, so a collapsing write does not
+        // strand it. An agent run filling a column reuses one version number a
+        // hundred times, and each of those writes has different bytes and so a
+        // different content-addressed name: one row, a hundred files.
+        const superseded =
+            (await db.getTableShadows(ref.libraryID, ref.key)).find(
+                (row) => row.version === version
+            )?.payloadPath ?? null;
+
         const payload = await writePayload(ref, version, serialized, sha256);
         const entry: TableShadowEntry = {
             libraryID: ref.libraryID,
@@ -285,6 +294,8 @@ export async function recordTableShadow(
             payloadSizeBytes: entry.payloadBytes,
         });
         await enforceBudget(ref);
+        // After the budget, so the survivors this is checked against are final.
+        await removeUnreferencedPayloads(ref, [superseded]);
         return entry;
     } catch (error) {
         logger(
@@ -331,13 +342,40 @@ async function writePayload(
 }
 
 /**
- * Drops retained versions until the table is inside both caps.
+ * Deletes the payloads among `paths` that no surviving row points at.
  *
- * A dropped row's payload is deleted only when no surviving row points at it,
- * which is the condition that keeps rows and files consistent: a row without a
- * file is a restore that promises a spec it cannot produce, and a file without a
- * row is a byte nothing will ever collect.
+ * The single rule for taking a payload away, used by everything that can leave
+ * one behind — a row that was dropped, and a row whose `payload_path` was
+ * replaced. The survivor check is what makes it safe rather than tidy: names
+ * are content-addressed, so a rewrite that produces the bytes the version
+ * already held resolves to the same file, and the path a row is recorded as
+ * giving up can be the path it still has. Only a path no surviving row names
+ * may go.
+ *
+ * A row without a file is a restore that promises a spec it cannot produce, and
+ * a file without a row is a byte nothing will ever collect — the shadow lives
+ * under the profile, where nothing else cleans up after it.
  */
+async function removeUnreferencedPayloads(
+    ref: TableRef,
+    paths: Array<string | null>
+): Promise<void> {
+    const candidates = paths.filter((path): path is string => !!path);
+    if (candidates.length === 0) return;
+    const db = shadowDb();
+    if (!db) return;
+
+    const referenced = new Set(
+        (await db.getTableShadows(ref.libraryID, ref.key))
+            .map((row) => row.payloadPath)
+            .filter((path): path is string => !!path)
+    );
+    for (const path of candidates) {
+        if (!referenced.has(path)) await removeQuietly(path);
+    }
+}
+
+/** Drops retained versions until the table is inside both caps. */
 async function enforceBudget(ref: TableRef): Promise<void> {
     const db = shadowDb();
     if (!db) return;
@@ -360,16 +398,10 @@ async function enforceBudget(ref: TableRef): Promise<void> {
     if (doomed.length === 0) return;
 
     const removed = await db.deleteTableShadowVersions(ref.libraryID, ref.key, doomed);
-    const survivors = new Set(
-        (await db.getTableShadows(ref.libraryID, ref.key))
-            .map((row) => row.payloadPath)
-            .filter((path): path is string => !!path)
+    await removeUnreferencedPayloads(
+        ref,
+        removed.map((row) => row.payloadPath)
     );
-    for (const row of removed) {
-        if (row.payloadPath && !survivors.has(row.payloadPath)) {
-            await removeQuietly(row.payloadPath);
-        }
-    }
 }
 
 /**
