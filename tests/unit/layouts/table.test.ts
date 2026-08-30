@@ -4,19 +4,24 @@ import {
     anchorColumn,
     cellIdFor,
     cellSortKey,
+    cellValueText,
     citationKeysInTable,
     citationKeysInText,
     citationsByKey,
     columnAlign,
     filterRows,
+    hasFixedVocabulary,
     isCellEmpty,
     isColumnSortable,
     isRowInLibrary,
+    readSpec,
+    stripCitationTags,
     summarizeCoverage,
     rowActions,
     rowIdFor,
     selectLabelsInColumn,
     sortRows,
+    TABLE_SPEC_VERSION,
     toCsv,
     validateTableSpec,
     type Column,
@@ -26,6 +31,28 @@ import {
 
 function row(id: string, cells: Row["cells"]): Row {
     return { id, cells };
+}
+
+/**
+ * The same spec with every filled cell attributed. A value without provenance
+ * is itself an issue, so specs written for other checks say where they came
+ * from rather than repeating that one everywhere.
+ */
+function attributed(spec: TableSpec): TableSpec {
+    return {
+        ...spec,
+        rows: spec.rows.map((r) => ({
+            ...r,
+            cells: Object.fromEntries(
+                Object.entries(r.cells).map(([id, cell]) => [
+                    id,
+                    cell.value
+                        ? { ...cell, provenance: "extracted" as const }
+                        : cell,
+                ]),
+            ),
+        })),
+    };
 }
 
 const spec: TableSpec = {
@@ -97,6 +124,117 @@ describe("ids", () => {
         expect(cellIdFor("ext:openalex:W123", "year")).toBe(
             "ext:openalex:W123/year",
         );
+    });
+
+    it("identifies a context-file row by its external key", () => {
+        expect(
+            rowIdFor({ kind: "file", ext_key: "AB12CD34", label: "notes.pdf" }),
+        ).toBe("file:AB12CD34");
+    });
+});
+
+describe("readSpec", () => {
+    const stored = {
+        id: "t1",
+        columns: [{ id: "a", header: "A", type: "text" }],
+        rows: [{ id: "r", cells: {} }],
+    };
+
+    it("opens a spec written without a version and one written by this build", () => {
+        expect(readSpec(stored)).toEqual({ ok: true, spec: stored });
+        const versioned = { ...stored, spec_version: TABLE_SPEC_VERSION };
+        expect(readSpec(versioned)).toEqual({ ok: true, spec: versioned });
+    });
+
+    it("refuses a spec from a newer format and reports the version it saw", () => {
+        expect(
+            readSpec({ ...stored, spec_version: TABLE_SPEC_VERSION + 1 }),
+        ).toEqual({
+            ok: false,
+            reason: "unsupported_version",
+            specVersion: TABLE_SPEC_VERSION + 1,
+        });
+    });
+
+    it("keeps a role, flag or provenance it does not recognise", () => {
+        const future = {
+            ...stored,
+            columns: [
+                { id: "a", header: "A", type: "text", role: "risk_of_bias" },
+            ],
+            rows: [
+                {
+                    id: "r",
+                    cells: {
+                        a: {
+                            value: { kind: "text", text: "x" },
+                            flag: "disputed",
+                            provenance: "delegated",
+                        },
+                    },
+                },
+            ],
+        };
+        const result = readSpec(future);
+        expect(result.ok).toBe(true);
+        // The spec comes back byte-for-byte, so an old client can hand a stored
+        // table on without flattening what it did not understand.
+        expect(result.ok && result.spec).toEqual(future);
+    });
+
+    it("rejects something that is not a table, and says why", () => {
+        expect(readSpec(null)).toMatchObject({
+            ok: false,
+            reason: "invalid",
+        });
+        expect(readSpec([stored])).toMatchObject({ reason: "invalid" });
+        expect(readSpec({ ...stored, id: "" })).toMatchObject({
+            reason: "invalid",
+        });
+        expect(readSpec({ ...stored, columns: {} })).toMatchObject({
+            reason: "invalid",
+        });
+        expect(readSpec({ ...stored, rows: "none" })).toMatchObject({
+            reason: "invalid",
+        });
+        expect(readSpec({ ...stored, rows: [{ cells: {} }] })).toMatchObject({
+            reason: "invalid",
+        });
+        expect(readSpec({ ...stored, rows: [{ id: "r" }] })).toMatchObject({
+            reason: "invalid",
+        });
+        // The reason is human-readable, so a caller can say what is wrong with
+        // the file rather than only that something is.
+        const detail = readSpec("nope");
+        expect(
+            detail.ok === false && detail.reason === "invalid"
+                ? detail.detail
+                : "",
+        ).toMatch(/not an object/);
+    });
+});
+
+describe("column vocabulary", () => {
+    it("fixes the option set of a screening decision and no other role", () => {
+        expect(
+            hasFixedVocabulary({
+                id: "d",
+                header: "Decision",
+                type: "select",
+                role: "screening_decision",
+            }),
+        ).toBe(true);
+        expect(
+            hasFixedVocabulary({
+                id: "q",
+                header: "Quality",
+                type: "select",
+                role: "quality",
+            }),
+        ).toBe(false);
+        expect(
+            hasFixedVocabulary({ id: "t", header: "T", type: "select" }),
+        ).toBe(false);
     });
 });
 
@@ -328,7 +466,7 @@ describe("citations", () => {
 
 describe("validateTableSpec", () => {
     it("accepts a well-formed spec", () => {
-        expect(validateTableSpec(spec)).toEqual([]);
+        expect(validateTableSpec(attributed(spec))).toEqual([]);
     });
 
     it("reports duplicate ids, unknown columns and sort columns", () => {
@@ -353,7 +491,14 @@ describe("validateTableSpec", () => {
         const bad: TableSpec = {
             id: "t",
             columns: [{ id: "n", header: "N", type: "number" }],
-            rows: [row("r", { n: { value: { kind: "text", text: "12" } } })],
+            rows: [
+                row("r", {
+                    n: {
+                        value: { kind: "text", text: "12" },
+                        provenance: "extracted",
+                    },
+                }),
+            ],
         };
         expect(validateTableSpec(bad)).toMatchObject([
             { code: "value_kind_mismatch", row_id: "r", column_id: "n" },
@@ -365,7 +510,10 @@ describe("validateTableSpec", () => {
             ...spec,
             rows: [
                 row("r", {
-                    type: { value: { kind: "select", label: "Preprint" } },
+                    type: {
+                        value: { kind: "select", label: "Preprint" },
+                        provenance: "asserted",
+                    },
                 }),
             ],
         };
@@ -378,11 +526,108 @@ describe("validateTableSpec", () => {
             columns: [{ id: "type", header: "T", type: "select" }],
             rows: [
                 row("r", {
-                    type: { value: { kind: "select", label: "Preprint" } },
+                    type: {
+                        value: { kind: "select", label: "Preprint" },
+                        provenance: "asserted",
+                    },
                 }),
             ],
         };
         expect(validateTableSpec(free)).toEqual([]);
+    });
+
+    it("tells a fixed-vocabulary violation apart from an open select's new label", () => {
+        const columns: Column[] = [
+            {
+                id: "decision",
+                header: "Decision",
+                type: "select",
+                role: "screening_decision",
+                options: [{ label: "Include" }, { label: "Exclude" }],
+            },
+        ];
+        const decided = (label: string): TableSpec => ({
+            id: "t",
+            columns,
+            rows: [
+                row("r", {
+                    decision: {
+                        value: { kind: "select", label },
+                        provenance: "asserted",
+                        details: { kind: "text", text: "Wrong population" },
+                    },
+                }),
+            ],
+        });
+        expect(validateTableSpec(decided("Maybe"))).toMatchObject([
+            {
+                code: "fixed_vocabulary_violation",
+                row_id: "r",
+                column_id: "decision",
+            },
+        ]);
+        expect(validateTableSpec(decided("Exclude"))).toEqual([]);
+    });
+
+    it("reports a screening decision that carries no reason", () => {
+        const columns: Column[] = [
+            {
+                id: "decision",
+                header: "Decision",
+                type: "select",
+                role: "screening_decision",
+            },
+        ];
+        const bare: TableSpec = {
+            id: "t",
+            columns,
+            rows: [
+                row("r", {
+                    decision: {
+                        value: { kind: "select", label: "Exclude" },
+                        provenance: "asserted",
+                    },
+                }),
+            ],
+        };
+        expect(validateTableSpec(bare)).toMatchObject([
+            {
+                code: "missing_decision_details",
+                row_id: "r",
+                column_id: "decision",
+            },
+        ]);
+        expect(
+            validateTableSpec({
+                ...bare,
+                rows: [
+                    row("r", {
+                        decision: {
+                            value: { kind: "select", label: "Exclude" },
+                            provenance: "asserted",
+                            details: { kind: "text", text: "Not a trial" },
+                        },
+                    }),
+                ],
+            }),
+        ).toEqual([]);
+    });
+
+    it("reports a value that does not say where it came from", () => {
+        const unattributed: TableSpec = {
+            id: "t",
+            columns: [{ id: "m", header: "M", type: "text" }],
+            rows: [
+                row("r1", { m: { value: { kind: "text", text: "Survey" } } }),
+                // An empty and a pending cell have nothing to attribute.
+                row("r2", { m: {} }),
+                row("r3", { m: { status: "pending" } }),
+            ],
+        };
+        expect(validateTableSpec(unattributed)).toMatchObject([
+            { code: "missing_provenance", row_id: "r1", column_id: "m" },
+        ]);
+        expect(validateTableSpec(attributed(unattributed))).toEqual([]);
     });
 
     it("reports citation tags without matching metadata", () => {
@@ -396,12 +641,13 @@ describe("validateTableSpec", () => {
                             kind: "text",
                             text: 'see <citation external_id="W9"/>',
                         },
+                        provenance: "extracted",
                     },
                 }),
             ],
         };
         expect(validateTableSpec(cited)).toMatchObject([
-            { code: "unresolved_citation" },
+            { code: "unresolved_citation", row_id: "r", column_id: "m" },
         ]);
         expect(
             validateTableSpec({
@@ -414,6 +660,93 @@ describe("validateTableSpec", () => {
                 ],
             }),
         ).toEqual([]);
+    });
+
+    it("checks the citations behind a non-text cell, which live in its details", () => {
+        const evidence: TableSpec = {
+            id: "t",
+            columns: [{ id: "n", header: "Sample", type: "number" }],
+            rows: [
+                row("r", {
+                    n: {
+                        value: { kind: "number", value: 1200 },
+                        provenance: "extracted",
+                        details: {
+                            kind: "text",
+                            text: 'reported in <citation external_id="W9"/>',
+                        },
+                    },
+                }),
+            ],
+        };
+        expect(validateTableSpec(evidence)).toMatchObject([
+            { code: "unresolved_citation", row_id: "r", column_id: "n" },
+        ]);
+        expect(
+            validateTableSpec({
+                ...evidence,
+                citations: [
+                    {
+                        citation_id: "x",
+                        requested_ref: { kind: "external", external_id: "W9" },
+                    } as Citation,
+                ],
+            }),
+        ).toEqual([]);
+    });
+});
+
+describe("plain text", () => {
+    const cited =
+        'Survey of 1,200 adults <citation id="1-ABCD1234" loc="s12"/> in 2019.';
+    const citedSpec: TableSpec = {
+        id: "t",
+        columns: [{ id: "m", header: "Methods", type: "text" }],
+        rows: [
+            row("a", {
+                m: {
+                    value: { kind: "text", text: cited },
+                    provenance: "extracted",
+                },
+            }),
+        ],
+    };
+
+    it("leaves citation markup out of the text form of a value", () => {
+        expect(cellValueText({ kind: "text", text: cited })).toBe(
+            "Survey of 1,200 adults in 2019.",
+        );
+        expect(stripCitationTags("nothing to strip")).toBe("nothing to strip");
+    });
+
+    it("sorts on the prose rather than on the markup in front of it", () => {
+        expect(
+            cellSortKey({
+                value: {
+                    kind: "text",
+                    text: '<citation external_id="W1"/>Zeta',
+                },
+            }),
+        ).toBe("zeta");
+    });
+
+    it("does not let a text filter match the citation tags", () => {
+        expect(
+            filterRows(citedSpec, [
+                { column_id: "m", kind: "contains", text: "citation" },
+            ]),
+        ).toEqual([]);
+        expect(
+            filterRows(citedSpec, [
+                { column_id: "m", kind: "contains", text: "adults in" },
+            ]).map((r) => r.id),
+        ).toEqual(["a"]);
+    });
+
+    it("exports a CSV cell without the tags", () => {
+        expect(toCsv(citedSpec)).toBe(
+            'Methods\r\n"Survey of 1,200 adults in 2019."',
+        );
     });
 });
 
@@ -508,6 +841,15 @@ describe("row actions", () => {
             "reveal",
             "open",
         ]);
+    });
+
+    it("offers nothing on a context-file row: neither in the library nor importable", () => {
+        const file = mkRow({
+            id: "file",
+            ref: { kind: "file", ext_key: "AB12CD34", label: "notes.pdf" },
+        });
+        expect(isRowInLibrary(file)).toBe(false);
+        expect(rowActions(spec, file)).toEqual([]);
     });
 
     it("lets a row narrow the table's verbs, and offers none without a ref", () => {

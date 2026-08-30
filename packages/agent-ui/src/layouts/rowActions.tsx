@@ -62,6 +62,11 @@ export function RowActionsView({
         );
     }
 
+    // A context-file row has no library identity, so there is nothing to reveal
+    // or open — `rowActions` resolves no verbs for it, and `canRender` keeps
+    // it out of the column count.
+    if (ref.kind !== "item") return null;
+
     const navigation = host.navigation;
     if (!navigation) return null;
     const itemRef = {
@@ -103,15 +108,15 @@ export function RowActionsView({
 /**
  * Whether the row's verbs can actually be drawn here: an external row needs the
  * bibliographic payload and the host's action component, a library row needs the
- * navigation slice. Split out so the column's existence and the buttons in it
- * can never disagree.
+ * navigation slice, and a context file has no verbs at all. Split out so the
+ * column's existence and the buttons in it can never disagree.
  */
 function canRender(host: ClientHost, row: Row): boolean {
     const ref = row.ref;
     if (!ref) return false;
-    return ref.kind === "external"
-        ? !!ref.reference && !!host.components
-        : !!host.navigation;
+    if (ref.kind === "external") return !!ref.reference && !!host.components;
+    if (ref.kind === "file") return false;
+    return !!host.navigation;
 }
 
 /**
