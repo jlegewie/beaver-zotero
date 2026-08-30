@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { TableSpec } from "@beaver/agent-core/layouts/table";
+import {
+    TABLE_SPEC_VERSION,
+    type TableSpec,
+} from "@beaver/agent-core/layouts/table";
 import {
     buildTableDocument,
+    parseTableDocument,
     renderTableHtml,
     TABLE_CSS,
 } from "../../../src/services/artifacts/tableDocument";
@@ -205,13 +209,23 @@ describe("renderTableHtml", () => {
 });
 
 describe("buildTableDocument", () => {
-    it("produces a self-contained document with no script and no external references", () => {
+    it("produces a self-contained document whose only script is the embedded spec", () => {
         const { html } = buildTableDocument(spec);
         expect(html.startsWith("<!DOCTYPE html>")).toBe(true);
-        expect(html).not.toMatch(/<script/i);
+        // Data, not code: the document still runs nothing.
+        expect([...html.matchAll(/<script\b[^>]*>/gi)].map((m) => m[0])).toEqual([
+            '<script type="application/json" id="beaver-table-spec">',
+        ]);
         expect(html).not.toMatch(/https?:\/\/(?!doi\.org)/);
         // rem is meaningless without a pinned root.
         expect(html).toContain("html { font-size: 14px; }");
+    });
+
+    it("marks the document so a viewer can recognise it without parsing", () => {
+        const { html } = buildTableDocument(spec);
+        expect(html).toContain(
+            `<html lang="en" data-beaver-table="${TABLE_SPEC_VERSION}">`,
+        );
     });
 
     it("stays under the reader's CSS rule budget", () => {
@@ -373,5 +387,479 @@ describe("citations", () => {
             rows: [],
         });
         expect(html).not.toContain("bt-srcs");
+    });
+});
+
+
+/**
+ * One spec that exercises every part of the model a stored table has to keep:
+ * all seven cell kinds, both flags, `stale`, every provenance, a select with a
+ * declared vocabulary, a screening decision with its details, a library row, an
+ * external row, a context-file row, and a citation with a preview.
+ */
+const fullSpec: TableSpec = {
+    id: "full",
+    key: "SNAP1234",
+    version: 7,
+    title: "Screening",
+    caption: "Every cell kind at once",
+    anchor_column_id: "ref",
+    columns: [
+        {
+            id: "ref",
+            header: "Item",
+            type: "reference",
+            details: { kind: "text", text: "The paper as it was found." },
+        },
+        {
+            id: "decision",
+            header: "Include?",
+            type: "select",
+            role: "screening_decision",
+            description: "Does it meet the inclusion criteria?",
+            options: [
+                { label: "Include", color: "green" },
+                { label: "Exclude", color: "red" },
+            ],
+        },
+        {
+            id: "n",
+            header: "Sample",
+            type: "number",
+            unit: "participants",
+            align: "end",
+            width: 120,
+        },
+        { id: "when", header: "Published", type: "date", priority: "primary" },
+        { id: "oa", header: "OA", type: "boolean" },
+        {
+            id: "finding",
+            header: "Finding",
+            type: "text",
+            description: "What did it find?",
+            details: { kind: "list", items: ["Read the results section"] },
+            status: "filling",
+            progress: { done: 2, total: 3 },
+            wrap: "clamp",
+        },
+        {
+            id: "url",
+            header: "DOI",
+            type: "link",
+            system: true,
+            sortable: false,
+            filterable: false,
+            wrap: "nowrap",
+            priority: "secondary",
+            width: "fill",
+        },
+    ],
+    rows: [
+        {
+            id: "item:1:K1",
+            ref: { kind: "item", library_id: 1, zotero_key: "K1" },
+            in_library: true,
+            cells: {
+                ref: {
+                    value: {
+                        kind: "reference",
+                        display_name: "Does working from home work?",
+                        subtitle: "Bloom et al.",
+                        venue: "QJE",
+                        item_type: "journalArticle",
+                        library_items: [{ library_id: 1, zotero_key: "K1" }],
+                    },
+                    provenance: "imported",
+                },
+                decision: {
+                    value: { kind: "select", label: "Include" },
+                    details: { kind: "text", text: "Randomised, and on topic." },
+                    provenance: "asserted",
+                },
+                n: {
+                    value: { kind: "number", value: 1200 },
+                    provenance: "extracted",
+                    flag: "unsure",
+                },
+                when: {
+                    value: { kind: "date", value: "2015-02", display: "Feb 2015" },
+                    provenance: "extracted",
+                },
+                oa: { value: { kind: "boolean", value: true }, provenance: "user" },
+                finding: {
+                    value: {
+                        kind: "text",
+                        text: 'Performance rose 13%. <citation id="1-K1" loc="page4"/>',
+                    },
+                    details: { kind: "list", items: ["Nine months", "Call centre"] },
+                    provenance: "extracted",
+                },
+                url: {
+                    value: {
+                        kind: "link",
+                        url: "https://doi.org/10.1093/qje/qju032",
+                        label: "10.1093/qje/qju032",
+                    },
+                    provenance: "imported",
+                    stale: true,
+                },
+            },
+        },
+        {
+            id: "ext:openalex:W123",
+            ref: {
+                kind: "external",
+                source: "openalex",
+                source_id: "W123",
+                reference: {
+                    source: "openalex",
+                    source_id: "W123",
+                    title: "Remote work and productivity",
+                    authors: ["Nguyen, T."],
+                    year: 2019,
+                    library_items: [],
+                },
+            },
+            in_library: false,
+            actions: ["import"],
+            cells: {
+                ref: {
+                    value: {
+                        kind: "reference",
+                        display_name: "Remote work and productivity",
+                        subtitle: "Nguyen",
+                    },
+                    provenance: "imported",
+                },
+                decision: {
+                    value: { kind: "select", label: "Exclude" },
+                    details: { kind: "list", items: ["Wrong population"] },
+                    provenance: "user",
+                },
+                n: { status: "pending" },
+                when: {
+                    value: { kind: "date", value: "2019" },
+                    provenance: "asserted",
+                    flag: "unsourced",
+                },
+                oa: { value: { kind: "boolean", value: false }, provenance: "user" },
+                finding: { status: "error", error: "Extraction failed" },
+            },
+        },
+        {
+            id: "file:f1",
+            ref: { kind: "file", ext_key: "f1", label: "protocol.pdf" },
+            status: "error",
+            error: "The file could not be read.",
+            cells: {
+                ref: {
+                    value: { kind: "reference", display_name: "protocol.pdf" },
+                    provenance: "imported",
+                },
+            },
+        },
+    ],
+    sort: { column_id: "when", direction: "asc" },
+    capabilities: {
+        sortable: true,
+        filterable: true,
+        expandable_rows: true,
+        row_actions: ["reveal", "open", "import"],
+        allow_add_column: true,
+        allow_add_row: true,
+    },
+    cost_estimate: { per_row_credits: 2, estimated_seconds: 45 },
+    citations: [
+        {
+            citation_id: "c1",
+            raw_tag: '<citation id="1-K1" loc="page4"/>',
+            display_name: "Bloom 2015",
+            formatted_citation: "Bloom, N. 2015. Does working from home work?",
+            preview: "a 13% performance increase",
+            pages: [4],
+            resolved_ref: { kind: "zotero", library_id: 1, zotero_key: "K1" },
+        },
+    ],
+};
+
+/**
+ * The document's text, near enough for offset comparisons: annotations anchor
+ * into text, and markup — including the inline style attributes that carry the
+ * sort ranks — is not text. Entities are left alone, since both sides of a
+ * comparison carry the same ones.
+ */
+function textOf(html: string): string {
+    return html
+        .replace(/<script[\s\S]*?<\/script>/gi, "")
+        .replace(/<style[\s\S]*?<\/style>/gi, "")
+        .replace(/<[^>]+>/g, "");
+}
+
+/** The JSON the document carries, as written (still `<`-escaped). */
+function embeddedJson(html: string): string {
+    return /id="beaver-table-spec">([\s\S]*?)<\/script>/.exec(html)![1];
+}
+
+describe("the embedded spec", () => {
+    it("round-trips a spec that uses every part of the model", () => {
+        const { html } = buildTableDocument(fullSpec);
+        expect(parseTableDocument(html)).toEqual({
+            ok: true,
+            spec: { ...fullSpec, spec_version: TABLE_SPEC_VERSION },
+        });
+    });
+
+    it("stamps the format version, and passes an existing one through", () => {
+        const stamped = parseTableDocument(buildTableDocument(fullSpec).html);
+        expect(stamped.ok && stamped.spec.spec_version).toBe(TABLE_SPEC_VERSION);
+        // Identity and revision belong to the store, so they survive untouched.
+        expect(stamped.ok && stamped.spec.key).toBe("SNAP1234");
+        expect(stamped.ok && stamped.spec.version).toBe(7);
+    });
+
+    it("serialises compactly, since the JSON is machine state", () => {
+        const json = embeddedJson(buildTableDocument(fullSpec).html);
+        expect(json).not.toContain("\n");
+        // Re-serialising it compactly changes nothing, so it was compact: no
+        // indentation and no space the data did not put there.
+        expect(json).toBe(
+            JSON.stringify(JSON.parse(json)).replace(/</g, "\\u003c"),
+        );
+    });
+
+    it("survives a cell that tries to close the script element", () => {
+        const hostile: TableSpec = {
+            ...fullSpec,
+            rows: [
+                {
+                    id: "r1",
+                    cells: {
+                        finding: {
+                            value: {
+                                kind: "text",
+                                text: "</script><!-- <script>alert(1)</script> --> still here",
+                            },
+                            provenance: "user",
+                        },
+                    },
+                },
+            ],
+        };
+        const { html } = buildTableDocument(hostile);
+        // Nothing in the data can end the element early, so the document still
+        // has exactly one script and it still parses.
+        expect([...html.matchAll(/<\/script>/gi)]).toHaveLength(1);
+        expect(embeddedJson(html)).not.toContain("<");
+        const parsed = parseTableDocument(html);
+        expect(parsed).toEqual({
+            ok: true,
+            spec: { ...hostile, spec_version: TABLE_SPEC_VERSION },
+        });
+        // …and the rendered cell escaped it rather than running it.
+        expect(html).not.toContain("<script>alert(1)</script>");
+        expect(html).toContain("&lt;script&gt;alert(1)");
+    });
+
+    it("is byte-for-byte the same on a second build", () => {
+        expect(buildTableDocument(fullSpec).html).toBe(
+            buildTableDocument(fullSpec).html,
+        );
+    });
+
+    it("does not move the text before a row when a later row changes", () => {
+        const before = buildTableDocument(spec).html;
+        // `spec` sorts by citations descending, so Gamma (no count) is last.
+        const after = buildTableDocument({
+            ...spec,
+            rows: spec.rows.map((row) =>
+                row.id === "r3"
+                    ? {
+                          ...row,
+                          cells: {
+                              ...row.cells,
+                              abstract: {
+                                  value: {
+                                      kind: "text" as const,
+                                      text: "A late addition",
+                                  },
+                              },
+                          },
+                      }
+                    : row,
+            ),
+        }).html;
+
+        expect(after).not.toBe(before);
+        const cut = textOf(before).indexOf("Gamma");
+        expect(cut).toBeGreaterThan(0);
+        expect(textOf(after).indexOf("Gamma")).toBe(cut);
+        expect(textOf(after).slice(0, cut)).toBe(textOf(before).slice(0, cut));
+    });
+});
+
+describe("parseTableDocument", () => {
+    it("reports a document that carries no spec", () => {
+        expect(
+            parseTableDocument("<!DOCTYPE html><html><body>Nope</body></html>"),
+        ).toEqual({ ok: false, reason: "no_spec" });
+    });
+
+    it("refuses a newer format, and says which one", () => {
+        const { html } = buildTableDocument({ ...fullSpec, spec_version: 999 });
+        expect(parseTableDocument(html)).toEqual({
+            ok: false,
+            reason: "unsupported_version",
+            specVersion: 999,
+        });
+    });
+
+    it("reports malformed JSON rather than throwing", () => {
+        const broken =
+            '<!DOCTYPE html><html><body><script type="application/json" ' +
+            'id="beaver-table-spec">{"id":</script></body></html>';
+        const parsed = parseTableDocument(broken);
+        expect(parsed.ok).toBe(false);
+        expect(parsed.ok === false && parsed.reason).toBe("invalid");
+        expect(parsed.ok === false && parsed.detail).toBeTruthy();
+    });
+
+    it("reports JSON that parses but is not a table", () => {
+        const notATable =
+            '<!DOCTYPE html><html><body><script type="application/json" ' +
+            'id="beaver-table-spec">{"id":"t","columns":[]}</script></body></html>';
+        const parsed = parseTableDocument(notATable);
+        expect(parsed.ok === false && parsed.reason).toBe("invalid");
+    });
+});
+
+describe("a stored table stands on its own", () => {
+    it("references no external resource", () => {
+        const { html } = buildTableDocument(fullSpec, {
+            linksFor: () => ({
+                selectUri: "zotero://select/library/items/K1",
+                openUri: "zotero://open/library/items/K1",
+            }),
+        });
+        // No stylesheet, script or image to fetch — the only `src`-less
+        // stylesheet is the inline <style>, and the only script is data.
+        expect(html).not.toMatch(/<link\b/i);
+        expect(html).not.toMatch(/<img\b/i);
+        expect(html).not.toMatch(/\bsrc=/i);
+        expect(html).not.toMatch(/@import/i);
+        expect(html).not.toMatch(/url\(/i);
+        expect(html).not.toMatch(/chrome:\/\//i);
+        // Row verbs are `zotero://` content links, which resolve locally.
+        expect(html).toContain('href="zotero://select/library/items/K1"');
+    });
+
+    it("stays under the reader's CSS budget at the design caps", () => {
+        // 20 columns, seven of them selects declaring ten categories each —
+        // the shape that drives the per-table rules.
+        const columns = Array.from({ length: 20 }, (_, i) =>
+            i % 3 === 0
+                ? {
+                      id: `c${i}`,
+                      header: `Column ${i}`,
+                      type: "select" as const,
+                      options: Array.from({ length: 10 }, (_, j) => ({
+                          label: `v${j}`,
+                      })),
+                  }
+                : { id: `c${i}`, header: `Column ${i}`, type: "text" as const },
+        );
+        const { html, cssRuleCount } = buildTableDocument({
+            id: "caps",
+            columns,
+            rows: [],
+        });
+        // The filters must survive, or the budget is met by shedding them.
+        expect(html).toContain("bt-fg-h");
+        expect(cssRuleCount).toBeLessThan(CSS_RULE_BUDGET);
+    });
+});
+
+describe("things a stored table must survive", () => {
+    it("keeps the embedded spec after the table, where it cannot displace annotation offsets", () => {
+        const { html } = buildTableDocument(spec);
+        const script = html.indexOf("<script");
+        // Snapshot annotations anchor by character offset into the document's
+        // text, so the spec has to come after every piece of the table. Pinned
+        // because the cost of moving it is invisible: the document still
+        // renders, and every other test here still passes.
+        expect(script).toBeGreaterThan(html.lastIndexOf("</section>"));
+        expect(html.indexOf("<script")).toBe(html.lastIndexOf("<script"));
+        expect(html.trimEnd().endsWith("</html>")).toBe(true);
+    });
+
+    it("renders a number that no longer survives a save as no value at all", () => {
+        // JSON has no NaN, so `JSON.stringify` stores it as null and a reloaded
+        // table would render `null.toLocaleString()`. Both directions read as
+        // an empty cell instead of throwing.
+        const withNaN: TableSpec = {
+            id: "n",
+            columns: [{ id: "size", header: "Size", type: "number" }],
+            rows: [
+                {
+                    id: "r1",
+                    cells: {
+                        size: {
+                            value: { kind: "number", value: Number.NaN },
+                            provenance: "asserted",
+                        },
+                    },
+                },
+            ],
+        };
+        expect(() => buildTableDocument(withNaN)).not.toThrow();
+
+        const parsed = parseTableDocument(buildTableDocument(withNaN).html);
+        expect(parsed.ok).toBe(true);
+        if (!parsed.ok) return;
+        // Re-rendering what came back is the case that used to throw.
+        expect(() => buildTableDocument(parsed.spec)).not.toThrow();
+        expect(buildTableDocument(parsed.spec).html).toContain("bt-empty");
+    });
+
+    it("points a filter chip at the rows that actually carry its label", () => {
+        // The chip and the row class are two halves of one index. An open
+        // select enumerated once over sorted rows and once over the spec's
+        // used to pair each chip with a different label's rows.
+        const openSelect: TableSpec = {
+            id: "f",
+            columns: [{ id: "d", header: "Design", type: "select" }],
+            sort: { column_id: "d", direction: "asc" },
+            rows: [
+                {
+                    id: "zeta",
+                    cells: {
+                        d: {
+                            value: { kind: "select", label: "Zeta" },
+                            provenance: "asserted",
+                        },
+                    },
+                },
+                {
+                    id: "alpha",
+                    cells: {
+                        d: {
+                            value: { kind: "select", label: "Alpha" },
+                            provenance: "asserted",
+                        },
+                    },
+                },
+            ],
+        };
+        const { html } = buildTableDocument(openSelect, { controls: true });
+
+        // The chip labelled "Alpha" hides everything that is not class N; the
+        // Alpha row must be the row carrying class N.
+        const chip = /class="bt-fo bt-fo0-(\d+)"[^>]*>Alpha</.exec(html);
+        expect(chip).not.toBeNull();
+        const rule = new RegExp(
+            `#bt-f0-${chip![1]}:checked ~ \\.bt-scroll \\.bt-r:not\\.?\\(\\.(bt-v0-\\d+)\\)`
+        ).exec(html);
+        expect(rule).not.toBeNull();
+        const alphaRow = /<details class="([^"]*)" id="alpha"/.exec(html);
+        expect(alphaRow?.[1]).toContain(rule![1]);
     });
 });

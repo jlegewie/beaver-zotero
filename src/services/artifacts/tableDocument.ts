@@ -38,6 +38,20 @@
  *
  * This module is free of Zotero APIs — callers pass prebuilt link URIs, exactly
  * as `reportHtml.ts` does.
+ *
+ * ## The document is the table
+ *
+ * A stored table is a snapshot attachment and nothing else: no database row, no
+ * server copy. So the document carries the spec it was rendered from, and
+ * {@link parseTableDocument} reads it back — see {@link buildTableDocument}.
+ *
+ * That makes rendering a **pure function of its inputs**: no clock, no random
+ * ids, no iteration over anything whose order is not fixed by the spec, so the
+ * same spec always produces the same bytes and a re-render never moves text
+ * that annotations are anchored to. The one deliberate exception is
+ * `options.linksFor`, which consults live Zotero state (does this item still
+ * have a file?), so two renders of the same spec at different times may differ
+ * in the row action links.
  */
 
 import {
@@ -47,10 +61,13 @@ import {
     columnAlign,
     isColumnFilterable,
     isColumnSortable,
+    readSpec,
     rowActions,
+    SORT_LOCALE,
     selectLabelsInColumn,
     sortRows,
     summarizeCoverage,
+    TABLE_SPEC_VERSION,
     type Cell,
     type Column,
     type Row,
@@ -186,6 +203,22 @@ function selectHue(label: string, column: Column): string {
     return 'gray';
 }
 
+/**
+ * Grouped digits in a fixed locale rather than the host's.
+ *
+ * The rendered document is stored and re-read, so it has to be the same
+ * everywhere: a bare `toLocaleString()` groups by the install's locale (and in
+ * some locales changes the digits themselves), which would make the same spec
+ * render differently on two machines.
+ */
+function formatNumber(value: number): string | null {
+    // JSON has no NaN or Infinity, so a non-finite value cannot survive a save:
+    // `JSON.stringify` writes it as `null`, and a reloaded table would then
+    // render `null.toLocaleString()`. Treated as no value in both directions,
+    // the way `cellSortKey` already treats it.
+    return Number.isFinite(value) ? value.toLocaleString('en-US') : null;
+}
+
 /** Only `zotero:` and `https:` become links; anything else renders as text. */
 function safeHref(uri: string | null | undefined): string | null {
     if (!uri) return null;
@@ -215,10 +248,13 @@ function renderCellValue(
                 cites ? cites.render(value.text) : escapeHtml(value.text)
             }</span>`;
 
-        case 'number':
+        case 'number': {
+            const shown = value.display ?? formatNumber(value.value);
+            if (shown === null) return '<span class="bt-empty"></span>';
             return `<span class="bt-num">${escapeHtml(
-                value.display ?? value.value.toLocaleString()
+                shown
             )}${column.unit && !value.display ? `<span class="bt-unit">${escapeHtml(column.unit)}</span>` : ''}</span>`;
+        }
 
         case 'date':
             return `<span class="bt-num">${escapeHtml(value.display ?? value.value)}</span>`;
@@ -393,12 +429,21 @@ function citationParts(citation: Citation | undefined): {
 // Ranks
 // ---------------------------------------------------------------------------
 
+/**
+ * Ordering for two sort keys, matching `sortRows`' comparator so the baked
+ * document order and the CSS ranks below can never disagree.
+ *
+ * Pinned to the same {@link SORT_LOCALE} `cellSortKey` lower-cases in — shared
+ * rather than restated, so the baked row order and the CSS ranks below cannot
+ * drift apart. A stored table's order is a function of its data, not of the
+ * install that wrote it.
+ */
 function compareKeys(a: number | string | null, b: number | string | null): number {
     if (a === null && b === null) return 0;
     if (a === null) return 1;
     if (b === null) return -1;
     if (typeof a === 'number' && typeof b === 'number') return a - b;
-    return String(a).localeCompare(String(b));
+    return String(a).localeCompare(String(b), SORT_LOCALE);
 }
 
 interface RowRanks {
@@ -457,15 +502,45 @@ interface FilterGroup {
     classes: string[];
 }
 
-function filterGroups(spec: TableSpec, sortedRows: Row[]): FilterGroup[] {
+/**
+ * The label list each `select` column filters on, keyed by column id.
+ *
+ * Built once and shared, because the chip in the toolbar and the class on the
+ * row are two halves of one index: a chip is `bt-v<col>-<n>` and it hides every
+ * row that does not carry that class. Enumerating the labels twice — once over
+ * the sorted rows and once over the spec's — silently pairs "Alpha" with
+ * "Zeta"'s rows the moment an undeclared select column is sorted.
+ *
+ * Enumerated over the rows in display order, so an open select's chips read in
+ * the order the values appear on screen.
+ */
+function selectFilterLabels(
+    spec: TableSpec,
+    sortedRows: Row[]
+): Map<string, string[]> {
+    const byColumn = new Map<string, string[]>();
+    for (const column of spec.columns) {
+        if (column.type !== 'select') continue;
+        byColumn.set(
+            column.id,
+            column.options?.length
+                ? column.options.map((o) => o.label)
+                : selectLabelsInColumn({ ...spec, rows: sortedRows }, column.id)
+        );
+    }
+    return byColumn;
+}
+
+function filterGroups(
+    spec: TableSpec,
+    selectLabels: Map<string, string[]>
+): FilterGroup[] {
     const groups: FilterGroup[] = [];
     for (const [index, column] of spec.columns.entries()) {
         if (!isColumnFilterable(column)) continue;
 
         if (column.type === 'select') {
-            const labels = column.options?.length
-                ? column.options.map((o) => o.label)
-                : selectLabelsInColumn({ ...spec, rows: sortedRows }, column.id);
+            const labels = selectLabels.get(column.id) ?? [];
             if (labels.length > 1) {
                 groups.push({
                     column,
@@ -487,15 +562,17 @@ function filterGroups(spec: TableSpec, sortedRows: Row[]): FilterGroup[] {
 }
 
 /** The classes a row carries so the filter rules can hide it. */
-function rowFilterClasses(row: Row, spec: TableSpec): string[] {
+function rowFilterClasses(
+    row: Row,
+    spec: TableSpec,
+    selectLabels: Map<string, string[]>
+): string[] {
     const classes: string[] = [];
     for (const [index, column] of spec.columns.entries()) {
         const value = row.cells[column.id]?.value;
         if (!value) continue;
         if (value.kind === 'select') {
-            const labels = column.options?.length
-                ? column.options.map((o) => o.label)
-                : selectLabelsInColumn(spec, column.id);
+            const labels = selectLabels.get(column.id) ?? [];
             const at = labels.indexOf(value.label);
             if (at >= 0) classes.push(`bt-v${index}-${at}`);
         }
@@ -623,7 +700,8 @@ export function renderTableHtml(
     // Every control costs rules, and past the reader's budget it stops theming
     // the document properly — so a table wide enough to blow it loses its
     // filters, which are far and away the most expensive, and keeps its sort.
-    const wanted = controls ? filterGroups(spec, rows) : [];
+    const selectLabels = selectFilterLabels(spec, rows);
+    const wanted = controls ? filterGroups(spec, selectLabels) : [];
     const groups = controls && fitsBudget(spec, prefix, wanted) ? wanted : [];
     const filterInputs = groups
         .map((group, g) =>
@@ -718,7 +796,7 @@ export function renderTableHtml(
                 ...rowRanks.asc.map((r, i) => `--o${i}:${r}`),
                 ...rowRanks.desc.map((r, i) => `--p${i}:${r}`),
             ].join(';');
-            const classes = ['bt-r', ...rowFilterClasses(row, spec)];
+            const classes = ['bt-r', ...rowFilterClasses(row, spec, selectLabels)];
             if (row.status === 'error') classes.push('bt-r-err');
 
             const cells = spec.columns
@@ -1068,15 +1146,57 @@ export const TABLE_CSS = `
 .bt-pill.bt-pill--gray { background: #f1f3f5; color: var(--t-mut); border-color: #e3e6ea; }
 `.trim();
 
-/** A complete document, for a tab or a saved snapshot. */
+// ---------------------------------------------------------------------------
+// Document
+// ---------------------------------------------------------------------------
+
+/** Id of the `<script>` element that carries the embedded spec. */
+export const TABLE_SPEC_SCRIPT_ID = 'beaver-table-spec';
+
+/**
+ * The spec as it is embedded in the document.
+ *
+ * Compact on purpose: the file already carries the rendered table, so the JSON
+ * is machine state, and a large table would pay for every space twice — on disk
+ * and in whatever later uploads the file.
+ *
+ * `<` is written as its JSON escape, which is what keeps the data from ending
+ * the element it lives in: a cell containing `</script>` or `<!--` would
+ * otherwise truncate the table's own state. `\u003c` decodes back to `<` under
+ * `JSON.parse`, so the escape is lossless. Nothing else is escaped, and nothing
+ * else should be: the reader below does `JSON.parse` and no unescaping, so any
+ * other scheme would silently corrupt the values it was meant to protect.
+ */
+function serializeSpec(spec: TableSpec): string {
+    return JSON.stringify(spec).replace(/</g, '\\u003c');
+}
+
+/**
+ * A complete document, for a tab or a saved snapshot.
+ *
+ * The document is round-trippable: it embeds the spec it was rendered from, so
+ * the stored `.html` is both a table anyone can read in a browser and the only
+ * copy of the table's state Beaver needs to open it again. See
+ * {@link parseTableDocument} for the way back in.
+ */
 export function buildTableDocument(
     spec: TableSpec,
     options: TableHtmlOptions = {}
 ): RenderedTable {
     const table = renderTableHtml(spec, options);
+    // The file is the only copy of its state, so it says which format wrote it.
+    // A spec that already names a version keeps it — as do `key` and `version`,
+    // which belong to whatever stores the file rather than to the renderer.
+    const stored: TableSpec =
+        spec.spec_version == null
+            ? { ...spec, spec_version: TABLE_SPEC_VERSION }
+            : spec;
+
     const html = [
         '<!DOCTYPE html>',
-        '<html lang="en">',
+        // Marks the document as one of ours, so a viewer can recognise it (and
+        // read the format version off it) without parsing the spec.
+        `<html lang="en" data-beaver-table="${escapeHtml(String(stored.spec_version))}">`,
         '<head>',
         '<meta charset="utf-8">',
         `<title>${escapeHtml(spec.title ?? 'Table')}</title>`,
@@ -1084,6 +1204,13 @@ export function buildTableDocument(
         '</head>',
         '<body>',
         table.html,
+        // Last in the body, after the table, and it has to stay there: snapshot
+        // annotations anchor by character offset into the document's text, so
+        // anything that could count as text must come after the content it
+        // would otherwise displace. Tidying this into <head> — or anywhere
+        // above the table — would silently break every annotation on every
+        // stored table.
+        `<script type="application/json" id="${TABLE_SPEC_SCRIPT_ID}">${serializeSpec(stored)}</script>`,
         '</body>',
         '</html>',
         '',
@@ -1094,6 +1221,67 @@ export function buildTableDocument(
         cssRuleCount:
             table.cssRuleCount + countTopLevelCssRules(DOCUMENT_CSS + TABLE_CSS),
     };
+}
+
+export type ParsedTableDocument =
+    | { ok: true; spec: TableSpec }
+    | {
+          ok: false;
+          reason: 'no_spec' | 'unsupported_version' | 'invalid';
+          detail?: string;
+          specVersion?: number;
+      };
+
+/**
+ * The embedded spec, located by id. The document is our own deterministic
+ * output, so the open tag is exact and the JSON body cannot contain `</script`
+ * (see {@link serializeSpec}) — which is what makes the lazy match safe.
+ */
+const SPEC_SCRIPT_RE = new RegExp(
+    `<script\\b[^>]*\\bid="${TABLE_SPEC_SCRIPT_ID}"[^>]*>([\\s\\S]*?)</script\\s*>`,
+    'i'
+);
+
+/**
+ * Reads a built document back into the spec it was rendered from.
+ *
+ * This is not a convenience. It is the proof that the stored file is a faithful
+ * representation of the table rather than a picture of one: everything the
+ * table knows about itself survives a save and a load, so a snapshot can be
+ * re-opened, re-sorted, extended with a column and written back without the
+ * round trip losing anything.
+ *
+ * Deliberately without `DOMParser`: this module has to stay usable from the
+ * esbuild bundle and from a plain Node unit test, and neither reliably has one.
+ * The version guard is {@link readSpec}'s, and `unsupported_version` survives
+ * with the version it read — a caller must be able to open a newer file
+ * read-only instead of writing back something lossy.
+ */
+export function parseTableDocument(html: string): ParsedTableDocument {
+    const match = SPEC_SCRIPT_RE.exec(html);
+    if (!match) return { ok: false, reason: 'no_spec' };
+
+    let raw: unknown;
+    try {
+        raw = JSON.parse(match[1]);
+    } catch (error) {
+        return {
+            ok: false,
+            reason: 'invalid',
+            detail: `embedded spec is not valid JSON: ${String(error)}`,
+        };
+    }
+
+    const read = readSpec(raw);
+    if (read.ok) return { ok: true, spec: read.spec };
+    if (read.reason === 'unsupported_version') {
+        return {
+            ok: false,
+            reason: 'unsupported_version',
+            specVersion: read.specVersion,
+        };
+    }
+    return { ok: false, reason: 'invalid', detail: read.detail };
 }
 
 /**

@@ -644,6 +644,19 @@ export function summarizeCoverage(
 
 type SortKey = number | string | null;
 
+/**
+ * The locale sorting is pinned to.
+ *
+ * A sorted table is baked into the stored snapshot in the order it was written,
+ * so the order has to be a function of the data and nothing else. Left to the
+ * host, `toLocaleLowerCase` and `localeCompare` would collate the same titles
+ * differently on two installs — which would show up as a spurious reordering
+ * when a second device writes the table, and would move the text offsets its
+ * annotations are anchored to. Filtering is not pinned: that is a live response
+ * to what someone is typing, not something stored.
+ */
+export const SORT_LOCALE = "en";
+
 /** Sort key of a cell; `null` means empty and sorts last in either direction. */
 export function cellSortKey(cell: Cell | undefined): SortKey {
     const value = cell?.value;
@@ -657,19 +670,19 @@ export function cellSortKey(cell: Cell | undefined): SortKey {
             return value.value;
         case "text":
             // Sorted on the prose, not on the markup wrapped around it.
-            return stripCitationTags(value.text).toLocaleLowerCase();
+            return stripCitationTags(value.text).toLocaleLowerCase(SORT_LOCALE);
         case "select":
-            return value.label.toLocaleLowerCase();
+            return value.label.toLocaleLowerCase(SORT_LOCALE);
         case "reference":
-            return value.display_name.toLocaleLowerCase();
+            return value.display_name.toLocaleLowerCase(SORT_LOCALE);
         case "link":
-            return (value.label ?? value.url).toLocaleLowerCase();
+            return (value.label ?? value.url).toLocaleLowerCase(SORT_LOCALE);
     }
 }
 
 function compareSortKeys(a: SortKey, b: SortKey): number {
     if (typeof a === "number" && typeof b === "number") return a - b;
-    return String(a).localeCompare(String(b));
+    return String(a).localeCompare(String(b), SORT_LOCALE);
 }
 
 /**
