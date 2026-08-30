@@ -92,6 +92,10 @@ import {
     handleTestCollectionDeleteHttpRequest,
 } from './httpHandlers/testCollectionHandlers';
 import {
+    handleTestPdfRetrievalHttpRequest,
+    handleTestPdfCaptchaEligibilityHttpRequest,
+} from './httpHandlers/testPdfRetrievalHandlers';
+import {
     handleTestAnnotationCreateHttpRequest,
 } from './httpHandlers/testAnnotationHandlers';
 import {
@@ -275,6 +279,9 @@ const ENDPOINT_PATHS = [
     // Test-only endpoints (collection seeding/teardown)
     '/beaver/test/collection-create',
     '/beaver/test/collection-delete',
+
+    '/beaver/test/pdf-retrieval',
+    '/beaver/test/pdf-captcha-eligibility',
     // Test-only endpoints (headless PDF annotations)
     '/beaver/test/annotation-create',
     // Test-only endpoints (batch progress bar preview)
@@ -1127,6 +1134,13 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/collection-delete'] =
             createEndpoint(handleTestCollectionDeleteHttpRequest);
+
+        // PDF-retrieval measurement (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/pdf-retrieval'] =
+            createEndpoint(handleTestPdfRetrievalHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-captcha-eligibility'] =
+            createEndpoint(handleTestPdfCaptchaEligibilityHttpRequest);
 
         // Headless PDF annotation primitives (dev-only)
         Zotero.Server.Endpoints['/beaver/test/annotation-create'] =
