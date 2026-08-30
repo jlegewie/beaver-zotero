@@ -158,6 +158,7 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     create_zotero_item: 'Add item',
     external_search: 'Web search',
     lookup_work: 'Lookup work',
+    find_related_works: 'Related works',
 
     // Batch jobs
     batch_start: 'Batch job',
