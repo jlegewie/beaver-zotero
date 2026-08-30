@@ -430,6 +430,83 @@ export default tseslint.config(
             ],
         },
     },
+    // The stored-table subsystem is compiled into BOTH bundles, so it obeys the
+    // esbuild bundle's rules: no React, no Jotai store, no `process`. Reaching
+    // any of those from here does not fail a build or a typecheck — the plugin
+    // simply throws `process is not defined` while loading `beaver.js` and does
+    // not start at all, with `Zotero.Beaver` undefined and no endpoints
+    // registered. See CLAUDE.md, "Shared code across bundles".
+    //
+    // This is not a blanket rule for `src/`: `hooks.ts` imports `react/eventBus`
+    // and `react/ui/UIManager` deliberately, and those are esbuild-safe.
+    {
+        files: ["src/services/artifacts/**/*.ts", "src/ui/tableTab.ts"],
+        rules: {
+            "no-restricted-imports": [
+                "error",
+                {
+                    patterns: [
+                        {
+                            group: ["**/react/*", "**/react/**"],
+                            message:
+                                "The stored-table subsystem is reachable from the esbuild bundle, where React, the Jotai store and `process` do not exist. A direct react/ import makes beaver.js throw on load and the plugin never starts.",
+                        },
+                        {
+                            group: ["**/store", "**/react/store"],
+                            message:
+                                "The stored-table subsystem is reachable from the esbuild bundle, which has no Jotai store — that global lives on the webpack side (Zotero.__beaverJotaiStore).",
+                        },
+                    ],
+                },
+            ],
+        },
+    },
+    // The half of that subsystem `src/hooks.ts` actually pulls in has a second
+    // constraint the pattern above cannot express: an import that *reaches*
+    // `react/` transitively is just as fatal as a direct one, and it is how this
+    // broke the first time — `tableItem.ts` imports `checkLibraryExcluded`, and
+    // `agentDataProvider/utils` imports the Jotai store, the profile atoms and
+    // the popup helpers, i.e. effectively the whole app graph.
+    //
+    // `tableItem.ts` is deliberately absent from this list: it owns creation and
+    // may keep that import, because only the webpack side and the store call it.
+    // Anything esbuild-side wanting identification or reading imports
+    // `tableItemIdentity.ts` instead.
+    {
+        files: [
+            "src/services/artifacts/tableItemIdentity.ts",
+            "src/services/artifacts/tableDocument.ts",
+            "src/services/artifacts/view/**/*.ts",
+            "src/ui/tableTab.ts",
+        ],
+        rules: {
+            "no-restricted-imports": [
+                "error",
+                {
+                    patterns: [
+                        {
+                            group: ["**/react/*", "**/react/**"],
+                            message:
+                                "This module is compiled into the esbuild bundle, where React, the Jotai store and `process` do not exist.",
+                        },
+                        {
+                            group: [
+                                "**/agentDataProvider",
+                                "**/agentDataProvider/**",
+                            ],
+                            message:
+                                "agentDataProvider reaches react/store and react/atoms/profile, so importing it here drags the whole React graph into the esbuild bundle and the plugin fails to load. Library exclusion gates writes and indexing — identification and reading are not gated, so this module does not need it.",
+                        },
+                        {
+                            group: ["**/tableItem"],
+                            message:
+                                "tableItem.ts imports the library-exclusion check and through it the React graph. Import ./tableItemIdentity for identification, paths and reading.",
+                        },
+                    ],
+                },
+            ],
+        },
+    },
     // The L1 core (wire protocol, transport, backend clients) stays free of the
     // Zotero global and the React/Jotai app graph, so it can be consumed by a
     // non-Zotero client. Zotero behavior reaches it through the injectable

@@ -23,9 +23,22 @@
  *
  * `Zotero_Tabs` is an internal global rather than a plugin API, so every entry
  * point here checks for it and degrades to doing nothing.
+ *
+ * The interactivity the document cannot supply itself — the citation card and
+ * link routing — is not here: it is `enhanceTableDocument`, which the reader
+ * host uses too. This file is that enhancer's tab host, and owns only what is
+ * particular to a tab: the container, the `srcdoc` iframe and the wait for the
+ * document it loads.
  */
 
 import { buildTableDocument, type TableHtmlOptions } from '../services/artifacts/tableDocument';
+import {
+    countCitationMarkers,
+    enhanceTableDocument,
+    type TableViewHost,
+    type TableViewSummary,
+} from '../services/artifacts/view/enhanceTableDocument';
+import { openTableLink } from '../services/artifacts/view/tableLinks';
 import type { RowRef, TableSpec } from '@beaver/agent-core/layouts/table';
 import { logger } from '@beaver/agent-core/platform/logger';
 
@@ -86,10 +99,26 @@ export function zoteroLinksFor(ref: RowRef): { selectUri?: string | null; openUr
     };
 }
 
-const openTabs = new Map<
-    string,
-    { win: Window; iframe: HTMLIFrameElement; card?: HTMLElement }
->();
+interface OpenTableTab {
+    id: string;
+    win: Window;
+    iframe: HTMLIFrameElement;
+    /**
+     * Bumped on every render into this tab. A pending wait for an older
+     * document stops when it sees a newer one, so re-rendering a tab cannot
+     * end with two sets of listeners on it.
+     */
+    generation: number;
+    /** The tab's own container, which the citation card is drawn into. */
+    mount: Element;
+    /** The table's Zotero item key, where the rendered spec carries one. */
+    key: string | null;
+    /** Undoes {@link enhanceTableDocument}; absent until the document loads. */
+    dispose?: () => void;
+    markers: number;
+}
+
+const openTabs = new Map<string, OpenTableTab>();
 
 export interface OpenTableTabOptions {
     /** Tab title. Defaults to the spec's title. */
@@ -128,7 +157,15 @@ export function openTableTab(
 
     if (existingId) {
         const existing = openTabs.get(existingId)!;
+        // A new `srcdoc` is a new document, so what was wired to the old one is
+        // released and the replacement is wired in its turn.
+        existing.dispose?.();
+        existing.dispose = undefined;
+        existing.generation += 1;
+        existing.markers = 0;
+        existing.key = spec.key ?? null;
         existing.iframe.setAttribute('srcdoc', html);
+        enhanceWhenLoaded(existing);
         tabs.select(existingId);
         return existingId;
     }
@@ -150,228 +187,74 @@ export function openTableTab(
     iframe.setAttribute('type', 'content');
     iframe.style.cssText = 'width:100%;height:100%;border:0;';
     container.appendChild(iframe);
-    const card = makeCitationCard(win, container);
-    // Order matters: the listener has to be registered before the document
-    // exists, or the only `load` it could catch has already gone by and the
-    // links are left unwired.
     iframe.setAttribute('srcdoc', html);
-    wireLinks(iframe, win, card);
 
-    openTabs.set(id, { win, iframe, card });
+    const entry: OpenTableTab = {
+        id,
+        win,
+        iframe,
+        generation: 0,
+        mount: container,
+        key: spec.key ?? null,
+        markers: 0,
+    };
+    openTabs.set(id, entry);
+    enhanceWhenLoaded(entry);
     return id;
 }
 
 /**
- * The chrome-side half of the document's links.
- *
- * `zotero://` navigates on its own — Zotero's protocol handler picks it up from
- * a content docshell — so the only thing it needs here is for the click not to
- * also toggle the `<details>` row it sits inside.
- *
- * An `https:` link is the one that has to be intercepted: left alone it would
- * load the publisher's page *into the tab*, replacing the table with no way
- * back. It goes to the system browser instead.
+ * The tab as a {@link TableViewHost}: one iframe, so the frame's rectangle is
+ * just the iframe's.
  */
-/**
- * The hover card a citation marker gets, built in chrome rather than in the
- * document.
- *
- * The document cannot draw its own: a marker sits inside a cell that is clamped
- * with `overflow: hidden`, so any card rendered beside it is clipped by the
- * cell it belongs to. Chrome is outside that clip, so the card is positioned
- * over the iframe from the marker's own rectangle — which is what lets the tab
- * show what the chat's `Citation` shows instead of a native tooltip.
- */
-function makeCitationCard(win: Window, container: Element): HTMLElement {
-    const card = win.document.createElementNS(HTML_NS, 'div') as HTMLElement;
-    card.className = 'beaver-root bt-tab-cite-card';
-    card.style.cssText = [
-        'position: absolute',
-        'z-index: 100',
-        'display: none',
-        'width: 22rem',
-        'max-width: 22rem',
-        'border: 1px solid var(--color-border50)',
-        'border-radius: 0.5rem',
-        // Opaque: the menu material is translucent and the table showed
-        // through the card.
-        'background: var(--material-sidepane)',
-        'box-shadow: 0 0.4rem 1.4rem rgba(0, 0, 0, 0.22)',
-        'font-size: 0.92rem',
-        'line-height: 1.4',
-        'color: var(--fill-primary)',
-        'pointer-events: none',
-    ].join(';');
-    container.appendChild(card);
-    return card;
+function tabHost(entry: OpenTableTab): TableViewHost {
+    return {
+        win: entry.win,
+        cardMount: entry.mount,
+        frameRect: () => entry.iframe.getBoundingClientRect(),
+        openLink: openTableLink,
+    };
 }
 
 /**
- * Fills the card from the marker's own data and centres it under it.
+ * Waits for the document behind the tab's `srcdoc`, then enhances it.
  *
- * The layout is the app's citation card: the source and its locator on one row,
- * a rule, the cited passage in quotation marks, a rule, and what a click will
- * do. The document carries those as separate attributes rather than one string
- * precisely so they can be laid out rather than dumped.
+ * A `srcdoc` document in a chrome `type="content"` iframe never fires `load` on
+ * the iframe element, so the document is waited for rather than listened for.
+ * The blank document that precedes the real one is a document too, which is why
+ * the wait ends on the document's URI rather than on there being one at all.
+ * Bounded: a document that never arrives stops the wait instead of polling
+ * forever.
  */
-function showCitationCard(
-    card: HTMLElement,
-    iframe: HTMLIFrameElement,
-    marker: Element
-): void {
-    const name = marker.getAttribute('data-cite-name');
-    const locator = marker.getAttribute('data-cite-loc');
-    const preview = marker.getAttribute('data-cite-preview');
-    const action = marker.getAttribute('data-cite-action');
-    if (!name && !preview) return;
-
-    const doc = card.ownerDocument;
-    const row = (cssText: string) => {
-        const el = doc.createElementNS(HTML_NS, 'div') as HTMLElement;
-        el.style.cssText = cssText;
-        return el;
-    };
-    card.textContent = '';
-
-    if (name) {
-        const head = row(
-            'display: flex; gap: 0.75rem; align-items: baseline; padding: 0.45rem 0.6rem;'
-        );
-        const who = row('flex: 1 1 auto; font-weight: 600; min-width: 0;');
-        who.textContent = name;
-        head.appendChild(who);
-        if (locator) {
-            const where = row(
-                'flex: 0 0 auto; color: var(--fill-secondary); white-space: nowrap;'
-            );
-            where.textContent = locator;
-            head.appendChild(where);
-        }
-        card.appendChild(head);
-    }
-
-    if (preview) {
-        const body = row(
-            'padding: 0.45rem 0.6rem; border-top: 1px solid var(--color-border50); color: var(--fill-secondary); overflow-wrap: anywhere;'
-        );
-        body.textContent = preview;
-        card.appendChild(body);
-    }
-
-    if (action) {
-        const foot = row(
-            'padding: 0.4rem 0.6rem; border-top: 1px solid var(--color-border50); color: var(--fill-secondary); font-size: 0.85rem;'
-        );
-        foot.textContent = action;
-        card.appendChild(foot);
-    }
-
-    // Centred under the marker, then pulled back inside the tab if that would
-    // hang it off either edge.
-    card.style.display = 'block';
-    const frame = iframe.getBoundingClientRect();
-    const at = marker.getBoundingClientRect();
-    const origin = (card.offsetParent as HTMLElement | null)?.getBoundingClientRect();
-    const width = card.offsetWidth;
-    const centred = frame.left + at.left + at.width / 2 - width / 2;
-    const clamped = Math.min(
-        Math.max(frame.left + 8, centred),
-        frame.right - width - 8
-    );
-    card.style.left = `${clamped - (origin?.left ?? 0)}px`;
-    card.style.top = `${frame.top + at.bottom - (origin?.top ?? 0) + 6}px`;
-}
-
-function wireLinks(
-    iframe: HTMLIFrameElement,
-    win: Window,
-    card?: HTMLElement
-): void {
-    const wired = new WeakSet<Document>();
-
-    /** Wires the current document, and reports whether it is the real one. */
-    const attach = (): boolean => {
-        const doc = iframe.contentDocument;
-        if (!doc) return false;
-        const ready = doc.documentURI === 'about:srcdoc' && doc.readyState !== 'loading';
-        // The blank document that precedes the real one is a document too, so
-        // each is wired at most once and only the real one ends the wait.
-        if (wired.has(doc)) return ready;
-        wired.add(doc);
-        if (card) {
-            doc.addEventListener(
-                'mouseover',
-                (event: Event) => {
-                    const marker = (event.target as Element | null)?.closest?.(
-                        '[data-bt-cite]'
-                    );
-                    if (!marker) return;
-                    // The document ships a `title` for viewers that can show no
-                    // card of their own. This is not one of them, and leaving it
-                    // would put the platform's tooltip on top of ours.
-                    const native = marker.getAttribute('title');
-                    if (native !== null) {
-                        marker.setAttribute('data-cite-title', native);
-                        marker.removeAttribute('title');
-                    }
-                    showCitationCard(card, iframe, marker);
-                },
-                true
-            );
-            const hide = () => {
-                card.style.display = 'none';
-            };
-            doc.addEventListener(
-                'mouseout',
-                (event: Event) => {
-                    if ((event.target as Element | null)?.closest?.('[data-bt-cite]'))
-                        hide();
-                },
-                true
-            );
-            doc.addEventListener('scroll', hide, true);
-            doc.defaultView?.addEventListener('scroll', hide, true);
-        }
-
-        doc.addEventListener(
-            'click',
-            (event: Event) => {
-                const target = event.target as Element | null;
-                const anchor = target?.closest?.('a[href]') as HTMLAnchorElement | null;
-                if (!anchor) return;
-                const href = anchor.getAttribute('href') ?? '';
-
-                // Either way the row must not expand under the click.
-                event.stopPropagation();
-
-                if (/^https:\/\//i.test(href)) {
-                    event.preventDefault();
-                    try {
-                        Zotero.launchURL(href);
-                    } catch (error) {
-                        logger(`openTableTab: could not open ${href}: ${error}`, 2);
-                    }
-                }
-            },
-            true
-        );
-        return ready;
-    };
-
-    // A `srcdoc` document in a chrome `type="content"` iframe never fires
-    // `load` on the iframe element, so the document is waited for rather than
-    // listened for. Bounded: a document that never arrives stops the wait
-    // instead of polling forever.
+function enhanceWhenLoaded(entry: OpenTableTab): void {
+    const generation = entry.generation;
     let attempts = 0;
     const wait = () => {
-        if (attach()) return;
+        // The tab may have closed, or been re-rendered, while this was pending.
+        if (openTabs.get(entry.id) !== entry || entry.generation !== generation) return;
+        const doc = entry.iframe.contentDocument;
+        if (doc && doc.documentURI === 'about:srcdoc' && doc.readyState !== 'loading') {
+            entry.dispose = enhanceTableDocument(doc, tabHost(entry));
+            entry.markers = countCitationMarkers(doc);
+            return;
+        }
         if (++attempts > 40) {
             logger('openTableTab: table document did not load; links are inert', 2);
             return;
         }
-        win.setTimeout(wait, 50);
+        entry.win.setTimeout(wait, 50);
     };
     wait();
+}
+
+/** The table tabs this window has open — for the dev view-state endpoint. */
+export function listTableTabViews(): TableViewSummary[] {
+    return [...openTabs.entries()].map(([id, entry]) => ({
+        host: 'tab' as const,
+        id,
+        key: entry.key,
+        markers: entry.markers,
+    }));
 }
 
 /** Closes a table tab and releases what was mounted into it. */
@@ -383,7 +266,7 @@ export function closeTableTab(id: string, options: { skipTabClose?: boolean } = 
     // Drop the document before the container goes, so a large table is not held
     // alive by a detached iframe.
     try {
-        entry.card?.remove();
+        entry.dispose?.();
         entry.iframe.removeAttribute('srcdoc');
         entry.iframe.remove();
     } catch {
@@ -399,7 +282,21 @@ export function closeTableTab(id: string, options: { skipTabClose?: boolean } = 
     }
 }
 
-/** Closes every table tab this window opened — for plugin shutdown. */
+/** Closes every table tab, in every window — for plugin shutdown. */
 export function closeAllTableTabs(): void {
     for (const id of [...openTabs.keys()]) closeTableTab(id);
+}
+
+/**
+ * Closes the table tabs belonging to one window — for that window's unload.
+ *
+ * A tab left in the map after its window goes holds the window, a detached
+ * iframe and the whole rendered document, which is a dead realm kept alive.
+ * `skipTabClose` because the window is taking its own tabs with it.
+ */
+export function closeTableTabsForWindow(win: Window): void {
+    for (const [id, entry] of [...openTabs.entries()]) {
+        if (entry.win !== win) continue;
+        closeTableTab(id, { skipTabClose: true });
+    }
 }

@@ -10,15 +10,19 @@
  * from, so the file is both the table anyone can read and the only copy of the
  * table's state.
  *
- * This module lives in the esbuild bundle but is imported by the webpack one
- * (the dev handlers under `react/` call it), so it never touches the bare
- * `addon` global.
+ * **Creation only, and only from the webpack side.** Recognition, the storage
+ * paths and reading live in `tableItemIdentity.ts` and are re-exported below.
+ * The split is not tidiness: this module imports the library-exclusion check,
+ * which reaches `react/store` and the profile atoms, so anything the esbuild
+ * bundle can reach must import that module instead — see its header for what
+ * this one costs there. This module never touches the bare `addon` global
+ * either, since the dev handlers under `react/` call it.
  *
- * Versioning, edit history and the write lock are not here: this is creation,
- * recognition and reading — `tableStore.ts` owns every write to a table file
- * and is the only caller of {@link createTableItem}. The one concession to that
- * split is the sidecar path helpers below, which name the files the store
- * writes so the two cannot disagree about where they live.
+ * Versioning, edit history and the write lock are not here either:
+ * `tableStore.ts` owns every write to a table file and is the only caller of
+ * {@link createTableItem}. The one concession to that split is the sidecar path
+ * helpers next door, which name the files the store writes so the two cannot
+ * disagree about where they live.
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -33,82 +37,45 @@ import { checkLibraryExcluded } from '../agentDataProvider/utils';
 import { CSS_RULE_BUDGET } from '../../utils/html';
 import {
     buildTableDocument,
-    parseTableDocument,
     type TableHtmlOptions,
 } from './tableDocument';
 // Only Zotero knows whether a library id is the user library or a group, so the
 // row action links are built there. Imported rather than reimplemented: the
 // stored document and the tab rendering must offer the same links.
 import { zoteroLinksFor } from '../../ui/tableTab';
+import {
+    buildTableUrl,
+    isTableItem,
+    loadTableItemFields,
+    tableStorageDirectory,
+    TableItemError,
+    TABLE_TAG,
+    TABLE_EMOJI_TAG,
+} from './tableItemIdentity';
 
-// ---------------------------------------------------------------------------
-// Marks
-// ---------------------------------------------------------------------------
-
-/**
- * The tag every stored table carries. Automatic (`addTag(name, 1)`) so it stays
- * out of the user's own tag vocabulary.
- */
-export const TABLE_TAG = 'beaver-table';
-
-/**
- * The row swatch. Zotero paints an emoji tag into the items-tree row, which is
- * the only row-level marker a plugin can get — `itemTree._getIcon` picks the
- * icon from the attachment's link mode and takes no plugin input.
- */
-export const TABLE_EMOJI_TAG = '📊';
-
-/**
- * Scheme of the item's `url` field. The URL field is required by the import API
- * and is surfaced in the item pane as the "archived from" link; a generated
- * table has no web origin, so a Beaver-owned scheme is used rather than a
- * plausible-looking http URL that would misrepresent the item as a capture of a
- * real page.
- */
-export const TABLE_URL_PREFIX = 'beaver://table/';
-
-/** Directory inside the attachment's storage folder for Beaver's own sidecars. */
-export const TABLE_SIDECAR_DIR = 'beaver';
-
-// ---------------------------------------------------------------------------
-// Errors
-// ---------------------------------------------------------------------------
-
-/**
- * One vocabulary for everything that can go wrong with a stored table, shared
- * by creation here and by the store that writes revisions of it: a caller
- * switching on a code must not have to know which module refused it.
- */
-export type TableItemErrorCode =
-    | 'library_excluded'
-    | 'no_writable_library'
-    /** The library is writable, but the import API cannot file a table there. */
-    | 'unsupported_library'
-    | 'invalid_target'
-    | 'import_failed'
-    | 'file_missing'
-    /** No item with that key in that library. */
-    | 'not_found'
-    /** The item exists but is not one of ours. */
-    | 'not_a_table'
-    /** The file is there but carries no embedded spec. */
-    | 'no_spec'
-    /** Written by a newer format than this build can read. */
-    | 'unsupported_version'
-    /** The embedded spec is not a readable table. */
-    | 'invalid_spec'
-    /** A stored version's file disagrees with what the version log recorded. */
-    | 'version_corrupt';
-
-export class TableItemError extends Error {
-    readonly code: TableItemErrorCode;
-
-    constructor(message: string, code: TableItemErrorCode) {
-        super(message);
-        this.name = 'TableItemError';
-        this.code = code;
-    }
-}
+// Recognition, paths and reading live next door and are re-exported here, so a
+// caller that wants both halves still has one import. Anything compiled into
+// the esbuild bundle must import `./tableItemIdentity` **directly** — see that
+// module's header for what pulling this one into that bundle costs.
+export {
+    buildTableUrl,
+    isTableItem,
+    loadTableItemFields,
+    readTableItemSpec,
+    tableHistoryPath,
+    tableSidecarDirectory,
+    tableStorageDirectory,
+    tableVersionPath,
+    TableItemError,
+    TABLE_EMOJI_TAG,
+    TABLE_SIDECAR_DIR,
+    TABLE_TAG,
+    TABLE_URL_PREFIX,
+} from './tableItemIdentity';
+export type {
+    ReadTableItemResult,
+    TableItemErrorCode,
+} from './tableItemIdentity';
 
 // ---------------------------------------------------------------------------
 // Home library
@@ -178,111 +145,6 @@ export function resolveTableLibrary(explicit?: number): ResolvedTableLibrary {
     // Excluded is the more actionable of the two refusals: it names something
     // the user can change in Beaver preferences.
     return { error: sawExcluded ? 'library_excluded' : 'no_writable_library' };
-}
-
-// ---------------------------------------------------------------------------
-// Recognising one of ours
-// ---------------------------------------------------------------------------
-
-/**
- * Slug of a table's `url`, so Zotero derives a readable filename from it:
- * `_getFileNameFromURL` takes the URL's last path segment and appends the
- * extension for the content type, giving `<slug>.html` on disk and in the item
- * pane.
- */
-export function buildTableUrl(title: string): string {
-    const slug = title
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 60)
-        .replace(/-+$/g, '');
-    return `${TABLE_URL_PREFIX}${slug || 'table'}`;
-}
-
-/**
- * The item's `url` field, or null when it cannot be read.
- *
- * An attachment's URL lives in `itemData`, which Zotero loads lazily, so this
- * returns null rather than throwing on an item whose data has not been loaded —
- * use {@link loadTableItemFields} first when the answer has to be trustworthy.
- */
-function tableUrlField(item: Zotero.Item): string | null {
-    try {
-        return item.getField('url') || null;
-    } catch {
-        return null;
-    }
-}
-
-/**
- * Loads the fields {@link isTableItem} reads, for callers holding items that
- * came out of a lazy path (`Zotero.Items.getAsync`, a search).
- */
-export async function loadTableItemFields(items: Zotero.Item[]): Promise<void> {
-    if (items.length === 0) return;
-    await Zotero.Items.loadDataTypes(items, ['itemData', 'tags']);
-}
-
-/**
- * Whether this item is a table Beaver stored.
- *
- * Both available marks are required, because neither is reliable alone: the
- * `beaver-table` tag is user-editable (anyone can add it to an unrelated item,
- * or remove it from one of ours), while the `url` field is not surfaced for
- * editing but is trivially shared by any snapshot the user happens to have
- * imported from a `beaver://` URL. Together they identify the item as ours
- * without a database of our own.
- *
- * Synchronous. The tag and the attachment properties are on the item; the URL
- * needs `itemData` loaded — see {@link loadTableItemFields}.
- */
-export function isTableItem(item: Zotero.Item | null | undefined): boolean {
-    if (!item || !item.isAttachment() || !item.isTopLevelItem()) return false;
-    if (item.attachmentLinkMode !== Zotero.Attachments.LINK_MODE_IMPORTED_URL)
-        return false;
-    if (item.attachmentContentType !== 'text/html') return false;
-    if (!item.hasTag(TABLE_TAG)) return false;
-    return tableUrlField(item)?.startsWith(TABLE_URL_PREFIX) ?? false;
-}
-
-// ---------------------------------------------------------------------------
-// Paths
-// ---------------------------------------------------------------------------
-
-/**
- * The attachment's storage directory, which holds the rendered `.html` and
- * everything Beaver keeps beside it. Null when the item has no key yet or the
- * storage directory cannot be resolved.
- */
-export function tableStorageDirectory(item: Zotero.Item): string | null {
-    try {
-        return Zotero.Attachments.getStorageDirectory(item).path;
-    } catch (error) {
-        logger(`tableStorageDirectory: ${String(error)}`, 2);
-        return null;
-    }
-}
-
-/** Beaver's own subdirectory inside the storage directory. */
-export function tableSidecarDirectory(item: Zotero.Item): string | null {
-    const dir = tableStorageDirectory(item);
-    return dir ? PathUtils.join(dir, TABLE_SIDECAR_DIR) : null;
-}
-
-/** Where the edit history goes. */
-export function tableHistoryPath(item: Zotero.Item): string | null {
-    const dir = tableSidecarDirectory(item);
-    return dir ? PathUtils.join(dir, 'history.json') : null;
-}
-
-/** Where revision `version` of the spec goes. */
-export function tableVersionPath(
-    item: Zotero.Item,
-    version: number
-): string | null {
-    const dir = tableSidecarDirectory(item);
-    return dir ? PathUtils.join(dir, `v${version}.json`) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -496,82 +358,6 @@ export async function queueTableFullText(item: Zotero.Item): Promise<void> {
     } catch (error) {
         logger(`queueTableFullText: ${String(error)}`, 2);
     }
-}
-
-// ---------------------------------------------------------------------------
-// Reading
-// ---------------------------------------------------------------------------
-
-export type ReadTableItemResult =
-    | { ok: true; spec: TableSpec }
-    | {
-          ok: false;
-          code: 'not_a_table' | 'no_file' | 'no_spec' | 'unsupported_version' | 'invalid';
-          message: string;
-          specVersion?: number;
-      };
-
-/**
- * The spec stored in a table item's file.
- *
- * Reading is deliberately not gated on library exclusion: an existing table the
- * user opens is theirs to look at, and exclusion governs what leaves the
- * machine, not what the user can see.
- */
-export async function readTableItemSpec(
-    item: Zotero.Item
-): Promise<ReadTableItemResult> {
-    await loadTableItemFields([item]);
-    if (!isTableItem(item)) {
-        return {
-            ok: false,
-            code: 'not_a_table',
-            message: `Item ${item.key} is not a Beaver table.`,
-        };
-    }
-
-    const path = await item.getFilePathAsync();
-    if (!path) {
-        return {
-            ok: false,
-            code: 'no_file',
-            message: `Table ${item.key} has no file on disk.`,
-        };
-    }
-
-    let html: string;
-    try {
-        html = (await Zotero.File.getContentsAsync(path)) as string;
-    } catch (error) {
-        return {
-            ok: false,
-            code: 'no_file',
-            message: `Table ${item.key} could not be read: ${String(error)}`,
-        };
-    }
-
-    const parsed = parseTableDocument(html);
-    if (parsed.ok) return { ok: true, spec: parsed.spec };
-    if (parsed.reason === 'unsupported_version') {
-        return {
-            ok: false,
-            code: 'unsupported_version',
-            specVersion: parsed.specVersion,
-            message: `Table ${item.key} was written by a newer format (spec_version ${parsed.specVersion}).`,
-        };
-    }
-    if (parsed.reason === 'no_spec') {
-        return {
-            ok: false,
-            code: 'no_spec',
-            message: `Table ${item.key} carries no embedded spec.`,
-        };
-    }
-    return {
-        ok: false,
-        code: 'invalid',
-        message: parsed.detail ?? `Table ${item.key} has an unreadable spec.`,
-    };
 }
 
 // ---------------------------------------------------------------------------

@@ -19,6 +19,12 @@ import { cancelAllActiveTasks } from "./utils/backgroundTasks";
 import { initContextMenus, cleanupContextMenus } from "./modules/zoteroContextMenu";
 import { initReaderIntegration, cleanupReaderIntegration } from "./modules/readerIntegration";
 import { initReaderToolbarMenu, cleanupReaderToolbarMenu } from "./modules/readerToolbarMenu";
+import {
+    initReaderTableViews,
+    cleanupReaderTableViews,
+    cleanupReaderTableViewsForWindow,
+} from "./services/artifacts/view/readerTableView";
+import { closeAllTableTabs, closeTableTabsForWindow } from "./ui/tableTab";
 import { setActionClient } from "@beaver/agent-core/types/actions";
 import { ZOTERO_PLUGIN_CLIENT_TYPE } from "@beaver/agent-core/protocol/agentProtocol";
 
@@ -296,6 +302,9 @@ async function onStartup() {
         // -------- Register reader toolbar dropdown menu --------
         await initReaderToolbarMenu();
 
+        // -------- Enhance stored tables opened in the reader --------
+        initReaderTableViews();
+
         // -------- Register Zotero preferences pane --------
         await Zotero.PreferencePanes.register({
             pluginID: addon.data.config.addonID,
@@ -535,6 +544,14 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // next popup translation, breaking Zotero's right-click menu.
         unregisterMainWindowFtl(win);
 
+        // Release this window's table surfaces. Window-specific, so it runs on
+        // every unload and not only during global cleanup: a table tab or a
+        // reader-hosted table left behind holds the closed window's iframe and
+        // its rendered document — a dead realm kept alive, which on macOS
+        // (close the last window, app keeps running) survives indefinitely.
+        closeTableTabsForWindow(win);
+        cleanupReaderTableViewsForWindow(win);
+
         if (!isLastWindow) {
             ztoolkit.log("onMainWindowUnload: Other windows remain, skipping global cleanup");
             return;
@@ -627,8 +644,12 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // 11. Unregister context menus
         cleanupContextMenus();
 
-        // 12. Unregister reader integration listeners
+        // 12. Unregister reader integration listeners, and release the table
+        //     surfaces: a table tab left open holds a detached iframe and the
+        //     whole rendered document, and a reader view holds its reader.
         cleanupReaderIntegration();
+        cleanupReaderTableViews();
+        closeAllTableTabs();
 
         // 13. Unregister reader toolbar menu
         cleanupReaderToolbarMenu();
@@ -851,6 +872,8 @@ async function onShutdown(): Promise<void> {
         unregisterQuitObserver();
         cleanupContextMenus();
         cleanupReaderIntegration();
+        cleanupReaderTableViews();
+        closeAllTableTabs();
         cleanupReaderToolbarMenu();
         unregisterBeaverProtocolHandler();
 

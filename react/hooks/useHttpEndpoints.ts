@@ -185,6 +185,8 @@ import {
     handleTestTableDeleteHttpRequest,
     handleTestTableOpenHttpRequest,
     handleTestTableCorruptHttpRequest,
+    handleTestTableOpenReaderHttpRequest,
+    handleTestTableViewStateHttpRequest,
 } from './httpHandlers/testTableHandlers';
 import type {
     WSZoteroDataRequest,
@@ -385,6 +387,9 @@ const ENDPOINT_PATHS = [
     '/beaver/test/table-delete',
     '/beaver/test/table-open',
     '/beaver/test/table-corrupt',
+    // The reader host for a stored table (dev-only)
+    '/beaver/test/table-open-reader',
+    '/beaver/test/table-view-state',
 ] as const;
 
 /**
@@ -1363,6 +1368,15 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/table-corrupt'] =
             createEndpoint(handleTestTableCorruptHttpRequest);
+
+        // The reader host (dev-only): open a stored table in the reader and
+        // report which of the enhancer's seams attached, and list every table
+        // document currently enhanced in either host.
+        Zotero.Server.Endpoints['/beaver/test/table-open-reader'] =
+            createEndpoint(handleTestTableOpenReaderHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-view-state'] =
+            createEndpoint(handleTestTableViewStateHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/beaver-sidebar'] =
             createEndpoint(handleTestBeaverSidebarHttpRequest);

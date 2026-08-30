@@ -18,6 +18,10 @@
  * `-delete` and `-open` drive the versioned store on top of it, and `-corrupt`
  * damages a table's storage directory on purpose so crash recovery can be
  * exercised without staging a real crash.
+ *
+ * `-open-reader` and `-view-state` drive the reader host: the first opens a
+ * stored table in Zotero's reader and reports which of the enhancer's seams
+ * attached, the second lists what is currently enhanced in either host.
  */
 
 import type {
@@ -30,7 +34,16 @@ import { rowIdFor, validateTableSpec } from '@beaver/agent-core/layouts/table';
 import { store } from '../../store';
 import { windowSurfaceAtom, type WindowSurface } from '../../atoms/windowSurface';
 import { BeaverUIFactory } from '../../../src/ui/ui';
-import { closeTableTab, openTableTab, zoteroLinksFor } from '../../../src/ui/tableTab';
+import {
+    closeTableTab,
+    listTableTabViews,
+    openTableTab,
+    zoteroLinksFor,
+} from '../../../src/ui/tableTab';
+import {
+    listReaderTableViews,
+    openTableInReader,
+} from '../../../src/services/artifacts/view/readerTableView';
 import { getSearchableLibraryIds } from '../../../src/services/agentDataProvider/utils';
 import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
 import { safeAttachmentFilename } from '../../../src/utils/attachmentFiles';
@@ -1001,4 +1014,80 @@ export async function handleTestTableCorruptHttpRequest(
     }
     await Zotero.File.putContentsAsync(htmlPath, document.html);
     return { ok: true, mode, version: ahead };
+}
+
+// ---------------------------------------------------------------------------
+// The reader host (dev-only)
+// ---------------------------------------------------------------------------
+
+/**
+ * Opens a stored table in the reader and reports what the enhancer attached.
+ *
+ * The report is deliberately literal: every step has its own field, and
+ * `failures` names the ones that did not come up. A table that renders as a
+ * plain static page is a supported outcome, so `ok: true` here means "the
+ * attempt ran", not "everything attached" — read `enhanced`. `tab_id` is null
+ * for a table opened in a reader *window* rather than a tab.
+ */
+export async function handleTestTableOpenReaderHttpRequest(
+    request: { key?: string; libraryID?: number; timeoutMs?: number } = {}
+): Promise<any> {
+    if (!request.key) return MISSING_KEY;
+    const libraryID = request.libraryID ?? Zotero.Libraries.userLibraryID;
+    const item = Zotero.Items.getByLibraryAndKey(libraryID, request.key) as
+        | Zotero.Item
+        | false;
+    if (!item) {
+        return {
+            ok: false,
+            code: 'not_found',
+            error: `No item ${request.key} in library ${libraryID}`,
+        };
+    }
+    await loadTableItemFields([item]);
+    if (!isTableItem(item)) {
+        return {
+            ok: false,
+            code: 'not_a_table',
+            error: `Item ${request.key} is not a Beaver table.`,
+        };
+    }
+
+    const report = await openTableInReader(item, { timeoutMs: request.timeoutMs });
+    return {
+        ok: true,
+        key: report.itemKey,
+        library_id: report.libraryID,
+        enhanced: report.enhanced,
+        reader_type: report.readerType,
+        tab_id: report.tabID,
+        is_table_item: report.isTableItem,
+        // The document's own mark, carrying the format version it was written
+        // with; null means the document was not one of ours (or not found).
+        data_beaver_table: report.beaverTableAttribute,
+        internal_reader_found: report.internalReaderFound,
+        primary_view_found: report.primaryViewFound,
+        view_initialized: report.viewInitialized,
+        document_found: report.documentFound,
+        card_mounted: report.cardMounted,
+        listeners_attached: report.listenersAttached,
+        markers: report.markers,
+        links: report.links,
+        failures: report.failures,
+        views: [...listTableTabViews(), ...listReaderTableViews()],
+    };
+}
+
+/**
+ * Every table document currently enhanced, in either host — so lifecycle and
+ * cleanup can be checked without driving the UI.
+ */
+export async function handleTestTableViewStateHttpRequest(): Promise<any> {
+    const views = [...listTableTabViews(), ...listReaderTableViews()];
+    return {
+        ok: true,
+        views,
+        tabs: views.filter((v) => v.host === 'tab').length,
+        readers: views.filter((v) => v.host === 'reader').length,
+    };
 }
