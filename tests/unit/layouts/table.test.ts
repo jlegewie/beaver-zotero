@@ -23,10 +23,6 @@ import {
     type Row,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
-import {
-    isTableView,
-    isToolResultView,
-} from "@beaver/agent-core/run-state/toolResultViews";
 
 function row(id: string, cells: Row["cells"]): Row {
     return { id, cells };
@@ -433,18 +429,6 @@ describe("toCsv", () => {
             "Jones 2018,2018-05,7,Book,false,",
             "adams 2022,2022-01-15,,Article,,Interviews",
         ]);
-    });
-});
-
-describe("TableView", () => {
-    it("is recognised as a tool-result view", () => {
-        const view = {
-            view_type: "table",
-            tool_name: "external_search",
-            table: spec,
-        };
-        expect(isToolResultView(view)).toBe(true);
-        expect(isTableView(view as any)).toBe(true);
     });
 });
 

@@ -11,7 +11,8 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { getZoteroSelectURI } from '../../utils/zoteroUtils';
 import { safeAttachmentFilename } from '../../utils/attachmentFiles';
 import { checkLibraryExcluded } from '../agentDataProvider/utils';
-import { buildReportHtml, CSS_RULE_BUDGET, type ReportSpec } from './reportHtml';
+import { CSS_RULE_BUDGET } from '../../utils/html';
+import { buildReportHtml, type ReportSpec } from './reportHtml';
 
 export interface CreateReportOptions {
     spec: ReportSpec;

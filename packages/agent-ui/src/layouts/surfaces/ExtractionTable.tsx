@@ -43,7 +43,8 @@ export interface ExtractionTableProps {
     onRetryCell?: (row: Row, column: Column) => void;
 
     onExport?: (csv: string, table: TableSpec) => void;
-    onSaveToLibrary?: (table: TableSpec) => void;
+    /** Reveals the table's own library item. Absent ⇒ no control. */
+    onShowInLibrary?: (table: TableSpec) => void;
     /** Adds more items to extract from. */
     onAddRows?: () => void;
 
@@ -78,7 +79,7 @@ export function ExtractionTable({
     onRemoveColumn,
     onRetryCell,
     onExport,
-    onSaveToLibrary,
+    onShowInLibrary,
     onAddRows,
     renderText,
     density,
@@ -154,12 +155,12 @@ export function ExtractionTable({
                             Export
                         </Button>
                     ) : null}
-                    {onSaveToLibrary ? (
+                    {onShowInLibrary ? (
                         <Button
                             variant="solid"
-                            onClick={() => onSaveToLibrary(table)}
+                            onClick={() => onShowInLibrary(table)}
                         >
-                            Save to library
+                            Show in library
                         </Button>
                     ) : null}
                 </>

@@ -18,8 +18,8 @@ export interface SearchResultsTableProps {
     onExport?: (csv: string, table: TableSpec) => void;
     /** Adds a selection to the library. Absent ⇒ no bulk import control. */
     onImportRows?: (rows: Row[]) => void;
-    /** Saves the table itself as a library item. Absent ⇒ no control. */
-    onSaveToLibrary?: (table: TableSpec) => void;
+    /** Reveals the table's own library item. Absent ⇒ no control. */
+    onShowInLibrary?: (table: TableSpec) => void;
     renderText?: TextRenderer;
     density?: TableSurfaceProps["density"];
     /** Narrow surface: carry the primary columns only. */
@@ -32,7 +32,7 @@ export interface SearchResultsTableProps {
  *
  * It is a view — nothing here changes the underlying data, and importing a row
  * goes through the host's approval pipeline like any other library write. The
- * chrome is the whole difference from an extraction table: export and save
+ * chrome is the whole difference from an extraction table: export and reveal
  * instead of add-column, and no per-column menus, because the columns are the
  * producer's and not the user's.
  *
@@ -44,7 +44,7 @@ export function SearchResultsTable({
     subtitle,
     onExport,
     onImportRows,
-    onSaveToLibrary,
+    onShowInLibrary,
     renderText,
     density,
     primaryColumnsOnly,
@@ -76,12 +76,12 @@ export function SearchResultsTable({
                             Export
                         </Button>
                     ) : null}
-                    {onSaveToLibrary ? (
+                    {onShowInLibrary ? (
                         <Button
                             variant="solid"
-                            onClick={() => onSaveToLibrary(table)}
+                            onClick={() => onShowInLibrary(table)}
                         >
-                            Save to library
+                            Show in library
                         </Button>
                     ) : null}
                 </>

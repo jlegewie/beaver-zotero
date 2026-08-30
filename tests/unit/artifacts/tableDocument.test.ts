@@ -4,8 +4,8 @@ import {
     buildTableDocument,
     renderTableHtml,
     TABLE_CSS,
-} from "../../../src/services/reports/tableHtml";
-import { CSS_RULE_BUDGET } from "../../../src/services/reports/reportHtml";
+} from "../../../src/services/artifacts/tableDocument";
+import { CSS_RULE_BUDGET } from "../../../src/utils/html";
 
 const spec: TableSpec = {
     id: "t",

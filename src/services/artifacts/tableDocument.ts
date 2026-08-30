@@ -63,7 +63,7 @@ import {
     requestedCitationKey,
 } from '@beaver/agent-core/citations/citationGrammar';
 import type { Citation } from '@beaver/agent-core/types/citations';
-import { countTopLevelCssRules, escapeHtml, CSS_RULE_BUDGET } from './reportHtml';
+import { countTopLevelCssRules, escapeHtml, CSS_RULE_BUDGET } from '../../utils/html';
 
 export interface TableHtmlLinks {
     /** `zotero://select/...` for a row, or null when it cannot be revealed. */

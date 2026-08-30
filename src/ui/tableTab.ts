@@ -4,7 +4,7 @@
  * `Zotero_Tabs.add` accepts any `type` string and creates a `tab-content`
  * container in the deck — no item, no file, no reader. The table is mounted
  * into it as a content iframe carrying the self-contained document from
- * `tableHtml.ts`, which is the same document a saved snapshot would hold.
+ * `tableDocument.ts`, which is the same document a saved snapshot would hold.
  *
  * Three things this file exists to get right, all learned from the real API
  * rather than its (absent) documentation:
@@ -25,7 +25,7 @@
  * point here checks for it and degrades to doing nothing.
  */
 
-import { buildTableDocument, type TableHtmlOptions } from '../services/reports/tableHtml';
+import { buildTableDocument, type TableHtmlOptions } from '../services/artifacts/tableDocument';
 import type { RowRef, TableSpec } from '@beaver/agent-core/layouts/table';
 import { logger } from '@beaver/agent-core/platform/logger';
 

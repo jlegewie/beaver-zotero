@@ -9,7 +9,6 @@
 
 import type { ContentKind, PartLocation } from "../types/citations";
 import type { ExternalReference } from "../types/externalReferences";
-import type { TableSpec } from "../layouts/table";
 
 // ---------------------------------------------------------------------------
 // Shared row sub-models
@@ -281,17 +280,6 @@ export interface BatchOperationView {
 }
 
 /** The general discriminated union — discriminated by `view_type`. */
-/**
- * A tool result presented through the shared table layout. `tool_name` lets the
- * dispatcher keep tool-specific chrome around the table (e.g. lookup_work's
- * not-found queries); the table itself is self-contained.
- */
-export interface TableView {
-    view_type: "table";
-    tool_name: string;
-    table: TableSpec;
-}
-
 export type ToolResultView =
     | ItemListView
     | AnnotationListView
@@ -300,8 +288,7 @@ export type ToolResultView =
     | TagListView
     | AttachmentSearchView
     | UserQuestionView
-    | BatchOperationView
-    | TableView;
+    | BatchOperationView;
 
 // ---------------------------------------------------------------------------
 // Type guards
@@ -319,8 +306,7 @@ export function isToolResultView(value: unknown): value is ToolResultView {
         viewType === "tag_list" ||
         viewType === "attachment_search" ||
         viewType === "user_question" ||
-        viewType === "batch_operation" ||
-        viewType === "table"
+        viewType === "batch_operation"
     );
 }
 
@@ -350,10 +336,6 @@ export function isAttachmentSearchView(view: ToolResultView): view is Attachment
 
 export function isUserQuestionView(view: ToolResultView): view is UserQuestionView {
     return view.view_type === "user_question";
-}
-
-export function isTableView(view: ToolResultView): view is TableView {
-    return view.view_type === "table";
 }
 
 export function isBatchOperationView(view: ToolResultView): view is BatchOperationView {
@@ -393,8 +375,6 @@ export function getToolResultRenderableCount(view: ToolResultView): number | nul
             return view.found_count ?? view.references.length;
         case "user_question":
             return view.answers.length;
-        case "table":
-            return view.table.rows.length;
         case "batch_operation":
             // A batch card always has something to show (goal + population),
             // so it must not be gated on a count.
