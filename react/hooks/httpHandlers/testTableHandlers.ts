@@ -14,7 +14,10 @@
  *
  * `/beaver/test/table-create`, `-read` and `-list` drive the stored side: the
  * same spec written to the library as a snapshot attachment, read back out of
- * the file, and enumerated.
+ * the file, and enumerated. `-write`, `-edit`, `-versions`, `-revert`,
+ * `-delete` and `-open` drive the versioned store on top of it, and `-corrupt`
+ * damages a table's storage directory on purpose so crash recovery can be
+ * exercised without staging a real crash.
  */
 
 import type {
@@ -27,19 +30,36 @@ import { rowIdFor, validateTableSpec } from '@beaver/agent-core/layouts/table';
 import { store } from '../../store';
 import { windowSurfaceAtom, type WindowSurface } from '../../atoms/windowSurface';
 import { BeaverUIFactory } from '../../../src/ui/ui';
-import { closeTableTab, openTableTab } from '../../../src/ui/tableTab';
+import { closeTableTab, openTableTab, zoteroLinksFor } from '../../../src/ui/tableTab';
 import { getSearchableLibraryIds } from '../../../src/services/agentDataProvider/utils';
 import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
 import { safeAttachmentFilename } from '../../../src/utils/attachmentFiles';
+import { buildTableDocument } from '../../../src/services/artifacts/tableDocument';
 import {
-    createTableItem,
     isTableItem,
     loadTableItemFields,
     readTableItemSpec,
+    tableHistoryPath,
+    tableSidecarDirectory,
     tableStorageDirectory,
+    tableVersionPath,
     TABLE_TAG,
     TableItemError,
 } from '../../../src/services/artifacts/tableItem';
+import {
+    createTable,
+    deleteTable,
+    editTable,
+    listVersions,
+    openTable,
+    readTable,
+    restoreTable,
+    revertTable,
+    writeTable,
+    type TableRef,
+    type TableWriteMeta,
+} from '../../../src/services/artifacts/tableStore';
+import type { TableMutation } from '@beaver/agent-core/layouts/tableMutations';
 
 /** Wide enough for the demo's columns; the window grows to it and no further. */
 const TABLE_WINDOW_SIZE = { width: 1180, height: 780 };
@@ -498,7 +518,8 @@ function selectLabelFor(itemType: string): string {
  * The library-item side of a table: create one, read the spec back out of the
  * stored file, and list what is in the library. These drive the real
  * `Zotero.Attachments` path, so a created table is a genuine snapshot
- * attachment that opens in the reader.
+ * attachment that opens in the reader. Creation goes through
+ * `tableStore.createTable`, which is what starts the version log.
  *
  * Failures answer 200 with `ok: false` and the error's `code`, so a caller sees
  * *why* a write was refused (an excluded library, a group library) instead of a
@@ -510,6 +531,10 @@ interface TableCreateRequest extends OpenTableRequest {
     spec?: TableSpec;
     libraryID?: number;
     collectionID?: number;
+    actor?: string;
+    run_id?: string;
+    thread_id?: string;
+    change?: string;
 }
 
 export async function handleTestTableCreateHttpRequest(
@@ -522,11 +547,15 @@ export async function handleTestTableCreateHttpRequest(
         (await buildDemoTable(variant, request.limit ?? DEMO_ROW_LIMIT));
 
     try {
-        const created = await createTableItem({
+        // Through the store, never `createTableItem` directly: creation is what
+        // seeds `beaver/v1.json` and the log entry that makes version 1
+        // revertable.
+        const created = await createTable({
             spec,
             title: request.title,
             libraryID: request.libraryID,
             collectionID: request.collectionID,
+            ...writeMetaFrom(request),
         });
         return {
             ok: true,
@@ -539,7 +568,8 @@ export async function handleTestTableCreateHttpRequest(
             byte_length: created.byteLength,
             css_rule_count: created.cssRuleCount,
             spec_version: created.spec.spec_version,
-            version: created.spec.version,
+            version: created.version,
+            entry: created.entry,
             rows: created.spec.rows.length,
             columns: created.spec.columns.map((c) => c.id),
             // A created demo table should carry no issues; anything here means
@@ -592,6 +622,10 @@ export async function handleTestTableReadHttpRequest(
         key: item.key,
         library_id: item.libraryID,
         storage_directory: tableStorageDirectory(item),
+        // 0 is `to_upload`: a write that failed to set it leaves the new bytes
+        // sitting locally with nothing to say they changed.
+        sync_state: item.attachmentSyncState,
+        version: read.spec.version,
         spec: read.spec,
         spec_issues: validateTableSpec(read.spec),
     };
@@ -650,4 +684,321 @@ function errorResponse(error: unknown): any {
         code,
         error: error instanceof Error ? error.message : String(error),
     };
+}
+
+// ---------------------------------------------------------------------------
+// The versioned store (dev-only)
+// ---------------------------------------------------------------------------
+
+/**
+ * The write side of a stored table: every revision, the version log, revert,
+ * trash/restore, and the crash recovery `open` performs.
+ *
+ * These call `tableStore` and nothing else, so what they exercise is exactly
+ * the write protocol the product uses — the single-flight lock, the version
+ * guard, the retention cap. Failures answer 200 with `ok: false` and the
+ * error's `code`, so a caller sees *why* rather than a bare 500.
+ */
+
+interface TableStoreRequest {
+    key?: string;
+    libraryID?: number;
+    actor?: string;
+    run_id?: string;
+    thread_id?: string;
+    change?: string;
+}
+
+function tableRefFrom(request: TableStoreRequest): TableRef | null {
+    if (!request.key) return null;
+    return {
+        libraryID: request.libraryID ?? Zotero.Libraries.userLibraryID,
+        key: request.key,
+    };
+}
+
+function writeMetaFrom(request: TableStoreRequest): TableWriteMeta {
+    const actor =
+        request.actor === 'user' || request.actor === 'system' ? request.actor : 'agent';
+    return {
+        actor,
+        run_id: request.run_id,
+        thread_id: request.thread_id,
+        change: request.change,
+    };
+}
+
+const MISSING_KEY = { ok: false, code: 'invalid_request', error: 'key is required' };
+
+/** One response shape for every path that ends in a store write. */
+function writeResponse(
+    result: Awaited<ReturnType<typeof writeTable>>
+): Record<string, unknown> {
+    if (!result.ok) {
+        return {
+            ok: false,
+            code: 'conflict',
+            conflict: true,
+            error: `The table is at version ${result.version}.`,
+            version: result.version,
+            spec: result.spec,
+        };
+    }
+    return {
+        ok: true,
+        version: result.version,
+        // False here after a second write in the same run means the collapse
+        // rule did not fire when it should have.
+        collapsed: result.collapsed,
+        // False means the table landed but Zotero's own bookkeeping did not.
+        saved: result.saved,
+        pruned: result.pruned,
+        entry: result.entry,
+        rows: result.spec.rows.length,
+        columns: result.spec.columns.map((c) => c.id),
+        spec_version: result.spec.spec_version,
+        spec_issues: validateTableSpec(result.spec),
+    };
+}
+
+interface TableWriteRequest extends TableStoreRequest {
+    spec?: TableSpec;
+    expectedVersion?: number;
+}
+
+export async function handleTestTableWriteHttpRequest(
+    request: TableWriteRequest = {}
+): Promise<any> {
+    const ref = tableRefFrom(request);
+    if (!ref) return MISSING_KEY;
+    if (!request.spec) {
+        return { ok: false, code: 'invalid_request', error: 'spec is required' };
+    }
+    try {
+        return writeResponse(
+            await writeTable(
+                ref,
+                request.spec,
+                writeMetaFrom(request),
+                request.expectedVersion
+            )
+        );
+    } catch (error) {
+        return errorResponse(error);
+    }
+}
+
+interface TableEditRequest extends TableStoreRequest {
+    mutations?: TableMutation[];
+}
+
+export async function handleTestTableEditHttpRequest(
+    request: TableEditRequest = {}
+): Promise<any> {
+    const ref = tableRefFrom(request);
+    if (!ref) return MISSING_KEY;
+    if (!Array.isArray(request.mutations)) {
+        return { ok: false, code: 'invalid_request', error: 'mutations is required' };
+    }
+    try {
+        const result = await editTable(ref, request.mutations, writeMetaFrom(request));
+        // A rejected mutation is not a conflict: the caller asked for something
+        // the table cannot do, and the apply error says which part.
+        if (!result.ok && 'error' in result) {
+            return { ok: false, code: result.error.code, error: result.error.message };
+        }
+        return writeResponse(result);
+    } catch (error) {
+        return errorResponse(error);
+    }
+}
+
+export async function handleTestTableVersionsHttpRequest(
+    request: TableStoreRequest = {}
+): Promise<any> {
+    const ref = tableRefFrom(request);
+    if (!ref) return MISSING_KEY;
+    try {
+        const versions = await listVersions(ref);
+        const current = await readTable(ref);
+        return {
+            ok: true,
+            version: current.version,
+            count: versions.length,
+            versions,
+        };
+    } catch (error) {
+        return errorResponse(error);
+    }
+}
+
+interface TableRevertRequest extends TableStoreRequest {
+    toVersion?: number;
+}
+
+export async function handleTestTableRevertHttpRequest(
+    request: TableRevertRequest = {}
+): Promise<any> {
+    const ref = tableRefFrom(request);
+    if (!ref) return MISSING_KEY;
+    if (typeof request.toVersion !== 'number') {
+        return { ok: false, code: 'invalid_request', error: 'toVersion is required' };
+    }
+    try {
+        return writeResponse(
+            await revertTable(ref, request.toVersion, writeMetaFrom(request))
+        );
+    } catch (error) {
+        return errorResponse(error);
+    }
+}
+
+interface TableDeleteRequest extends TableStoreRequest {
+    /** Take it back out of the trash instead of putting it in. */
+    restore?: boolean;
+}
+
+export async function handleTestTableDeleteHttpRequest(
+    request: TableDeleteRequest = {}
+): Promise<any> {
+    const ref = tableRefFrom(request);
+    if (!ref) return MISSING_KEY;
+    try {
+        if (request.restore) {
+            await restoreTable(ref);
+            return { ok: true, deleted: false };
+        }
+        await deleteTable(ref);
+        return { ok: true, deleted: true };
+    } catch (error) {
+        return errorResponse(error);
+    }
+}
+
+export async function handleTestTableOpenHttpRequest(
+    request: TableStoreRequest = {}
+): Promise<any> {
+    const ref = tableRefFrom(request);
+    if (!ref) return MISSING_KEY;
+    try {
+        const opened = await openTable(ref);
+        return {
+            ok: true,
+            key: ref.key,
+            library_id: ref.libraryID,
+            version: opened.version,
+            // Empty on a table nothing interrupted; the shapes are documented
+            // on `TableRecovery`.
+            recovered: opened.recovered,
+            history: opened.history,
+            rows: opened.spec.rows.length,
+            columns: opened.spec.columns.map((c) => c.id),
+            spec: opened.spec,
+            spec_issues: validateTableSpec(opened.spec),
+        };
+    } catch (error) {
+        return errorResponse(error);
+    }
+}
+
+interface TableCorruptRequest {
+    key?: string;
+    libraryID?: number;
+    mode?: 'drop_history' | 'orphan_version' | 'html_ahead';
+}
+
+/**
+ * Damages a table's storage directory on purpose, so `table-open`'s recovery
+ * can be driven from outside without staging a real crash.
+ *
+ * This is the one place that writes a table file without going through the
+ * store, which is exactly the point — it reproduces the states an interrupted
+ * write leaves behind:
+ *
+ * - `drop_history` — the log is gone.
+ * - `orphan_version` — a `v<N>.json` no entry and no HTML refers to, as if the
+ *   write stopped after step 4.
+ * - `html_ahead` — the document committed a version the log never recorded, as
+ *   if the write stopped after step 5.
+ *
+ * Guarded to a `beaver-table` item: nothing else is ever touched.
+ */
+export async function handleTestTableCorruptHttpRequest(
+    request: TableCorruptRequest = {}
+): Promise<any> {
+    if (!request.key) return MISSING_KEY;
+    const mode = request.mode ?? 'drop_history';
+    const libraryID = request.libraryID ?? Zotero.Libraries.userLibraryID;
+    const item = Zotero.Items.getByLibraryAndKey(libraryID, request.key) as
+        | Zotero.Item
+        | false;
+    if (!item) {
+        return {
+            ok: false,
+            code: 'not_found',
+            error: `No item ${request.key} in library ${libraryID}`,
+        };
+    }
+    await loadTableItemFields([item]);
+    if (!isTableItem(item)) {
+        return {
+            ok: false,
+            code: 'not_a_table',
+            error: `Item ${request.key} is not a Beaver table — refusing to damage it.`,
+        };
+    }
+
+    const read = await readTableItemSpec(item);
+    if (!read.ok) {
+        return { ok: false, code: read.code, error: read.message };
+    }
+
+    const historyPath = tableHistoryPath(item);
+    const sidecar = tableSidecarDirectory(item);
+    if (!historyPath || !sidecar) {
+        return {
+            ok: false,
+            code: 'file_missing',
+            error: `Table ${request.key} has no storage directory.`,
+        };
+    }
+
+    if (mode === 'drop_history') {
+        await IOUtils.remove(historyPath, { ignoreAbsent: true });
+        return { ok: true, mode, removed: historyPath };
+    }
+
+    if (mode === 'orphan_version') {
+        const orphan = (read.spec.version ?? 0) + 7;
+        const path = tableVersionPath(item, orphan);
+        if (!path) {
+            return { ok: false, code: 'file_missing', error: 'No sidecar path.' };
+        }
+        await IOUtils.makeDirectory(sidecar, {
+            createAncestors: true,
+            ignoreExisting: true,
+        });
+        await IOUtils.writeUTF8(
+            path,
+            JSON.stringify({ ...read.spec, version: orphan })
+        );
+        return { ok: true, mode, version: orphan, path };
+    }
+
+    // html_ahead: the document commits a version the log never learns about.
+    const ahead = (read.spec.version ?? 0) + 1;
+    const document = buildTableDocument(
+        { ...read.spec, version: ahead },
+        { linksFor: zoteroLinksFor }
+    );
+    const htmlPath = await item.getFilePathAsync();
+    if (!htmlPath) {
+        return {
+            ok: false,
+            code: 'file_missing',
+            error: `Table ${request.key} has no file on disk.`,
+        };
+    }
+    await Zotero.File.putContentsAsync(htmlPath, document.html);
+    return { ok: true, mode, version: ahead };
 }

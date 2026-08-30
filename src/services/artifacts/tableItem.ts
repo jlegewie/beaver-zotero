@@ -15,9 +15,10 @@
  * `addon` global.
  *
  * Versioning, edit history and the write lock are not here: this is creation,
- * recognition and reading. The one concession to what comes next is the sidecar
- * path helpers below, which name the files a later revision writer will use so
- * two callers cannot disagree about where they live.
+ * recognition and reading — `tableStore.ts` owns every write to a table file
+ * and is the only caller of {@link createTableItem}. The one concession to that
+ * split is the sidecar path helpers below, which name the files the store
+ * writes so the two cannot disagree about where they live.
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -73,6 +74,11 @@ export const TABLE_SIDECAR_DIR = 'beaver';
 // Errors
 // ---------------------------------------------------------------------------
 
+/**
+ * One vocabulary for everything that can go wrong with a stored table, shared
+ * by creation here and by the store that writes revisions of it: a caller
+ * switching on a code must not have to know which module refused it.
+ */
 export type TableItemErrorCode =
     | 'library_excluded'
     | 'no_writable_library'
@@ -80,7 +86,19 @@ export type TableItemErrorCode =
     | 'unsupported_library'
     | 'invalid_target'
     | 'import_failed'
-    | 'file_missing';
+    | 'file_missing'
+    /** No item with that key in that library. */
+    | 'not_found'
+    /** The item exists but is not one of ours. */
+    | 'not_a_table'
+    /** The file is there but carries no embedded spec. */
+    | 'no_spec'
+    /** Written by a newer format than this build can read. */
+    | 'unsupported_version'
+    /** The embedded spec is not a readable table. */
+    | 'invalid_spec'
+    /** A stored version's file disagrees with what the version log recorded. */
+    | 'version_corrupt';
 
 export class TableItemError extends Error {
     readonly code: TableItemErrorCode;
@@ -314,6 +332,12 @@ function getZoteroOpenURI(libraryID: number, key: string): string | null {
 /**
  * Creates the library item for a table.
  *
+ * **The item-layer primitive, not the entry point.** This imports the
+ * attachment and writes the document; it knows nothing about versions, so a
+ * table created through it directly has a version 1 with no log entry and no
+ * `beaver/v1.json` — a state nobody can revert to. `tableStore.createTable` is
+ * its only caller and seeds that; go through the store.
+ *
  * ## Two writes, on purpose
  *
  * `TableSpec.key` holds the **Zotero item key** of this attachment: there is no
@@ -439,7 +463,7 @@ export async function createTableItem(
     item.addTag(TABLE_EMOJI_TAG, 1);
 
     // The index was queued against the first write; the file has changed since.
-    await queueFullText(item);
+    await queueTableFullText(item);
     // Load-bearing, not bookkeeping: Zotero schedules its auto-sync off data
     // object saves, not off file writes. Without a save a new or changed table
     // sits unsynced until some unrelated change triggers the next sync.
@@ -462,7 +486,7 @@ export async function createTableItem(
 }
 
 /** Full-text indexing is best-effort: a failure must not lose the table. */
-async function queueFullText(item: Zotero.Item): Promise<void> {
+export async function queueTableFullText(item: Zotero.Item): Promise<void> {
     try {
         await (
             Zotero as unknown as {
@@ -470,7 +494,7 @@ async function queueFullText(item: Zotero.Item): Promise<void> {
             }
         ).FullText?.queueItem?.(item);
     } catch (error) {
-        logger(`createTableItem: full-text queueing failed: ${String(error)}`, 2);
+        logger(`queueTableFullText: ${String(error)}`, 2);
     }
 }
 

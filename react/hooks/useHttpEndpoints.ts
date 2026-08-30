@@ -178,6 +178,13 @@ import {
     handleTestTableCreateHttpRequest,
     handleTestTableReadHttpRequest,
     handleTestTableListHttpRequest,
+    handleTestTableWriteHttpRequest,
+    handleTestTableEditHttpRequest,
+    handleTestTableVersionsHttpRequest,
+    handleTestTableRevertHttpRequest,
+    handleTestTableDeleteHttpRequest,
+    handleTestTableOpenHttpRequest,
+    handleTestTableCorruptHttpRequest,
 } from './httpHandlers/testTableHandlers';
 import type {
     WSZoteroDataRequest,
@@ -370,6 +377,14 @@ const ENDPOINT_PATHS = [
     '/beaver/test/table-create',
     '/beaver/test/table-read',
     '/beaver/test/table-list',
+    // The versioned store on top of it (dev-only)
+    '/beaver/test/table-write',
+    '/beaver/test/table-edit',
+    '/beaver/test/table-versions',
+    '/beaver/test/table-revert',
+    '/beaver/test/table-delete',
+    '/beaver/test/table-open',
+    '/beaver/test/table-corrupt',
 ] as const;
 
 /**
@@ -1323,6 +1338,31 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/table-list'] =
             createEndpoint(handleTestTableListHttpRequest);
+
+        // The versioned store (dev-only): the write protocol, the version log,
+        // revert, trash/restore, and the crash recovery `open` performs.
+        // `table-corrupt` damages the storage directory on purpose so that
+        // recovery can be exercised without staging a real crash.
+        Zotero.Server.Endpoints['/beaver/test/table-write'] =
+            createEndpoint(handleTestTableWriteHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-edit'] =
+            createEndpoint(handleTestTableEditHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-versions'] =
+            createEndpoint(handleTestTableVersionsHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-revert'] =
+            createEndpoint(handleTestTableRevertHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-delete'] =
+            createEndpoint(handleTestTableDeleteHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-open'] =
+            createEndpoint(handleTestTableOpenHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-corrupt'] =
+            createEndpoint(handleTestTableCorruptHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/beaver-sidebar'] =
             createEndpoint(handleTestBeaverSidebarHttpRequest);

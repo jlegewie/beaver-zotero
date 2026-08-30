@@ -46,6 +46,10 @@ const pathUtils = {
         const segments = path.split('/');
         return segments[segments.length - 1];
     }),
+    parent: vi.fn((path: string) => {
+        const at = path.lastIndexOf('/');
+        return at > 0 ? path.slice(0, at) : null;
+    }),
 };
 (globalThis as any).PathUtils = pathUtils;
 
