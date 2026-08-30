@@ -64,15 +64,22 @@ export type ColumnType =
     | "reference"
     | "link";
 
-/** Notion-style palette for `select` categories. */
-export type SelectColor =
-    | "gray"
-    | "blue"
-    | "green"
-    | "yellow"
-    | "orange"
-    | "red"
-    | "purple";
+/**
+ * Notion-style palette for `select` categories, in the order a writer hands
+ * colours out to new categories. `gray` is first because it is also the
+ * renderer's fallback for an option that declares no colour.
+ */
+export const SELECT_COLORS = [
+    "gray",
+    "blue",
+    "green",
+    "yellow",
+    "orange",
+    "red",
+    "purple",
+] as const;
+
+export type SelectColor = (typeof SELECT_COLORS)[number];
 
 export interface SelectOption {
     label: string;

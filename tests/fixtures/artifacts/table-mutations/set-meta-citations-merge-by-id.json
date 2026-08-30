@@ -1,0 +1,199 @@
+{
+    "name": "citations_add replaces an entry with the same citation_id in place and appends the rest",
+    "before": {
+        "id": "t2",
+        "spec_version": 1,
+        "anchor_column_id": "paper",
+        "columns": [
+            {
+                "id": "paper",
+                "header": "Paper",
+                "type": "reference"
+            },
+            {
+                "id": "topic",
+                "header": "Topic",
+                "type": "select",
+                "options": [
+                    {
+                        "label": "Methods",
+                        "color": "blue"
+                    }
+                ]
+            },
+            {
+                "id": "decision",
+                "header": "Include?",
+                "type": "select",
+                "role": "screening_decision",
+                "description": "Does the paper meet the inclusion criteria?",
+                "options": [
+                    {
+                        "label": "include",
+                        "color": "green"
+                    },
+                    {
+                        "label": "exclude",
+                        "color": "red"
+                    }
+                ]
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "AAA"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Alpha"
+                        },
+                        "provenance": "imported"
+                    }
+                }
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "BBB"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Beta"
+                        },
+                        "provenance": "imported"
+                    }
+                }
+            }
+        ],
+        "citations": [
+            {
+                "citation_id": "c1",
+                "display_name": "Alpha 2020",
+                "preview": "as first reported"
+            },
+            {
+                "citation_id": "c2",
+                "display_name": "Beta 2019"
+            }
+        ]
+    },
+    "mutations": [
+        {
+            "op": "set_meta",
+            "citations_add": [
+                {
+                    "citation_id": "c1",
+                    "display_name": "Alpha 2020",
+                    "preview": "as first reported",
+                    "pages": [12]
+                },
+                {
+                    "citation_id": "c3",
+                    "display_name": "Gamma 2021"
+                }
+            ]
+        }
+    ],
+    "after": {
+        "id": "t2",
+        "spec_version": 1,
+        "anchor_column_id": "paper",
+        "columns": [
+            {
+                "id": "paper",
+                "header": "Paper",
+                "type": "reference"
+            },
+            {
+                "id": "topic",
+                "header": "Topic",
+                "type": "select",
+                "options": [
+                    {
+                        "label": "Methods",
+                        "color": "blue"
+                    }
+                ]
+            },
+            {
+                "id": "decision",
+                "header": "Include?",
+                "type": "select",
+                "role": "screening_decision",
+                "description": "Does the paper meet the inclusion criteria?",
+                "options": [
+                    {
+                        "label": "include",
+                        "color": "green"
+                    },
+                    {
+                        "label": "exclude",
+                        "color": "red"
+                    }
+                ]
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "AAA"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Alpha"
+                        },
+                        "provenance": "imported"
+                    }
+                }
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "BBB"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Beta"
+                        },
+                        "provenance": "imported"
+                    }
+                }
+            }
+        ],
+        "citations": [
+            {
+                "citation_id": "c1",
+                "display_name": "Alpha 2020",
+                "preview": "as first reported",
+                "pages": [12]
+            },
+            {
+                "citation_id": "c2",
+                "display_name": "Beta 2019"
+            },
+            {
+                "citation_id": "c3",
+                "display_name": "Gamma 2021"
+            }
+        ]
+    }
+}

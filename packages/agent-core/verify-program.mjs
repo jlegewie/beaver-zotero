@@ -165,6 +165,10 @@ if (!parsed.options.lib || nonEsLibs.length > 0) {
 // imports it. So is `transport/otp.ts`: a client's sign-in form calls it, and
 // nothing inside the package has a reason to send anyone a code, and
 // `layouts/table.ts`, the table model a client's table surface reads.
+// `layouts/tableMutations.ts` is a root for the same reason as the table model
+// it edits: the mutation vocabulary is what a client (and the test corpus that
+// pins it) calls to change a stored table, and nothing inside the package
+// applies a mutation.
 const entryPaths = [
   "src/globals.d.ts",
   "src/protocol/agentProtocol.ts",
@@ -200,6 +204,7 @@ const entryPaths = [
   "src/citations/atoms.ts",
   "src/citations/externalReferences.ts",
   "src/layouts/table.ts",
+  "src/layouts/tableMutations.ts",
 ].map((p) => path.join(pkgDir, p));
 
 const listed = parsed.fileNames.map((f) => path.resolve(f));

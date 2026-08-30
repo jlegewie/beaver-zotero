@@ -1,0 +1,62 @@
+{
+    "name": "a table with columns but no rows still reports a detail per column, with empty distributions",
+    "spec": {
+        "id": "t4",
+        "spec_version": 1,
+        "columns": [
+            {
+                "id": "paper",
+                "header": "Paper",
+                "type": "reference"
+            },
+            {
+                "id": "topic",
+                "header": "Topic",
+                "type": "select",
+                "options": [
+                    {
+                        "label": "Methods",
+                        "color": "blue"
+                    }
+                ]
+            },
+            {
+                "id": "open_access",
+                "header": "Open access",
+                "type": "boolean"
+            }
+        ],
+        "rows": []
+    },
+    "summary": {
+        "rows": 0,
+        "columns": 3,
+        "failed_rows": 0,
+        "user_edits": 0,
+        "columns_detail": {
+            "paper": {
+                "type": "reference",
+                "filled": 0,
+                "unsure": 0,
+                "unsourced": 0,
+                "stale": 0
+            },
+            "topic": {
+                "type": "select",
+                "filled": 0,
+                "unsure": 0,
+                "unsourced": 0,
+                "stale": 0,
+                "distribution": {}
+            },
+            "open_access": {
+                "type": "boolean",
+                "filled": 0,
+                "unsure": 0,
+                "unsourced": 0,
+                "stale": 0,
+                "distribution": {}
+            }
+        }
+    }
+}

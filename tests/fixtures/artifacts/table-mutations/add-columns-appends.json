@@ -1,0 +1,248 @@
+{
+    "name": "add_columns appends a column and leaves every row alone",
+    "before": {
+        "id": "t1",
+        "spec_version": 1,
+        "title": "Sampling methods",
+        "anchor_column_id": "paper",
+        "columns": [
+            {
+                "id": "paper",
+                "header": "Paper",
+                "type": "reference"
+            },
+            {
+                "id": "year",
+                "header": "Year",
+                "type": "number",
+                "system": true
+            },
+            {
+                "id": "method",
+                "header": "Method",
+                "type": "text",
+                "description": "What method does the paper use?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "AAA"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Alpha"
+                        },
+                        "provenance": "imported"
+                    },
+                    "year": {
+                        "value": {
+                            "kind": "number",
+                            "value": 2020
+                        },
+                        "provenance": "imported"
+                    },
+                    "method": {
+                        "value": {
+                            "kind": "text",
+                            "text": "Survey"
+                        },
+                        "provenance": "extracted"
+                    }
+                }
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "BBB"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Beta"
+                        },
+                        "provenance": "imported"
+                    },
+                    "year": {
+                        "value": {
+                            "kind": "number",
+                            "value": 2019
+                        },
+                        "provenance": "imported"
+                    },
+                    "method": {
+                        "value": {
+                            "kind": "text",
+                            "text": "Field experiment"
+                        },
+                        "provenance": "extracted"
+                    }
+                }
+            },
+            {
+                "id": "r3",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "CCC"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Gamma"
+                        },
+                        "provenance": "imported"
+                    },
+                    "year": {
+                        "value": {
+                            "kind": "number",
+                            "value": 2021
+                        },
+                        "provenance": "imported"
+                    }
+                }
+            }
+        ]
+    },
+    "mutations": [
+        {
+            "op": "add_columns",
+            "columns": [
+                {
+                    "id": "outcome",
+                    "header": "Outcome",
+                    "type": "text",
+                    "description": "What outcome does the paper report?"
+                }
+            ]
+        }
+    ],
+    "after": {
+        "id": "t1",
+        "spec_version": 1,
+        "title": "Sampling methods",
+        "anchor_column_id": "paper",
+        "columns": [
+            {
+                "id": "paper",
+                "header": "Paper",
+                "type": "reference"
+            },
+            {
+                "id": "year",
+                "header": "Year",
+                "type": "number",
+                "system": true
+            },
+            {
+                "id": "method",
+                "header": "Method",
+                "type": "text",
+                "description": "What method does the paper use?"
+            },
+            {
+                "id": "outcome",
+                "header": "Outcome",
+                "type": "text",
+                "description": "What outcome does the paper report?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "AAA"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Alpha"
+                        },
+                        "provenance": "imported"
+                    },
+                    "year": {
+                        "value": {
+                            "kind": "number",
+                            "value": 2020
+                        },
+                        "provenance": "imported"
+                    },
+                    "method": {
+                        "value": {
+                            "kind": "text",
+                            "text": "Survey"
+                        },
+                        "provenance": "extracted"
+                    }
+                }
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "BBB"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Beta"
+                        },
+                        "provenance": "imported"
+                    },
+                    "year": {
+                        "value": {
+                            "kind": "number",
+                            "value": 2019
+                        },
+                        "provenance": "imported"
+                    },
+                    "method": {
+                        "value": {
+                            "kind": "text",
+                            "text": "Field experiment"
+                        },
+                        "provenance": "extracted"
+                    }
+                }
+            },
+            {
+                "id": "r3",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "CCC"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Gamma"
+                        },
+                        "provenance": "imported"
+                    },
+                    "year": {
+                        "value": {
+                            "kind": "number",
+                            "value": 2021
+                        },
+                        "provenance": "imported"
+                    }
+                }
+            }
+        ]
+    }
+}
