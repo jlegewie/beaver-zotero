@@ -280,7 +280,7 @@ function skillNameFromPath(path: string): string {
 function relatedWorkShortLabel(work: ExternalReference): string {
     const first = work.authors?.[0] ? extractAuthorLastName(work.authors[0]) : undefined;
     const name = first ? ((work.authors?.length ?? 0) > 1 ? `${first} et al.` : first) : null;
-    if (name) return work.year ? `${name} (${work.year})` : name;
+    if (name) return work.year ? `${name} ${work.year}` : name;
     if (work.title) return truncate(work.title, 40);
     return 'work';
 }
