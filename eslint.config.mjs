@@ -483,6 +483,9 @@ export default tseslint.config(
         files: [
             "src/services/artifacts/tableItemIdentity.ts",
             "src/services/artifacts/tableDocument.ts",
+            // The recovery shadow: the item-pane section reads it to say a
+            // table went backwards, so it has to be esbuild-safe too.
+            "src/services/artifacts/recoveryShadow.ts",
             "src/services/artifacts/view/**/*.ts",
             "src/ui/tableTab.ts",
             "src/ui/openTable.ts",

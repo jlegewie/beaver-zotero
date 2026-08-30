@@ -44,6 +44,7 @@ vi.mock('../../../src/services/artifacts/tableStore', () => ({
     listVersions: vi.fn(),
     openTable: vi.fn(),
     readTable: vi.fn(),
+    restoreShadowVersion: vi.fn(),
     restoreTable: vi.fn(),
     revertTable: vi.fn(),
     writeTable: vi.fn(),

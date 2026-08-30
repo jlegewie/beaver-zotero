@@ -187,6 +187,8 @@ import {
     handleTestTableDeleteHttpRequest,
     handleTestTableOpenHttpRequest,
     handleTestTableCorruptHttpRequest,
+    handleTestTableShadowHttpRequest,
+    handleTestTableRestoreShadowHttpRequest,
     handleTestTableOpenReaderHttpRequest,
     handleTestTableItemPaneHttpRequest,
     handleTestTableViewStateHttpRequest,
@@ -392,6 +394,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/table-delete',
     '/beaver/test/table-open',
     '/beaver/test/table-corrupt',
+    '/beaver/test/table-shadow',
+    '/beaver/test/table-restore-shadow',
     // The reader host for a stored table (dev-only)
     '/beaver/test/table-open-reader',
     '/beaver/test/table-view-state',
@@ -1383,6 +1387,15 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/table-corrupt'] =
             createEndpoint(handleTestTableCorruptHttpRequest);
+
+        // The recovery shadow (dev-only): what this device last wrote to a
+        // table, whether the table has gone backwards under it, and putting
+        // this device's version back.
+        Zotero.Server.Endpoints['/beaver/test/table-shadow'] =
+            createEndpoint(handleTestTableShadowHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-restore-shadow'] =
+            createEndpoint(handleTestTableRestoreShadowHttpRequest);
 
         // The reader host (dev-only): open a stored table in the reader and
         // report which of the enhancer's seams attached, and list every table

@@ -31,6 +31,17 @@
  * disagreement is resolved in its favour, by rebuilding the sidecar rather than
  * by rolling the document back. {@link openTable} is where that repair happens.
  *
+ * ## The one thing the file layout cannot answer
+ *
+ * That argument holds only while the storage directory is this device's. It is
+ * also what syncs, and Zotero resolves a file conflict by keeping one whole
+ * copy — so a table can arrive complete, internally consistent, and older than
+ * what this device wrote. Nothing inside the directory survives to say so, so
+ * the store records each write to a shadow outside it (`recoveryShadow.ts`) and
+ * {@link openTable} reports the disagreement as a `conflict` rather than a
+ * repair. {@link restoreShadowVersion} is the way back, and it is an ordinary
+ * write.
+ *
  * ## Addressing
  *
  * A table is addressed by {@link TableRef} — a library id and a Zotero item
@@ -56,6 +67,16 @@ import {
 } from '@beaver/agent-core/layouts/tableMutations';
 import { sha256Hex } from '../../utils/hash';
 import { checkLibraryExcluded } from '../agentDataProvider/utils';
+import {
+    detectTableSyncConflict,
+    lastTableShadow,
+    pruneTableShadow,
+    readTableShadowSpec,
+    recordTableShadow,
+    tableSpecHash,
+    type TableSyncConflict,
+} from './recoveryShadow';
+import { setTableShadowRestore } from './tablesApi';
 import { zoteroLinksFor } from './view/tableLinks';
 import { buildTableDocument } from './tableDocument';
 import {
@@ -105,6 +126,15 @@ export type {
     TableRef,
     TableVersionEntry,
 } from './tableItemIdentity';
+// The sync conflict is part of what opening a table tells you, so its shape is
+// re-exported here for the same reason the log's is: one import for callers of
+// the store. Detection and retention live next door, esbuild-side, because the
+// item-pane section has to reach them without reaching this module.
+export type {
+    TableShadowEntry,
+    TableSyncConflict,
+    TableSyncConflictReason,
+} from './recoveryShadow';
 
 export interface TableWriteMeta {
     actor: TableActor;
@@ -192,7 +222,42 @@ export interface OpenTableResult {
     history: TableVersionEntry[];
     /** Empty on a table whose sidecar already agreed with its document. */
     recovered: TableRecovery[];
+    /**
+     * Set when the table went backwards under this device — a Zotero file
+     * conflict resolved toward another device's copy.
+     *
+     * Deliberately not a {@link TableRecovery}: those are damage the store
+     * repairs and moves on from, and folding this in with them would say the
+     * same thing about a case where nothing has been repaired and nothing will
+     * be. Which state the user wants is theirs to choose; the store only offers
+     * {@link restoreShadowVersion}.
+     */
+    conflict: TableSyncConflict | null;
 }
+
+/** The outcome of {@link restoreShadowVersion}. */
+export type TableShadowRestoreResult =
+    | {
+          ok: true;
+          /** The new version the retained spec was written as. */
+          version: number;
+          /** The version it was retained under. */
+          restoredFrom: number;
+          entry: TableVersionEntry;
+      }
+    | {
+          ok: false;
+          code:
+              /** This device never wrote to this table (or the shadow was pruned). */
+              | 'no_shadow'
+              /** The version is known but its spec was not retained, or no longer verifies. */
+              | 'no_payload'
+              /** The write itself was refused. */
+              | 'write_refused';
+          error: string;
+          /** The version that would have been restored, when one is known. */
+          version?: number;
+      };
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -791,6 +856,15 @@ export async function createTable(
                 tableTempPath(created.item)
             );
             await commitHistory(created.item, [seeded]);
+            // Version 1 is a write like any other as far as the shadow is
+            // concerned, and it is the state most likely to be wanted back.
+            await recordTableShadow(ref, version, serialized, seeded.sha256).catch(
+                (error) =>
+                    logger(
+                        `tableStore: could not record the recovery shadow for ${ref.key}: ${String(error)}`,
+                        2
+                    )
+            );
             return seeded;
         });
     } catch (error) {
@@ -987,6 +1061,19 @@ async function commitWrite(
 
     const pruned = await commitHistory(item, mergeEntry(versions, entry));
 
+    // The recovery shadow: what this device wrote, kept outside the storage
+    // directory so it survives that directory being replaced by a sync
+    // conflict resolution. Logged and dropped on failure, like the full-text
+    // queueing below — the table is already committed, and a caller that
+    // retried because the bookkeeping failed would apply its mutations twice.
+    // It does not affect `saved`, which is Zotero's bookkeeping, not ours.
+    await recordTableShadow(ref, version, serialized, entry.sha256).catch((error) =>
+        logger(
+            `tableStore: could not record the recovery shadow for ${ref.key}: ${String(error)}`,
+            2
+        )
+    );
+
     let saved = true;
     try {
         await queueTableFullText(item);
@@ -1142,8 +1229,117 @@ export async function openTable(ref: TableRef): Promise<OpenTableResult> {
             version: Math.max(current.htmlVersion, history.tip),
             history: history.versions,
             recovered,
+            conflict: await detectSyncConflict(ref, current),
         };
     });
+}
+
+/**
+ * Whether the table went backwards under this device.
+ *
+ * The document's version is compared against the last one this device wrote.
+ * The digest is only computed when the two numbers are equal, because that is
+ * the only case it decides — and hashing a re-serialised megabyte on every open
+ * to answer a question already settled would be a real cost for nothing.
+ *
+ * The comparison is exact rather than approximate, and that is what keeps an
+ * ordinary open silent: the shadow's digest is over the very bytes the store
+ * wrote to `beaver/v<N>.json`, and the document embeds that same spec, so a
+ * table nobody else touched hashes to what the shadow recorded.
+ */
+async function detectSyncConflict(
+    ref: TableRef,
+    current: CurrentState
+): Promise<TableSyncConflict | null> {
+    try {
+        if (!current.spec || current.htmlVersion <= 0) return null;
+        const shadow = await lastTableShadow(ref);
+        if (!shadow) return null;
+        const sha256 =
+            current.htmlVersion === shadow.version
+                ? await tableSpecHash(current.spec)
+                : null;
+        return detectTableSyncConflict(shadow, {
+            version: current.htmlVersion,
+            sha256,
+        });
+    } catch (error) {
+        // Opening a table must not fail because the shadow could not be read.
+        logger(
+            `tableStore: could not check the recovery shadow for ${ref.key}: ${String(error)}`,
+            2
+        );
+        return null;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Restoring what a sync conflict took
+// ---------------------------------------------------------------------------
+
+/**
+ * Writes the version this device last wrote back, as a **new** version.
+ *
+ * The whole point is that it goes through {@link writeTable} rather than around
+ * it: the state the conflict resolution left behind keeps its number and stays
+ * in the log, the restored state gets the next number, and the user can revert
+ * between them like any other pair of versions. Nothing is erased, and the
+ * exclusion boundary, the lock and the crash-safe write order all apply exactly
+ * as they do to any other write.
+ *
+ * A shadow that has a version but no usable spec — over the retention size cap,
+ * pruned, or no longer matching its digest — is refused with `no_payload`
+ * rather than restored approximately. Detecting a loss it cannot undo is a
+ * useful thing to say; pretending to undo it is not.
+ */
+export async function restoreShadowVersion(
+    ref: TableRef,
+    meta: TableWriteMeta = { actor: 'user' }
+): Promise<TableShadowRestoreResult> {
+    requireWritable(ref);
+
+    const shadow = await lastTableShadow(ref);
+    if (!shadow) {
+        return {
+            ok: false,
+            code: 'no_shadow',
+            error: `This device has no recorded version of table ${ref.key} to restore.`,
+        };
+    }
+
+    const spec = await readTableShadowSpec(shadow);
+    if (!spec) {
+        return {
+            ok: false,
+            code: 'no_payload',
+            version: shadow.version,
+            error:
+                `This device wrote version ${shadow.version} of table ${ref.key}, but its ` +
+                'stored copy is missing or no longer matches what was recorded for it, so it cannot be restored.',
+        };
+    }
+
+    // A restore is a deliberate step, never folded into whatever version a run
+    // is currently building — the same rule a revert follows.
+    const result = await writeTable(ref, spec, {
+        ...meta,
+        run_id: undefined,
+        change: meta.change ?? `Restored this device's version ${shadow.version}`,
+    });
+    if (!result.ok) {
+        return {
+            ok: false,
+            code: 'write_refused',
+            version: shadow.version,
+            error: `The table is at version ${result.version}; the restore was refused.`,
+        };
+    }
+    return {
+        ok: true,
+        version: result.version,
+        restoredFrom: shadow.version,
+        entry: result.entry,
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -1246,6 +1442,10 @@ export async function deleteTable(ref: TableRef): Promise<void> {
         const item = await resolveTableItem(ref);
         requireWritable(ref);
         await trashTableItem(item);
+        // The shadow lives outside the storage directory, so nothing else would
+        // ever collect it: a deleted table's retained specs would sit in the
+        // profile for the life of the install.
+        await pruneTableShadow(ref);
     });
     emitTableUpdated(ref, null, { actor: 'user', change: 'Moved to trash' });
 }
@@ -1320,3 +1520,21 @@ function emitTableUpdated(
 // ---------------------------------------------------------------------------
 
 /** Maps a spec-read failure onto the shared table error vocabulary. */
+
+// ---------------------------------------------------------------------------
+// Publishing the write half
+// ---------------------------------------------------------------------------
+
+/**
+ * Publishes {@link restoreShadowVersion} on the shared global, so the
+ * esbuild-side item pane can offer the action without importing this module.
+ *
+ * It cannot import it: this module owns the single-flight write lock, which is
+ * only single because the store stays out of the esbuild bundle
+ * (`npm run check:bundle` enforces it). Called once from the React bundle's
+ * entry point; safe to call twice, since it replaces the binding. Withdrawing
+ * it is `unregisterTablesApi`'s job, in the bundle that owns teardown.
+ */
+export function registerTableShadowRestore(): void {
+    setTableShadowRestore((ref) => restoreShadowVersion(ref));
+}

@@ -76,6 +76,15 @@ declare namespace Zotero {
     let __beaverTables:
         | import("../src/services/artifacts/tablesApi").TablesApi
         | undefined;
+    /**
+     * The write half of the stored-table recovery shadow, published by the
+     * *webpack* bundle. Restoring goes through `tableStore.ts`, which is
+     * webpack-only so its single-flight write lock stays single, so the
+     * esbuild-side item pane reaches it through here.
+     */
+    let __beaverTableShadowRestore:
+        | import("../src/services/artifacts/tablesApi").TableShadowRestore
+        | undefined;
 
     namespace Beaver {
         const pluginVersion: string;
@@ -341,6 +350,27 @@ declare namespace Zotero {
             getExternalFileStats(): Promise<{ count: number; totalBytes: number }>;
 
             deleteAllExternalFiles(): Promise<void>;
+
+            // --- Stored-table recovery shadow ---
+            upsertTableShadow(
+                input: import("../src/services/database").TableShadowInput,
+            ): Promise<void>;
+
+            getTableShadows(
+                libraryId: number,
+                zoteroKey: string,
+            ): Promise<import("../src/services/database").TableShadowRecord[]>;
+
+            deleteTableShadowVersions(
+                libraryId: number,
+                zoteroKey: string,
+                versions: number[],
+            ): Promise<import("../src/services/database").TableShadowRecord[]>;
+
+            deleteTableShadows(
+                libraryId: number,
+                zoteroKey: string,
+            ): Promise<import("../src/services/database").TableShadowRecord[]>;
 
             // --- Background job queue ---
             enqueueBackgroundJob(

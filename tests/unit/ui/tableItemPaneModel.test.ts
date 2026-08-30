@@ -434,3 +434,57 @@ describe('buildTableSectionFields — the annotation warning', () => {
         expect(fields.warning).toBeNull();
     });
 });
+
+describe('a table another device\'s copy replaced', () => {
+    const conflict = {
+        reason: 'behind' as const,
+        documentVersion: 5,
+        shadowVersion: 7,
+        restorable: true,
+    };
+
+    it('says nothing at all about a table that is not in that state', () => {
+        const fields = buildTableSectionFields(input());
+
+        // The important one: every table gets these fields, and almost none is
+        // in this state.
+        expect(fields.conflict).toBeNull();
+        expect(fields.conflictLine).toBeNull();
+    });
+
+    it('names both versions and says nothing was merged or overwritten', () => {
+        const fields = buildTableSectionFields(input({ conflict }));
+
+        expect(fields.conflict).toEqual(conflict);
+        expect(fields.conflictLine).toContain('version 5 from another device');
+        expect(fields.conflictLine).toContain('this device last wrote version 7');
+        expect(fields.conflictLine).toContain('Nothing was merged and nothing was overwritten');
+        expect(fields.conflictLine).toContain('can be restored as a new version');
+    });
+
+    it('does not offer a restore it cannot perform', () => {
+        const fields = buildTableSectionFields(
+            input({ conflict: { ...conflict, restorable: false } })
+        );
+
+        expect(fields.conflictLine).toContain('no longer keeps a copy of your version 7');
+        expect(fields.conflictLine).not.toContain('can be restored');
+    });
+
+    it('distinguishes two devices that both numbered their edit the same', () => {
+        const fields = buildTableSectionFields(
+            input({
+                conflict: { ...conflict, reason: 'diverged', documentVersion: 7 },
+            })
+        );
+
+        expect(fields.conflictLine).toContain('a different version 7 from another device');
+    });
+
+    it('still says it on a table whose counts could not be read', () => {
+        const fields = buildTableSectionFields(input({ summary: null, conflict }));
+
+        expect(fields.rows).toBe(0);
+        expect(fields.conflictLine).toContain('this device last wrote version 7');
+    });
+});

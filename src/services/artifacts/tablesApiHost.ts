@@ -13,7 +13,14 @@
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
-import { setTablesApi, type TablesApi } from './tablesApi';
+import {
+    getTableShadowRestore,
+    setTableShadowRestore,
+    setTablesApi,
+    TABLE_SHADOW_RESTORE_UNAVAILABLE,
+    type TablesApi,
+} from './tablesApi';
+import { inspectTableShadow } from './recoveryShadow';
 import { openTable, resolveTableTarget } from '../../ui/openTable';
 import { closeTableTab, listTableTabViews, openTableTab } from '../../ui/tableTab';
 import { listReaderTableViews, openTableInReader } from './view/readerTableView';
@@ -54,6 +61,24 @@ export function registerTablesApi(): void {
             paneID: () => tableItemPaneID(),
             describe: (ref) => describeTableItemPane(ref),
         },
+        shadow: {
+            // Reading the shadow is esbuild-safe, so it is answered here.
+            inspect: (ref, observed) => inspectTableShadow(ref, observed ?? null),
+            // Writing is not: every write goes through `tableStore.ts`, which
+            // is webpack-only so its single-flight lock stays single. A missing
+            // registration is reported rather than worked around.
+            restore: async (ref) => {
+                const restore = getTableShadowRestore();
+                if (!restore) {
+                    return {
+                        ok: false,
+                        code: 'store_unavailable',
+                        error: TABLE_SHADOW_RESTORE_UNAVAILABLE,
+                    };
+                }
+                return restore(ref);
+            },
+        },
     };
     setTablesApi(api);
     logger('tablesApiHost: registered Zotero.__beaverTables', 3);
@@ -65,4 +90,8 @@ export function registerTablesApi(): void {
  */
 export function unregisterTablesApi(): void {
     setTablesApi(null);
+    // The shadow's write half too. The React bundle publishes it but has no
+    // teardown of its own, and its closure would otherwise outlive its realm;
+    // a reopened window re-runs that bundle's entry point and re-publishes it.
+    setTableShadowRestore(null);
 }

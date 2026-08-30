@@ -8,6 +8,12 @@
  * how big it is and how much of it is filled in, how much of it we are unsure
  * about, and which version it is at — plus the ways to open it.
  *
+ * It is also where a table that went *backwards* is surfaced: a Zotero file
+ * conflict resolved toward another device replaces the whole storage directory,
+ * so the table looks healthy and is simply older than what this device wrote.
+ * The section says so and offers the one action that undoes it, which — being a
+ * write — goes through `Zotero.__beaverTables`. See `recoveryShadow.ts`.
+ *
  * ## Where the numbers come from
  *
  * The version log's tip entry carries the `summarize()` of the spec that was
@@ -49,8 +55,13 @@ import {
 } from '../services/artifacts/tableItemIdentity';
 import { getTablesApi } from '../services/artifacts/tablesApi';
 import {
+    detectTableSyncConflict,
+    lastTableShadow,
+} from '../services/artifacts/recoveryShadow';
+import {
     buildTableSectionFields,
     tipVersionEntry,
+    type TableSectionConflict,
     type TableSectionFields,
     type TableSectionInput,
 } from './tableItemPaneModel';
@@ -264,6 +275,8 @@ export async function readTableSectionData(
         }
     }
 
+    input.conflict = await readTableConflict(item, input.version, tip?.sha256, tip?.version);
+
     let hasFile = false;
     try {
         hasFile = !!(await item.getFilePathAsync());
@@ -272,6 +285,42 @@ export async function readTableSectionData(
     }
 
     return { fields: buildTableSectionFields(input), reason, hasFile };
+}
+
+/**
+ * Whether this table went backwards under this device.
+ *
+ * Answered from the version log rather than from the document, so the section
+ * still never parses the megabyte of JSON the file carries: the log's tip entry
+ * records the digest of the spec that was written, and a sync conflict replaces
+ * the log along with everything else in the storage directory, so the tip is
+ * the *other* device's word about the table this device is now looking at.
+ *
+ * The digest is paired with a version only when the log's own two answers agree
+ * about which version is the tip. When they do not, the comparison falls back to
+ * version numbers alone — which is the half that catches a real loss, and never
+ * on its own reports one that did not happen.
+ */
+async function readTableConflict(
+    item: Zotero.Item,
+    version: number | null,
+    tipSha256: string | undefined,
+    tipVersion: number | undefined
+): Promise<TableSectionConflict | null> {
+    if (typeof version !== 'number' || version <= 0) return null;
+    try {
+        const shadow = await lastTableShadow({
+            libraryID: item.libraryID,
+            key: item.key,
+        });
+        return detectTableSyncConflict(shadow, {
+            version,
+            sha256: tipVersion === version ? (tipSha256 ?? null) : null,
+        });
+    } catch (error) {
+        logger(`tableItemPane: could not read the recovery shadow: ${String(error)}`, 2);
+        return null;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -367,12 +416,32 @@ async function handleAsyncRender({
                 line(doc, data.fields.warning, 'beaver-table-section-warning')
             );
         }
+        // Last, and styled apart: everything above describes the table, this
+        // describes something that happened to it.
+        if (data.fields.conflictLine) {
+            facts.append(
+                line(doc, data.fields.conflictLine, 'beaver-table-section-conflict')
+            );
+        }
         setSectionSummary(data.fields.headerSummary);
 
         const reader = body.querySelector<HTMLButtonElement>(
             '[data-beaver-action="reader"]'
         );
         if (reader) reader.disabled = !data.hasFile;
+
+        const restore = body.querySelector<HTMLButtonElement>(
+            '[data-beaver-action="restore-shadow"]'
+        );
+        if (restore) {
+            const actions = tableSectionActions(
+                windowOf(doc),
+                data.hasFile,
+                !!data.fields.conflict?.restorable
+            );
+            restore.disabled = !actions.restoreShadow;
+            restore.hidden = !actions.restoreShadow;
+        }
     } catch (error) {
         logger(`tableItemPane: onAsyncRender failed: ${String(error)}`, 2);
     }
@@ -426,11 +495,17 @@ function renderDistribution(
 // Actions
 // ---------------------------------------------------------------------------
 
-/** Which of the three buttons can do anything for this item right now. */
+/** Which of the section's buttons can do anything for this item right now. */
 export interface TableSectionActions {
     openInBeaver: boolean;
     openInReader: boolean;
     showInLibrary: boolean;
+    /**
+     * True only for a table another device's copy replaced whose own version is
+     * still retained. There is nothing to restore otherwise, and an enabled
+     * button that cannot work is worse than no button.
+     */
+    restoreShadow: boolean;
 }
 
 function canShowInLibrary(win: Window | null): boolean {
@@ -442,18 +517,21 @@ function canShowInLibrary(win: Window | null): boolean {
 /**
  * What the section's buttons would do for this item.
  *
- * `openInReader` needs a file on disk, which only a read can settle, so it is
- * passed in rather than guessed.
+ * `openInReader` needs a file on disk and `restoreShadow` needs a retained
+ * version, neither of which is knowable without a read, so both are passed in
+ * rather than guessed.
  */
 export function tableSectionActions(
     win: Window | null,
-    hasFile: boolean
+    hasFile: boolean,
+    canRestoreShadow = false
 ): TableSectionActions {
     const api = !!getTablesApi();
     return {
         openInBeaver: api,
         openInReader: api && hasFile,
         showInLibrary: canShowInLibrary(win),
+        restoreShadow: api && canRestoreShadow,
     };
 }
 
@@ -481,6 +559,32 @@ async function open(ref: TableRef, where?: 'tab' | 'reader'): Promise<void> {
     }
     const outcome = await api.openTable(ref, where ? { where } : {});
     if ('error' in outcome) logger(`tableItemPane: ${outcome.error}`, 1);
+}
+
+/**
+ * Writes this device's retained version back, as a new version.
+ *
+ * Through the namespace for the usual reason and one more: the restore is a
+ * *write*, and every write goes through `tableStore.ts`, which is webpack-only
+ * so its single-flight lock stays single. This module cannot import it at all.
+ */
+async function restoreShadow(ref: TableRef): Promise<void> {
+    const api = getTablesApi();
+    if (!api) {
+        logger('tableItemPane: the table surfaces are not registered', 1);
+        return;
+    }
+    const result = await api.shadow.restore(ref);
+    if (!result.ok) {
+        logger(`tableItemPane: restore refused (${result.code}): ${result.error}`, 1);
+        return;
+    }
+    // The store announces the write, so whatever is showing the table re-reads
+    // it; the section itself re-renders on the next selection change.
+    logger(
+        `tableItemPane: restored ${ref.key} v${result.restoredFrom} as v${result.version}`,
+        3
+    );
 }
 
 function showInLibrary(win: Window | null, item: Zotero.Item): void {
@@ -516,9 +620,23 @@ function renderActions(doc: Document, item: Zotero.Item): HTMLElement {
         ),
         button(doc, 'library', 'Show in library', actions.showInLibrary, () =>
             showInLibrary(win, item)
+        ),
+        // The opposite default to the others: this one applies to almost no
+        // table, so it starts disabled and the async half enables it only for a
+        // table that is actually in the conflicted state.
+        hidden(
+            button(doc, 'restore-shadow', 'Restore my version', false, () =>
+                void restoreShadow(ref)
+            )
         )
     );
     return wrapper;
+}
+
+/** Starts a button out of the layout, for one the async half may reveal. */
+function hidden(element: HTMLButtonElement): HTMLButtonElement {
+    element.hidden = true;
+    return element;
 }
 
 function button(
@@ -609,6 +727,10 @@ export async function describeTableItemPane(
         applies: true,
         reason: data.reason,
         fields: data.fields,
-        actions: tableSectionActions(win, data.hasFile),
+        actions: tableSectionActions(
+            win,
+            data.hasFile,
+            !!data.fields.conflict?.restorable
+        ),
     };
 }

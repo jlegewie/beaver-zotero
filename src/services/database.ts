@@ -176,6 +176,27 @@ export function isExternalFileContentKind(value: string): value is ExternalFileC
     return EXTERNAL_FILE_CONTENT_KINDS.has(value);
 }
 
+/**
+ * One retained version in `table_recovery_shadow`: what *this device* last
+ * wrote to a stored table, kept outside the table's own storage directory so it
+ * survives that directory being replaced wholesale by a sync conflict
+ * resolution. See `src/services/artifacts/recoveryShadow.ts`.
+ */
+export interface TableShadowRecord {
+    libraryId: number;
+    zoteroKey: string;
+    version: number;
+    /** SHA-256 of the serialised spec this device wrote for that version. */
+    sha256: string;
+    /** ISO timestamp of the write. */
+    writtenAt: string;
+    /** Gzipped spec on disk, or null when it was too large to retain. */
+    payloadPath: string | null;
+    payloadSizeBytes: number;
+}
+
+export type TableShadowInput = TableShadowRecord;
+
 /** Background extraction job kinds. */
 export type BackgroundJobType = 'document_timeout_retry';
 
@@ -590,6 +611,31 @@ export class BeaverDB {
         await this.conn.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_external_files_sha256
             ON external_files(sha256);
+        `);
+
+        // What this device last wrote to each stored table, kept here rather
+        // than in the table's storage directory: that directory is what syncs,
+        // and a Zotero file-conflict resolution replaces it whole. A row per
+        // retained version, newest first by `written_at`; `payload_path` points
+        // at the gzipped spec so a version lost to a conflict can be restored
+        // rather than only reported. See artifacts/recoveryShadow.ts.
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS table_recovery_shadow (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                library_id          INTEGER NOT NULL,
+                zotero_key          TEXT NOT NULL,
+                version             INTEGER NOT NULL,
+                sha256              TEXT NOT NULL,
+                written_at          TEXT NOT NULL,
+                payload_path        TEXT,
+                payload_size_bytes  INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(library_id, zotero_key, version)
+            );
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_table_shadow_table
+            ON table_recovery_shadow(library_id, zotero_key, written_at DESC);
         `);
 
         // Drop and recreate the ephemeral queue if the schema or unique key is stale.
@@ -2566,6 +2612,110 @@ export class BeaverDB {
     /** Delete every external file registry row. */
     public async deleteAllExternalFiles(): Promise<void> {
         await this.conn.queryAsync(`DELETE FROM external_files`);
+    }
+
+    // =====================================================================
+    // Stored-table recovery shadow
+    // =====================================================================
+
+    private static tableShadowSelect(): string {
+        return `SELECT library_id, zotero_key, version, sha256, written_at,
+                       payload_path, payload_size_bytes
+                FROM table_recovery_shadow`;
+    }
+
+    private async selectTableShadows(sql: string, params: any[] = []): Promise<TableShadowRecord[]> {
+        const rows: TableShadowRecord[] = [];
+        await this.conn.queryAsync(sql, params, {
+            onRow: (row: any) => {
+                // These indices must match the SELECT column order above.
+                rows.push({
+                    libraryId: row.getResultByIndex(0),
+                    zoteroKey: row.getResultByIndex(1),
+                    version: row.getResultByIndex(2),
+                    sha256: row.getResultByIndex(3),
+                    writtenAt: row.getResultByIndex(4),
+                    payloadPath: row.getResultByIndex(5) ?? null,
+                    payloadSizeBytes: row.getResultByIndex(6) ?? 0,
+                });
+            },
+        });
+        return rows;
+    }
+
+    /**
+     * Record what this device wrote for one version of one table. A write that
+     * reuses its version number (the store's collapse rule) updates the row in
+     * place rather than adding one.
+     */
+    public async upsertTableShadow(input: TableShadowInput): Promise<void> {
+        await this.conn.queryAsync(
+            `INSERT INTO table_recovery_shadow (
+                library_id, zotero_key, version, sha256, written_at,
+                payload_path, payload_size_bytes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(library_id, zotero_key, version) DO UPDATE SET
+                sha256 = excluded.sha256,
+                written_at = excluded.written_at,
+                payload_path = excluded.payload_path,
+                payload_size_bytes = excluded.payload_size_bytes`,
+            [
+                input.libraryId,
+                input.zoteroKey,
+                input.version,
+                input.sha256,
+                input.writtenAt,
+                input.payloadPath,
+                input.payloadSizeBytes,
+            ],
+        );
+    }
+
+    /** Every retained version for one table, most recently written first. */
+    public async getTableShadows(libraryId: number, zoteroKey: string): Promise<TableShadowRecord[]> {
+        return this.selectTableShadows(
+            `${BeaverDB.tableShadowSelect()} WHERE library_id = ? AND zotero_key = ?
+             ORDER BY written_at DESC, version DESC`,
+            [libraryId, zoteroKey],
+        );
+    }
+
+    /**
+     * Delete the named versions and return the rows that were removed, so the
+     * caller can delete their payload files. Deleting the rows first is
+     * deliberate: an orphaned file is a wasted byte, an orphaned row is a
+     * restore that promises a spec it cannot produce.
+     */
+    public async deleteTableShadowVersions(
+        libraryId: number,
+        zoteroKey: string,
+        versions: number[],
+    ): Promise<TableShadowRecord[]> {
+        if (versions.length === 0) return [];
+        const placeholders = versions.map(() => '?').join(', ');
+        const doomed = await this.selectTableShadows(
+            `${BeaverDB.tableShadowSelect()} WHERE library_id = ? AND zotero_key = ?
+             AND version IN (${placeholders})`,
+            [libraryId, zoteroKey, ...versions],
+        );
+        if (doomed.length === 0) return [];
+        await this.conn.queryAsync(
+            `DELETE FROM table_recovery_shadow
+             WHERE library_id = ? AND zotero_key = ? AND version IN (${placeholders})`,
+            [libraryId, zoteroKey, ...versions],
+        );
+        return doomed;
+    }
+
+    /** Delete every retained version for one table and return the removed rows. */
+    public async deleteTableShadows(libraryId: number, zoteroKey: string): Promise<TableShadowRecord[]> {
+        const doomed = await this.getTableShadows(libraryId, zoteroKey);
+        if (doomed.length === 0) return [];
+        await this.conn.queryAsync(
+            `DELETE FROM table_recovery_shadow WHERE library_id = ? AND zotero_key = ?`,
+            [libraryId, zoteroKey],
+        );
+        return doomed;
     }
 
     // =====================================================================

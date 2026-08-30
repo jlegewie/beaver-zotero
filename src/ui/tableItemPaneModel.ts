@@ -25,6 +25,22 @@ import type { TableVersionEntry } from '../services/artifacts/tableItemIdentity'
 /** Where the counts came from, so a caller can tell a fallback from the norm. */
 export type TableSectionSource = 'history' | 'spec';
 
+/**
+ * A table that went backwards under this device, as the section needs it —
+ * structurally the store's `TableSyncConflict`, restated here so this module
+ * stays free of everything but arithmetic and strings.
+ */
+export interface TableSectionConflict {
+    /** `behind`: a lower version. `diverged`: the same number, other content. */
+    reason: 'behind' | 'diverged';
+    /** The version the table is at now. */
+    documentVersion: number;
+    /** The version this device wrote, and lost. */
+    shadowVersion: number;
+    /** Whether the retained spec is still here to be restored. */
+    restorable: boolean;
+}
+
 export interface TableSectionInput {
     /** `summarize()` of the current spec, from the log tip or computed. */
     summary: TableSummary | null;
@@ -44,6 +60,12 @@ export interface TableSectionInput {
      * either SQL UTC or ISO form. One entry per annotation on the item.
      */
     annotationDates?: (string | null | undefined)[];
+    /**
+     * Set when this device's copy of the table was replaced by another
+     * device's. Absent on every ordinary table, which is the point: this line
+     * only appears when something was actually lost.
+     */
+    conflict?: TableSectionConflict | null;
 }
 
 export interface TableSectionDistributionEntry {
@@ -97,6 +119,10 @@ export interface TableSectionFields {
     headerSummary: string;
     /** The annotation caveat, or null when it does not apply. */
     warning: string | null;
+    /** The sync conflict, or null when the table is not in that state. */
+    conflict: TableSectionConflict | null;
+    /** What the section says about it, or null when there is nothing to say. */
+    conflictLine: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +271,8 @@ function emptyFields(annotations: number): TableSectionFields {
         versionLine: '',
         headerSummary: '',
         warning: null,
+        conflict: null,
+        conflictLine: null,
     };
 }
 
@@ -260,6 +288,7 @@ export function buildTableSectionFields(
 ): TableSectionFields {
     const annotationDates = input.annotationDates ?? [];
     const history = Array.isArray(input.history) ? input.history : [];
+    const conflict = input.conflict ?? null;
 
     const oldestVersion = history.length ? history[0].version : null;
     const loggedTip = history.length ? history[history.length - 1].version : null;
@@ -296,6 +325,8 @@ export function buildTableSectionFields(
         fields.lastWriteAt = lastWriteAt;
         fields.versionLine = versionLineFor(version, oldestVersion, historyTruncated);
         fields.headerSummary = version === null ? '' : `v${version}`;
+        fields.conflict = conflict;
+        fields.conflictLine = conflict ? conflictLineFor(conflict) : null;
         return fields;
     }
 
@@ -347,6 +378,8 @@ export function buildTableSectionFields(
         warning: annotationWarning
             ? warningFor(annotationsBeforeLastWrite, version)
             : null,
+        conflict,
+        conflictLine: conflict ? conflictLineFor(conflict) : null,
     };
 }
 
@@ -380,6 +413,29 @@ function headerSummaryFor(rows: number, version: number | null): string {
  * only where the edit landed before the annotation, and nothing here knows
  * where that was.
  */
+/**
+ * What the section says about a table another device's copy replaced.
+ *
+ * Both versions are named, because "your work was replaced" is useless without
+ * saying by what and from where. The middle clause is the one that matters:
+ * Zotero resolved a file conflict by keeping one whole copy, so nothing was
+ * combined and Beaver did not write over anything — and a user who reads this
+ * as "Beaver has already done something" would take the wrong next step. A
+ * version whose spec was not retained says so plainly rather than offering an
+ * action that cannot work.
+ */
+function conflictLineFor(conflict: TableSectionConflict): string {
+    const showing =
+        conflict.reason === 'diverged'
+            ? `Showing a different version ${conflict.documentVersion} from another device`
+            : `Showing version ${conflict.documentVersion} from another device`;
+    const wrote = `this device last wrote version ${conflict.shadowVersion}`;
+    const tail = conflict.restorable
+        ? `your version ${conflict.shadowVersion} is kept here and can be restored as a new version.`
+        : `but Beaver no longer keeps a copy of your version ${conflict.shadowVersion}.`;
+    return `${showing}; ${wrote}. Nothing was merged and nothing was overwritten — ${tail}`;
+}
+
 function warningFor(count: number, version: number | null): string {
     const subject =
         count === 1

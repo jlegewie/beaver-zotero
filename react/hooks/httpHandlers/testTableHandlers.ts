@@ -17,7 +17,10 @@
  * the file, and enumerated. `-write`, `-edit`, `-versions`, `-revert`,
  * `-delete` and `-open` drive the versioned store on top of it, and `-corrupt`
  * damages a table's storage directory on purpose so crash recovery can be
- * exercised without staging a real crash.
+ * exercised without staging a real crash — including its `sync_conflict` mode,
+ * which rolls the whole directory back to an earlier version the way a resolved
+ * Zotero file conflict does. `-table-shadow` and `-table-restore-shadow` are the
+ * other side of that: what this device last wrote, and putting it back.
  *
  * `-open-reader` and `-view-state` drive the reader host: the first opens a
  * stored table in Zotero's reader and reports which of the enhancer's seams
@@ -81,12 +84,20 @@ import {
     listVersions,
     openTable,
     readTable,
+    restoreShadowVersion,
     restoreTable,
     revertTable,
     writeTable,
     type TableRef,
     type TableWriteMeta,
 } from '../../../src/services/artifacts/tableStore';
+import {
+    inspectTableShadow,
+    TABLE_SHADOW_MAX_PAYLOAD_BYTES,
+    TABLE_SHADOW_RETENTION,
+} from '../../../src/services/artifacts/recoveryShadow';
+import { summarize } from '@beaver/agent-core/layouts/tableMutations';
+import { sha256Hex } from '../../../src/utils/hash';
 import type { TableMutation } from '@beaver/agent-core/layouts/tableMutations';
 
 /** Wide enough for the demo's columns; the window grows to it and no further. */
@@ -1059,6 +1070,9 @@ export async function handleTestTableOpenHttpRequest(
             // Empty on a table nothing interrupted; the shapes are documented
             // on `TableRecovery`.
             recovered: opened.recovered,
+            // Null on every table this device is still ahead of. Deliberately
+            // separate from `recovered`: nothing has been repaired.
+            conflict: opened.conflict,
             history: opened.history,
             rows: opened.spec.rows.length,
             columns: opened.spec.columns.map((c) => c.id),
@@ -1073,7 +1087,9 @@ export async function handleTestTableOpenHttpRequest(
 interface TableCorruptRequest {
     key?: string;
     libraryID?: number;
-    mode?: 'drop_history' | 'orphan_version' | 'html_ahead';
+    mode?: 'drop_history' | 'orphan_version' | 'html_ahead' | 'sync_conflict';
+    /** `sync_conflict` only: the version to roll the table back to. */
+    toVersion?: number;
 }
 
 /**
@@ -1089,6 +1105,11 @@ interface TableCorruptRequest {
  *   write stopped after step 4.
  * - `html_ahead` — the document committed a version the log never recorded, as
  *   if the write stopped after step 5.
+ * - `sync_conflict` — the whole storage directory rolled back to an earlier
+ *   version, as if Zotero had resolved a file conflict toward another device's
+ *   copy. Unlike the others this leaves a *consistent* table: the document, the
+ *   log and the version files all agree, and only the recovery shadow outside
+ *   the directory knows this device ever wrote anything newer.
  *
  * Guarded to a `beaver-table` item: nothing else is ever touched.
  */
@@ -1154,6 +1175,10 @@ export async function handleTestTableCorruptHttpRequest(
         return { ok: true, mode, version: orphan, path };
     }
 
+    if (mode === 'sync_conflict') {
+        return rollBackWholeDirectory(item, read.spec, sidecar, historyPath, request.toVersion);
+    }
+
     // html_ahead: the document commits a version the log never learns about.
     const ahead = (read.spec.version ?? 0) + 1;
     const document = buildTableDocument(
@@ -1170,6 +1195,171 @@ export async function handleTestTableCorruptHttpRequest(
     }
     await Zotero.File.putContentsAsync(htmlPath, document.html);
     return { ok: true, mode, version: ahead };
+}
+
+/**
+ * Replaces a table's whole storage directory with an earlier version of itself.
+ *
+ * This is what a resolved Zotero file conflict leaves behind, and simulating it
+ * faithfully matters: the point of the exercise is a table with *no* internal
+ * damage. So the document, `history.json` and the version files are all rolled
+ * back together, and every version above the target is deleted — a run that
+ * only downgraded the HTML would trip the store's ordinary crash recovery
+ * instead, and prove nothing about the shadow.
+ *
+ * The target's spec is the one stored in `beaver/v<N>.json` when that file is
+ * there, so what comes back is a state the table really was in.
+ */
+async function rollBackWholeDirectory(
+    item: Zotero.Item,
+    current: TableSpec,
+    sidecar: string,
+    historyPath: string,
+    requested?: number
+): Promise<any> {
+    const currentVersion = current.version ?? 0;
+    const target = requested ?? currentVersion - 1;
+    if (!Number.isInteger(target) || target < 1 || target >= currentVersion) {
+        return {
+            ok: false,
+            code: 'invalid_request',
+            error: `toVersion must be between 1 and ${currentVersion - 1}; the table is at ${currentVersion}.`,
+        };
+    }
+
+    const targetPath = tableVersionPath(item, target);
+    const htmlPath = await item.getFilePathAsync();
+    if (!targetPath || !htmlPath) {
+        return { ok: false, code: 'file_missing', error: 'No path for the target version.' };
+    }
+
+    let spec: TableSpec = current;
+    if (await IOUtils.exists(targetPath)) {
+        const stored = JSON.parse(await IOUtils.readUTF8(targetPath)) as TableSpec;
+        if (validateTableSpec(stored).length === 0) spec = stored;
+    }
+    spec = { ...spec, version: target };
+
+    const serialized = JSON.stringify(spec);
+    const sha256 = await sha256Hex(serialized);
+
+    await IOUtils.makeDirectory(sidecar, { createAncestors: true, ignoreExisting: true });
+    await IOUtils.writeUTF8(targetPath, serialized);
+
+    // The log the other device would have shipped: everything up to the target,
+    // with the target's entry describing the bytes just written.
+    const history = JSON.parse(await IOUtils.readUTF8(historyPath).catch(() => '{}')) as {
+        versions?: Array<Record<string, unknown>>;
+    };
+    const kept = (Array.isArray(history.versions) ? history.versions : []).filter(
+        (entry) => typeof entry.version === 'number' && entry.version < target
+    );
+    kept.push({
+        version: target,
+        actor: 'system',
+        at: new Date().toISOString(),
+        sha256,
+        summary: summarize(spec),
+        change: 'Synced from another device',
+        sealed: true,
+    });
+    await IOUtils.writeUTF8(historyPath, JSON.stringify({ tip: target, versions: kept }));
+
+    const removed: number[] = [];
+    for (const child of await IOUtils.getChildren(sidecar).catch(() => [])) {
+        const match = /^v(\d+)\.json$/.exec(PathUtils.filename(child));
+        if (match && Number(match[1]) > target) {
+            await IOUtils.remove(child, { ignoreAbsent: true });
+            removed.push(Number(match[1]));
+        }
+    }
+
+    await Zotero.File.putContentsAsync(
+        htmlPath,
+        buildTableDocument(spec, { linksFor: zoteroLinksFor }).html
+    );
+
+    return {
+        ok: true,
+        mode: 'sync_conflict',
+        from_version: currentVersion,
+        version: target,
+        sha256,
+        removed_versions: removed.sort((a, b) => a - b),
+    };
+}
+
+// ---------------------------------------------------------------------------
+// The recovery shadow (dev-only)
+// ---------------------------------------------------------------------------
+
+/**
+ * What this device last wrote to a table, and whether the table has gone
+ * backwards under it.
+ *
+ * Read straight from the shadow rather than through `openTable`, so the row can
+ * be inspected on a table that cannot be opened at all — and so the observation
+ * the conflict is judged against is visible beside the verdict.
+ */
+export async function handleTestTableShadowHttpRequest(
+    request: TableStoreRequest = {}
+): Promise<any> {
+    const ref = tableRefFrom(request);
+    if (!ref) return MISSING_KEY;
+    try {
+        const current = await readTable(ref);
+        const report = await inspectTableShadow(ref, {
+            version: current.version,
+            sha256: await sha256Hex(JSON.stringify(current.spec)),
+        });
+        return {
+            ok: true,
+            key: ref.key,
+            library_id: ref.libraryID,
+            document_version: current.version,
+            retention: TABLE_SHADOW_RETENTION,
+            max_payload_bytes: TABLE_SHADOW_MAX_PAYLOAD_BYTES,
+            total_bytes: report.totalBytes,
+            last: report.last,
+            entries: report.entries,
+            conflict: report.conflict,
+        };
+    } catch (error) {
+        return errorResponse(error);
+    }
+}
+
+/**
+ * Writes this device's retained version back as a new version.
+ *
+ * Calls the store directly rather than going through `Zotero.__beaverTables`:
+ * the namespace's `shadow.restore` forwards to this very function, and the
+ * endpoint's job is to exercise the write, not the forwarding.
+ */
+export async function handleTestTableRestoreShadowHttpRequest(
+    request: TableStoreRequest = {}
+): Promise<any> {
+    const ref = tableRefFrom(request);
+    if (!ref) return MISSING_KEY;
+    try {
+        const result = await restoreShadowVersion(ref, writeMetaFrom(request));
+        if (!result.ok) {
+            return {
+                ok: false,
+                code: result.code,
+                error: result.error,
+                version: result.version,
+            };
+        }
+        return {
+            ok: true,
+            version: result.version,
+            restored_from: result.restoredFrom,
+            entry: result.entry,
+        };
+    } catch (error) {
+        return errorResponse(error);
+    }
 }
 
 // ---------------------------------------------------------------------------
