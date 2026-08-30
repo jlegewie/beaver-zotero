@@ -25,6 +25,16 @@ import {
     cleanupReaderTableViewsForWindow,
 } from "./services/artifacts/view/readerTableView";
 import { closeAllTableTabs, closeTableTabsForWindow } from "./ui/tableTab";
+import {
+    initTableDoubleClick,
+    installTableDoubleClick,
+    uninstallTableDoubleClick,
+    cleanupTableDoubleClick,
+} from "./ui/tableDoubleClick";
+import {
+    registerTablesApi,
+    unregisterTablesApi,
+} from "./services/artifacts/tablesApiHost";
 import { setActionClient } from "@beaver/agent-core/types/actions";
 import { ZOTERO_PLUGIN_CLIENT_TYPE } from "@beaver/agent-core/protocol/agentProtocol";
 
@@ -305,6 +315,18 @@ async function onStartup() {
         // -------- Enhance stored tables opened in the reader --------
         initReaderTableViews();
 
+        // -------- Learn which items are stored tables --------
+        // The double-click guard has to decide synchronously, so the item data
+        // `isTableItem` reads is loaded ahead of the click, not during it.
+        initTableDoubleClick();
+
+        // -------- Publish the table surfaces to the other bundle --------
+        // The tab deck, the double-click guard and the reader views keep module
+        // state, so they live in this bundle only. Anything on the webpack side
+        // reaches them through `Zotero.__beaverTables` rather than importing
+        // them, which would give it a second, permanently empty copy.
+        registerTablesApi();
+
         // -------- Register Zotero preferences pane --------
         await Zotero.PreferencePanes.register({
             pluginID: addon.data.config.addonID,
@@ -381,6 +403,11 @@ async function onMainWindowLoad(win: Window): Promise<void> {
     win.__beaverEventBus = eventBus;
 
     BeaverUIFactory.registerChatPanel(win);
+
+    // Wrap this window's ZoteroPane.viewItems / viewAttachment so a
+    // double-clicked stored table opens Beaver's table surface. Every other
+    // double-click falls through untouched — see src/ui/tableDoubleClick.ts.
+    installTableDoubleClick(win);
 
     ztoolkit.log("UI ready");
     
@@ -551,6 +578,8 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // (close the last window, app keeps running) survives indefinitely.
         closeTableTabsForWindow(win);
         cleanupReaderTableViewsForWindow(win);
+        // Give this window's ZoteroPane its own handlers back before it goes.
+        uninstallTableDoubleClick(win);
 
         if (!isLastWindow) {
             ztoolkit.log("onMainWindowUnload: Other windows remain, skipping global cleanup");
@@ -648,8 +677,10 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         //     surfaces: a table tab left open holds a detached iframe and the
         //     whole rendered document, and a reader view holds its reader.
         cleanupReaderIntegration();
+        unregisterTablesApi();
         cleanupReaderTableViews();
         closeAllTableTabs();
+        cleanupTableDoubleClick();
 
         // 13. Unregister reader toolbar menu
         cleanupReaderToolbarMenu();
@@ -872,8 +903,10 @@ async function onShutdown(): Promise<void> {
         unregisterQuitObserver();
         cleanupContextMenus();
         cleanupReaderIntegration();
+        unregisterTablesApi();
         cleanupReaderTableViews();
         closeAllTableTabs();
+        cleanupTableDoubleClick();
         cleanupReaderToolbarMenu();
         unregisterBeaverProtocolHandler();
 

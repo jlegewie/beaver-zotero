@@ -274,3 +274,78 @@ export async function readTableItemSpec(
         message: parsed.detail ?? `Table ${item.key} has an unreadable spec.`,
     };
 }
+
+// ---------------------------------------------------------------------------
+// Addressing
+// ---------------------------------------------------------------------------
+
+/**
+ * A stored table, by the item that holds it.
+ *
+ * Declared here rather than in the store because the esbuild side addresses
+ * tables too — the double-click guard and `src/ui/openTable.ts` both take one —
+ * and `tableStore.ts` cannot be reached from that bundle. `tableStore.ts`
+ * re-exports it, so nothing that already imports it from there has to change.
+ */
+export interface TableRef {
+    libraryID: number;
+    key: string;
+}
+
+/**
+ * The item behind a ref, or a typed refusal.
+ *
+ * Reading is never gated on library exclusion — an existing table is the user's
+ * to look at. The store's `requireWritable` is where the exclusion boundary is.
+ */
+export async function resolveTableItem(ref: TableRef): Promise<Zotero.Item> {
+    const item = Zotero.Items.getByLibraryAndKey(ref.libraryID, ref.key) as
+        | Zotero.Item
+        | false;
+    if (!item) {
+        throw new TableItemError(
+            `No item ${ref.key} in library ${ref.libraryID}.`,
+            'not_found'
+        );
+    }
+    await loadTableItemFields([item]);
+    if (!isTableItem(item)) {
+        throw new TableItemError(
+            `Item ${ref.key} is not a Beaver table.`,
+            'not_a_table'
+        );
+    }
+    return item;
+}
+
+/** Maps a read refusal onto the shared {@link TableItemErrorCode} vocabulary. */
+export function tableReadError(
+    code: 'not_a_table' | 'no_file' | 'no_spec' | 'unsupported_version' | 'invalid',
+    message: string
+): TableItemError {
+    switch (code) {
+        case 'no_file':
+            return new TableItemError(message, 'file_missing');
+        case 'invalid':
+            return new TableItemError(message, 'invalid_spec');
+        default:
+            return new TableItemError(message, code);
+    }
+}
+
+/**
+ * The stored spec and the version it claims — the store's read API.
+ *
+ * Lives on this side of the split so that the esbuild bundle can read a table
+ * without reaching `tableStore.ts`, which imports the library-exclusion check
+ * and through it the whole React graph. `tableStore.ts` re-exports it, so
+ * "read a table through the store" stays one function with one implementation.
+ */
+export async function readTable(
+    ref: TableRef
+): Promise<{ spec: TableSpec; version: number }> {
+    const item = await resolveTableItem(ref);
+    const read = await readTableItemSpec(item);
+    if (!read.ok) throw tableReadError(read.code, read.message);
+    return { spec: read.spec, version: read.spec.version ?? 0 };
+}

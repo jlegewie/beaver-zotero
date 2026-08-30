@@ -57,33 +57,36 @@ import {
 } from '@beaver/agent-core/layouts/tableMutations';
 import { sha256Hex } from '../../utils/hash';
 import { checkLibraryExcluded } from '../agentDataProvider/utils';
-import { zoteroLinksFor } from '../../ui/tableTab';
+import { zoteroLinksFor } from './view/tableLinks';
 import { buildTableDocument } from './tableDocument';
 import {
     createTableItem,
-    loadTableItemFields,
-    isTableItem,
     queueTableFullText,
     readTableItemSpec,
+    resolveTableItem,
     restoreTableItem,
     tableHistoryPath,
+    tableReadError,
     tableSidecarDirectory,
     tableVersionPath,
     trashTableItem,
     TableItemError,
     type CreatedTableItem,
     type CreateTableItemOptions,
+    type TableRef,
 } from './tableItem';
 
 // ---------------------------------------------------------------------------
 // Shape
 // ---------------------------------------------------------------------------
 
-/** A stored table, by the item that holds it. */
-export interface TableRef {
-    libraryID: number;
-    key: string;
-}
+// Addressing and reading live next door, so that the esbuild bundle can reach
+// them without reaching this module (which imports the library-exclusion check
+// and through it the whole React graph). Re-exported here because this is the
+// store's public surface: `readTable` is still "read a table through the
+// store", with one implementation.
+export { readTable, resolveTableItem } from './tableItemIdentity';
+export type { TableRef } from './tableItemIdentity';
 
 /** Who asked for a write. `user` never collapses — see {@link writeTable}. */
 export type TableActor = 'user' | 'agent' | 'system';
@@ -251,6 +254,17 @@ const EMPTY_HISTORY: TableHistory = { tip: 0, versions: [] };
  * instances pointed at the same data directory are not something the file
  * layout can defend against, and `expectedVersion` on {@link writeTable} is
  * what turns that case into a refused write rather than a lost one.
+ *
+ * **One bundle, too — and that is load-bearing.** This map is module state, so
+ * it is per bundle instance. The lock is genuinely single only because this
+ * module imports `checkLibraryExcluded` and through it the React graph, which
+ * keeps it out of the esbuild bundle: `src/hooks.ts` reaches
+ * `tableItemIdentity.ts`, never this file. If anything ever pulls the store
+ * into esbuild there would be two maps, two locks, and no serialisation at all
+ * between a user edit and an agent write — the write protocol's whole
+ * concurrency story would be void while every test still passed.
+ * `eslint.config.mjs` guards the esbuild side of that line, and
+ * `npm run check:bundle` fails if the React graph reaches `beaver.js`.
  */
 const locks = new Map<string, Promise<unknown>>();
 
@@ -393,32 +407,6 @@ async function versionFilesOnDisk(item: Zotero.Item): Promise<number[]> {
 // ---------------------------------------------------------------------------
 
 /**
- * The item behind a ref, or a typed refusal.
- *
- * Reading is never gated on library exclusion — an existing table is the user's
- * to look at. {@link requireWritable} is where the exclusion boundary is.
- */
-async function resolveTableItem(ref: TableRef): Promise<Zotero.Item> {
-    const item = Zotero.Items.getByLibraryAndKey(ref.libraryID, ref.key) as
-        | Zotero.Item
-        | false;
-    if (!item) {
-        throw new TableItemError(
-            `No item ${ref.key} in library ${ref.libraryID}.`,
-            'not_found'
-        );
-    }
-    await loadTableItemFields([item]);
-    if (!isTableItem(item)) {
-        throw new TableItemError(
-            `Item ${ref.key} is not a Beaver table.`,
-            'not_a_table'
-        );
-    }
-    return item;
-}
-
-/**
  * The exclusion boundary for a table. Every path that changes a table's file or
  * its item goes through here first: a library the user excluded in Beaver
  * preferences is one Beaver does not write to.
@@ -458,7 +446,7 @@ async function readCurrentState(item: Zotero.Item): Promise<CurrentState> {
             read.code === 'no_file' ||
             read.code === 'not_a_table')
     ) {
-        throw readError(read.code, read.message);
+        throw tableReadError(read.code, read.message);
     }
 
     const spec = read.ok ? read.spec : null;
@@ -1131,16 +1119,6 @@ export async function editTable(
 // Reading
 // ---------------------------------------------------------------------------
 
-/** The stored spec and the version it claims. */
-export async function readTable(
-    ref: TableRef
-): Promise<{ spec: TableSpec; version: number }> {
-    const item = await resolveTableItem(ref);
-    const read = await readTableItemSpec(item);
-    if (!read.ok) throw readError(read.code, read.message);
-    return { spec: read.spec, version: read.spec.version ?? 0 };
-}
-
 /** The version log, oldest first. */
 export async function listVersions(ref: TableRef): Promise<TableVersionEntry[]> {
     const item = await resolveTableItem(ref);
@@ -1375,16 +1353,3 @@ function emitTableUpdated(
 // ---------------------------------------------------------------------------
 
 /** Maps a spec-read failure onto the shared table error vocabulary. */
-function readError(
-    code: 'not_a_table' | 'no_file' | 'no_spec' | 'unsupported_version' | 'invalid',
-    message: string
-): TableItemError {
-    switch (code) {
-        case 'no_file':
-            return new TableItemError(message, 'file_missing');
-        case 'invalid':
-            return new TableItemError(message, 'invalid_spec');
-        default:
-            return new TableItemError(message, code);
-    }
-}

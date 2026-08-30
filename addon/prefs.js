@@ -158,3 +158,13 @@ pref("maxAttachmentFileSizeMB", 100);
 // the user library. Never overrides a library the user excluded in Beaver
 // preferences — see resolveTableLibrary().
 pref("tables.defaultLibraryID", 0);
+
+// Where a stored table opens: "tab" (a temporary Zotero tab holding the
+// rendered document) or "reader" (Zotero's own snapshot reader). Anything else
+// is read as "tab" — see resolveTableTarget().
+pref("tables.openIn", "tab");
+
+// Whether double-clicking a stored table in the items tree opens Beaver's
+// table surface instead of Zotero's default action. Off, every double-click
+// reaches Zotero's own handler untouched.
+pref("tables.interceptDoubleClick", true);

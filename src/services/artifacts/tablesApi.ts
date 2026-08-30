@@ -1,0 +1,110 @@
+/**
+ * The one instance of the stored-table surfaces, shared across both bundles.
+ *
+ * ## Why this exists
+ *
+ * `src/ui/tableTab.ts`, `src/ui/tableDoubleClick.ts` and
+ * `view/readerTableView.ts` all keep **module-level state**: the open-tab
+ * registry, the wrapped `ZoteroPane` handlers and their last decision, the
+ * enhanced-reader registry. `src/hooks.ts` imports them, so esbuild compiles
+ * them into `beaver.js`. If anything under `react/` imports them too, webpack
+ * compiles a *second* copy into `reactBundle.js` — and the two copies never
+ * see each other. CLAUDE.md states the rule this violates: "The two bundles
+ * cannot import from each other … cross-bundle communication goes through
+ * `__beaver*` properties".
+ *
+ * The failure is quiet and specific. The webpack copy's registries stay empty
+ * while the esbuild copy does the real work, so a dev endpoint reports
+ * `installed: false` on a `ZoteroPane` that is demonstrably wrapped. Worse, a
+ * tab opened through the webpack copy is invisible to `closeAllTableTabs()` —
+ * which runs from `hooks.ts`, i.e. against the esbuild copy — and leaks a
+ * detached iframe holding its whole rendered document.
+ *
+ * ## The seam
+ *
+ * The **esbuild bundle owns these surfaces**, because that is where `hooks.ts`
+ * runs and where the wrapping, the tab deck and the reader integration
+ * actually live. It publishes them here at startup; the webpack side reaches
+ * them through {@link getTablesApi} instead of importing the modules.
+ *
+ * **This module must never gain a value import.** Types are erased, so the
+ * interface below can name anything; a real import would put the very modules
+ * this protects back into whichever bundle loads it. `eslint.config.mjs`
+ * enforces the other half of the rule — that `react/` does not import them
+ * directly.
+ *
+ * Absent means absent: a caller that finds no API must say the esbuild half is
+ * not up, rather than fall back to a private copy that will always look idle.
+ */
+
+import type { TableSpec } from '@beaver/agent-core/layouts/table';
+import type { TableRef } from './tableItemIdentity';
+import type { TableViewSummary } from './view/enhanceTableDocument';
+import type { ReaderTableDiagnostics } from './view/readerTableView';
+import type { OpenTableTabOptions } from '../../ui/tableTab';
+import type {
+    OpenTableOptions,
+    OpenTableOutcome,
+    TableTarget,
+} from '../../ui/openTable';
+import type { TableDoubleClickRecord } from '../../ui/tableDoubleClick';
+
+/** The double-click guard, as the dev endpoints need to see it. */
+export interface TablesDoubleClickApi {
+    /** Whether this window's `ZoteroPane` handlers are currently wrapped. */
+    /** Absent `win` means the main window. */
+    isInstalled(win?: Window): boolean;
+    /** The most recent decision the guard made, or null if it has made none. */
+    last(): TableDoubleClickRecord | null;
+    /** Loads the item data the synchronous decision depends on. */
+    warm(items: Zotero.Item[]): Promise<number>;
+    /** Resolves once the open started by the most recent decision has settled. */
+    settled(): Promise<void>;
+}
+
+export interface TablesApi {
+    /** The single entry point for showing a stored table. */
+    openTable(ref: TableRef, options?: OpenTableOptions): Promise<OpenTableOutcome>;
+    /** Which surface {@link openTable} would try first. */
+    resolveTableTarget(where?: TableTarget): TableTarget;
+
+    /** Renders an unsaved spec into a tab. Returns the tab id, or null. */
+    openSpecInTab(spec: TableSpec, options?: OpenTableTabOptions): string | null;
+    /** Closes one table tab and releases what was mounted into it. */
+    closeTab(id: string): void;
+
+    /** Every table document currently enhanced, in either host. */
+    listViews(): TableViewSummary[];
+
+    /** Opens a stored table in the reader and reports what the enhancer attached. */
+    openInReader(
+        item: Zotero.Item,
+        options?: { timeoutMs?: number }
+    ): Promise<ReaderTableDiagnostics>;
+
+    doubleClick: TablesDoubleClickApi;
+}
+
+/**
+ * The shared slot. `__beaver`-prefixed on `Zotero` to match
+ * `__beaverJotaiStore` and the other cross-bundle globals, and because a `let`
+ * in the ambient `Zotero` namespace is assignable where `Zotero.Beaver`'s
+ * `const` members are not.
+ */
+export function getTablesApi(): TablesApi | null {
+    return Zotero.__beaverTables ?? null;
+}
+
+/** Publishes (or, with null, withdraws) the esbuild bundle's implementation. */
+export function setTablesApi(api: TablesApi | null): void {
+    Zotero.__beaverTables = api ?? undefined;
+}
+
+/**
+ * The message a caller shows when the esbuild half is not up. Named here so
+ * every dev endpoint reports the same thing, and reports it rather than
+ * quietly substituting a copy of its own.
+ */
+export const TABLES_API_UNAVAILABLE =
+    "Beaver's table surfaces are not registered (Zotero.__beaverTables is unset). " +
+    'The esbuild bundle either failed to load or has already been torn down.';

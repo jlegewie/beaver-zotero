@@ -24,6 +24,14 @@
  * `Zotero_Tabs` is an internal global rather than a plugin API, so every entry
  * point here checks for it and degrades to doing nothing.
  *
+ * **One bundle only.** `openTabs` below is module state, so a second copy of
+ * this module would be a second tab registry that `closeAllTableTabs()` never
+ * reaches — a detached iframe and its whole rendered document, leaked. The
+ * webpack side reaches these functions through `Zotero.__beaverTables`; see
+ * `src/services/artifacts/tablesApi.ts`. The stateless link builder that used
+ * to live here now lives in `view/tableLinks.ts`, so wanting it no longer drags
+ * this registry into the other bundle.
+ *
  * The interactivity the document cannot supply itself — the citation card and
  * link routing — is not here: it is `enhanceTableDocument`, which the reader
  * host uses too. This file is that enhancer's tab host, and owns only what is
@@ -38,8 +46,8 @@ import {
     type TableViewHost,
     type TableViewSummary,
 } from '../services/artifacts/view/enhanceTableDocument';
-import { openTableLink } from '../services/artifacts/view/tableLinks';
-import type { RowRef, TableSpec } from '@beaver/agent-core/layouts/table';
+import { openTableLink, zoteroLinksFor } from '../services/artifacts/view/tableLinks';
+import type { TableSpec } from '@beaver/agent-core/layouts/table';
 import { logger } from '@beaver/agent-core/platform/logger';
 
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
@@ -68,35 +76,6 @@ function tabsApi(win: Window): ZoteroTabsApi | null {
 /** Whether this Zotero exposes the internal tab API this surface needs. */
 export function canOpenTableTab(win: Window = Zotero.getMainWindow()): boolean {
     return !!tabsApi(win);
-}
-
-/**
- * `zotero://` URIs for a row, built here because only Zotero knows whether a
- * library id is the user library or a group.
- */
-export function zoteroLinksFor(ref: RowRef): { selectUri?: string | null; openUri?: string | null } {
-    if (ref.kind !== 'item') return {};
-    const { library_id: libraryID, zotero_key: key } = ref;
-    let scope = 'library';
-    try {
-        if (libraryID !== Zotero.Libraries.userLibraryID) {
-            const groupID = Zotero.Groups.getGroupIDFromLibraryID(libraryID);
-            if (groupID) scope = `groups/${groupID}`;
-        }
-    } catch {
-        // A library that no longer resolves still gets a select URI for the
-        // user library; the worst case is a link that reveals nothing.
-    }
-    const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
-    const hasFile =
-        item && typeof (item as Zotero.Item).getAttachments === 'function'
-            ? (item as Zotero.Item).getAttachments().length > 0
-            : false;
-
-    return {
-        selectUri: `zotero://select/${scope}/items/${key}`,
-        openUri: hasFile ? `zotero://open/${scope}/items/${key}` : null,
-    };
 }
 
 interface OpenTableTab {

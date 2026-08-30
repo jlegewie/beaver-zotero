@@ -41,8 +41,8 @@ import {
 } from './tableDocument';
 // Only Zotero knows whether a library id is the user library or a group, so the
 // row action links are built there. Imported rather than reimplemented: the
-// stored document and the tab rendering must offer the same links.
-import { zoteroLinksFor } from '../../ui/tableTab';
+// stored document, the tab rendering and the reader must offer the same links.
+import { zoteroLinksFor } from './view/tableLinks';
 import {
     buildTableUrl,
     isTableItem,
@@ -61,8 +61,11 @@ export {
     buildTableUrl,
     isTableItem,
     loadTableItemFields,
+    readTable,
     readTableItemSpec,
+    resolveTableItem,
     tableHistoryPath,
+    tableReadError,
     tableSidecarDirectory,
     tableStorageDirectory,
     tableVersionPath,
@@ -75,6 +78,7 @@ export {
 export type {
     ReadTableItemResult,
     TableItemErrorCode,
+    TableRef,
 } from './tableItemIdentity';
 
 // ---------------------------------------------------------------------------

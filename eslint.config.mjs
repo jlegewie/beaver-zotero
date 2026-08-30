@@ -440,7 +440,12 @@ export default tseslint.config(
     // This is not a blanket rule for `src/`: `hooks.ts` imports `react/eventBus`
     // and `react/ui/UIManager` deliberately, and those are esbuild-safe.
     {
-        files: ["src/services/artifacts/**/*.ts", "src/ui/tableTab.ts"],
+        files: [
+            "src/services/artifacts/**/*.ts",
+            "src/ui/tableTab.ts",
+            "src/ui/openTable.ts",
+            "src/ui/tableDoubleClick.ts",
+        ],
         rules: {
             "no-restricted-imports": [
                 "error",
@@ -478,6 +483,8 @@ export default tseslint.config(
             "src/services/artifacts/tableDocument.ts",
             "src/services/artifacts/view/**/*.ts",
             "src/ui/tableTab.ts",
+            "src/ui/openTable.ts",
+            "src/ui/tableDoubleClick.ts",
         ],
         rules: {
             "no-restricted-imports": [
@@ -498,9 +505,54 @@ export default tseslint.config(
                                 "agentDataProvider reaches react/store and react/atoms/profile, so importing it here drags the whole React graph into the esbuild bundle and the plugin fails to load. Library exclusion gates writes and indexing — identification and reading are not gated, so this module does not need it.",
                         },
                         {
-                            group: ["**/tableItem"],
+                            group: ["**/tableItem", "**/tableStore"],
                             message:
-                                "tableItem.ts imports the library-exclusion check and through it the React graph. Import ./tableItemIdentity for identification, paths and reading.",
+                                "tableItem.ts and tableStore.ts import the library-exclusion check and through it the React graph. Import ./tableItemIdentity for identification, paths, addressing and reading — it owns readTable(), which tableStore re-exports.",
+                        },
+                    ],
+                },
+            ],
+        },
+    },
+    // Modules that keep the stored-table *runtime state* — the open-tab
+    // registry, the wrapped ZoteroPane handlers, the enhanced-reader registry —
+    // are compiled into the esbuild bundle by `src/hooks.ts`. Importing one from
+    // the webpack bundle does not fail anything; it silently creates a SECOND
+    // copy of that state. The esbuild copy does the real work while the webpack
+    // copy stays empty, so a dev endpoint reports `installed: false` on a
+    // demonstrably wrapped ZoteroPane, and a tab opened through the webpack copy
+    // is invisible to `closeAllTableTabs()` — leaking a detached iframe and its
+    // whole rendered document.
+    //
+    // Reach them through `Zotero.__beaverTables` instead: see
+    // `src/services/artifacts/tablesApi.ts`. Stateless helpers are fine and stay
+    // importable (`tableLinks.ts`, `tableDocument.ts`, `tableItemIdentity.ts`).
+    {
+        files: [
+            "react/**/*.ts",
+            "react/**/*.tsx",
+            // The webpack-only half of the subsystem, which reaches the React
+            // graph through the library-exclusion check and so can never be in
+            // the esbuild bundle either.
+            "src/services/artifacts/tableItem.ts",
+            "src/services/artifacts/tableStore.ts",
+        ],
+        rules: {
+            "no-restricted-imports": [
+                "error",
+                {
+                    patterns: [
+                        {
+                            group: [
+                                "**/ui/tableTab",
+                                "**/ui/tableDoubleClick",
+                                "**/ui/openTable",
+                                "**/artifacts/view/readerTableView",
+                                "**/artifacts/tablesApiHost",
+                            ],
+                            allowTypeImports: true,
+                            message:
+                                "This module owns stored-table runtime state and is compiled into the esbuild bundle. Importing it here creates a second, permanently empty copy of that state (empty registries, leaked tabs). Use `getTablesApi()` from src/services/artifacts/tablesApi.ts; import stateless helpers from artifacts/view/tableLinks.ts instead.",
                         },
                     ],
                 },

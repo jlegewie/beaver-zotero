@@ -82,6 +82,8 @@ declare namespace _ZoteroTypes {
       "firstRunAssignments": string;
       "maxAttachmentFileSizeMB": number;
       "tables.defaultLibraryID": number;
+      "tables.openIn": string;
+      "tables.interceptDoubleClick": boolean;
     };
   }
 }

@@ -174,6 +174,8 @@ import {
     handleTestOpenTableHttpRequest,
     handleTestCloseTableHttpRequest,
     handleTestOpenTableTabHttpRequest,
+    handleTestOpenTableTargetHttpRequest,
+    handleTestTableDoubleClickHttpRequest,
     handleTestCloseTableTabHttpRequest,
     handleTestTableCreateHttpRequest,
     handleTestTableReadHttpRequest,
@@ -374,6 +376,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/open-table',
     '/beaver/test/close-table',
     '/beaver/test/open-table-tab',
+    '/beaver/test/open-table-target',
+    '/beaver/test/table-double-click',
     '/beaver/test/close-table-tab',
     // Stored tables: the snapshot attachment behind a table (dev-only)
     '/beaver/test/table-create',
@@ -1329,6 +1333,14 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/open-table-tab'] =
             createEndpoint(handleTestOpenTableTabHttpRequest);
+
+        // `openTable` itself — which surface a stored table lands on, and the
+        // double-click guard driven without a mouse.
+        Zotero.Server.Endpoints['/beaver/test/open-table-target'] =
+            createEndpoint(handleTestOpenTableTargetHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-double-click'] =
+            createEndpoint(handleTestTableDoubleClickHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/close-table-tab'] =
             createEndpoint(handleTestCloseTableTabHttpRequest);
