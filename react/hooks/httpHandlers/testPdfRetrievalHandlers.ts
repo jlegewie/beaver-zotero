@@ -25,6 +25,7 @@
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
+import { refuseCaptchaChallengeUrls } from '../../utils/pdfChallengeUrls';
 
 interface ItemSpec {
     item_type?: string;
@@ -42,6 +43,7 @@ interface StrategySpec {
     url?: string;
     resolvers?: Record<string, unknown>[];
     timeout_ms?: number;
+    skip_challenge_urls?: boolean;
 }
 
 interface AttemptResult {
@@ -238,11 +240,13 @@ async function runStrategy(
     }
 
     if (strategy.kind === 'add_file_from_urls') {
-        if (!strategy.resolvers?.length) throw new Error('add_file_from_urls requires resolvers');
+        // Empty resolvers = Zotero's own cascade (same as production strategy 3).
+        // skip_challenge_urls applies the same onBeforeRequest hook.
+        const skipChallengeUrls = strategy.skip_challenge_urls ? refuseCaptchaChallengeUrls : undefined;
         // Zotero's own doi/url/oa/custom resolvers are appended so this arm is
         // a superset of `addAvailableFile`, never a narrower substitute.
         const resolvers = [
-            ...strategy.resolvers,
+            ...(strategy.resolvers ?? []),
             ...(Zotero.Attachments as any).getFileResolvers(item),
         ];
         let accessMethod: string | undefined;
@@ -251,6 +255,7 @@ async function runStrategy(
                 onAccessMethodStart: (method: string) => {
                     accessMethod = method;
                 },
+                onBeforeRequest: skipChallengeUrls,
             }),
             timeout,
             'addFileFromURLs'

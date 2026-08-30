@@ -3,6 +3,7 @@ import { ExternalReference, NormalizedPublicationType } from '@beaver/agent-core
 import { logger } from '@beaver/agent-core/platform/logger';
 import { getZoteroTargetContext } from '../../src/utils/zoteroUtils';
 import { scheduleBackgroundTask, generateTaskId, isPdfFetchInProgress, deduplicatedSync } from '../../src/utils/backgroundTasks';
+import { isCaptchaChallengeUrl, refuseCaptchaChallengeUrls } from './pdfChallengeUrls';
 import { ensureItemSynced } from '../../src/utils/sync';
 import { TimingAccumulator } from '../../src/utils/timing';
 import { emitAttachmentResolved } from './attachmentResolvedEvent';
@@ -216,6 +217,11 @@ async function attachPdfFromUrl(
     url: string,
     libraryId: number,
 ): Promise<Zotero.Item | null> {
+    // No resolver cascade here — refuse challenge hosts before they can pop a CAPTCHA.
+    if (isCaptchaChallengeUrl(url)) {
+        logger(`attachPdfFromUrl: skipping bot-challenge URL ${url}`, 2);
+        return null;
+    }
     try {
         const attachment = await withTimeout(
             Zotero.Attachments.importFromURL({
@@ -711,8 +717,13 @@ function schedulePdfFetchTask(
                 if (!signal.aborted && !attachedPdf) {
                     try {
                         logger(`schedulePdfFetchTask: Trying addAvailableFile for ${itemKey}`, 2);
+                        // addAvailableFile forwards no hooks; same resolvers
+                        // via addFileFromURLs so we can refuse challenge URLs.
+                        const resolvers = (Zotero.Attachments as any).getFileResolvers(item);
                         const attachment = await withTimeout(
-                            (Zotero.Attachments as any).addAvailableFile(item),
+                            (Zotero.Attachments as any).addFileFromURLs(item, resolvers, {
+                                onBeforeRequest: refuseCaptchaChallengeUrls,
+                            }),
                             30000,
                             'Find PDF'
                         );
