@@ -182,6 +182,18 @@ export interface AnnotationListView {
     variant: "with-parent" | "compact";
 }
 
+/** find_related_works view data */
+export interface RelatedWorksViewInfo {
+    /** Discriminator for tool-specific view data. */
+    info_type: "related_works";
+    /** "references" = works the work cites; "cited_by" = works citing it. */
+    relation: "references" | "cited_by";
+    /** Full result count across all pages (after filters). */
+    total_count: number;
+    /** The work whose graph is listed; absent when it could not be resolved. */
+    work?: ExternalReference | null;
+}
+
 export interface ExternalReferenceListView {
     view_type: "external_reference_list";
     tool_name: string;
@@ -193,6 +205,8 @@ export interface ExternalReferenceListView {
     /** temporarily_unchecked_queries */
     unavailable_queries?: string[];
     message?: string | null;
+    /** Optional tool-specific extension */
+    tool_info?: RelatedWorksViewInfo | null;
 }
 
 export interface CollectionListView {
