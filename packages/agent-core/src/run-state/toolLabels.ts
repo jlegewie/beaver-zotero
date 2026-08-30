@@ -1,7 +1,8 @@
 import { ToolCallStatus } from './atoms';
 import { ToolCallPart } from '../agents/types';
 import { parseArgs, TOOL_BASE_LABELS } from './toolCallRequest';
-import { isItemRow, type ToolResultView } from './toolResultViews';
+import { isExternalReferenceListView, isItemRow, type ToolResultView } from './toolResultViews';
+import { extractAuthorLastName, type ExternalReference } from '../types/externalReferences';
 
 // The request-side reference extraction lives in `toolCallRequest`; re-exported
 // here so label consumers can take it from this module.
@@ -41,6 +42,7 @@ const CAPABILITY_LABELS: Record<string, string> = {
     zotero_annotations: 'Annotations',
     external_literature: 'External Literature',
     beaver_help: 'Beaver Help',
+    citation_graph: 'Citation Graph',
 };
 
 function humanizeCapabilityId(id: string): string {
@@ -162,6 +164,14 @@ export function getToolResultLabelSuffix(
                 const n = view.found_count ?? view.references.length;
                 return n != null ? ` (${n} found)` : null;
             }
+            // find_related_works: the page is a window into a larger set.
+            if (view.tool_info) {
+                const shown = view.references.length;
+                const total = view.tool_info.total_count;
+                // Empty pages (not_found, page beyond the end) get no count.
+                if (!total || !shown) return null;
+                return total > shown ? ` (${shown} of ${total})` : ` (${plural(total, 'result')})`;
+            }
             const n = view.references.length;
             return n ? ` (${plural(n, 'result')})` : null;
         }
@@ -266,6 +276,15 @@ function skillNameFromPath(path: string): string {
 /**
  * Truncate a string to a maximum length, adding ellipsis if needed.
  */
+/** Compact citation-style label for a work: "Vaswani et al. (2017)". */
+function relatedWorkShortLabel(work: ExternalReference): string {
+    const first = work.authors?.[0] ? extractAuthorLastName(work.authors[0]) : undefined;
+    const name = first ? ((work.authors?.length ?? 0) > 1 ? `${first} et al.` : first) : null;
+    if (name) return work.year ? `${name} (${work.year})` : name;
+    if (work.title) return truncate(work.title, 40);
+    return 'work';
+}
+
 function truncate(str: string, maxLength: number): string {
     if (str.length <= maxLength) return str;
     return str.slice(0, maxLength) + '...';
@@ -658,6 +677,22 @@ function computeMainLabel(
             }
             if (count > 0) {
                 return `${baseLabel}: ${count} paper${count === 1 ? '' : 's'}`;
+            }
+            return baseLabel;
+        }
+
+        case 'find_related_works': {
+            const relation = args.relation as string | undefined;
+            const work =
+                view && isExternalReferenceListView(view) ? (view.tool_info?.work ?? null) : null;
+            const workLabel = work ? relatedWorkShortLabel(work) : null;
+            if (relation === 'references') {
+                if (workLabel) return `References in ${workLabel}`;
+                return view ? 'References' : 'Finding references';
+            }
+            if (relation === 'cited_by') {
+                if (workLabel) return `Citations to ${workLabel}`;
+                return view ? 'Citations' : 'Finding citing works';
             }
             return baseLabel;
         }

@@ -37,6 +37,7 @@ import {
     HighlighterIcon,
     ChattingIcon,
     LayersIcon,
+    FlowConnectionIcon,
     WrenchIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, toggleToolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
@@ -93,6 +94,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     // External search tools
     external_search: GlobalSearchIcon,
     lookup_work: GlobalSearchIcon,
+    find_related_works: FlowConnectionIcon,
 
     // Create item tool
     create_zotero_item: DocumentValidationIcon,
