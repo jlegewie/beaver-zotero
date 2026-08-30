@@ -268,7 +268,7 @@ describe('find_related_works labels', () => {
     it('completed label names the resolved work and the page window', () => {
         const view = relatedWorksView(true, 10);
         expect(getToolCallLabel(tc('find_related_works', { relation: 'cited_by', work: 'W1' }), 'completed', { view })).toBe(
-            'Citations to Vaswani et al. (2017) (10 of 13)',
+            'Citations to Vaswani et al. 2017 (10 of 13)',
         );
     });
 

@@ -276,7 +276,7 @@ function skillNameFromPath(path: string): string {
 /**
  * Truncate a string to a maximum length, adding ellipsis if needed.
  */
-/** Compact citation-style label for a work: "Vaswani et al. (2017)". */
+/** Compact citation-style label for a work: "Vaswani et al. 2017". */
 function relatedWorkShortLabel(work: ExternalReference): string {
     const first = work.authors?.[0] ? extractAuthorLastName(work.authors[0]) : undefined;
     const name = first ? ((work.authors?.length ?? 0) > 1 ? `${first} et al.` : first) : null;
