@@ -3,6 +3,7 @@ import type {
     ComponentsHost,
     ExternalReferenceActionsProps,
     AgentActionInStreamProps,
+    RequestSourcesMenuProps,
 } from '@beaver/agent-ui/host/types';
 import ActionButtons from './ActionButtons';
 import { AgentActionInStream } from './AgentActionInStream';
@@ -10,6 +11,7 @@ import { AgentActionsReview } from './AgentActionsReview';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { CSSItemTypeIcon } from '../../../components/icons/zotero';
 import { ZOTERO_ICONS, ZoteroIcon } from '../../../components/icons/ZoteroIcon';
+import { RequestSourcesMenu } from '../../../components/ui/menus/RequestSourcesMenu';
 
 /**
  * Zotero implementations of the host-provided, client-specific UI components.
@@ -36,5 +38,8 @@ export const zoteroComponents: ComponentsHost = {
     },
     revealInLibraryIcon({ className }: { className?: string }) {
         return <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={10} className={className} />;
+    },
+    requestSourcesMenu(props: RequestSourcesMenuProps) {
+        return <RequestSourcesMenu {...props} />;
     },
 };

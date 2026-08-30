@@ -7,7 +7,18 @@ import { useAddSourcesMenu, AddSourcesMenuHandle } from '@beaver/agent-ui/compos
 
 type Hook = ReturnType<typeof useAddSourcesMenu>;
 
-const RECT = { left: 40, top: 200, bottom: 260 } as DOMRect;
+const RECT = { left: 40, right: 340, top: 200, bottom: 260 } as DOMRect;
+
+/** Stands in for the editor's contenteditable, which the hook measures to
+ *  place the menu. jsdom reports no caret rect, so the fallback (the editor's
+ *  own left edge) applies. */
+function editorElement(): HTMLElement {
+    const el = document.createElement('div');
+    el.getBoundingClientRect = () => RECT;
+    return el;
+}
+
+const EDITOR = editorElement();
 
 /**
  * Renders the hook and exposes its latest return value, plus the editor seams
@@ -76,7 +87,7 @@ describe('useAddSourcesMenu', () => {
     describe('opening from a typed @', () => {
         it('opens when the @ starts a word, with the editor as its search box', () => {
             harness = mount();
-            expect(harness.run(h => h.handleTrigger('find @', RECT))).toBe(true);
+            expect(harness.run(h => h.handleTrigger('find @', EDITOR))).toBe(true);
             expect(harness.hook.isOpen).toBe(true);
             expect(harness.hook.query).toBe('');
             expect(harness.hook.querySource).toBe('editor');
@@ -84,19 +95,43 @@ describe('useAddSourcesMenu', () => {
 
         it('opens when the @ is the first character', () => {
             harness = mount();
-            expect(harness.run(h => h.handleTrigger('@', RECT))).toBe(true);
+            expect(harness.run(h => h.handleTrigger('@', EDITOR))).toBe(true);
             expect(harness.hook.isOpen).toBe(true);
         });
 
         it('leaves an @ inside a word alone', () => {
             harness = mount();
-            expect(harness.run(h => h.handleTrigger('joscha@', RECT))).toBe(false);
+            expect(harness.run(h => h.handleTrigger('joscha@', EDITOR))).toBe(false);
             expect(harness.hook.isOpen).toBe(false);
+        });
+
+        it('opens at the caret rather than the composer\'s left edge', () => {
+            // A wide composer whose text ends far to the right: the menu
+            // belongs under the `@`, not under the editor's left edge.
+            const editor = editorElement();
+            const line = document.createElement('span');
+            const text = document.createTextNode('a long line ending far right @');
+            line.appendChild(text);
+            line.getBoundingClientRect = () => ({ left: 280, top: 210, bottom: 230 } as DOMRect);
+            editor.appendChild(line);
+            document.body.appendChild(editor);
+            document.getSelection()!.collapse(text, text.length);
+
+            harness = mount();
+            harness.run(h => h.handleTrigger('a long line ending far right @', editor));
+            expect(harness.hook.position.x).toBe(280);
+            editor.remove();
+        });
+
+        it('falls back to the composer\'s left edge when the caret has no rect', () => {
+            harness = mount();
+            harness.run(h => h.handleTrigger('find @', EDITOR));
+            expect(harness.hook.position.x).toBe(40);
         });
 
         it('keeps the typed @ in the editor content', () => {
             harness = mount();
-            harness.run(h => h.handleTrigger('find @', RECT));
+            harness.run(h => h.handleTrigger('find @', EDITOR));
             expect(harness.contentRef.current).toBe('find @');
             expect(harness.deleted).toEqual([]);
         });
@@ -105,7 +140,7 @@ describe('useAddSourcesMenu', () => {
     describe('typing the query', () => {
         beforeEach(() => {
             harness = mount();
-            harness.run(h => h.handleTrigger('find @', RECT));
+            harness.run(h => h.handleTrigger('find @', EDITOR));
         });
 
         it('treats everything after the @ as the query', () => {
@@ -144,7 +179,7 @@ describe('useAddSourcesMenu', () => {
     describe('closing', () => {
         beforeEach(() => {
             harness = mount();
-            harness.run(h => h.handleTrigger('find @', RECT));
+            harness.run(h => h.handleTrigger('find @', EDITOR));
         });
 
         it('closes on a space typed as the first query character', () => {
@@ -209,7 +244,7 @@ describe('useAddSourcesMenu', () => {
         it('steps back out of a submenu on an empty-query Backspace', () => {
             const goBack = vi.fn(() => true);
             harness = mount({ goBack });
-            harness.run(h => h.handleTrigger('@', RECT));
+            harness.run(h => h.handleTrigger('@', EDITOR));
             const { event, prevented } = keyEvent('Backspace');
             expect(harness.run(h => h.handleKeyDown(event))).toBe(true);
             expect(goBack).toHaveBeenCalled();
@@ -220,7 +255,7 @@ describe('useAddSourcesMenu', () => {
         it('lets Backspace delete the @ when there is no submenu to leave', () => {
             const goBack = vi.fn(() => false);
             harness = mount({ goBack });
-            harness.run(h => h.handleTrigger('@', RECT));
+            harness.run(h => h.handleTrigger('@', EDITOR));
             const { event, prevented } = keyEvent('Backspace');
             expect(harness.run(h => h.handleKeyDown(event))).toBe(false);
             expect(prevented.value).toBe(false);
@@ -228,7 +263,7 @@ describe('useAddSourcesMenu', () => {
 
         it('drops the typed query from the editor when entering a submenu', () => {
             harness = mount();
-            harness.run(h => h.handleTrigger('@', RECT));
+            harness.run(h => h.handleTrigger('@', EDITOR));
             harness.run(h => h.handleChange('@lib'));
             harness.run(h => h.resetQuery());
             expect(harness.deleted).toEqual(['lib'.length]);

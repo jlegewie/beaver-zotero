@@ -40,6 +40,7 @@ export { default as DocumentValidationIcon } from './DocumentValidationIcon';
 export { default as DownloadIcon } from './DownloadIcon';
 export { default as AttachmentIcon } from './AttachmentIcon';
 export { default as ArrowUpIcon } from './ArrowUpIcon';
+export { default as ArrowUpLineIcon } from './ArrowUpLineIcon';
 export { default as ArrowDownIcon } from './ArrowDownIcon';
 export { default as ArrowLeftIcon } from './ArrowLeftIcon';
 export { default as MoreHorizontalIcon } from './MoreHorizontalIcon';

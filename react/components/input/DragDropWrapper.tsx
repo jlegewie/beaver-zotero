@@ -507,7 +507,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         >
             {/* Drag overlay - always render but control visibility with opacity/transform */}
             <div
-                className="absolute inset-0 display-flex items-center justify-center z-10 bg-quaternary border-popup"
+                className="absolute inset-0 display-flex items-center justify-center z-10 bg-overlay border-popup"
                 style={{ 
                     opacity: isDragging ? 0.8 : 0, 
                     borderRadius: '6px', 

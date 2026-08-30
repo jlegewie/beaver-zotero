@@ -31,6 +31,12 @@ interface RunStatusIndicatorProps {
      * is the better estimate anyway, since that is when the wait became visible.
      */
     waitingSince?: number | null;
+    /**
+     * What the line says when neither a reconnect nor a backend retry is
+     * speaking for it. Defaults to the ordinary wait for a model's next token;
+     * a caller waiting on something else names that instead.
+     */
+    idleLabel?: string;
 }
 
 /**
@@ -61,7 +67,7 @@ function useElapsedSeconds(since: number | null | undefined): number {
  * connection.
  * Note: Errors are displayed separately by RunErrorDisplay.
  */
-export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, runId, lastMessageHasToolCall, followsText, waitingSince }) => {
+export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, runId, lastMessageHasToolCall, followsText, waitingSince, idleLabel = 'Generating' }) => {
     const retryState = useAtomValue(wsRetryAtom);
     const reconnectState = useAtomValue(wsReconnectingAtom);
     const elapsedSeconds = useElapsedSeconds(waitingSince);
@@ -74,7 +80,7 @@ export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, 
     const state = {
         reconnect: reconnectState,
         backendRetry: isRetrying ? retryState : null,
-        idleLabel: 'Generating',
+        idleLabel,
     };
     const text = runStatusText({
         ...state,

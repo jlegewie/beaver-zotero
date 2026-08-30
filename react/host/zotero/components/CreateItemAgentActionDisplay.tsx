@@ -499,7 +499,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
     return (
         <div
             id={`agent-actions-${groupId}`}
-            className="border-popup rounded-md display-flex flex-col min-w-0"
+            className="border-card rounded-card display-flex flex-col min-w-0"
         >
             {/* Header with button and action icons */}
             <div

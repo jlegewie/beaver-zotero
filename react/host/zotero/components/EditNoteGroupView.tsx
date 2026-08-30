@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
-import { getToolCallStatus, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
+import { getToolCallStatus, runToolResultsAtom } from '@beaver/agent-core/run-state/atoms';
 import {
     AgentAction,
     agentActionsByToolcallAtom,
@@ -100,7 +100,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const isRunStreaming = runStatus === 'in_progress';
     const [isHovered, setIsHovered] = useState(false);
 
-    const resultsMap = useAtomValue(toolResultsMapAtom);
+    // Scoped to this run: every call in the group belongs to it, and a
+    // thread-wide subscription would re-render the group on every streamed frame.
+    const resultsMap = useAtomValue(useMemo(() => runToolResultsAtom(runId), [runId]));
     // Subscribe to the grouped-actions map itself (not the stable getter atom)
     // so partStates re-derives whenever any agent action changes — the getter's
     // identity never changes, which would leave memoized rows showing stale
@@ -719,7 +721,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
     return (
         <div
-            className="agent-action-view agent-action-group rounded-md flex flex-col min-w-0 border-popup mb-2"
+            className="agent-action-view agent-action-group rounded-card flex flex-col min-w-0 border-card mb-2"
             data-edit-count={editCount}
             data-note-key={resolvedTarget ? `${resolvedTarget.libraryId}-${resolvedTarget.zoteroKey}` : 'pending'}
         >

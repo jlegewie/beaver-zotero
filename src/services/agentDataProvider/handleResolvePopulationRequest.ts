@@ -1,26 +1,36 @@
 /**
  * resolve_population handler.
  *
- * Resolves a batch operation's population — every item matching a filter
+ * Resolves a batch job's population — every item matching a filter
  * description — in a single round trip, returning ids only. The population is
  * frozen by the backend and later sliced against the returned order, so this
  * handler must never load or serialize items (that is what made the old
  * `list_items` paging loop cost O(library)), and the order it returns must be
  * deterministic.
  *
- * Filters are ANDed, except that `collection_keys` and `tags` are each an
- * OR-group inside that AND: the population is the items in ANY of the
- * collections that also carry ANY of the tags. An OR-group is expressed as a
- * scope search (see `orGroupScope`) rather than as conditions on the main
- * search, because Zotero's join mode is per-search — flipping the main search
- * to 'any' would turn its item-type guards into always-true disjuncts and
- * select the whole library.
+ * Filters are ANDed. Some of them are internally an OR-group inside that AND:
+ * `collection_keys`, `tags`, and — when `conditions_join_mode` is 'any' — the
+ * `conditions` list. So the population is the items in ANY of the collections
+ * that also carry ANY of the tags and also satisfy the conditions group.
+ *
+ * An OR-group is expressed as its own search (see `valuesOrGroup` and
+ * `conditionsOrGroup`) rather than as conditions on the main search, because
+ * Zotero's join mode is per-search: flipping the main search to 'any' would
+ * turn its item-type guards into always-true disjuncts and select the whole
+ * library. Groups are recombined with the main search by `setScope` or by
+ * intersecting ids, both of which keep the group ANDed with everything else.
+ *
+ * A filter that cannot be applied as described FAILS the request; this handler
+ * never answers with ids beside a warning. The population it resolves is about
+ * to be mutated, so an answer that no longer matches the description has to be
+ * impossible to act on, not merely flagged.
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSResolvePopulationRequest,
     WSResolvePopulationResponse,
+    ZoteroSearchCondition,
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { modelObjectId } from '../../utils/libraryIdentity';
 import { resolveStoredTagName, validateLibraryAccess } from './utils';
@@ -145,39 +155,105 @@ function errorResponse(
 }
 
 /**
- * A search matching the union of `values` under one condition name.
+ * Conditions that cannot be a disjunct of a `joinMode any` group.
  *
- * `joinMode any` is safe here and nowhere else in this handler: the scope
- * search carries nothing but this one group, so there is no ANDed guard for
- * the OR to swallow. The caller intersects it into the population with
- * `setScope`, which is what keeps the group ANDed with everything else.
+ * Zotero pulls each of these out of the condition list while building the query
+ * and applies it as its own ` AND (...)` clause, which makes it a search-wide
+ * flag rather than something the join mode combines. Inside an OR-group it
+ * would therefore be ANDed with the disjuncts and make the population NARROWER
+ * than the caller described, with nothing to signal it. Under join mode 'all'
+ * they are ordinary narrowing filters and stay allowed.
  *
- * Returns null for an empty group — an unscoped search matches the whole
- * library, so attaching one would widen the population instead of narrowing
- * it.
+ * The restructuring conditions (`joinMode`, `recursive`, `noChildren`, ...)
+ * never reach here: `addSearchCondition` refuses them outright.
  */
-function orGroupScope(
+const NON_DISJUNCT_CONDITION_FIELDS = new Set(['unfiled', 'retracted', 'publications', 'feed']);
+
+/**
+ * An empty group search over one library, in join mode 'any'.
+ *
+ * `joinMode any` is safe in a group search and nowhere else in this handler:
+ * the group carries nothing but its own disjuncts, so there is no ANDed guard
+ * for the OR to swallow. The caller keeps the group ANDed with the rest of the
+ * filters by attaching it as the main search's scope or by intersecting its
+ * ids.
+ */
+function newOrGroup(libraryID: number): ZoteroSearchWritable {
+    const group = new Zotero.Search() as unknown as ZoteroSearchWritable;
+    group.libraryID = libraryID;
+    group.addCondition('joinMode', 'any', '');
+    return group;
+}
+
+/**
+ * A group matching the union of `values` under one condition name.
+ *
+ * Returns null for an empty group — a search with no conditions matches the
+ * whole library, so attaching one would widen the population instead of
+ * narrowing it.
+ */
+function valuesOrGroup(
     libraryID: number,
     condition: 'collection' | 'tag',
     values: string[],
+    recursive: boolean,
 ): Zotero.Search | null {
     if (values.length === 0) return null;
 
+    const group = newOrGroup(libraryID);
+    for (const value of values) {
+        group.addCondition(condition, 'is', value);
+    }
+    // `recursive` applies to every collection in the group. It is a flag rather
+    // than a disjunct, so it stays ANDed even under join mode 'any' — it says
+    // how to read a collection condition, not what to match.
+    if (condition === 'collection' && recursive) {
+        group.addCondition('recursive', 'true', '');
+    }
     // Returned as `Zotero.Search`, not `ZoteroSearchWritable`: `setScope`
     // takes the former, and checking the interface against it trips TS2589
     // ("type instantiation is excessively deep") at the call site.
-    const scope = new Zotero.Search() as unknown as ZoteroSearchWritable;
-    scope.libraryID = libraryID;
-    scope.addCondition('joinMode', 'any', '');
-    for (const value of values) {
-        scope.addCondition(condition, 'is', value);
+    return group as unknown as Zotero.Search;
+}
+
+/**
+ * A group matching an item that satisfies ANY of `conditions`.
+ *
+ * `recursive` is added for the same reason the main search gets it: a
+ * `collection` condition would otherwise match direct membership only while
+ * `collection_keys` recursed.
+ *
+ * Returns null when no condition survived validation, because such a group
+ * would carry nothing but its join mode and match the whole library. The
+ * refused conditions are recorded in `warnings`, which fails the request.
+ */
+function conditionsOrGroup(
+    libraryID: number,
+    conditions: ZoteroSearchCondition[],
+    recursive: boolean,
+    warnings: string[],
+): Zotero.Search | null {
+    if (conditions.length === 0) return null;
+
+    const group = newOrGroup(libraryID);
+    let disjuncts = 0;
+    for (const condition of conditions) {
+        if (addSearchCondition(group, condition, warnings, 'handleResolvePopulationRequest', libraryID)) {
+            disjuncts++;
+        }
     }
-    return scope as unknown as Zotero.Search;
+    if (disjuncts === 0) return null;
+
+    if (recursive) {
+        group.addCondition('recursive', 'true', '');
+    }
+    return group as unknown as Zotero.Search;
 }
 
 /**
  * Handle resolve_population request from backend.
- * Runs one native Zotero search with every filter group ANDed and returns ids only.
+ * Runs one native Zotero search per filter group, ANDs the groups together and
+ * returns ids only.
  */
 export async function handleResolvePopulationRequest(
     request: WSResolvePopulationRequest
@@ -227,6 +303,32 @@ export async function handleResolvePopulationRequest(
                 'collection_keys contained an empty entry. Pass collection keys from list_collections, or omit the filter.',
                 'invalid_request',
             );
+        }
+
+        // How the `conditions` list is joined among itself, and nothing else.
+        // Anything other than 'any' resolves to 'all': a bogus value must not
+        // widen the population.
+        const conditionsJoinMode = request.conditions_join_mode === 'any' ? 'any' : 'all';
+        const requestedConditions = request.conditions ?? [];
+
+        // A condition Zotero applies as a search-wide flag cannot be one of the
+        // disjuncts, and silently behaves as its opposite (narrowing, not
+        // widening). Refuse it rather than resolve a population that does not
+        // match the description the user is about to approve.
+        if (conditionsJoinMode === 'any') {
+            const flagCondition = requestedConditions.find(
+                (condition) => NON_DISJUNCT_CONDITION_FIELDS.has(condition.field));
+            if (flagCondition) {
+                return errorResponse(
+                    request.request_id,
+                    `conditions_join_mode='any' cannot be combined with field='${flagCondition.field}': `
+                        + 'Zotero applies it as a search-wide flag, so it would be ANDed with the other '
+                        + 'conditions rather than ORed with them and the population would be narrower than '
+                        + 'described. Give it as a filter that always applies (unfiled has its own request '
+                        + 'flag), or resolve it as a separate batch.',
+                    'invalid_request',
+                );
+            }
         }
 
         // Resolve the collection scope. The wire always carries BARE keys; the
@@ -287,33 +389,55 @@ export async function handleResolvePopulationRequest(
             search.addCondition('tag', 'doesNotContain', '');
         }
 
-        for (const condition of request.conditions ?? []) {
-            addSearchCondition(search, condition, warnings, 'handleResolvePopulationRequest');
+        // Under join mode 'all' the conditions are ANDed with every other
+        // filter, so they belong on the main search. Under 'any' they become a
+        // third OR-group below instead: putting them here would require
+        // `joinMode any` on the main search, which turns the itemType guards
+        // into always-true disjuncts and selects the whole library.
+        if (conditionsJoinMode === 'all') {
+            for (const condition of requestedConditions) {
+                addSearchCondition(search, condition, warnings, 'handleResolvePopulationRequest', library.libraryID);
+            }
         }
 
         // `recursive` only affects collection conditions, so this is a no-op
         // unless one was given as a condition — and it must be added for those
         // too, or a `collection` condition would match direct membership only
         // while `collection_keys` recursed. Mirrors handleZoteroSearchRequest.
+        // The conditions group carries its own, for the same reason.
         if (recursive) {
             search.addCondition('recursive', 'true', '');
         }
 
-        // The two OR-groups. A search carries ONE scope, and scopes must not be
+        // The OR-groups, in a fixed order so which one becomes the scope is
+        // deterministic. A search carries ONE scope, and scopes must not be
         // nested: Zotero 7 materializes an outer scope from `getSQL()`, which
         // ignores that scope's own `_scope`, so the inner group is silently
         // dropped — and a dropped group WIDENS the population to every item the
         // outer group matched. (Zotero 10 added a branch that runs a nested
         // scope properly, which is exactly why the bug is invisible there.) So
-        // one group becomes the scope and the other is intersected below.
-        const collectionScope = orGroupScope(library.libraryID, 'collection', requestedCollectionKeys);
-        if (collectionScope && recursive) {
-            // `recursive` is special, not a disjunct, so it stays ANDed even
-            // under joinMode 'any' — it applies to every collection in the group.
-            collectionScope.addCondition('recursive', 'true', '');
+        // the first group becomes the scope and the rest are intersected below.
+        const groups = [
+            valuesOrGroup(library.libraryID, 'collection', requestedCollectionKeys, recursive),
+            valuesOrGroup(library.libraryID, 'tag', resolvedTags, recursive),
+            conditionsJoinMode === 'any'
+                ? conditionsOrGroup(library.libraryID, requestedConditions, recursive, warnings)
+                : null,
+        ].filter((group): group is Zotero.Search => group !== null);
+
+        // Every condition is now in place, so this is the first point at which
+        // a refused one is known. A population is about to be MUTATED, and what
+        // is left of the filter no longer describes it, so the request fails
+        // rather than resolving ids beside a warning: an empty answer cannot be
+        // acted on by mistake, and it is how every other unapplicable filter in
+        // this handler already answers. A read path can afford to hand back
+        // results and a warning; this one cannot.
+        if (warnings.length > 0) {
+            logger(`handleResolvePopulationRequest: Refused ${warnings.length} condition(s)`, 1);
+            return errorResponse(request.request_id, warnings.join(' '), 'invalid_condition');
         }
-        const tagScope = orGroupScope(library.libraryID, 'tag', resolvedTags);
-        const scope = collectionScope ?? tagScope;
+
+        const [scope, ...extraGroups] = groups;
         if (scope) {
             search.setScope(scope, true);
         }
@@ -332,14 +456,15 @@ export async function handleResolvePopulationRequest(
 
         let itemIds = await search.search();
 
-        // The group that did not become the scope, intersected here. Running it
-        // as its own search costs one ids-only query and is what makes the two
-        // groups independent of how a given Zotero version materializes a
+        // Every group that did not become the scope, intersected here. Running
+        // one as its own search costs a single ids-only query and is what makes
+        // the groups independent of how a given Zotero version materializes a
         // nested scope. Intersecting can only narrow, which is the safe
         // direction for a population about to be mutated.
-        if (collectionScope && tagScope && itemIds.length > 0) {
-            const tagged = new Set(await tagScope.search());
-            itemIds = itemIds.filter(id => tagged.has(id));
+        for (const group of extraGroups) {
+            if (itemIds.length === 0) break;
+            const matched = new Set(await group.search());
+            itemIds = itemIds.filter(id => matched.has(id));
         }
 
         // has_attachments, in SQL. This is the only filter that could
@@ -354,6 +479,13 @@ export async function handleResolvePopulationRequest(
                 ? itemIds.filter(id => withAttachments.has(id))
                 : itemIds.filter(id => !withAttachments.has(id));
         }
+
+        // How many bibliographic items the filters matched, captured before an
+        // attachment population is derived from them. From here on `total_count`
+        // counts attachments for an attachment scope, and is 0 when none of the
+        // matched items has one — reporting this alongside it is what lets the
+        // caller tell that apart from filters that matched nothing.
+        const matchedItemCount = itemIds.length;
 
         // An attachment population is the matched items' own attachments, so
         // it is derived here rather than searched for. Standalone attachments
@@ -374,7 +506,7 @@ export async function handleResolvePopulationRequest(
         if (maxItems === 0) {
             logger(
                 `handleResolvePopulationRequest: Returning 0/${totalCount} item ids`
-                    + `${totalCount > 0 ? ' (truncated)' : ''}${warnings.length ? ` with ${warnings.length} warning(s)` : ''}`,
+                    + `${totalCount > 0 ? ' (truncated)' : ''}`,
                 1,
             );
             return {
@@ -382,10 +514,13 @@ export async function handleResolvePopulationRequest(
                 request_id: request.request_id,
                 item_ids: [],
                 total_count: totalCount,
+                matched_item_count: matchedItemCount,
                 truncated: totalCount > 0,
                 library_name: library.name,
                 collection_names: collectionNames,
-                warnings: warnings.length ? warnings : undefined,
+                // Echoed so a caller that asked for 'any' can tell an applied
+                // 'any' from a provider that never knew the field.
+                conditions_join_mode: conditionsJoinMode,
             };
         }
 
@@ -405,7 +540,7 @@ export async function handleResolvePopulationRequest(
 
         logger(
             `handleResolvePopulationRequest: Returning ${resultIds.length}/${totalCount} item ids`
-                + `${truncated ? ' (truncated)' : ''}${warnings.length ? ` with ${warnings.length} warning(s)` : ''}`,
+                + `${truncated ? ' (truncated)' : ''}`,
             1,
         );
 
@@ -414,12 +549,15 @@ export async function handleResolvePopulationRequest(
             request_id: request.request_id,
             item_ids: resultIds,
             total_count: totalCount,
+            matched_item_count: matchedItemCount,
             truncated,
             // Where the population lives, in the names the user gave those
             // places. The approval card states the location from these alone.
             library_name: library.name,
             collection_names: collectionNames,
-            warnings: warnings.length ? warnings : undefined,
+            // Echoed so a caller that asked for 'any' can tell an applied
+            // 'any' from a provider that never knew the field.
+            conditions_join_mode: conditionsJoinMode,
         };
     } catch (error) {
         logger(`handleResolvePopulationRequest: Error: ${error}`, 1);

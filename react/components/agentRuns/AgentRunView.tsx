@@ -12,10 +12,12 @@ import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
 import { RunInterruptedDisplay } from './RunInterruptedDisplay';
 import { threadWarningsAtom } from '../../atoms/warnings';
-import { toolResultsMapAtom, resumedRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
+import { resumeChainAtom, runToolResultsAtom, resumedRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
-import { streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
+import { autoReplacementPendingRunIdsAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { getHost } from '@beaver/agent-ui/host';
+import BatchRunReceipt, { hasBatchReceipt } from '@beaver/agent-ui/chat/BatchRunReceipt';
+import { FindQueryProvider } from '@beaver/agent-ui/chat/findContext';
 
 interface AgentRunViewProps {
     run: AgentRun;
@@ -32,7 +34,20 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     const allWarnings = useAtomValue(threadWarningsAtom);
     const runWarnings = allWarnings.filter((w) => w.run_id === run.id && w.type !== 'credit_info');
     const resumedRunIds = useAtomValue(resumedRunIdsAtom);
-    const resultsMap = useAtomValue(toolResultsMapAtom);
+    // Scoped to this run rather than the thread: a thread-wide subscription
+    // re-renders every run on every frame of a later run's response.
+    const resultsMap = useAtomValue(useMemo(() => runToolResultsAtom(run.id), [run.id]));
+    // A response continued after an interruption spans several runs but reads
+    // as one message, so what the whole answer ended up doing belongs under its
+    // last run — beside the footer, which already speaks for the chain. An
+    // ordinary run is a chain of one, so nothing changes for it.
+    const chainAtomValue = useAtomValue(useMemo(() => resumeChainAtom(run.id), [run.id]));
+    // Empty only if this run has left the thread while its card is still
+    // mounted. The chain is always at least the run itself.
+    const chainRuns = useMemo(
+        () => (chainAtomValue.length > 0 ? chainAtomValue : [run]),
+        [chainAtomValue, run],
+    );
     const streamingDoneRunIds = useAtomValue(streamingDoneRunIdsAtom);
     const isPostProcessing = streamingDoneRunIds.has(run.id);
     // Safe to subscribe from every run in the thread: this atom changes when a
@@ -43,6 +58,11 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // footer give way to the continuation's, and it shows the subtle resume
     // line instead. Covers a failed run and an interrupted one alike.
     const wasResumed = wasRunContinued(run, resumedRunIds);
+
+    // A run the client is already replacing on its own. Its error card is
+    // suppressed until the replacement lands — the failure is about to be
+    // undone, and flashing it up would report a problem the reader never had.
+    const autoReplacementPending = useAtomValue(autoReplacementPendingRunIdsAtom).has(run.id);
 
     // A run that was cut off (Beaver closed, connection dropped, server
     // restarted) rather than finished or stopped by the user gets an offer to
@@ -68,7 +88,12 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
         () => shouldShowRunStatus(run, resultsMap, { isStreamQuiet }),
         [run, resultsMap, isStreamQuiet],
     );
-    const showStatusIndicator = isLastRun && runHasNothingToShow;
+    // The replacement is not instant: an auto-retry commits the failed run's
+    // removal on the backend first, and that round trip would otherwise leave
+    // the card with a suppressed error, no spinner, and nothing to say the
+    // client is working. The run's own status is terminal, so this is the one
+    // wait `shouldShowRunStatus` cannot see.
+    const showStatusIndicator = isLastRun && (runHasNothingToShow || autoReplacementPending);
 
     // Where the visible wait started, so the indicator can count it up. Null
     // while the run has produced nothing yet: there is no event to count from,
@@ -105,10 +130,13 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // Terminal statuses: the run is done. `awaiting_deferred` is still live (see isRunActive).
     const isTerminal = run.status === 'completed' || run.status === 'error' || run.status === 'canceled';
 
+    const showRunOutcomes = isTerminal && !wasResumed;
+    const showBatchReceipt = showRunOutcomes && hasBatchReceipt(chainRuns);
+
     // Allow editing when run is in a terminal state (not actively streaming or awaiting approval)
     const canEdit = !isStreaming && isTerminal;
 
-    return (
+    const runCard = (
         <div id={`run-${run.id}`} className="display-flex flex-col gap-4" ref={ref}>
             {/* User's message */}
             {showUserMessage && <UserRequestView userPrompt={run.user_prompt} runId={run.id} canEdit={canEdit} />}
@@ -130,10 +158,15 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 showStatusIndicator={showStatusIndicator}
                 status={run.status}
                 waitingSince={waitingSince}
+                // The pending signal covers an auto-resume too, but only the
+                // auto-retry has a wait to label: a resume installs its
+                // replacement in the same synchronous batch, so the failed run
+                // has stopped being the last one before anything renders.
+                statusIdleLabel={autoReplacementPending ? 'Retrying' : undefined}
             />
 
             {/* Error display (includes retry/resume buttons) - hide if run was resumed */}
-            {hasError && run.error && !wasResumed && (
+            {hasError && run.error && !wasResumed && !autoReplacementPending && (
                 <RunErrorDisplay runId={run.id} error={run.error} isLastRun={isLastRun} />
             )}
 
@@ -148,9 +181,19 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
             )}
 
 
+            {/* What this answer's batch jobs ended up doing. Above the changes
+                card, so the two read as outcome then detail: how each batch came
+                out, then the individual changes it made. */}
+            {showBatchReceipt && <BatchRunReceipt runs={chainRuns} />}
+
             {/* Agent actions (e.g., create item from citations) — client-specific
-                UI injected by the host; absent for clients without it. */}
-            {isTerminal && (getHost().components?.pendingActionsReview({ run }) ?? null)}
+                UI injected by the host; absent for clients without it. Actions
+                are recorded per run, so a continued answer lists each run's. */}
+            {showRunOutcomes && chainRuns.map((chainRun) => (
+                <React.Fragment key={chainRun.id}>
+                    {getHost().components?.pendingActionsReview({ run: chainRun }) ?? null}
+                </React.Fragment>
+            ))}
 
             {/* Suggestions (only for the last run, rendered below footer) */}
             {suggestionParts.length > 0 && !suggestionsDismissed && (
@@ -170,6 +213,16 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
 
         </div>
     );
+
+    // A streaming run is excluded from find highlighting: its text re-renders on
+    // every token, so highlighting it would re-run the markdown pipeline per
+    // token and make the find bar's match count jump around while the user
+    // reads. Only while it streams — a run waiting on the reader (a deferred
+    // approval) is not generating anything, and its answer is on screen to be
+    // searched like any other. The empty provider shadows the thread-level query
+    // for this run's whole subtree — no prop drilling, and it renders no element
+    // of its own, so the markup is unchanged either way.
+    return isStreaming ? <FindQueryProvider query="">{runCard}</FindQueryProvider> : runCard;
 }));
 
 AgentRunView.displayName = 'AgentRunView';

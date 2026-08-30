@@ -308,6 +308,11 @@ describe('libraryIdentity', () => {
         it('falls back to library_id when library_ref is absent', () => {
             expect(modelObjectIdFromReference({ library_id: 5, zotero_key: 'ABCD1234' })).toBe('5-ABCD1234');
         });
+
+        it.each(['', 'bad'])('falls back to library_id when library_ref is malformed (%j)', (library_ref) => {
+            expect(modelObjectIdFromReference({ library_id: 5, library_ref, zotero_key: 'ABCD1234' }))
+                .toBe('5-ABCD1234');
+        });
     });
 
     describe('resolveWriteTargetLibrary', () => {

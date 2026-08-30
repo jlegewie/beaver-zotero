@@ -64,6 +64,13 @@ export interface PendingBatchApproval {
      */
     destructiveWarning: string;
     /**
+     * What the job costs the user directly, rendered verbatim in its own
+     * block; set only for a run on the user's own API key that is large enough
+     * to warn about, and empty for everyone else — including every run whose
+     * cost the credit chip already quotes.
+     */
+    costWarning: string;
+    /**
      * Short line about the confirmation limit approving raises, shown beside
      * the title. Empty when the run has no credit ledger or the user switched
      * confirmations off, and the chip is then hidden.
@@ -80,6 +87,8 @@ export interface PendingBatchApproval {
     approveLabel: string;
     /** Decline button label, rendered verbatim */
     declineLabel: string;
+    /** Decline button label once instructions have been typed */
+    declineWithInstructionsLabel: string;
     /** Backend-provided docs link text */
     learnMoreLabel?: string;
     /** Docs path resolved against the client's environment-specific docs URL */
@@ -112,11 +121,16 @@ export const addPendingBatchApprovalAtom = atom(
                 scopeSecondary: event.scope_secondary,
                 message: event.message,
                 destructiveWarning: event.destructive_warning,
+                // Absent from a backend that predates the field, which is the
+                // same thing as a run with nothing to warn about.
+                costWarning: event.cost_warning || '',
                 creditChip: event.credit_chip,
                 creditTooltip: event.credit_tooltip,
                 defaultMode: event.default_mode,
                 approveLabel: event.approve_label,
                 declineLabel: event.decline_label,
+                declineWithInstructionsLabel:
+                    event.decline_with_instructions_label || event.decline_label,
                 learnMoreLabel: event.learn_more_label,
                 learnMorePath: event.learn_more_path,
                 timeoutSeconds: event.timeout_seconds,

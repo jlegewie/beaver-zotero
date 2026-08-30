@@ -1,11 +1,15 @@
-import type { ReactNode } from 'react';
+import type { MutableRefObject, ReactNode } from 'react';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { CitationRef } from '@beaver/agent-core/citations/citationGrammar';
 import type { Citation, PartLocation } from '@beaver/agent-core/types/citations';
 import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
-import type { ToolCallPart, AgentRun, AgentRunStatus } from '@beaver/agent-core/agents/types';
+import type { ToolCallPart, AgentRun, AgentRunStatus, MessageSearchFilters } from '@beaver/agent-core/agents/types';
+import type { MessageAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
+import type { MenuPosition, SearchMenuCloseReason } from '../primitives/SearchMenu';
+import type { AddSourcesMenuHandle, AddSourcesQuerySource } from '../composer/useAddSourcesMenu';
 import type { AgentActionType } from '@beaver/agent-core/protocol/agentProtocol';
+import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgress';
 
 /**
  * Everything the host needs to activate (navigate to / open) a cited location.
@@ -114,6 +118,12 @@ export interface NavigationHost {
      * omit it, and action pills degrade to hover-only.
      */
     openActionSettings?(actionId: string): void;
+    /**
+     * Navigate to what a batch outcome row names (collection filed into, tag
+     * applied). The target has no library — the host resolves the name or key
+     * against the libraries it can see.
+     */
+    revealBatchOutcome?(target: BatchOutcomeTarget): void | Promise<void>;
 }
 
 /**
@@ -451,6 +461,63 @@ export type AgentActionInStreamProps =
     };
 
 /**
+ * Host-rendered "+" picker for a user message being edited.
+ *
+ * Library search, collection/tag browse, and file pick are client-specific, so
+ * the shared overlay owns only the attachment/filter data and hands the picker
+ * to the host. Chip removal stays on the shared chip row.
+ */
+export interface RequestSourcesMenuProps {
+    attachments: MessageAttachment[];
+    filters: MessageSearchFilters | null;
+    /**
+     * Identifies the edit session these props belong to. Opaque: the picker
+     * captures it when it starts staging a pick and hands it back on
+     * completion, so the caller can tell a pick that belongs to the session on
+     * screen from one that outlived the session that started it.
+     */
+    editSessionId: number;
+    /**
+     * Attach what the user picked; the caller dedupes against `attachments`.
+     * The id is the one that was current when staging began.
+     */
+    onAddAttachments(attachments: MessageAttachment[], editSessionId: number): void;
+    /** Detach one attachment, keyed by `messageAttachmentIdentity`. */
+    onRemoveAttachment(attachmentKey: string): void;
+    /** Replace the search filters (see `onAddAttachments` for the id). */
+    onFiltersChange(filters: MessageSearchFilters, editSessionId: number): void;
+    /**
+     * True while a pick is still being staged (file copy, item load, filter
+     * serialize). The overlay holds sending so a submit in that window cannot
+     * regenerate without what the user just picked.
+     */
+    onPendingChange?(isPending: boolean): void;
+
+    // Menu state, owned by the caller so a typed `@` can open the picker with
+    // the editor as its search box (same as the composer). Produced by
+    // `useAddSourcesMenu`; only the picker itself is client-specific.
+    isMenuOpen: boolean;
+    menuPosition: MenuPosition;
+    searchQuery: string;
+    /** Whether the query comes from the editor (typed `@`) or the menu's field. */
+    querySource: AddSourcesQuerySource;
+    onQueryChange(query: string): void;
+    onOpen(position: MenuPosition): void;
+    /** Close without consuming the typed `@query` (Escape, click outside). */
+    onDismiss(reason: SearchMenuCloseReason): void;
+    /** Close because something was picked — the typed `@query` is consumed. */
+    onCommit(): void;
+    /** Clear the typed query but leave the menu open (entering a submenu). */
+    onResetQuery(): void;
+    /** Receives the open menu so the caller can step back out of a submenu. */
+    menuRef: MutableRefObject<AddSourcesMenuHandle | null>;
+
+    menuPortalContainer?: HTMLElement | null;
+    disabled?: boolean;
+    verticalPosition?: 'above' | 'below';
+}
+
+/**
  * Host-provided, client-specific UI components.
  *
  * Unlike the other slices (which inject *behavior*), this slice injects *UI* for
@@ -479,9 +546,9 @@ export interface ComponentsHost {
      */
     agentActionInStream(props: AgentActionInStreamProps): ReactNode;
     /**
-     * Render the post-run pending-approval review block (create-item / note /
-     * annotation mutation summaries). Return null when the client has nothing to
-     * approve.
+     * Render the post-run review block for the client's library changes
+     * (create-item / note / annotation mutation summaries), pending or settled.
+     * Return null when the client has nothing to show for the run.
      */
     pendingActionsReview(props: { run: AgentRun }): ReactNode;
     /**
@@ -504,6 +571,12 @@ export interface ComponentsHost {
      * null falls back to the package's generic library icon.
      */
     revealInLibraryIcon(props: { className?: string }): ReactNode;
+    /**
+     * Render the "+" picker for a user message being edited. Optional — a
+     * client with no library to pick from omits it, and the overlay then only
+     * lets the user remove what is already attached.
+     */
+    requestSourcesMenu?(props: RequestSourcesMenuProps): ReactNode;
 }
 
 /**

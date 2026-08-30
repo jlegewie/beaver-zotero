@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
-import { isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowUserScrolledAtom } from "./ui";
+import { isAtBottomAtom, isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowIsAtBottomAtom, windowUserScrolledAtom } from "./ui";
 
 import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "@beaver/agent-core/citations/atoms";
 import { maybeShowCitationTipAtom } from "./citationTip";
@@ -9,15 +9,16 @@ import { agentService } from "@beaver/agent-core/transport/agentService";
 import { threadService, ZoteroInstanceRef } from "@beaver/agent-core/transport/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes, currentZoteroInstanceRef } from "../../src/utils/zoteroUtils";
-import { isThreadInstanceMismatch } from "../utils/threadMatches";
+import { isThreadInstanceMismatch, threadModelToThreadData } from "../utils/threadMatches";
+import { upsertThreadsAtom, threadWriteStampAtom } from "./threadList";
 import { getHost } from '@beaver/agent-ui/host';
 import { logger } from "@beaver/agent-core/platform/logger";
 import { ApiError } from "@beaver/agent-core/types/apiErrors";
-import { resetMessageUIStateAtom, retainedReviewActionsAtom } from "./messageUIState";
+import { resetMessageUIStateAtom } from "./messageUIState";
 import { checkExternalReferencesAtom } from "./externalReferences";
 import { clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "@beaver/agent-core/citations/externalReferences";
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
-import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom } from "@beaver/agent-core/run-state/atoms";
+import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom, resetRunSelectorCaches } from "@beaver/agent-core/run-state/atoms";
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
 import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
 import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
@@ -40,6 +41,7 @@ import { enrichMessageAttachmentStub } from "../types/attachments/converters";
 import { zoteroReferenceKey } from "@beaver/agent-core/types/attachments/apiTypes";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
 import type { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
+import { flushPendingPartEvents } from "../utils/streamingPartQueue";
 
 /**
  * Stores a run ID that ThreadView should scroll to after a thread finishes loading.
@@ -130,6 +132,18 @@ export interface ThreadData {
     // masquerade as unattributed and bypass the mismatch confirm.
     zoteroUserId?: string | null;
     zoteroLocalId?: string | null;
+    /**
+     * Whether the user pinned this chat to the top of the history list. The
+     * wire field is `starred` (backend column and route vocabulary); every
+     * user-facing string says "pinned".
+     */
+    isPinned: boolean;
+    /**
+     * Agent the thread belongs to. Absent from a backend that predates the
+     * field. Needed so a scoped response is not treated as authoritative about
+     * another agent's threads.
+     */
+    agentName?: string | null;
 }
 
 // Thread messages and attachments
@@ -138,7 +152,10 @@ export interface ThreadData {
 export { currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom };
 
 /**
- * Atom to store the scroll position of the current thread
+ * Where the reader is in each thread, by thread id: the offset they scrolled
+ * back to. A thread with no entry is reopened at its bottom — the reader was
+ * following the response when they left it, or has never opened it — and the
+ * bottom is recorded by dropping the entry rather than storing an offset.
  */
 export const threadScrollPositionsAtom = atom<Record<string, number>>({});
 
@@ -172,7 +189,7 @@ export const currentThreadScrollPositionAtom = atom(
 );
 
 /**
- * Atom to store scroll positions for the separate window (independent from sidebar)
+ * The same, for the separate window, which scrolls independently of the sidebars.
  */
 export const windowScrollPositionsAtom = atom<Record<string, number>>({});
 
@@ -240,6 +257,9 @@ function confirmOpenMismatchedThread(): boolean {
  * This ensures the WebSocket connection is closed and UI state is consistent.
  */
 async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any, value?: any) => void): Promise<void> {
+    // A run canceled mid-response is archived as it stands, so it has to
+    // include the streamed text still sitting in the frame queue.
+    flushPendingPartEvents();
     const isPending = get(isWSChatPendingAtom);
     const activeRun = get(activeRunAtom);
     
@@ -269,6 +289,12 @@ async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any,
 }
 
 /**
+ * Counts chat navigations, so work started in one chat can tell it has been
+ * left behind.
+ */
+export const threadNavigationSeqAtom = atom(0);
+
+/**
  * Atom to create a new thread
  */
 export const newThreadAtom = atom(
@@ -288,6 +314,8 @@ export const newThreadAtom = atom(
             }
             set(isLoadingThreadAtom, true);
         }
+        // The user has committed to leaving. See threadNavigationSeqAtom.
+        set(threadNavigationSeqAtom, (seq) => seq + 1);
 
         try {
             // Cancel any active run before switching threads
@@ -319,6 +347,7 @@ export const newThreadAtom = atom(
             set(removePopupMessagesByTypeAtom, ['items_summary']);
             set(citationsAtom, []);
             set(resetCitationMarkersAtom);
+            resetRunSelectorCaches();
             set(clearComposerAtom);
             set(resetMessageUIStateAtom);
             set(clearExternalReferenceCacheAtom);
@@ -333,9 +362,14 @@ export const newThreadAtom = atom(
                     await set(updateReaderAttachmentAtom);
                 }
             }
-            // Reset scroll state for both sidebar and window
+            // Reset scroll state for both sidebar and window. The measured
+            // position is reset with the intent: the thread being opened has
+            // not been measured yet, and the previous thread's reading would
+            // otherwise decide whether the scroll-down button shows.
             set(userScrolledAtom, false);
             set(windowUserScrolledAtom, false);
+            set(isAtBottomAtom, true);
+            set(windowIsAtBottomAtom, true);
         } finally {
             // Always clear loading state
             set(isLoadingThreadAtom, false);
@@ -382,6 +416,11 @@ export const loadThreadAtom = atom(
 
         // Show loading state immediately for instant UI feedback
         set(isLoadingThreadAtom, true);
+        // The user has committed to leaving, and everything below this point —
+        // starting with the identity preflight's round trip — is time in which
+        // work belonging to the chat being left must not finish and act. See
+        // threadNavigationSeqAtom.
+        set(threadNavigationSeqAtom, (seq) => seq + 1);
 
         // Resolve the thread's instance identity (and name, from the same
         // request) BEFORE any thread-state mutation, so a canceled mismatch
@@ -389,6 +428,10 @@ export const loadThreadAtom = atom(
         const statefulChat = getPref('statefulChat');
         let identity = threadIdentity;
         let resolvedName = threadName ?? null;
+        // Captured before the fetch: a response that lands after a sign-out
+        // must not repopulate the store for the previous account, and one that
+        // predates a pin toggle must not write its stale flag back.
+        const threadWriteStamp = get(threadWriteStampAtom);
         if (identity === undefined && statefulChat) {
             try {
                 const thread = await threadService.getThread(threadId);
@@ -397,6 +440,10 @@ export const loadThreadAtom = atom(
                     zoteroLocalId: thread.zotero_local_id ?? null,
                 };
                 resolvedName = resolvedName ?? (thread.name || null);
+                // Feed the thread store: this is the one fetch a deep-linked
+                // chat gets, and the chat lists and the header's pin entry all
+                // read their state from there.
+                set(upsertThreadsAtom, { threads: [threadModelToThreadData(thread)], stamp: threadWriteStamp });
             } catch (error) {
                 // An unknown identity must abort rather than degrade to
                 // "matching": without it we cannot decide whether applied
@@ -437,9 +484,14 @@ export const loadThreadAtom = atom(
                 logger(`loadThreadAtom: Error cleaning up temporary annotations: ${error}`);
             });
 
-            // Reset scroll state for both sidebar and window
+            // Reset scroll state for both sidebar and window. The measured
+            // position is reset with the intent: the thread being opened has
+            // not been measured yet, and the previous thread's reading would
+            // otherwise decide whether the scroll-down button shows.
             set(userScrolledAtom, false);
             set(windowUserScrolledAtom, false);
+            set(isAtBottomAtom, true);
+            set(windowIsAtBottomAtom, true);
             // Set the current thread ID and name
             set(currentThreadIdAtom, threadId);
             set(currentThreadNameAtom, resolvedName);
@@ -452,9 +504,6 @@ export const loadThreadAtom = atom(
             set(clearAllPendingQuestionsAtom);
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearAllPendingBatchApprovalsAtom);
-            // A reopened thread takes a fresh snapshot containing only actions
-            // that are still pending.
-            set(retainedReviewActionsAtom, {});
             // Legacy non-stateful path: fetch the name from the local DB when
             // not provided (the stateful path already resolved it above).
             const threadNamePromise = !resolvedName && !statefulChat
@@ -555,7 +604,10 @@ export const loadThreadAtom = atom(
                         logger(`loadThreadAtom: Failed to preload page labels: ${err}`, 1)
                     );
 
-                // Set agent runs
+                // Set agent runs. The scoped run selectors are dropped in the
+                // same breath: reset any earlier and the old thread's runs, still
+                // in the store while this load ran, would populate them again.
+                resetRunSelectorCaches();
                 set(threadRunsAtom, processedRuns);
 
                 // Reconcile toolcall_id mismatches between REST API and model messages
@@ -608,6 +660,7 @@ export const loadThreadAtom = atom(
                 }
             } else {
                 // No runs found, clear state
+                resetRunSelectorCaches();
                 set(threadRunsAtom, []);
                 set(threadAgentActionsAtom, []);
                 set(citationsAtom, []);
@@ -628,6 +681,7 @@ export const loadThreadAtom = atom(
             if (error instanceof ApiError && error.status === 404) {
                 logger(`loadThreadAtom: Thread ${threadId} not found, resetting to empty thread state`, 1);
                 set(currentThreadIdAtom, null);
+                resetRunSelectorCaches();
                 set(threadRunsAtom, []);
                 set(activeRunAtom, null);
                 set(threadAgentActionsAtom, []);

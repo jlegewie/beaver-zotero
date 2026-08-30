@@ -18,6 +18,8 @@ interface ModelMessagesViewProps {
      * the run has produced nothing to date it from.
      */
     waitingSince?: number | null;
+    /** What the status indicator says while nothing more specific applies. */
+    statusIdleLabel?: string;
 }
 
 /**
@@ -25,7 +27,7 @@ interface ModelMessagesViewProps {
  *
  * Only ModelResponse messages are rendered — see `isRenderableMessage` for why
  * a ModelRequest never is. Their tool-return parts surface elsewhere, inline
- * with the matching tool call via `toolResultsMapAtom`; their user-prompt parts
+ * with the matching tool call via `toolResultAtom`; their user-prompt parts
  * have no consumer by design.
  */
 export const ModelMessagesView: React.FC<ModelMessagesViewProps> = React.memo(function ModelMessagesView({
@@ -35,6 +37,7 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = React.memo(fu
     showStatusIndicator,
     status,
     waitingSince,
+    statusIdleLabel,
 }) {
     // Don't render anything if there's no content to show
     if (messages.length === 0 && !showStatusIndicator) {
@@ -100,6 +103,7 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = React.memo(fu
                     lastMessageHasToolCall={lastMessageHasToolCall}
                     followsText={followsText}
                     waitingSince={waitingSince}
+                    idleLabel={statusIdleLabel}
                 />
             )}
         </div>

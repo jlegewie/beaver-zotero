@@ -9,7 +9,7 @@ import { TagListResultView } from './toolResultViews/TagListResultView';
 import { AnnotationListResultView } from './toolResultViews/AnnotationListResultView';
 import { AttachmentSearchResultView } from './toolResultViews/AttachmentSearchResultView';
 import { UserQuestionResultView } from './toolResultViews/UserQuestionResultView';
-import { BatchOperationResultView } from './toolResultViews/BatchOperationResultView';
+import { BatchJobResultView } from './toolResultViews/BatchJobResultView';
 
 interface ToolResultViewProps {
     result: ToolReturnPart;
@@ -38,7 +38,7 @@ function renderFromView(view: ToolResultViewModel): React.ReactNode | null {
         case 'user_question':
             return <UserQuestionResultView view={view} />;
         case 'batch_operation':
-            return <BatchOperationResultView view={view} />;
+            return <BatchJobResultView view={view} />;
         default:
             return null;
     }

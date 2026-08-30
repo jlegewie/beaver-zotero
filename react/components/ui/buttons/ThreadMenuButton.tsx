@@ -1,15 +1,28 @@
 import React, { useState, useCallback } from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
+import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { MoreHorizontalIcon } from '../../icons/icons';
 import { copyToClipboard } from '../../../utils/clipboard';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../../utils/citationRenderers';
 import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
 import { resolveToolCallLabelEnrichMap } from '../../../utils/toolCallLabelEnrich';
-import { allRunsAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
+import { allRunsAtom, runsCountAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
+import { flushPendingPartEvents } from '../../../utils/streamingPartQueue';
 import { currentThreadIdAtom, currentThreadNameAtom, newThreadAtom, recentThreadsAtom, ThreadData } from '../../../atoms/threads';
+import {
+    currentThreadPinnedAtom,
+    setThreadPinnedAtom,
+    upsertThreadsAtom,
+    threadWriteStampAtom,
+    pinsPendingAtom,
+    isPinPending,
+    threadViewKey,
+    updateThreadAtom,
+    removeThreadAtom,
+} from '../../../atoms/threadList';
 import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { getZoteroTargetContextSync } from '../../../../src/utils/zoteroUtils';
@@ -18,8 +31,12 @@ import { selectItem, selectItemById } from '../../../../src/utils/selectItem';
 import { store } from '../../../store';
 import { prepareCitationRenderContext } from '../../../utils/citationRenderContext';
 import { threadService } from '@beaver/agent-core/transport/threadService';
+import { threadModelToThreadData } from '../../../utils/threadMatches';
+import { userAtom } from '../../../atoms/auth';
+import { showAllThreadInstancesAtom } from '../../../atoms/ui';
+import { currentZoteroInstanceRef } from '../../../../src/utils/zoteroUtils';
 import { clearRecentChatsCache } from '../../RecentChats';
-import { clearThreadListCache } from '../../ThreadListView';
+import { useFindInChatControls } from '../../../hooks/useFindInChat';
 
 interface ThreadMenuButtonProps {
     className?: string;
@@ -31,13 +48,58 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     ariaLabel = 'Chat actions',
 }) => {
     const [, forceUpdate] = useState({});
+    const threadId = useAtomValue(currentThreadIdAtom);
+    // Derived from the thread store, so this entry cannot disagree with the
+    // chat lists. `null` means the open chat is not in the store yet — a
+    // zotero://beaver deep link, or a chat created in this session — which is
+    // resolved below rather than assumed to be unpinned.
+    const isPinned = useAtomValue(currentThreadPinnedAtom);
+    const setThreadPinned = useSetAtom(setThreadPinnedAtom);
+    const upsertThreads = useSetAtom(upsertThreadsAtom);
+    const updateThread = useSetAtom(updateThreadAtom);
+    const removeThread = useSetAtom(removeThreadAtom);
+    // Shared with the list's pin buttons, so the two surfaces cannot fire
+    // concurrent toggles for the same chat.
+    const pinsPending = useAtomValue(pinsPendingAtom);
+
+    /**
+     * Loads the open chat into the thread store when it is not there yet — a
+     * deep link, or a chat created in this session. Runs on menu open rather
+     * than on mount: it retries on the next open if it fails, where an effect
+     * keyed on an unchanged `null` would leave the entry disabled forever, and
+     * it costs nothing for a chat whose menu is never opened.
+     */
+    const resolvePinnedState = useCallback(async () => {
+        const openThreadId = store.get(currentThreadIdAtom);
+        if (!openThreadId || store.get(currentThreadPinnedAtom) !== null) return;
+        const stamp = store.get(threadWriteStampAtom);
+        try {
+            const thread = await threadService.getThread(openThreadId);
+            // Into the store, not into local state — the lists want it too.
+            // Re-checked because the user can switch chats mid-request; the
+            // stamp additionally drops it if the store was reset or a pin moved.
+            if (store.get(currentThreadIdAtom) === openThreadId) {
+                upsertThreads({ threads: [threadModelToThreadData(thread)], stamp });
+            }
+        } catch (error) {
+            console.error('Error resolving pinned state:', error);
+        }
+    }, [upsertThreads]);
 
     const handleMenuToggle = useCallback((isOpen: boolean) => {
-        if (isOpen) forceUpdate({});
-    }, []);
+        if (!isOpen) return;
+        forceUpdate({});
+        void resolvePinnedState();
+    }, [resolvePinnedState]);
 
-    const runs = useAtomValue(allRunsAtom);
-    const toolResultsMap = useAtomValue(toolResultsMapAtom);
+    // The menu's content is built when it is opened, so the runs and their tool
+    // results are read then rather than subscribed to — subscribing would
+    // re-render the header on every frame of a streaming response. Only the
+    // count, which decides whether the entries are enabled, is subscribed.
+    const runsCount = useAtomValue(runsCountAtom);
+    // Its own context, not the find query: this button must not re-render while
+    // the reader types in the find bar.
+    const findControls = useFindInChatControls();
     const citationDataMap = useAtomValue(citationMapAtom);
     const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
@@ -58,7 +120,13 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
      * raw library ref ("u") instead of the library name.
      */
     const getThreadContent = async (overrides?: Partial<ExtractThreadContentOptions>) => {
+        // Streamed parts are applied a frame after they arrive, so a thread
+        // copied or saved mid-response would otherwise stop a frame short of
+        // what is on screen.
+        flushPendingPartEvents();
         const { threadId, threadName } = getThreadMeta();
+        const runs = store.get(allRunsAtom);
+        const toolResultsMap = store.get(toolResultsMapAtom);
         const enrichMap = await resolveToolCallLabelEnrichMap(runs, toolResultsMap);
         return extractThreadContent(runs, toolResultsMap, {
             threadId,
@@ -187,12 +255,37 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
             store.set(recentThreadsAtom, (prev: ThreadData[]) =>
                 prev.map(t => (t.id === threadId ? { ...t, name: newName } : t)),
             );
-            // Invalidate caches so chat lists refetch fresh names
-            clearThreadListCache();
+            // One entity write reaches every chat list; no cache to invalidate.
+            updateThread({ id: threadId, update: t => ({ ...t, name: newName }) });
             clearRecentChatsCache();
         } catch (error) {
             console.error('Error renaming thread:', error);
         }
+    };
+
+    /**
+     * Pins or unpins the open chat, moving it into or out of the pinned group
+     * at the top of the chat history.
+     */
+    const handleTogglePin = () => {
+        const currentId = store.get(currentThreadIdAtom);
+        if (!currentId || isPinned === null) return;
+
+        // The plain list's view key, so an unpin here retains the row in the
+        // window exactly as the row-level unpin does. Without it the two paths
+        // to one action behave differently: this one would drop a chat the
+        // paginated window never held.
+        const currentUser = store.get(userAtom);
+        const viewKey = currentUser
+            ? threadViewKey({
+                userId: currentUser.id,
+                showAll: store.get(showAllThreadInstancesAtom),
+                scope: currentZoteroInstanceRef(),
+            })
+            : undefined;
+        // The store owns confirmation/reconciliation and the shared
+        // one-toggle-at-a-time guard.
+        void setThreadPinned({ threadId: currentId, pinned: !isPinned, viewKey });
     };
 
     const handleDeleteChat = async () => {
@@ -211,25 +304,41 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
         try {
             await threadService.deleteThread(threadId);
-            // Drop it from the recent-thread list and invalidate caches
             store.set(recentThreadsAtom, (prev: ThreadData[]) => prev.filter(t => t.id !== threadId));
-            clearThreadListCache();
             clearRecentChatsCache(threadId);
-            // This menu always targets the current thread, so switch to a new chat.
-            // The delete was already confirmed above, so skip the active-run confirmation.
+            // This menu always targets the current thread, so switch to a new chat
+            // BEFORE forgetting the entity: while the deleted id is still
+            // `currentThreadId`, its pin state reads "unknown" and anything
+            // watching for that would fetch a chat that no longer exists.
+            // The delete was already confirmed above, so skip the run confirm.
             await store.set(newThreadAtom, { skipActiveRunConfirm: true });
+            // Every chat list resolves ids through the store and drops what is
+            // gone, so one entity removal is the whole job.
+            removeThread(threadId);
         } catch (error) {
             console.error('Error deleting thread:', error);
         }
     };
 
     const getMenuItems = (): MenuItem[] => {
-        const threadId = store.get(currentThreadIdAtom);
-        const hasRuns = runs.length > 0;
+        const hasRuns = runsCount > 0;
         const context = getZoteroTargetContextSync();
         const hasParent = context.parentReference !== null;
+        const pinPending = !!threadId && isPinPending(pinsPending, threadId);
 
         const items: MenuItem[] = [
+            {
+                // MenuItem carries no shortcut field, so the ⌘F / Ctrl+F chord
+                // that also opens the bar is not shown here.
+                label: 'Find in chat',
+                onClick: findControls.open,
+                disabled: !hasRuns || !findControls.isAvailable,
+            },
+            {
+                label: 'find-in-chat-divider',
+                onClick: () => {},
+                isDivider: true,
+            },
             {
                 label: 'Copy entire chat',
                 onClick: handleCopyThread,
@@ -254,6 +363,17 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
                 label: 'thread-actions-divider',
                 onClick: () => {},
                 isDivider: true,
+            },
+            {
+                label: isPinned ? 'Unpin chat' : 'Pin chat',
+                onClick: handleTogglePin,
+                disabled: !threadId || isPinned === null || pinPending,
+                customContent: pinPending ? (
+                    <span className="display-flex items-center gap-2">
+                        <Spinner size={14} />
+                        <span>{isPinned ? 'Unpinning chat' : 'Pinning chat'}</span>
+                    </span>
+                ) : undefined,
             },
             {
                 label: 'Rename chat',

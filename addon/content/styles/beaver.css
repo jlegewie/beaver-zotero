@@ -11,8 +11,10 @@
  *                            contract of platform tokens Zotero supplies.
  *   agent-ui-utilities.css   the utility layer, scoped `.beaver-root`.
  *   agent-ui-components.css  shared component rules — the sign-in surface, the
- *                            link vocabulary, and `@keyframes spin`, which the
- *                            `.animate-spin` rule below still resolves by name.
+ *                            link vocabulary, the composer and the bars that
+ *                            dock to it, the editor field, the tooltip family,
+ *                            and `@keyframes spin`, which the `.animate-spin`
+ *                            rule below still resolves by name.
  *
  * `.beaver-root` sits on every element that carries a `beaver-pane-*` id, so
  * `.beaver-root .foo` matches exactly what `[id^="beaver-pane-"] .foo` matched.
@@ -189,21 +191,12 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif;
 }
 
-[id^="beaver-pane-"] .user-message-display {
-    /* margin: 0 auto; */
-    padding-left: 0.65rem;
-    padding-right: 0.65rem;
-    padding-top: 0.65rem;
-    padding-bottom: 0.65rem;
-    border: 1px solid var(--fill-quinary);
-    border-radius: 6px;
-    background-color: var(--material-mix-quarternary);
-    user-select: text;
-}
-
-/* Source Preview Container */
+/* The popup message card (PopupMessageItem), which renders either over the main
+   Zotero window or inside the pane. It floats either way, so it takes the
+   overlay surface — though the component also sets background and border
+   inline, which is what actually paints. */
 [id^="beaver-pane-"] .source-preview {
-    background-color: var(--material-mix-quarternary);
+    background-color: var(--beaver-surface-overlay);
     color: var(--fill-secondary);
     /* border: 1px solid var(--fill-quinary); */
     border-radius: 6px;
@@ -227,38 +220,50 @@
 }
 
 [id^="beaver-pane-"] .source-content {
-    background-color: var(--material-mix-quarternary);
-    /* background-color: var(--material-sidepane); */
+    background-color: var(--beaver-fill-subtle);
     border-radius: 8px;
     overflow-y: auto;
     min-height: 1.5rem;
 }
 
-/* Drag and Drop Styles */
-[id^="beaver-pane-"] .user-message-display {
-    position: relative;
-}
+/* Bars docked to the composer's top edge. The geometry — the bleed that cancels
+   the card's padding, and the top-corner radius — comes from
+   `.composer-docked-bar` (agent-ui-components.css), which each of these also
+   wears. Only what they paint is here, because only these three components are
+   Zotero's; the batch progress bar is shared, so its fill lives beside the
+   geometry. */
 
-/* Pending Actions Bar - shows when agent actions await approval */
+/* Pending approvals. */
 [id^="beaver-pane-"] .pending-actions-bar {
-    margin: -0.65rem -0.65rem 0.65rem -0.65rem;
-    border-radius: 5px 5px 0 0;
+    background-color: var(--beaver-fill-bar);
 }
 
-/* High token usage warning above composer */
+/* High token usage warning. */
 [id^="beaver-pane-"] .high-token-usage-warning-bar {
-    margin: -0.65rem -0.65rem 0.65rem -0.65rem;
-    border-radius: 5px 5px 0 0;
     background-color: var(--tag-yellow-senary);
     border-bottom: 1px solid var(--fill-quinary);
 }
 
-/* First-run "Next steps" panel above composer */
+/* First-run "Next steps" panel. */
 [id^="beaver-pane-"] .next-steps-panel {
-    margin: -0.65rem -0.65rem 0.65rem -0.65rem;
-    border-radius: 5px 5px 0 0;
     border-bottom: 1px solid var(--fill-quarternary);
-    /* background-color: var(--material-mix-quarternary); */
+}
+
+/* Disclosure hover, shared by the batch progress bar and the run receipt. The
+   bar's own surface and its bleed into the composer's top edge live in
+   agent-ui-components.css, with the composer whose padding they cancel; the
+   receipt is a transcript card (`BatchDoneRows` clips its corners) and gets no
+   bleed. Skip `.batch-outcome-target` — nested buttons with their own
+   underline, not a second disclosure. */
+[id^="beaver-pane-"] .batch-progress-bar [role="button"]:not(.batch-outcome-target):hover,
+[id^="beaver-pane-"] .batch-run-receipt [role="button"]:not(.batch-outcome-target):hover {
+    background-color: var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .batch-progress-bar [role="button"]:not(.batch-outcome-target):focus-visible,
+[id^="beaver-pane-"] .batch-run-receipt [role="button"]:not(.batch-outcome-target):focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--fill-tertiary);
 }
 
 /* Credit info bar below composer */
@@ -302,6 +307,7 @@
        position:fixed descendants, which displaces the inline context menus
        rendered by the attachment chips. */
     border-color: var(--fill-quarternary);
+    background-color: var(--beaver-surface-overlay);
 }
 
 [id^="beaver-pane-"] .user-request-view-editing {
@@ -337,6 +343,12 @@
 }
 
 [id^="beaver-pane-"] .user-request-view-hover .user-request-edit-icon {
+    opacity: 1;
+}
+
+/* Unsent edits: accent-colored pencil, visible without hover. */
+[id^="beaver-pane-"] .user-request-edit-icon-stashed {
+    color: var(--accent-blue);
     opacity: 1;
 }
 
@@ -386,43 +398,6 @@
     min-height: 1.5rem;
 }
 
-[id^="beaver-pane-"] .chat-input {
-    font-family: system-ui, -apple-system, sans-serif;
-    width: 100%;
-    font-size: 13px;
-    /* color: var(--fill-secondary); */
-    background-color: transparent;
-    border: 0px solid transparent;
-    /* border-radius: 8px; */
-    outline: none;
-    caret-color: var(--fill-primary);
-    resize: none;
-    padding: 1px 0;
-    line-height: 1.25;
-    height: calc(1.25em + 3px);
-    min-height: calc(1.25em + 2px);
-    max-height: 12.5em;
-    /* transition: all .2s ease-in-out; */
-    /* overflow-y: auto; */
-}
-
-[id^="beaver-pane-"] .chat-input:focus {
-    border-color: var(--fill-quarternary);
-    box-shadow: 0 0 0 0px transparent;
-    background-color: transparent !important;
-    border: 0px solid transparent !important;
-    border-bottom-color: transparent !important;
-    background-image: none !important;
-}
-
-[id^="beaver-pane-"] .chat-input:hover {
-    background-color: transparent !important;
-}
-
-[id^="beaver-pane-"] .chat-input::placeholder {
-    color: var(--fill-tertiary);
-}
-
 /* -----------------------------------------------------------
  * Lexical-based rich input (replaces textarea in InputArea)
  * --------------------------------------------------------- */
@@ -439,8 +414,10 @@
     overflow-y: auto;
 }
 
-/* ContentEditable shares .chat-input typography / sizing with the old
-   textarea so the rest of the UI is unchanged. */
+/* The contenteditable also carries `.chat-input` (agent-ui-components.css) for
+   its typography, and replaces the height band that rule sets — it grows with
+   its content and lets `.beaver-lexical-scroll` above own the cap. This sheet
+   loads after the package sheets, so these declarations win the tie. */
 [id^="beaver-pane-"] .beaver-lexical-content {
     min-height: calc(1.25em + 2px);
     height: auto;
@@ -596,7 +573,7 @@
 }
 
 [id^="beaver-pane-"] .custom-prompt-card:hover:not(.custom-prompt-card-editing) {
-    background-color: var(--material-mix-quarternary);
+    background-color: var(--beaver-fill-hover);
 }
 
 [id^="beaver-pane-"] .custom-prompt-edit-textarea {
@@ -618,7 +595,7 @@
 }
 
 [id^="beaver-pane-"] .action-card:hover:not(.action-card-editing) {
-    background-color: var(--material-mix-quarternary);
+    background-color: var(--beaver-fill-hover);
 }
 
 /* Action Card — edit mode: header bar spans full width, so drop card padding */
@@ -636,8 +613,8 @@
     justify-content: space-between;
     gap: 8px;
     padding: 8px 12px;
-    background-color: var(--material-mix-quarternary);
-    border-bottom: 1px solid var(--fill-quarternary);
+    background-color: var(--beaver-fill-bar);
+    border-bottom: 1px solid var(--beaver-border-strong);
 }
 
 [id^="beaver-pane-"] .action-edit-body {
@@ -755,7 +732,7 @@
 
 [id^="beaver-pane-"] .create-annotations-preview-row:hover,
 [id^="beaver-pane-"] .edit-annotations-preview-row:hover {
-    background-color: var(--material-mix-quarternary);
+    background-color: var(--beaver-fill-hover);
 }
 
 /* Preview text: 2-line clamp */
@@ -789,9 +766,9 @@
     line-height: 1;
     padding: 2px 6px;
     border-radius: 4px;
-    background-color: var(--material-mix-quarternary);
+    background-color: var(--beaver-fill-chip);
     color: var(--fill-secondary);
-    border: 1px solid var(--fill-quinary);
+    border: 1px solid var(--beaver-border-subtle);
     white-space: nowrap;
     flex-shrink: 0;
 }
@@ -898,10 +875,14 @@
 
 /* Spacing and type utilities that override a component's own padding or size.
  * `.px-25` beats `.edit-annotations-preview-row` (padding 6px) on the annotation
- * preview rows; `.px-3` / `.py-2` beat `.user-message-display` (0.65rem) on the
+ * preview rows; `.px-3` / `.py-2` beat `.user-message-display`'s padding shorthand on the
  * onboarding example prompts; `.text-base` (1rem) beats `.chat-input`'s literal
  * 13px, and `rem` here resolves against the host's root font size, so the two
- * are not interchangeable. */
+ * are not interchangeable.
+ *
+ * `.user-message-display` and `.chat-input` live in agent-ui-components.css,
+ * which this sheet loads after, so those two ties are decided by sheet order
+ * rather than by source order within a file. */
 [id^="beaver-pane-"] .px-25 { padding-left: 0.625rem; padding-right: 0.625rem; }
 [id^="beaver-pane-"] .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
 [id^="beaver-pane-"] .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
@@ -927,9 +908,6 @@
 [id^="beaver-pane-"] .variant-ghost:hover .font-color-purple,
 [id^="beaver-pane-"] .variant-ghost-secondary:hover .font-color-purple,
 [id^="beaver-pane-"] .icon-button:hover .font-color-purple { color: var(--tag-purple); opacity: 1; }
-
-/* Beats `.chat-input`'s transparent background on SearchMenu's filter field. */
-[id^="beaver-pane-"] .bg-quaternary { background-color: var(--material-mix-quarternary); }
 
 /* Menu items use roving focus, so replace the browser outline with Beaver's menu highlight. */
 [id^="beaver-pane-"] .beaver-menu-item:focus {
@@ -1244,6 +1222,63 @@
     border-top: 1px solid var(--fill-secondary);
 }
 
+/* ───── Find in chat ───── */
+
+/* The find bar floats over the top of the thread area rather than sitting in
+   the column, so opening it neither covers the header nor moves the thread. It
+   shrinks with a narrow sidebar; the input is what gives way. */
+[id^="beaver-pane-"] .beaver-find-bar {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    width: 280px;
+    max-width: calc(100% - 24px);
+    padding: 3px 4px 3px 8px;
+    background-color: var(--beaver-surface-overlay);
+    border: 1px solid var(--beaver-border-strong);
+    border-radius: 6px;
+    box-shadow: var(--beaver-shadow-overlay);
+}
+
+[id^="beaver-pane-"] .beaver-find-bar-icon {
+    flex: none;
+    margin-right: 4px;
+    color: var(--fill-tertiary);
+}
+
+[id^="beaver-pane-"] .beaver-find-bar-input {
+    flex: 1;
+    min-width: 0;
+    padding: 2px 0;
+    background: transparent;
+    border: none;
+    color: var(--fill-primary);
+    font-size: 1rem;
+    outline: none;
+}
+
+[id^="beaver-pane-"] .beaver-find-bar-input::placeholder {
+    color: var(--fill-tertiary);
+}
+
+/* Reserved width and tabular figures: the count changes with every keystroke,
+   and the bar must not resize under the reader's cursor. Wide enough for the
+   longest thing shown here, which is "No results" rather than a count. */
+[id^="beaver-pane-"] .beaver-find-bar-count {
+    flex: none;
+    width: 70px;
+    padding-right: 2px;
+    text-align: right;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--fill-tertiary);
+    white-space: nowrap;
+}
+
 /* Hover-based fade utility classes */
 [id^="beaver-pane-"] .hover-trigger { position: relative; }
 [id^="beaver-pane-"] .hover-fade { 
@@ -1273,91 +1308,6 @@
     opacity: 1;
     visibility: visible;
 }
-
-/* Component: Tooltip */
-[id^="beaver-pane-"] .tooltip-container {
-    position: absolute;
-    z-index: 1000;
-    padding: 4px 8px;
-    border-radius: 4px;
-    background-color: var(--material-mix-quarternary);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    font-size: 0.85rem;
-    line-height: 1.4;
-    max-width: 250px;
-    word-wrap: break-word;
-    pointer-events: none;
-    color: var(--fill-secondary);
-    border: 1px solid var(--fill-quarternary);
-    transform: translateX(-50%);
-    white-space: normal;
-}
-
-[id^="beaver-pane-"] .tooltip-container.whitespace-nowrap {
-    white-space: nowrap;
-    max-width: none;
-}
-
-/* Arrow styles with border */
-[id^="beaver-pane-"] .tooltip-arrow {
-    position: absolute;
-    width: 0;
-    height: 0;
-    transform: translateX(-50%);
-}
-
-[id^="beaver-pane-"] .tooltip-arrow-bottom {
-    top: -6px;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 6px solid var(--fill-quarternary);
-}
-
-[id^="beaver-pane-"] .tooltip-arrow-bottom::after {
-    content: '';
-    position: absolute;
-    left: -5px;
-    top: 1px;
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-bottom: 5px solid var(--material-mix-quarternary);
-}
-
-[id^="beaver-pane-"] .tooltip-arrow-top {
-    bottom: -6px;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-top: 6px solid var(--fill-quarternary);
-}
-
-[id^="beaver-pane-"] .tooltip-arrow-top::after {
-    content: '';
-    position: absolute;
-    left: -5px;
-    bottom: 1px;
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-top: 5px solid var(--material-mix-quarternary);
-}
-
-@keyframes tooltipFadeIn {
-    from { opacity: 0; transform: translateY(5px) translateX(-50%); }
-    to { opacity: 1; transform: translateY(0) translateX(-50%); }
-}
-
-@keyframes tooltipFadeInTop {
-    from { opacity: 0; transform: translateY(-5px) translateX(-50%); }
-    to { opacity: 1; transform: translateY(0) translateX(-50%); }
-}
-
-[id^="beaver-pane-"] .tooltip-fade-in-bottom {
-    animation: tooltipFadeIn 0.2s ease-in-out forwards;
-}
-
-[id^="beaver-pane-"] .tooltip-fade-in-top {
-    animation: tooltipFadeInTop 0.2s ease-in-out forwards;
-}
-
 
 /* Common button styles - shared across all variants */
 [id^="beaver-pane-"] .button-base {
@@ -1688,12 +1638,12 @@
 [id^="beaver-pane-"] .variant-ghost {
     cursor: pointer;
     border: 0px solid transparent;
-    border-radius: 4px;
+    border-radius: 5px;
     transition: all 0.2s ease-in-out;
     font-size: 0.9rem;
     background-color: transparent;
     color: var(--fill-secondary);
-    padding: 2px 6px;
+    padding: 4px 6px;
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -1701,7 +1651,7 @@
 
 [id^="beaver-pane-"] .variant-ghost:hover {
     color: var(--fill-primary);
-    background-color: var(--fill-senary);
+    background-color: var(--fill-quinary);
 }
 
 [id^="beaver-pane-"] .variant-ghost:disabled {
@@ -1912,7 +1862,7 @@
 /* Scroll down button */
 [id^="beaver-pane-"] .scroll-down-button {
     transform: translateY(-29px);
-    background: var(--material-mix-quarternary);
+    background: var(--beaver-surface-overlay);
     border: 1px solid var(--color-border50);
     border-radius: 50%;
     width: 2rem;
@@ -1923,6 +1873,74 @@
     cursor: pointer;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     transition: all 0.2s ease;
+}
+
+/* Arrow and streaming dots share one grid cell so they cross-fade in place
+   rather than shifting the button's content. The dots stay mounted at opacity 0
+   when idle; only the `.is-bouncing` class (which React holds through the
+   fade-out) drives the animation. */
+[id^="beaver-pane-"] .scroll-down-icons {
+    display: grid;
+    place-items: center;
+    line-height: 0;
+}
+
+[id^="beaver-pane-"] .scroll-down-icon {
+    grid-area: 1 / 1;
+    transition: opacity 0.2s ease;
+}
+
+[id^="beaver-pane-"] .scroll-down-dots {
+    opacity: 0;
+}
+
+[id^="beaver-pane-"] .scroll-down-button.is-streaming .scroll-down-arrow {
+    opacity: 0;
+}
+
+[id^="beaver-pane-"] .scroll-down-button.is-streaming .scroll-down-dots {
+    opacity: 1;
+}
+
+/* Hover always resolves back to the arrow: the button is a scroll affordance
+   first, a streaming cue second. */
+[id^="beaver-pane-"] .scroll-down-button.is-streaming:hover .scroll-down-arrow {
+    opacity: 1;
+}
+
+[id^="beaver-pane-"] .scroll-down-button.is-streaming:hover .scroll-down-dots {
+    opacity: 0;
+}
+
+[id^="beaver-pane-"] .scroll-down-dots.is-bouncing circle {
+    animation: beaverScrollDotBounce 1.05s cubic-bezier(0.33, 0, 0.33, 1) infinite;
+}
+
+[id^="beaver-pane-"] .scroll-down-dots.is-bouncing circle:nth-child(2) {
+    animation-delay: 0.12s;
+}
+
+[id^="beaver-pane-"] .scroll-down-dots.is-bouncing circle:nth-child(3) {
+    animation-delay: 0.24s;
+}
+
+/* Rests at translateY(0) for the back half of every cycle, so the dots enter and
+   leave the bounce from the steady triplet instead of jumping into it. Lengths
+   are SVG user units (viewBox is 24 wide), not CSS pixels. */
+@keyframes beaverScrollDotBounce {
+    0%, 55%, 100% {
+        transform: translateY(0);
+    }
+
+    27.5% {
+        transform: translateY(-3.5px);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    [id^="beaver-pane-"] .scroll-down-dots.is-bouncing circle {
+        animation: none;
+    }
 }
 
 /* Surface light variant */
@@ -2235,9 +2253,9 @@
     top: 0;
     bottom: 0;
     width: 90%;
-    background-color: var(--material-sidepane);
+    background-color: var(--beaver-surface-ground);
     box-shadow: -6px 0 26px rgba(0, 0, 0, 0.175);
-    border-left: 1px solid var(--fill-quinary);
+    border-left: 1px solid var(--beaver-border-default);
     display: flex;
     flex-direction: column;
 }
@@ -2265,8 +2283,8 @@
 [id^="beaver-pane-"] .thread-search-input {
     width: 100%;
     padding: 6px 28px 6px 28px;
-    background: var(--fill-senary);
-    border: 1px solid var(--fill-quinary);
+    background: var(--beaver-fill-subtle);
+    border: 1px solid var(--beaver-border-subtle);
     border-radius: 6px;
     color: var(--fill-primary);
     font-size: 1rem;

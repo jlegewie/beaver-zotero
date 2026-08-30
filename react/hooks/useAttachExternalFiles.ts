@@ -28,6 +28,12 @@ export interface AttachExternalFilesOptions {
      * composition current at the start of the attach is used.
      */
     composerToken?: number;
+    /**
+     * Take the attached records instead of adding them to the composer. Used by
+     * the message-edit overlay: the composer's staging area and reset token
+     * belong to the message being typed, not the one being edited.
+     */
+    onAttached?: (records: ExternalFileRecord[]) => void;
 }
 
 export interface AttachExternalFilesResult {
@@ -137,6 +143,10 @@ export function useAttachExternalFiles() {
                     }
                 }
                 if (attached.length > 0) {
+                    if (options.onAttached) {
+                        options.onAttached(attached);
+                        return { attached, rejectedCount };
+                    }
                     if (store.get(composerResetTokenAtom) !== composerToken) {
                         // Adding them now would move files staged for the
                         // previous message onto the next one.

@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import type { MenuPosition, SearchMenuCloseReason } from '../primitives/SearchMenu';
+import { getCaretRectWithin } from './caretNavigation';
 
 /** The character that opens the Add Sources menu from the chat editor. */
 const TRIGGER = '@';
@@ -30,11 +31,13 @@ export interface OpenTrigger {
  * Only a word-initial `@` counts, so an email address typed into the composer
  * stays plain text. Returns null when the value does not end in such an `@`.
  */
-export function matchSourcesTrigger(value: string): { prefix: string } | null {
+export function matchSourcesTrigger(value: string, baseline = ''): { prefix: string } | null {
     if (!value.endsWith(TRIGGER)) return null;
-    const charBefore = value.length > 1 ? value[value.length - 2] : null;
+    const prefix = value.slice(0, -1);
+    if (prefix === baseline) return { prefix };
+    const charBefore = prefix.length > 0 ? prefix[prefix.length - 1] : null;
     if (charBefore !== null && charBefore !== ' ' && charBefore !== '\n') return null;
-    return { prefix: value.slice(0, -1) };
+    return { prefix };
 }
 
 /**
@@ -169,12 +172,28 @@ export function useAddSourcesMenu({
         updateQuery(value);
     }, [updateQuery]);
 
-    /** Detect a typed `@` trigger. Returns true when the menu opened. */
-    const handleTrigger = useCallback((value: string, rect: DOMRect): boolean => {
-        const match = matchSourcesTrigger(value);
+    /**
+     * Detect a typed `@` trigger. Returns true when the menu opened.
+     *
+     * `editorRoot` is the editor's contenteditable. The menu clears the whole
+     * composer vertically (it can be several lines tall), but is anchored
+     * horizontally on the caret, so in a wide composer it opens at the `@` the
+     * user just typed rather than at the far-away left edge. Falls back to that
+     * edge when the caret has no measurable rect.
+     *
+     * `baseline` relaxes the word-boundary guard for a first keystroke — see
+     * {@link matchSourcesTrigger}.
+     */
+    const handleTrigger = useCallback((value: string, editorRoot: HTMLElement, baseline?: string): boolean => {
+        const match = matchSourcesTrigger(value, baseline);
         if (!match) return false;
+        const rect = editorRoot.getBoundingClientRect();
+        const caretRect = getCaretRectWithin(editorRoot);
+        const x = caretRect
+            ? Math.min(Math.max(caretRect.left, rect.left), rect.right)
+            : rect.left;
         const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
-        open('editor', { prefix: match.prefix }, { x: rect.left, y });
+        open('editor', { prefix: match.prefix }, { x, y });
         setMessageContent(value);
         return true;
     }, [open, setMessageContent, verticalPosition]);

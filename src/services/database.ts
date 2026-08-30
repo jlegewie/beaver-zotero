@@ -719,6 +719,9 @@ export class BeaverDB {
             name: record.name || '', // Convert null to empty string
             createdAt: record.created_at,
             updatedAt: record.updated_at,
+            // Pinning is a backend-thread feature; the local thread table has
+            // no column for it and no surface that offers it.
+            isPinned: false,
         };
     }
 
@@ -780,6 +783,7 @@ export class BeaverDB {
             name,
             createdAt: now,
             updatedAt: now,
+            isPinned: false,
         };
     }
 

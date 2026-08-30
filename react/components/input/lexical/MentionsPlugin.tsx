@@ -133,7 +133,7 @@ export const MentionsPlugin: React.FC<{
                 if (anchorRef.current == null || options.length === 0) return null;
                 return createPortal(
                     <div
-                        className="bg-quaternary border-popup rounded-md outline-none z-1000 shadow-md display-flex flex-col"
+                        className="bg-overlay border-popup rounded-md outline-none z-1000 shadow-md display-flex flex-col"
                         style={{ width: '280px', maxHeight: '40vh', overflow: 'hidden' }}
                         role="listbox"
                     >

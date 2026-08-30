@@ -4,7 +4,7 @@ import { PlusSignIcon, Icon } from '../../icons/icons';
 import { ItemSearchResult } from '@beaver/agent-core/transport/clients/searchService';
 import { itemSearchResultFromZoteroItem } from '../../../../src/utils/zoteroSerializers';
 import SearchMenu, { MenuPosition, SearchMenuCloseReason } from '@beaver/agent-ui/primitives/SearchMenu';
-import { currentMessageFiltersAtom, removeItemFromMessageAtom, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom } from '../../../atoms/messageComposition';
+import { currentMessageFiltersAtom, removeItemFromMessageAtom, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom, type MessageFiltersState } from '../../../atoms/messageComposition';
 import { EXTERNAL_FILE_PICKER_EXTENSIONS } from '../../../../src/services/externalFiles';
 import { useAttachExternalFiles } from '../../../hooks/useAttachExternalFiles';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -105,8 +105,23 @@ const getRecentItems = async (): Promise<Zotero.Item[]> => {
 }
 
 
+/**
+ * Where the menu's picks go. Defaults to the composer's message-composition
+ * atoms; the message-edit overlay supplies its own target.
+ *
+ * `isAttached` must be referentially stable across keystrokes — it ends up in
+ * the menu hooks' fetch-effect dependencies.
+ */
+export interface AddSourcesTarget {
+    isAttached: (item: Zotero.Item) => boolean;
+    addItem: (item: Zotero.Item) => void;
+    removeItem: (item: Zotero.Item) => void;
+    filters: MessageFiltersState;
+    setFilters: (updater: (prev: MessageFiltersState) => MessageFiltersState) => void;
+    attachFiles: (paths: string[]) => void;
+}
+
 export interface AddSourcesMenuProps {
-    showText: boolean;
     isMenuOpen: boolean;
     menuPosition: MenuPosition;
     /** The current search query, wherever it is being typed. */
@@ -127,13 +142,13 @@ export interface AddSourcesMenuProps {
     /** Clear the typed query but leave the menu open (entering a submenu). */
     onResetQuery: () => void;
     menuPortalContainer?: HTMLElement | null;
-    onAfterMenuInitialFocus?: () => void;
     disabled?: boolean;
     verticalPosition?: 'above' | 'below';
+    /** Write picks somewhere other than the composer (see {@link AddSourcesTarget}). */
+    target?: AddSourcesTarget;
 }
 
 const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(function AddSourcesMenu({
-    showText,
     isMenuOpen,
     menuPosition,
     searchQuery,
@@ -144,9 +159,9 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     onCommit,
     onResetQuery,
     menuPortalContainer,
-    onAfterMenuInitialFocus,
     disabled = false,
     verticalPosition = 'above',
+    target,
 }, ref) {
     const [isLoading, setIsLoading] = useState(false);
     const [searchResults, setSearchResults] = useState<ItemSearchResult[]>([]);
@@ -155,13 +170,27 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     const selectedZoteroItems = useAtomValue(selectedZoteroItemsAtom);
-    const currentMessageFilters = useAtomValue(currentMessageFiltersAtom);
-    const setCurrentMessageFilters = useSetAtom(currentMessageFiltersAtom);
-    const { libraryIds: currentLibraryIds, collectionIds: currentCollectionIds, tagSelections: currentTagSelections } = currentMessageFilters;
+    const composerFilters = useAtomValue(currentMessageFiltersAtom);
+    const setComposerFilters = useSetAtom(currentMessageFiltersAtom);
     const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
     const attachExternalFiles = useAttachExternalFiles();
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
+
+    // Resolve through `target` so the same picker serves composer and edit overlay.
+    const currentMessageFilters = target ? target.filters : composerFilters;
+    const { libraryIds: currentLibraryIds, collectionIds: currentCollectionIds, tagSelections: currentTagSelections } = currentMessageFilters;
+    const setCurrentMessageFilters = target ? target.setFilters : setComposerFilters;
+    // The item search scopes itself to the active filters, and runs from an
+    // effect that must not re-subscribe on every filter change; a ref keeps it
+    // reading the current ones without becoming a dependency.
+    const filtersRef = useRef(currentMessageFilters);
+    filtersRef.current = currentMessageFilters;
+    const composerIsAttached = useCallback(
+        (item: Zotero.Item) => currentMessageItems.some((i) => i.id === item.id),
+        [currentMessageItems],
+    );
+    const isAttached = target ? target.isAttached : composerIsAttached;
 
     // Identifies the search whose results may still be applied. A counter, not
     // a timestamp: keystrokes land well within the same millisecond, and two
@@ -218,7 +247,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
             query = query.trim();
             
             // Search Zotero items
-            const { libraryIds, tagSelections } = store.get(currentMessageFiltersAtom);
+            const { libraryIds, tagSelections } = filtersRef.current;
             const searchLibraryIds = libraryIds.length > 0
                 ? libraryIds
                 : tagSelections.length > 0
@@ -305,11 +334,15 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
             const rv = await fp.show();
             if (rv !== fp.returnOK) return;
             const paths: string[] = fp.files || [];
+            if (target) {
+                target.attachFiles(paths);
+                return;
+            }
             await attachExternalFiles(paths);
         })().catch((error) => {
             logger(`AddSourcesMenu.handleSelectFiles: ${error}`, 1);
         });
-    }, [handleCommit, attachExternalFiles]);
+    }, [handleCommit, attachExternalFiles, target]);
 
     // Handler functions for menu item callbacks
     const handleAddSourceItem = useCallback((item: Zotero.Item) => {
@@ -318,14 +351,22 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
             library_id: item.libraryID,
             library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         }]);
-        addItemToCurrentMessageItems(item);
+        if (target) {
+            target.addItem(item);
+        } else {
+            addItemToCurrentMessageItems(item);
+        }
         handleCommit();
-    }, [addItemToCurrentMessageItems, handleCommit]);
+    }, [addItemToCurrentMessageItems, handleCommit, target]);
 
     const handleRemoveSourceItem = useCallback((item: Zotero.Item) => {
-        removeItemFromMessage(item);
+        if (target) {
+            target.removeItem(item);
+        } else {
+            removeItemFromMessage(item);
+        }
         handleCommit();
-    }, [removeItemFromMessage, handleCommit]);
+    }, [removeItemFromMessage, handleCommit, target]);
 
     const handleSelectLibrary = useCallback((libraryId: number) => {
         setCurrentMessageFilters((prev) => {
@@ -375,10 +416,10 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     // collections and libraries on every character typed. The search query
     // reaches the rows as a separate argument to the item factories.
     const sourceMenuItemContext = useMemo<SourceMenuItemContext>(() => ({
-        currentMessageItems,
+        isAttached,
         onAdd: handleAddSourceItem,
         onRemove: handleRemoveSourceItem
-    }), [currentMessageItems, handleAddSourceItem, handleRemoveSourceItem]);
+    }), [isAttached, handleAddSourceItem, handleRemoveSourceItem]);
 
     const libraryMenuItemContext = useMemo<LibraryMenuItemContext>(() => ({
         currentLibraryIds,
@@ -532,8 +573,11 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         <>
             <Tooltip content="Add Sources" showArrow singleLine>
                 <button
-                    className="variant-outline source-button"
-                    style={{ height: '22px', paddingRight: '4px', paddingLeft: '4px', paddingTop: '3px', paddingBottom: '3px' }}
+                    // The control row lives inside the composer's <form>, so a
+                    // button with no type would default to submit and send the
+                    // message on the way to opening the menu.
+                    type="button"
+                    className="variant-ghost composer-add-sources"
                     ref={buttonRef}
                     onClick={handleButtonClick}
                     aria-label="Add Sources"
@@ -541,8 +585,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
                     aria-expanded={isMenuOpen}
                     disabled={disabled}
                 >
-                    <Icon icon={PlusSignIcon} className="scale-12" />
-                    {showText && <span>Add Sources</span>}
+                    <Icon icon={PlusSignIcon} size={18} className="scale-13" />
                 </button>
             </Tooltip>
             <SearchMenu
@@ -568,7 +611,6 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
                 // a real input to move out of.
                 selectOnTab={!ownsSearchField}
                 portalContainer={menuPortalContainer}
-                onAfterInitialFocus={onAfterMenuInitialFocus}
             />
         </>
     );

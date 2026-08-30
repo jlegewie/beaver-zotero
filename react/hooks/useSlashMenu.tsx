@@ -247,11 +247,12 @@ export function useSlashMenu(
     }, [isSlashMenuOpen, setMessageContent]);
 
     /** Detect `/` trigger in onChange. Returns true if the slash menu was opened. */
-    const handleSlashTrigger = useCallback((value: string, rect: DOMRect): boolean => {
+    const handleSlashTrigger = useCallback((value: string, rect: DOMRect, baseline = ''): boolean => {
         if (value.endsWith('/')) {
-            const charBefore = value.length > 1 ? value[value.length - 2] : null;
-            if (charBefore === null || charBefore === ' ' || charBefore === '\n') {
-                preSlashTextRef.current = value.slice(0, -1);
+            const prefix = value.slice(0, -1);
+            const charBefore = prefix.length > 0 ? prefix[prefix.length - 1] : null;
+            if (prefix === baseline || charBefore === null || charBefore === ' ' || charBefore === '\n') {
+                preSlashTextRef.current = prefix;
                 slashQueryRef.current = '';
                 const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
                 setSlashMenuPosition({ x: rect.left, y });

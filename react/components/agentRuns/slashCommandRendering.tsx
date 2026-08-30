@@ -14,6 +14,8 @@ import type { PromptAction } from '@beaver/agent-core/agents/types';
 import { splitContentBySlashTokens } from '@beaver/agent-ui/composer/slashCommands';
 import { ChipWithPopup } from '@beaver/agent-ui/chat/ChipPopup';
 import { buildActionPopup } from '@beaver/agent-ui/chat/actionPopup';
+import { highlightText } from '@beaver/agent-ui/chat/highlightText';
+import { findMatchRanges } from '@beaver/agent-ui/chat/findContext';
 import { getHost } from '@beaver/agent-ui/host';
 
 /**
@@ -27,16 +29,25 @@ import { getHost } from '@beaver/agent-ui/host';
  * also trigger the surrounding message's click-to-edit behavior. Hosts without
  * one degrade to hover-only: no click affordance, no edit-hint footer, and
  * clicks bubble to the surrounding message as usual.
+ *
+ * @param findQuery Active find-in-chat query, or `''`. Passed in rather than
+ *                  read from the find context so this stays a plain function.
+ *                  Only the prose segments are highlighted: a pill's label is a
+ *                  command token, not text the user wrote, and a `<mark>` inside
+ *                  the chip would fight its own styling.
  */
 export function renderContentWithSlashPills(
     content: string,
     actions: PromptAction[],
+    findQuery: string = '',
 ): React.ReactNode[] {
     const canEditActions = Boolean(getHost().navigation?.openActionSettings);
     return splitContentBySlashTokens(content, actions).map((segment, i) => {
         const action = segment.action;
         if (!action) {
-            return <React.Fragment key={i}>{segment.text}</React.Fragment>;
+            // `highlightText` hands back the string itself when there is no
+            // query or no match, so the no-find rendering is untouched.
+            return <React.Fragment key={i}>{highlightText(segment.text, findQuery, `find-${i}`)}</React.Fragment>;
         }
         const popup = buildActionPopup({
             title: action.title,
@@ -62,4 +73,22 @@ export function renderContentWithSlashPills(
             </ChipWithPopup>
         );
     });
+}
+
+/**
+ * Whether a find query matches text this message actually shows as prose.
+ *
+ * Mirrors the rule above — pill labels are never highlighted — so a caller
+ * cannot conclude a message holds a visible hit that no renderer produces.
+ */
+export function hasProseFindMatch(
+    content: string,
+    actions: PromptAction[],
+    findQuery: string,
+): boolean {
+    if (!findQuery) return false;
+    if (actions.length === 0) return findMatchRanges(content, findQuery).length > 0;
+    return splitContentBySlashTokens(content, actions).some(
+        segment => !segment.action && findMatchRanges(segment.text, findQuery).length > 0,
+    );
 }

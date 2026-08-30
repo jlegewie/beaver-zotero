@@ -168,6 +168,22 @@ export const userScrolledAtom = atom(false);
 // Independent scroll state for separate window
 export const windowUserScrolledAtom = atom(false);
 
+// Whether the thread is scrolled to (or within a threshold of) its bottom.
+//
+// Distinct from `userScrolledAtom`, which records the reader's *intent* to read
+// back and is what decides whether auto-scroll follows the stream. This records
+// a *measured* fact about the container, so it stays true to the view even when
+// the distance changes without a scroll event — content streaming in, a card
+// expanding, the pane being resized. Anything that answers "is there more
+// below?" — the scroll-down button above all — belongs on this atom.
+//
+// Published only through `publishScrollPosition` (react/utils/scrollPosition.ts),
+// so every writer measures the same way against the same threshold. Starts true:
+// a thread with nothing in it yet is at its bottom.
+export const isAtBottomAtom = atom(true);
+// Independent measured scroll position for the separate window
+export const windowIsAtBottomAtom = atom(true);
+
 // Popup Messages
 export const popupMessagesAtom = atom<PopupMessage[]>([]);
 

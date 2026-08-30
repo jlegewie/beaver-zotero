@@ -59,6 +59,9 @@ export async function executeCreateCollectionAction(
     logger(`executeCreateCollectionAction: Created collection "${name}" with ID ${collectionID}`, 1);
 
     let itemsAdded = 0;
+    // Reported by id so the backend can settle each one; a bare count cannot
+    // say which items were left out.
+    const skippedItemIds: string[] = [];
 
     // Add items to the collection if specified
     if (item_ids && item_ids.length > 0) {
@@ -70,12 +73,20 @@ export async function executeCreateCollectionAction(
             // (mirrors the WS executor in agentDataProvider/actions/createCollection.ts).
             for (const itemIdStr of item_ids) {
                 const parsedRef = resolveObjectId(itemIdStr);
-                if (!parsedRef) continue;
+                if (!parsedRef) {
+                    skippedItemIds.push(itemIdStr);
+                    continue;
+                }
                 const resolved = await resolveItemReference(parsedRef);
-                if (resolved.status !== 'found') continue;
+                if (resolved.status !== 'found') {
+                    skippedItemIds.push(itemIdStr);
+                    continue;
+                }
                 const item = resolved.item;
                 if (!item.isAttachment() && !item.isNote() && !item.isAnnotation()) {
                     itemIdsToAdd.push(item.id);
+                } else {
+                    skippedItemIds.push(itemIdStr);
                 }
             }
 
@@ -92,6 +103,7 @@ export async function executeCreateCollectionAction(
         library_ref: libraryRefForLibraryID(library_id) ?? undefined,
         collection_key: collection.key,
         items_added: itemsAdded,
+        skipped_item_ids: skippedItemIds,
     };
 }
 

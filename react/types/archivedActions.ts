@@ -100,16 +100,6 @@ export const ARCHIVED_ACTIONS: Action[] = [
         deprecated: true,
     },
 
-    {
-        id: 'builtin-fix-metadata-recent',
-        name: 'fix-metadata',
-        title: 'Fix metadata for my recent additions',
-        text: 'Look at items I\'ve added in the last 7 days. For each one, fix missing or incomplete metadata (DOI, title, abstract, authors).{{recent_items}}',
-        targets: ['global'],
-        sortOrder: 530,
-        deprecated: true,
-    },
-
     // Duplicate of auto-tag applied to a fixed scope.
     {
         id: 'builtin-tag-untagged',

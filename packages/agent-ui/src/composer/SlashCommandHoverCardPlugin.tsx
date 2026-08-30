@@ -49,7 +49,7 @@ const FloatingPopupCard: React.FC<{ anchor: HTMLElement; popup: ChipPopupContent
         <span
             ref={cardRef}
             role="tooltip"
-            className={`bg-quaternary rounded-md shadow-md fixed z-100000 border-popup block ${
+            className={`bg-overlay rounded-md shadow-md fixed z-100000 border-popup block ${
                 layout ? (layout.placement === 'bottom' ? 'tooltip-fade-in-bottom' : 'tooltip-fade-in-top') : ''
             }`}
             style={{

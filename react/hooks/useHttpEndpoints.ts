@@ -92,6 +92,10 @@ import {
     handleTestCollectionDeleteHttpRequest,
 } from './httpHandlers/testCollectionHandlers';
 import {
+    handleTestPdfRetrievalHttpRequest,
+    handleTestPdfCaptchaEligibilityHttpRequest,
+} from './httpHandlers/testPdfRetrievalHandlers';
+import {
     handleTestAnnotationCreateHttpRequest,
 } from './httpHandlers/testAnnotationHandlers';
 import {
@@ -100,6 +104,10 @@ import {
 import {
     handleTestSidebarWidthHandlerHttpRequest,
 } from './httpHandlers/testUiHandlers';
+import {
+    handleBatchProgressPreview,
+    handleBatchProgressClear,
+} from './httpHandlers/testBatchProgressHandlers';
 import {
     handleTestPdfPageCountHttpRequest,
     handleTestPdfPageLabelsHttpRequest,
@@ -294,8 +302,14 @@ const ENDPOINT_PATHS = [
     // Test-only endpoints (collection seeding/teardown)
     '/beaver/test/collection-create',
     '/beaver/test/collection-delete',
+
+    '/beaver/test/pdf-retrieval',
+    '/beaver/test/pdf-captcha-eligibility',
     // Test-only endpoints (headless PDF annotations)
     '/beaver/test/annotation-create',
+    // Test-only endpoints (batch progress bar preview)
+    '/beaver/test/batch-progress-preview',
+    '/beaver/test/batch-progress-clear',
     // Test-only endpoints (MuPDF worker singleton stats / lifecycle)
     '/beaver/test/worker-stats',
     '/beaver/test/worker-mark-stale',
@@ -715,6 +729,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         unfiled: request.unfiled ?? false,
         untagged: request.untagged ?? false,
         conditions: request.conditions || [],
+        conditions_join_mode: request.conditions_join_mode ?? null,
         item_category: request.item_category === 'attachment' ? 'attachment' : 'regular',
         has_attachments: request.has_attachments ?? null,
         max_items: request.max_items ?? 1000,
@@ -725,12 +740,20 @@ async function handleResolvePopulationHttpRequest(request: any) {
     return {
         item_ids: response.item_ids,
         total_count: response.total_count,
+        // How many bibliographic items matched, before an attachment population
+        // was derived from them. Without it the caller cannot tell an empty
+        // attachment population from filters that matched nothing.
+        matched_item_count: response.matched_item_count,
         truncated: response.truncated,
         // The place the population lives, which the approval card states from
         // these alone — the WebSocket transport forwards them, so this one has
         // to as well or a localhost run loses the WHERE half of the card.
         library_name: response.library_name,
         collection_names: response.collection_names,
+        // The join mode actually applied to `conditions`. Its absence is how the
+        // caller detects a provider that predates the field, so it has to be
+        // forwarded here too.
+        conditions_join_mode: response.conditions_join_mode,
         // A dropped condition widens the population; the caller must not act on
         // ids that came back with a warning.
         warnings: response.warnings,
@@ -1103,6 +1126,15 @@ function registerEndpoints(): boolean {
         Zotero.Server.Endpoints['/beaver/test/document-serialized'] =
             createEndpoint(handleTestDocumentSerializedHttpRequest);
 
+        // Batch progress bar preview (dev-only): stage a synthetic stamp so the
+        // bar can be inspected in every operation and ledger state without
+        // paying for a real batch run of each.
+        Zotero.Server.Endpoints['/beaver/test/batch-progress-preview'] =
+            createEndpoint(handleBatchProgressPreview);
+
+        Zotero.Server.Endpoints['/beaver/test/batch-progress-clear'] =
+            createEndpoint(handleBatchProgressClear);
+
         // MuPDF worker singleton stats / lifecycle (dev-only)
         Zotero.Server.Endpoints['/beaver/test/worker-stats'] =
             createEndpoint(handleTestWorkerStatsHttpRequest);
@@ -1151,6 +1183,13 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/collection-delete'] =
             createEndpoint(handleTestCollectionDeleteHttpRequest);
+
+        // PDF-retrieval measurement (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/pdf-retrieval'] =
+            createEndpoint(handleTestPdfRetrievalHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-captcha-eligibility'] =
+            createEndpoint(handleTestPdfCaptchaEligibilityHttpRequest);
 
         // Headless PDF annotation primitives (dev-only)
         Zotero.Server.Endpoints['/beaver/test/annotation-create'] =

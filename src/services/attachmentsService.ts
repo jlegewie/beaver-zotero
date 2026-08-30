@@ -275,7 +275,7 @@ export class AttachmentsService extends ApiService {
     }
 
     /**
-     * Marks multiple uploads as completed in a batch operation.
+     * Marks multiple uploads as completed in a batch job.
      * @param requests Array of complete upload requests
      * @returns Promise with an array of upload completed responses
      */

@@ -243,6 +243,63 @@ export function messageAttachmentLookupKeys(attachment: MessageAttachment): stri
 }
 
 /**
+ * The Zotero key namespace an attachment's key belongs to. Collections and
+ * items are separate namespaces, so the same key in the same library can name
+ * both; any comparison that decides "same attachment?" has to account for that,
+ * or an attached item swallows a collection that merely shares its key.
+ */
+function attachmentNamespace(attachment: MessageAttachment): string {
+    return attachment.type === 'collection' ? 'collection' : 'item';
+}
+
+/**
+ * Canonical identity for an attachment: {@link messageAttachmentKey} qualified
+ * by object kind. Use this, not the bare key, wherever two attachments are
+ * compared for being the same object.
+ */
+export function messageAttachmentIdentity(attachment: MessageAttachment): string {
+    return `${attachmentNamespace(attachment)}:${messageAttachmentKey(attachment)}`;
+}
+
+/**
+ * Every identity alias for an attachment, qualified by object kind — the
+ * kind-aware companion to {@link messageAttachmentLookupKeys}, so a record
+ * written before portable library refs still matches.
+ */
+export function messageAttachmentIdentityKeys(attachment: MessageAttachment): string[] {
+    const namespace = attachmentNamespace(attachment);
+    return messageAttachmentLookupKeys(attachment).map((key) => `${namespace}:${key}`);
+}
+
+/** Kind-qualified identity aliases for a Zotero *item* reference (never a collection). */
+export function zoteroItemIdentityKeys(ref: {
+    library_id: number;
+    zotero_key: string;
+    library_ref?: string | null;
+}): string[] {
+    return zoteroReferenceLookupKeys(ref).map((key) => `item:${key}`);
+}
+
+/**
+ * Append `added` onto `existing`, skipping anything already present under any
+ * {@link messageAttachmentLookupKeys} alias.
+ */
+export function mergeMessageAttachments(
+    existing: MessageAttachment[],
+    added: MessageAttachment[],
+): MessageAttachment[] {
+    const keys = new Set(existing.flatMap(messageAttachmentIdentityKeys));
+    const merged = [...existing];
+    for (const attachment of added) {
+        const aliases = messageAttachmentIdentityKeys(attachment);
+        if (aliases.some((key) => keys.has(key))) continue;
+        aliases.forEach((key) => keys.add(key));
+        merged.push(attachment);
+    }
+    return merged;
+}
+
+/**
  * Whether two attachments identify the same object. When both carry portable
  * identity it is authoritative; the numeric fallback is only used when at
  * least one side is a legacy record without `library_ref`.

@@ -726,7 +726,8 @@ async function onMainWindowUnload(win: Window): Promise<void> {
  * custom properties plus the documented contract of platform tokens Zotero
  * supplies; `agent-ui-utilities.css` holds the utility layer, scoped
  * `.beaver-root`; `agent-ui-components.css` holds the shared component rules —
- * today the sign-in surface and the link vocabulary.
+ * the sign-in surface, the link vocabulary, the composer and the bars that dock
+ * to it, the editor field and the tooltip family.
  *
  * Order is the cascade. The shared sheets are registered *before* `beaver.css` so
  * this client's own rules win at equal specificity — the package supplies the

@@ -77,6 +77,8 @@ describe('threadModelToThreadData', () => {
             updated_at: '2026-01-02T00:00:00Z',
             zotero_user_id: '123',
             zotero_local_id: 'LOCAL',
+            starred: true,
+            agent_name: 'beaver',
         })).toEqual({
             id: 't1',
             name: 'Named',
@@ -84,6 +86,8 @@ describe('threadModelToThreadData', () => {
             updatedAt: '2026-01-02T00:00:00Z',
             zoteroUserId: '123',
             zoteroLocalId: 'LOCAL',
+            isPinned: true,
+            agentName: 'beaver',
         });
     });
 
@@ -96,6 +100,10 @@ describe('threadModelToThreadData', () => {
         expect(mapped.name).toBe('');
         expect(mapped.zoteroUserId).toBeNull();
         expect(mapped.zoteroLocalId).toBeNull();
+        // A backend response without the field means "not pinned", never undefined.
+        expect(mapped.isPinned).toBe(false);
+        // Absent on a backend that predates the field; null, not undefined.
+        expect(mapped.agentName).toBeNull();
     });
 });
 

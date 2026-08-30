@@ -33,6 +33,7 @@ import {
     currentThreadNameAtom,
 } from '../../atoms/threads';
 import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import { flushPendingPartEvents } from '../../utils/streamingPartQueue';
 import {
     isWSChatPendingAtom,
     sendApprovalResponseAtom,
@@ -101,6 +102,9 @@ function serializeApproval(a: PendingApproval) {
 
 /** Snapshot of thread/run/approval identity — the return shape of /current-ids. */
 function currentIds() {
+    // See getJotaiState: apply the frame-queued parts so the snapshot matches
+    // what has actually streamed in.
+    flushPendingPartEvents();
     const activeRun = store.get(activeRunAtom);
     const runs = store.get(threadRunsAtom);
     const approvals: Map<string, PendingApproval> = store.get(pendingApprovalsAtom);

@@ -361,7 +361,7 @@ async function validateEditNoteAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Item not found: ${library_id}-${zotero_key}`,
+            error: `Item not found: ${modelObjectIdFromReference({ library_id, library_ref, zotero_key })}`,
             error_code: 'item_not_found',
             preference: 'always_ask',
         };
@@ -448,7 +448,7 @@ async function validateEditNoteAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Note ${resolvedLibraryId}-${zotero_key} is empty`,
+            error: `Note ${modelObjectIdFromReference({ library_id: resolvedLibraryId, library_ref, zotero_key })} is empty`,
             error_code: 'empty_note',
             preference: 'always_ask',
         };
@@ -785,7 +785,7 @@ async function executeEditNoteAction(
             success: false,
             error: resolved.status === 'library_unavailable'
                 ? `Library not available for note: ${library_ref || library_id}-${zotero_key}`
-                : `Item not found: ${library_id}-${zotero_key}`,
+                : `Item not found: ${modelObjectIdFromReference({ library_id, library_ref, zotero_key })}`,
             error_code: resolved.status === 'library_unavailable' ? 'library_unavailable' : 'item_not_found',
         };
     }

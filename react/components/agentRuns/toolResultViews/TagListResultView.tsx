@@ -42,7 +42,7 @@ export const TagListResultView: React.FC<{ view: TagListView }> = ({ view }) => 
                 {tags.map((tag) => (
                     <div
                         key={tag.name}
-                        className="display-flex flex-row items-center min-w-0 px-2 py-05 rounded-md whitespace-nowrap bg-quaternary"
+                        className="display-flex flex-row items-center min-w-0 px-2 py-05 rounded-md whitespace-nowrap bg-chip"
                         title={tagTooltip(tag)}
                     >
                         <span className="text-sm font-color-primary truncate min-w-0">

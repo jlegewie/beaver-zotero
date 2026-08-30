@@ -188,6 +188,7 @@ const entryPaths = [
   "src/transport/clients/zoteroLibraryService.ts",
   "src/run-state/askUserQuestionAnswers.ts",
   "src/run-state/batchApprovalAnswers.ts",
+  "src/run-state/batchProgress.ts",
   "src/run-state/toolResultViews.ts",
   "src/run-state/toolResultTypes.ts",
   "src/run-state/toolCallRequest.ts",

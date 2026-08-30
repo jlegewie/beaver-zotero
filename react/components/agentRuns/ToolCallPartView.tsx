@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
-import { toolResultsMapAtom, getToolCallStatus } from '@beaver/agent-core/run-state/atoms';
+import { getToolCallStatusFromResult, toolResultAtom } from '@beaver/agent-core/run-state/atoms';
 import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
 import {
     isToolResultView,
@@ -113,7 +113,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     load_capability: WrenchIcon,
     search_tools: WrenchIcon,
 
-    // Batch operations
+    // Batch jobs
     batch_start: LayersIcon,
     batch_resolve: LayersIcon,
     batch_digest: LayersIcon,
@@ -225,15 +225,16 @@ interface ToolCallPartViewProps {
 
 /**
  * Renders a tool call with its status and result.
- * Uses toolResultsMapAtom to look up the result for this tool call.
+ * Uses toolResultAtom to look up the result for this tool call.
  * Visibility state is managed globally via searchToolVisibilityAtom.
  * Shows AgentActionView for tools with agent actions (e.g., edit_metadata).
  */
 export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId, responseIndex, runStatus }) => {
-    const resultsMap = useAtomValue(toolResultsMapAtom);
-    const result = resultsMap.get(part.tool_call_id);
+    // Scoped to this call: subscribing to the thread's whole result lookup
+    // re-renders every tool card on every frame of a streaming response.
+    const result = useAtomValue(useMemo(() => toolResultAtom(part.tool_call_id), [part.tool_call_id]));
     const hasResult = result !== undefined;
-    const status = getToolCallStatus(part.tool_call_id, resultsMap, runStatus);
+    const status = getToolCallStatusFromResult(result, runStatus);
 
     // Hydrated tool-result view model — present once the call has returned.
     const rawView = result?.part_kind === 'tool-return' ? result.metadata?.view : undefined;
@@ -261,8 +262,6 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         return () => { cancelled = true; };
     }, [part.tool_call_id, part.args, view]);
 
-    const label = getToolCallLabel(part, status, { view, enrich: labelEnrich });
-    
     // Check for pending approval for this tool call
     const getPendingApproval = useAtomValue(getPendingApprovalForToolcallAtom);
     const pendingApproval = getPendingApproval(part.tool_call_id);
@@ -272,7 +271,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
     const agentActions = getAgentActionsByToolcall(part.tool_call_id);
     const hasAgentAction = agentActions.length > 0;
-    
+
     // Determine if this tool should use AgentActionView
     const isStandardAgentActionTool =
         part.tool_name === 'edit_metadata' ||
@@ -315,6 +314,25 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             ? 'confirm_external_search'
             : part.tool_name;
 
+    // A write tool reports what it did through its agent action. When it returns
+    // successfully with no action and a bare string payload, it wrote nothing —
+    // the item already held the requested value — and that string is guidance
+    // written for the model (which tool to call next, which ids to pass). Never
+    // a result payload, so the row says "no change needed" and stays collapsed
+    // rather than exposing that text.
+    const isNoChangeReturn =
+        isStandardAgentActionTool &&
+        !showAgentActionView &&
+        result?.part_kind === 'tool-return' &&
+        !isUnsuccessfulToolReturn(result) &&
+        typeof result.content === 'string';
+
+    const label = getToolCallLabel(part, status, {
+        view,
+        enrich: labelEnrich,
+        noChange: isNoChangeReturn,
+    });
+
     // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
     const expansionKey = `${runId}:${responseIndex}:${part.tool_call_id}`;
     const expansionState = useAtomValue(toolExpandedAtom);
@@ -351,6 +369,8 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         (!VIEW_ONLY_EXPANDABLE_TOOLS.has(part.tool_name) || view !== null) &&
         !isExtractionRejected &&
         !isExternalSearchRejected &&
+        // A write that changed nothing has no result payload to show.
+        !isNoChangeReturn &&
         !showAgentActionView; // Don't allow expand toggle for agent action tools
 
     const effectiveExpanded = isExpanded && canExpand;
@@ -416,7 +436,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
 
     const effectiveLabelColor = effectiveExpanded
         ? 'font-color-primary'
-        : NON_EXPANDABLE_TOOLS.has(part.tool_name)
+        : NON_EXPANDABLE_TOOLS.has(part.tool_name) || isNoChangeReturn
             ? 'font-color-secondary'
             : '';
 
@@ -424,8 +444,8 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         <div
             id={`tool-${part.tool_call_id}`}
             className={`
-                rounded-md flex flex-col min-w-0
-                ${effectiveExpanded ? 'border-popup' : 'border-transparent'}
+                rounded-card flex flex-col min-w-0
+                ${effectiveExpanded ? 'border-card' : 'border-transparent'}
                 ${hasExpandedResult ? 'mb-2' : ''}
             `}
         >
