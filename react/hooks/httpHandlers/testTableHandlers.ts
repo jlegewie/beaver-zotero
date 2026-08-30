@@ -11,6 +11,10 @@
  * fabricated keys. The demo covers every `ColumnType` and every cell state
  * deliberately: an empty value, a pending cell under a filling column, a failed
  * cell, a hand-edited one and a failed row.
+ *
+ * `/beaver/test/table-create`, `-read` and `-list` drive the stored side: the
+ * same spec written to the library as a snapshot attachment, read back out of
+ * the file, and enumerated.
  */
 
 import type {
@@ -19,13 +23,23 @@ import type {
     Row,
     TableSpec,
 } from '@beaver/agent-core/layouts/table';
-import { rowIdFor } from '@beaver/agent-core/layouts/table';
+import { rowIdFor, validateTableSpec } from '@beaver/agent-core/layouts/table';
 import { store } from '../../store';
 import { windowSurfaceAtom, type WindowSurface } from '../../atoms/windowSurface';
 import { BeaverUIFactory } from '../../../src/ui/ui';
 import { closeTableTab, openTableTab } from '../../../src/ui/tableTab';
 import { getSearchableLibraryIds } from '../../../src/services/agentDataProvider/utils';
 import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
+import { safeAttachmentFilename } from '../../../src/utils/attachmentFiles';
+import {
+    createTableItem,
+    isTableItem,
+    loadTableItemFields,
+    readTableItemSpec,
+    tableStorageDirectory,
+    TABLE_TAG,
+    TableItemError,
+} from '../../../src/services/artifacts/tableItem';
 
 /** Wide enough for the demo's columns; the window grows to it and no further. */
 const TABLE_WINDOW_SIZE = { width: 1180, height: 780 };
@@ -205,8 +219,14 @@ function sentence(text: string, index: number): string {
     return picked.length > 150 ? `${picked.slice(0, 147)}…` : picked;
 }
 
+/**
+ * A demo cell. Every value carries `provenance`, because a spec whose cells
+ * have values and no provenance is invalid — an unattributed value is not
+ * evidence. `asserted` is the honest label for hand-built demo data: nothing
+ * read a document for it.
+ */
 function textCell(text: string): Cell {
-    return text ? { value: { kind: 'text', text } } : {};
+    return text ? { value: { kind: 'text', text }, provenance: 'asserted' } : {};
 }
 
 async function buildDemoTable(
@@ -238,6 +258,7 @@ function referenceRow(item: DemoItem, index: number, withAbstract = true): Row {
                     venue: item.venue || undefined,
                     item_type: item.itemType,
                 },
+                provenance: 'asserted',
                 details:
                     withAbstract && item.abstract
                         ? { kind: 'text', label: 'Abstract', text: item.abstract }
@@ -273,14 +294,21 @@ function buildSearchDemo(items: DemoItem[]): TableSpec {
         // and carrying both prints it twice in the expanded row.
         const row = referenceRow(item, i, false);
         row.cells.year = item.year
-            ? { value: { kind: 'date', value: item.year } }
+            ? { value: { kind: 'date', value: item.year }, provenance: 'asserted' }
             : {};
         // Stand-in metrics: the demo is about the rendering, not the numbers.
-        row.cells.cites = { value: { kind: 'number', value: (i + 1) * 137 } };
+        row.cells.cites = {
+            value: { kind: 'number', value: (i + 1) * 137 },
+            provenance: 'asserted',
+        };
         row.cells.type = {
             value: { kind: 'select', label: selectLabelFor(item.itemType) },
+            provenance: 'asserted',
         };
-        row.cells.oa = { value: { kind: 'boolean', value: i % 3 !== 0 } };
+        row.cells.oa = {
+            value: { kind: 'boolean', value: i % 3 !== 0 },
+            provenance: 'asserted',
+        };
         row.cells.abstract = textCell(item.abstract);
         row.cells.doi = item.doi
             ? {
@@ -289,6 +317,7 @@ function buildSearchDemo(items: DemoItem[]): TableSpec {
                       url: `https://doi.org/${item.doi}`,
                       label: item.doi,
                   },
+                  provenance: 'asserted',
               }
             : {};
         return row;
@@ -308,6 +337,7 @@ function buildSearchDemo(items: DemoItem[]): TableSpec {
                     subtitle: 'openalex',
                     venue: 'demo-failed',
                 },
+                provenance: 'asserted',
             },
             abstract: { status: 'error', error: 'No abstract available' },
         },
@@ -375,7 +405,7 @@ function buildExtractionDemo(items: DemoItem[]): TableSpec {
     const rows: Row[] = items.map((item, i) => {
         const row = referenceRow(item, i);
         row.cells.year = item.year
-            ? { value: { kind: 'date', value: item.year } }
+            ? { value: { kind: 'date', value: item.year }, provenance: 'asserted' }
             : {};
         // A citation tag per cell, so the marker, its tooltip and the source
         // list all have something real to resolve against.
@@ -387,11 +417,12 @@ function buildExtractionDemo(items: DemoItem[]): TableSpec {
             ...textCell(
                 item.abstract ? `${sentence(item.abstract, 0)} ${cite}` : ''
             ),
-            // One hand-edited cell, so visible provenance shows up.
-            provenance: i === 1 ? 'user' : undefined,
+            // One hand-edited cell, so a second provenance shows up.
+            provenance: i === 1 ? 'user' : 'asserted',
         };
         row.cells.design = {
             value: { kind: 'select', label: designs[i % designs.length] },
+            provenance: 'asserted',
         };
         // A cell the producer reports nothing for is a finding, not a gap.
         row.cells.effect =
@@ -457,4 +488,166 @@ function selectLabelFor(itemType: string): string {
     if (itemType === 'book' || itemType === 'bookSection') return 'Book';
     if (itemType === 'preprint') return 'Preprint';
     return 'Other';
+}
+
+// ---------------------------------------------------------------------------
+// Stored tables (dev-only)
+// ---------------------------------------------------------------------------
+
+/**
+ * The library-item side of a table: create one, read the spec back out of the
+ * stored file, and list what is in the library. These drive the real
+ * `Zotero.Attachments` path, so a created table is a genuine snapshot
+ * attachment that opens in the reader.
+ *
+ * Failures answer 200 with `ok: false` and the error's `code`, so a caller sees
+ * *why* a write was refused (an excluded library, a group library) instead of a
+ * bare 500.
+ */
+
+interface TableCreateRequest extends OpenTableRequest {
+    /** The spec to store. Omit it and a demo spec is built from the library. */
+    spec?: TableSpec;
+    libraryID?: number;
+    collectionID?: number;
+}
+
+export async function handleTestTableCreateHttpRequest(
+    request: TableCreateRequest = {}
+): Promise<any> {
+    const variant = request.variant === 'extraction' ? 'extraction' : 'search';
+    const spec =
+        request.spec ??
+        request.table ??
+        (await buildDemoTable(variant, request.limit ?? DEMO_ROW_LIMIT));
+
+    try {
+        const created = await createTableItem({
+            spec,
+            title: request.title,
+            libraryID: request.libraryID,
+            collectionID: request.collectionID,
+        });
+        return {
+            ok: true,
+            key: created.key,
+            item_id: created.itemID,
+            library_id: created.libraryID,
+            title: created.title,
+            filename: created.filename,
+            storage_directory: created.storageDirectory,
+            byte_length: created.byteLength,
+            css_rule_count: created.cssRuleCount,
+            spec_version: created.spec.spec_version,
+            version: created.spec.version,
+            rows: created.spec.rows.length,
+            columns: created.spec.columns.map((c) => c.id),
+            // A created demo table should carry no issues; anything here means
+            // the spec that was stored is not one a producer should emit.
+            spec_issues: validateTableSpec(created.spec),
+            select_uri: created.selectUri,
+            open_uri: created.openUri,
+        };
+    } catch (error) {
+        return errorResponse(error);
+    }
+}
+
+interface TableReadRequest {
+    libraryID?: number;
+    key?: string;
+}
+
+export async function handleTestTableReadHttpRequest(
+    request: TableReadRequest = {}
+): Promise<any> {
+    if (!request.key) return { ok: false, code: 'invalid_request', error: 'key is required' };
+    const libraryID = request.libraryID ?? Zotero.Libraries.userLibraryID;
+    const item = Zotero.Items.getByLibraryAndKey(libraryID, request.key) as
+        | Zotero.Item
+        | false;
+    if (!item) {
+        return {
+            ok: false,
+            code: 'not_found',
+            error: `No item ${request.key} in library ${libraryID}`,
+        };
+    }
+
+    await loadTableItemFields([item]);
+    const isTable = isTableItem(item);
+    const read = await readTableItemSpec(item);
+    if (!read.ok) {
+        return {
+            ok: false,
+            is_table_item: isTable,
+            code: read.code,
+            error: read.message,
+            spec_version: read.specVersion,
+        };
+    }
+    return {
+        ok: true,
+        is_table_item: isTable,
+        key: item.key,
+        library_id: item.libraryID,
+        storage_directory: tableStorageDirectory(item),
+        spec: read.spec,
+        spec_issues: validateTableSpec(read.spec),
+    };
+}
+
+/**
+ * Every stored table, across every local library.
+ *
+ * Not filtered by library exclusion: these are the user's own artifacts and the
+ * listing never leaves the machine — exclusion governs what Beaver sends out
+ * and writes, not what the user may look at. Excluded libraries are flagged
+ * rather than hidden.
+ */
+export async function handleTestTableListHttpRequest(): Promise<any> {
+    const searchable = new Set(getSearchableLibraryIds());
+    const tables: any[] = [];
+
+    for (const library of Zotero.Libraries.getAll()) {
+        const search = new Zotero.Search() as unknown as ZoteroSearchWritable;
+        search.libraryID = library.libraryID;
+        search.addCondition('tag', 'is', TABLE_TAG);
+        // Trashed tables are listed too, so a trash/restore round trip is
+        // visible here rather than looking like the table disappeared.
+        search.addCondition('includeDeleted', 'true', '');
+        const itemIDs = await search.search();
+        if (!itemIDs?.length) continue;
+
+        const items = (await Zotero.Items.getAsync(itemIDs)) as Zotero.Item[];
+        await loadTableItemFields(items);
+        for (const item of items) {
+            if (!isTableItem(item)) continue;
+            const read = await readTableItemSpec(item);
+            tables.push({
+                key: item.key,
+                library_id: item.libraryID,
+                library_name: library.name,
+                library_excluded: !searchable.has(library.libraryID),
+                title: item.getField('title'),
+                filename: safeAttachmentFilename(item),
+                deleted: !!item.deleted,
+                rows: read.ok ? read.spec.rows.length : null,
+                columns: read.ok ? read.spec.columns.length : null,
+                version: read.ok ? read.spec.version : null,
+                error: read.ok ? undefined : `${read.code}: ${read.message}`,
+            });
+        }
+    }
+
+    return { ok: true, count: tables.length, tables };
+}
+
+function errorResponse(error: unknown): any {
+    const code = error instanceof TableItemError ? error.code : 'unexpected_error';
+    return {
+        ok: false,
+        code,
+        error: error instanceof Error ? error.message : String(error),
+    };
 }

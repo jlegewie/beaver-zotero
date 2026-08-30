@@ -175,6 +175,9 @@ import {
     handleTestCloseTableHttpRequest,
     handleTestOpenTableTabHttpRequest,
     handleTestCloseTableTabHttpRequest,
+    handleTestTableCreateHttpRequest,
+    handleTestTableReadHttpRequest,
+    handleTestTableListHttpRequest,
 } from './httpHandlers/testTableHandlers';
 import type {
     WSZoteroDataRequest,
@@ -363,6 +366,10 @@ const ENDPOINT_PATHS = [
     '/beaver/test/close-table',
     '/beaver/test/open-table-tab',
     '/beaver/test/close-table-tab',
+    // Stored tables: the snapshot attachment behind a table (dev-only)
+    '/beaver/test/table-create',
+    '/beaver/test/table-read',
+    '/beaver/test/table-list',
 ] as const;
 
 /**
@@ -1305,6 +1312,17 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/close-table-tab'] =
             createEndpoint(handleTestCloseTableTabHttpRequest);
+
+        // Stored tables (dev-only): create the real snapshot attachment, read
+        // the spec back out of the file, and list what is in the library.
+        Zotero.Server.Endpoints['/beaver/test/table-create'] =
+            createEndpoint(handleTestTableCreateHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-read'] =
+            createEndpoint(handleTestTableReadHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-list'] =
+            createEndpoint(handleTestTableListHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/beaver-sidebar'] =
             createEndpoint(handleTestBeaverSidebarHttpRequest);
