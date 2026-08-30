@@ -53,7 +53,6 @@ import {
     summarize,
     type ApplyError,
     type TableMutation,
-    type TableSummary,
 } from '@beaver/agent-core/layouts/tableMutations';
 import { sha256Hex } from '../../utils/hash';
 import { checkLibraryExcluded } from '../agentDataProvider/utils';
@@ -61,6 +60,7 @@ import { zoteroLinksFor } from './view/tableLinks';
 import { buildTableDocument } from './tableDocument';
 import {
     createTableItem,
+    normalizeTableHistory,
     queueTableFullText,
     readTableItemSpec,
     resolveTableItem,
@@ -70,26 +70,41 @@ import {
     tableSidecarDirectory,
     tableVersionPath,
     trashTableItem,
+    EMPTY_TABLE_HISTORY,
     TableItemError,
     type CreatedTableItem,
     type CreateTableItemOptions,
+    type TableActor,
+    type TableHistory,
     type TableRef,
+    type TableVersionEntry,
 } from './tableItem';
 
 // ---------------------------------------------------------------------------
 // Shape
 // ---------------------------------------------------------------------------
 
-// Addressing and reading live next door, so that the esbuild bundle can reach
-// them without reaching this module (which imports the library-exclusion check
-// and through it the whole React graph). Re-exported here because this is the
-// store's public surface: `readTable` is still "read a table through the
-// store", with one implementation.
-export { readTable, resolveTableItem } from './tableItemIdentity';
-export type { TableRef } from './tableItemIdentity';
-
-/** Who asked for a write. `user` never collapses — see {@link writeTable}. */
-export type TableActor = 'user' | 'agent' | 'system';
+// Addressing, reading and the shape of the version log live next door, so that
+// the esbuild bundle can reach them without reaching this module (which imports
+// the library-exclusion check and through it the whole React graph).
+// Re-exported here because this is the store's public surface: `readTable` is
+// still "read a table through the store", with one implementation, and a caller
+// that already imports `TableVersionEntry` from here keeps working.
+//
+// Only the *shape* and the read moved. Every write to `history.json` is still
+// this module's, under its lock.
+export {
+    normalizeTableHistory,
+    readTable,
+    readTableHistory,
+    resolveTableItem,
+} from './tableItemIdentity';
+export type {
+    TableActor,
+    TableHistory,
+    TableRef,
+    TableVersionEntry,
+} from './tableItemIdentity';
 
 export interface TableWriteMeta {
     actor: TableActor;
@@ -98,41 +113,6 @@ export interface TableWriteMeta {
     thread_id?: string;
     /** One line describing what changed, for a history list. */
     change?: string;
-}
-
-/** One entry in the version log. */
-export interface TableVersionEntry {
-    version: number;
-    actor: TableActor;
-    run_id?: string;
-    thread_id?: string;
-    change?: string;
-    /** ISO timestamp of the write. */
-    at: string;
-    /**
-     * SHA-256 of the serialised spec exactly as it was written to
-     * `beaver/v<N>.json`. Not a security claim: it is how a later read notices
-     * that a file changed behind our back (a sync conflict resolved by copying,
-     * a hand-edited sidecar, a write interrupted mid-sequence) rather than
-     * silently trusting it. {@link openTable} verifies it and
-     * {@link revertTable} refuses a version that fails it.
-     */
-    sha256: string;
-    /** {@link summarize} of that spec, so listing tables never reads one. */
-    summary: TableSummary;
-    /**
-     * This version may never be overwritten in place — see the collapse rule on
-     * {@link writeTable}. Set on the version a table was created in, and on any
-     * version reconstructed from the file rather than written by a known author.
-     */
-    sealed?: true;
-}
-
-export interface TableHistory {
-    /** The highest version the log knows about. 0 when there is none. */
-    tip: number;
-    /** Oldest first, capped at {@link TABLE_VERSION_RETENTION}. */
-    versions: TableVersionEntry[];
 }
 
 /** What {@link openTable} had to repair. */
@@ -233,8 +213,6 @@ const RECOVERED_CHANGE = 'Recovered from an interrupted write';
 
 /** What an entry rebuilt from a version file the log had lost says it is. */
 const ADOPTED_CHANGE = 'Recovered from a lost log entry';
-
-const EMPTY_HISTORY: TableHistory = { tip: 0, versions: [] };
 
 // ---------------------------------------------------------------------------
 // The single-flight lock
@@ -457,24 +435,13 @@ async function readCurrentState(item: Zotero.Item): Promise<CurrentState> {
     }
 
     const history =
-        (await readJson<TableHistory>(historyPathOf(item))) ?? EMPTY_HISTORY;
+        (await readJson<TableHistory>(historyPathOf(item))) ?? EMPTY_TABLE_HISTORY;
 
     return {
         spec,
         htmlVersion: typeof spec?.version === 'number' ? spec.version : 0,
-        history: normalizeHistory(history),
+        history: normalizeTableHistory(history),
     };
-}
-
-/** Defends every reader against a hand-edited or truncated `history.json`. */
-function normalizeHistory(history: TableHistory | null): TableHistory {
-    const versions = Array.isArray(history?.versions)
-        ? history.versions
-              .filter((entry) => typeof entry?.version === 'number')
-              .sort((a, b) => a.version - b.version)
-        : [];
-    const tip = versions.length ? versions[versions.length - 1].version : 0;
-    return { tip: Math.max(tip, Number(history?.tip) || 0), versions };
 }
 
 // ---------------------------------------------------------------------------
@@ -1123,7 +1090,7 @@ export async function editTable(
 export async function listVersions(ref: TableRef): Promise<TableVersionEntry[]> {
     const item = await resolveTableItem(ref);
     const history = await readJson<TableHistory>(historyPathOf(item));
-    return normalizeHistory(history).versions;
+    return normalizeTableHistory(history).versions;
 }
 
 /**
@@ -1166,7 +1133,7 @@ export async function openTable(ref: TableRef): Promise<OpenTableResult> {
             }
         }
 
-        const history = normalizeHistory(
+        const history = normalizeTableHistory(
             await readJson<TableHistory>(historyPathOf(item))
         );
         return {

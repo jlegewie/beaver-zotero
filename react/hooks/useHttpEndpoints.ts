@@ -188,6 +188,7 @@ import {
     handleTestTableOpenHttpRequest,
     handleTestTableCorruptHttpRequest,
     handleTestTableOpenReaderHttpRequest,
+    handleTestTableItemPaneHttpRequest,
     handleTestTableViewStateHttpRequest,
 } from './httpHandlers/testTableHandlers';
 import type {
@@ -394,6 +395,8 @@ const ENDPOINT_PATHS = [
     // The reader host for a stored table (dev-only)
     '/beaver/test/table-open-reader',
     '/beaver/test/table-view-state',
+    // The item-pane section for a stored table (dev-only)
+    '/beaver/test/table-item-pane',
 ] as const;
 
 /**
@@ -1389,6 +1392,11 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/table-view-state'] =
             createEndpoint(handleTestTableViewStateHttpRequest);
+
+        // The item-pane section (dev-only): whether it is registered, and the
+        // fields it would render for one table.
+        Zotero.Server.Endpoints['/beaver/test/table-item-pane'] =
+            createEndpoint(handleTestTableItemPaneHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/beaver-sidebar'] =
             createEndpoint(handleTestBeaverSidebarHttpRequest);

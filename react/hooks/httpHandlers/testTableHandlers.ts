@@ -1252,3 +1252,38 @@ export async function handleTestTableViewStateHttpRequest(): Promise<any> {
         readers: views.filter((v) => v.host === 'reader').length,
     };
 }
+
+/**
+ * What the item-pane section would render for a stored table.
+ *
+ * Answers from the stored numbers rather than from a rendered section's DOM, so
+ * it works whether or not the item is selected anywhere — `registered` is what
+ * says whether the section itself is up. Routed through the shared namespace
+ * like every other table surface: the section keeps its registration id as
+ * module state in the esbuild bundle, and a second copy here would report on a
+ * registration nothing made.
+ */
+export async function handleTestTableItemPaneHttpRequest(
+    request: { key?: string; libraryID?: number } = {}
+): Promise<any> {
+    if (!request.key) return MISSING_KEY;
+    const api = getTablesApi();
+    if (!api) return TABLES_API_MISSING;
+
+    const ref: TableRef = {
+        libraryID: request.libraryID ?? Zotero.Libraries.userLibraryID,
+        key: request.key,
+    };
+    const report = await api.itemPane.describe(ref);
+    return {
+        ok: report.applies,
+        registered: report.registered,
+        pane_id: report.paneID,
+        key: report.key,
+        library_id: report.libraryID,
+        applies: report.applies,
+        reason: report.reason,
+        fields: report.fields,
+        actions: report.actions,
+    };
+}

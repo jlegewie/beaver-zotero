@@ -61,7 +61,9 @@ export {
     buildTableUrl,
     isTableItem,
     loadTableItemFields,
+    normalizeTableHistory,
     readTable,
+    readTableHistory,
     readTableItemSpec,
     resolveTableItem,
     tableHistoryPath,
@@ -69,6 +71,7 @@ export {
     tableSidecarDirectory,
     tableStorageDirectory,
     tableVersionPath,
+    EMPTY_TABLE_HISTORY,
     TableItemError,
     TABLE_EMOJI_TAG,
     TABLE_SIDECAR_DIR,
@@ -77,8 +80,11 @@ export {
 } from './tableItemIdentity';
 export type {
     ReadTableItemResult,
+    TableActor,
+    TableHistory,
     TableItemErrorCode,
     TableRef,
+    TableVersionEntry,
 } from './tableItemIdentity';
 
 // ---------------------------------------------------------------------------

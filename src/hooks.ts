@@ -32,6 +32,10 @@ import {
     cleanupTableDoubleClick,
 } from "./ui/tableDoubleClick";
 import {
+    initTableItemPane,
+    cleanupTableItemPane,
+} from "./ui/tableItemPane";
+import {
     registerTablesApi,
     unregisterTablesApi,
 } from "./services/artifacts/tablesApiHost";
@@ -319,6 +323,11 @@ async function onStartup() {
         // The double-click guard has to decide synchronously, so the item data
         // `isTableItem` reads is loaded ahead of the click, not during it.
         initTableDoubleClick();
+
+        // -------- Describe a stored table in the item pane --------
+        // Registered once, globally: Zotero re-creates the section in every
+        // window's item pane from the same registration.
+        initTableItemPane();
 
         // -------- Publish the table surfaces to the other bundle --------
         // The tab deck, the double-click guard and the reader views keep module
@@ -681,6 +690,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         cleanupReaderTableViews();
         closeAllTableTabs();
         cleanupTableDoubleClick();
+        cleanupTableItemPane();
 
         // 13. Unregister reader toolbar menu
         cleanupReaderToolbarMenu();
@@ -907,6 +917,7 @@ async function onShutdown(): Promise<void> {
         cleanupReaderTableViews();
         closeAllTableTabs();
         cleanupTableDoubleClick();
+        cleanupTableItemPane();
         cleanupReaderToolbarMenu();
         unregisterBeaverProtocolHandler();
 

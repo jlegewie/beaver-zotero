@@ -48,6 +48,7 @@ import type {
     TableTarget,
 } from '../../ui/openTable';
 import type { TableDoubleClickRecord } from '../../ui/tableDoubleClick';
+import type { TableItemPaneReport } from '../../ui/tableItemPane';
 
 /** The double-click guard, as the dev endpoints need to see it. */
 export interface TablesDoubleClickApi {
@@ -60,6 +61,16 @@ export interface TablesDoubleClickApi {
     warm(items: Zotero.Item[]): Promise<number>;
     /** Resolves once the open started by the most recent decision has settled. */
     settled(): Promise<void>;
+}
+
+/** The item-pane section, as the dev endpoint needs to see it. */
+export interface TablesItemPaneApi {
+    /** Whether the section is registered with Zotero right now. */
+    isRegistered(): boolean;
+    /** The namespaced pane id Zotero assigned, or null. */
+    paneID(): string | null;
+    /** What the section would render for one table. */
+    describe(ref: TableRef): Promise<TableItemPaneReport>;
 }
 
 export interface TablesApi {
@@ -83,6 +94,7 @@ export interface TablesApi {
     ): Promise<ReaderTableDiagnostics>;
 
     doubleClick: TablesDoubleClickApi;
+    itemPane: TablesItemPaneApi;
 }
 
 /**

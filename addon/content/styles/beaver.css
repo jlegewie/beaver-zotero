@@ -2529,3 +2529,83 @@
     text-overflow: ellipsis;
     word-break: break-word;
 }
+
+
+/* ---------------------------------------------------------------------------
+ * Item-pane section for a stored table (src/ui/tableItemPane.ts)
+ *
+ * Zotero's own item-pane tokens, so the section sits in the pane rather than on
+ * top of it: --fill-secondary/-tertiary for text, --accent-blue for the action
+ * row, and the pane's own font size.
+ * ------------------------------------------------------------------------- */
+.beaver-table-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 2px 0;
+}
+
+.beaver-table-section-facts {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.beaver-table-section-line {
+    color: var(--fill-secondary);
+    line-height: 1.5;
+}
+
+.beaver-table-section-flags,
+.beaver-table-section-problem {
+    color: var(--fill-tertiary);
+}
+
+.beaver-table-section-warning {
+    margin-top: 6px;
+    color: var(--fill-tertiary);
+    font-size: 0.92em;
+    line-height: 1.4;
+}
+
+.beaver-table-section-distribution {
+    margin-top: 6px;
+}
+
+.beaver-table-section-distribution-label {
+    color: var(--fill-tertiary);
+    font-size: 0.92em;
+}
+
+.beaver-table-section-distribution-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--fill-secondary);
+    line-height: 1.5;
+}
+
+.beaver-table-section-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.beaver-table-section-action {
+    padding: 3px 8px;
+    border: 1px solid var(--fill-quinary);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--accent-blue);
+    font: inherit;
+    cursor: pointer;
+}
+
+.beaver-table-section-action:hover:not(:disabled) {
+    background: var(--fill-quinary);
+}
+
+.beaver-table-section-action:disabled {
+    color: var(--fill-tertiary);
+    cursor: default;
+}

@@ -445,6 +445,8 @@ export default tseslint.config(
             "src/ui/tableTab.ts",
             "src/ui/openTable.ts",
             "src/ui/tableDoubleClick.ts",
+            "src/ui/tableItemPane.ts",
+            "src/ui/tableItemPaneModel.ts",
         ],
         rules: {
             "no-restricted-imports": [
@@ -485,6 +487,8 @@ export default tseslint.config(
             "src/ui/tableTab.ts",
             "src/ui/openTable.ts",
             "src/ui/tableDoubleClick.ts",
+            "src/ui/tableItemPane.ts",
+            "src/ui/tableItemPaneModel.ts",
         ],
         rules: {
             "no-restricted-imports": [
@@ -547,6 +551,7 @@ export default tseslint.config(
                                 "**/ui/tableTab",
                                 "**/ui/tableDoubleClick",
                                 "**/ui/openTable",
+                                "**/ui/tableItemPane",
                                 "**/artifacts/view/readerTableView",
                                 "**/artifacts/tablesApiHost",
                             ],

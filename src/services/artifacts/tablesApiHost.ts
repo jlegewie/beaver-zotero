@@ -23,6 +23,11 @@ import {
     warmTableItems,
     whenTableDoubleClickSettles,
 } from '../../ui/tableDoubleClick';
+import {
+    describeTableItemPane,
+    isTableItemPaneRegistered,
+    tableItemPaneID,
+} from '../../ui/tableItemPane';
 
 /**
  * Registers the namespace. Safe to call twice — a plugin reload replaces the
@@ -43,6 +48,11 @@ export function registerTablesApi(): void {
             last: () => lastTableDoubleClick(),
             warm: (items) => warmTableItems(items),
             settled: () => whenTableDoubleClickSettles(),
+        },
+        itemPane: {
+            isRegistered: () => isTableItemPaneRegistered(),
+            paneID: () => tableItemPaneID(),
+            describe: (ref) => describeTableItemPane(ref),
         },
     };
     setTablesApi(api);

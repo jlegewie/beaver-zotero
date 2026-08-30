@@ -23,6 +23,7 @@
 
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { TableSpec } from '@beaver/agent-core/layouts/table';
+import type { TableSummary } from '@beaver/agent-core/layouts/tableMutations';
 import { parseTableDocument } from './tableDocument';
 
 // ---------------------------------------------------------------------------
@@ -273,6 +274,92 @@ export async function readTableItemSpec(
         code: 'invalid',
         message: parsed.detail ?? `Table ${item.key} has an unreadable spec.`,
     };
+}
+
+// ---------------------------------------------------------------------------
+// The version log
+// ---------------------------------------------------------------------------
+
+/**
+ * Who asked for a write. `tableStore.ts` owns what each value means for
+ * collapsing; the shape lives here because readers on the esbuild side — the
+ * item-pane section — need to name it without reaching the store.
+ */
+export type TableActor = 'user' | 'agent' | 'system';
+
+/** One entry in the version log. */
+export interface TableVersionEntry {
+    version: number;
+    actor: TableActor;
+    run_id?: string;
+    thread_id?: string;
+    change?: string;
+    /** ISO timestamp of the write. */
+    at: string;
+    /**
+     * SHA-256 of the serialised spec exactly as it was written to
+     * `beaver/v<N>.json`. Not a security claim: it is how a later read notices
+     * that a file changed behind our back (a sync conflict resolved by copying,
+     * a hand-edited sidecar, a write interrupted mid-sequence) rather than
+     * silently trusting it. The store verifies it when opening a table and
+     * refuses to revert to a version that fails it.
+     */
+    sha256: string;
+    /** `summarize()` of that spec, so listing tables never reads one. */
+    summary: TableSummary;
+    /**
+     * This version may never be overwritten in place — see the collapse rule on
+     * `writeTable`. Set on the version a table was created in, and on any
+     * version reconstructed from the file rather than written by a known author.
+     */
+    sealed?: true;
+}
+
+export interface TableHistory {
+    /** The highest version the log knows about. 0 when there is none. */
+    tip: number;
+    /** Oldest first, capped by the store's retention limit. */
+    versions: TableVersionEntry[];
+}
+
+/** A table with no log at all — a fresh item, or one whose sidecar is gone. */
+export const EMPTY_TABLE_HISTORY: TableHistory = { tip: 0, versions: [] };
+
+/** Defends every reader against a hand-edited or truncated `history.json`. */
+export function normalizeTableHistory(
+    history: TableHistory | null | undefined
+): TableHistory {
+    const versions = Array.isArray(history?.versions)
+        ? history.versions
+              .filter((entry) => typeof entry?.version === 'number')
+              .sort((a, b) => a.version - b.version)
+        : [];
+    const tip = versions.length ? versions[versions.length - 1].version : 0;
+    return { tip: Math.max(tip, Number(history?.tip) || 0), versions };
+}
+
+/**
+ * The version log as stored, normalized.
+ *
+ * Read-only and lock-free on purpose: this is what a display surface calls to
+ * learn a table's version and coverage without reading (and parsing) the whole
+ * document. Every write to the log still goes through `tableStore.ts`. An
+ * absent or damaged log reads as an empty one — the document is the state, and
+ * the store rebuilds the log from it on the next open.
+ */
+export async function readTableHistory(
+    item: Zotero.Item
+): Promise<TableHistory> {
+    const path = tableHistoryPath(item);
+    if (!path) return EMPTY_TABLE_HISTORY;
+    try {
+        if (!(await IOUtils.exists(path))) return EMPTY_TABLE_HISTORY;
+        const text = await IOUtils.readUTF8(path);
+        return normalizeTableHistory(JSON.parse(text) as TableHistory);
+    } catch (error) {
+        logger(`readTableHistory: unusable log for ${item.key}: ${String(error)}`, 2);
+        return EMPTY_TABLE_HISTORY;
+    }
 }
 
 // ---------------------------------------------------------------------------
