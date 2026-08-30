@@ -111,6 +111,7 @@
     "./src/icons/FilterIcon.tsx",
     "./src/icons/FolderAddIcon.tsx",
     "./src/icons/FolderDetailIcon.tsx",
+    "./src/icons/FlowConnectionIcon.tsx",
     "./src/icons/FourIcon.tsx",
     "./src/icons/GlobalSearchIcon.tsx",
     "./src/icons/HandIcon.tsx",
