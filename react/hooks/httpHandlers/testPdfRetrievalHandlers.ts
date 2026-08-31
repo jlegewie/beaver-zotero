@@ -56,6 +56,14 @@ interface AttemptResult {
     access_method?: string;
 }
 
+/** One URL the resolver cascade tried, in the order it tried them. */
+interface AttemptedUrl {
+    url: string;
+    /** Milliseconds after the strategy started. */
+    ms: number;
+    skipped: boolean;
+}
+
 interface OpenedWindow {
     /** Location of the window when we first managed to read it. */
     href: string | null;
@@ -199,6 +207,8 @@ async function describeAttachment(attachment: Zotero.Item): Promise<Record<strin
     }
     return {
         key: attachment.key,
+        // Which URL actually produced the file.
+        source_url: attachment.getField('url') || null,
         content_type: attachment.attachmentContentType || null,
         filename: attachment.attachmentFilename || null,
         byte_size: byteSize,
@@ -209,7 +219,8 @@ async function describeAttachment(attachment: Zotero.Item): Promise<Record<strin
 async function runStrategy(
     item: Zotero.Item,
     libraryID: number,
-    strategy: StrategySpec
+    strategy: StrategySpec,
+    attemptedUrls: AttemptedUrl[]
 ): Promise<{ attachment: Zotero.Item | null; accessMethod?: string }> {
     const timeout = strategy.timeout_ms ?? DEFAULT_STRATEGY_TIMEOUT_MS;
 
@@ -242,7 +253,22 @@ async function runStrategy(
     if (strategy.kind === 'add_file_from_urls') {
         // Empty resolvers = Zotero's own cascade (same as production strategy 3).
         // skip_challenge_urls applies the same onBeforeRequest hook.
-        const skipChallengeUrls = strategy.skip_challenge_urls ? refuseCaptchaChallengeUrls : undefined;
+        // Recording every attempted URL is what makes the resolver-cap question
+        // answerable from a single run: the winning URL's rank in our candidate
+        // list says directly which caps would still have found it.
+        const startedAt = Date.now();
+        const onBeforeRequest = (url: string) => {
+            const record: AttemptedUrl = { url, ms: Date.now() - startedAt, skipped: false };
+            attemptedUrls.push(record);
+            if (strategy.skip_challenge_urls) {
+                try {
+                    refuseCaptchaChallengeUrls(url);
+                } catch (e) {
+                    record.skipped = true;
+                    throw e;
+                }
+            }
+        };
         // Zotero's own doi/url/oa/custom resolvers are appended so this arm is
         // a superset of `addAvailableFile`, never a narrower substitute.
         const resolvers = [
@@ -255,7 +281,7 @@ async function runStrategy(
                 onAccessMethodStart: (method: string) => {
                     accessMethod = method;
                 },
-                onBeforeRequest: skipChallengeUrls,
+                onBeforeRequest,
             }),
             timeout,
             'addFileFromURLs'
@@ -302,6 +328,7 @@ export async function handleTestPdfRetrievalHttpRequest(request: any) {
     const startedAt = Date.now();
     const windowWatch = watch_windows ? watchWindows(startedAt, close_windows !== false) : null;
     const attempts: AttemptResult[] = [];
+    const attemptedUrls: AttemptedUrl[] = [];
     let item: Zotero.Item | null = null;
     let attached: Zotero.Item | null = null;
     let winning: AttemptResult | null = null;
@@ -336,7 +363,9 @@ export async function handleTestPdfRetrievalHttpRequest(request: any) {
                 timed_out: false,
             };
             try {
-                const { attachment, accessMethod } = await runStrategy(item, libraryID, strategy);
+                const { attachment, accessMethod } = await runStrategy(
+                    item, libraryID, strategy, attemptedUrls
+                );
                 attempt.access_method = accessMethod;
                 if (attachment) {
                     attached = attachment;
@@ -401,6 +430,7 @@ export async function handleTestPdfRetrievalHttpRequest(request: any) {
         winning_access_method: winning?.access_method ?? null,
         attachment: attachmentInfo,
         attempts,
+        attempted_urls: attemptedUrls,
         create_ms: createMs,
         total_ms: Date.now() - startedAt,
         cleaned_up: cleanedUp,
