@@ -44,6 +44,10 @@ interface StrategySpec {
     resolvers?: Record<string, unknown>[];
     timeout_ms?: number;
     skip_challenge_urls?: boolean;
+    /** Stop starting new downloads after this long, by refusing URLs in
+     * `onBeforeRequest`.
+     */
+    budget_ms?: number;
 }
 
 interface AttemptResult {
@@ -259,6 +263,10 @@ async function runStrategy(
         const onBeforeRequest = (url: string) => {
             const record: AttemptedUrl = { url, ms: Date.now() - startedAt, skipped: false };
             attemptedUrls.push(record);
+            if (strategy.budget_ms && Date.now() - startedAt > strategy.budget_ms) {
+                record.skipped = true;
+                throw new Error(`budget spent before ${url}`);
+            }
             if (strategy.skip_challenge_urls) {
                 try {
                     refuseCaptchaChallengeUrls(url);
