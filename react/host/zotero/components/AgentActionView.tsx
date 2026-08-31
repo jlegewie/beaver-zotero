@@ -284,6 +284,19 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         ? { ...baseConfig, showApply: false, showReject: false, showUndo: false, showRetry: false }
         : baseConfig;
 
+    // Every action on this card has settled, but the tool call has not returned:
+    // the backend is still working on it (`create_items` holds its result while
+    // background PDF fetches finish). The run-level status line is suppressed
+    // for as long as any tool call is outstanding — see `shouldShowRunStatus` —
+    // on the assumption that the call's own card reports the wait, so without a
+    // spinner here the pane looks frozen. Excludes `pending`, where the card is
+    // waiting on the reader rather than on the backend.
+    const isAwaitingToolReturn =
+        runStatus === 'in_progress' &&
+        !hasToolReturn &&
+        status !== 'awaiting' &&
+        status !== 'pending';
+
     const handleApprove = useCallback(() => {
         if (!pendingApproval) return;
         setIsProcessingApproval(true);
@@ -375,12 +388,16 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         if (isAwaitingApproval) return getAgentActionToolIcon(toolName);
         if (isHovered && isExpanded) return ArrowDownIcon;
         if (isHovered && !isExpanded) return ArrowRightIcon;
+        if (isAwaitingToolReturn) return Spinner;
         if (config.icon === null) return getAgentActionToolIcon(toolName);
         return config.icon;
     };
 
     const shouldShowStatusIcon = () => {
         if (isHovered) return false;
+        // A spinner stands in for the status icon while the tool call is open,
+        // and the status icon's own colour and scale are not its to wear.
+        if (isAwaitingToolReturn) return false;
         return config.icon !== null || !isAwaitingApproval;
     };
 
@@ -513,7 +530,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         <div className="flex-1 display-flex mt-010 font-color-primary">
                             <Icon icon={getHeaderIcon()} className={shouldShowStatusIcon() ? config.iconClassName : undefined} />
                         </div>
-                        <div className="two-line-header">
+                        <div className={`two-line-header${isAwaitingToolReturn ? ' shimmer-text' : ''}`}>
                             {/* Label off the same data the preview renders: a
                                 count-carrying label would otherwise read as
                                 singular while an approval is still pending and
