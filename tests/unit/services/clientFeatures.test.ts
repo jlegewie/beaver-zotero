@@ -64,6 +64,8 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // falls back to the per-tool confirmations instead.
 // batch_jobs is declaration-only because it gates a deferred capability with
 // no client handler: a client that does not declare it sees no catalog entry.
+// citation_graph is declaration-only because it gates a deferred capability;
+// on relayed runs the provider declaration controls Zotero-backed lookups.
 // pdf_candidates is declaration-only because the backend would otherwise send a
 // ranked candidate list to clients that ignore it, paying the payload for
 // nothing.
@@ -83,6 +85,7 @@ const DECLARATION_ONLY_FEATURES = [
     'list_tags_name_query',
     'credit_confirmation',
     'batch_jobs',
+    'citation_graph',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every
@@ -179,6 +182,10 @@ describe('client feature declaration (Lane C)', () => {
 
     it('always declares batch_jobs', () => {
         expect(ZOTERO_PLUGIN_FEATURES).toContain('batch_jobs');
+    });
+
+    it('always declares citation_graph', () => {
+        expect(ZOTERO_PLUGIN_FEATURES).toContain('citation_graph');
     });
 });
 

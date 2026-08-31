@@ -2451,6 +2451,8 @@ export const CLIENT_FEATURES = {
     CREDIT_CONFIRMATION: 'credit_confirmation',
     /** `batch_jobs` capability (batch_start / batch_resolve). */
     BATCH_JOBS: 'batch_jobs',
+    /** `citation_graph` capability (`find_related_works`). */
+    CITATION_GRAPH: 'citation_graph',
     /**
      * `create_item` actions carry `pdf_candidates`: a ranked list of places the
      * PDF might be downloaded from.
