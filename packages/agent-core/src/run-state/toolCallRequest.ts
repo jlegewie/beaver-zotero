@@ -156,6 +156,7 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     // External search
     search_external_references: 'Web search',
     create_zotero_item: 'Add item',
+    create_items: 'Import items',
     external_search: 'Web search',
     lookup_work: 'Lookup work',
     find_related_works: 'Related works',

@@ -231,6 +231,23 @@ export function isUnsuccessfulToolReturn(
     );
 }
 
+/**
+ * True when a successful write-tool return carries no result payload, because
+ * the write turned out to be unnecessary.
+ */
+export function isEmptyWriteReturn(
+    part: ToolReturnPart | RetryPromptPart | null | undefined
+): boolean {
+    if (part?.part_kind !== 'tool-return' || isUnsuccessfulToolReturn(part)) return false;
+    if (typeof part.content === 'string') return true;
+    return (
+        part.tool_name === 'create_items' &&
+        !!part.content &&
+        typeof part.content === 'object' &&
+        Object.keys(part.content.items_created ?? {}).length === 0
+    );
+}
+
 export interface TextPart {
     part_kind: 'text';
     content: string;

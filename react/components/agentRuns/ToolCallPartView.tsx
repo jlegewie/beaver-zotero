@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { AgentRunStatus, ToolCallPart, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
+import { AgentRunStatus, ToolCallPart, isEmptyWriteReturn, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
 import { getToolCallStatusFromResult, toolResultAtom } from '@beaver/agent-core/run-state/atoms';
 import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
 import {
@@ -316,18 +316,14 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             ? 'confirm_external_search'
             : part.tool_name;
 
-    // A write tool reports what it did through its agent action. When it returns
-    // successfully with no action and a bare string payload, it wrote nothing —
-    // the item already held the requested value — and that string is guidance
-    // written for the model (which tool to call next, which ids to pass). Never
-    // a result payload, so the row says "no change needed" and stays collapsed
-    // rather than exposing that text.
+    // A write tool that returned successfully without producing an agent action
+    // wrote nothing — the item already held the requested value. Its payload is
+    // guidance for the model, not a result, so the row says "no change needed"
+    // and stays collapsed rather than exposing it (see isEmptyWriteReturn).
     const isNoChangeReturn =
         isStandardAgentActionTool &&
         !showAgentActionView &&
-        result?.part_kind === 'tool-return' &&
-        !isUnsuccessfulToolReturn(result) &&
-        typeof result.content === 'string';
+        isEmptyWriteReturn(result);
 
     const label = getToolCallLabel(part, status, {
         view,
