@@ -1,7 +1,6 @@
 import React, { useMemo } from "react";
 import {
     summarizeCoverage,
-    toCsv,
     type Column,
     type Row,
     type TableSpec,
@@ -13,12 +12,9 @@ import {
     type TableDensity,
     type TextRenderer,
 } from "../tableView";
-import { useTableState, type TableState } from "../useTableState";
+import { useOptionalTableState, type TableState } from "../useTableState";
 import { TableFooter, TableSelectionBar, TableTitleBar } from "./TableBars";
 import { TableToolbar } from "./TableToolbar";
-
-/** Stands in for the spec when the caller owns the state — see `TableSurface`. */
-const EMPTY_TABLE: TableSpec = { id: "", columns: [], rows: [] };
 
 export interface TableSurfaceProps {
     table: TableSpec;
@@ -105,12 +101,7 @@ export function TableSurface({
     filteredEmptyText,
     className,
 }: TableSurfaceProps): React.ReactElement {
-    // Hooks cannot be conditional, but the derivation can be: a surface that
-    // was handed a state instance must not repeat its filter and sort passes.
-    const internalState = useTableState(externalState ? EMPTY_TABLE : table, {
-        density,
-    });
-    const state = externalState ?? internalState;
+    const state = useOptionalTableState(table, externalState, { density });
 
     const coverage = useMemo(
         () => summarizeCoverage(table, state.rows),
@@ -190,15 +181,6 @@ export function TableSurface({
             {overlay}
         </section>
     );
-}
-
-/**
- * CSV of what the viewer is currently looking at — filtered and sorted, not the
- * whole spec. Exporting the unfiltered table after narrowing it is a quiet way
- * to hand someone the wrong file.
- */
-export function csvForCurrentView(table: TableSpec, state: TableState): string {
-    return toCsv(table, state.rows);
 }
 
 export default TableSurface;

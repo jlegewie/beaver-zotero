@@ -4,6 +4,7 @@ import {
     filterRows,
     isColumnFilterable,
     sortRows,
+    toCsv,
     type Filter,
     type Row,
     type TableSort,
@@ -90,6 +91,25 @@ function matchesQuickFilter(spec: TableSpec, row: Row, query: string): boolean {
             .toLocaleLowerCase()
             .includes(needle);
     });
+}
+
+/** Stands in for the spec when the caller owns the state — see {@link useOptionalTableState}. */
+const EMPTY_TABLE: TableSpec = { id: "", columns: [], rows: [] };
+
+/**
+ * {@link useTableState}, or the caller's instance when one was passed.
+ *
+ * Hooks cannot be conditional, so the spare {@link useTableState} still runs.
+ * Running it against the real spec would repeat the filter and sort passes on
+ * every render, so it runs against an empty spec instead.
+ */
+export function useOptionalTableState(
+    spec: TableSpec,
+    external: TableState | undefined,
+    options: UseTableStateOptions = {},
+): TableState {
+    const internal = useTableState(external ? EMPTY_TABLE : spec, options);
+    return external ?? internal;
 }
 
 export function useTableState(
@@ -239,4 +259,13 @@ export function useTableState(
         clearSelection,
         allInViewSelected,
     };
+}
+
+/**
+ * CSV of the current view — filtered and sorted, not the whole spec.
+ * Exporting the unfiltered table after the viewer narrowed it hands them the
+ * wrong file.
+ */
+export function csvForCurrentView(table: TableSpec, state: TableState): string {
+    return toCsv(table, state.rows);
 }

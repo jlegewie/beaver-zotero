@@ -60,16 +60,13 @@ const FORBIDDEN_INPUTS = [
 ];
 
 /**
- * Modules that must stay **out** of the esbuild bundle for a reason other than
- * `process`: they keep module-level state whose correctness depends on there
- * being one copy.
+ * Modules that pull the React graph into esbuild: both import the
+ * library-exclusion check, and `agentDataProvider/utils` pulls in the Jotai
+ * store, profile atoms, and popup helpers.
  *
- * `tableStore.ts` owns the single-flight lock that serialises every write to a
- * stored table. It is single only because the store imports the
- * library-exclusion check and through it the React graph, which keeps it
- * webpack-only. Pulled into esbuild there would be two lock maps and no
- * serialisation between a user edit and an agent write — silently, with every
- * test still green.
+ * The `react/` scan below would catch them too, as a hundred-file dump. Naming
+ * them here points at the module that imported them, which is the cue to import
+ * `tableItemIdentity.ts` instead.
  */
 const WEBPACK_ONLY_INPUTS = [
     'src/services/artifacts/tableStore.ts',
@@ -152,10 +149,10 @@ if (webpackOnly.length) {
     problems.push('Webpack-only module(s) reached the esbuild bundle:');
     for (const p of webpackOnly) problems.push(`  - ${p}`);
     problems.push(
-        '  These keep state that is only correct in one copy — tableStore.ts holds the'
+        '  These import the library-exclusion check and through it the whole React'
     );
     problems.push(
-        '  single-flight write lock. Two bundles means two locks and no serialisation.'
+        '  graph, so beaver.js throws on load. Import ./tableItemIdentity instead.'
     );
     problems.push('');
 }

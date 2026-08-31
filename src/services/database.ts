@@ -195,8 +195,6 @@ export interface TableShadowRecord {
     payloadSizeBytes: number;
 }
 
-export type TableShadowInput = TableShadowRecord;
-
 /** Background extraction job kinds. */
 export type BackgroundJobType = 'document_timeout_retry';
 
@@ -2652,7 +2650,7 @@ export class BeaverDB {
      * reuses its version number (the store's collapse rule) updates the row in
      * place rather than adding one.
      */
-    public async upsertTableShadow(input: TableShadowInput): Promise<void> {
+    public async upsertTableShadow(input: TableShadowRecord): Promise<void> {
         await this.conn.queryAsync(
             `INSERT INTO table_recovery_shadow (
                 library_id, zotero_key, version, sha256, written_at,

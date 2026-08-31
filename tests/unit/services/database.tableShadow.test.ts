@@ -10,7 +10,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MockDBConnection } from '../../mocks/mockDBConnection';
-import { BeaverDB, type TableShadowInput } from '../../../src/services/database';
+import { BeaverDB, type TableShadowRecord } from '../../../src/services/database';
 
 vi.mock('../../../src/utils/prefs', () => ({
     getPref: vi.fn(() => '0.23.0'),
@@ -24,7 +24,7 @@ const KEY = 'TBL00003';
 let conn: MockDBConnection;
 let db: BeaverDB;
 
-function row(overrides: Partial<TableShadowInput> = {}): TableShadowInput {
+function row(overrides: Partial<TableShadowRecord> = {}): TableShadowRecord {
     return {
         libraryId: LIBRARY_ID,
         zoteroKey: KEY,

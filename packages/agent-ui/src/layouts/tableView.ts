@@ -2,26 +2,13 @@
  * Vocabulary shared by the grid and the chrome around it.
  *
  * Everything here is presentation-level and client-agnostic: what a density is
- * called, how a cell's text gets rendered, which glyph stands for a column
- * type. Anything that is a fact about the data rather than about the rendering
+ * called, how a cell's text gets rendered, how wide a column of each type is.
+ * Anything that is a fact about the data rather than about the rendering
  * belongs in `@beaver/agent-core/layouts/table` instead.
  */
 
 import type React from "react";
-import {
-    columnAlign,
-    type Column,
-    type ColumnType,
-} from "@beaver/agent-core/layouts/table";
-import {
-    ChartIcon,
-    CheckmarkCircleIcon,
-    ClockIcon,
-    FileIcon,
-    LinkIcon,
-    TagIcon,
-    TextAlignLeftIcon,
-} from "../icons";
+import type { Column } from "@beaver/agent-core/layouts/table";
 
 /**
  * Row height, and with it how many lines every cell clamps to. One lever moves
@@ -52,48 +39,6 @@ export type TextRenderer = (text: string) => React.ReactNode;
 
 export const renderPlainText: TextRenderer = (text) => text;
 
-/**
- * What an absent value looks like. In an extraction table this is a finding —
- * "the paper does not report this" — so it must read as a value, not as a gap.
- */
-export const EMPTY_CELL = "—";
-
-/** The glyph that stands for a column's type in its header. */
-export function columnTypeIcon(
-    type: ColumnType,
-): React.ComponentType<React.SVGProps<SVGSVGElement>> {
-    switch (type) {
-        case "reference":
-            return FileIcon;
-        case "number":
-            return ChartIcon;
-        case "date":
-            return ClockIcon;
-        case "boolean":
-            return CheckmarkCircleIcon;
-        case "select":
-            return TagIcon;
-        case "link":
-            return LinkIcon;
-        case "text":
-            return TextAlignLeftIcon;
-    }
-}
-
-/**
- * How a column's values line up, and with them its header.
- *
- * `columnAlign` in agent-core answers start-or-end for sorting and export; this
- * adds the third case the rendering needs — a boolean is a single glyph and
- * centres under its header. Header and cell read the same function so the two
- * can never disagree, which is the whole failure this exists to prevent.
- */
-export function cellAlign(column: Column): "start" | "end" | "center" {
-    if (column.align) return column.align;
-    if (column.type === "boolean") return "center";
-    return columnAlign(column);
-}
-
 /** Width the rail column takes, and the floor a flexible column may shrink to. */
 const RAIL_WIDTH = "3.2rem";
 const ACTIONS_WIDTH = "6rem";
@@ -121,8 +66,7 @@ export function defaultColumnWidth(
         case "date":
             return "6.5rem";
         case "boolean":
-            // Wide enough for a short header beside its type glyph: at 4rem
-            // the label had nowhere to go and collapsed to nothing.
+            // Short header + sort control: 4rem collapsed the label to nothing.
             return "5.5rem";
         case "select":
             return "9.5rem";

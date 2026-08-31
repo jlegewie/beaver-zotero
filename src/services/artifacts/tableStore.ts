@@ -76,13 +76,14 @@ import {
     tableSpecHash,
     type TableSyncConflict,
 } from './recoveryShadow';
-import { setTableShadowRestore } from './tablesApi';
-import { zoteroLinksFor } from './view/tableLinks';
+import { setTableShadowRestore, tableWriteLocks } from './tablesApi';
+import { zoteroLinkScope, zoteroLinksFor } from './view/tableLinks';
 import { buildTableDocument } from './tableDocument';
 import {
     createTableItem,
     normalizeTableHistory,
     queueTableFullText,
+    readTableHistory,
     readTableItemSpec,
     resolveTableItem,
     restoreTableItem,
@@ -287,6 +288,10 @@ const ADOPTED_CHANGE = 'Recovered from a lost log entry';
 // The single-flight lock
 // ---------------------------------------------------------------------------
 
+function lockKey(ref: TableRef): string {
+    return `${ref.libraryID}/${ref.key}`;
+}
+
 /**
  * One promise chain per table, so a user edit and an agent write cannot
  * interleave their read-modify-write.
@@ -302,24 +307,13 @@ const ADOPTED_CHANGE = 'Recovered from a lost log entry';
  * layout can defend against, and `expectedVersion` on {@link writeTable} is
  * what turns that case into a refused write rather than a lost one.
  *
- * **One bundle, too — and that is load-bearing.** This map is module state, so
- * it is per bundle instance. The lock is genuinely single only because this
- * module imports `checkLibraryExcluded` and through it the React graph, which
- * keeps it out of the esbuild bundle: `src/hooks.ts` reaches
- * `tableItemIdentity.ts`, never this file. If anything ever pulls the store
- * into esbuild there would be two maps, two locks, and no serialisation at all
- * between a user edit and an agent write — the write protocol's whole
- * concurrency story would be void while every test still passed.
- * `eslint.config.mjs` guards the esbuild side of that line, and
- * `npm run check:bundle` fails if the React graph reaches `beaver.js`.
+ * The chains themselves live on the shared global ({@link tableWriteLocks}),
+ * not as module state. Module state is per bundle; the lock has to be per
+ * process. See {@link tableWriteLocks} for why, and for the window-realm
+ * caveat on the entries.
  */
-const locks = new Map<string, Promise<unknown>>();
-
-function lockKey(ref: TableRef): string {
-    return `${ref.libraryID}/${ref.key}`;
-}
-
 function withTableLock<T>(ref: TableRef, run: () => Promise<T>): Promise<T> {
+    const locks = tableWriteLocks();
     const key = lockKey(ref);
     const previous = locks.get(key) ?? Promise.resolve();
     // Runs whether the previous holder resolved or rejected: one failed write
@@ -1051,7 +1045,10 @@ async function commitWrite(
     await ensureSidecarDirectory(item);
     const temp = tableTempPath(item);
     const versionPath = versionPathOf(item, version);
-    const document = buildTableDocument(stored, { linksFor: zoteroLinksFor });
+    const document = buildTableDocument(stored, {
+        linksFor: zoteroLinksFor,
+        citationScopeFor: zoteroLinkScope,
+    });
     const htmlPath = await item.getFilePathAsync();
     if (!htmlPath) {
         throw new TableItemError(
@@ -1206,9 +1203,7 @@ export async function editTable(
 
 /** The version log, oldest first. */
 export async function listVersions(ref: TableRef): Promise<TableVersionEntry[]> {
-    const item = await resolveTableItem(ref);
-    const history = await readJson<TableHistory>(historyPathOf(item));
-    return normalizeTableHistory(history).versions;
+    return (await readTableHistory(await resolveTableItem(ref))).versions;
 }
 
 /**
@@ -1545,12 +1540,6 @@ function emitTableUpdated(
         logger(`tableStore: table-updated dispatch failed: ${String(error)}`, 2);
     }
 }
-
-// ---------------------------------------------------------------------------
-// Errors
-// ---------------------------------------------------------------------------
-
-/** Maps a spec-read failure onto the shared table error vocabulary. */
 
 // ---------------------------------------------------------------------------
 // Publishing the write half

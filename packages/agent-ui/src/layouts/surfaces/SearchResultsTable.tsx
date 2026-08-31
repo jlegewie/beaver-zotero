@@ -1,12 +1,9 @@
 import React from "react";
 import type { Row, TableSpec } from "@beaver/agent-core/layouts/table";
-import { BookSearchIcon, DownloadIcon, ImportIcon } from "../../icons";
+import { BookSearchIcon, ImportIcon } from "../../icons";
 import Button from "../../primitives/Button";
-import {
-    csvForCurrentView,
-    TableSurface,
-    type TableSurfaceProps,
-} from "../chrome/TableSurface";
+import { TableSurface, type TableSurfaceProps } from "../chrome/TableSurface";
+import { TableHeaderActions } from "../chrome/TableBars";
 import { useTableState } from "../useTableState";
 import type { TextRenderer } from "../tableView";
 
@@ -64,27 +61,12 @@ export function SearchResultsTable({
             className={className}
             emptyText="No results"
             headerActions={
-                <>
-                    {onExport ? (
-                        <Button
-                            variant="surface"
-                            icon={DownloadIcon}
-                            onClick={() =>
-                                onExport(csvForCurrentView(table, state), table)
-                            }
-                        >
-                            Export
-                        </Button>
-                    ) : null}
-                    {onShowInLibrary ? (
-                        <Button
-                            variant="solid"
-                            onClick={() => onShowInLibrary(table)}
-                        >
-                            Show in library
-                        </Button>
-                    ) : null}
-                </>
+                <TableHeaderActions
+                    table={table}
+                    state={state}
+                    onExport={onExport}
+                    onShowInLibrary={onShowInLibrary}
+                />
             }
             selectionActions={(_ids, rows) =>
                 onImportRows ? (

@@ -2,6 +2,7 @@ import React, { useCallback, useMemo } from "react";
 import {
     anchorColumn,
     cellIdFor,
+    columnAlign,
     isColumnFilterable,
     isColumnSortable,
     type Column,
@@ -14,18 +15,14 @@ import { CellView, DetailsView } from "./cells";
 import { ColumnHeaderCell } from "./columnHeader";
 import { RowActionsView, tableHasRowActions } from "./rowActions";
 import {
-    cellAlign,
     defaultColumnWidth,
     renderPlainText,
     tableMinWidth,
     type TextRenderer,
 } from "./tableView";
-import { useTableState, type TableState } from "./useTableState";
+import { useOptionalTableState, type TableState } from "./useTableState";
 
 export type { TableDensity } from "./tableView";
-
-/** Stands in for the spec when the surface owns the state — see `DataTable`. */
-const EMPTY_TABLE: TableSpec = { id: "", columns: [], rows: [] };
 
 export interface DataTableProps {
     table: TableSpec;
@@ -90,11 +87,7 @@ export function DataTable({
     filteredEmptyText = "No rows match these filters",
     className,
 }: DataTableProps): React.ReactElement {
-    // Hooks cannot be conditional, but the derivation can be: when the surface
-    // owns the state, this instance runs against an empty spec so the filter
-    // and sort passes are not repeated on every render.
-    const internalState = useTableState(externalState ? EMPTY_TABLE : table);
-    const state = externalState ?? internalState;
+    const state = useOptionalTableState(table, externalState);
 
     const capabilities = table.capabilities ?? {};
     const sortable = capabilities.sortable ?? true;
@@ -333,7 +326,7 @@ function TableRow({
                         id={cellIdFor(row.id, column.id)}
                         className={[
                             "bt-td",
-                            `bt-align-${cellAlign(column)}`,
+                            `bt-align-${columnAlign(column)}`,
                             `bt-kind-${column.type}`,
                             // The header's sort control sits after its label, so
                             // the values leave it the same gutter and line up

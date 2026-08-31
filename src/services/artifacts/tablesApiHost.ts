@@ -14,9 +14,11 @@
 
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
+    clearTableWriteLocks,
     getTableShadowRestore,
     setTableShadowRestore,
     setTablesApi,
+    tableWriteLocks,
     TABLE_SHADOW_RESTORE_UNAVAILABLE,
     type TablesApi,
 } from './tablesApi';
@@ -81,6 +83,9 @@ export function registerTablesApi(): void {
         },
     };
     setTablesApi(api);
+    // Seed the registry in the plugin realm (`onShutdown` tears it down), not
+    // in whichever window bundle first takes a lock.
+    tableWriteLocks();
     logger('tablesApiHost: registered Zotero.__beaverTables', 3);
 }
 
@@ -95,6 +100,9 @@ export function registerTablesApi(): void {
 export function unregisterTablesApi(): void {
     setTablesApi(null);
     unregisterTableShadowRestore();
+    // Dropped with the realm that created it. Teardown means no write is in
+    // flight to lose its turn.
+    clearTableWriteLocks();
 }
 
 /**

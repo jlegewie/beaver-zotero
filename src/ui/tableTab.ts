@@ -46,7 +46,11 @@ import {
     type TableViewHost,
     type TableViewSummary,
 } from '../services/artifacts/view/enhanceTableDocument';
-import { openTableLink, zoteroLinksFor } from '../services/artifacts/view/tableLinks';
+import {
+    openTableLink,
+    zoteroLinkScope,
+    zoteroLinksFor,
+} from '../services/artifacts/view/tableLinks';
 import type { TableSpec } from '@beaver/agent-core/layouts/table';
 import { logger } from '@beaver/agent-core/platform/logger';
 
@@ -106,7 +110,7 @@ export interface OpenTableTabOptions {
     tabId?: string;
     win?: Window;
     /** Passed through to the renderer; links default to Zotero's own. */
-    html?: Omit<TableHtmlOptions, 'linksFor'>;
+    html?: Omit<TableHtmlOptions, 'linksFor' | 'citationScopeFor'>;
 }
 
 /**
@@ -129,6 +133,7 @@ export function openTableTab(
     const { html } = buildTableDocument(spec, {
         ...options.html,
         linksFor: (ref) => zoteroLinksFor(ref),
+        citationScopeFor: zoteroLinkScope,
     });
 
     const title = options.title ?? spec.title ?? 'Table';

@@ -47,15 +47,21 @@ describe('resolveTableLibrary', () => {
         getPref.mockReturnValue(0);
     });
 
-    it('answers an explicit library as given, over the default and the user library', () => {
+    it('refuses an explicit library it cannot write to, rather than substituting another', () => {
         getPref.mockReturnValue(USER_LIBRARY.libraryID);
 
-        expect(resolveTableLibrary(EDITABLE_GROUP.libraryID)).toEqual({
-            libraryID: EDITABLE_GROUP.libraryID,
-        });
-        // Not substituted with a library that would have worked.
+        // Not substituted with the user library, which would have worked.
         expect(resolveTableLibrary(READ_ONLY_GROUP.libraryID)).toEqual({
             error: 'no_writable_library',
+        });
+    });
+
+    it('refuses an explicit group library instead of silently filing elsewhere', () => {
+        // Creation can only file a table in the personal library, so a caller
+        // that names a group is told so rather than handed a table in a
+        // library it did not ask for.
+        expect(resolveTableLibrary(EDITABLE_GROUP.libraryID)).toEqual({
+            error: 'unsupported_library',
         });
     });
 
@@ -73,10 +79,14 @@ describe('resolveTableLibrary', () => {
         expect(resolveTableLibrary(404)).toEqual({ error: 'no_writable_library' });
     });
 
-    it('prefers the configured default over the user library', () => {
+    it('falls through a group default to the user library', () => {
+        // The preference can name any library, but only the personal one can
+        // hold a table. A group there must not break table creation — there is
+        // no UI to undo it — so it is skipped like any other unusable default.
         getPref.mockReturnValue(EDITABLE_GROUP.libraryID);
 
-        expect(resolveTableLibrary()).toEqual({ libraryID: EDITABLE_GROUP.libraryID });
+        expect(resolveTableLibrary()).toEqual({ libraryID: USER_LIBRARY.libraryID });
+        expect(getPref).toHaveBeenCalled();
     });
 
     it('falls back to the user library when no default is configured', () => {

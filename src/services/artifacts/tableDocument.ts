@@ -16,8 +16,8 @@
  *
  * - **Sort** — a radio per column and direction. Every row carries its rank in
  *   each sortable column as a custom property, and the checked radio maps that
- *   rank onto `order` in a flex column. Ascending is the rank; descending is the
- *   rank counted from the other end.
+ *   rank onto `order` in a flex column. Ascending and descending are each their
+ *   own pass (empty cells last in both — not `n - asc`).
  * - **Filter** — a radio group per select or boolean column, each non-matching
  *   value hidden by one rule.
  * - **Row height** — a radio group swapping the line clamps and the row height.
@@ -36,8 +36,8 @@
  * CSS-only sorting possible, and table rows cannot be reordered. Alignment
  * comes from every row sharing one `grid-template-columns`.
  *
- * This module is free of Zotero APIs — callers pass prebuilt link URIs, exactly
- * as `reportHtml.ts` does.
+ * This module is free of Zotero APIs — callers pass prebuilt link URIs and a
+ * library-scope resolver, exactly as `reportHtml.ts` does.
  *
  * ## The document is the table
  *
@@ -48,10 +48,10 @@
  * That makes rendering a **pure function of its inputs**: no clock, no random
  * ids, no iteration over anything whose order is not fixed by the spec, so the
  * same spec always produces the same bytes and a re-render never moves text
- * that annotations are anchored to. The one deliberate exception is
- * `options.linksFor`, which consults live Zotero state (does this item still
- * have a file?), so two renders of the same spec at different times may differ
- * in the row action links.
+ * that annotations are anchored to. The deliberate exceptions are the two
+ * options that consult live Zotero state — `linksFor` (does this item still
+ * have a file?) and `citationScopeFor` (is this library a group here?) — so
+ * two renders of the same spec may differ in their links.
  */
 
 import {
@@ -59,14 +59,16 @@ import {
     cellSortKey,
     citationsByKey,
     columnAlign,
+    compareSortKeys,
     isColumnFilterable,
     isColumnSortable,
     readSpec,
     rowActions,
-    SORT_LOCALE,
     selectLabelsInColumn,
     sortRows,
     summarizeCoverage,
+    CITATION_TAG_RE,
+    SELECT_COLORS,
     TABLE_SPEC_VERSION,
     type Cell,
     type Column,
@@ -98,9 +100,19 @@ export interface TableHtmlOptions {
     controls?: boolean;
     /** Per-row links. Rows it returns nothing for get no action links. */
     linksFor?: (ref: RowRef, row: Row) => TableHtmlLinks;
+    /**
+     * The `zotero://` path scope for a cited item's library (`library` or
+     * `groups/<groupID>`). This module has no Zotero, so the host supplies it —
+     * the same `zoteroLinkScope` the row links use. Absent, every citation names
+     * the personal library, which is all a caller with no Zotero can assume.
+     */
+    citationScopeFor?: (libraryId: number) => string;
     /** Prefix for generated element ids, so two tables can share a document. */
     idPrefix?: string;
 }
+
+/** Personal-library scope when the host does not supply {@link TableHtmlOptions.citationScopeFor}. */
+const USER_LIBRARY_SCOPE = () => 'library';
 
 export interface RenderedTable {
     /** A fragment. `buildTableDocument` wraps it; a report embeds it. */
@@ -180,27 +192,20 @@ const SORT_BOTH_SVG =
     '<svg class="bt-gl" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
     '<path d="m7 10 5-5 5 5M7 14l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-/**
- * How a column's values line up, and with them its header. `columnAlign`
- * answers start-or-end; a boolean is a single glyph and centres. Header and
- * cell read the same function so the two can never disagree.
- */
-function cellAlign(column: Column): 'start' | 'end' | 'center' {
-    if (column.align) return column.align;
-    if (column.type === 'boolean') return 'center';
-    return columnAlign(column);
-}
-
 // ---------------------------------------------------------------------------
 // Cells
 // ---------------------------------------------------------------------------
 
-const SELECT_HUES = ['blue', 'green', 'purple', 'orange', 'red', 'yellow', 'gray'];
-
+/**
+ * The pill colour for a select label. Checked against agent-core's palette
+ * rather than a list restated here: a colour added there but missing from a
+ * local copy renders as grey in every stored table.
+ */
 function selectHue(label: string, column: Column): string {
     const declared = column.options?.find((o) => o.label === label)?.color;
-    if (declared && SELECT_HUES.includes(declared)) return declared;
-    return 'gray';
+    return declared && (SELECT_COLORS as readonly string[]).includes(declared)
+        ? declared
+        : 'gray';
 }
 
 /**
@@ -297,8 +302,6 @@ function renderCellValue(
 // Citations
 // ---------------------------------------------------------------------------
 
-const CITATION_TAG_RE = /<citation\b([^>]*?)\/?>/gi;
-
 /**
  * Numbers every citation in the table and renders each tag as a marker.
  *
@@ -317,11 +320,28 @@ const CITATION_TAG_RE = /<citation\b([^>]*?)\/?>/gi;
 class CitationNumbering {
     private readonly byKey: Record<string, Citation>;
     private readonly markers = new Map<string, number>();
+    private readonly scopeFor: (libraryId: number) => string;
     /** Every cited source, in the order its marker was assigned. */
     readonly cited: Array<{ marker: number; key: string; citation?: Citation }> = [];
 
-    constructor(citations: Citation[] | undefined) {
+    constructor(
+        citations: Citation[] | undefined,
+        scopeFor: (libraryId: number) => string = USER_LIBRARY_SCOPE
+    ) {
         this.byKey = citationsByKey(citations);
+        this.scopeFor = scopeFor;
+    }
+
+    /**
+     * `zotero://open` at the first cited page, or the item if there is none.
+     * Shared with the bibliography so a marker and its entry always agree.
+     */
+    hrefFor(citation: Citation | undefined): string | null {
+        const ref = citation?.resolved_ref ?? citation?.requested_ref;
+        if (!ref || !('zotero_key' in ref) || !ref.zotero_key) return null;
+        const page = citation?.pages?.[0];
+        const base = `zotero://open/${this.scopeFor(ref.library_id)}/items/${ref.zotero_key}`;
+        return page ? `${base}?page=${page}` : base;
     }
 
     private markerFor(key: string): number {
@@ -356,7 +376,7 @@ class CitationNumbering {
     }
 
     private marker(marker: number, citation: Citation | undefined): string {
-        const href = citationHref(citation);
+        const href = this.hrefFor(citation);
         const parts = citationParts(citation);
         const attrs = [
             `class="bt-cite bt-cite--${citationTone(citation)}"`,
@@ -375,15 +395,6 @@ class CitationNumbering {
             ? `<a ${attrs} href="${escapeHtml(href)}">${marker}</a>`
             : `<span ${attrs}>${marker}</span>`;
     }
-}
-
-/** `zotero://open` at the cited page, falling back to revealing the item. */
-function citationHref(citation: Citation | undefined): string | null {
-    const ref = citation?.resolved_ref ?? citation?.requested_ref;
-    if (!ref || !('zotero_key' in ref) || !ref.zotero_key) return null;
-    const page = citation?.pages?.[0];
-    const base = `zotero://open/library/items/${ref.zotero_key}`;
-    return page ? `${base}?page=${page}` : base;
 }
 
 /**
@@ -429,23 +440,6 @@ function citationParts(citation: Citation | undefined): {
 // Ranks
 // ---------------------------------------------------------------------------
 
-/**
- * Ordering for two sort keys, matching `sortRows`' comparator so the baked
- * document order and the CSS ranks below can never disagree.
- *
- * Pinned to the same {@link SORT_LOCALE} `cellSortKey` lower-cases in — shared
- * rather than restated, so the baked row order and the CSS ranks below cannot
- * drift apart. A stored table's order is a function of its data, not of the
- * install that wrote it.
- */
-function compareKeys(a: number | string | null, b: number | string | null): number {
-    if (a === null && b === null) return 0;
-    if (a === null) return 1;
-    if (b === null) return -1;
-    if (typeof a === 'number' && typeof b === 'number') return a - b;
-    return String(a).localeCompare(String(b), SORT_LOCALE);
-}
-
 interface RowRanks {
     /** Ascending position per sortable column, as `--o<i>`. */
     asc: number[];
@@ -474,12 +468,8 @@ function sortRanks(rows: Row[], columns: Column[]): Map<string, RowRanks> {
             key: cellSortKey(row.cells[column.id]),
         }));
         for (const direction of ['asc', 'desc'] as const) {
-            const sign = direction === 'asc' ? 1 : -1;
             const ordered = keyed.slice().sort((a, b) => {
-                if (a.key === null && b.key === null) return a.index - b.index;
-                if (a.key === null) return 1;
-                if (b.key === null) return -1;
-                const cmp = compareKeys(a.key, b.key) * sign;
+                const cmp = compareSortKeys(a.key, b.key, direction);
                 return cmp !== 0 ? cmp : a.index - b.index;
             });
             ordered.forEach((entry, position) =>
@@ -676,7 +666,7 @@ export function renderTableHtml(
     const prefix = options.idPrefix ?? 'bt';
     const controls = options.controls ?? true;
     const anchor = anchorColumn(spec);
-    const cites = new CitationNumbering(spec.citations);
+    const cites = new CitationNumbering(spec.citations, options.citationScopeFor);
     const rows = sortRows(spec, spec.sort);
     const ranks = sortRanks(rows, spec.columns);
     const hasActions =
@@ -795,7 +785,7 @@ export function renderTableHtml(
             const full = column.description
                 ? ` title="${escapeHtml(column.description)}"`
                 : '';
-            return `<span class="bt-c bt-h bt-h${i} bt-${cellAlign(column)} bt-hk-${column.type}${sort ? ' bt-sortable' : ''}${column.id === anchor?.id ? ' bt-anchor' : ''}"${full}><span class="bt-h-top"><span class="bt-h-label">${escapeHtml(column.header)}</span>${sorter}</span>${description}</span>`;
+            return `<span class="bt-c bt-h bt-h${i} bt-${columnAlign(column)} bt-hk-${column.type}${sort ? ' bt-sortable' : ''}${column.id === anchor?.id ? ' bt-anchor' : ''}"${full}><span class="bt-h-top"><span class="bt-h-label">${escapeHtml(column.header)}</span>${sorter}</span>${description}</span>`;
         }),
         hasActions ? '<span class="bt-c bt-acts-h"></span>' : '',
         '</div>',
@@ -820,7 +810,7 @@ export function renderTableHtml(
                     const sortable =
                         (spec.capabilities?.sortable ?? true) &&
                         isColumnSortable(column);
-                    return `<span class="bt-c bt-${cellAlign(column)} bt-k-${column.type}${sortable ? ' bt-sortable' : ''}${anchorClass}" id="${escapeHtml(row.id)}/${escapeHtml(column.id)}">${renderCellValue(row.cells[column.id], column, cites)}</span>`;
+                    return `<span class="bt-c bt-${columnAlign(column)} bt-k-${column.type}${sortable ? ' bt-sortable' : ''}${anchorClass}" id="${escapeHtml(row.id)}/${escapeHtml(column.id)}">${renderCellValue(row.cells[column.id], column, cites)}</span>`;
                 })
                 .join('');
 
@@ -919,7 +909,7 @@ function renderBibliography(cites: CitationNumbering): string {
                 citation?.formatted_citation ??
                 citation?.display_name ??
                 'Source unavailable';
-            const href = citationHref(citation);
+            const href = cites.hrefFor(citation);
             const body = href
                 ? `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`
                 : escapeHtml(label);

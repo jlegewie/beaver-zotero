@@ -324,9 +324,14 @@ describe("DataTable", () => {
             }),
         );
 
-        // In-library item row: reveal, from the action column and from the title.
+        // In-library item row: reveal lives on the anchor cell — the title is
+        // the target and the arrow sits at the cell's edge.
         const rows = container!.querySelectorAll("tr.bt-row");
-        click(rows[1].querySelector('button[aria-label="Reveal in library"]'));
+        click(
+            rows[1].querySelector(
+                '.bt-ref-reveal button[aria-label="Reveal in library"]',
+            ),
+        );
         expect(revealInLibrary).toHaveBeenCalledWith({
             library_id: 1,
             zotero_key: "K2",
@@ -335,6 +340,16 @@ describe("DataTable", () => {
 
         click(rows[1].querySelector(".bt-ref-title-button"));
         expect(revealInLibrary).toHaveBeenCalledTimes(2);
+
+        // The actions column must not draw the same reveal again.
+        expect(
+            rows[1].querySelectorAll('button[aria-label="Reveal in library"]'),
+        ).toHaveLength(1);
+        expect(
+            rows[1].querySelector(
+                '.bt-actions button[aria-label="Reveal in library"]',
+            ),
+        ).toBeNull();
 
         // The clamp must sit on a span inside the button, never on the button:
         // Gecko forces a button's display to a flow root and the clamp never

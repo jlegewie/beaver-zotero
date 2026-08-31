@@ -160,7 +160,7 @@ export interface Column {
     wrap?: "clamp" | "nowrap";
     /** Compact renderings show only `primary` columns; the rest appear on row expand. */
     priority?: "primary" | "secondary";
-    /** Default `end` for number/date, `start` otherwise. */
+    /** Overrides {@link columnAlign}, which centres a boolean and ends a number or date. */
     align?: "start" | "end";
     /**
      * Absent ⇒ ready. `"filling"` means a producer is populating this column
@@ -511,8 +511,16 @@ export function hasFixedVocabulary(column: Column): boolean {
     return column.role === "screening_decision";
 }
 
-export function columnAlign(column: Column): "start" | "end" {
+/**
+ * Alignment of a column's values and its header.
+ *
+ * Boolean centres (a single glyph); number and date end; everything else
+ * starts. Header and cell, in both the React grid and the HTML snapshot, must
+ * call this — a local copy is how they start to disagree.
+ */
+export function columnAlign(column: Column): "start" | "end" | "center" {
     if (column.align) return column.align;
+    if (column.type === "boolean") return "center";
     return column.type === "number" || column.type === "date" ? "end" : "start";
 }
 
@@ -561,10 +569,6 @@ export function rowActions(spec: TableSpec, row: Row): RowAction[] {
     return declared.filter((action) =>
         action === "import" ? !inLibrary : inLibrary,
     );
-}
-
-export function getCell(row: Row, columnId: string): Cell | undefined {
-    return row.cells[columnId];
 }
 
 /**
@@ -680,9 +684,30 @@ export function cellSortKey(cell: Cell | undefined): SortKey {
     }
 }
 
-function compareSortKeys(a: SortKey, b: SortKey): number {
-    if (typeof a === "number" && typeof b === "number") return a - b;
-    return String(a).localeCompare(String(b), SORT_LOCALE);
+/**
+ * Orders two sort keys, with `null` (an empty cell) last in **either**
+ * direction.
+ *
+ * Exported because a stored table is sorted twice: row order is baked into the
+ * document, and the HTML renderer emits CSS ranks beside it. Those ranks have
+ * to come from this comparator — a different one shows up as a table that
+ * reorders itself the moment someone clicks the column it was already sorted
+ * by. Empty-last in both directions is also why a descending rank cannot be
+ * `n - asc`: reversing an ascending order would lead with the empty rows.
+ */
+export function compareSortKeys(
+    a: SortKey,
+    b: SortKey,
+    direction: TableSort["direction"] = "asc",
+): number {
+    if (a === null && b === null) return 0;
+    if (a === null) return 1;
+    if (b === null) return -1;
+    const cmp =
+        typeof a === "number" && typeof b === "number"
+            ? a - b
+            : String(a).localeCompare(String(b), SORT_LOCALE);
+    return direction === "desc" ? -cmp : cmp;
 }
 
 /**
@@ -693,7 +718,6 @@ export function sortRows(spec: TableSpec, sort: TableSort | undefined): Row[] {
     if (!sort) return spec.rows;
     const column = spec.columns.find((c) => c.id === sort.column_id);
     if (!column) return spec.rows;
-    const dir = sort.direction === "desc" ? -1 : 1;
     return spec.rows
         .map((row, index) => ({
             row,
@@ -701,10 +725,7 @@ export function sortRows(spec: TableSpec, sort: TableSort | undefined): Row[] {
             key: cellSortKey(row.cells[column.id]),
         }))
         .sort((a, b) => {
-            if (a.key === null && b.key === null) return a.index - b.index;
-            if (a.key === null) return 1;
-            if (b.key === null) return -1;
-            const cmp = compareSortKeys(a.key, b.key) * dir;
+            const cmp = compareSortKeys(a.key, b.key, sort.direction);
             return cmp !== 0 ? cmp : a.index - b.index;
         })
         .map((entry) => entry.row);
@@ -787,7 +808,18 @@ export function selectLabelsInColumn(
 // Citations
 // ---------------------------------------------------------------------------
 
-const CITATION_TAG_RE = /<citation\b([^>]*?)\/?>/gi;
+/**
+ * Every `<citation …/>` tag, with its raw attributes in group 1.
+ *
+ * Shared so a renderer cannot match citations differently from the code that
+ * strips them for sorting and CSV — that shows as a cell whose text and sort
+ * key disagree.
+ *
+ * **Global, so use it only with `matchAll` or `replace`.** Neither mutates the
+ * source pattern's `lastIndex` (`matchAll` clones). A bare `.exec` loop would
+ * leave `lastIndex` parked mid-string for the next caller in any module.
+ */
+export const CITATION_TAG_RE = /<citation\b([^>]*?)\/?>/gi;
 
 /** Lookup keys of every `<citation …/>` tag in a text, in document order (unparseable tags are skipped). */
 export function citationKeysInText(text: string): string[] {

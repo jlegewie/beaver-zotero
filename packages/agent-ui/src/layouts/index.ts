@@ -18,14 +18,16 @@
 export { DataTable } from "./DataTable";
 export type { DataTableProps } from "./DataTable";
 
-export { useTableState } from "./useTableState";
+export {
+    csvForCurrentView,
+    useOptionalTableState,
+    useTableState,
+} from "./useTableState";
 export type { TableState, UseTableStateOptions } from "./useTableState";
 
 export {
-    EMPTY_CELL,
     DENSITY_LABELS,
     TABLE_DENSITIES,
-    columnTypeIcon,
     defaultColumnWidth,
     renderPlainText,
 } from "./tableView";
@@ -39,16 +41,18 @@ export type { ColumnHeaderCellProps } from "./columnHeader";
 
 export { RowActionsView, tableHasRowActions } from "./rowActions";
 
-export { TableSurface, csvForCurrentView } from "./chrome/TableSurface";
+export { TableSurface } from "./chrome/TableSurface";
 export type { TableSurfaceProps } from "./chrome/TableSurface";
 
 export {
     TableTitleBar,
+    TableHeaderActions,
     TableSelectionBar,
     TableFooter,
 } from "./chrome/TableBars";
 export type {
     TableTitleBarProps,
+    TableHeaderActionsProps,
     TableSelectionBarProps,
     TableFooterProps,
 } from "./chrome/TableBars";

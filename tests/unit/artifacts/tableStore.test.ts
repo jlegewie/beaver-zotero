@@ -34,6 +34,7 @@ import {
     type TableHistory,
     type TableWriteResult,
 } from '../../../src/services/artifacts/tableStore';
+import { tableWriteLocks } from '../../../src/services/artifacts/tablesApi';
 
 // ---------------------------------------------------------------------------
 // A temp directory standing in for the attachment's storage directory
@@ -289,6 +290,50 @@ describe('createTable', () => {
         const { spec } = await readTable(ref);
         expect(spec.title).toBe(created.spec.title);
         expect(spec.rows[0].cells.note?.value).toMatchObject({ text: 'Created' });
+    });
+});
+
+describe('the single-flight write lock', () => {
+    it('serialises two writes made through separate module instances', async () => {
+        // The lock registry lives on the shared global rather than in the
+        // store's module scope, so it is one lock per *process* however the
+        // module is bundled. A second instance stands in for the second bundle:
+        // with a module-local map each edit would read version 1, both would
+        // write version 2, and one caller's mutation would be gone from the
+        // file while both were told they succeeded.
+        vi.resetModules();
+        const second = await import('../../../src/services/artifacts/tableStore');
+        expect(second.editTable).not.toBe(editTable);
+
+        await createTable({ spec: demoSpec('Created') });
+
+        const [first, other] = await Promise.all([
+            editTable(ref, [{ op: 'set_meta', title: 'From instance A' }], {
+                actor: 'user',
+            }),
+            second.editTable(
+                ref,
+                [{ op: 'set_meta', caption: 'From instance B' }],
+                { actor: 'user' }
+            ),
+        ]);
+
+        expect(first.ok && other.ok).toBe(true);
+        if (!first.ok || !other.ok) return;
+        // Two versions, not one number issued twice.
+        expect([first.version, other.version].sort()).toEqual([2, 3]);
+
+        // Neither edit was derived from a stale read, so both survive.
+        const { spec } = await readTable(ref);
+        expect(spec.title).toBe('From instance A');
+        expect(spec.caption).toBe('From instance B');
+        expect((await listVersions(ref)).map((v) => v.version)).toEqual([1, 2, 3]);
+    });
+
+    it('shares one registry across module instances', async () => {
+        vi.resetModules();
+        const api = await import('../../../src/services/artifacts/tablesApi');
+        expect(api.tableWriteLocks()).toBe(tableWriteLocks());
     });
 });
 

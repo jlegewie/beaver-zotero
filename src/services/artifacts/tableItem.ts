@@ -30,7 +30,7 @@ import {
     TABLE_SPEC_VERSION,
     type TableSpec,
 } from '@beaver/agent-core/layouts/table';
-import { getZoteroSelectURI } from '../../utils/zoteroUtils';
+import { getZoteroOpenURI, getZoteroSelectURI } from '../../utils/zoteroUtils';
 import { safeAttachmentFilename } from '../../utils/attachmentFiles';
 import { getPref } from '../../utils/prefs';
 import { checkLibraryExcluded } from '../agentDataProvider/utils';
@@ -42,7 +42,7 @@ import {
 // Only Zotero knows whether a library id is the user library or a group, so the
 // row action links are built there. Imported rather than reimplemented: the
 // stored document, the tab rendering and the reader must offer the same links.
-import { zoteroLinksFor } from './view/tableLinks';
+import { zoteroLinkScope, zoteroLinksFor } from './view/tableLinks';
 import {
     buildTableUrl,
     isTableItem,
@@ -93,11 +93,15 @@ export type {
 
 export type ResolvedTableLibrary =
     | { libraryID: number }
-    | { error: 'no_writable_library' | 'library_excluded' };
+    | { error: 'no_writable_library' | 'library_excluded' | 'unsupported_library' };
 
 /**
  * Preference holding the library new tables are filed in. Unset (or 0) means
  * "no preference"; see {@link resolveTableLibrary}.
+ *
+ * Only the personal library can currently hold a table ({@link createTableItem}).
+ * A group here is skipped, not an error the user sees, so the preference is
+ * inert rather than destructive.
  */
 const DEFAULT_LIBRARY_PREF = 'tables.defaultLibraryID';
 
@@ -115,13 +119,19 @@ function preferredLibraryID(): number | null {
  *
  * Order matters: existence first, because `checkLibraryExcluded` answers `null`
  * for a library that does not exist so a bad reference is never mislabeled
- * "excluded".
+ * "excluded". Exclusion next: it is the access-control boundary, and names
+ * something the user can change. Groups last: {@link createTableItem} can only
+ * file in the personal library, so refusing here lets {@link resolveTableLibrary}
+ * fall through to that library instead of returning something creation would
+ * reject.
  */
 function checkTableLibrary(libraryID: number): ResolvedTableLibrary {
     const library = Zotero.Libraries.get(libraryID);
     if (!library) return { error: 'no_writable_library' };
     if (!library.editable) return { error: 'no_writable_library' };
     if (checkLibraryExcluded(libraryID)) return { error: 'library_excluded' };
+    if (libraryID !== Zotero.Libraries.userLibraryID)
+        return { error: 'unsupported_library' };
     return { libraryID };
 }
 
@@ -137,7 +147,8 @@ function checkTableLibrary(libraryID: number): ResolvedTableLibrary {
  * still reveal and open what is already in their library.
  *
  * An explicit id is answered as given: a caller that names a library gets that
- * library or an error, never a silent substitution. The default preference is a
+ * library or an error, never a silent substitution — so naming a group is
+ * refused rather than quietly redirected. The default preference is a
  * *preference*, so an unusable one falls through to the user library rather
  * than failing the whole request.
  */
@@ -152,14 +163,26 @@ export function resolveTableLibrary(explicit?: number): ResolvedTableLibrary {
         if ('libraryID' in checked) return checked;
         if (checked.error === 'library_excluded') sawExcluded = true;
     }
-    // Excluded is the more actionable of the two refusals: it names something
-    // the user can change in Beaver preferences.
+    // Excluded is the most actionable of the refusals: it names something the
+    // user can change in Beaver preferences.
     return { error: sawExcluded ? 'library_excluded' : 'no_writable_library' };
 }
 
 // ---------------------------------------------------------------------------
 // Creation
 // ---------------------------------------------------------------------------
+
+/** What a caller is told when {@link resolveTableLibrary} refuses. */
+const TABLE_LIBRARY_REFUSALS: Record<
+    Extract<ResolvedTableLibrary, { error: string }>['error'],
+    string
+> = {
+    library_excluded:
+        'That library is excluded in Beaver preferences, so Beaver will not write to it.',
+    unsupported_library:
+        'Beaver can currently only create tables in your personal library.',
+    no_writable_library: 'No writable library is available for a new table.',
+};
 
 export interface CreateTableItemOptions {
     spec: TableSpec;
@@ -190,15 +213,6 @@ export interface CreatedTableItem {
     selectUri: string | null;
     /** Opens the table in the reader. */
     openUri: string | null;
-}
-
-/** Builds the `zotero://open` URI for a file attachment. */
-function getZoteroOpenURI(libraryID: number, key: string): string | null {
-    const library = Zotero.Libraries.get(libraryID);
-    if (!library) return null;
-    // @ts-ignore groupID is defined for group libraries
-    const segment = library.libraryType === 'group' ? `groups/${library.groupID}` : 'library';
-    return `zotero://open/${segment}/items/${key}`;
 }
 
 /**
@@ -235,31 +249,19 @@ export async function createTableItem(
 ): Promise<CreatedTableItem> {
     const { spec, collectionID } = options;
 
-    const resolved = resolveTableLibrary(options.libraryID);
-    if ('error' in resolved) {
-        throw new TableItemError(
-            resolved.error === 'library_excluded'
-                ? 'That library is excluded in Beaver preferences, so Beaver will not write to it.'
-                : 'No writable library is available for a new table.',
-            resolved.error
-        );
-    }
-    const libraryID = resolved.libraryID;
-
     // `Zotero.Attachments.importFromSnapshotContent` has no `libraryID` option:
     // its `_addToDB` takes the library from the *parent item*, and a top-level
     // attachment therefore always lands in the user library (`setCollections`
     // assigns `Zotero.Libraries.userLibraryID` before it resolves anything).
     // Passing a group collection would file a user-library item against a group
-    // collection, so a writable group library is refused here rather than
-    // misfiled. Filing tables in a group needs the item built by hand — a
+    // collection, so `checkTableLibrary` refuses a group rather than let one be
+    // misfiled here. Filing tables in a group needs the item built by hand — a
     // separate decision, not something to fake through this API.
-    if (libraryID !== Zotero.Libraries.userLibraryID) {
-        throw new TableItemError(
-            'Beaver can currently only create tables in your personal library.',
-            'unsupported_library'
-        );
+    const resolved = resolveTableLibrary(options.libraryID);
+    if ('error' in resolved) {
+        throw new TableItemError(TABLE_LIBRARY_REFUSALS[resolved.error], resolved.error);
     }
+    const libraryID = resolved.libraryID;
 
     if (collectionID) {
         const collection = Zotero.Collections.get(collectionID) as
@@ -280,7 +282,7 @@ export async function createTableItem(
     const named: TableSpec = spec.title === title ? spec : { ...spec, title };
     const linksFor = options.linksFor ?? zoteroLinksFor;
 
-    const first = buildTableDocument(named, { linksFor });
+    const first = buildTableDocument(named, { linksFor, citationScopeFor: zoteroLinkScope });
     if (first.cssRuleCount > CSS_RULE_BUDGET) {
         // Above the reader's threshold the snapshot loses its palette in dark mode.
         logger(
@@ -320,7 +322,7 @@ export async function createTableItem(
         // copied from an existing table starts its own history here.
         version: 1,
     };
-    const second = buildTableDocument(stored, { linksFor });
+    const second = buildTableDocument(stored, { linksFor, citationScopeFor: zoteroLinkScope });
 
     const path = await item.getFilePathAsync();
     if (!path) {

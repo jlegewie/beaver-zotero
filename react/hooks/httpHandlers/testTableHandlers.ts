@@ -51,7 +51,10 @@ import { rowIdFor, validateTableSpec } from '@beaver/agent-core/layouts/table';
 import { store } from '../../store';
 import { windowSurfaceAtom, type WindowSurface } from '../../atoms/windowSurface';
 import { BeaverUIFactory } from '../../../src/ui/ui';
-import { zoteroLinksFor } from '../../../src/services/artifacts/view/tableLinks';
+import {
+    zoteroLinkScope,
+    zoteroLinksFor,
+} from '../../../src/services/artifacts/view/tableLinks';
 // The tab deck, the reader views and the double-click guard keep module state
 // and are compiled into the *esbuild* bundle by `src/hooks.ts`. Importing them
 // here would give this bundle a second, permanently empty copy — the endpoint
@@ -1183,7 +1186,7 @@ export async function handleTestTableCorruptHttpRequest(
     const ahead = (read.spec.version ?? 0) + 1;
     const document = buildTableDocument(
         { ...read.spec, version: ahead },
-        { linksFor: zoteroLinksFor }
+        { linksFor: zoteroLinksFor, citationScopeFor: zoteroLinkScope }
     );
     const htmlPath = await item.getFilePathAsync();
     if (!htmlPath) {
@@ -1276,7 +1279,10 @@ async function rollBackWholeDirectory(
 
     await Zotero.File.putContentsAsync(
         htmlPath,
-        buildTableDocument(spec, { linksFor: zoteroLinksFor }).html
+        buildTableDocument(spec, {
+            linksFor: zoteroLinksFor,
+            citationScopeFor: zoteroLinkScope,
+        }).html
     );
 
     return {

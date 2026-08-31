@@ -1,7 +1,11 @@
 import React from "react";
-import type { TableCoverage } from "@beaver/agent-core/layouts/table";
-import { Icon } from "../../icons";
+import type {
+    TableCoverage,
+    TableSpec,
+} from "@beaver/agent-core/layouts/table";
+import { DownloadIcon, Icon } from "../../icons";
 import Button from "../../primitives/Button";
+import { csvForCurrentView, type TableState } from "../useTableState";
 
 /**
  * The thin presentational bars a table surface is built from: the title bar at
@@ -45,6 +49,49 @@ export function TableTitleBar({
             </div>
             {actions ? <div className="bt-titleactions">{actions}</div> : null}
         </header>
+    );
+}
+
+export interface TableHeaderActionsProps {
+    table: TableSpec;
+    /** The view state, so Export writes what the viewer is actually looking at. */
+    state: TableState;
+    /** Receives the CSV of the current view. Absent ⇒ no export control. */
+    onExport?: (csv: string, table: TableSpec) => void;
+    /** Reveals the table's own library item. Absent ⇒ no control. */
+    onShowInLibrary?: (table: TableSpec) => void;
+}
+
+/**
+ * Export of the current view, and reveal of the table's library item.
+ * Either control is omitted when its callback is absent, rather than shown
+ * disabled.
+ */
+export function TableHeaderActions({
+    table,
+    state,
+    onExport,
+    onShowInLibrary,
+}: TableHeaderActionsProps): React.ReactElement {
+    return (
+        <>
+            {onExport ? (
+                <Button
+                    variant="surface"
+                    icon={DownloadIcon}
+                    onClick={() =>
+                        onExport(csvForCurrentView(table, state), table)
+                    }
+                >
+                    Export
+                </Button>
+            ) : null}
+            {onShowInLibrary ? (
+                <Button variant="solid" onClick={() => onShowInLibrary(table)}>
+                    Show in library
+                </Button>
+            ) : null}
+        </>
     );
 }
 

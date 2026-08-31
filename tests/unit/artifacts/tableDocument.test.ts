@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+    SELECT_COLORS,
     TABLE_SPEC_VERSION,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
@@ -267,6 +268,68 @@ describe("buildTableDocument", () => {
     });
 });
 
+describe("select pills", () => {
+    it("renders every colour in the shared palette as itself, not as grey", () => {
+        // The renderer checks a declared colour against agent-core's palette.
+        // A colour added there but missing from a list restated here would
+        // silently come out grey in every stored table.
+        for (const color of SELECT_COLORS) {
+            const { html } = renderTableHtml({
+                id: "p",
+                columns: [
+                    {
+                        id: "tag",
+                        header: "Tag",
+                        type: "select",
+                        options: [{ label: "Alpha", color }],
+                    },
+                ],
+                rows: [
+                    {
+                        id: "r1",
+                        cells: {
+                            tag: { value: { kind: "select", label: "Alpha" } },
+                        },
+                    },
+                ],
+            });
+            expect(html).toContain(`bt-pill bt-pill--${color}`);
+        }
+    });
+
+    it("has a stylesheet rule for every colour in the palette", () => {
+        // A colour the renderer emits but the sheet does not style is unstyled
+        // in every stored table.
+        for (const color of SELECT_COLORS) {
+            expect(TABLE_CSS).toContain(`.bt-pill.bt-pill--${color} {`);
+        }
+    });
+
+    it("falls back to grey for a colour outside the palette", () => {
+        const { html } = renderTableHtml({
+            id: "p",
+            columns: [
+                {
+                    id: "tag",
+                    header: "Tag",
+                    type: "select",
+                    options: [
+                        { label: "Alpha", color: "chartreuse" as never },
+                    ],
+                },
+            ],
+            rows: [
+                {
+                    id: "r1",
+                    cells: { tag: { value: { kind: "select", label: "Alpha" } } },
+                },
+            ],
+        });
+        expect(html).toContain("bt-pill bt-pill--gray");
+        expect(html).not.toContain("chartreuse");
+    });
+});
+
 describe("citations", () => {
     const cited: TableSpec = {
         id: "c",
@@ -378,6 +441,46 @@ describe("citations", () => {
         });
         expect(html).not.toContain("&lt;citation");
         expect(html).toContain("Claim.");
+    });
+
+    it("names the cited item's library, so a group citation is not a dead link", () => {
+        // `library/` is the personal library. A citation into a group resolves
+        // to nothing under it, and only the host knows which is which — hence
+        // the `citationScopeFor` seam.
+        const inGroup: TableSpec = {
+            ...cited,
+            citations: [
+                {
+                    ...cited.citations![0],
+                    resolved_ref: {
+                        kind: "zotero",
+                        library_id: 7,
+                        library_ref: "g4242",
+                        zotero_key: "K1",
+                    },
+                },
+            ],
+        };
+
+        const { html } = renderTableHtml(inGroup, {
+            citationScopeFor: (libraryId) =>
+                libraryId === 7 ? "groups/4242" : "library",
+        });
+
+        expect(html).toContain(
+            'href="zotero://open/groups/4242/items/K1?page=4"',
+        );
+        expect(html).not.toContain("zotero://open/library/items/K1");
+        // The bibliography entry has to agree with the marker above it.
+        expect(
+            [...html.matchAll(/zotero:\/\/open\/groups\/4242\/items\/K1/g)]
+                .length,
+        ).toBeGreaterThan(1);
+    });
+
+    it("falls back to the personal library when no host supplies a scope", () => {
+        const { html } = renderTableHtml(cited);
+        expect(html).toContain('href="zotero://open/library/items/K1?page=4"');
     });
 
     it("renders no sources section for a table without citations", () => {

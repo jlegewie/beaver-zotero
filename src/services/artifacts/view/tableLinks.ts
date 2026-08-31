@@ -16,6 +16,19 @@
 
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { RowRef } from '@beaver/agent-core/layouts/table';
+import { getZoteroUriScope } from '../../../utils/zoteroUris';
+
+/**
+ * The `zotero://` path scope for a library. Returns `library` when this device
+ * cannot resolve the id, because callers (citation links and row actions) must
+ * not throw mid-render.
+ *
+ * Used as `citationScopeFor` and for the row links below, so a citation and a
+ * row action into the same group never disagree about how to name it.
+ */
+export function zoteroLinkScope(libraryID: number): string {
+    return getZoteroUriScope(libraryID) ?? 'library';
+}
 
 /**
  * `zotero://` URIs for a row, built here because only Zotero knows whether a
@@ -36,16 +49,7 @@ import type { RowRef } from '@beaver/agent-core/layouts/table';
 export function zoteroLinksFor(ref: RowRef): { selectUri?: string | null; openUri?: string | null } {
     if (ref.kind !== 'item') return {};
     const { library_id: libraryID, zotero_key: key } = ref;
-    let scope = 'library';
-    try {
-        if (libraryID !== Zotero.Libraries.userLibraryID) {
-            const groupID = Zotero.Groups.getGroupIDFromLibraryID(libraryID);
-            if (groupID) scope = `groups/${groupID}`;
-        }
-    } catch {
-        // A library that no longer resolves still gets a select URI for the
-        // user library; the worst case is a link that reveals nothing.
-    }
+    const scope = zoteroLinkScope(libraryID);
 
     return {
         selectUri: `zotero://select/${scope}/items/${key}`,

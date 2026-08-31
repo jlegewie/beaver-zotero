@@ -1,10 +1,13 @@
 import React from "react";
 import {
+    anchorColumn,
     rowActions,
     type Row,
+    type RowAction,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
 import { getHost, type ClientHost } from "../host";
+import { revealHandler } from "./cells";
 import { ArrowUpRightIcon, FileViewIcon } from "../icons";
 import IconButton from "../primitives/IconButton";
 
@@ -29,7 +32,7 @@ export function RowActionsView({
     row: Row;
 }): React.ReactElement | null {
     const host = getHost();
-    const actions = rowActions(table, row);
+    const actions = visibleRowActions(table, row);
     const ref = row.ref;
     if (!ref || !canRender(host, row)) return null;
 
@@ -106,6 +109,37 @@ export function RowActionsView({
 }
 
 /**
+ * The verbs this row actually draws, which is not quite {@link rowActions}.
+ *
+ * `reveal` is omitted when the anchor cell already carries it: a `reference`
+ * value renders its title as the reveal target (`revealHandler` in `cells.tsx`).
+ * Drawing it again in the actions column is the same control twice on one row.
+ *
+ * {@link rowActions} stays the answer to "what can this row do"; this is only
+ * about where the control is shown.
+ */
+function visibleRowActions(table: TableSpec, row: Row): RowAction[] {
+    const actions = rowActions(table, row);
+    if (!actions.includes("reveal") || !anchorRevealsRow(table, row))
+        return actions;
+    return actions.filter((action) => action !== "reveal");
+}
+
+/**
+ * Whether the row's anchor cell already draws the reveal control. The anchor is
+ * never hidden by density or the viewer's column choices (`splitColumns`), so
+ * this cannot drop the only reveal on screen.
+ */
+function anchorRevealsRow(table: TableSpec, row: Row): boolean {
+    const anchor = anchorColumn(table);
+    if (!anchor) return false;
+    return (
+        row.cells[anchor.id]?.value?.kind === "reference" &&
+        !!revealHandler(row)
+    );
+}
+
+/**
  * Whether the row's verbs can actually be drawn here: an external row needs the
  * bibliographic payload and the host's action component, a library row needs the
  * navigation slice, and a context file has no verbs at all. Split out so the
@@ -127,6 +161,7 @@ function canRender(host: ClientHost, row: Row): boolean {
 export function tableHasRowActions(table: TableSpec): boolean {
     const host = getHost();
     return table.rows.some(
-        (row) => rowActions(table, row).length > 0 && canRender(host, row),
+        (row) =>
+            visibleRowActions(table, row).length > 0 && canRender(host, row),
     );
 }

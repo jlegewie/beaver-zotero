@@ -7,7 +7,6 @@ import {
 } from "@beaver/agent-core/layouts/table";
 import {
     AiMagicIcon,
-    DownloadIcon,
     EditIcon,
     PlusSignIcon,
     RepeatIcon,
@@ -16,11 +15,8 @@ import {
 import Button from "../../primitives/Button";
 import type { MenuItem } from "../../primitives/ContextMenu";
 import { AddColumnDialog, type ColumnDraft } from "../chrome/AddColumnDialog";
-import {
-    csvForCurrentView,
-    TableSurface,
-    type TableSurfaceProps,
-} from "../chrome/TableSurface";
+import { TableSurface, type TableSurfaceProps } from "../chrome/TableSurface";
+import { TableHeaderActions } from "../chrome/TableBars";
 import { useTableState } from "../useTableState";
 import type { TextRenderer } from "../tableView";
 
@@ -143,27 +139,12 @@ export function ExtractionTable({
             columnMenuItems={columnMenuItems}
             onRetryCell={onRetryCell}
             headerActions={
-                <>
-                    {onExport ? (
-                        <Button
-                            variant="surface"
-                            icon={DownloadIcon}
-                            onClick={() =>
-                                onExport(csvForCurrentView(table, state), table)
-                            }
-                        >
-                            Export
-                        </Button>
-                    ) : null}
-                    {onShowInLibrary ? (
-                        <Button
-                            variant="solid"
-                            onClick={() => onShowInLibrary(table)}
-                        >
-                            Show in library
-                        </Button>
-                    ) : null}
-                </>
+                <TableHeaderActions
+                    table={table}
+                    state={state}
+                    onExport={onExport}
+                    onShowInLibrary={onShowInLibrary}
+                />
             }
             toolbarActions={
                 <>

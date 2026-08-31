@@ -176,6 +176,51 @@ export function setTablesApi(api: TablesApi | null): void {
 }
 
 /**
+ * Single-flight write locks for stored tables: one promise chain per table,
+ * keyed `<libraryID>/<key>`. Only `tableStore.ts` takes one.
+ *
+ * Lives on the shared global rather than in `tableStore.ts` because module
+ * state is per *bundle* and the lock has to be per *process*. A map in the
+ * store would split the moment that module also reached the esbuild bundle:
+ * two chains, no serialisation between a user edit and an agent write, and
+ * every test still green.
+ *
+ * The map belongs to the **plugin realm**: `registerTablesApi()` seeds it at
+ * startup, and {@link clearTableWriteLocks} drops it at teardown, so a reload
+ * never inherits the previous realm's map. This function self-initialises if
+ * called first, which is why the seed exists — otherwise the first window
+ * bundle to take a lock would own the map.
+ *
+ * Its *entries* are promises created by a window's webpack realm (`tableStore`
+ * is compiled there). That is a bounded exception to not parking realm-bound
+ * values on a `Zotero.__beaver*` slot:
+ *
+ * - An entry deletes itself once it settles, so it is not a lasting reference.
+ * - Everything a write awaits (`IOUtils`, `Zotero.DB`, `Zotero.Items`) belongs
+ *   to the plugin or system realm. Closing a chrome window makes its *timers*
+ *   inert but does not nuke its objects, so a write whose window closes
+ *   mid-flight still settles and still releases its entry.
+ *
+ * An entry still pins its creating realm for as long as the write runs, and a
+ * future change that made the write await something window-bound would wedge
+ * that one table until reload. Clearing a closing window's entries is **not**
+ * the fix — a write still in flight would then run concurrently with the next
+ * window's, against the same staging path.
+ */
+export function tableWriteLocks(): Map<string, Promise<unknown>> {
+    const existing = Zotero.__beaverTableWriteLocks;
+    if (existing) return existing;
+    const created = new Map<string, Promise<unknown>>();
+    Zotero.__beaverTableWriteLocks = created;
+    return created;
+}
+
+/** Drops the registry. Plugin teardown only — no write may be in flight. */
+export function clearTableWriteLocks(): void {
+    Zotero.__beaverTableWriteLocks = undefined;
+}
+
+/**
  * The message a caller shows when the esbuild half is not up. Named here so
  * every dev endpoint reports the same thing, and reports it rather than
  * quietly substituting a copy of its own.

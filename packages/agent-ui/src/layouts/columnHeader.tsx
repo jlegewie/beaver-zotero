@@ -1,5 +1,6 @@
 import React from "react";
 import {
+    columnAlign,
     isColumnSortable,
     type Column,
     type TableSort,
@@ -14,7 +15,6 @@ import {
 } from "../icons";
 import MenuButton from "../primitives/MenuButton";
 import type { MenuItem } from "../primitives/ContextMenu";
-import { cellAlign } from "./tableView";
 
 export interface ColumnHeaderCellProps {
     column: Column;
@@ -55,7 +55,7 @@ export function ColumnHeaderCell({
     const canSort = sortable && isColumnSortable(column);
     const direction =
         sort?.column_id === column.id ? sort.direction : undefined;
-    const align = cellAlign(column);
+    const align = columnAlign(column);
     const progress = column.progress;
     const details = detailsText(column);
     // The full text lives on the header itself: the visible line is clamped, and

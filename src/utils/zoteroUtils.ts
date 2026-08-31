@@ -469,21 +469,12 @@ export function getInstanceIndexScopeRefs(searchableLibraryIds: number[]): strin
 }
 
 /**
- * Build a zotero://select URI that opens Zotero and selects the given item.
- * Works without loading the full item — only needs libraryID and key.
- *
- * User libraries:  zotero://select/library/items/{key}
- * Group libraries: zotero://select/groups/{groupID}/items/{key}
+ * `zotero://` URI builders. Defined in `./zoteroUris` rather than here so the
+ * esbuild bundle can reach them — this module imports from `react/`, that one
+ * imports nothing — and re-exported here because this is where callers look for
+ * them.
  */
-export function getZoteroSelectURI(libraryId: number, key: string): string | null {
-    const lib = Zotero.Libraries.get(libraryId);
-    if (!lib) return null;
-    if (lib.libraryType === 'group') {
-        // @ts-ignore Zotero.Library.groupID is defined for group libraries
-        return `zotero://select/groups/${lib.groupID}/items/${key}`;
-    }
-    return `zotero://select/library/items/${key}`;
-}
+export { getZoteroOpenURI, getZoteroSelectURI, getZoteroUriScope } from './zoteroUris';
 
 export function isLibraryEditable(libraryId: number): boolean {
     const library = Zotero.Libraries.get(libraryId);

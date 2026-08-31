@@ -19,9 +19,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TableSpec } from '@beaver/agent-core/layouts/table';
 import { buildTableDocument } from '../../../src/services/artifacts/tableDocument';
-import { zoteroLinksFor } from '../../../src/services/artifacts/view/tableLinks';
+import {
+    zoteroLinkScope,
+    zoteroLinksFor,
+} from '../../../src/services/artifacts/view/tableLinks';
 
 const LIBRARY_ID = 1;
+const GROUP_LIBRARY_ID = 7;
+const GROUP_ID = 4242;
 
 let savedZotero: any;
 
@@ -38,8 +43,16 @@ function unloadedData(): never {
 function stubItems(items: Record<string, any>): void {
     (globalThis as any).Zotero = {
         ...savedZotero,
-        Libraries: { ...savedZotero.Libraries, userLibraryID: LIBRARY_ID },
-        Groups: { getGroupIDFromLibraryID: vi.fn(() => 0) },
+        Libraries: {
+            ...savedZotero.Libraries,
+            userLibraryID: LIBRARY_ID,
+            get: vi.fn((id: number) => {
+                if (id === LIBRARY_ID) return { libraryType: 'user' };
+                if (id === GROUP_LIBRARY_ID)
+                    return { libraryType: 'group', groupID: GROUP_ID };
+                return false;
+            }),
+        },
         Items: {
             getByLibraryAndKey: vi.fn(
                 (libraryID: number, key: string) =>
@@ -117,6 +130,86 @@ describe('zoteroLinksFor', () => {
     it('offers nothing for a row that names no library item', () => {
         stubItems({});
         expect(zoteroLinksFor({ kind: 'external', url: 'https://example.org' })).toEqual({});
+    });
+
+    it('names the group in a group library row, not `library`', () => {
+        stubItems({});
+
+        expect(
+            zoteroLinksFor({
+                kind: 'item',
+                library_id: GROUP_LIBRARY_ID,
+                zotero_key: 'GGG',
+            })
+        ).toEqual({
+            selectUri: `zotero://select/groups/${GROUP_ID}/items/GGG`,
+            // The item is not resolvable here, so no open link — the scope is
+            // still the group's.
+            openUri: null,
+        });
+    });
+});
+
+describe('zoteroLinkScope', () => {
+    beforeEach(() => stubItems({}));
+
+    it('answers the group scope for a group library and `library` for the personal one', () => {
+        expect(zoteroLinkScope(LIBRARY_ID)).toBe('library');
+        expect(zoteroLinkScope(GROUP_LIBRARY_ID)).toBe(`groups/${GROUP_ID}`);
+    });
+
+    it('degrades to the personal library rather than throwing on an unknown one', () => {
+        // Handed to `buildTableDocument` on every write: a throw here would
+        // abort a write over an unknown library.
+        expect(zoteroLinkScope(404)).toBe('library');
+    });
+});
+
+describe('a citation into a group library', () => {
+    it('gets a link that resolves, not one under `library/`', () => {
+        stubItems({});
+
+        const spec: TableSpec = {
+            id: 'c',
+            columns: [{ id: 'finding', header: 'Finding', type: 'text' }],
+            rows: [
+                {
+                    id: 'r1',
+                    cells: {
+                        finding: {
+                            value: {
+                                kind: 'text',
+                                text: 'Rose 13%. <citation id="g4242-K1" loc="page4"/>',
+                            },
+                        },
+                    },
+                },
+            ],
+            citations: [
+                {
+                    citation_id: 'c1',
+                    raw_tag: '<citation id="g4242-K1" loc="page4"/>',
+                    display_name: 'Bloom 2015',
+                    pages: [4],
+                    resolved_ref: {
+                        kind: 'zotero',
+                        library_id: GROUP_LIBRARY_ID,
+                        library_ref: `g${GROUP_ID}`,
+                        zotero_key: 'K1',
+                    },
+                },
+            ],
+        };
+
+        const { html } = buildTableDocument(spec, {
+            linksFor: zoteroLinksFor,
+            citationScopeFor: zoteroLinkScope,
+        });
+
+        expect(html).toContain(
+            `zotero://open/groups/${GROUP_ID}/items/K1?page=4`
+        );
+        expect(html).not.toContain('zotero://open/library/items/K1');
     });
 });
 
