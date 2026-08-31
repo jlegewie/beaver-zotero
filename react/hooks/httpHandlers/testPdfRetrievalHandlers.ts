@@ -143,10 +143,9 @@ const DEFAULT_STRATEGY_TIMEOUT_MS = 30_000;
 const DEFAULT_PLAN_TIMEOUT_MS = 120_000;
 
 /**
- * Same shape as `addItemActions.ts::withTimeout`: the losing promise is NOT
- * cancelled, so a strategy that times out may still attach a PDF afterwards.
- * Reproduced rather than imported because that leak is part of what is being
- * measured.
+ * Bounds the wait only: the losing promise is NOT cancelled, so a strategy that
+ * times out may still attach a PDF afterwards. That leak is part of what these
+ * measurements are for.
  */
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: string): Promise<T> {
     return Promise.race([

@@ -2451,6 +2451,11 @@ export const CLIENT_FEATURES = {
     CREDIT_CONFIRMATION: 'credit_confirmation',
     /** `batch_jobs` capability (batch_start / batch_resolve). */
     BATCH_JOBS: 'batch_jobs',
+    /**
+     * `create_item` actions carry `pdf_candidates`: a ranked list of places the
+     * PDF might be downloaded from.
+     */
+    PDF_CANDIDATES: 'pdf_candidates',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */

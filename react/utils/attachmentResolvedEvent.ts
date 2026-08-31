@@ -23,6 +23,14 @@ export interface AttachmentResolvedPayload {
     zoteroKey: string;
     attachmentStatus: 'available' | 'failed';
     attachmentKey?: string;
+    /**
+     * Which resolver produced the file — one we supplied ('openalex') or one of
+     * Zotero's own ('doi', 'url', 'oa', 'custom'). Without it the attach rate is
+     * a single number with no way to tell which sources earn their place.
+     */
+    accessMethod?: string;
+    /** Wall-clock duration of the whole fetch task. */
+    elapsedMs?: number;
 }
 
 export function emitAttachmentResolved(payload: AttachmentResolvedPayload): void {
@@ -43,5 +51,7 @@ export function emitAttachmentResolved(payload: AttachmentResolvedPayload): void
         library_ref: libraryRefForLibraryID(payload.libraryId) ?? undefined,
         attachment_status: payload.attachmentStatus,
         attachment_key: payload.attachmentKey,
+        access_method: payload.accessMethod,
+        elapsed_ms: payload.elapsedMs,
     });
 }
