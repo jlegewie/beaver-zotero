@@ -64,8 +64,12 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // falls back to the per-tool confirmations instead.
 // batch_jobs is declaration-only because it gates a deferred capability with
 // no client handler: a client that does not declare it sees no catalog entry.
+// pdf_candidates is declaration-only because the backend would otherwise send a
+// ranked candidate list to clients that ignore it, paying the payload for
+// nothing.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
+    'pdf_candidates',
     'ask_user_question',
     'portable_ids',
     'list_items_include_children',

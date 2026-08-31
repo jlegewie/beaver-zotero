@@ -1,5 +1,22 @@
 import type { ProposedAction } from "./base";
+
 import type { ExternalReference } from "../externalReferences";
+
+/**
+ * One place a PDF might be fetched from, derived from the item's open-access
+ * locations. Shaped to map onto Zotero's `urlResolver` (`{url, pageURL, accessMethod,
+ * articleVersion}`) so it can be handed to `addFileFromURLs` unchanged.
+ */
+export interface PdfCandidate {
+    url?: string | null;
+    page_url?: string | null;
+    /** publishedVersion | acceptedVersion | submittedVersion */
+    version?: string | null;
+    /** Names the source, and is reported back when this candidate wins. */
+    access_method?: string;
+    source_name?: string | null;
+    host_type?: string | null;
+}
 
 export interface CreateItemProposedData {
     // Target library (undefined = user's main library)
@@ -15,6 +32,8 @@ export interface CreateItemProposedData {
 
     // Fulltext information
     file_available: boolean;  // Whether fulltext PDF is available
+    /** Ranked places to try downloading the PDF, best first. */
+    pdf_candidates?: PdfCandidate[];
     downloaded_url?: string;  // URL from which fulltext was downloaded
     storage_path?: string;  // Storage path if file was downloaded
     text_path?: string;  // Path to extracted text file
