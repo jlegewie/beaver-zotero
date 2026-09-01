@@ -1545,6 +1545,8 @@ export interface TagReference {
     note_count?: number;
     /** Number of annotations carrying this tag. Omitted by older backends. */
     annotation_count?: number;
+    /** `manual` if any occurrence is user-added, otherwise `automatic`. Absent on older results. */
+    tag_type?: 'manual' | 'automatic';
 }
 
 /**
@@ -1705,6 +1707,8 @@ export interface TagInfo {
     /** Number of annotations carrying this tag. Omitted by older frontends. */
     annotation_count?: number;
     color?: string | null;
+    /** `manual` if any occurrence is user-added, otherwise `automatic`. Absent on older results. */
+    tag_type?: 'manual' | 'automatic';
 }
 
 /**
@@ -2272,6 +2276,7 @@ export function extractListTagsData(
                 attachment_count: tag.attachment_count,
                 note_count: tag.note_count,
                 annotation_count: tag.annotation_count,
+                tag_type: tag.tag_type,
             }));
 
             return {
@@ -2294,6 +2299,7 @@ export function extractListTagsData(
                     attachment_count: tag.attachment_count,
                     note_count: tag.note_count,
                     annotation_count: tag.annotation_count,
+                    tag_type: tag.tag_type,
                 })),
                 totalCount: summary.total_count,
                 libraryId: summary.library_id,

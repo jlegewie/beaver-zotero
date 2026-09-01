@@ -124,6 +124,8 @@ export interface TagRowView {
     note_count?: number;
     /** Number of annotations carrying this tag. Absent on older results. */
     annotation_count?: number;
+    /** `manual` if any occurrence is user-added, otherwise `automatic`. Absent on older results. */
+    tag_type?: 'manual' | 'automatic';
 }
 
 /** One find_in_attachments match (snippet + click-to-highlight target). */

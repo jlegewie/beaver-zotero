@@ -54,10 +54,11 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // event a client only answers if it has the handler: a build that predates it
 // drops the unknown event silently, so the backend refuses the op up front
 // rather than letting the caller wait out the request timeout.
-// list_collections_recursive and list_tags_name_query are declaration-only for
-// the same reason as list_items_include_children: they gate request fields a
-// client only honors if its handler implements them, and a build that predates
-// them drops the field and answers a narrower question without saying so.
+// list_collections_recursive, list_tags_name_query and list_tags_types are
+// declaration-only for the same reason as list_items_include_children: they
+// gate request fields a client only honors if its handler implements them, and
+// a build that predates them drops the field and answers a narrower question
+// without saying so.
 // credit_confirmation is declaration-only because it gates an inbound event a
 // client only answers if it has the handler: a build that predates it drops the
 // event and stalls the run for the whole confirmation timeout, so the backend
@@ -83,6 +84,7 @@ const DECLARATION_ONLY_FEATURES = [
     'item_quick_search',
     'list_collections_recursive',
     'list_tags_name_query',
+    'list_tags_types',
     'credit_confirmation',
     'batch_jobs',
     'citation_graph',
