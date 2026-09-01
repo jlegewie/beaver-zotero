@@ -1435,6 +1435,18 @@ export interface WSResolvePopulationRequest extends WSBaseEvent {
      * returned. 0 returns no ids (total_count is still the true match count).
      */
     max_items: number;
+    /**
+     * Item ids to leave out of the result. Applied before truncation to
+     * `max_items`, so a caller paging one tranche at a time can reach the
+     * next — excluding after would return the same first `max_items` matches
+     * every time. Entries may use any id grammar; resolve each to this
+     * device's library before comparing, do not match on the raw string.
+     *
+     * A handler that applies this MUST set `excluded_count` (including 0)
+     * so the caller can tell a build that honoured the field from one that
+     * ignored it.
+     */
+    exclude_item_ids?: string[] | null;
 }
 
 /** Response to resolve_population request */
@@ -1447,8 +1459,21 @@ export interface WSResolvePopulationResponse {
      * id), deterministic order, length <= max_items.
      */
     item_ids: string[];
-    /** True number of matches, counted before truncation. */
+    /**
+     * True number of matches, counted after any `exclude_item_ids` were
+     * removed but before truncation.
+     */
     total_count: number;
+    /**
+     * How many matching items `exclude_item_ids` removed.
+     *
+     * Presence confirms this build applied the exclusion. Set on every
+     * successful resolution (0 when nothing was excluded); absent from a
+     * failure and from a build that predates the field. A shrinking
+     * population and an ignored field both come back short, so the ids
+     * alone cannot tell them apart.
+     */
+    excluded_count?: number | null;
     /**
      * Number of bibliographic items the filters matched, counted before any
      * attachment population is derived from them and before truncation.
@@ -2138,6 +2163,13 @@ export interface WSBatchApprovalRequest extends WSBaseEvent {
     learn_more_label?: string;
     /** Docs path resolved against the client's environment-specific docs URL */
     learn_more_path?: string;
+    /**
+     * Initial contents of the instructions box; a non-empty value also
+     * opens it. Set only for a continuation, from the instructions the
+     * earlier batch was approved with. An editable default — whatever
+     * the response carries is what binds.
+     */
+    user_instructions_prefill?: string;
     /** How long the backend will wait for a response */
     timeout_seconds: number;
 }

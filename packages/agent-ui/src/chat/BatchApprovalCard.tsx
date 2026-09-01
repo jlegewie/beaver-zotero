@@ -102,14 +102,20 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
     approval,
     onSubmit,
 }) => {
-    // Mode + instructions, seeded from the mode the request preselects.
-    const [draft, setDraft] = useState<BatchApprovalDraft>(() => initialDraft(approval.defaultMode));
-    // Whether the instructions field has been asked for. Collapsed by default:
-    // most decisions carry none, and the composer this card replaces is gone,
-    // so an empty field sitting above the buttons reads as something left
-    // undone.
-    const [wantsInstructions, setWantsInstructions] = useState(false);
-    const hasInstructions = draft.userInstructions.trim().length > 0;
+    const [draft, setDraft] = useState<BatchApprovalDraft>(
+        () => initialDraft(approval.defaultMode, approval.userInstructionsPrefill),
+    );
+    // Collapsed by default so an empty field doesn't look unfinished. Open
+    // immediately when a continuation carries instructions — hidden behind
+    // a button they read as absent.
+    const [wantsInstructions, setWantsInstructions] = useState(
+        () => (approval.userInstructionsPrefill ?? '').length > 0,
+    );
+    // True once the user has edited the prefill. Decline with the untouched
+    // prefill would send the previous tranche's constraint as "do this instead".
+    const authoredInstructions =
+        draft.userInstructions.trim() !== (approval.userInstructionsPrefill ?? '').trim();
+    const hasInstructions = authoredInstructions && draft.userInstructions.trim().length > 0;
     // Drives the disabled styling in the instant before the card unmounts.
     const [isDecided, setIsDecided] = useState(false);
     // The guard that actually holds. Exactly one decision may leave the
@@ -125,8 +131,13 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
         if (hasDecidedRef.current) return;
         hasDecidedRef.current = true;
         setIsDecided(true);
-        onSubmit(buildResponse(draft, approved));
-    }, [draft, onSubmit]);
+        onSubmit(buildResponse(
+            approved || authoredInstructions
+                ? draft
+                : { ...draft, userInstructions: '' },
+            approved,
+        ));
+    }, [draft, authoredInstructions, onSubmit]);
 
     const handleApprove = useCallback(() => decide(true), [decide]);
     const handleDecline = useCallback(() => decide(false), [decide]);

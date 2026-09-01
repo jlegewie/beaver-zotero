@@ -684,6 +684,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         item_category: request.item_category === 'attachment' ? 'attachment' : 'regular',
         has_attachments: request.has_attachments ?? null,
         max_items: request.max_items ?? 1000,
+        exclude_item_ids: request.exclude_item_ids ?? [],
     };
 
     const response = await handleResolvePopulationRequest(wsRequest);
@@ -691,6 +692,10 @@ async function handleResolvePopulationHttpRequest(request: any) {
     return {
         item_ids: response.item_ids,
         total_count: response.total_count,
+        // Presence tells the caller this build applied `exclude_item_ids`.
+        // Forwarded here too, like `conditions_join_mode`, or a localhost
+        // run cannot continue a batch.
+        excluded_count: response.excluded_count,
         // How many bibliographic items matched, before an attachment population
         // was derived from them. Without it the caller cannot tell an empty
         // attachment population from filters that matched nothing.

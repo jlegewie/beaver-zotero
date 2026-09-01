@@ -31,6 +31,9 @@ vi.mock('react', async () => {
         return hookState.slots[i];
     };
 
+    // `useCallback` ignores its deps and `useEffect` is a no-op, so this
+    // suite cannot catch a stale-closure regression. It exercises decision
+    // logic, not React's re-render semantics.
     const hooks = {
         useState: (initial: any) => {
             const cell = slot(() => (typeof initial === 'function' ? initial() : initial));
@@ -81,6 +84,7 @@ function approval(overrides: Partial<PendingBatchApproval> = {}): PendingBatchAp
         approveLabel: 'Approve 184 items',
         declineLabel: 'Cancel',
         declineWithInstructionsLabel: DECLINE_WITH_INSTRUCTIONS,
+        userInstructionsPrefill: '',
         timeoutSeconds: 180,
         ...overrides,
     };
@@ -385,6 +389,121 @@ describe('BatchApprovalCard instructions disclosure', () => {
         const onSubmit = vi.fn();
 
         findOne(render(onSubmit), byAriaLabel('Approve batch job')).props.onClick();
+
+        expect(onSubmit).toHaveBeenCalledWith({
+            approved: true,
+            mode: 'full_access',
+            user_instructions: null,
+        });
+    });
+});
+
+describe('BatchApprovalCard continuation', () => {
+    const PRIOR_INSTRUCTIONS = 'Only use collections that already exist';
+
+    beforeEach(() => {
+        hookState.slots = [];
+        hookState.index = 0;
+    });
+
+    it('renders the continuation clause as part of the scope line', () => {
+        // Composed into `scopeSecondary` rather than a dedicated field, so a
+        // client that predates continuation still shows it.
+        const carried = 'in My Library — continuing b1, so anything it already handled is left out';
+        const tree = render(vi.fn(), { scopeSecondary: carried });
+
+        expect(renderedText(tree)).toContain(` ${carried}`);
+    });
+
+    it('opens the instructions box already filled when a continuation carries them', () => {
+        const tree = render(vi.fn(), { userInstructionsPrefill: PRIOR_INSTRUCTIONS });
+
+        expect(findOne(tree, isTextarea).props.value).toBe(PRIOR_INSTRUCTIONS);
+    });
+
+    it('sends the carried-forward instructions when the user just approves', () => {
+        const onSubmit = vi.fn();
+
+        findOne(
+            render(onSubmit, { userInstructionsPrefill: PRIOR_INSTRUCTIONS }),
+            byAriaLabel('Approve batch job'),
+        ).props.onClick();
+
+        expect(onSubmit).toHaveBeenCalledWith({
+            approved: true,
+            mode: 'full_access',
+            user_instructions: PRIOR_INSTRUCTIONS,
+        });
+    });
+
+    it('does not put the carried-forward instructions in a decline', () => {
+        // Decline instructions are read as "do this instead"; echoing the
+        // previous tranche's constraint would put words in the user's mouth.
+        const onSubmit = vi.fn();
+
+        findOne(
+            render(onSubmit, { userInstructionsPrefill: PRIOR_INSTRUCTIONS }),
+            byAriaLabel('Cancel batch job'),
+        ).props.onClick();
+
+        expect(onSubmit).toHaveBeenCalledWith({
+            approved: false,
+            mode: 'full_access',
+            user_instructions: null,
+        });
+    });
+
+    it('sends instructions with a decline once the user has written them', () => {
+        const onSubmit = vi.fn();
+        const overrides = { userInstructionsPrefill: PRIOR_INSTRUCTIONS };
+
+        findOne(render(onSubmit, overrides), isTextarea)
+            .props.onChange({ target: { value: 'Do the tagging job instead' } });
+        findOne(
+            render(onSubmit, overrides),
+            byAriaLabel('Cancel batch job and send instructions'),
+        ).props.onClick();
+
+        expect(onSubmit).toHaveBeenCalledWith({
+            approved: false,
+            mode: 'full_access',
+            user_instructions: 'Do the tagging job instead',
+        });
+    });
+
+    it('keeps the plain decline label while the prefill is untouched', () => {
+        const tree = render(vi.fn(), { userInstructionsPrefill: PRIOR_INSTRUCTIONS });
+
+        expect(renderedText(tree)).toContain('Cancel');
+        expect(renderedText(tree)).not.toContain(DECLINE_WITH_INSTRUCTIONS);
+    });
+
+    it('treats a whitespace-only edit of the prefill as untouched', () => {
+        // Prefill autofocuses the textarea, so a stray space is a realistic
+        // "edit". Trim both sides or that would ship the previous constraint
+        // as the user's decline instructions.
+        const onSubmit = vi.fn();
+        const overrides = { userInstructionsPrefill: PRIOR_INSTRUCTIONS };
+
+        findOne(render(onSubmit, overrides), isTextarea)
+            .props.onChange({ target: { value: `${PRIOR_INSTRUCTIONS}  ` } });
+        const tree = render(onSubmit, overrides);
+
+        expect(renderedText(tree)).not.toContain(DECLINE_WITH_INSTRUCTIONS);
+        findOne(tree, byAriaLabel('Cancel batch job')).props.onClick();
+        expect(onSubmit).toHaveBeenCalledWith({
+            approved: false,
+            mode: 'full_access',
+            user_instructions: null,
+        });
+    });
+
+    it('lets the user clear the carried-forward instructions', () => {
+        const onSubmit = vi.fn();
+        const overrides = { userInstructionsPrefill: PRIOR_INSTRUCTIONS };
+
+        findOne(render(onSubmit, overrides), isTextarea).props.onChange({ target: { value: '' } });
+        findOne(render(onSubmit, overrides), byAriaLabel('Approve batch job')).props.onClick();
 
         expect(onSubmit).toHaveBeenCalledWith({
             approved: true,
