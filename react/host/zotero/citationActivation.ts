@@ -39,6 +39,18 @@ import { BEAVER_CITATION_ANNOTATION_AUTHOR } from '../../../src/constants/annota
 import { libraryRefForLibraryID, resolveItemReference } from '../../../src/utils/libraryIdentity';
 import type { CitationActivation } from '@beaver/agent-ui/host/types';
 
+/**
+ * Walk to the top-level item. An annotation or attachment citation names a child
+ * row; "the item" the user wants revealed is the work it hangs off.
+ */
+function topLevelItemOf(item: Zotero.Item): Zotero.Item {
+    let current = item;
+    while (current.parentItem) {
+        current = current.parentItem;
+    }
+    return current;
+}
+
 /** Reveal the cited item in the library view. */
 function revealInLibrary(libraryID: number, zoteroKey: string): void {
     revealSource({
@@ -56,6 +68,7 @@ function revealInLibrary(libraryID: number, zoteroKey: string): void {
 export async function activateCitation(activation: CitationActivation): Promise<void> {
     const {
         metadata,
+        intent = 'passage',
         isExternal,
         isExternalFile,
         externalFileKey,
@@ -118,6 +131,15 @@ export async function activateCitation(activation: CitationActivation): Promise<
     const item = resolved.item;
 
     await item.loadAllData();
+
+    // Alternate activation: the user asked for the cited work, not the cited
+    // passage. Reveal it and skip every locator-driven path below.
+    if (intent === 'item') {
+        const target = topLevelItemOf(item);
+        logger(`Citation activation: revealing cited item in library (${target.id})`);
+        revealInLibrary(target.libraryID, target.key);
+        return;
+    }
 
     const contentKind = getContentKind(metadata);
     const symbolicLocation = getSymbolicLocation(metadata);

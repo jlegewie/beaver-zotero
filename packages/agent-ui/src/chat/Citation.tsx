@@ -11,6 +11,7 @@ import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '@beave
 import { useCitationMarker } from './useCitationMarker';
 import { getHost } from '../host';
 import { useCitationViewModel } from './useCitationViewModel';
+import { useAlternateActivation } from './useAlternateActivation';
 import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon } from '../icons';
 const TOOLTIP_WIDTH = '250px';
 
@@ -82,6 +83,7 @@ const Citation: React.FC<CitationProps> = (props) => {
         effectiveLibraryRef,
         consecutive,
         citation,
+        formatted_citation,
         previewText,
         pagesDisplay,
         pages,
@@ -104,9 +106,21 @@ const Citation: React.FC<CitationProps> = (props) => {
     // Uses markerKey (without sid/page) so all citations to the same item share a marker
     const numericMarker = useCitationMarker(markerKey, exportRendering);
 
+    // Whether the alternate-activation modifier is held over this citation.
+    // See `useAlternateActivation` for why it is Shift.
+    const { isAlternate, hoverProps } = useAlternateActivation();
+
     // Render as soon as we have an identifier; citationMetadata may arrive later.
     // 'error' state means no valid identifier was found - don't render.
     if (displayState === 'error') return null;
+
+    // Alternate activation acts on the cited work rather than the cited passage.
+    // It is only offered where there is a work to reveal: an unmapped external
+    // reference and an external file have no library item behind them.
+    const canRevealItem = !isExternalFile
+        && (!isExternal || !!mappedZoteroItem)
+        && !!effectiveItemKey;
+    const showItemInfo = isAlternate && canRevealItem;
 
     // Click handler — delegates all client-specific navigation to the host.
     // The streaming/invalid states don't attach this handler (see below), so it
@@ -116,6 +130,9 @@ const Citation: React.FC<CitationProps> = (props) => {
         if (!citationMetadata) return;
         getHost().navigation?.activateCitation({
             metadata: citationMetadata,
+            // Read the modifier off the click rather than the hover state, so
+            // the action always matches the key that was actually held down.
+            intent: (e.shiftKey && canRevealItem) ? 'item' : 'passage',
             isExternal,
             isExternalFile,
             externalFileKey,
@@ -247,10 +264,16 @@ const Citation: React.FC<CitationProps> = (props) => {
         ? `${citationClassBase} invalid`
         : citationClassBase;
     const showPreviewText = previewText && previewText !== citation;
+    // Body of the alternate ("item") hover state: the full bibliographic
+    // reference. Suppressed when it would only repeat the header.
+    const itemInfoText = formatted_citation && formatted_citation !== citation
+        ? formatted_citation
+        : '';
 
     const citationElement = (
         <span 
             onClick={(isStreaming || isInvalid) ? undefined : handleClick}
+            {...hoverProps}
             className={citationClass}
             data-pages={pages}
             data-item-key={itemKey}
@@ -267,12 +290,12 @@ const Citation: React.FC<CitationProps> = (props) => {
                     {citation}
                 </span>
                 <span className="flex-1" />
-                {hasLocatorDisplay && (
+                {!showItemInfo && hasLocatorDisplay && (
                     <span className="font-color-secondary text-sm" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
                         {`Page ${pagesDisplay}`}
                     </span>
                 )}
-                {(!pages || pages.length === 0) && textLineLocation && (
+                {!showItemInfo && (!pages || pages.length === 0) && textLineLocation && (
                     <span className="font-color-secondary text-sm" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
                         {textLineLocation.line_end && textLineLocation.line_end !== textLineLocation.line
                             ? `Lines ${textLineLocation.line}–${textLineLocation.line_end}`
@@ -280,94 +303,114 @@ const Citation: React.FC<CitationProps> = (props) => {
                     </span>
                 )}
             </span>
-            {showPreviewText && (
-                <span className="font-color-secondary text-sm px-3 py-15 block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
-                    {previewText}
-                </span>
-            )}
-            {isExternal && !mappedZoteroItem && (
-                <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
-                    <span className="display-flex flex-row items-center gap-15">
-                        <Icon icon={GlobalSearchIcon} className="font-color-secondary" />
-                        <span className="text-sm font-color-secondary">
-                            View details
+            {showItemInfo ? (
+                <>
+                    {itemInfoText && (
+                        <span className="font-color-secondary text-sm px-3 py-15 block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+                            {itemInfoText}
+                        </span>
+                    )}
+                    <span className={`px-3 py-15 block ${itemInfoText ? 'border-top-quinary' : ''}`}>
+                        <span className="display-flex flex-row items-center gap-15">
+                            <Icon icon={LibraryIcon} className="font-color-secondary" />
+                            <span className="text-sm font-color-secondary">
+                                Reveals item in library
+                            </span>
                         </span>
                     </span>
-                </span>
-            )}
-            {isExternalFile && (
-                <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
-                    <span className="display-flex flex-row items-center gap-15">
-                        <Icon icon={ExternalLinkIcon} className="font-color-secondary scale-90" />
-                        <span className="text-sm font-color-secondary">
-                            Opens external file
+                </>
+            ) : (
+                <>
+                {showPreviewText && (
+                    <span className="font-color-secondary text-sm px-3 py-15 block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
+                        {previewText}
+                    </span>
+                )}
+                {isExternal && !mappedZoteroItem && (
+                    <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
+                        <span className="display-flex flex-row items-center gap-15">
+                            <Icon icon={GlobalSearchIcon} className="font-color-secondary" />
+                            <span className="text-sm font-color-secondary">
+                                View details
+                            </span>
                         </span>
                     </span>
-                </span>
-            )}
-            {isNoteCitation && !isExternalFile && (!isExternal || !!mappedZoteroItem) && (
-                <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
-                    <span className="display-flex flex-row items-center gap-15">
-                        <Icon icon={NoteIcon} className="font-color-secondary" />
-                        <span className="text-sm font-color-secondary">
-                            Opens note
+                )}
+                {isExternalFile && (
+                    <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
+                        <span className="display-flex flex-row items-center gap-15">
+                            <Icon icon={ExternalLinkIcon} className="font-color-secondary scale-90" />
+                            <span className="text-sm font-color-secondary">
+                                Opens external file
+                            </span>
                         </span>
                     </span>
-                </span>
-            )}
-            {isAnnotationCitation && !isExternalFile && (!isExternal || !!mappedZoteroItem) && (
-                <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
-                    <span className="display-flex flex-row items-center gap-15">
-                        <Icon icon={HighlighterIcon} className="font-color-secondary" />
-                        <span className="text-sm font-color-secondary">
-                            Opens annotation in PDF
+                )}
+                {isNoteCitation && !isExternalFile && (!isExternal || !!mappedZoteroItem) && (
+                    <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
+                        <span className="display-flex flex-row items-center gap-15">
+                            <Icon icon={NoteIcon} className="font-color-secondary" />
+                            <span className="text-sm font-color-secondary">
+                                Opens note
+                            </span>
                         </span>
                     </span>
-                </span>
-            )}
-            {hasLocator && !isExternalFile && (!isExternal || !!mappedZoteroItem) && (
-                <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
-                    <span className="display-flex flex-row items-center gap-15">
-                        <Icon icon={PdfIcon} className="font-color-secondary" />
-                        <span className="text-sm font-color-secondary">
-                            {isEpubCitation
-                                ? (hasLocatorDisplay ? `Opens EPUB at page ${pagesDisplay}` : 'Opens EPUB at location')
-                                : hasBoundingBoxes
-                                    ? (hasLocatorDisplay ? `Highlights passage on page ${pagesDisplay}` : 'Highlights passage in PDF')
-                                    : (hasLocatorDisplay ? `Opens PDF on page ${pagesDisplay}` : 'Opens PDF at location')}
+                )}
+                {isAnnotationCitation && !isExternalFile && (!isExternal || !!mappedZoteroItem) && (
+                    <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
+                        <span className="display-flex flex-row items-center gap-15">
+                            <Icon icon={HighlighterIcon} className="font-color-secondary" />
+                            <span className="text-sm font-color-secondary">
+                                Opens annotation in PDF
+                            </span>
                         </span>
                     </span>
-                </span>
-            )}
-            {isTextCitation && !isExternalFile && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
-                <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
-                    <span className="display-flex flex-row items-center gap-15">
-                        <Icon icon={TextAlignLeftIcon} className="font-color-secondary scale-90" />
-                        <span className="text-sm font-color-secondary">
-                            Opens text file (external application)
+                )}
+                {hasLocator && !isExternalFile && (!isExternal || !!mappedZoteroItem) && (
+                    <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
+                        <span className="display-flex flex-row items-center gap-15">
+                            <Icon icon={PdfIcon} className="font-color-secondary" />
+                            <span className="text-sm font-color-secondary">
+                                {isEpubCitation
+                                    ? (hasLocatorDisplay ? `Opens EPUB at page ${pagesDisplay}` : 'Opens EPUB at location')
+                                    : hasBoundingBoxes
+                                        ? (hasLocatorDisplay ? `Highlights passage on page ${pagesDisplay}` : 'Highlights passage in PDF')
+                                        : (hasLocatorDisplay ? `Opens PDF on page ${pagesDisplay}` : 'Opens PDF at location')}
+                            </span>
                         </span>
                     </span>
-                </span>
-            )}
-            {isSnapshotCitation && !isExternalFile && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
-                <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
-                    <span className="display-flex flex-row items-center gap-15">
-                        <Icon icon={FileIcon} className="font-color-secondary" />
-                        <span className="text-sm font-color-secondary">
-                            {hasSnapshotSymbolicLocator ? 'Opens Snapshot at location' : 'Opens Snapshot'}
+                )}
+                {isTextCitation && !isExternalFile && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
+                    <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
+                        <span className="display-flex flex-row items-center gap-15">
+                            <Icon icon={TextAlignLeftIcon} className="font-color-secondary scale-90" />
+                            <span className="text-sm font-color-secondary">
+                                Opens text file (external application)
+                            </span>
                         </span>
                     </span>
-                </span>
-            )}
-            {!hasLocator && !isSnapshotCitation && !isExternalFile && !isTextCitation && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
-                <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
-                    <span className="display-flex flex-row items-center gap-15">
-                        <Icon icon={LibraryIcon} className="font-color-secondary" />
-                        <span className="text-sm font-color-secondary">
-                            Reveals item in library
+                )}
+                {isSnapshotCitation && !isExternalFile && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
+                    <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
+                        <span className="display-flex flex-row items-center gap-15">
+                            <Icon icon={FileIcon} className="font-color-secondary" />
+                            <span className="text-sm font-color-secondary">
+                                {hasSnapshotSymbolicLocator ? 'Opens Snapshot at location' : 'Opens Snapshot'}
+                            </span>
                         </span>
                     </span>
-                </span>
+                )}
+                {!hasLocator && !isSnapshotCitation && !isExternalFile && !isTextCitation && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
+                    <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
+                        <span className="display-flex flex-row items-center gap-15">
+                            <Icon icon={LibraryIcon} className="font-color-secondary" />
+                            <span className="text-sm font-color-secondary">
+                                Reveals item in library
+                            </span>
+                        </span>
+                    </span>
+                )}
+                </>
             )}
         </span>
     )
@@ -396,6 +439,7 @@ const Citation: React.FC<CitationProps> = (props) => {
                     <Tooltip
                         content={previewText}
                         customContent={citationPreview}
+                        contentKey={showItemInfo ? 'item' : 'passage'}
                         width={TOOLTIP_WIDTH}
                         padding={false}
                     >

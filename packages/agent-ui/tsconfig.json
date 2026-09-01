@@ -208,6 +208,7 @@
     "./src/chat/highlightText.tsx",
     "./src/chat/rehypeFindHighlight.ts",
     "./src/chat/actionPopup.ts",
+    "./src/chat/useAlternateActivation.ts",
     "./src/chat/useCitationMarker.ts",
     "./src/chat/useCitationViewModel.ts",
 

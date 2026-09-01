@@ -12,6 +12,17 @@ import type { AgentActionType } from '@beaver/agent-core/protocol/agentProtocol'
 import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgress';
 
 /**
+ * What a citation click should act on.
+ *
+ * - `passage` — navigate to the cited location: open the reader at the page and
+ *   highlight the quoted text, open the note, launch the external file, ... This
+ *   is the default.
+ * - `item` — reveal the cited work itself where the user keeps it, ignoring the
+ *   locator. Selected by holding the alternate-activation modifier (Shift).
+ */
+export type CitationActivationIntent = 'passage' | 'item';
+
+/**
  * Everything the host needs to activate (navigate to / open) a cited location.
  *
  * The render layer derives this from the client-agnostic citation view model and
@@ -23,6 +34,12 @@ import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgr
 export interface CitationActivation {
     /** Self-contained citation metadata (content kind, locations, pages, preview, ...). */
     metadata: Citation;
+    /**
+     * What the click should act on. Optional: a host that does not distinguish
+     * the two treats every click as `passage`, which is the behavior it had
+     * before the alternate activation existed.
+     */
+    intent?: CitationActivationIntent;
     isExternal: boolean;
     isExternalFile: boolean;
     externalFileKey: string | null;

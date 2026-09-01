@@ -30,6 +30,14 @@ export interface TooltipProps {
     allowHtml?: boolean;
     /** Custom content to render instead of the default content */
     customContent?: ReactNode;
+    /**
+     * Identifies the *shape* of the current content. The tooltip is positioned
+     * from its own measured size, so content that changes height while the
+     * tooltip is open must trigger a re-measure. The content itself can't be a
+     * dependency — a fresh element identity on every parent render would
+     * re-measure constantly — so callers that swap content pass a stable key.
+     */
+    contentKey?: string | number;
     /** Whether the tooltip should stay open when clicking the anchor element */
     stayOpenOnAnchorClick?: boolean;
     /** Optional preferred placement ('top' or 'bottom') */
@@ -56,6 +64,7 @@ const Tooltip: React.FC<TooltipProps> = ({
     width,
     allowHtml = false,
     customContent,
+    contentKey,
     stayOpenOnAnchorClick = false,
     placement: preferredPlacement,
     horizontalAlign = 'center',
@@ -182,7 +191,7 @@ const Tooltip: React.FC<TooltipProps> = ({
             win.removeEventListener('scroll', handleScroll, true);
             win.removeEventListener('click', handleClick);
         };
-    }, [isOpen, stayOpenOnAnchorClick]);
+    }, [isOpen, stayOpenOnAnchorClick, contentKey]);
     
     // Close tooltip when disabled prop changes to true
     useEffect(() => {
