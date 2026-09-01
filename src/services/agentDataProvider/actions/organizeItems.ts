@@ -439,11 +439,17 @@ export async function executeOrganizeItemsAction(
         ...(extra ?? {}),
     });
 
-    const { item_ids, tags, collections } = request.action_data as {
+    const { item_ids: requestedItemIds, tags, collections } = request.action_data as {
         item_ids: string[];
         tags?: { add?: string[]; remove?: string[] } | null;
         collections?: { add?: string[]; remove?: string[] } | null;
     };
+
+    // Collapse repeated ids before anything classifies them. Processing the same
+    // id twice makes the second pass read the state the first pass just wrote,
+    // so the item would be counted as modified AND listed as unchanged — and the
+    // second rollback snapshot would capture the already-modified state.
+    const item_ids = [...new Set(requestedItemIds)];
 
     // TOCTOU guard: never mutate items in a library the user excluded from Beaver,
     // even if validation passed earlier or the execute request skipped it.
@@ -489,16 +495,19 @@ export async function executeOrganizeItemsAction(
 
     // Resolve collection keys to objects once, before opening the write transaction.
     // Validation guarantees all items share a library when collection changes are
-    // requested, and that every key in add/remove resolves — so a miss here is a
-    // benign race (collection deleted between validate and execute) and is skipped.
+    // requested, and that every key in add/remove resolves — so a miss here means
+    // the collection was deleted between validate and execute.
     const addCollections = new Map<string, { id: number }>();
     const removeCollections = new Map<string, { id: number }>();
     const hasCollectionChanges = !!(collections && ((collections.add && collections.add.length > 0) || (collections.remove && collections.remove.length > 0)));
+    // Library the collection keys were resolved against; null when no requested
+    // item exists on this device (every item is skipped below, so there is
+    // nothing to resolve keys for).
+    let collectionLibraryId: number | null = null;
     if (hasCollectionChanges && item_ids.length > 0) {
         // Validation guarantees a collection batch shares one library. Resolve the
         // first item reference that exists on this device and use its libraryID —
         // more robust than trusting the raw prefix of item_ids[0].
-        let collectionLibraryId: number | null = null;
         for (const itemId of item_ids) {
             const parsed = parseItemReference(itemId);
             if (!parsed) continue;
@@ -521,6 +530,33 @@ export async function executeOrganizeItemsAction(
                     if (collection) removeCollections.set(collKey, collection);
                 }
             });
+        }
+    }
+
+    // A requested "add to collection" whose key no longer resolves cannot be
+    // carried out: the per-item loop below would silently do nothing for it and
+    // then report the item as modified-by-its-other-changes or unchanged — i.e.
+    // as if the call had succeeded — leaving the caller to treat incomplete work
+    // as complete. Fail the batch before anything is written instead, so the
+    // reason reaches the model. A missing REMOVE target needs no such guard: an
+    // item cannot be in a collection that no longer exists, so the requested
+    // state already holds. Only checked once the keys were actually looked up
+    // (collectionLibraryId != null); otherwise every item is skipped anyway and
+    // "collection not found" would misname the problem.
+    if (hasCollectionChanges && collectionLibraryId != null) {
+        const unresolvedAddKeys = (collections?.add ?? []).filter((key) => !addCollections.has(key));
+        if (unresolvedAddKeys.length > 0) {
+            const plural = unresolvedAddKeys.length === 1 ? '' : 's';
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: `Collection${plural} not found: ${unresolvedAddKeys.join(', ')}. `
+                    + `The collection${plural} existed when this action was validated and ${unresolvedAddKeys.length === 1 ? 'has' : 'have'} since been deleted, so no changes were applied. `
+                    + 'Use list_collections to find valid collection keys, or create_collection to make a new one.',
+                error_code: 'collection_not_found',
+                timing: buildTiming({ item_count: item_ids.length }),
+            };
         }
     }
 

@@ -171,4 +171,58 @@ describe('executeOrganizeItemsAction unchanged_items', () => {
         expect(response.result_data?.skipped_items).toEqual(['1-ZZZZZZZZ']);
         expect(response.result_data?.unchanged_items).toBeUndefined();
     });
+
+    it('counts a repeated id once instead of reporting it modified and unchanged', async () => {
+        items.AAAAAAAA = makeItem('AAAAAAAA', [], []);
+
+        const response = await executeOrganizeItemsAction(
+            buildRequest({
+                item_ids: ['1-AAAAAAAA', '1-AAAAAAAA'],
+                tags: { add: ['reviewed'] },
+            }),
+            timeoutCtx()
+        );
+
+        expect(response.result_data?.items_modified).toBe(1);
+        expect(response.result_data?.unchanged_items).toBeUndefined();
+        expect(items.AAAAAAAA.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('fails the batch when an add-target collection was deleted since validation', async () => {
+        // Filed in the surviving collection already; the second key resolves to
+        // nothing, so the item is NOT in the requested state.
+        items.AAAAAAAA = makeItem('AAAAAAAA', [], [COLLECTION_ID]);
+
+        const response = await executeOrganizeItemsAction(
+            buildRequest({
+                item_ids: ['1-AAAAAAAA'],
+                collections: { add: [COLLECTION_KEY, 'DELETED12'] },
+            }),
+            timeoutCtx()
+        );
+
+        expect(response.success).toBe(false);
+        expect(response.error_code).toBe('collection_not_found');
+        expect(response.error).toContain('DELETED12');
+        expect(response.result_data).toBeUndefined();
+        expect(items.AAAAAAAA.save).not.toHaveBeenCalled();
+    });
+
+    it('treats a deleted remove-target as already satisfied', async () => {
+        // An item cannot be in a collection that no longer exists, so the
+        // requested state holds and the item belongs in unchanged_items.
+        items.AAAAAAAA = makeItem('AAAAAAAA', [], []);
+
+        const response = await executeOrganizeItemsAction(
+            buildRequest({
+                item_ids: ['1-AAAAAAAA'],
+                collections: { remove: ['DELETED12'] },
+            }),
+            timeoutCtx()
+        );
+
+        expect(response.success).toBe(true);
+        expect(response.result_data?.items_modified).toBe(0);
+        expect(response.result_data?.unchanged_items).toEqual(['1-AAAAAAAA']);
+    });
 });
