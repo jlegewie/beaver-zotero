@@ -42,11 +42,23 @@ import type { CitationActivation } from '@beaver/agent-ui/host/types';
 /**
  * Walk to the top-level item. An annotation or attachment citation names a child
  * row; "the item" the user wants revealed is the work it hangs off.
+ *
+ * Walks by parent *ID* rather than the `parentItem` getter: that getter resolves
+ * through `Zotero.Items.get()`, which throws `UnloadedDataException` when the
+ * parent is registered but not yet in the object cache. A child item reached
+ * directly by key — which is how a citation resolves — routinely has an
+ * unloaded parent, and `loadAllData()` only loads the child itself.
  */
-function topLevelItemOf(item: Zotero.Item): Zotero.Item {
+async function topLevelItemOf(item: Zotero.Item): Promise<Zotero.Item> {
     let current = item;
-    while (current.parentItem) {
-        current = current.parentItem;
+    // Zotero nests at most annotation -> attachment -> item; the bound just
+    // stops a malformed parent cycle from spinning here.
+    for (let depth = 0; depth < 5; depth++) {
+        const parentID = current.parentItemID;
+        if (!parentID) break;
+        const parent = await Zotero.Items.getAsync(parentID);
+        if (!parent) break;
+        current = parent;
     }
     return current;
 }
@@ -135,7 +147,7 @@ export async function activateCitation(activation: CitationActivation): Promise<
     // Alternate activation: the user asked for the cited work, not the cited
     // passage. Reveal it and skip every locator-driven path below.
     if (intent === 'item') {
-        const target = topLevelItemOf(item);
+        const target = await topLevelItemOf(item);
         logger(`Citation activation: revealing cited item in library (${target.id})`);
         revealInLibrary(target.libraryID, target.key);
         return;
