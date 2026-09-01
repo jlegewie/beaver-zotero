@@ -467,6 +467,11 @@ export async function executeOrganizeItemsAction(
 
     let itemsModified = 0;
     const skippedItems: string[] = [];
+    // Items found on this device that already held every requested change, so
+    // nothing was written for them. Reported per item, not just as the
+    // itemsModified shortfall: a caller tracking a large job needs to know WHICH
+    // items it left alone, or it counts a no-op as work done.
+    const unchangedItems: string[] = [];
     // Track actual changes (not just requested changes) for safe undo
     const actualTagsAdded = new Set<string>();
     const actualTagsRemoved = new Set<string>();
@@ -631,6 +636,13 @@ export async function executeOrganizeItemsAction(
                     checkAborted(ctx, 'organize_items:before_item_save');
                     await ta.track('item_save_ms', () => item.save());
                     itemsModified++;
+                } else {
+                    // Every requested change was already in place (the item has
+                    // the tags, is in the collections, is out of the ones being
+                    // removed). Not a failure — the item is in the requested
+                    // state — and distinct from skippedItems, which never
+                    // resolved at all.
+                    unchangedItems.push(itemId);
                 }
             }
             } finally {
@@ -657,11 +669,12 @@ export async function executeOrganizeItemsAction(
                 item_count: item_ids.length,
                 items_modified: itemsModified,
                 items_skipped: skippedItems.length,
+                items_unchanged: unchangedItems.length,
             }),
         };
     }
 
-    logger(`executeOrganizeItemsAction: Modified ${itemsModified} items, skipped ${skippedItems.length}`, 1);
+    logger(`executeOrganizeItemsAction: Modified ${itemsModified} items, skipped ${skippedItems.length}, unchanged ${unchangedItems.length}`, 1);
 
     return {
         type: 'agent_action_execute_response',
@@ -675,11 +688,13 @@ export async function executeOrganizeItemsAction(
             collections_added: actualCollectionsAdded.size > 0 ? [...actualCollectionsAdded] : undefined,
             collections_removed: actualCollectionsRemoved.size > 0 ? [...actualCollectionsRemoved] : undefined,
             skipped_items: skippedItems.length > 0 ? skippedItems : undefined,
+            unchanged_items: unchangedItems.length > 0 ? unchangedItems : undefined,
         },
         timing: buildTiming({
             item_count: item_ids.length,
             items_modified: itemsModified,
             items_skipped: skippedItems.length,
+            items_unchanged: unchangedItems.length,
         }),
     };
 }
