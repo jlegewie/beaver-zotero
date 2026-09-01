@@ -18,7 +18,7 @@ import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgr
  *   highlight the quoted text, open the note, launch the external file, ... This
  *   is the default.
  * - `item` — reveal the cited work itself where the user keeps it, ignoring the
- *   locator. Selected by holding the alternate-activation modifier (Shift).
+ *   locator. Selected by holding the platform accelerator (Cmd / Ctrl).
  */
 export type CitationActivationIntent = 'passage' | 'item';
 

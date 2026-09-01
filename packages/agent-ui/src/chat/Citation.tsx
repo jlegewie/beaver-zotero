@@ -11,7 +11,7 @@ import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '@beave
 import { useCitationMarker } from './useCitationMarker';
 import { getHost } from '../host';
 import { useCitationViewModel } from './useCitationViewModel';
-import { useAlternateActivation } from './useAlternateActivation';
+import { hasAlternateModifier, useAlternateActivation } from './useAlternateActivation';
 import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon } from '../icons';
 const TOOLTIP_WIDTH = '250px';
 
@@ -107,7 +107,6 @@ const Citation: React.FC<CitationProps> = (props) => {
     const numericMarker = useCitationMarker(markerKey, exportRendering);
 
     // Whether the alternate-activation modifier is held over this citation.
-    // See `useAlternateActivation` for why it is Shift.
     const { isAlternate, hoverProps } = useAlternateActivation();
 
     // Render as soon as we have an identifier; citationMetadata may arrive later.
@@ -132,7 +131,9 @@ const Citation: React.FC<CitationProps> = (props) => {
             metadata: citationMetadata,
             // Read the modifier off the click rather than the hover state, so
             // the action always matches the key that was actually held down.
-            intent: (e.shiftKey && canRevealItem) ? 'item' : 'passage',
+            intent: (canRevealItem && hasAlternateModifier(e, e.currentTarget.ownerDocument.defaultView?.navigator))
+                ? 'item'
+                : 'passage',
             isExternal,
             isExternalFile,
             externalFileKey,

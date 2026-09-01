@@ -1,5 +1,31 @@
 import { useEffect, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
+import { isMacPlatform } from '../utils/platform';
+
+/**
+ * Whether an event carries the alternate-activation modifier: the platform
+ * accelerator, Cmd on macOS and Ctrl everywhere else.
+ *
+ * It has to be the accelerator rather than Shift or Alt, because a citation sits
+ * inside selectable prose in a chrome document:
+ *
+ * - Shift-click extends the text selection. That happens on *mousedown*, so a
+ *   `preventDefault()` on the click cannot undo it — the user gets a selection
+ *   and an activation at once.
+ * - A bare Alt keydown activates Gecko's menu bar on Windows and Linux, which
+ *   would fire while the user is merely hovering.
+ *
+ * Neither accelerator chord has a default action over a plain `<span>`, and
+ * mapping macOS to Cmd keeps Ctrl-click free for the context menu there.
+ *
+ * @param navigator - The navigator of the window the event was delivered to
+ */
+export function hasAlternateModifier(
+    event: { metaKey: boolean; ctrlKey: boolean },
+    navigator: Navigator | undefined | null,
+): boolean {
+    return navigator && isMacPlatform(navigator) ? event.metaKey : event.ctrlKey;
+}
 
 /**
  * Tracks whether the alternate-activation modifier is held while the pointer is
@@ -10,10 +36,7 @@ import type { MouseEvent as ReactMouseEvent } from 'react';
  * modifier acts on the work. The hover preview and the click handler both need
  * to agree on which one is currently selected, so the state lives here.
  *
- * Shift is the modifier because it is the only one that is inert on its own in
- * every host: a bare Alt keydown activates Gecko's menu bar on Windows and
- * Linux, and Ctrl-click is the context-menu gesture on macOS — either would
- * fire while the user is merely hovering.
+ * See {@link hasAlternateModifier} for which key that is and why.
  *
  * Key listeners are attached only while hovering, and on the document the
  * pointer actually entered, so a citation rendered in a second window tracks
@@ -36,7 +59,8 @@ export function useAlternateActivation(): AlternateActivation {
     useEffect(() => {
         if (!hoveredDocument) return;
 
-        const sync = (event: KeyboardEvent) => setIsAlternate(event.shiftKey);
+        const win = hoveredDocument.defaultView;
+        const sync = (event: KeyboardEvent) => setIsAlternate(hasAlternateModifier(event, win?.navigator));
         const clear = () => setIsAlternate(false);
 
         // Capture phase: a citation can render inside surfaces that stop key
@@ -45,7 +69,7 @@ export function useAlternateActivation(): AlternateActivation {
         hoveredDocument.addEventListener('keyup', sync, true);
         // Focus can leave the window while the key is still down, in which case
         // the keyup is delivered elsewhere and the state would stay stuck on.
-        const win = hoveredDocument.defaultView;
+        // On macOS that includes Cmd-Tab, which is exactly this chord.
         win?.addEventListener('blur', clear);
 
         return () => {
@@ -59,9 +83,10 @@ export function useAlternateActivation(): AlternateActivation {
         isAlternate,
         hoverProps: {
             onMouseEnter: (event: ReactMouseEvent) => {
+                const doc = event.currentTarget.ownerDocument;
                 // The modifier may already be held when the pointer arrives.
-                setIsAlternate(event.shiftKey);
-                setHoveredDocument(event.currentTarget.ownerDocument);
+                setIsAlternate(hasAlternateModifier(event, doc.defaultView?.navigator));
+                setHoveredDocument(doc);
             },
             onMouseLeave: () => {
                 setIsAlternate(false);

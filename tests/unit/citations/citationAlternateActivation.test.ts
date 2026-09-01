@@ -2,12 +2,15 @@
 
 /**
  * A citation names two things at once: the passage it cites and the work the
- * passage comes from. Holding Shift switches both the hover preview and the
- * click from the first to the second.
+ * passage comes from. Holding the platform accelerator switches both the hover
+ * preview and the click from the first to the second.
  *
  * The two halves have to agree, and each can break independently: the hover
  * state lives in the shared component while the click is executed by the host,
  * so this drives the real component against a stub host and asserts on both.
+ *
+ * The component cases derive the chord from the running platform, so the choice
+ * of accelerator is pinned by the `hasAlternateModifier` cases instead.
  */
 
 import React, { act } from 'react';
@@ -19,12 +22,21 @@ import type { Citation as CitationMetadata } from '@beaver/agent-core/types/cita
 import type { ClientHost } from '@beaver/agent-ui/host';
 import { setHost } from '@beaver/agent-ui/host';
 import Citation from '@beaver/agent-ui/chat/Citation';
+import { hasAlternateModifier } from '@beaver/agent-ui/chat/useAlternateActivation';
+import { isMacPlatform } from '@beaver/agent-ui/utils/platform';
 
 // Tells React that `act()` is available, so it doesn't warn on every render.
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 const LIBRARY_ID = 1;
 const ITEM_KEY = 'ABCD1234';
+
+/** The accelerator chord as this platform delivers it. */
+const ACCEL_DOWN = isMacPlatform(window.navigator) ? { metaKey: true } : { ctrlKey: true };
+
+const macNavigator = { platform: 'MacIntel', userAgent: '' } as Navigator;
+const winNavigator = { platform: 'Win32', userAgent: '' } as Navigator;
+const NO_MODIFIER = { metaKey: false, ctrlKey: false };
 
 const pageCitation: CitationMetadata = {
     citation_id: 'c1',
@@ -71,9 +83,23 @@ function mount(): HTMLElement {
 }
 
 /** Open the hover preview, optionally with the modifier already held. */
-function hover(marker: HTMLElement, shiftKey = false): void {
+function hover(marker: HTMLElement, withModifier = false): void {
     act(() => {
-        marker.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, shiftKey }));
+        marker.dispatchEvent(
+            new MouseEvent('mouseover', { bubbles: true, ...(withModifier ? ACCEL_DOWN : {}) }),
+        );
+    });
+}
+
+/** Press or release the accelerator on the document the citation lives in. */
+function setModifier(held: boolean): void {
+    act(() => {
+        document.dispatchEvent(
+            new KeyboardEvent(held ? 'keydown' : 'keyup', {
+                bubbles: true,
+                ...(held ? ACCEL_DOWN : {}),
+            }),
+        );
     });
 }
 
@@ -108,9 +134,7 @@ describe('citation hover preview', () => {
         const marker = mount();
         hover(marker);
 
-        act(() => {
-            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', shiftKey: true, bubbles: true }));
-        });
+        setModifier(true);
 
         expect(tooltipText()).toContain('A study of beavers');
         expect(tooltipText()).toContain('Reveals item in library');
@@ -123,12 +147,8 @@ describe('citation hover preview', () => {
         const marker = mount();
         hover(marker);
 
-        act(() => {
-            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', shiftKey: true, bubbles: true }));
-        });
-        act(() => {
-            document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', shiftKey: false, bubbles: true }));
-        });
+        setModifier(true);
+        setModifier(false);
 
         expect(tooltipText()).toContain('Beavers build dams.');
         expect(tooltipText()).not.toContain('A study of beavers');
@@ -159,10 +179,39 @@ describe('citation click', () => {
     it('activates the cited work on a modified click', () => {
         const marker = mount();
         act(() => {
-            marker.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+            marker.dispatchEvent(new MouseEvent('click', { bubbles: true, ...ACCEL_DOWN }));
         });
 
         expect(activateCitation).toHaveBeenCalledTimes(1);
         expect(activateCitation.mock.calls[0][0]).toMatchObject({ intent: 'item' });
+    });
+
+    // Shift-click extends the text selection around the citation, on mousedown,
+    // where the click handler can no longer prevent it. It must stay a plain
+    // activation rather than doubling as the alternate one.
+    it('ignores Shift, which belongs to the text selection', () => {
+        const marker = mount();
+        act(() => {
+            marker.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+        });
+
+        expect(activateCitation.mock.calls[0][0]).toMatchObject({ intent: 'passage' });
+    });
+});
+
+describe('hasAlternateModifier', () => {
+    it('is Cmd on macOS, where Ctrl-click is the context menu', () => {
+        expect(hasAlternateModifier({ metaKey: true, ctrlKey: false }, macNavigator)).toBe(true);
+        expect(hasAlternateModifier({ metaKey: false, ctrlKey: true }, macNavigator)).toBe(false);
+    });
+
+    it('is Ctrl everywhere else', () => {
+        expect(hasAlternateModifier({ metaKey: false, ctrlKey: true }, winNavigator)).toBe(true);
+        expect(hasAlternateModifier({ metaKey: true, ctrlKey: false }, winNavigator)).toBe(false);
+    });
+
+    it('is not triggered by an unmodified event', () => {
+        expect(hasAlternateModifier(NO_MODIFIER, macNavigator)).toBe(false);
+        expect(hasAlternateModifier(NO_MODIFIER, winNavigator)).toBe(false);
     });
 });
