@@ -386,9 +386,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     const getHeaderIcon = () => {
         if (isAwaitingApproval) return getAgentActionToolIcon(toolName);
+        if (isAwaitingToolReturn) return Spinner;
         if (isHovered && isExpanded) return ArrowDownIcon;
         if (isHovered && !isExpanded) return ArrowRightIcon;
-        if (isAwaitingToolReturn) return Spinner;
         if (config.icon === null) return getAgentActionToolIcon(toolName);
         return config.icon;
     };
