@@ -106,46 +106,13 @@ const Citation: React.FC<CitationProps> = (props) => {
     // Uses markerKey (without sid/page) so all citations to the same item share a marker
     const numericMarker = useCitationMarker(markerKey, exportRendering);
 
-    // Whether the alternate-activation modifier is held over this citation.
-    const { isAlternate, hoverProps } = useAlternateActivation();
+    // Whether the alternate-activation modifier is being held. Document-wide, so
+    // every citation flips together and the hold reads as a mode.
+    const { isAlternate, ref: citationRef } = useAlternateActivation();
 
     // Render as soon as we have an identifier; citationMetadata may arrive later.
     // 'error' state means no valid identifier was found - don't render.
     if (displayState === 'error') return null;
-
-    // Alternate activation acts on the cited work rather than the cited passage.
-    // It is only offered where there is a work to reveal: an unmapped external
-    // reference and an external file have no library item behind them.
-    const canRevealItem = !isExternalFile
-        && (!isExternal || !!mappedZoteroItem)
-        && !!effectiveItemKey;
-    const showItemInfo = isAlternate && canRevealItem;
-
-    // Click handler — delegates all client-specific navigation to the host.
-    // The streaming/invalid states don't attach this handler (see below), so it
-    // only runs for "ready" citations where metadata is present.
-    const handleClick = (e: React.MouseEvent) => {
-        e.preventDefault();
-        if (!citationMetadata) return;
-        getHost().navigation?.activateCitation({
-            metadata: citationMetadata,
-            // Read the modifier off the click rather than the hover state, so
-            // the action always matches the key that was actually held down.
-            intent: (canRevealItem && hasAlternateModifier(e, e.currentTarget.ownerDocument.defaultView?.navigator))
-                ? 'item'
-                : 'passage',
-            isExternal,
-            isExternalFile,
-            externalFileKey,
-            externalSourceId,
-            hasMappedItem: !!mappedZoteroItem,
-            effectiveLibraryID,
-            effectiveItemKey,
-            effectiveLibraryRef,
-            previewText,
-            ownerDocument: e.currentTarget.ownerDocument,
-        });
-    };
 
     // Format for display
     let displayText = '';
@@ -254,9 +221,58 @@ const Citation: React.FC<CitationProps> = (props) => {
     // synthetic page that must not be presented as a PDF page locator.
     const hasLocator = !isNoteCitation && !isAnnotationCitation && !isSnapshotCitation
         && (pages.length > 0 || hasBoundingBoxes || hasEpubSymbolicLocator);
+    // Alternate activation acts on the cited work rather than the cited passage.
+    // It stays inert wherever it would change nothing: an unmapped external
+    // reference and an external file have no library item behind them; a
+    // streaming or invalid citation has no click at all; and a plain
+    // locator-less item is already revealed in the library by an ordinary
+    // click. What is left is exactly the set whose click it redirects.
+    const defaultRevealsItem = !hasLocator
+        && !isSnapshotCitation
+        && !isTextCitation
+        && !isNoteCitation
+        && !isAnnotationCitation;
+    const canRevealItem = !isExternalFile
+        && (!isExternal || !!mappedZoteroItem)
+        && !!effectiveItemKey
+        && !isStreaming
+        && !isInvalid
+        && !defaultRevealsItem;
+    const showItemInfo = isAlternate && canRevealItem;
+
+    // Click handler — delegates all client-specific navigation to the host.
+    // The streaming/invalid states don't attach this handler (see below), so it
+    // only runs for "ready" citations where metadata is present.
+    const handleClick = (e: React.MouseEvent) => {
+        e.preventDefault();
+        if (!citationMetadata) return;
+        getHost().navigation?.activateCitation({
+            metadata: citationMetadata,
+            // Read the modifier off the click rather than the hover state, so
+            // the action always matches the key that was actually held down.
+            intent: (canRevealItem && hasAlternateModifier(e, e.currentTarget.ownerDocument.defaultView?.navigator))
+                ? 'item'
+                : 'passage',
+            isExternal,
+            isExternalFile,
+            externalFileKey,
+            externalSourceId,
+            hasMappedItem: !!mappedZoteroItem,
+            effectiveLibraryID,
+            effectiveItemKey,
+            effectiveLibraryRef,
+            previewText,
+            ownerDocument: e.currentTarget.ownerDocument,
+        });
+    };
+
+    // The locator style promises navigation to a place inside the document.
+    // While the modifier is held the click reveals the work instead, so the
+    // marker drops to the plain style — which is already exactly how a citation
+    // whose click reveals its item is drawn.
     const citationClassBase = isExternal && !mappedZoteroItem
         ? "zotero-citation external-citation"
-        : (hasLocator || isAnnotationCitation || hasSnapshotSymbolicLocator) && !isExternalFile
+        : (hasLocator || isAnnotationCitation || hasSnapshotSymbolicLocator) && !isExternalFile && !showItemInfo
         ? "zotero-citation with-locator"
         : "zotero-citation";
     const citationClass = isStreaming
@@ -273,8 +289,8 @@ const Citation: React.FC<CitationProps> = (props) => {
 
     const citationElement = (
         <span 
+            ref={citationRef}
             onClick={(isStreaming || isInvalid) ? undefined : handleClick}
-            {...hoverProps}
             className={citationClass}
             data-pages={pages}
             data-item-key={itemKey}
