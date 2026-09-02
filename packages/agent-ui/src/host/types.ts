@@ -109,6 +109,15 @@ export interface NavigationHost {
      * `zotero_key` is the collection key (not an item key).
      */
     revealCollection(ref: ZoteroItemReference): void;
+    /**
+     * Reveal whatever `zotero_key` names in the referenced library: a regular
+     * item, attachment, or note is selected in the library view, an annotation
+     * is opened in the reader, and a collection is selected. Used by the object
+     * links the model writes in prose (`[Smith 2004](u-KEY)`), which carry a
+     * key but not the object type. Optional — clients without it leave such
+     * links inert.
+     */
+    revealObject?(ref: ZoteroItemReference): void | Promise<void>;
     /** Open a local file (e.g. a PDF/text attachment) in the host's default handler. */
     launchFile(filePath: string): void;
     /** Open an external URL. */

@@ -86,6 +86,33 @@ export const zoteroNavigation: NavigationHost = {
         if (found) selectCollection(found);
         else notifyReferenceUnavailable('collection');
     },
+    async revealObject(ref: ZoteroItemReference): Promise<void> {
+        // Click handler: an uncaught throw here is a silent dead link.
+        try {
+            const libraryID = resolveLibraryRef(ref);
+            if (!libraryID) {
+                notifyReferenceUnavailable('link', 'library_unavailable');
+                return;
+            }
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, ref.zotero_key);
+            if (item) {
+                // Annotations have no row in the items tree; the reader is
+                // the only place they can be shown.
+                if (item.isAnnotation()) await navigateToAnnotation(item);
+                else revealSource({ ...ref, library_id: libraryID });
+                return;
+            }
+            // Items and collections have separate key spaces, so a key that
+            // is not an item may still be a collection.
+            const collection = Zotero.Collections.getByLibraryAndKey(libraryID, ref.zotero_key);
+            // Trashed collections still resolve but cannot be selected.
+            if (collection && (await selectCollection(collection as Zotero.Collection))) return;
+            notifyReferenceUnavailable('link');
+        } catch (error) {
+            logger(`revealObject: failed to reveal ${ref.zotero_key}: ${error}`, 2);
+            notifyReferenceUnavailable('link');
+        }
+    },
     launchFile(filePath: string): void {
         Zotero.launchFile(filePath);
     },

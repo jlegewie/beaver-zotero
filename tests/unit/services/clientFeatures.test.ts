@@ -70,6 +70,10 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // pdf_candidates is declaration-only because the backend would otherwise send a
 // ranked candidate list to clients that ignore it, paying the payload for
 // nothing.
+// item_links is declaration-only because it describes what the chat client's
+// markdown renderer does with object-id hrefs; a client that predates it would
+// treat `[Smith 2004](u-KEY)` as a broken relative link, so the backend only
+// tells the model to write those when this feature is declared.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'pdf_candidates',
@@ -88,6 +92,7 @@ const DECLARATION_ONLY_FEATURES = [
     'credit_confirmation',
     'batch_jobs',
     'citation_graph',
+    'item_links',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every
