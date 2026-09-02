@@ -34,8 +34,11 @@ export interface BatchOutcomeTally {
     created?: boolean;
 }
 
-/** How a block's rows are drawn. */
-export type BatchOutcomeBlockKind = 'destination' | 'removal' | 'failure';
+/**
+ * How a block's rows are drawn. `finding` is what the model flagged for the
+ * user to act on, grouped by finding; any operation may send one.
+ */
+export type BatchOutcomeBlockKind = 'destination' | 'removal' | 'finding' | 'failure';
 
 /**
  * One labelled group of outcome rows.
@@ -59,7 +62,7 @@ export interface BatchOutcomeBlock {
 /** Progress for one batch. */
 export interface BatchProgressEntry {
     batch_id: string;
-    /** `tag` | `sort` | `annotate` | `extract` | `edit_metadata` | `create_notes`. */
+    /** `tag` | `sort` | `annotate` | `extract` | `edit_metadata` | `create_notes` | `review`. */
     operation: string;
     /**
      * Absent means `active` — the backend omits default-valued fields, so this
@@ -104,6 +107,12 @@ export interface BatchProgressEntry {
     total?: number;
     resolved?: number;
     no_change?: number;
+    /**
+     * Items examined and flagged for the user to act on. Settled like
+     * `no_change`, but neither changed nor left alone — the `finding` block
+     * groups them by what was found. Absent on older records and when zero.
+     */
+    findings?: number;
     failed?: number;
     /**
      * What the batch has done, in labelled groups. Empty for an operation that

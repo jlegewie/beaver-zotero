@@ -163,7 +163,7 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
 
     // Batch jobs
     batch_start: 'Batch job',
-    batch_resolve: 'Skipping items',
+    batch_resolve: 'Working through items',
     batch_digest: 'Recording findings',
 
     // Framework tools

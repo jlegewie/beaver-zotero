@@ -99,6 +99,12 @@ export interface PendingBatchApproval {
      * the response is what binds.
      */
     userInstructionsPrefill: string;
+    /**
+     * The batch changes nothing in the library, so the card offers no
+     * coverage choice: there is nothing for full access to cover, and asking
+     * would put a write-access warning on a job that never writes.
+     */
+    readOnly: boolean;
     /** How long the backend will wait for a response, in seconds */
     timeoutSeconds: number;
 }
@@ -142,6 +148,9 @@ export const addPendingBatchApprovalAtom = atom(
                 // Absent from a backend that predates the field, which is the
                 // same thing as a batch that continues nothing.
                 userInstructionsPrefill: event.user_instructions_prefill || '',
+                // Absent from a backend that predates the field, which is the
+                // same thing as a batch that writes.
+                readOnly: event.read_only === true,
                 timeoutSeconds: event.timeout_seconds,
             });
             return next;

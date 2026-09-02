@@ -16,6 +16,7 @@ import editMetadataStamp from './fixtures/batchProgress-edit_metadata.json';
 import annotateStamp from './fixtures/batchProgress-annotate.json';
 import extractStamp from './fixtures/batchProgress-extract.json';
 import createNotesStamp from './fixtures/batchProgress-create_notes.json';
+import reviewStamp from './fixtures/batchProgress-review.json';
 import removalsOverflowStamp from './fixtures/batchProgress-removals-overflow.json';
 import failuresOverflowStamp from './fixtures/batchProgress-failures-overflow.json';
 import completedStamp from './fixtures/batchProgress-completed.json';
@@ -42,6 +43,7 @@ const FIXTURES: Record<string, unknown> = {
     annotate: annotateStamp,
     extract: extractStamp,
     create_notes: createNotesStamp,
+    review: reviewStamp,
 };
 
 /** A live run carrying `stamp` on its only tool return. */
@@ -109,6 +111,7 @@ describe('the title, which is the only thing the counts cannot say', () => {
         ['annotate', 'Annotating'],
         ['edit_metadata', 'Editing items'],
         ['create_notes', 'Writing notes'],
+        ['review', 'Reviewing'],
     ])('names what a running %s batch is doing', (name, expected) => {
         const tracked = selectTrackedBatch(FIXTURES[name] as BatchProgressStamp)!;
         expect(tracked.progress_title).toBe(expected);
@@ -149,11 +152,47 @@ describe('the distribution the backend registry decides', () => {
         expect(rowsOf(tracked).length).toBeGreaterThan(0);
     });
 
-    it.each(['annotate', 'extract', 'create_notes'])('%s carries none', (name) => {
+    it.each(['annotate', 'extract', 'create_notes', 'review'])('%s carries none', (name) => {
         // Their outcome label is the same string on every call. No block is
         // sent, so the client renders nothing and never learns the list.
         const tracked = selectTrackedBatch(FIXTURES[name] as BatchProgressStamp)!;
         expect(block(tracked)).toBeUndefined();
+    });
+});
+
+describe('findings, which any operation may record', () => {
+    // A review changes nothing: every item ends either flagged with a finding
+    // or recorded as having no issue, so this is the block the bar and the
+    // receipt draw for it. Renamed backend-side, a review would read as a
+    // batch that did nothing.
+    const tracked = selectTrackedBatch(reviewStamp as BatchProgressStamp)!;
+
+    it('arrive as their own block, grouped by finding', () => {
+        expect(block(tracked, 'finding')?.heading).toBe('Findings');
+        const rows = rowsOf(tracked, 'finding');
+        expect(rows.length).toBeGreaterThan(0);
+        // Most-common first, so the collapsed panel shows the biggest group.
+        for (let i = 1; i < rows.length; i++) {
+            expect(rows[i - 1].count).toBeGreaterThanOrEqual(rows[i].count);
+        }
+    });
+
+    it('count items, so the block total is the findings count', () => {
+        expect(tracked.findings).toBeGreaterThan(0);
+        expect(block(tracked, 'finding')?.total).toBe(tracked.findings);
+    });
+
+    it('fill the track alongside the items found in order', () => {
+        // Both are decisions the model made, so both count as done.
+        const done = (tracked.no_change ?? 0) + (tracked.findings ?? 0);
+        expect(tracked.progress_primary).toBe(`${done} of ${tracked.total}`);
+        expect(tracked.detail_label).toContain('findings');
+        expect(tracked.detail_label).toContain('no issue');
+    });
+
+    it('name what a review does without claiming a change', () => {
+        expect(tracked.resolved).toBeUndefined();
+        expect(tracked.progress_secondary).toBe('items reviewed');
     });
 });
 
