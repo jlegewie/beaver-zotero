@@ -3,8 +3,7 @@
  * recognized as object ids, and how they are written when saved into a note.
  */
 import { describe, expect, it } from 'vitest';
-import { setLibraryRefResolver } from '@beaver/agent-core/identity/libraryRef';
-import { itemLinkExportHref, parseItemLinkHref } from '../../../react/utils/itemLinks';
+import { hydrateItemLinkLibraryRefs, itemLinkExportHref, parseItemLinkHref } from '../../../react/utils/itemLinks';
 
 describe('parseItemLinkHref', () => {
     it('recognizes a bare object id in every library form', () => {
@@ -65,16 +64,35 @@ describe('itemLinkExportHref', () => {
             .toBe('zotero://select/groups/42/collections/ANVV522N');
     });
 
-    it('resolves a legacy numeric library id through the library-ref seam', () => {
-        setLibraryRefResolver((libraryID) => (libraryID === 1 ? 'u' : libraryID === 3 ? 'g77' : null));
-        expect(itemLinkExportHref('1-ANVV522N')).toBe('zotero://select/library/items/ANVV522N');
-        expect(itemLinkExportHref('3-ANVV522N')).toBe('zotero://select/groups/77/items/ANVV522N');
-        // No portable identity for this library on this device: nothing better to write.
-        expect(itemLinkExportHref('9-ANVV522N')).toBeNull();
+    it('never resolves a legacy device-local library id itself', () => {
+        // Hydration at the export boundary is responsible for legacy ids.
+        expect(itemLinkExportHref('1-ANVV522N')).toBeNull();
+        expect(itemLinkExportHref('3-ANVV522N')).toBeNull();
     });
 
     it('returns null for hrefs that are not item links', () => {
         expect(itemLinkExportHref('https://example.org')).toBeNull();
         expect(itemLinkExportHref('u-turn')).toBeNull();
+    });
+});
+
+describe('hydrateItemLinkLibraryRefs', () => {
+    const libraryRef = (libraryID: number) => (libraryID === 1 ? 'u' : libraryID === 3 ? 'g77' : null);
+
+    it('rewrites legacy link targets to their portable form', () => {
+        expect(hydrateItemLinkLibraryRefs('See [Smith 2004](1-ANVV522N) and [Doe](3-BBBB2222).', libraryRef))
+            .toBe('See [Smith 2004](u-ANVV522N) and [Doe](g77-BBBB2222).');
+    });
+
+    it('handles link titles and raw href attributes', () => {
+        expect(hydrateItemLinkLibraryRefs('[Smith](1-ANVV522N "Smith 2004")', libraryRef))
+            .toBe('[Smith](u-ANVV522N "Smith 2004")');
+        expect(hydrateItemLinkLibraryRefs('<a href="3-ANVV522N">Doe</a>', libraryRef))
+            .toBe('<a href="g77-ANVV522N">Doe</a>');
+    });
+
+    it('leaves portable ids, prose, and unmappable libraries as written', () => {
+        const content = 'Id 1-ANVV522N in prose, [ok](u-ANVV522N), [gone](9-ANVV522N), [web](https://x.org/1-ANVV522N)';
+        expect(hydrateItemLinkLibraryRefs(content, libraryRef)).toBe(content);
     });
 });

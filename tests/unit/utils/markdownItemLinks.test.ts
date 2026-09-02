@@ -21,6 +21,9 @@ vi.mock('../../../react/components/messages/NoteDisplay', () => ({
 
 import { setHost } from '@beaver/agent-ui/host';
 import MarkdownRenderer from '../../../react/components/messages/MarkdownRenderer';
+import { renderToHTML } from '../../../react/utils/citationRenderers';
+
+declare const Zotero: any;
 
 const navigation = {
     revealObject: vi.fn(),
@@ -99,5 +102,22 @@ describe('MarkdownRenderer item links', () => {
         const html = staticHtml('See [Smith 2004](u-ANVV522N).', true);
         expect(html).toContain('href="zotero://select/library/items/ANVV522N"');
         expect(html).not.toContain('title="Show in Zotero"');
+    });
+
+    it('exports legacy device-local ids from older history as working note links', () => {
+        // Older history names libraries by rowid; the export boundary maps them
+        // through this device's libraries before the render sees the content.
+        Zotero.Libraries.userLibraryID = 1;
+        Zotero.Groups = {
+            getGroupIDFromLibraryID: (libraryID: number) => {
+                if (libraryID === 3) return 77;
+                throw new Error('not a group library');
+            },
+        };
+
+        const html = renderToHTML('See [Smith 2004](1-ANVV522N) and [Doe 2010](3-BBBB2222).');
+
+        expect(html).toContain('href="zotero://select/library/items/ANVV522N"');
+        expect(html).toContain('href="zotero://select/groups/77/items/BBBB2222"');
     });
 });

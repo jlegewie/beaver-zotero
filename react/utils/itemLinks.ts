@@ -12,7 +12,7 @@
  * Parsing is pure. Resolving a link against the libraries on this computer
  * happens at click time, through the host (`navigation.revealObject`).
  */
-import { parseItemReference, resolveLibraryRefForLibraryID } from '@beaver/agent-core/identity/libraryRef';
+import { parseItemReference } from '@beaver/agent-core/identity/libraryRef';
 
 /**
  * Shape of a Zotero object key. Zotero generates eight characters from an
@@ -59,10 +59,40 @@ export function parseItemLinkHref(href: string | null | undefined): ItemLinkTarg
 }
 
 /**
+ * Legacy `<libraryID>-KEY` hrefs in markdown link syntax and raw `href`
+ * attributes. Only a link's target position is matched, so the same text in
+ * prose is untouched.
+ */
+const LEGACY_LINK_HREF_PATTERN = /(\]\(|href=")([1-9][0-9]*)-([A-Z0-9]{8})(?=[)\s"])/g;
+
+/**
+ * Rewrite legacy `<libraryID>-KEY` link targets to their portable
+ * `<library_ref>-KEY` form, using the caller's device-local library mapping.
+ *
+ * Run this at the data boundary, before content reaches a render, so the
+ * renderer itself never has to consult library state: older thread history
+ * still carries device-local ids, and a note exported from it must link
+ * portably. A library with no portable identity leaves its link as written.
+ */
+export function hydrateItemLinkLibraryRefs(
+    markdown: string,
+    libraryRefForLibraryID: (libraryID: number) => string | null,
+): string {
+    return markdown.replace(LEGACY_LINK_HREF_PATTERN, (match, opener: string, libraryID: string, key: string) => {
+        const libraryRef = libraryRefForLibraryID(Number(libraryID));
+        return libraryRef ? `${opener}${libraryRef}-${key}` : match;
+    });
+}
+
+/**
  * The `zotero://select` URI an item link should carry when the rendered
  * markdown is saved into a Zotero note, where a bare object id is not a
- * working link. Returns `null` when the href is not an item link, or when a
- * legacy numeric id names a library with no portable identity on this device.
+ * working link. Returns `null` when the href is not an item link.
+ *
+ * Only portable ids are rewritten; the export boundary hydrates legacy ids
+ * first (`hydrateItemLinkLibraryRefs`), so by the time content renders, a
+ * remaining numeric id names a library with no portable identity and is left
+ * as written rather than resolved here.
  *
  * A bare object id is written as an item URI: it cannot say whether it names a
  * collection, and items are what prose links point at in practice.
@@ -70,11 +100,10 @@ export function parseItemLinkHref(href: string | null | undefined): ItemLinkTarg
 export function itemLinkExportHref(href: string): string | null {
     const target = parseItemLinkHref(href);
     if (!target) return null;
-    const parsed = parseItemReference(target.objectId);
-    if (!parsed) return null;
-    const libraryRef = parsed.library_ref ?? resolveLibraryRefForLibraryID(parsed.library_id!);
+    const libraryRef = parseItemReference(target.objectId)?.library_ref;
     if (!libraryRef) return null;
+    const zoteroKey = target.objectId.slice(libraryRef.length + 1);
     const scope = libraryRef === 'u' ? 'library' : `groups/${libraryRef.slice(1)}`;
     const type = target.kind === 'collection' ? 'collections' : 'items';
-    return `zotero://select/${scope}/${type}/${parsed.zotero_key}`;
+    return `zotero://select/${scope}/${type}/${zoteroKey}`;
 }
