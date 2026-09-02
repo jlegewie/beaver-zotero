@@ -586,6 +586,7 @@ function buildTagListView(part: ToolReturnPart): TagListView | null {
             attachment_count: t.attachment_count,
             note_count: t.note_count,
             annotation_count: t.annotation_count,
+            tag_type: t.tag_type,
         })),
         total_count: data.totalCount,
     };

@@ -1709,6 +1709,14 @@ export interface WSListTagsRequest extends WSBaseEvent {
      * silently returns the unfiltered list.
      */
     name_query?: string | null;
+    /**
+     * Include tags imported with an item's metadata rather than added by the
+     * user. Defaults to true when absent.
+     *
+     * Gated by the `list_tags_types` client feature: a client without it
+     * ignores the field and returns every tag.
+     */
+    include_automatic?: boolean | null;
     limit: number;
     offset: number;
 }
@@ -1725,6 +1733,12 @@ export interface TagInfo {
     /** Number of annotations carrying this tag. Omitted by older frontends. */
     annotation_count?: number;
     color?: string | null;
+    /**
+     * `manual` if any occurrence is user-added, `automatic` if every
+     * occurrence was imported with an item's metadata. One name can be both
+     * (`itemTags.type` is per pair); manual wins. Omitted by older clients.
+     */
+    tag_type?: 'manual' | 'automatic';
 }
 
 /** Response to list_tags request */
@@ -1733,6 +1747,12 @@ export interface WSListTagsResponse {
     request_id: string;
     tags: TagInfo[];
     total_count: number;
+    /**
+     * Automatic tags in scope after the other filters. Counted even when
+     * `include_automatic` is false (they then leave `tags` and `total_count`).
+     * Always 0 from clients that do not report types.
+     */
+    automatic_count?: number;
     library_id?: number | null;
     /** Device-portable library identity ('u' / 'g<groupID>') of the listed library. */
     library_ref?: string;
@@ -2474,6 +2494,12 @@ export const CLIENT_FEATURES = {
      * reads as "these are the matches".
      */
     LIST_TAGS_NAME_QUERY: 'list_tags_name_query',
+    /**
+     * `list_tags` reports each tag as `manual` or `automatic` and honors
+     * `include_automatic`. A client without it ignores the flag and returns
+     * every tag untyped, which must not be presented as the user's vocabulary.
+     */
+    LIST_TAGS_TYPES: 'list_tags_types',
     /**
      * `credit_confirmation_request`: the run's credit cost is confirmed once per
      * run instead of per tool call. A client declaring it is asked at the

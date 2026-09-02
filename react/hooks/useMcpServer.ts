@@ -536,7 +536,10 @@ const LIST_TAGS_TOOL = {
         'Returns tag names with per-type counts: item_count (regular items), attachment_count, note_count, and annotation_count. ' +
         'Use this to discover available tags before using them as filters in `search_by_topic` or `search_by_metadata` (`tags_filter`). ' +
         'Set `min_item_count` to filter out rarely-used tags (counts all tagged objects, not just regular items). ' +
-        'Set `name_query` to search tag names in a library with too many tags to list.',
+        'Set `name_query` to search tag names in a library with too many tags to list. ' +
+        'Each tag reports a `tag_type`: "manual" when the user added it, "automatic" when it was imported ' +
+        'with an item\'s metadata (publisher keywords, MeSH terms). Set `include_automatic` to false to ' +
+        "list only the user's own vocabulary.",
     inputSchema: {
         type: 'object' as const,
         properties: {
@@ -556,6 +559,12 @@ const LIST_TAGS_TOOL = {
                 type: 'integer',
                 description: 'Minimum number of items a tag must have to be included. Default: 1.',
                 default: 1,
+            },
+            include_automatic: {
+                type: 'boolean',
+                description:
+                    'Include tags imported with an item\'s metadata rather than added by the user. Default: true.',
+                default: true,
             },
             limit: {
                 type: 'integer',
@@ -1330,6 +1339,7 @@ async function handleListTags(args: any): Promise<any> {
         collection_key: args.collection ?? null,
         min_item_count: args.min_item_count ?? 1,
         name_query: args.name_query ?? null,
+        include_automatic: args.include_automatic ?? true,
         limit,
         offset,
     };
@@ -1344,6 +1354,7 @@ async function handleListTags(args: any): Promise<any> {
 
     return {
         total_count: response.total_count,
+        automatic_count: response.automatic_count ?? 0,
         has_more: hasMore,
         next_offset: hasMore ? offset + limit : null,
         tags: response.tags.map((t) => {
@@ -1355,6 +1366,7 @@ async function handleListTags(args: any): Promise<any> {
                 annotation_count: t.annotation_count ?? 0,
             };
             if (t.color) tag.color = t.color;
+            if (t.tag_type) tag.tag_type = t.tag_type;
             return tag;
         }),
     };
