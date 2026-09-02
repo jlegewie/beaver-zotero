@@ -2516,6 +2516,13 @@ export const CLIENT_FEATURES = {
      * PDF might be downloaded from.
      */
     PDF_CANDIDATES: 'pdf_candidates',
+    /**
+     * Chat markdown follows `[label](u-KEY)` (and `zotero://select/...`) as a
+     * link that reveals the named library object. Without it those hrefs render
+     * as ordinary relative links, so the backend must not instruct the model to
+     * write them.
+     */
+    ITEM_LINKS: 'item_links',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
