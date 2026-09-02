@@ -1,5 +1,14 @@
 import React from "react";
 import DocsLink from "@beaver/agent-ui/primitives/DocsLink";
+import { getHost } from "@beaver/agent-ui/host";
+
+/**
+ * Third-party benchmark cited as the rule of thumb for whether a custom model
+ * is capable enough to drive Beaver. Referenced from more than one settings
+ * surface, so it lives with the shared settings elements.
+ */
+export const INTELLIGENCE_INDEX_URL =
+    'https://artificialanalysis.ai/evaluations/artificial-analysis-intelligence-index';
 
 
 /** Section label displayed above a settings group */
@@ -126,4 +135,32 @@ export const SettingsRow: React.FC<SettingsRowProps> = ({
  */
 export const DocLink: React.FC<{ path: string; children: React.ReactNode }> = ({ path, children }) => (
     <DocsLink path={path}>{children}</DocsLink>
+);
+
+/**
+ * Link to a page outside the Beaver documentation site.
+ *
+ * A chrome window may not navigate itself, so the click is routed through the
+ * host's navigation slice exactly as {@link DocLink} does; only the href is
+ * absolute here rather than resolved from a docs base URL.
+ */
+export const ExternalLink: React.FC<{ href: string; children: React.ReactNode; className?: string }> = ({
+    href,
+    children,
+    className,
+}) => (
+    <a
+        href={href}
+        onClick={(event) => {
+            const navigation = getHost().navigation;
+            if (!navigation) return;
+            event.preventDefault();
+            navigation.openExternalUrl(href);
+        }}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={className ? `text-link ${className}` : 'text-link'}
+    >
+        {children}
+    </a>
 );
