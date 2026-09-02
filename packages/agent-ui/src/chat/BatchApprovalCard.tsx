@@ -344,15 +344,21 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                     className="display-flex flex-row items-center gap-2 min-w-0"
                     style={{ borderTop: '1px solid var(--fill-quinary)', paddingTop: '0.7rem' }}
                 >
-                    <PermissionMenu
-                        options={MODE_OPTIONS}
-                        value={draft.mode}
-                        onChange={(mode) => setDraft((prev) => setMode(mode, prev))}
-                        heading={MODE_HEADING}
-                        disabled={isDecided}
-                        tooltipContent="How this batch's changes are approved"
-                        style={{ padding: '2px 6px', fontSize: '0.95rem' }}
-                    />
+                    {/* A read-only batch has nothing for full access to cover,
+                        and a write-access warning beside "nothing is changed"
+                        would contradict the scope line. The answer then carries
+                        the mode the backend preselected. */}
+                    {!approval.readOnly && (
+                        <PermissionMenu
+                            options={MODE_OPTIONS}
+                            value={draft.mode}
+                            onChange={(mode) => setDraft((prev) => setMode(mode, prev))}
+                            heading={MODE_HEADING}
+                            disabled={isDecided}
+                            tooltipContent="How this batch's changes are approved"
+                            style={{ padding: '2px 6px', fontSize: '0.95rem' }}
+                        />
+                    )}
                     <div className="flex-1" />
                     {/* Typed instructions turn a decline into a request for
                         different work, and the button says so. */}

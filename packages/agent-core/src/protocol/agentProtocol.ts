@@ -2190,6 +2190,13 @@ export interface WSBatchApprovalRequest extends WSBaseEvent {
      * the response carries is what binds.
      */
     user_instructions_prefill?: string;
+    /**
+     * Whether the batch changes nothing in the library. The card then offers
+     * no coverage choice — there is nothing for full access to cover — and
+     * answers with `default_mode`. Absent from a backend that predates the
+     * field, which is the same thing as a batch that writes.
+     */
+    read_only?: boolean;
     /** How long the backend will wait for a response */
     timeout_seconds: number;
 }

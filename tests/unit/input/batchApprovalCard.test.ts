@@ -85,6 +85,7 @@ function approval(overrides: Partial<PendingBatchApproval> = {}): PendingBatchAp
         declineLabel: 'Cancel',
         declineWithInstructionsLabel: DECLINE_WITH_INSTRUCTIONS,
         userInstructionsPrefill: '',
+        readOnly: false,
         timeoutSeconds: 180,
         ...overrides,
     };
@@ -510,5 +511,43 @@ describe('BatchApprovalCard continuation', () => {
             mode: 'full_access',
             user_instructions: null,
         });
+    });
+});
+
+describe('a read-only batch', () => {
+    beforeEach(() => {
+        hookState.slots = [];
+        hookState.index = 0;
+    });
+
+    // Nothing for full access to cover, so the coverage picker — the one
+    // client-owned control on the card, with its write-access warning — is
+    // not offered beside a scope line saying nothing is changed.
+    it('offers no coverage choice', () => {
+        const onSubmit = vi.fn();
+        const tree = render(onSubmit, {
+            readOnly: true,
+            defaultMode: 'ask_each_time',
+            scopeSecondary: '(read-only — nothing in the library is changed)',
+        });
+
+        expect(findAll(tree, isModeMenu)).toHaveLength(0);
+        expect(renderedText(tree).join(' ')).not.toContain('Full access');
+    });
+
+    it('answers with the mode the backend preselected', () => {
+        const onSubmit = vi.fn();
+        const tree = render(onSubmit, { readOnly: true, defaultMode: 'ask_each_time' });
+
+        findOne(tree, byAriaLabel('Approve batch job')).props.onClick();
+
+        expect(onSubmit).toHaveBeenCalledTimes(1);
+        expect(onSubmit.mock.calls[0][0]).toMatchObject({ approved: true, mode: 'ask_each_time' });
+    });
+
+    it('still offers the choice to a batch that writes', () => {
+        const tree = render(vi.fn(), { readOnly: false });
+
+        expect(findAll(tree, isModeMenu)).toHaveLength(1);
     });
 });

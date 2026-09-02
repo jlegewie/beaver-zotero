@@ -74,6 +74,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
     const total = batch.total ?? 0;
     const resolved = batch.resolved ?? 0;
     const noChange = batch.no_change ?? 0;
+    const findings = batch.findings ?? 0;
     const failed = batch.failed ?? 0;
     // `cancelled` batches are dropped from the stamp backend-side.
     const isOver = status === 'completed' || status === 'failed_out';
@@ -81,13 +82,15 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
 
     const share = (count: number) => (total > 0 ? (count / total) * 100 : 0);
     // A determinate track at zero reads as stalled before the first outcome.
-    const isIndeterminate = status === 'active' && resolved + noChange + failed === 0;
+    const isIndeterminate =
+        status === 'active' && resolved + noChange + findings + failed === 0;
     const segments = isIndeterminate ? (
         <div className="batch-progress-indeterminate" />
     ) : (
         <>
             <div style={{ width: `${share(resolved)}%`, backgroundColor: 'var(--accent-blue)' }} />
             <div style={{ width: `${share(noChange)}%`, backgroundColor: 'var(--fill-tertiary)' }} />
+            <div style={{ width: `${share(findings)}%`, backgroundColor: 'var(--tag-purple)' }} />
             <div style={{ width: `${share(failed)}%`, backgroundColor: 'var(--tag-orange)' }} />
         </>
     );
@@ -121,7 +124,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                 role="progressbar"
                 aria-valuemin={0}
                 aria-valuemax={total}
-                aria-valuenow={resolved + noChange}
+                aria-valuenow={resolved + noChange + findings}
                 aria-valuetext={[title, batch.progress_primary, title ? '' : batch.progress_secondary]
                     .filter(Boolean)
                     .join(' ')}

@@ -47,7 +47,7 @@ const view = (block: BatchOutcomeBlock, resolved?: number) =>
     text(BatchOutcomeBlockView({ block, resolved }));
 
 describe('one outcome block', () => {
-    it.each(['destination', 'removal', 'failure'] as const)(
+    it.each(['destination', 'removal', 'finding', 'failure'] as const)(
         'reports the %s rows it hid',
         (kind) => {
             const rendered = view({
