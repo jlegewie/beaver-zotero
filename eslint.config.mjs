@@ -390,6 +390,10 @@ export default tseslint.config(
             "react/components/agentRuns/slashCommandRendering.tsx",
             "react/components/agentRuns/requestChips/**/*.{ts,tsx}",
             "react/components/messages/NoteDisplay.tsx",
+            // The markdown body renderer and the pure item-link grammar it
+            // uses: links are followed through getHost().navigation.
+            "react/components/messages/MarkdownRenderer.tsx",
+            "react/utils/itemLinks.ts",
             // ToolCallPartView resolves request-side display names through
             // getHost(), not the Zotero global. The label layer it calls lives in
             // the core and is covered by the stricter block below.

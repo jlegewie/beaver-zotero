@@ -12,7 +12,8 @@ import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { formatExternalCitation } from '@beaver/agent-core/citations/externalReferences';
-import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
+import { UNRESOLVED_LIBRARY_ID, libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
+import { hydrateItemLinkLibraryRefs } from './itemLinks';
 import {
     baseCitationKey,
     getPageLocator,
@@ -291,6 +292,11 @@ export function renderToHTML(
     contextData?: RenderContextData
 ): string {
     let renderStore = store;
+
+    // Data boundary for the export render: legacy device-local item links in
+    // older history become portable here, so the renderer can write them as
+    // note links without consulting library state itself.
+    content = hydrateItemLinkLibraryRefs(content, libraryRefForLibraryID);
 
     // Pre-calculate citation markers for static render to avoid React state updates during render.
     // This must happen before the render since effects don't run during renderToStaticMarkup.
