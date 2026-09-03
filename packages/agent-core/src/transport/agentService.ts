@@ -18,6 +18,12 @@ import {
     AgentDataProviderMap,
     resolveDefaultAgentDataProvider,
     unknownDataRequestErrorResponse,
+    NOOP_KEEPALIVE,
+    REQUEST_KEEPALIVE_INTERVAL_MS,
+    isBackendRequestEvent,
+    isRequestSignal,
+    type AgentDataRequestContext,
+    type RequestKeepalive,
 } from './agentDataDispatch';
 import { AgentRunRequest, ZoteroInstanceWire } from '../protocol/agentProtocol';
 import {
@@ -27,6 +33,7 @@ import {
     WSAuthMessage,
     WSReadyData,
     WSRequestAckData,
+    WSRequestKeepalive,
     WSRequestReceivedAck,
     AskUserQuestionAnswer,
     BatchApprovalMode,
@@ -171,6 +178,23 @@ export class AgentService {
     private connectionId: number = 0;
     /** Whether the connected backend understands `request_received` acks (from the ready event) */
     private serverSupportsRequestAcks: boolean = false;
+    /** Whether the connected backend understands `request_keepalive` messages (from the ready event) */
+    private serverSupportsRequestKeepalive: boolean = false;
+    /**
+     * Arrival times of inbound messages not yet fully handled: the one being
+     * handled plus those queued behind it. Reported in acks as `queue_depth`
+     * / `queue_oldest_ms` so the backend can tell a blocked message queue from
+     * a frozen main thread.
+     */
+    private queuedMessageArrivals: number[] = [];
+    /**
+     * Keepalive controllers started on receipt of a backend request, keyed by
+     * request id until the dispatcher picks them up, plus every controller
+     * still ticking. Stopped as a group when the connection is reset so a
+     * hung handler cannot keep sending keepalives on a replacement socket.
+     */
+    private pendingKeepalives: Map<string, RequestKeepalive> = new Map();
+    private activeKeepalives: Set<RequestKeepalive> = new Set();
     /**
      * Map of backend data-request event -> handler. Injectable so a non-Zotero
      * host can serve the same requests its own way. Resolved lazily from the
@@ -213,6 +237,9 @@ export class AgentService {
         this.messageQueue = Promise.resolve();
         this.actionExecutionQueue = Promise.resolve();
         this.serverSupportsRequestAcks = false;
+        this.serverSupportsRequestKeepalive = false;
+        this.queuedMessageArrivals = [];
+        this.stopAllKeepalives();
     }
 
     /**
@@ -508,18 +535,37 @@ export class AgentService {
 
             const connId = this.connectionId;
             wsInstance.onmessage = (event) => {
-                // Capture arrival time so dispatch lag (message-queue
-                // backlog) can be reported in request acks.
+                // A frame buffered on a socket that close() has already
+                // replaced must not be acked, counted or queued against the
+                // new connection.
+                if (this.connectionId !== connId || this.ws !== wsInstance) return;
                 const receivedAt = Date.now();
                 attempt.lastMessageAt = receivedAt;
+                const parsed = this.parseMessage(event.data);
+                if (parsed === null) return;
+                // Ack and start keepalives here, before the message enters the
+                // queue: the queue awaits UI callbacks (item loads for streamed
+                // parts), so anything sent from inside it would say nothing
+                // about whether the request arrived — only about whether the
+                // queue was moving. Until the dispatcher picks the request up
+                // its keepalives report the `queued` phase.
+                this.maybeAckRequest(parsed, receivedAt);
+                this.maybeStartKeepalive(parsed, receivedAt);
                 // Chain onto the queue so async callbacks are processed in order.
-                // connId check prevents stale messages from a previous connection
-                // from being processed after a reconnect.
+                // Captured per message: a reset swaps in a fresh array, and a
+                // handler from the old connection that settles afterwards must
+                // shift its own array, not the new connection's.
+                const arrivals = this.queuedMessageArrivals;
+                arrivals.push(receivedAt);
                 this.messageQueue = this.messageQueue.then(() => {
                     if (this.connectionId !== connId) return;
-                    return this.handleMessage(event.data, receivedAt);
+                    return this.handleMessage(parsed, receivedAt);
                 }).catch(err => {
                     logger(`AgentService: Unhandled error in message queue: ${err}`, 1);
+                }).finally(() => {
+                    // Entries stay until their handler settles, so the count
+                    // includes the message currently being handled.
+                    arrivals.shift();
                 });
             };
 
@@ -584,7 +630,7 @@ export class AgentService {
             if (
                 'request_id' in envelope
                 && 'type' in envelope
-                && envelope.type !== 'request_received'
+                && !isRequestSignal(envelope.type)
             ) {
                 try {
                     data = withPreparedJsonEnvelope(data, (current) => ({
@@ -598,7 +644,7 @@ export class AgentService {
         } else if (
             'request_id' in data
             && 'type' in data
-            && (data as any).type !== 'request_received'
+            && !isRequestSignal((data as any).type)
         ) {
             try {
                 data = {
@@ -648,32 +694,34 @@ export class AgentService {
         return true;
     }
 
+    /** Busy snapshot plus transport state, shared by acks and keepalives. */
+    private transportBusyContext(receivedAt: number): Record<string, number> {
+        const now = Date.now();
+        const oldest = this.queuedMessageArrivals[0];
+        return {
+            ...resolveBusyContext(),
+            dispatch_lag_ms: Math.max(0, now - receivedAt),
+            queue_depth: this.queuedMessageArrivals.length,
+            queue_oldest_ms: oldest === undefined ? 0 : Math.max(0, now - oldest),
+        };
+    }
+
     /**
-     * Acknowledge a backend→frontend request as received, before its handler
-     * runs. Gated on the backend's `supports_request_acks` capability (older
-     * backends would route the ack to the pending request as its response).
-     * Best-effort: never blocks or fails request dispatch.
+     * Acknowledge a backend→frontend request as received. Called from the
+     * socket's message handler before the message enters the queue. Gated on
+     * the backend's `supports_request_acks` capability (older backends would
+     * route the ack to the pending request as its response). Best-effort:
+     * never blocks or fails request dispatch.
      */
     private maybeAckRequest(event: WSEvent, receivedAt: number): void {
         if (!this.serverSupportsRequestAcks) return;
         const requestId = (event as any).request_id;
-        const eventName = event.event;
-        if (typeof requestId !== 'string' || typeof eventName !== 'string') return;
-        // Backend requests awaiting a response keyed by request_id: all
-        // `*_request` events plus the agent action validate/execute pair.
-        if (
-            !eventName.endsWith('_request')
-            && eventName !== 'agent_action_validate'
-            && eventName !== 'agent_action_execute'
-        ) return;
+        if (typeof requestId !== 'string' || !isBackendRequestEvent(event.event)) return;
         try {
             const ack: WSRequestReceivedAck = {
                 type: 'request_received',
                 request_id: requestId,
-                busy: {
-                    ...resolveBusyContext(),
-                    dispatch_lag_ms: Math.max(0, Date.now() - receivedAt),
-                },
+                busy: this.transportBusyContext(receivedAt),
             };
             this.send(ack);
         } catch (error) {
@@ -682,43 +730,107 @@ export class AgentService {
     }
 
     /**
-     * Handle incoming WebSocket message.
-     * Async to support callbacks that load item data before updating state.
-     * Messages are serialized via messageQueue to preserve processing order.
+     * Start `request_keepalive` for a backend request as soon as it arrives.
+     * The backend keeps waiting on slow work while these arrive and treats
+     * silence after the first one as a frozen client. The controller is parked
+     * under the request id until the dispatcher takes it over (see
+     * `takeKeepalive`); it reports `queued` until then.
      */
-    private async handleMessage(rawData: string, receivedAt: number = Date.now()): Promise<void> {
-        if (!this.callbacks) return;
+    private maybeStartKeepalive(event: WSEvent, receivedAt: number): void {
+        if (!this.serverSupportsRequestKeepalive) return;
+        const requestId = (event as any).request_id;
+        if (typeof requestId !== 'string' || !isBackendRequestEvent(event.event)) return;
+        this.pendingKeepalives.set(requestId, this.startKeepalive(requestId, receivedAt, 'queued'));
+    }
 
+    /** Hand a parked keepalive to the dispatcher; a no-op controller when none was started. */
+    private takeKeepalive(requestId: string | null): RequestKeepalive {
+        if (requestId === null) return NOOP_KEEPALIVE;
+        const keepalive = this.pendingKeepalives.get(requestId);
+        if (!keepalive) return NOOP_KEEPALIVE;
+        this.pendingKeepalives.delete(requestId);
+        return keepalive;
+    }
+
+    private startKeepalive(requestId: string, receivedAt: number, initialPhase: string): RequestKeepalive {
+        const connId = this.connectionId;
+        let phase = initialPhase;
+        const controller: RequestKeepalive = {
+            setPhase: (next: string) => { phase = next; },
+            stop: () => {
+                clearInterval(timer);
+                this.activeKeepalives.delete(controller);
+                this.pendingKeepalives.delete(requestId);
+            },
+        };
+        const tick = () => {
+            // The connection was replaced under a still-running handler:
+            // the new socket must not carry this request's keepalives.
+            if (this.connectionId !== connId) {
+                controller.stop();
+                return;
+            }
+            try {
+                const keepalive: WSRequestKeepalive = {
+                    type: 'request_keepalive',
+                    request_id: requestId,
+                    phase,
+                    elapsed_ms: Math.max(0, Date.now() - receivedAt),
+                    busy: this.transportBusyContext(receivedAt),
+                };
+                this.send(keepalive);
+            } catch (error) {
+                logger(`AgentService: Failed to send request_keepalive: ${error}`, 1);
+            }
+        };
+        const timer = setInterval(tick, REQUEST_KEEPALIVE_INTERVAL_MS);
+        this.activeKeepalives.add(controller);
+        return controller;
+    }
+
+    private stopAllKeepalives(): void {
+        for (const keepalive of Array.from(this.activeKeepalives)) {
+            keepalive.stop();
+        }
+        this.activeKeepalives.clear();
+        this.pendingKeepalives.clear();
+    }
+
+    /** Parse a raw socket frame; null (after reporting) when it is not a usable event. */
+    private parseMessage(rawData: unknown): WSEvent | null {
+        if (!this.callbacks) return null;
         // Guard against invalid data during close handshake
         if (typeof rawData !== 'string' || !rawData) {
             logger('AgentService: Received invalid message data (likely during close)', 1);
-            return;
+            return null;
         }
-
-        let event: WSEvent;
         try {
-            event = JSON.parse(rawData) as WSEvent;
+            return JSON.parse(rawData) as WSEvent;
         } catch (error) {
             logger(`AgentService: Failed to parse message: ${error}`, 1);
-            // Only report parse errors if we're still actively listening
-            if (this.callbacks) {
-                this.callbacks.onError({
-                    event: 'error',
-                    type: 'parse_error',
-                    message: 'Failed to parse server message',
-                });
-            }
-            return;
+            this.callbacks.onError({
+                event: 'error',
+                type: 'parse_error',
+                message: 'Failed to parse server message',
+            });
+            return null;
         }
+    }
 
-        // Ack backend requests immediately (before handler dispatch) so the
-        // backend can tell "request never arrived" from "handler is slow".
-        this.maybeAckRequest(event, receivedAt);
+    /**
+     * Handle a parsed WebSocket message.
+     * Async to support callbacks that load item data before updating state.
+     * Messages are serialized via messageQueue to preserve processing order;
+     * the request ack has already been sent by the time this runs.
+     */
+    private async handleMessage(event: WSEvent, receivedAt: number = Date.now()): Promise<void> {
+        if (!this.callbacks) return;
 
         try {
             switch (event.event) {
                 case 'ready': {
                     this.serverSupportsRequestAcks = event.supports_request_acks === true;
+                    this.serverSupportsRequestKeepalive = event.supports_request_keepalive === true;
                     // Convert snake_case backend response to camelCase frontend data
                     const readyData: WSReadyData = {
                         subscriptionStatus: event.subscription_status,
@@ -916,8 +1028,15 @@ export class AgentService {
                     // the map has no entry — an error reply is sent so the
                     // backend doesn't time out.
                     const eventName = (event as any).event;
+                    const dataEvent = event as any;
+                    const requestId = typeof dataEvent.request_id === 'string' ? dataEvent.request_id : null;
+                    // Started on receipt (see onmessage), so time spent in the
+                    // message queue or behind other executes is reported as
+                    // `queued` rather than as silence.
+                    const keepalive = this.takeKeepalive(requestId);
                     const entry = this.getDataProvider()[eventName];
                     if (!entry) {
+                        keepalive.stop();
                         logger(`AgentService: Unknown event type: ${eventName}`, 1);
                         const errorResponse = unknownDataRequestErrorResponse(event);
                         if (errorResponse) {
@@ -925,15 +1044,21 @@ export class AgentService {
                         }
                         break;
                     }
-                    const dataEvent = event as any;
                     logger(`AgentService: Received ${eventName}`, dataEvent, 1);
-                    const runRequest = (): Promise<void> =>
-                        entry.handle(dataEvent)
-                            .then(res => { this.send(res); })
+                    const context: AgentDataRequestContext = {
+                        receivedAt,
+                        reportPhase: (phase) => keepalive.setPhase(phase),
+                    };
+                    const runRequest = (): Promise<void> => {
+                        keepalive.setPhase('running');
+                        return entry.handle(dataEvent, context)
+                            .then(res => { keepalive.stop(); this.send(res); })
                             .catch(err => {
+                                keepalive.stop();
                                 logger(`AgentService: ${eventName} failed: ${err}`, 1);
                                 this.send(entry.errorResponse(dataEvent, err));
                             });
+                    };
                     if (entry.serialize) {
                         // Chain onto actionExecutionQueue to serialize mutating
                         // actions. Capture connectionId so stale queued actions
@@ -941,7 +1066,10 @@ export class AgentService {
                         // messageQueue).
                         const actionConnId = this.connectionId;
                         this.actionExecutionQueue = this.actionExecutionQueue.then(() => {
-                            if (this.connectionId !== actionConnId) return;
+                            if (this.connectionId !== actionConnId) {
+                                keepalive.stop();
+                                return;
+                            }
                             return runRequest();
                         });
                     } else {

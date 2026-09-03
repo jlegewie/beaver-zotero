@@ -1,5 +1,6 @@
 import { logger } from '@beaver/agent-core/platform/logger';
 import { WSAgentActionExecuteRequest, WSAgentActionExecuteResponse } from '@beaver/agent-core/protocol/agentProtocol';
+import type { AgentDataRequestContext } from '@beaver/agent-core/transport/agentDataDispatch';
 import { TimeoutContext, DEFAULT_TIMEOUT_SECONDS } from './timeout';
 import { TimeoutError } from './timeout';
 import { executeEditNoteAction } from './actions/editNote';
@@ -21,30 +22,51 @@ import { executeEditAnnotationsAction } from './actions/editAnnotations';
  * Executes the action and returns the result.
  *
  * Timeout handling:
- * - Uses timeout_seconds from request (default: 25s)
+ * - Uses timeout_seconds from request (default: 25s), measured from when the
+ *   request arrived on the socket (`context.receivedAt`) rather than from
+ *   when this handler started. Executes are serialized, so a request that
+ *   waited behind others has already spent part of its budget; a deadline
+ *   that only started here would let it begin a save the backend had long
+ *   stopped waiting for.
  * - Uses cooperative cancellation via AbortController so executors
  *   check the signal before irreversible operations (saves, transactions)
  * - Returns detailed diagnostics on timeout
+ * - Merges `queued_ms` / `total_ms` into the response timing so slow
+ *   executes can be attributed to queueing versus the executor itself.
  */
 export async function handleAgentActionExecuteRequest(
-    request: WSAgentActionExecuteRequest
+    request: WSAgentActionExecuteRequest,
+    context?: Pick<AgentDataRequestContext, 'receivedAt' | 'reportPhase'>,
 ): Promise<WSAgentActionExecuteResponse> {
     const rawTimeout = request.timeout_seconds;
     const timeoutSeconds = (typeof rawTimeout === 'number' && rawTimeout > 0)
         ? rawTimeout
         : DEFAULT_TIMEOUT_SECONDS;
-    const startTime = Date.now();
+    const handlerStartedAt = Date.now();
+    const startTime = context?.receivedAt ?? handlerStartedAt;
+    const queuedMs = Math.max(0, handlerStartedAt - startTime);
 
-    logger(`handleAgentActionExecuteRequest: Executing ${request.action_type} with timeout ${timeoutSeconds}s`, 1);
+    logger(`handleAgentActionExecuteRequest: Executing ${request.action_type} with timeout ${timeoutSeconds}s (queued ${queuedMs}ms)`, 1);
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
+    const remainingMs = Math.max(0, startTime + timeoutSeconds * 1000 - handlerStartedAt);
+    const timer = setTimeout(() => controller.abort(), remainingMs);
+
+    const withTiming = (result: WSAgentActionExecuteResponse): WSAgentActionExecuteResponse => ({
+        ...result,
+        timing: {
+            ...result.timing,
+            queued_ms: queuedMs,
+            total_ms: Date.now() - startTime,
+        },
+    });
 
     try {
         const ctx: TimeoutContext = {
             signal: controller.signal,
             timeoutSeconds,
             startTime,
+            reportPhase: context?.reportPhase,
         };
 
         let result: WSAgentActionExecuteResponse;
@@ -83,13 +105,13 @@ export async function handleAgentActionExecuteRequest(
             };
         }
 
-        return result;
+        return withTiming(result);
     } catch (error) {
         const elapsedMs = Date.now() - startTime;
 
         if (error instanceof TimeoutError) {
             logger(`handleAgentActionExecuteRequest: Timeout after ${error.elapsedMs}ms in phase '${error.phase}'`, 1);
-            return {
+            return withTiming({
                 type: 'agent_action_execute_response',
                 request_id: request.request_id,
                 success: false,
@@ -102,12 +124,11 @@ export async function handleAgentActionExecuteRequest(
                     action_type: request.action_type,
                     timeout_seconds: error.timeoutSeconds,
                 },
-                timing: { total_ms: error.elapsedMs },
-            };
+            });
         }
 
         logger(`handleAgentActionExecuteRequest: Error after ${elapsedMs}ms: ${error}`, 1);
-        return {
+        return withTiming({
             type: 'agent_action_execute_response',
             request_id: request.request_id,
             success: false,
@@ -118,8 +139,7 @@ export async function handleAgentActionExecuteRequest(
                 elapsed_ms: elapsedMs,
                 action_type: request.action_type,
             },
-            timing: { total_ms: elapsedMs },
-        };
+        });
     } finally {
         clearTimeout(timer);
     }
