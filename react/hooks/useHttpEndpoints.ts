@@ -821,8 +821,8 @@ async function handleListTagsHttpRequest(request: any) {
         collection_key: request.collection_key,
         min_item_count: request.min_item_count ?? 0,
         name_query: request.name_query,
-        // Pass through so omitted stays "include all" in the handler.
-        include_automatic: request.include_automatic,
+        // Pass through so omitted stays 'all' in the handler.
+        tag_type: request.tag_type,
         limit: request.limit ?? 50,
         offset: request.offset ?? 0,
     };
@@ -832,6 +832,7 @@ async function handleListTagsHttpRequest(request: any) {
     return {
         tags: response.tags,
         total_count: response.total_count,
+        manual_count: response.manual_count,
         automatic_count: response.automatic_count,
         library_id: response.library_id,
         library_name: response.library_name,

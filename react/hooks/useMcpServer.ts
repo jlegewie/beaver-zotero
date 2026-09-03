@@ -538,8 +538,9 @@ const LIST_TAGS_TOOL = {
         'Set `min_item_count` to filter out rarely-used tags (counts all tagged objects, not just regular items). ' +
         'Set `name_query` to search tag names in a library with too many tags to list. ' +
         'Each tag reports a `tag_type`: "manual" when the user added it, "automatic" when it was imported ' +
-        'with an item\'s metadata (publisher keywords, MeSH terms). Set `include_automatic` to false to ' +
-        "list only the user's own vocabulary.",
+        'with an item\'s metadata (publisher keywords, MeSH terms). `tag_type` selects which kind to list: ' +
+        '"manual" (default, the user\'s own vocabulary), "automatic" (imported keywords only) or "all". ' +
+        'The response always reports `manual_count` and `automatic_count` for the whole scope.',
     inputSchema: {
         type: 'object' as const,
         properties: {
@@ -560,11 +561,12 @@ const LIST_TAGS_TOOL = {
                 description: 'Minimum number of items a tag must have to be included. Default: 1.',
                 default: 1,
             },
-            include_automatic: {
-                type: 'boolean',
+            tag_type: {
+                type: 'string',
+                enum: ['manual', 'automatic', 'all'],
                 description:
-                    'Include tags imported with an item\'s metadata rather than added by the user. Default: true.',
-                default: true,
+                    'Which tags to list: "manual" (added by the user), "automatic" (imported with an item\'s metadata) or "all". Default: "manual".',
+                default: 'manual',
             },
             limit: {
                 type: 'integer',
@@ -1339,7 +1341,7 @@ async function handleListTags(args: any): Promise<any> {
         collection_key: args.collection ?? null,
         min_item_count: args.min_item_count ?? 1,
         name_query: args.name_query ?? null,
-        include_automatic: args.include_automatic ?? true,
+        tag_type: args.tag_type ?? 'manual',
         limit,
         offset,
     };
@@ -1354,6 +1356,7 @@ async function handleListTags(args: any): Promise<any> {
 
     return {
         total_count: response.total_count,
+        manual_count: response.manual_count ?? 0,
         automatic_count: response.automatic_count ?? 0,
         has_more: hasMore,
         next_offset: hasMore ? offset + limit : null,

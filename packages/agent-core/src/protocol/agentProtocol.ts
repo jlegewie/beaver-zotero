@@ -1710,13 +1710,14 @@ export interface WSListTagsRequest extends WSBaseEvent {
      */
     name_query?: string | null;
     /**
-     * Include tags imported with an item's metadata rather than added by the
-     * user. Defaults to true when absent.
+     * Which tags to return: `manual` (the user added the tag to at least one
+     * item), `automatic` (every occurrence was imported with an item's
+     * metadata) or `all`. Defaults to `all` when absent.
      *
      * Gated by the `list_tags_types` client feature: a client without it
      * ignores the field and returns every tag.
      */
-    include_automatic?: boolean | null;
+    tag_type?: 'manual' | 'automatic' | 'all' | null;
     limit: number;
     offset: number;
 }
@@ -1748,9 +1749,13 @@ export interface WSListTagsResponse {
     tags: TagInfo[];
     total_count: number;
     /**
-     * Automatic tags in scope after the other filters. Counted even when
-     * `include_automatic` is false (they then leave `tags` and `total_count`).
-     * Always 0 from clients that do not report types.
+     * Manual tags in scope after the other filters, whatever `tag_type` asked
+     * for. Always 0 from clients that do not report types.
+     */
+    manual_count?: number;
+    /**
+     * Automatic tags in scope after the other filters, whatever `tag_type`
+     * asked for. Always 0 from clients that do not report types.
      */
     automatic_count?: number;
     library_id?: number | null;
@@ -2502,9 +2507,10 @@ export const CLIENT_FEATURES = {
      */
     LIST_TAGS_NAME_QUERY: 'list_tags_name_query',
     /**
-     * `list_tags` reports each tag as `manual` or `automatic` and honors
-     * `include_automatic`. A client without it ignores the flag and returns
-     * every tag untyped, which must not be presented as the user's vocabulary.
+     * `list_tags` reports each tag as `manual` or `automatic`, honors
+     * `tag_type` and returns both per-type counts. A client without it ignores
+     * the field and returns every tag untyped, which must not be presented as
+     * the user's vocabulary.
      */
     LIST_TAGS_TYPES: 'list_tags_types',
     /**

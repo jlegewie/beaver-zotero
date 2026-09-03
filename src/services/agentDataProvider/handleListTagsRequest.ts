@@ -59,7 +59,7 @@ function likeContainsPattern(query: string): string {
 export async function handleListTagsRequest(
     request: WSListTagsRequest
 ): Promise<WSListTagsResponse> {
-    logger(`handleListTagsRequest: library=${request.library_id}, collection=${request.collection_key}, name_query=${request.name_query ?? ''}, include_automatic=${request.include_automatic ?? true}`, 1);
+    logger(`handleListTagsRequest: library=${request.library_id}, collection=${request.collection_key}, name_query=${request.name_query ?? ''}, tag_type=${request.tag_type ?? 'all'}`, 1);
     
     try {
         // Validate library (checks both existence and searchability)
@@ -225,12 +225,16 @@ export async function handleListTagsRequest(
             });
         }
 
-        // Default true: callers that omit the field expect the whole list.
-        // Filter is per tag, not per occurrence — mixed tags stay, with full counts.
-        const includeAutomatic = request.include_automatic ?? true;
+        // Default 'all': callers that omit the field expect the whole list.
+        // Filter is per tag, not per occurrence — mixed tags count as manual and
+        // keep their full counts.
+        const tagType = request.tag_type ?? 'all';
 
-        // Build tag info array
+        // Build tag info array. Both per-type counts are taken after the other
+        // filters but before the type filter, so the caller always learns how
+        // many tags of the other kind the listing left out.
         const tags: TagInfo[] = [];
+        let manualCount = 0;
         let automaticCount = 0;
         for (const [name, data] of tagMap) {
             // Filter on the total number of tagged objects so a tag is kept even
@@ -240,11 +244,14 @@ export async function handleListTagsRequest(
                 continue;
             }
 
-            if (!data.hasManual) {
+            const type = data.hasManual ? 'manual' : 'automatic';
+            if (type === 'manual') {
+                manualCount++;
+            } else {
                 automaticCount++;
-                if (!includeAutomatic) {
-                    continue;
-                }
+            }
+            if (tagType !== 'all' && type !== tagType) {
+                continue;
             }
 
             // Get color if any
@@ -257,7 +264,7 @@ export async function handleListTagsRequest(
                 note_count: data.noteCount,
                 annotation_count: data.annotationCount,
                 color: colorInfo?.color || null,
-                tag_type: data.hasManual ? 'manual' : 'automatic',
+                tag_type: type,
             });
         }
 
@@ -280,13 +287,14 @@ export async function handleListTagsRequest(
         const limit = Math.max(0, Math.min(request.limit ?? DEFAULT_LIMIT, MAX_LIMIT));
         const paginatedTags = tags.slice(offset, offset + limit);
         
-        logger(`handleListTagsRequest: Returning ${paginatedTags.length}/${totalCount} tags (${automaticCount} automatic, included=${includeAutomatic})`, 1);
+        logger(`handleListTagsRequest: Returning ${paginatedTags.length}/${totalCount} tags (${manualCount} manual, ${automaticCount} automatic, tag_type=${tagType})`, 1);
         
         return {
             type: 'list_tags',
             request_id: request.request_id,
             tags: paginatedTags,
             total_count: totalCount,
+            manual_count: manualCount,
             automatic_count: automaticCount,
             library_id: library.libraryID,
             library_ref: libraryRefForLibraryID(library.libraryID) ?? undefined,

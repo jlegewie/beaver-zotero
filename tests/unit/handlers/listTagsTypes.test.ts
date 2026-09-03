@@ -77,38 +77,51 @@ describe('handleListTagsRequest tag types', () => {
         ]);
     });
 
-    it('drops automatic tags when asked, and says how many', async () => {
-        const res = await handleListTagsRequest(request({ include_automatic: false }));
-
-        expect(res.tags.map((t) => t.name)).toEqual(['methods']);
-        expect(res.total_count).toBe(1);
-        expect(res.automatic_count).toBe(1);
-    });
-
-    it('counts automatic tags even when they are included', async () => {
-        const res = await handleListTagsRequest(request({ include_automatic: true }));
-
-        expect(res.tags).toHaveLength(2);
-        expect(res.total_count).toBe(2);
-        expect(res.automatic_count).toBe(1);
-    });
-
     it('keeps every tag when the request says nothing about types', async () => {
         // A caller that predates tag types expects the whole vocabulary.
         const res = await handleListTagsRequest(request());
 
         expect(res.tags).toHaveLength(2);
+        expect(res.total_count).toBe(2);
+        expect(res.manual_count).toBe(1);
+        expect(res.automatic_count).toBe(1);
+    });
+
+    it('lists only manual tags for tag_type manual, and still counts both kinds', async () => {
+        const res = await handleListTagsRequest(request({ tag_type: 'manual' }));
+
+        expect(res.tags.map((t) => t.name)).toEqual(['methods']);
+        expect(res.total_count).toBe(1);
+        expect(res.manual_count).toBe(1);
+        expect(res.automatic_count).toBe(1);
+    });
+
+    it('lists only automatic tags for tag_type automatic, and still counts both kinds', async () => {
+        const res = await handleListTagsRequest(request({ tag_type: 'automatic' }));
+
+        expect(res.tags.map((t) => t.name)).toEqual(['Humans']);
+        expect(res.total_count).toBe(1);
+        expect(res.manual_count).toBe(1);
+        expect(res.automatic_count).toBe(1);
+    });
+
+    it('lists both for tag_type all', async () => {
+        const res = await handleListTagsRequest(request({ tag_type: 'all' }));
+
+        expect(res.tags).toHaveLength(2);
+        expect(res.total_count).toBe(2);
     });
 
     it('calls a tag manual as soon as one item carries it manually', async () => {
         // Same name twice: the merge must OR the flag, not take the last row.
         serveRows([tagRow('mixed', 40, 0), tagRow('mixed', 3, 1)]);
 
-        const res = await handleListTagsRequest(request({ include_automatic: false }));
+        const res = await handleListTagsRequest(request({ tag_type: 'manual' }));
 
         expect(res.tags.map((t) => [t.name, t.tag_type, t.item_count])).toEqual([
             ['mixed', 'manual', 43],
         ]);
+        expect(res.manual_count).toBe(1);
         expect(res.automatic_count).toBe(0);
     });
 
@@ -116,7 +129,7 @@ describe('handleListTagsRequest tag types', () => {
         serveRows([tagRow('methods', 4, 1), tagRow('rare-import', 1, 0)]);
 
         const res = await handleListTagsRequest(
-            request({ min_item_count: 2, include_automatic: false })
+            request({ min_item_count: 2, tag_type: 'manual' })
         );
 
         expect(res.tags.map((t) => t.name)).toEqual(['methods']);
