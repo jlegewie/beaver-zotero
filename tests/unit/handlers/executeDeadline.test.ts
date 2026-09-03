@@ -38,9 +38,10 @@ describe('handleAgentActionExecuteRequest deadline', () => {
         executors.editMetadata.mockReset();
     });
 
-    it('measures the deadline from socket receipt, not from handler start', async () => {
-        // Arrived 12s ago with a 10s budget: queued behind other executes for
-        // longer than the whole budget, so the save must not start.
+    it('gives the executor its full budget however long the request queued', async () => {
+        // Arrived 12s ago with a 10s budget. The backend is still waiting on
+        // it — acks and keepalives told it so — and the queue wait is not the
+        // executor's to pay for, so the save goes ahead.
         const receivedAt = Date.now() - 12_000;
         executors.editMetadata.mockImplementation(async (_req, ctx) => {
             checkAborted(ctx, 'edit_metadata:before_save');
@@ -49,14 +50,30 @@ describe('handleAgentActionExecuteRequest deadline', () => {
 
         const response = await handleAgentActionExecuteRequest(request, { receivedAt, reportPhase: () => {} });
 
-        expect(response.success).toBe(false);
-        expect(response.error_code).toBe('timeout');
-        expect(response.result_data?.phase).toBe('edit_metadata:before_save');
+        expect(response.success).toBe(true);
+        // The wait is still reported, just not charged.
         expect(response.timing?.queued_ms).toBeGreaterThanOrEqual(12_000);
         expect(response.timing?.total_ms).toBeGreaterThanOrEqual(12_000);
     });
 
-    it('passes the remaining budget and phase reporter to the executor', async () => {
+    it('aborts before a write once the executor has spent its own budget', async () => {
+        executors.editMetadata.mockImplementation(async (_req, ctx) => {
+            await new Promise((resolve) => setTimeout(resolve, 60));
+            checkAborted(ctx, 'edit_metadata:before_save');
+            return { type: 'agent_action_execute_response', request_id: 'req-1', success: true };
+        });
+
+        const response = await handleAgentActionExecuteRequest(
+            { ...request, timeout_seconds: 0.02 },
+            { receivedAt: Date.now(), reportPhase: () => {} },
+        );
+
+        expect(response.success).toBe(false);
+        expect(response.error_code).toBe('timeout');
+        expect(response.result_data?.phase).toBe('edit_metadata:before_save');
+    });
+
+    it('passes the executor its own start time and the phase reporter', async () => {
         const receivedAt = Date.now() - 2_000;
         const reportPhase = vi.fn();
         let seenCtx: any;
@@ -73,7 +90,9 @@ describe('handleAgentActionExecuteRequest deadline', () => {
 
         const response = await handleAgentActionExecuteRequest(request, { receivedAt, reportPhase });
 
-        expect(seenCtx.startTime).toBe(receivedAt);
+        // Handler start, not socket receipt: the deadline and the elapsed time
+        // reported with a timeout both have to mean the executor's own work.
+        expect(seenCtx.startTime).toBeGreaterThanOrEqual(receivedAt + 2_000);
         expect(seenCtx.timeoutSeconds).toBe(10);
         expect(seenCtx.signal.aborted).toBe(false);
         expect(reportPhase).toHaveBeenCalledWith('saving');

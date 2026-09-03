@@ -22,17 +22,20 @@ import { executeEditAnnotationsAction } from './actions/editAnnotations';
  * Executes the action and returns the result.
  *
  * Timeout handling:
- * - Uses timeout_seconds from request (default: 25s), measured from when the
- *   request arrived on the socket (`context.receivedAt`) rather than from
- *   when this handler started. Executes are serialized, so a request that
- *   waited behind others has already spent part of its budget; a deadline
- *   that only started here would let it begin a save the backend had long
- *   stopped waiting for.
+ * - Uses timeout_seconds from request (default: 25s), measured from when this
+ *   handler started. It bounds the executor's own work, not the request's age:
+ *   the backend keeps waiting on a request it can see is being worked (acks
+ *   and keepalives), so time spent queued behind other executes is not the
+ *   executor's to spend, and charging it here would abort work the backend
+ *   still wants — the more so because executes are serialized.
  * - Uses cooperative cancellation via AbortController so executors
- *   check the signal before irreversible operations (saves, transactions)
+ *   check the signal before irreversible operations (saves, transactions).
+ *   Hitting the deadline therefore means the change did not land, which is
+ *   what makes this a better answer than the backend's own give-up.
  * - Returns detailed diagnostics on timeout
- * - Merges `queued_ms` / `total_ms` into the response timing so slow
- *   executes can be attributed to queueing versus the executor itself.
+ * - Merges `queued_ms` / `total_ms` into the response timing, both measured
+ *   from socket receipt, so slow executes can still be attributed to queueing
+ *   versus the executor itself.
  */
 export async function handleAgentActionExecuteRequest(
     request: WSAgentActionExecuteRequest,
@@ -42,22 +45,22 @@ export async function handleAgentActionExecuteRequest(
     const timeoutSeconds = (typeof rawTimeout === 'number' && rawTimeout > 0)
         ? rawTimeout
         : DEFAULT_TIMEOUT_SECONDS;
-    const handlerStartedAt = Date.now();
-    const startTime = context?.receivedAt ?? handlerStartedAt;
-    const queuedMs = Math.max(0, handlerStartedAt - startTime);
+    // The deadline runs from here; the receipt time only measures the wait.
+    const startTime = Date.now();
+    const receivedAt = context?.receivedAt ?? startTime;
+    const queuedMs = Math.max(0, startTime - receivedAt);
 
     logger(`handleAgentActionExecuteRequest: Executing ${request.action_type} with timeout ${timeoutSeconds}s (queued ${queuedMs}ms)`, 1);
 
     const controller = new AbortController();
-    const remainingMs = Math.max(0, startTime + timeoutSeconds * 1000 - handlerStartedAt);
-    const timer = setTimeout(() => controller.abort(), remainingMs);
+    const timer = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
 
     const withTiming = (result: WSAgentActionExecuteResponse): WSAgentActionExecuteResponse => ({
         ...result,
         timing: {
             ...result.timing,
             queued_ms: queuedMs,
-            total_ms: Date.now() - startTime,
+            total_ms: Date.now() - receivedAt,
         },
     });
 

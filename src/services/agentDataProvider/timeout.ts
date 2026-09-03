@@ -63,7 +63,7 @@ function isExternalAbortReason(reason: unknown): boolean {
 export interface TimeoutContext {
     signal: AbortSignal;
     timeoutSeconds: number;
-    /** Deadline origin: when the request arrived, not when the executor started */
+    /** Deadline origin: when the executor started, not when the request arrived */
     startTime: number;
     /** Optional: name the current phase so the backend's keepalives can show it */
     reportPhase?: (phase: string) => void;
