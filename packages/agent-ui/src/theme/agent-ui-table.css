@@ -525,10 +525,6 @@
     width: 3.2rem;
 }
 
-.beaver-root .bt-col-actions {
-    width: 6rem;
-}
-
 /* Header ------------------------------------------------------------------- */
 
 .beaver-root .bt-th {
@@ -556,10 +552,6 @@
 .beaver-root .bt-th-anchor {
     left: var(--bt-rail-w);
     z-index: 6;
-}
-
-.beaver-root .bt-th-actions {
-    text-align: right;
 }
 
 .beaver-root .bt-th-inner {
@@ -785,13 +777,22 @@
     position: sticky;
     left: var(--bt-rail-w);
     z-index: 2;
-    padding-right: 1.7rem;
     box-shadow: 1px 0 0 var(--fill-quinary);
 }
 
-.beaver-root .bt-td-actions {
-    text-align: right;
-    white-space: nowrap;
+/* The anchor cell is value plus verbs, side by side in normal flow: the value
+   takes what is left, the verbs take what they need, and neither overlaps the
+   other however many controls a row has. */
+.beaver-root .bt-anchor-cell {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.3rem;
+    min-width: 0;
+}
+
+.beaver-root .bt-anchor-cell > :first-child {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .beaver-root .bt-row:hover > .bt-td {
@@ -904,23 +905,6 @@
     background: var(--accent-blue);
     border-color: var(--accent-blue);
     color: var(--accent-white);
-}
-
-/* Row actions -------------------------------------------------------------- */
-
-.beaver-root .bt-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.1rem;
-    opacity: 0.65;
-    transition: opacity 100ms ease;
-}
-
-.beaver-root .bt-row:hover .bt-actions,
-.beaver-root .bt-row-open .bt-actions,
-.beaver-root .bt-row-selected .bt-actions,
-.beaver-root .bt-row:focus-within .bt-actions {
-    opacity: 1;
 }
 
 /* ==========================================================================
@@ -1231,10 +1215,10 @@
     content: none;
 }
 
-/* An annotation's comment is context, not the row's identity: it appears only
-   where the row is tall enough to hold a second thought. */
+/* An annotation's comment follows the passage in plain type. A one-line row
+   has no room for a second thought, so it goes there and nowhere else. */
 .beaver-root .bt-ann-comment {
-    display: none;
+    display: block;
     color: var(--fill-secondary);
     font-size: 0.92rem;
     line-height: var(--bt-subtitle-h);
@@ -1243,27 +1227,37 @@
     white-space: nowrap;
 }
 
-.beaver-root .bt[data-density="tall"] .bt-ann-comment,
-.beaver-root .bt-detail .bt-ann-comment {
-    display: block;
+.beaver-root .bt[data-density="compact"] .bt-ann-comment {
+    display: none;
 }
 
-.beaver-root .bt-detail .bt-ann-comment {
-    white-space: normal;
-}
+/* Row actions ------------------------------------------------------------- */
 
-.beaver-root .bt-ref-reveal {
-    position: absolute;
-    top: 0.3rem;
-    right: 0.2rem;
-    opacity: 0;
+/* The row's verbs sit at the edge of the sticky anchor cell, so they are
+   always within reach: visible at rest, so nobody has to know to hover, and
+   full strength once the row is under the pointer. */
+.beaver-root .bt-ref-actions {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.1rem;
+    margin-top: -0.15rem;
+    opacity: 0.55;
     transition: opacity 100ms ease;
 }
 
-.beaver-root .bt-row:hover .bt-ref-reveal,
-.beaver-root .bt-row-open .bt-ref-reveal,
-.beaver-root .bt-td:focus-within .bt-ref-reveal {
+.beaver-root .bt-row:hover .bt-ref-actions,
+.beaver-root .bt-row-open .bt-ref-actions,
+.beaver-root .bt-td:focus-within .bt-ref-actions {
     opacity: 1;
+}
+
+/* An annotation's passage is a quotation, marked by a bar in the colour the
+   annotation has in the reader. */
+.beaver-root .bt-ann-quote {
+    padding-left: 0.5rem;
+    border-left: 3px solid var(--fill-quaternary);
+    font-weight: 400;
 }
 
 .beaver-root .bt-link {
@@ -1331,10 +1325,6 @@
 
 .beaver-root .bt-detail .bt-nowrap {
     white-space: normal;
-}
-
-.beaver-root .bt-detail .bt-ref-reveal {
-    display: none;
 }
 
 .beaver-root .bt-details {

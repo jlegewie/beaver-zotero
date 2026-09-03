@@ -6,6 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TableSpec } from "@beaver/agent-core/layouts/table";
 import type { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import { DataTable } from "@beaver/agent-ui/layouts/DataTable";
+import {
+    useTableState,
+    type TableState,
+} from "@beaver/agent-ui/layouts/useTableState";
 import { setHost } from "@beaver/agent-ui/host";
 
 const externalRef: ExternalReference = {
@@ -218,11 +222,22 @@ describe("DataTable", () => {
 
         const detail = container!.querySelector(".bt-detail")!;
         expect(detail.textContent).toContain("An abstract about alpha.");
+        // The label is the field's name and nothing else repeats it.
+        expect(detail.textContent!.match(/Abstract/g)).toHaveLength(1);
         expect(
             Array.from(detail.querySelectorAll("dt")).map(
                 (dt) => dt.textContent,
             ),
-        ).toEqual(["Item", "Citations", "Type", "Open access", "Methods"]);
+            // The labelled abstract is a field of its own, after the cell it
+            // belongs to.
+        ).toEqual([
+            "Item",
+            "Abstract",
+            "Citations",
+            "Type",
+            "Open access",
+            "Methods",
+        ]);
     });
 
     it("spans the detail row across every column", () => {
@@ -305,7 +320,7 @@ describe("DataTable", () => {
 
     it("renders no row actions without a host, and resolved ones with a host", () => {
         mount(React.createElement(DataTable, { table: spec }));
-        expect(container!.querySelector(".bt-td-actions")).toBeNull();
+        expect(container!.querySelector(".bt-ref-actions")).toBeNull();
 
         act(() => root?.unmount());
         container?.remove();
@@ -353,12 +368,19 @@ describe("DataTable", () => {
             }),
         );
 
-        // In-library item row: reveal lives on the anchor cell — the title is
-        // the target and the arrow sits at the cell's edge.
+        // Every verb lives at the edge of the sticky anchor cell, never in a
+        // column of its own: the host's Add control for the external row…
         const rows = container!.querySelectorAll("tr.bt-row");
+        expect(container!.querySelector(".bt-td-actions")).toBeNull();
+        expect(
+            rows[0].querySelector(".bt-td-anchor .bt-ref-actions .host-import"),
+        ).not.toBeNull();
+
+        // …and for the in-library item row the reveal glyph, with the title
+        // as the same target.
         click(
             rows[1].querySelector(
-                '.bt-ref-reveal button[aria-label="Reveal in library"]',
+                '.bt-td-anchor .bt-ref-actions button[aria-label="Reveal in library"]',
             ),
         );
         expect(revealInLibrary).toHaveBeenCalledWith({
@@ -370,14 +392,13 @@ describe("DataTable", () => {
         click(rows[1].querySelector(".bt-ref-title-button"));
         expect(revealInLibrary).toHaveBeenCalledTimes(2);
 
-        // The actions column must not draw the same reveal again.
+        // One reveal control besides the title, and no menu: the table declares
+        // no other verb for the row to hold.
         expect(
             rows[1].querySelectorAll('button[aria-label="Reveal in library"]'),
         ).toHaveLength(1);
         expect(
-            rows[1].querySelector(
-                '.bt-actions button[aria-label="Reveal in library"]',
-            ),
+            rows[1].querySelector('button[aria-label="More actions"]'),
         ).toBeNull();
 
         // The clamp must sit on a span inside the button, never on the button:
@@ -390,7 +411,121 @@ describe("DataTable", () => {
         ).not.toBeNull();
 
         // A row with no ref offers nothing.
-        expect(rows[2].querySelector(".bt-actions")?.children.length).toBe(0);
+        expect(rows[2].querySelector(".bt-ref-actions")).toBeNull();
+    });
+
+    it("offers import only when the table declares it", () => {
+        const externalReferenceActions = vi.fn(() =>
+            React.createElement("button", { className: "host-import" }, "Add"),
+        );
+        setHost({
+            components: {
+                externalReferenceActions,
+                agentActionInStream: () => null,
+                pendingActionsReview: () => null,
+                itemTypeIcon: () => null,
+                revealInLibraryIcon: () => null,
+            },
+        });
+        mount(
+            React.createElement(DataTable, {
+                table: { ...spec, capabilities: { row_actions: ["reveal"] } },
+            }),
+        );
+        expect(externalReferenceActions).not.toHaveBeenCalled();
+        expect(container!.querySelector(".host-import")).toBeNull();
+    });
+
+    it("keeps the verbs on the anchor cell whatever state its value is in, once per row", () => {
+        setHost({
+            navigation: {
+                revealInLibrary: vi.fn(),
+                revealLibrary: () => {},
+                revealCollection: () => {},
+                launchFile: () => {},
+                openExternalUrl: () => {},
+                activateCitation: () => {},
+                openSource: () => {},
+                openAnnotation: () => {},
+                navigateToAttachmentMatch: () => {},
+                launchExternalFile: () => {},
+            },
+        });
+        const itemRow = spec.rows[1];
+        mount(
+            React.createElement(DataTable, {
+                table: {
+                    ...spec,
+                    columns: [
+                        ...spec.columns,
+                        {
+                            id: "cites_ref",
+                            header: "Cited by",
+                            type: "reference",
+                        },
+                    ],
+                    rows: [
+                        {
+                            ...itemRow,
+                            cells: {
+                                ...itemRow.cells,
+                                // The anchor is still filling…
+                                ref: { status: "pending" },
+                                // …and a second reference column must not grow
+                                // a copy of the row's verbs, nor a title verb.
+                                cites_ref: {
+                                    value: {
+                                        kind: "reference",
+                                        display_name: "Smith 2020",
+                                    },
+                                },
+                            },
+                        },
+                    ],
+                },
+            }),
+        );
+        const row = container!.querySelector("tr.bt-row")!;
+        expect(row.querySelectorAll(".bt-ref-actions")).toHaveLength(1);
+        expect(
+            row.querySelector(
+                '.bt-td-anchor .bt-ref-actions button[aria-label="Reveal in library"]',
+            ),
+        ).not.toBeNull();
+        expect(row.querySelector(".bt-ref-title-button")).toBeNull();
+    });
+
+    it("puts the verbs beyond the primary one behind a menu on the anchor cell", () => {
+        setHost({
+            navigation: {
+                revealInLibrary: vi.fn(),
+                revealLibrary: () => {},
+                revealCollection: () => {},
+                launchFile: () => {},
+                openExternalUrl: () => {},
+                activateCitation: () => {},
+                openSource: () => {},
+                openAnnotation: () => {},
+                navigateToAttachmentMatch: () => {},
+                launchExternalFile: () => {},
+            },
+        });
+        mount(
+            React.createElement(DataTable, {
+                table: {
+                    ...spec,
+                    capabilities: { row_actions: ["reveal", "open"] },
+                },
+            }),
+        );
+        const rows = container!.querySelectorAll("tr.bt-row");
+        const actions = rows[1].querySelector(".bt-td-anchor .bt-ref-actions")!;
+        expect(
+            actions.querySelector('button[aria-label="Reveal in library"]'),
+        ).not.toBeNull();
+        expect(
+            actions.querySelector('button[aria-label="More actions"]'),
+        ).not.toBeNull();
     });
 
     it("renders the empty text for a table without rows", () => {
@@ -447,6 +582,193 @@ describe("DataTable — density, columns and expansion", () => {
         expect(headerLabels()).toEqual(before);
     });
 
+    it("starts a different table from its own hidden-column defaults", () => {
+        const typeColumn = {
+            id: "_type",
+            header: "Type",
+            type: "select" as const,
+            role: "row_type" as const,
+            system: true as const,
+        };
+        const itemRow = spec.rows[1];
+        const uniform: TableSpec = {
+            ...spec,
+            id: "uniform",
+            columns: [spec.columns[0], typeColumn],
+            rows: [itemRow],
+        };
+        const mixed: TableSpec = {
+            ...uniform,
+            id: "mixed",
+            rows: [itemRow, spec.rows[0]],
+        };
+        mount(React.createElement(DataTable, { table: uniform }));
+        // One kind of row: the type column stays out of the way.
+        expect(headerLabels()).toEqual(["Item"]);
+
+        // Same mounted surface, another table: its own defaults apply rather
+        // than the previous table's hidden set.
+        act(() =>
+            root?.render(React.createElement(DataTable, { table: mixed })),
+        );
+        expect(headerLabels()).toEqual(["Item", "Type"]);
+    });
+
+    it("keeps the viewer's column choices when the same table gains its stored key", () => {
+        const typeColumn = {
+            id: "_type",
+            header: "Type",
+            type: "select" as const,
+            role: "row_type" as const,
+            system: true as const,
+        };
+        const unsaved: TableSpec = {
+            ...spec,
+            id: "draft",
+            columns: [spec.columns[0], typeColumn],
+            rows: [spec.rows[1]],
+        };
+        let latest: TableState | null = null;
+        function Harness({ table }: { table: TableSpec }) {
+            const state = useTableState(table);
+            latest = state;
+            return React.createElement(DataTable, { table, state });
+        }
+        mount(React.createElement(Harness, { table: unsaved }));
+        expect(headerLabels()).toEqual(["Item"]);
+        act(() => latest!.toggleColumn("_type"));
+        expect(headerLabels()).toEqual(["Item", "Type"]);
+
+        // Persisting the table gives it a key; it is still the same table.
+        act(() =>
+            root?.render(
+                React.createElement(Harness, {
+                    table: { ...unsaved, key: "ABCD1234", version: 1 },
+                }),
+            ),
+        );
+        expect(headerLabels()).toEqual(["Item", "Type"]);
+
+        // A different stored table is not.
+        act(() =>
+            root?.render(
+                React.createElement(Harness, {
+                    table: { ...unsaved, key: "WXYZ5678", version: 1 },
+                }),
+            ),
+        );
+        expect(headerLabels()).toEqual(["Item"]);
+    });
+
+    it("shows the type column as soon as the same table mixes kinds, but keeps a column the viewer hid", () => {
+        const typeColumn = {
+            id: "_type",
+            header: "Type",
+            type: "select" as const,
+            role: "row_type" as const,
+            system: true as const,
+        };
+        const uniform: TableSpec = {
+            ...spec,
+            id: "draft",
+            columns: [spec.columns[0], typeColumn, spec.columns[1]],
+            rows: [spec.rows[1]],
+        };
+        let latest: TableState | null = null;
+        function Harness({ table }: { table: TableSpec }) {
+            const state = useTableState(table);
+            latest = state;
+            return React.createElement(DataTable, { table, state });
+        }
+        mount(React.createElement(Harness, { table: uniform }));
+        expect(headerLabels()).toEqual(["Item", "Citations"]);
+        // The viewer hides Citations by hand.
+        act(() => latest!.toggleColumn("cites"));
+        expect(headerLabels()).toEqual(["Item"]);
+
+        // An in-place update brings an annotation row: the type column is now
+        // due by default, and the viewer's own choice about Citations stands.
+        const annotationRow = {
+            id: "item:1:A",
+            ref: {
+                kind: "annotation" as const,
+                library_id: 1,
+                zotero_key: "A",
+                attachment: { library_id: 1, zotero_key: "F" },
+            },
+            cells: {
+                ref: {
+                    value: { kind: "annotation" as const, text: "A passage" },
+                },
+            },
+        };
+        act(() =>
+            root?.render(
+                React.createElement(Harness, {
+                    table: {
+                        ...uniform,
+                        rows: [...uniform.rows, annotationRow],
+                    },
+                }),
+            ),
+        );
+        expect(headerLabels()).toEqual(["Item", "Type"]);
+
+        // Show all clears every override, defaults included.
+        act(() => latest!.showAllColumns());
+        expect(headerLabels()).toEqual(["Item", "Type", "Citations"]);
+    });
+
+    it("cannot tell two unstored tables with one render id apart, so a surface remounts between them", () => {
+        const typeColumn = {
+            id: "_type",
+            header: "Type",
+            type: "select" as const,
+            role: "row_type" as const,
+            system: true as const,
+        };
+        const first: TableSpec = {
+            ...spec,
+            id: "draft",
+            columns: [spec.columns[0], typeColumn],
+            rows: [spec.rows[1]],
+        };
+        // A different unstored table that happens to reuse the render id.
+        const second: TableSpec = { ...first, rows: [spec.rows[2]] };
+        let latest: TableState | null = null;
+        function Harness({ table }: { table: TableSpec }) {
+            const state = useTableState(table);
+            latest = state;
+            return React.createElement(DataTable, { table, state });
+        }
+
+        // Same React key: the hook has nothing to go on and keeps the choice.
+        mount(React.createElement(Harness, { key: "showing-1", table: first }));
+        act(() => latest!.toggleColumn("_type"));
+        expect(headerLabels()).toEqual(["Item", "Type"]);
+        act(() =>
+            root?.render(
+                React.createElement(Harness, {
+                    key: "showing-1",
+                    table: second,
+                }),
+            ),
+        );
+        expect(headerLabels()).toEqual(["Item", "Type"]);
+
+        // A new showing remounts, and the second table starts from its own
+        // defaults — which is what the Beaver window does per surface id.
+        act(() =>
+            root?.render(
+                React.createElement(Harness, {
+                    key: "showing-2",
+                    table: second,
+                }),
+            ),
+        );
+        expect(headerLabels()).toEqual(["Item"]);
+    });
+
     it("drops non-primary columns only when the surface says it is narrow", () => {
         mount(
             React.createElement(DataTable, {
@@ -462,7 +784,14 @@ describe("DataTable — density, columns and expansion", () => {
             Array.from(container!.querySelectorAll(".bt-detail dt")).map(
                 (dt) => dt.textContent,
             ),
-        ).toEqual(["Item", "Citations", "Type", "Open access", "Methods"]);
+        ).toEqual([
+            "Item",
+            "Abstract",
+            "Citations",
+            "Type",
+            "Open access",
+            "Methods",
+        ]);
     });
 
     it("keeps a failed column in the expanded row and offers its retry", () => {

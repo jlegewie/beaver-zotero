@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import {
     cellValueText,
+    defaultHiddenColumnIds,
     filterRows,
     isColumnFilterable,
     sortRows,
@@ -76,6 +77,28 @@ export interface UseTableStateOptions {
     density?: TableDensity;
 }
 
+/** The table a hidden-column set was seeded for. */
+interface TableIdentity {
+    key?: string;
+    id: string;
+}
+
+/**
+ * Whether two specs are the same table. Stored keys settle it — except that a
+ * table gaining its first key (an unsaved table just persisted) is still the
+ * table it was, so a missing previous key defers to the render id.
+ *
+ * Two *unstored* tables sharing a render id cannot be told apart from their
+ * specs at all. A surface that shows unstored tables in turn must remount for
+ * each (a React `key` on the showing, as the Beaver window does), which resets
+ * every part of this state and not just the columns.
+ */
+function isSameTable(a: TableIdentity, b: TableIdentity): boolean {
+    if (a.key !== undefined && b.key !== undefined) return a.key === b.key;
+    if (a.key !== undefined && b.key === undefined) return false;
+    return a.id === b.id;
+}
+
 function toggleInSet(set: ReadonlySet<string>, id: string): Set<string> {
     const next = new Set(set);
     if (next.has(id)) next.delete(id);
@@ -128,9 +151,33 @@ export function useTableState(
     const [selectedRows, setSelectedRows] = useState<ReadonlySet<string>>(
         () => new Set(),
     );
-    const [hiddenColumns, setHiddenColumns] = useState<ReadonlySet<string>>(
-        () => new Set(),
-    );
+    // Which columns are hidden is derived, not stored: the spec's defaults
+    // (system columns hidden, the row-type column shown once the table mixes
+    // kinds) overlaid with the columns the viewer has explicitly toggled. So a
+    // table that gains its first annotation row shows its type column at once,
+    // while a column the viewer hid stays hidden. The overrides last as long
+    // as the table does; a different table starts with none.
+    const [columnOverrides, setColumnOverrides] = useState<
+        ReadonlyMap<string, boolean>
+    >(() => new Map());
+    const identity: TableIdentity = { key: spec.key, id: spec.id };
+    const [hiddenFor, setHiddenFor] = useState(identity);
+    if (!isSameTable(hiddenFor, identity)) {
+        setHiddenFor(identity);
+        setColumnOverrides(new Map());
+    } else if (hiddenFor.key !== identity.key) {
+        // Same table, now stored: remember the key so a later table with the
+        // same render id is not mistaken for it.
+        setHiddenFor(identity);
+    }
+    const hiddenColumns = useMemo<ReadonlySet<string>>(() => {
+        const hidden = new Set(defaultHiddenColumnIds(spec));
+        for (const [id, isHidden] of columnOverrides) {
+            if (isHidden) hidden.add(id);
+            else hidden.delete(id);
+        }
+        return hidden;
+    }, [spec, columnOverrides]);
 
     const toggleSort = useCallback((columnId: string) => {
         setSort((current) => {
@@ -217,10 +264,19 @@ export function useTableState(
     );
     const clearSelection = useCallback(() => setSelectedRows(new Set()), []);
     const toggleColumn = useCallback(
-        (columnId: string) => setHiddenColumns((s) => toggleInSet(s, columnId)),
-        [],
+        (columnId: string) =>
+            setColumnOverrides((current) =>
+                new Map(current).set(columnId, !hiddenColumns.has(columnId)),
+            ),
+        [hiddenColumns],
     );
-    const showAllColumns = useCallback(() => setHiddenColumns(new Set()), []);
+    const showAllColumns = useCallback(
+        () =>
+            setColumnOverrides(
+                new Map(spec.columns.map((column) => [column.id, false])),
+            ),
+        [spec.columns],
+    );
 
     const allInViewSelected =
         rows.length > 0 && rows.every((row) => selectedRows.has(row.id));

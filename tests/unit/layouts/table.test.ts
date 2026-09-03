@@ -3,6 +3,9 @@ import type { Citation } from "@beaver/agent-core/types/citations";
 import type { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import {
     anchorColumn,
+    annotationComment,
+    annotationTitle,
+    cellExpandedFields,
     cellIdFor,
     cellSortKey,
     cellValueText,
@@ -10,6 +13,7 @@ import {
     citationKeysInText,
     citationsByKey,
     columnAlign,
+    defaultHiddenColumnIds,
     filterRows,
     hasFixedVocabulary,
     isCellEmpty,
@@ -22,6 +26,7 @@ import {
     rowActions,
     rowIdFor,
     rowPrimaryAction,
+    rowTypeLabel,
     selectLabelsInColumn,
     sortRows,
     TABLE_SPEC_VERSION,
@@ -1022,6 +1027,193 @@ describe("row actions", () => {
     });
 });
 
+describe("row types and expanded fields", () => {
+    const typeColumn = {
+        id: "_type",
+        header: "Type",
+        type: "select" as const,
+        role: "row_type" as const,
+        system: true as const,
+    };
+    const item = (id: string): Row => ({
+        id,
+        ref: { kind: "item", library_id: 1, zotero_key: id },
+        cells: {},
+    });
+    const annotation: Row = {
+        id: "a",
+        ref: {
+            kind: "annotation",
+            library_id: 1,
+            zotero_key: "A",
+            attachment: { library_id: 1, zotero_key: "F" },
+        },
+        cells: {},
+    };
+
+    it("hides system columns until the table mixes row kinds, then shows the type column", () => {
+        const uniform: TableSpec = {
+            id: "t",
+            columns: [
+                { id: "ref", header: "Item", type: "reference" },
+                typeColumn,
+                { id: "_year", header: "Year", type: "date", system: true },
+            ],
+            rows: [item("K1"), item("K2")],
+        };
+        expect(defaultHiddenColumnIds(uniform)).toEqual(["_type", "_year"]);
+        const mixed = { ...uniform, rows: [item("K1"), annotation] };
+        expect(defaultHiddenColumnIds(mixed)).toEqual(["_year"]);
+    });
+
+    it("labels non-item rows by kind and leaves item types to the producer", () => {
+        expect(rowTypeLabel(item("K"), undefined)).toBeUndefined();
+        expect(
+            rowTypeLabel(annotation, {
+                kind: "annotation",
+                annotation_type: "underline",
+            }),
+        ).toBe("Underline");
+        expect(
+            rowTypeLabel(
+                {
+                    id: "f",
+                    ref: {
+                        kind: "attachment",
+                        library_id: 1,
+                        zotero_key: "F",
+                    },
+                    cells: {},
+                },
+                { kind: "reference", display_name: "x", content_kind: "pdf" },
+            ),
+        ).toBe("PDF");
+        expect(
+            rowTypeLabel(
+                {
+                    id: "e",
+                    ref: {
+                        kind: "external",
+                        source: "openalex",
+                        source_id: "W",
+                    },
+                    cells: {},
+                },
+                undefined,
+            ),
+        ).toBe("Search result");
+        expect(
+            rowTypeLabel(
+                {
+                    id: "x",
+                    ref: { kind: "file", ext_key: "AB12CD34" },
+                    cells: {},
+                },
+                undefined,
+            ),
+        ).toBe("Local file");
+    });
+
+    it("titles an annotation by what it has: passage, comment, or its place", () => {
+        expect(
+            annotationTitle({
+                kind: "annotation",
+                annotation_type: "highlight",
+                text: "A passage",
+                comment: "A note",
+            }),
+        ).toBe("A passage");
+        expect(
+            annotationTitle({
+                kind: "annotation",
+                annotation_type: "note",
+                comment: "A note",
+            }),
+        ).toBe("A note");
+        expect(
+            annotationTitle({
+                kind: "annotation",
+                annotation_type: "image",
+                page_label: "4",
+            }),
+        ).toBe("Area on p. 4");
+        expect(annotationTitle({ kind: "annotation" })).toBe("Annotation");
+    });
+
+    it("shows a comment under the title only when the title is something else", () => {
+        // A highlight's comment is a second voice under the passage…
+        expect(
+            annotationComment({
+                kind: "annotation",
+                annotation_type: "highlight",
+                text: "A passage",
+                comment: "A note",
+            }),
+        ).toBe("A note");
+        // …a note's comment is already its title…
+        expect(
+            annotationComment({
+                kind: "annotation",
+                annotation_type: "note",
+                text: "Selected text",
+                comment: "A note",
+            }),
+        ).toBeUndefined();
+        // …and so is a highlight's when it has no passage of its own.
+        expect(
+            annotationComment({
+                kind: "annotation",
+                annotation_type: "highlight",
+                comment: "A note",
+            }),
+        ).toBeUndefined();
+        // An area mark is titled by its place, so its comment is worth a line.
+        expect(
+            annotationComment({
+                kind: "annotation",
+                annotation_type: "image",
+                comment: "Figure 2",
+            }),
+        ).toBe("Figure 2");
+    });
+
+    it("lists a labelled detail and an annotation's parts as fields of their own", () => {
+        // The label names the field and is stripped from the details, so a
+        // renderer never prints it twice.
+        expect(
+            cellExpandedFields({
+                value: { kind: "reference", display_name: "x" },
+                details: { kind: "text", label: "Abstract", text: "…" },
+            }),
+        ).toEqual([
+            { label: "Abstract", details: { kind: "text", text: "…" } },
+        ]);
+        // An unlabelled detail stays with its cell.
+        expect(
+            cellExpandedFields({
+                value: { kind: "text", text: "x" },
+                details: { kind: "list", items: ["a"] },
+            }),
+        ).toEqual([]);
+        expect(
+            cellExpandedFields({
+                value: {
+                    kind: "annotation",
+                    annotation_type: "highlight",
+                    text: "A passage",
+                    comment: "A note",
+                },
+            }).map((f) => [
+                f.label,
+                f.details.kind === "text" && f.details.text,
+            ]),
+        ).toEqual([
+            ["Highlighted text", "A passage"],
+            ["Comment", "A note"],
+        ]);
+    });
+});
+
 describe("anchor cells and row kinds", () => {
     const spec: TableSpec = {
         id: "t",
@@ -1111,7 +1303,14 @@ describe("coverage", () => {
             id: "t",
             columns: [
                 { id: "a", header: "A", type: "text" },
-                { id: "b", header: "B", type: "text" },
+                {
+                    id: "b",
+                    header: "B",
+                    type: "text",
+                    description: "What is B?",
+                },
+                // A system column: its empties are gaps, not findings.
+                { id: "_year", header: "Year", type: "date", system: true },
             ],
             rows: [
                 {
@@ -1133,9 +1332,11 @@ describe("coverage", () => {
         };
         expect(summarizeCoverage(spec)).toEqual({
             rows: 2,
-            cells: 4,
+            cells: 6,
             filled: 1,
-            empty: 1,
+            empty: 3,
+            // Only the empty answer to a question counts as "not reported".
+            notReported: 1,
             pending: 1,
             error: 1,
             errorRows: 1,

@@ -17,7 +17,14 @@
 
 import type { ExternalReference } from "../types/externalReferences";
 import type { ZoteroItemReference } from "../types/zotero";
-import type { CellValueKind, Row, RowRef, TableSpec } from "./table";
+import type {
+    CellValue,
+    CellValueKind,
+    Row,
+    RowRef,
+    SelectColor,
+    TableSpec,
+} from "./table";
 
 /**
  * Verbs a row may offer. Add-only: the names are persisted in stored tables
@@ -79,6 +86,79 @@ export interface RowKindDef<K extends RowKind = RowKind> {
         action: RowAction,
         inLibrary: boolean,
     ): RowActionTarget | undefined;
+    /**
+     * The row's label in a `row_type` column ("Highlight", "Search result"),
+     * derived from the ref and its anchor value. `undefined` means the producer
+     * supplies it — a regular item's type needs the host's localised item-type
+     * name, which the core does not have.
+     */
+    typeLabel(ref: RefOf<K>, anchor: CellValue | undefined): string | undefined;
+    /** Colour of this kind's labels in a `row_type` column. */
+    typeColor: SelectColor;
+}
+
+const ANNOTATION_TYPE_LABELS: Record<string, string> = {
+    highlight: "Highlight",
+    underline: "Underline",
+    note: "Note",
+    text: "Text",
+    image: "Area",
+    ink: "Ink",
+};
+
+/** Human label for an annotation type; unknown types read as "Annotation". */
+export function annotationTypeLabel(type: string | undefined): string {
+    return (type && ANNOTATION_TYPE_LABELS[type]) ?? "Annotation";
+}
+
+const ATTACHMENT_KIND_LABELS: Record<string, string> = {
+    pdf: "PDF",
+    epub: "EPUB",
+    snapshot: "Snapshot",
+    image: "Image",
+    video: "Video",
+    linked_url: "Web link",
+};
+
+/**
+ * The comment shown under an annotation's title — only when the title is
+ * something else. A note's comment *is* its title, so repeating it below would
+ * say the same thing twice; a highlight's comment is a second voice under the
+ * passage, and an area or ink mark's comment is the only words it has.
+ */
+export function annotationComment(
+    value: Extract<CellValue, { kind: "annotation" }>,
+): string | undefined {
+    if (!value.comment) return undefined;
+    switch (value.annotation_type) {
+        case "note":
+            return undefined;
+        case "image":
+        case "ink":
+            return value.comment;
+        default:
+            return value.text ? value.comment : undefined;
+    }
+}
+
+/**
+ * What an annotation row is titled. A highlight or underline is its passage; a
+ * note is its comment; an area or ink mark has no text of its own, so it is
+ * named by what it is and where it sits.
+ */
+export function annotationTitle(
+    value: Extract<CellValue, { kind: "annotation" }>,
+): string {
+    const where = value.page_label ? ` on p. ${value.page_label}` : "";
+    switch (value.annotation_type) {
+        case "note":
+            return value.comment ?? value.text ?? `Note${where}`;
+        case "image":
+        case "ink":
+            return `${annotationTypeLabel(value.annotation_type)}${where}`;
+        default:
+            return value.text ?? value.comment ?? `Annotation${where}`;
+    }
 }
 
 /** Zotero object kinds share one id scheme: the key is the identity, whatever the object is. */
@@ -100,6 +180,9 @@ export const ROW_KINDS: { [K in RowKind]: RowKindDef<K> } = {
         inLibrary: () => true,
         anchorValueKinds: ["reference"],
         primaryAction: "reveal",
+        // The item type's name is the host's to localise.
+        typeLabel: () => undefined,
+        typeColor: "gray",
         target(ref, action, inLibrary) {
             // A producer that marks a library object as no longer in the
             // library (deleted, out of reach) takes its verbs with it.
@@ -120,6 +203,12 @@ export const ROW_KINDS: { [K in RowKind]: RowKindDef<K> } = {
         inLibrary: () => true,
         anchorValueKinds: ["reference"],
         primaryAction: "reveal",
+        typeLabel: (_ref, anchor) => {
+            const kind =
+                anchor?.kind === "reference" ? anchor.content_kind : undefined;
+            return (kind && ATTACHMENT_KIND_LABELS[kind]) ?? "Attachment";
+        },
+        typeColor: "blue",
         target(ref, action, inLibrary) {
             if (!inLibrary) return undefined;
             if (action === "reveal")
@@ -135,6 +224,13 @@ export const ROW_KINDS: { [K in RowKind]: RowKindDef<K> } = {
         // An annotation has no row in the items tree; the reader is where it
         // is shown, so opening it is the verb its text carries.
         primaryAction: "open",
+        typeLabel: (_ref, anchor) =>
+            annotationTypeLabel(
+                anchor?.kind === "annotation"
+                    ? anchor.annotation_type
+                    : undefined,
+            ),
+        typeColor: "yellow",
         target(ref, action, inLibrary) {
             if (!inLibrary) return undefined;
             if (action === "reveal")
@@ -156,6 +252,8 @@ export const ROW_KINDS: { [K in RowKind]: RowKindDef<K> } = {
         inLibrary: (ref) => (ref.reference?.library_items?.length ?? 0) > 0,
         anchorValueKinds: ["reference"],
         primaryAction: "reveal",
+        typeLabel: () => "Search result",
+        typeColor: "purple",
         target(ref, action, inLibrary) {
             const copy = ref.reference?.library_items?.[0];
             if (action === "import")
@@ -178,6 +276,8 @@ export const ROW_KINDS: { [K in RowKind]: RowKindDef<K> } = {
         inLibrary: () => false,
         anchorValueKinds: ["reference"],
         primaryAction: "open",
+        typeLabel: () => "Local file",
+        typeColor: "green",
         target(ref, action) {
             return action === "open"
                 ? { kind: "open_external_file", ext_key: ref.ext_key }
@@ -247,4 +347,28 @@ export function rowPrimaryAction(row: Row): RowAction | undefined {
 /** Anchor cell value kinds that can describe this ref. */
 export function anchorValueKindsFor(ref: RowRef): readonly CellValueKind[] {
     return rowKindOf(ref).anchorValueKinds;
+}
+
+/** The kinds of row a table holds. */
+export function rowKindsIn(spec: TableSpec): Set<RowKind> {
+    const kinds = new Set<RowKind>();
+    for (const row of spec.rows) if (row.ref) kinds.add(row.ref.kind);
+    return kinds;
+}
+
+/**
+ * The row's label for a `row_type` column, from its kind and anchor value.
+ * `undefined` for a regular item, whose type name the producer localises.
+ */
+export function rowTypeLabel(
+    row: Row,
+    anchor: CellValue | undefined,
+): string | undefined {
+    if (!row.ref) return undefined;
+    return rowKindOf(row.ref).typeLabel(row.ref as never, anchor);
+}
+
+/** Colour a `row_type` column gives this row's label. */
+export function rowTypeColor(row: Row): SelectColor {
+    return row.ref ? rowKindOf(row.ref).typeColor : "gray";
 }

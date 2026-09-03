@@ -205,9 +205,9 @@ describe("renderTableHtml", () => {
         expect(html).not.toContain("items/K2");
     });
 
-    it("draws no actions column when no row's verb has a link", () => {
+    it("draws the primary verb on the anchor cell and never a column of its own", () => {
         // A context-file row declares `open`, but a static document has no
-        // link for a local file; the column would be all empty cells.
+        // link for a local file, so its anchor carries no control.
         const files: TableSpec = {
             ...spec,
             capabilities: { row_actions: ["open", "import"] },
@@ -222,8 +222,19 @@ describe("renderTableHtml", () => {
             ],
         };
         const { html } = renderTableHtml(files, { linksFor: () => ({}) });
+        expect(html).not.toContain("bt-ref-act");
         expect(html).not.toContain("bt-acts");
-        expect(renderTableHtml(spec, { linksFor: () => ({ reveal: "zotero://select/library/items/K1" }) }).html).toContain("bt-acts");
+
+        const linked = renderTableHtml(spec, {
+            linksFor: () => ({ reveal: "zotero://select/library/items/K1" }),
+        }).html;
+        // The reveal link sits inside the anchor cell; the expanded detail
+        // lists it too.
+        expect(linked).toMatch(
+            /class="bt-c[^"]*bt-anchor"[^>]*>.*?<a class="bt-act bt-ref-act" href="zotero:\/\/select\/library\/items\/K1"/,
+        );
+        expect(linked).toContain('class="bt-d-actions"');
+        expect(linked).not.toContain("bt-acts");
     });
 });
 

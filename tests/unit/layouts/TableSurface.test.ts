@@ -23,7 +23,12 @@ const spec: TableSpec = {
             type: "select",
             options: [{ label: "Article", color: "blue" }, { label: "Book" }],
         },
-        { id: "notes", header: "Notes", type: "text" },
+        {
+            id: "notes",
+            header: "Notes",
+            type: "text",
+            description: "What did the study note?",
+        },
     ],
     rows: [
         {
@@ -111,6 +116,43 @@ describe("table chrome", () => {
         expect(footer).toContain("not reported");
         // …and the failed cell is reported separately from them.
         expect(footer).toContain("1 failed");
+    });
+
+    it("offers the columns menu whenever a column starts hidden, so it can be brought back", () => {
+        const typeColumn = {
+            id: "_type",
+            header: "Type",
+            type: "select" as const,
+            role: "row_type" as const,
+            system: true as const,
+        };
+        // Anchor plus one system column: hidden by default, so the menu is
+        // the only way to it and must exist even for a single hideable column.
+        mount(
+            React.createElement(TableSurface, {
+                table: { ...spec, columns: [spec.columns[0], typeColumn] },
+            }),
+        );
+        expect(
+            container!.querySelector(
+                'button[aria-label="Show and hide columns"]',
+            ),
+        ).not.toBeNull();
+
+        act(() => root?.unmount());
+        container?.remove();
+
+        // Anchor plus one ordinary column: nothing hidden, no menu to offer.
+        mount(
+            React.createElement(TableSurface, {
+                table: { ...spec, columns: [spec.columns[0], spec.columns[1]] },
+            }),
+        );
+        expect(
+            container!.querySelector(
+                'button[aria-label="Show and hide columns"]',
+            ),
+        ).toBeNull();
     });
 
     it("moves the row height from the toolbar", () => {

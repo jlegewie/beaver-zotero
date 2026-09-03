@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo } from "react";
 import {
     anchorColumn,
+    cellExpandedFields,
     cellIdFor,
     columnAlign,
     isColumnFilterable,
@@ -13,7 +14,7 @@ import { ArrowRightIcon, Icon, TickIcon } from "../icons";
 import type { MenuItem } from "../primitives/ContextMenu";
 import { CellView, DetailsView } from "./cells";
 import { ColumnHeaderCell } from "./columnHeader";
-import { RowActionsView, tableHasRowActions } from "./rowActions";
+import { RowActionsView } from "./rowActions";
 import {
     defaultColumnWidth,
     renderPlainText,
@@ -69,7 +70,8 @@ export interface DataTableProps {
  * 2. **One expansion affordance per row**, in the left rail. The expanded row
  *    shows every field in full, so no cell needs a chevron of its own.
  * 3. **The anchor column is sticky**, together with the rail, so the row keeps
- *    its identity while the value columns scroll horizontally.
+ *    its identity while the value columns scroll horizontally — and it carries
+ *    the row's verbs (`rowActions.tsx`), so they never scroll away either.
  *
  * Nothing here reads a global store and nothing queries the client at render
  * time: the spec is self-contained, and client behaviour arrives through
@@ -95,7 +97,6 @@ export function DataTable({
     const density = state.density;
 
     const anchor = anchorColumn(table);
-    const hasRowActions = tableHasRowActions(table);
     const selectable = table.rows.length > 0;
     const expandable = capabilities.expandable_rows ?? true;
     // One column with a question gives every header the same reserved block, so
@@ -116,10 +117,10 @@ export function DataTable({
         [table.columns, primaryColumnsOnly, anchor, state.hiddenColumns],
     );
 
-    const columnCount = visibleColumns.length + 1 + (hasRowActions ? 1 : 0);
+    const columnCount = visibleColumns.length + 1;
     const minWidth = useMemo(
-        () => tableMinWidth(visibleColumns, anchor?.id, hasRowActions),
-        [visibleColumns, anchor, hasRowActions],
+        () => tableMinWidth(visibleColumns, anchor?.id),
+        [visibleColumns, anchor],
     );
 
     const selectClickFor = (column: Column) =>
@@ -147,7 +148,6 @@ export function DataTable({
                             }}
                         />
                     ))}
-                    {hasRowActions ? <col className="bt-col-actions" /> : null}
                 </colgroup>
 
                 <thead>
@@ -178,13 +178,6 @@ export function DataTable({
                                 menuItems={columnMenuItems?.(column)}
                             />
                         ))}
-                        {hasRowActions ? (
-                            <th className="bt-th bt-th-actions" scope="col">
-                                <span className="bt-visually-hidden">
-                                    Actions
-                                </span>
-                            </th>
-                        ) : null}
                     </tr>
                 </thead>
 
@@ -203,7 +196,6 @@ export function DataTable({
                             renderRowDetail={renderRowDetail}
                             selectClickFor={selectClickFor}
                             onRetryCell={onRetryCell}
-                            hasRowActions={hasRowActions}
                             expandable={expandable}
                             sortable={sortable}
                             columnCount={columnCount}
@@ -269,7 +261,6 @@ interface TableRowProps {
     renderRowDetail?: (row: Row) => React.ReactNode;
     selectClickFor: (column: Column) => ((label: string) => void) | undefined;
     onRetryCell?: (row: Row, column: Column) => void;
-    hasRowActions: boolean;
     expandable: boolean;
     sortable: boolean;
     columnCount: number;
@@ -287,7 +278,6 @@ function TableRow({
     renderRowDetail,
     selectClickFor,
     onRetryCell,
-    hasRowActions,
     expandable,
     sortable,
     columnCount,
@@ -339,29 +329,44 @@ function TableRow({
                             .filter(Boolean)
                             .join(" ")}
                     >
-                        <CellView
-                            cell={row.cells[column.id]}
-                            column={column}
-                            row={row}
-                            table={table}
-                            renderText={renderText}
-                            onSelectClick={selectClickFor(column)}
-                            onRetry={
-                                onRetryCell
-                                    ? () => onRetryCell(row, column)
-                                    : undefined
-                            }
-                        />
+                        {column.id === anchorId ? (
+                            // The row's verbs ride on the anchor cell itself,
+                            // in normal flow beside the value, so they are
+                            // there whatever state the value is in and take
+                            // the width they need rather than the title's.
+                            <div className="bt-anchor-cell">
+                                <CellView
+                                    cell={row.cells[column.id]}
+                                    column={column}
+                                    row={row}
+                                    table={table}
+                                    renderText={renderText}
+                                    onSelectClick={selectClickFor(column)}
+                                    onRetry={
+                                        onRetryCell
+                                            ? () => onRetryCell(row, column)
+                                            : undefined
+                                    }
+                                />
+                                <RowActionsView table={table} row={row} />
+                            </div>
+                        ) : (
+                            <CellView
+                                cell={row.cells[column.id]}
+                                column={column}
+                                row={row}
+                                table={table}
+                                renderText={renderText}
+                                onSelectClick={selectClickFor(column)}
+                                onRetry={
+                                    onRetryCell
+                                        ? () => onRetryCell(row, column)
+                                        : undefined
+                                }
+                            />
+                        )}
                     </td>
                 ))}
-
-                {hasRowActions ? (
-                    <td className="bt-td bt-td-actions">
-                        <span className="bt-actions">
-                            <RowActionsView table={table} row={row} />
-                        </span>
-                    </td>
-                ) : null}
             </tr>
 
             {expanded ? (
@@ -491,6 +496,10 @@ function SelectionBox({
  * The expanded row: every field in full, including the ones a clamp cut short
  * plus, on a narrow surface, the columns that are not columns here. This is what
  * makes clamping safe — nothing is unreachable, it is one click away.
+ *
+ * A field may bring fields of its own that exist only here: a labelled detail
+ * such as an abstract, or an annotation's passage and comment. They follow the
+ * cell they belong to, listed by name like any other field.
  */
 function RowDetail({
     table,
@@ -526,31 +535,50 @@ function RowDetail({
             ) : null}
 
             <dl className="bt-detail-fields">
-                {fields.map((column) => (
-                    <React.Fragment key={column.id}>
-                        <dt>{column.header}</dt>
-                        <dd>
-                            <CellView
-                                cell={row.cells[column.id]}
-                                column={column}
-                                row={row}
-                                table={table}
-                                renderText={renderText}
-                                onRetry={
-                                    onRetryCell
-                                        ? () => onRetryCell(row, column)
-                                        : undefined
-                                }
-                            />
-                            {row.cells[column.id]?.details ? (
-                                <DetailsView
-                                    details={row.cells[column.id]!.details!}
+                {fields.map((column) => {
+                    const cell = row.cells[column.id];
+                    const expanded = cellExpandedFields(cell);
+                    return (
+                        <React.Fragment key={column.id}>
+                            <dt>{column.header}</dt>
+                            <dd>
+                                <CellView
+                                    cell={cell}
+                                    column={column}
+                                    row={row}
+                                    table={table}
+                                    variant="detail"
                                     renderText={renderText}
+                                    onRetry={
+                                        onRetryCell
+                                            ? () => onRetryCell(row, column)
+                                            : undefined
+                                    }
                                 />
-                            ) : null}
-                        </dd>
-                    </React.Fragment>
-                ))}
+                                {cell?.details && !cell.details.label ? (
+                                    <DetailsView
+                                        details={cell.details}
+                                        renderText={renderText}
+                                    />
+                                ) : null}
+                            </dd>
+                            {expanded.map((field) => (
+                                <React.Fragment
+                                    key={`${column.id}/${field.label}`}
+                                >
+                                    <dt>{field.label}</dt>
+                                    <dd>
+                                        <DetailsView
+                                            details={field.details}
+                                            label=""
+                                            renderText={renderText}
+                                        />
+                                    </dd>
+                                </React.Fragment>
+                            ))}
+                        </React.Fragment>
+                    );
+                })}
             </dl>
 
             {extra ? <div className="bt-detail-extra">{extra}</div> : null}

@@ -56,7 +56,12 @@
 
 import {
     anchorColumn,
+    annotationComment,
+    annotationTitle,
+    annotationTypeLabel,
+    cellExpandedFields,
     cellSortKey,
+    defaultHiddenColumnIds,
     citationsByKey,
     columnAlign,
     compareSortKeys,
@@ -64,6 +69,7 @@ import {
     isColumnSortable,
     readSpec,
     rowActions,
+    rowPrimaryAction,
     selectLabelsInColumn,
     sortRows,
     summarizeCoverage,
@@ -130,7 +136,6 @@ export interface RenderedTable {
 // ---------------------------------------------------------------------------
 
 const RAIL_WIDTH = '2.6rem';
-const ACTIONS_WIDTH = '5rem';
 const FLEX_COLUMN_MIN = 'minmax(14rem, 1.6fr)';
 
 /**
@@ -224,16 +229,27 @@ function formatNumber(value: number): string | null {
     return Number.isFinite(value) ? value.toLocaleString('en-US') : null;
 }
 
+/** A colour is inlined into a style attribute, so only a hex literal passes. */
+function safeColor(color: string): string | null {
+    return /^#[0-9a-f]{3,8}$/i.test(color) ? color : null;
+}
+
 /** Only `zotero:` and `https:` become links; anything else renders as text. */
 function safeHref(uri: string | null | undefined): string | null {
     if (!uri) return null;
     return /^(zotero:\/\/|https:\/\/)/i.test(uri) ? uri : null;
 }
 
+/**
+ * One cell's value. In the expanded row (`detail`) an annotation names only
+ * what it is and where it sits: its passage and comment are listed as fields
+ * of their own there (`cellExpandedFields`).
+ */
 function renderCellValue(
     cell: Cell | undefined,
     column: Column,
-    cites?: CitationNumbering
+    cites?: CitationNumbering,
+    variant: 'cell' | 'detail' = 'cell'
 ): string {
     if (cell?.status === 'pending') {
         return '<span class="bt-pending">Filling…</span>';
@@ -286,10 +302,11 @@ function renderCellValue(
         }
 
         case 'annotation': {
-            // Same frame as a reference: the passage where the title goes, the
-            // source and page where the authors go. The comment is context and
-            // shows only in the expanded row.
-            const title = value.text ?? value.comment ?? 'Annotation';
+            // Same frame as a reference: the passage where the title goes,
+            // drawn as a quote with a bar in the annotation's colour, the
+            // source and page where the authors go, the comment in plain type
+            // below. Expanded, the passage and comment are fields of their own.
+            const detail = variant === 'detail';
             const meta = [
                 value.source_display_name,
                 value.page_label ? `p. ${value.page_label}` : undefined,
@@ -297,11 +314,25 @@ function renderCellValue(
                 .filter(Boolean)
                 .join(' · ');
             const sub = meta ? `<span class="bt-sub">${escapeHtml(meta)}</span>` : '';
-            const comment =
-                value.text && value.comment
-                    ? `<span class="bt-ann-comment">${escapeHtml(value.comment)}</span>`
-                    : '';
-            return `<span class="bt-ref"><span class="bt-title">${escapeHtml(title)}</span>${sub}${comment}</span>`;
+            if (detail) {
+                return `<span class="bt-ref"><span class="bt-title">${escapeHtml(
+                    annotationTypeLabel(value.annotation_type)
+                )}</span>${sub}</span>`;
+            }
+            const quoted =
+                !!value.text &&
+                value.annotation_type !== 'note' &&
+                value.annotation_type !== 'image' &&
+                value.annotation_type !== 'ink';
+            const color = quoted && value.color ? safeColor(value.color) : null;
+            const title = `<span class="bt-title${quoted ? ' bt-ann-quote' : ''}"${
+                color ? ` style="border-color:${color}"` : ''
+            }>${escapeHtml(annotationTitle(value))}</span>`;
+            const secondary = annotationComment(value);
+            const comment = secondary
+                ? `<span class="bt-ann-comment">${escapeHtml(secondary)}</span>`
+                : '';
+            return `<span class="bt-ref">${title}${sub}${comment}</span>`;
         }
 
         case 'link': {
@@ -610,6 +641,24 @@ const ACTION_LINKS: Partial<Record<RowAction, { glyph: string; label: string }>>
     open: { glyph: '▤', label: 'Open' },
 };
 
+/**
+ * The link for the row's primary verb, drawn at the edge of its anchor cell —
+ * the sticky cell that never scrolls away, and where the React grid puts the
+ * same control. Every verb is also listed in the expanded detail.
+ */
+function renderPrimaryAction(
+    row: Row,
+    spec: TableSpec,
+    links: TableHtmlLinks | null
+): string {
+    const primary = rowPrimaryAction(row);
+    if (!links || !primary || !rowActions(spec, row).includes(primary)) return '';
+    const link = ACTION_LINKS[primary];
+    const href = safeHref(links[primary]);
+    if (!link || !href) return '';
+    return `<a class="bt-act bt-ref-act" href="${escapeHtml(href)}" title="${link.label}" aria-label="${link.label}">${link.glyph}</a>`;
+}
+
 function renderActions(row: Row, spec: TableSpec, links: TableHtmlLinks | null): string {
     if (!links) return '';
     const parts: string[] = [];
@@ -633,6 +682,12 @@ function renderDetail(
     links: TableHtmlLinks | null,
     cites: CitationNumbering
 ): string {
+    const renderDetails = (details: NonNullable<Cell['details']>): string =>
+        details.kind === 'text'
+            ? `<div class="bt-d-extra">${cites.render(details.text)}</div>`
+            : `<ul class="bt-d-list">${details.items
+                  .map((item) => `<li>${cites.render(item)}</li>`)
+                  .join('')}</ul>`;
     const fields = spec.columns
         .filter((column) => {
             const cell = row.cells[column.id];
@@ -640,16 +695,20 @@ function renderDetail(
         })
         .map((column) => {
             const cell = row.cells[column.id];
-            const details = cell?.details
-                ? cell.details.kind === 'text'
-                    ? `<div class="bt-d-extra">${cites.render(cell.details.text)}</div>`
-                    : `<ul class="bt-d-list">${cell.details.items
-                          .map((item) => `<li>${cites.render(item)}</li>`)
-                          .join('')}</ul>`
-                : '';
+            // A labelled detail (an abstract) and an annotation's passage and
+            // comment are fields of their own, listed by name after their cell.
+            const inline =
+                cell?.details && !cell.details.label ? renderDetails(cell.details) : '';
+            const own = cellExpandedFields(cell)
+                .map(
+                    (field) =>
+                        `<dt>${escapeHtml(field.label)}</dt><dd>${renderDetails(field.details)}</dd>`
+                )
+                .join('');
             return [
                 `<dt>${escapeHtml(column.header)}</dt>`,
-                `<dd>${renderCellValue(cell, column, cites)}${details}</dd>`,
+                `<dd>${renderCellValue(cell, column, cites, 'detail')}${inline}</dd>`,
+                own,
             ].join('');
         })
         .join('');
@@ -682,26 +741,22 @@ export function renderTableHtml(
     const cites = new CitationNumbering(spec.citations, options.citationScopeFor);
     const rows = sortRows(spec, spec.sort);
     const ranks = sortRanks(rows, spec.columns);
-    // Asked once per row, used twice: the actions cell and the expanded detail
-    // show the same links. The column exists only if some row has a verb the
-    // host gave a link for — an import-only or context-file table would
-    // otherwise reserve the width for cells that are all empty.
+    // Asked once per row, used twice: the anchor cell draws the primary verb
+    // and the expanded detail lists them all.
     const rowLinks = new Map(
         rows.map((row) => [row.id, resolveRowLinks(row, options.linksFor)] as const)
     );
-    const hasActions = rows.some(
-        (row) => renderActions(row, spec, rowLinks.get(row.id) ?? null) !== ''
-    );
 
-    const hasQuestions = spec.columns.some((c) => !!c.description);
+    // System columns stay out of the grid unless the table mixes row kinds;
+    // a static document has no toggle, so the expanded row is where they show.
+    const hidden = new Set(defaultHiddenColumnIds(spec));
+    const gridColumns = spec.columns.filter((c) => !hidden.has(c.id) || c.id === anchor?.id);
+    const hasQuestions = gridColumns.some((c) => !!c.description);
 
     const template = [
         RAIL_WIDTH,
-        ...spec.columns.map((c) => columnWidth(c, c.id === anchor?.id)),
-        hasActions ? ACTIONS_WIDTH : '',
-    ]
-        .filter(Boolean)
-        .join(' ');
+        ...gridColumns.map((c) => columnWidth(c, c.id === anchor?.id)),
+    ].join(' ');
 
     // --- the radios that drive everything, before the body so `~` can reach it
     const sortInputs: string[] = [];
@@ -778,7 +833,8 @@ export function renderTableHtml(
     const coverage = summarizeCoverage(spec, rows);
     const footerParts = [`${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`];
     if (coverage.pending > 0) footerParts.push(`${coverage.pending} filling`);
-    if (coverage.empty > 0) footerParts.push(`${coverage.empty} not reported`);
+    if (coverage.notReported > 0)
+        footerParts.push(`${coverage.notReported} not reported`);
     if (coverage.error > 0) footerParts.push(`${coverage.error} failed`);
     if (coverage.errorRows > 0)
         footerParts.push(
@@ -789,7 +845,10 @@ export function renderTableHtml(
     const head = [
         '<div class="bt-head">',
         '<span class="bt-c bt-rail"></span>',
+        // Indexed by position in `spec.columns`, hidden or not: the sort
+        // rules and radios are keyed on that index.
         ...spec.columns.map((column, i) => {
+            if (hidden.has(column.id) && column.id !== anchor?.id) return '';
             const sort = controls && isColumnSortable(column);
             // One control per column, showing the state it would move to next:
             // both directions at rest, then ascending, then descending.
@@ -808,7 +867,6 @@ export function renderTableHtml(
                 : '';
             return `<span class="bt-c bt-h bt-h${i} bt-${columnAlign(column)} bt-hk-${column.type}${sort ? ' bt-sortable' : ''}${column.id === anchor?.id ? ' bt-anchor' : ''}"${full}><span class="bt-h-top"><span class="bt-h-label">${escapeHtml(column.header)}</span>${sorter}</span>${description}</span>`;
         }),
-        hasActions ? '<span class="bt-c bt-acts-h"></span>' : '',
         '</div>',
     ]
         .filter(Boolean)
@@ -825,27 +883,25 @@ export function renderTableHtml(
             const classes = ['bt-r', ...rowFilterClasses(row, spec, selectLabels)];
             if (row.status === 'error') classes.push('bt-r-err');
 
-            const cells = spec.columns
-                .map((column, i) => {
-                    const anchorClass = column.id === anchor?.id ? ' bt-anchor' : '';
+            const links = rowLinks.get(row.id) ?? null;
+            const cells = gridColumns
+                .map((column) => {
+                    const isAnchor = column.id === anchor?.id;
                     const sortable =
                         (spec.capabilities?.sortable ?? true) &&
                         isColumnSortable(column);
-                    return `<span class="bt-c bt-${columnAlign(column)} bt-k-${column.type}${sortable ? ' bt-sortable' : ''}${anchorClass}" id="${escapeHtml(row.id)}/${escapeHtml(column.id)}">${renderCellValue(row.cells[column.id], column, cites)}</span>`;
+                    // The anchor cell carries the row's primary verb, where the
+                    // React grid draws it too.
+                    const action = isAnchor ? renderPrimaryAction(row, spec, links) : '';
+                    return `<span class="bt-c bt-${columnAlign(column)} bt-k-${column.type}${sortable ? ' bt-sortable' : ''}${isAnchor ? ' bt-anchor' : ''}" id="${escapeHtml(row.id)}/${escapeHtml(column.id)}">${renderCellValue(row.cells[column.id], column, cites)}${action}</span>`;
                 })
                 .join('');
-
-            const links = rowLinks.get(row.id) ?? null;
-            const actions = hasActions
-                ? `<span class="bt-c bt-acts">${renderActions(row, spec, links)}</span>`
-                : '';
 
             return [
                 `<details class="${classes.join(' ')}" id="${escapeHtml(row.id)}" style="${orderVars}">`,
                 '<summary class="bt-row">',
                 `<span class="bt-c bt-rail">${CHEVRON_SVG}</span>`,
                 cells,
-                actions,
                 '</summary>',
                 renderDetail(row, spec, links, cites),
                 '</details>',
@@ -988,6 +1044,10 @@ function renderDynamicCss(
             key === 't'
                 ? `#${prefix}-dt:checked ~ .bt-scroll .bt-authors + .bt-venue::before { content: none; }`
                 : '',
+            // A one-line row has no room for an annotation's comment.
+            key === 'c'
+                ? `#${prefix}-dc:checked ~ .bt-scroll .bt-ann-comment { display: none; }`
+                : '',
             `#${prefix}-d${key}:checked ~ .bt-toolbar .bt-seg-${key} { background: var(--t-sel); color: var(--t-fg); }`
         );
     }
@@ -1113,9 +1173,11 @@ export const TABLE_CSS = `
 .bt-authors + .bt-venue::before { content: ' · '; font-style: normal; }
 .bt-d .bt-venue { display: block; }
 .bt-d .bt-authors + .bt-venue::before { content: none; }
-/* An annotation's comment is context, shown only in the expanded row. */
-.bt-ann-comment { display: none; font-size: 13px; color: var(--t-mut); }
-.bt-d .bt-ann-comment { display: block; white-space: normal; }
+/* An annotation's passage is a quotation, marked by a bar in the colour it has
+   in the reader; the comment follows in plain type, except in one-line rows. */
+.bt-ann-quote { padding-left: 6px; border-left: 3px solid var(--t-line); font-weight: 400; }
+.bt-ann-comment { display: block; font-size: 13px; color: var(--t-mut); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
 .bt-pill { display: inline-block; max-width: 100%; padding: 1px 8px; border-radius: 999px;
   font-size: 12px; line-height: 17px; white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; border: 1px solid transparent; }
@@ -1124,8 +1186,11 @@ export const TABLE_CSS = `
 .bt-link { color: var(--t-accent); text-decoration: none; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-line-clamp: var(--lines); -webkit-box-orient: vertical;
   overflow: hidden; }
-.bt-acts { display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding-right: 12px; }
 .bt-act { display: inline-flex; color: var(--t-fade); text-decoration: none; padding: 2px 3px; }
+/* The primary verb sits at the edge of the anchor cell, the one that never
+   scrolls away; the expanded row lists every verb. */
+.bt-anchor { position: relative; padding-right: 30px; }
+.bt-ref-act { position: absolute; top: 6px; right: 6px; }
 .bt-act:hover { color: var(--t-accent); }
 .bt-act .bt-gl { width: 14px; height: 14px; }
 .bt-d { padding: 4px 12px 14px 40px; background: #fbfcfd; }

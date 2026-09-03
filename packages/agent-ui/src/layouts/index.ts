@@ -39,7 +39,7 @@ export type { CellViewProps, CellValueViewProps } from "./cells";
 export { ColumnHeaderCell } from "./columnHeader";
 export type { ColumnHeaderCellProps } from "./columnHeader";
 
-export { RowActionsView, tableHasRowActions } from "./rowActions";
+export { RowActionsView } from "./rowActions";
 export { anchorActionHandler, rowActionHandler } from "./rowActionHandlers";
 
 export { TableSurface } from "./chrome/TableSurface";

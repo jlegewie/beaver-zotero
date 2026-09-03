@@ -288,7 +288,9 @@ function ColumnsMenu({
     // visible regardless — offering it here would leave a checkbox that lies.
     const anchorId = anchorColumn(table)?.id;
     const hideable = table.columns.filter((c: Column) => c.id !== anchorId);
-    if (hideable.length < 2) return null;
+    // A single hideable column earns no menu — unless it started hidden (a
+    // lone system column), in which case the menu is the only way back.
+    if (hideable.length < 2 && state.hiddenColumns.size === 0) return null;
 
     const items: MenuItem[] = hideable.map((column) =>
         checkItem(column.header, !state.hiddenColumns.has(column.id), () =>

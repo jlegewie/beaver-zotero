@@ -41,7 +41,6 @@ export const renderPlainText: TextRenderer = (text) => text;
 
 /** Width the rail column takes, and the floor a flexible column may shrink to. */
 const RAIL_WIDTH = "3.2rem";
-const ACTIONS_WIDTH = "6rem";
 const FLEX_COLUMN_MIN = "14rem";
 
 /**
@@ -89,7 +88,6 @@ export function defaultColumnWidth(
 export function tableMinWidth(
     columns: Column[],
     anchorId: string | undefined,
-    hasActions: boolean,
 ): string {
     const parts = [RAIL_WIDTH];
     for (const column of columns) {
@@ -98,6 +96,5 @@ export function tableMinWidth(
                 FLEX_COLUMN_MIN,
         );
     }
-    if (hasActions) parts.push(ACTIONS_WIDTH);
     return `calc(${parts.join(" + ")})`;
 }

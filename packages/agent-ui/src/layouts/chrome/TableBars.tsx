@@ -156,7 +156,8 @@ export function TableFooter({
     );
     if (sortLabel) parts.push(sortLabel);
     if (coverage.pending > 0) parts.push(`${coverage.pending} filling`);
-    if (coverage.empty > 0) parts.push(`${coverage.empty} not reported`);
+    if (coverage.notReported > 0)
+        parts.push(`${coverage.notReported} not reported`);
     if (coverage.error > 0) parts.push(`${coverage.error} failed`);
     if (coverage.errorRows > 0)
         parts.push(

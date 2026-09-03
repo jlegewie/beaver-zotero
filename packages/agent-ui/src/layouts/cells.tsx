@@ -1,5 +1,9 @@
 import React from "react";
 import {
+    anchorColumn,
+    annotationComment,
+    annotationTitle,
+    annotationTypeLabel,
     columnWrap,
     type Cell,
     type CellValue,
@@ -13,10 +17,8 @@ import { itemTypeToIconName } from "@beaver/agent-core/types/citations";
 import { getHost } from "../host";
 import {
     AlertCircleIcon,
-    ArrowUpRightIcon,
     EditIcon,
     FileIcon,
-    FileViewIcon,
     HighlighterIcon,
     Icon,
     NoteIcon,
@@ -24,9 +26,15 @@ import {
     TextAlignLeftIcon,
     TickIcon,
 } from "../icons";
-import IconButton from "../primitives/IconButton";
 import { anchorActionHandler } from "./rowActionHandlers";
 import { type TextRenderer } from "./tableView";
+
+/**
+ * Where a cell is drawn. In the grid a value is compact and clamped; in the
+ * expanded row it has room, and an anchor cell hands its long parts (an
+ * annotation's passage and comment) to labelled fields of their own.
+ */
+export type CellVariant = "cell" | "detail";
 
 /**
  * One cell, in four states that must not be confused with one another:
@@ -48,6 +56,7 @@ export interface CellViewProps {
     row: Row;
     /** The table the row belongs to; decides which verb the anchor cell carries. */
     table: TableSpec;
+    variant?: CellVariant;
     renderText: TextRenderer;
     /** Clicking a select pill filters by it, where the table allows filtering. */
     onSelectClick?: (label: string) => void;
@@ -60,6 +69,7 @@ export function CellView({
     column,
     row,
     table,
+    variant = "cell",
     renderText,
     onSelectClick,
     onRetry,
@@ -88,6 +98,7 @@ export function CellView({
                 column={column}
                 row={row}
                 table={table}
+                variant={variant}
                 renderText={renderText}
                 onSelectClick={onSelectClick}
             />
@@ -167,6 +178,7 @@ export interface CellValueViewProps {
     column: Column;
     row: Row;
     table: TableSpec;
+    variant?: CellVariant;
     renderText: TextRenderer;
     onSelectClick?: (label: string) => void;
 }
@@ -176,6 +188,7 @@ export function CellValueView({
     column,
     row,
     table,
+    variant = "cell",
     renderText,
     onSelectClick,
 }: CellValueViewProps): React.ReactElement {
@@ -223,10 +236,25 @@ export function CellValueView({
             );
 
         case "reference":
-            return <ReferenceValue value={value} row={row} table={table} />;
+            return (
+                <ReferenceValue
+                    value={value}
+                    row={row}
+                    table={table}
+                    isAnchor={anchorColumn(table)?.id === column.id}
+                />
+            );
 
         case "annotation":
-            return <AnnotationValue value={value} row={row} table={table} />;
+            return (
+                <AnnotationValue
+                    value={value}
+                    row={row}
+                    table={table}
+                    variant={variant}
+                    isAnchor={anchorColumn(table)?.id === column.id}
+                />
+            );
 
         case "link": {
             const label = value.label ?? value.url;
@@ -302,10 +330,12 @@ function ReferenceValue({
     value,
     row,
     table,
+    isAnchor,
 }: {
     value: Extract<CellValue, { kind: "reference" }>;
     row: Row;
     table: TableSpec;
+    isAnchor: boolean;
 }): React.ReactElement {
     const host = getHost();
     const iconName = itemTypeToIconName(value.item_type, value.content_kind);
@@ -317,6 +347,7 @@ function ReferenceValue({
         <SubjectValue
             row={row}
             table={table}
+            isAnchor={isAnchor}
             icon={
                 hostIcon ?? (
                     <Icon icon={FileIcon} size={15} className="bt-ref-icon" />
@@ -359,18 +390,25 @@ function annotationIcon(
 }
 
 /**
- * The anchor cell for an annotation. The highlighted passage is the title and
- * its click opens the reader on it; the source and page sit where a paper's
- * authors would. The comment shows only where the row is tall enough.
+ * The anchor cell for an annotation. In the grid the passage is the title,
+ * drawn as a quote with a bar in the annotation's colour, and the comment
+ * follows in plain type; the source and page sit where a paper's authors
+ * would. In the expanded row the passage and comment become labelled fields
+ * of their own (`cellExpandedFields`), so here the cell names only what the
+ * annotation is and where it sits.
  */
 function AnnotationValue({
     value,
     row,
     table,
+    variant,
+    isAnchor,
 }: {
     value: Extract<CellValue, { kind: "annotation" }>;
     row: Row;
     table: TableSpec;
+    variant: CellVariant;
+    isAnchor: boolean;
 }): React.ReactElement {
     const meta = [
         value.source_display_name,
@@ -378,10 +416,18 @@ function AnnotationValue({
     ]
         .filter(Boolean)
         .join(" · ");
+    const detail = variant === "detail";
+    const quoted =
+        !detail &&
+        !!value.text &&
+        value.annotation_type !== "note" &&
+        value.annotation_type !== "image" &&
+        value.annotation_type !== "ink";
     return (
         <SubjectValue
             row={row}
             table={table}
+            isAnchor={isAnchor}
             icon={
                 <Icon
                     icon={annotationIcon(value.annotation_type)}
@@ -390,45 +436,63 @@ function AnnotationValue({
                     style={value.color ? { color: value.color } : undefined}
                 />
             }
-            title={value.text ?? value.comment ?? "Annotation"}
+            title={
+                detail
+                    ? annotationTypeLabel(value.annotation_type)
+                    : annotationTitle(value)
+            }
+            titleClassName={quoted ? "bt-ann-quote" : undefined}
+            titleStyle={
+                quoted && value.color ? { borderColor: value.color } : undefined
+            }
             meta={meta ? <span className="bt-ref-authors">{meta}</span> : null}
             extra={
-                value.text && value.comment ? (
-                    <span className="bt-ann-comment">{value.comment}</span>
+                !detail && annotationComment(value) ? (
+                    <span className="bt-ann-comment">
+                        {annotationComment(value)}
+                    </span>
                 ) : null
             }
-            actionIcon={FileViewIcon}
             actionLabel="Open in reader"
         />
     );
 }
 
 /**
- * The shared frame of an anchor cell: icon, title, a meta line — and the row's
- * primary verb on the title itself, with a glyph at the cell's edge, because it
- * is the row's commonest action and finding it in a column costs a hunt per
- * row. Only where the row's kind has one and the host can perform it.
+ * The shared frame of a subject cell: icon, title and a meta line. In the anchor
+ * column the title also performs the row's primary verb, because it is the
+ * row's commonest action and finding it elsewhere costs a hunt per row — only
+ * where the table declares it and the host can perform it. The row's full set
+ * of verbs is mounted beside this by the grid (`RowActionsView`), on the anchor
+ * cell rather than on its value, so it survives a pending or failed anchor.
  */
 function SubjectValue({
     row,
     table,
+    isAnchor,
     icon,
     title,
+    titleClassName,
+    titleStyle,
     meta,
     extra,
-    actionIcon = ArrowUpRightIcon,
     actionLabel = "Reveal in library",
 }: {
     row: Row;
     table: TableSpec;
+    isAnchor: boolean;
     icon: React.ReactNode;
     title: string;
+    titleClassName?: string;
+    titleStyle?: React.CSSProperties;
     meta: React.ReactNode;
     extra?: React.ReactNode;
-    actionIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     actionLabel?: string;
 }): React.ReactElement {
-    const act = anchorActionHandler(table, row);
+    const act = isAnchor ? anchorActionHandler(table, row) : undefined;
+    const titleClass = ["bt-ref-title", titleClassName]
+        .filter(Boolean)
+        .join(" ");
     return (
         <span className="bt-reference">
             <span className="bt-ref-icon-slot" aria-hidden="true">
@@ -452,28 +516,18 @@ function SubjectValue({
                             act();
                         }}
                     >
-                        <span className="bt-ref-title">{title}</span>
+                        <span className={titleClass} style={titleStyle}>
+                            {title}
+                        </span>
                     </button>
                 ) : (
-                    <span className="bt-ref-title">{title}</span>
+                    <span className={titleClass} style={titleStyle}>
+                        {title}
+                    </span>
                 )}
                 {meta ? <span className="bt-ref-meta">{meta}</span> : null}
                 {extra}
             </span>
-            {act ? (
-                <span className="bt-ref-reveal">
-                    <IconButton
-                        icon={actionIcon}
-                        variant="ghost-secondary"
-                        ariaLabel={actionLabel}
-                        title={actionLabel}
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            act();
-                        }}
-                    />
-                </span>
-            ) : null}
         </span>
     );
 }

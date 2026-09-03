@@ -43,9 +43,13 @@ import type {
     Row,
     TableSpec,
 } from '@beaver/agent-core/layouts/table';
-import { rowIdFor, validateTableSpec, type RowRef } from '@beaver/agent-core/layouts/table';
+import {
+    rowIdFor,
+    validateTableSpec,
+    type RowRef,
+} from '@beaver/agent-core/layouts/table';
 import { store } from '../../store';
-import { windowSurfaceAtom, type WindowSurface } from '../../atoms/windowSurface';
+import { showTableInWindowAtom, windowSurfaceAtom } from '../../atoms/windowSurface';
 import { BeaverUIFactory } from '../../../src/ui/ui';
 import {
     zoteroLinkScope,
@@ -137,14 +141,12 @@ export async function handleTestOpenTableHttpRequest(
         request.table ??
         (await buildDemoTable(variant, request.limit ?? DEMO_ROW_LIMIT));
 
-    const surface: WindowSurface = {
-        kind: 'table',
+    store.set(showTableInWindowAtom, {
         variant,
         table,
         title: request.title,
         subtitle: request.subtitle,
-    };
-    store.set(windowSurfaceAtom, surface);
+    });
 
     if (request.open !== false) {
         BeaverUIFactory.openBeaverWindow(TABLE_WINDOW_SIZE);
@@ -291,6 +293,34 @@ function textCell(text: string): Cell {
     return text ? { value: { kind: 'text', text }, provenance: 'asserted' } : {};
 }
 
+/**
+ * The row-type system column a producer writes: the localised item type for a
+ * library item, the row's kind otherwise. Hidden until the table mixes kinds.
+ */
+function typeColumn(items: DemoItem[]): Column {
+    const labels = [...new Set(items.map((item) => typeLabelFor(item)))];
+    return {
+        id: '_type',
+        header: 'Type',
+        type: 'select',
+        role: 'row_type',
+        system: true,
+        priority: 'secondary',
+        options: labels.map((label) => ({ label, color: 'gray' })),
+    };
+}
+
+function typeLabelFor(item: DemoItem): string {
+    return Zotero.ItemTypes.getLocalizedString(item.itemType) || item.itemType;
+}
+
+function typeCell(item: DemoItem): Cell {
+    return {
+        value: { kind: 'select', label: typeLabelFor(item) },
+        provenance: 'imported',
+    };
+}
+
 async function buildDemoTable(
     variant: 'search' | 'extraction',
     limit: number
@@ -329,6 +359,7 @@ function referenceRow(item: DemoItem, index: number, withAbstract = true): Row {
                         ? { kind: 'text', label: 'Abstract', text: item.abstract }
                         : undefined,
             },
+            _type: typeCell(item),
         },
     };
 }
@@ -336,6 +367,7 @@ function referenceRow(item: DemoItem, index: number, withAbstract = true): Row {
 function buildSearchDemo(items: DemoItem[]): TableSpec {
     const columns: Column[] = [
         { id: 'ref', header: 'Item', type: 'reference', priority: 'primary' },
+        typeColumn(items),
         { id: 'year', header: 'Year', type: 'date', priority: 'primary' },
         { id: 'cites', header: 'Citations', type: 'number', priority: 'primary' },
         {
@@ -423,6 +455,7 @@ function buildSearchDemo(items: DemoItem[]): TableSpec {
 function buildExtractionDemo(items: DemoItem[]): TableSpec {
     const columns: Column[] = [
         { id: 'ref', header: 'Item', type: 'reference', priority: 'primary' },
+        typeColumn(items),
         { id: 'year', header: 'Year', type: 'date', priority: 'primary' },
         {
             id: 'sample',

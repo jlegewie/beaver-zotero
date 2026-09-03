@@ -66,15 +66,23 @@ export default function TableWindowView({ surface }: { surface: TableSurface }):
                 </Button>
             </div>
 
+            {/*
+             * Keyed on the showing, not the spec: a different table gets a fresh
+             * surface with fresh view state, while updates to the same table
+             * keep sort, filters and column choices. The spec alone cannot say
+             * which is which — see `TableWindowSurface.id`.
+             */}
             <div className="flex-1 min-h-0 min-w-0">
                 {surface.variant === 'extraction' ? (
                     <ExtractionTable
+                        key={surface.id}
                         table={table}
                         subtitle={surface.subtitle}
                         renderText={renderCellText}
                     />
                 ) : (
                     <SearchResultsTable
+                        key={surface.id}
                         table={table}
                         subtitle={surface.subtitle}
                         renderText={renderCellText}

@@ -46,18 +46,24 @@ import {
     requestedCitationKey,
 } from "../citations/citationGrammar";
 import { collectCitationKeys } from "../citations/atoms";
-import { anchorValueKindsFor, type RowAction } from "./rowKinds";
+import { anchorValueKindsFor, rowKindsIn, type RowAction } from "./rowKinds";
 
 export {
     ROW_ACTIONS,
     ROW_KINDS,
     anchorValueKindsFor,
+    annotationComment,
+    annotationTitle,
+    annotationTypeLabel,
     isRowInLibrary,
     rowActionTarget,
     rowActions,
     rowIdFor,
     rowKindOf,
+    rowKindsIn,
     rowPrimaryAction,
+    rowTypeColor,
+    rowTypeLabel,
 } from "./rowKinds";
 export type {
     RowAction,
@@ -122,7 +128,14 @@ export type ColumnRole =
     | "exclusion_reason"
     | "relevance"
     | "quality"
-    | "quote";
+    | "quote"
+    /**
+     * The row's type: the item type of a library item ("Journal Article"), or
+     * the kind of a row that is not one ("Highlight", "Search result"). A
+     * `system` column the producer writes; see {@link defaultHiddenColumnIds}
+     * for when it shows.
+     */
+    | "row_type";
 
 export interface Column {
     /** snake_case identifier, unique within the table. */
@@ -596,6 +609,56 @@ export function isColumnFilterable(column: Column): boolean {
 }
 
 /**
+ * Columns a rendering hides until asked: the `system` ones, because they are
+ * enrichment rather than answers — with one exception. A `row_type` column
+ * shows by default when the table mixes kinds of row (papers beside
+ * annotations, a search result beside a library item), since that is when the
+ * type is the first thing a reader needs; in a table of one kind the anchor
+ * icon already says it.
+ */
+export function defaultHiddenColumnIds(spec: TableSpec): string[] {
+    const mixed = rowKindsIn(spec).size > 1;
+    return spec.columns
+        .filter((c) => c.system && !(c.role === "row_type" && mixed))
+        .map((c) => c.id);
+}
+
+/**
+ * The fields a row reveals only when expanded, beyond its cells: a labelled
+ * `Cell.details` is its own field ("Abstract"), and an annotation's passage
+ * and comment are listed under their names. Unlabelled details stay with
+ * their cell.
+ */
+export function cellExpandedFields(
+    cell: Cell | undefined,
+): { label: string; details: Details }[] {
+    const fields: { label: string; details: Details }[] = [];
+    const value = cell?.value;
+    if (value?.kind === "annotation") {
+        if (value.text)
+            fields.push({
+                label:
+                    value.annotation_type === "text"
+                        ? "Text"
+                        : "Highlighted text",
+                details: { kind: "text", text: value.text },
+            });
+        if (value.comment)
+            fields.push({
+                label: "Comment",
+                details: { kind: "text", text: value.comment },
+            });
+    }
+    if (cell?.details?.label) {
+        // The label becomes the field's name, so the details carry none of
+        // their own — a renderer would otherwise print it twice.
+        const { label, ...details } = cell.details;
+        fields.push({ label, details });
+    }
+    return fields;
+}
+
+/**
  * Roles whose option set is fixed: a label outside `options` is an error, not a
  * new option. A screening decision is the one vocabulary a reviewer must be
  * able to count on — "include" / "exclude" and nothing invented beside them.
@@ -662,7 +725,14 @@ export interface TableCoverage {
     rows: number;
     cells: number;
     filled: number;
+    /** Cells with no value, in any column. */
     empty: number;
+    /**
+     * Empty cells in question columns (those with a `description`) — the ones
+     * that mean "the source does not report this". An empty year in a system
+     * column is not a finding and is not counted here.
+     */
+    notReported: number;
     pending: number;
     error: number;
     errorRows: number;
@@ -677,6 +747,7 @@ export function summarizeCoverage(
         cells: rows.length * spec.columns.length,
         filled: 0,
         empty: 0,
+        notReported: 0,
         pending: 0,
         error: 0,
         errorRows: 0,
@@ -688,7 +759,10 @@ export function summarizeCoverage(
             if (cell?.status === "pending") coverage.pending += 1;
             else if (cell?.status === "error") coverage.error += 1;
             else if (cell?.value) coverage.filled += 1;
-            else coverage.empty += 1;
+            else {
+                coverage.empty += 1;
+                if (column.description) coverage.notReported += 1;
+            }
         }
     }
     return coverage;
