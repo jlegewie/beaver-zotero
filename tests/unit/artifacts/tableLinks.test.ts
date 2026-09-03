@@ -3,23 +3,18 @@
  *
  * `zoteroLinksFor` is handed to `buildTableDocument`, which every write to a
  * stored table goes through, and it is called once per row while the document
- * is being built. So it is not merely a place where an exception would be
- * inconvenient: an exception here rejects `writeTable` before anything is
- * written, with an error that names none of this.
- *
- * Two of its lookups throw on perfectly ordinary items, both from
- * `Zotero.Item::getAttachments`: unconditionally when the item *is* an
- * attachment, and with an unloaded-data error when the item's child items have
- * not been loaded — which is true of any item nothing has touched this session.
- * Neither can be pre-empted, because this is synchronous and there is no point
- * at which a load could be awaited.
+ * is being built. So an exception here rejects `writeTable` before anything is
+ * written, with an error that names none of this. Nothing here asks Zotero
+ * about an item: every target comes from the spec, and the only lookup is the
+ * library's URI scope.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { TableSpec } from '@beaver/agent-core/layouts/table';
+import type { Row, TableSpec } from '@beaver/agent-core/layouts/table';
 import { buildTableDocument } from '../../../src/services/artifacts/tableDocument';
 import {
+    rowActionHref,
     zoteroLinkScope,
     zoteroLinksFor,
 } from '../../../src/services/artifacts/view/tableLinks';
@@ -30,17 +25,7 @@ const GROUP_ID = 4242;
 
 let savedZotero: any;
 
-/** An item whose `getAttachments()` behaves the way `behaviour` says. */
-function itemWith(behaviour: () => number[]): any {
-    return { getAttachments: behaviour };
-}
-
-/** Zotero's own error for a data type that was never loaded. */
-function unloadedData(): never {
-    throw new Error("Item data 'childItems' not loaded");
-}
-
-function stubItems(items: Record<string, any>): void {
+function stubLibraries(): void {
     (globalThis as any).Zotero = {
         ...savedZotero,
         Libraries: {
@@ -53,34 +38,16 @@ function stubItems(items: Record<string, any>): void {
                 return false;
             }),
         },
-        Items: {
-            getByLibraryAndKey: vi.fn(
-                (libraryID: number, key: string) =>
-                    (libraryID === LIBRARY_ID && items[key]) || false
-            ),
-        },
     };
 }
 
-/** A table whose rows point at library items and offer both row actions. */
-function specWithRows(keys: string[]): TableSpec {
-    return {
-        id: 'demo',
-        title: 'Demo table',
-        capabilities: { row_actions: ['reveal', 'open'] },
-        columns: [{ id: 'note', header: 'Note', type: 'text' }],
-        rows: keys.map((key, index) => ({
-            id: `r${index}`,
-            ref: { kind: 'item', library_id: LIBRARY_ID, zotero_key: key },
-            cells: {
-                note: { value: { kind: 'text', text: key }, provenance: 'asserted' },
-            },
-        })),
-    };
+function row(ref: Row['ref']): Row {
+    return { id: 'r', ref, cells: {} };
 }
 
 beforeEach(() => {
     savedZotero = (globalThis as any).Zotero;
+    stubLibraries();
 });
 
 afterEach(() => {
@@ -88,71 +55,79 @@ afterEach(() => {
 });
 
 describe('zoteroLinksFor', () => {
-    it('offers an open link for an item that has a file', () => {
-        stubItems({ AAA: itemWith(() => [11]) });
-
+    it('links an item row to its named file, and only reveals one without', () => {
         expect(
-            zoteroLinksFor({ kind: 'item', library_id: LIBRARY_ID, zotero_key: 'AAA' })
+            zoteroLinksFor(
+                row({
+                    kind: 'item',
+                    library_id: LIBRARY_ID,
+                    zotero_key: 'AAA',
+                    attachment: { library_id: LIBRARY_ID, zotero_key: 'FFF' },
+                })
+            )
         ).toEqual({
-            selectUri: 'zotero://select/library/items/AAA',
-            openUri: 'zotero://open/library/items/AAA',
+            reveal: 'zotero://select/library/items/AAA',
+            // `zotero://open` accepts only a file attachment, so the link names
+            // the file, not the item.
+            open: 'zotero://open/library/items/FFF',
+        });
+        expect(
+            zoteroLinksFor(row({ kind: 'item', library_id: LIBRARY_ID, zotero_key: 'BBB' }))
+        ).toEqual({ reveal: 'zotero://select/library/items/BBB' });
+    });
+
+    it('opens an attachment row itself', () => {
+        expect(
+            zoteroLinksFor(row({ kind: 'attachment', library_id: LIBRARY_ID, zotero_key: 'FFF' }))
+        ).toEqual({
+            reveal: 'zotero://select/library/items/FFF',
+            open: 'zotero://open/library/items/FFF',
         });
     });
 
-    it('still reveals a row whose item is itself an attachment', () => {
-        // `getAttachments()` throws unconditionally on an attachment, and a row
-        // may legitimately reference one.
-        stubItems({
-            BBB: itemWith(() => {
-                throw new Error('getAttachments() cannot be called on attachment items');
-            }),
-        });
-
+    it('opens an annotation row in the reader on its attachment, and reveals its item', () => {
         expect(
-            zoteroLinksFor({ kind: 'item', library_id: LIBRARY_ID, zotero_key: 'BBB' })
+            zoteroLinksFor(
+                row({
+                    kind: 'annotation',
+                    library_id: LIBRARY_ID,
+                    zotero_key: 'ANN',
+                    attachment: { library_id: LIBRARY_ID, zotero_key: 'FFF' },
+                    parent_item: { library_id: LIBRARY_ID, zotero_key: 'AAA' },
+                })
+            )
         ).toEqual({
-            selectUri: 'zotero://select/library/items/BBB',
-            openUri: null,
+            reveal: 'zotero://select/library/items/AAA',
+            open: 'zotero://open/library/items/FFF?annotation=ANN',
         });
     });
 
-    it('still reveals a row whose item has unloaded child items', () => {
-        stubItems({ CCC: itemWith(unloadedData) });
-
+    it('offers nothing a static document cannot do: import, or a file the host resolves', () => {
+        expect(zoteroLinksFor(row({ kind: 'file', ext_key: 'AB12CD34' }))).toEqual({});
         expect(
-            zoteroLinksFor({ kind: 'item', library_id: LIBRARY_ID, zotero_key: 'CCC' })
-        ).toEqual({
-            selectUri: 'zotero://select/library/items/CCC',
-            openUri: null,
-        });
-    });
-
-    it('offers nothing for a row that names no library item', () => {
-        stubItems({});
-        expect(zoteroLinksFor({ kind: 'external', url: 'https://example.org' })).toEqual({});
+            zoteroLinksFor(
+                row({
+                    kind: 'external',
+                    source: 'openalex',
+                    source_id: 'W1',
+                    reference: { source: 'openalex', source_id: 'W1', library_items: [] },
+                })
+            )
+        ).toEqual({});
+        expect(rowActionHref({ kind: 'open_external_file', ext_key: 'AB12CD34' })).toBeNull();
+        expect(
+            rowActionHref({ kind: 'open_item', ref: { library_id: LIBRARY_ID, zotero_key: 'AAA' } })
+        ).toBeNull();
     });
 
     it('names the group in a group library row, not `library`', () => {
-        stubItems({});
-
         expect(
-            zoteroLinksFor({
-                kind: 'item',
-                library_id: GROUP_LIBRARY_ID,
-                zotero_key: 'GGG',
-            })
-        ).toEqual({
-            selectUri: `zotero://select/groups/${GROUP_ID}/items/GGG`,
-            // The item is not resolvable here, so no open link — the scope is
-            // still the group's.
-            openUri: null,
-        });
+            zoteroLinksFor(row({ kind: 'item', library_id: GROUP_LIBRARY_ID, zotero_key: 'GGG' }))
+        ).toEqual({ reveal: `zotero://select/groups/${GROUP_ID}/items/GGG` });
     });
 });
 
 describe('zoteroLinkScope', () => {
-    beforeEach(() => stubItems({}));
-
     it('answers the group scope for a group library and `library` for the personal one', () => {
         expect(zoteroLinkScope(LIBRARY_ID)).toBe('library');
         expect(zoteroLinkScope(GROUP_LIBRARY_ID)).toBe(`groups/${GROUP_ID}`);
@@ -167,8 +142,6 @@ describe('zoteroLinkScope', () => {
 
 describe('a citation into a group library', () => {
     it('gets a link that resolves, not one under `library/`', () => {
-        stubItems({});
-
         const spec: TableSpec = {
             id: 'c',
             columns: [{ id: 'finding', header: 'Finding', type: 'text' }],
@@ -206,45 +179,34 @@ describe('a citation into a group library', () => {
             citationScopeFor: zoteroLinkScope,
         });
 
-        expect(html).toContain(
-            `zotero://open/groups/${GROUP_ID}/items/K1?page=4`
-        );
+        expect(html).toContain(`zotero://open/groups/${GROUP_ID}/items/K1?page=4`);
         expect(html).not.toContain('zotero://open/library/items/K1');
     });
 });
 
-describe('rendering a table whose rows cannot be asked about their files', () => {
-    it('renders rather than throwing, so the write is not lost', () => {
-        stubItems({
-            AAA: itemWith(() => [11]),
-            BBB: itemWith(() => {
-                throw new Error('getAttachments() cannot be called on attachment items');
-            }),
-            CCC: itemWith(unloadedData),
-        });
-
-        const document = buildTableDocument(specWithRows(['AAA', 'BBB', 'CCC']), {
-            linksFor: zoteroLinksFor,
-        });
-
-        // Every row is revealable; only the one that could answer gets an open
-        // link. A row that could not answer costs its open link and nothing more.
-        for (const key of ['AAA', 'BBB', 'CCC']) {
-            expect(document.html).toContain(`zotero://select/library/items/${key}`);
-        }
-        expect(document.html).toContain('zotero://open/library/items/AAA');
-        expect(document.html).not.toContain('zotero://open/library/items/BBB');
-        expect(document.html).not.toContain('zotero://open/library/items/CCC');
-    });
-
-    it('asks for a row\'s links once, not once per place they are shown', () => {
-        stubItems({ AAA: itemWith(() => [11]), BBB: itemWith(() => []) });
+describe('a stored table with rows of every kind', () => {
+    it('draws each row the verbs it has links for, and asks for them once per row', () => {
+        const spec: TableSpec = {
+            id: 'demo',
+            capabilities: { row_actions: ['reveal', 'open', 'import'] },
+            columns: [{ id: 'note', header: 'Note', type: 'text' }],
+            rows: [
+                row({
+                    kind: 'item',
+                    library_id: LIBRARY_ID,
+                    zotero_key: 'AAA',
+                    attachment: { library_id: LIBRARY_ID, zotero_key: 'FFF' },
+                }),
+                { ...row({ kind: 'file', ext_key: 'AB12CD34' }), id: 'file' },
+            ].map((r, i) => ({ ...r, id: `r${i}` })),
+        };
         const linksFor = vi.fn(zoteroLinksFor);
 
-        buildTableDocument(specWithRows(['AAA', 'BBB']), { linksFor });
+        const document = buildTableDocument(spec, { linksFor });
 
-        // The actions cell and the expanded detail show the same links, and
-        // this is a live Zotero lookup per row on every write.
+        expect(document.html).toContain('zotero://select/library/items/AAA');
+        expect(document.html).toContain('zotero://open/library/items/FFF');
+        // The actions cell and the expanded detail show the same links.
         expect(linksFor).toHaveBeenCalledTimes(2);
     });
 });

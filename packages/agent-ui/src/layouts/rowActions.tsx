@@ -1,28 +1,28 @@
 import React from "react";
 import {
     anchorColumn,
+    rowActionTarget,
     rowActions,
+    rowPrimaryAction,
     type Row,
     type RowAction,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
 import { getHost, type ClientHost } from "../host";
-import { revealHandler } from "./cells";
+import { anchorActionHandler, rowActionHandler } from "./rowActionHandlers";
 import { ArrowUpRightIcon, FileViewIcon } from "../icons";
 import IconButton from "../primitives/IconButton";
+
+type IconComponent = React.ComponentType<React.SVGProps<SVGSVGElement>>;
 
 /**
  * The row's verbs, resolved and rendered.
  *
- * Which verbs a row offers is a fact about the data, so it is decided in
- * agent-core (`rowActions`): import only off-library, reveal and open only
- * in-library, nothing without a `ref`. This component only turns that answer
- * into controls, and it renders **nothing** when the host provides no slice for
- * them — an absent control beats a dead one.
- *
- * Import is deliberately delegated to the host's `externalReferenceActions`
- * rather than reimplemented: adding an item to the library is a mutation, and
- * that component is what carries it through the approval / undo pipeline.
+ * Which verbs a row offers is a fact about the data, decided in agent-core
+ * (`rowActions`), and how each is performed is the host's (`rowActionHandler`).
+ * This component only turns those answers into controls, and it renders
+ * **nothing** when the host provides no slice for them — an absent control
+ * beats a dead one.
  */
 export function RowActionsView({
     table,
@@ -31,126 +31,99 @@ export function RowActionsView({
     table: TableSpec;
     row: Row;
 }): React.ReactElement | null {
-    const host = getHost();
-    const actions = visibleRowActions(table, row);
-    const ref = row.ref;
-    if (!ref || !canRender(host, row)) return null;
+    const controls = rowActionControls(table, row, getHost());
+    if (controls.length === 0) return null;
+    return <>{controls}</>;
+}
 
-    if (ref.kind === "external") {
-        // `canRender` already established both; repeated for narrowing.
-        if (!ref.reference || !host.components) return null;
-        // A row that is not in the library gets a labelled Add — the verb, not
-        // a glyph to decode — and one already in it gets the reveal arrow.
-        // Import stays the host's to render: it is a library write, and that
-        // component is what carries it through approval and undo.
-        return (
-            <>
-                {host.components.externalReferenceActions({
-                    item: ref.reference,
-                    buttonVariant: "surface",
-                    importButtonMode: actions.includes("import")
-                        ? "full"
-                        : "none",
-                    revealButtonMode: actions.includes("reveal")
-                        ? "icon-only"
-                        : "none",
-                    pdfButtonMode: actions.includes("open")
-                        ? "icon-only"
-                        : "none",
-                    detailsButtonMode: "none",
-                    webButtonMode: "none",
-                    showCitationCount: false,
-                })}
-            </>
+/** Glyph and label for each verb that renders as a plain button. */
+const ACTION_BUTTONS: Record<
+    Exclude<RowAction, "import">,
+    { icon: IconComponent; label: string }
+> = {
+    reveal: { icon: ArrowUpRightIcon, label: "Reveal in library" },
+    open: { icon: FileViewIcon, label: "Open" },
+};
+
+function rowActionControls(
+    table: TableSpec,
+    row: Row,
+    host: ClientHost,
+): React.ReactElement[] {
+    const controls: React.ReactElement[] = [];
+    for (const action of visibleRowActions(table, row)) {
+        if (action === "import") {
+            const target = rowActionTarget(row, action);
+            if (target?.kind !== "import_reference" || !host.components)
+                continue;
+            // Import is a library write, so the host's own component carries
+            // it through approval and undo. It keeps the reveal glyph too: once
+            // the import lands, that component is what flips the control from
+            // "Add" to "Reveal" until the stored row catches up.
+            controls.push(
+                <React.Fragment key={action}>
+                    {host.components.externalReferenceActions({
+                        item: target.reference,
+                        buttonVariant: "surface",
+                        importButtonMode: "full",
+                        revealButtonMode: "icon-only",
+                        pdfButtonMode: "none",
+                        detailsButtonMode: "none",
+                        webButtonMode: "none",
+                        showCitationCount: false,
+                    })}
+                </React.Fragment>,
+            );
+            continue;
+        }
+        const handler = rowActionHandler(row, action, host);
+        if (!handler) continue;
+        const { icon, label } = ACTION_BUTTONS[action];
+        controls.push(
+            <IconButton
+                key={action}
+                icon={icon}
+                variant="ghost-secondary"
+                ariaLabel={label}
+                title={label}
+                onClick={(e) => {
+                    e.stopPropagation();
+                    handler();
+                }}
+            />,
         );
     }
-
-    // A context-file row has no library identity, so there is nothing to reveal
-    // or open — `rowActions` resolves no verbs for it, and `canRender` keeps
-    // it out of the column count.
-    if (ref.kind !== "item") return null;
-
-    const navigation = host.navigation;
-    if (!navigation) return null;
-    const itemRef = {
-        library_id: ref.library_id,
-        zotero_key: ref.zotero_key,
-        library_ref: ref.library_ref,
-    };
-
-    return (
-        <>
-            {actions.includes("reveal") ? (
-                <IconButton
-                    icon={ArrowUpRightIcon}
-                    variant="ghost-secondary"
-                    ariaLabel="Reveal in library"
-                    title="Reveal in library"
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        navigation.revealInLibrary(itemRef);
-                    }}
-                />
-            ) : null}
-            {actions.includes("open") ? (
-                <IconButton
-                    icon={FileViewIcon}
-                    variant="ghost-secondary"
-                    ariaLabel="Open"
-                    title="Open"
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        void navigation.openSource(itemRef);
-                    }}
-                />
-            ) : null}
-        </>
-    );
+    return controls;
 }
 
 /**
- * The verbs this row actually draws, which is not quite {@link rowActions}.
- *
- * `reveal` is omitted when the anchor cell already carries it: a `reference`
- * value renders its title as the reveal target (`revealHandler` in `cells.tsx`).
- * Drawing it again in the actions column is the same control twice on one row.
- *
- * {@link rowActions} stays the answer to "what can this row do"; this is only
- * about where the control is shown.
+ * The verbs this row draws in the actions column, which is not quite
+ * {@link rowActions}: the kind's primary verb is omitted when the anchor cell
+ * already carries it (`anchorActionHandler` in `cells.tsx`), because drawing it
+ * again is the same control twice on one row. The anchor is never hidden by
+ * density or the viewer's column choices, so this cannot drop the only copy.
  */
 function visibleRowActions(table: TableSpec, row: Row): RowAction[] {
     const actions = rowActions(table, row);
-    if (!actions.includes("reveal") || !anchorRevealsRow(table, row))
+    const primary = rowPrimaryAction(row);
+    if (
+        !primary ||
+        !actions.includes(primary) ||
+        !anchorCarriesAction(table, row)
+    )
         return actions;
-    return actions.filter((action) => action !== "reveal");
+    return actions.filter((action) => action !== primary);
 }
 
-/**
- * Whether the row's anchor cell already draws the reveal control. The anchor is
- * never hidden by density or the viewer's column choices (`splitColumns`), so
- * this cannot drop the only reveal on screen.
- */
-function anchorRevealsRow(table: TableSpec, row: Row): boolean {
+/** Whether the row's anchor cell draws the primary verb: it has a subject value and a handler. */
+function anchorCarriesAction(table: TableSpec, row: Row): boolean {
     const anchor = anchorColumn(table);
     if (!anchor) return false;
+    const kind = row.cells[anchor.id]?.value?.kind;
     return (
-        row.cells[anchor.id]?.value?.kind === "reference" &&
-        !!revealHandler(row)
+        (kind === "reference" || kind === "annotation") &&
+        !!anchorActionHandler(table, row)
     );
-}
-
-/**
- * Whether the row's verbs can actually be drawn here: an external row needs the
- * bibliographic payload and the host's action component, a library row needs the
- * navigation slice, and a context file has no verbs at all. Split out so the
- * column's existence and the buttons in it can never disagree.
- */
-function canRender(host: ClientHost, row: Row): boolean {
-    const ref = row.ref;
-    if (!ref) return false;
-    if (ref.kind === "external") return !!ref.reference && !!host.components;
-    if (ref.kind === "file") return false;
-    return !!host.navigation;
 }
 
 /**
@@ -161,7 +134,6 @@ function canRender(host: ClientHost, row: Row): boolean {
 export function tableHasRowActions(table: TableSpec): boolean {
     const host = getHost();
     return table.rows.some(
-        (row) =>
-            visibleRowActions(table, row).length > 0 && canRender(host, row),
+        (row) => rowActionControls(table, row, host).length > 0,
     );
 }

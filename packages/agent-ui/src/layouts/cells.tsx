@@ -7,6 +7,7 @@ import {
     type Details,
     type Row,
     type SelectColor,
+    type TableSpec,
 } from "@beaver/agent-core/layouts/table";
 import { itemTypeToIconName } from "@beaver/agent-core/types/citations";
 import { getHost } from "../host";
@@ -15,10 +16,16 @@ import {
     ArrowUpRightIcon,
     EditIcon,
     FileIcon,
+    FileViewIcon,
+    HighlighterIcon,
     Icon,
+    NoteIcon,
+    PictureInPictureIcon,
+    TextAlignLeftIcon,
     TickIcon,
 } from "../icons";
 import IconButton from "../primitives/IconButton";
+import { anchorActionHandler } from "./rowActionHandlers";
 import { type TextRenderer } from "./tableView";
 
 /**
@@ -39,6 +46,8 @@ export interface CellViewProps {
     cell: Cell | undefined;
     column: Column;
     row: Row;
+    /** The table the row belongs to; decides which verb the anchor cell carries. */
+    table: TableSpec;
     renderText: TextRenderer;
     /** Clicking a select pill filters by it, where the table allows filtering. */
     onSelectClick?: (label: string) => void;
@@ -50,6 +59,7 @@ export function CellView({
     cell,
     column,
     row,
+    table,
     renderText,
     onSelectClick,
     onRetry,
@@ -77,6 +87,7 @@ export function CellView({
                 value={cell.value}
                 column={column}
                 row={row}
+                table={table}
                 renderText={renderText}
                 onSelectClick={onSelectClick}
             />
@@ -96,7 +107,7 @@ export function CellView({
  * for no gain.
  */
 function overflowClass(value: CellValue, column: Column): string {
-    if (value.kind === "reference") return "";
+    if (value.kind === "reference" || value.kind === "annotation") return "";
     // Prose and links both wrap: a DOI is long enough that one ellipsised line
     // shows the prefix every row shares and none of what tells them apart.
     if (value.kind === "text" || value.kind === "link")
@@ -155,6 +166,7 @@ export interface CellValueViewProps {
     value: CellValue;
     column: Column;
     row: Row;
+    table: TableSpec;
     renderText: TextRenderer;
     onSelectClick?: (label: string) => void;
 }
@@ -163,6 +175,7 @@ export function CellValueView({
     value,
     column,
     row,
+    table,
     renderText,
     onSelectClick,
 }: CellValueViewProps): React.ReactElement {
@@ -210,7 +223,10 @@ export function CellValueView({
             );
 
         case "reference":
-            return <ReferenceValue value={value} row={row} />;
+            return <ReferenceValue value={value} row={row} table={table} />;
+
+        case "annotation":
+            return <AnnotationValue value={value} row={row} table={table} />;
 
         case "link": {
             const label = value.label ?? value.url;
@@ -277,32 +293,146 @@ function SelectPill({
 }
 
 /**
- * The anchor cell, and the one column fed from two different sources: a Zotero
- * item or an external reference. Both carry a display name, a subtitle and an
+ * The anchor cell for a bibliographic subject: a library item, an attachment,
+ * an external reference or a file. All carry a display name, a subtitle and an
  * item type, so they render identically here — only the row's verbs differ,
- * and those are resolved in `rowActions.tsx`.
+ * and those come from the row's kind (`anchorActionHandler`).
  */
 function ReferenceValue({
     value,
     row,
+    table,
 }: {
     value: Extract<CellValue, { kind: "reference" }>;
     row: Row;
+    table: TableSpec;
 }): React.ReactElement {
     const host = getHost();
-    const iconName = itemTypeToIconName(value.item_type, undefined);
+    const iconName = itemTypeToIconName(value.item_type, value.content_kind);
     const hostIcon = host.components?.itemTypeIcon({
         itemType: iconName,
         className: "bt-ref-icon",
     });
-    const reveal = revealHandler(row);
+    return (
+        <SubjectValue
+            row={row}
+            table={table}
+            icon={
+                hostIcon ?? (
+                    <Icon icon={FileIcon} size={15} className="bt-ref-icon" />
+                )
+            }
+            title={value.display_name}
+            meta={
+                value.subtitle || value.venue ? (
+                    <>
+                        {value.subtitle ? (
+                            <span className="bt-ref-authors">
+                                {value.subtitle}
+                            </span>
+                        ) : null}
+                        {value.venue ? (
+                            <span className="bt-ref-venue">{value.venue}</span>
+                        ) : null}
+                    </>
+                ) : null
+            }
+        />
+    );
+}
 
+/** Glyph for an annotation type; the highlight colour tints it. */
+function annotationIcon(
+    type: string | undefined,
+): React.ComponentType<React.SVGProps<SVGSVGElement>> {
+    switch (type) {
+        case "highlight":
+        case "underline":
+            return HighlighterIcon;
+        case "image":
+            return PictureInPictureIcon;
+        case "text":
+            return TextAlignLeftIcon;
+        default:
+            return NoteIcon;
+    }
+}
+
+/**
+ * The anchor cell for an annotation. The highlighted passage is the title and
+ * its click opens the reader on it; the source and page sit where a paper's
+ * authors would. The comment shows only where the row is tall enough.
+ */
+function AnnotationValue({
+    value,
+    row,
+    table,
+}: {
+    value: Extract<CellValue, { kind: "annotation" }>;
+    row: Row;
+    table: TableSpec;
+}): React.ReactElement {
+    const meta = [
+        value.source_display_name,
+        value.page_label ? `p. ${value.page_label}` : undefined,
+    ]
+        .filter(Boolean)
+        .join(" · ");
+    return (
+        <SubjectValue
+            row={row}
+            table={table}
+            icon={
+                <Icon
+                    icon={annotationIcon(value.annotation_type)}
+                    size={15}
+                    className="bt-ref-icon"
+                    style={value.color ? { color: value.color } : undefined}
+                />
+            }
+            title={value.text ?? value.comment ?? "Annotation"}
+            meta={meta ? <span className="bt-ref-authors">{meta}</span> : null}
+            extra={
+                value.text && value.comment ? (
+                    <span className="bt-ann-comment">{value.comment}</span>
+                ) : null
+            }
+            actionIcon={FileViewIcon}
+            actionLabel="Open in reader"
+        />
+    );
+}
+
+/**
+ * The shared frame of an anchor cell: icon, title, a meta line — and the row's
+ * primary verb on the title itself, with a glyph at the cell's edge, because it
+ * is the row's commonest action and finding it in a column costs a hunt per
+ * row. Only where the row's kind has one and the host can perform it.
+ */
+function SubjectValue({
+    row,
+    table,
+    icon,
+    title,
+    meta,
+    extra,
+    actionIcon = ArrowUpRightIcon,
+    actionLabel = "Reveal in library",
+}: {
+    row: Row;
+    table: TableSpec;
+    icon: React.ReactNode;
+    title: string;
+    meta: React.ReactNode;
+    extra?: React.ReactNode;
+    actionIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+    actionLabel?: string;
+}): React.ReactElement {
+    const act = anchorActionHandler(table, row);
     return (
         <span className="bt-reference">
             <span className="bt-ref-icon-slot" aria-hidden="true">
-                {hostIcon ?? (
-                    <Icon icon={FileIcon} size={15} className="bt-ref-icon" />
-                )}
+                {icon}
             </span>
             <span className="bt-ref-body">
                 {/*
@@ -312,70 +442,40 @@ function ReferenceValue({
                  * anonymous block inside it — the title then wraps to its full
                  * length and takes the row's height with it.
                  */}
-                {reveal ? (
+                {act ? (
                     <button
                         type="button"
                         className="bt-ref-title-button"
-                        title="Reveal in library"
+                        title={actionLabel}
                         onClick={(e) => {
                             e.stopPropagation();
-                            reveal();
+                            act();
                         }}
                     >
-                        <span className="bt-ref-title">
-                            {value.display_name}
-                        </span>
+                        <span className="bt-ref-title">{title}</span>
                     </button>
                 ) : (
-                    <span className="bt-ref-title">{value.display_name}</span>
+                    <span className="bt-ref-title">{title}</span>
                 )}
-                {value.subtitle || value.venue ? (
-                    <span className="bt-ref-meta">
-                        {value.subtitle ? (
-                            <span className="bt-ref-authors">
-                                {value.subtitle}
-                            </span>
-                        ) : null}
-                        {value.venue ? (
-                            <span className="bt-ref-venue">{value.venue}</span>
-                        ) : null}
-                    </span>
-                ) : null}
+                {meta ? <span className="bt-ref-meta">{meta}</span> : null}
+                {extra}
             </span>
-            {reveal ? (
+            {act ? (
                 <span className="bt-ref-reveal">
                     <IconButton
-                        icon={ArrowUpRightIcon}
+                        icon={actionIcon}
                         variant="ghost-secondary"
-                        ariaLabel="Reveal in library"
-                        title="Reveal in library"
+                        ariaLabel={actionLabel}
+                        title={actionLabel}
                         onClick={(e) => {
                             e.stopPropagation();
-                            reveal();
+                            act();
                         }}
                     />
                 </span>
             ) : null}
         </span>
     );
-}
-
-/**
- * Reveal is offered on the anchor cell itself — the title is the target, with
- * an arrow at the cell's edge — because it is the row's most common verb and
- * making people find it in an action column costs a hunt per row. Only for a
- * row that resolves to a library item, and only where the host can navigate.
- */
-export function revealHandler(row: Row): (() => void) | undefined {
-    const navigation = getHost().navigation;
-    const ref = row.ref;
-    if (!navigation || ref?.kind !== "item") return undefined;
-    return () =>
-        navigation.revealInLibrary({
-            library_id: ref.library_id,
-            zotero_key: ref.zotero_key,
-            library_ref: ref.library_ref,
-        });
 }
 
 // ---------------------------------------------------------------------------

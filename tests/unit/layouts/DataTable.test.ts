@@ -276,6 +276,33 @@ describe("DataTable", () => {
         expect(rowNames().length).toBe(3);
     });
 
+    it("puts no verb on the anchor title that the table does not declare", () => {
+        setHost({
+            navigation: {
+                revealInLibrary: vi.fn(),
+                revealLibrary: () => {},
+                revealCollection: () => {},
+                launchFile: () => {},
+                openExternalUrl: () => {},
+                activateCitation: () => {},
+                openSource: () => {},
+                openAnnotation: () => {},
+                navigateToAttachmentMatch: () => {},
+                launchExternalFile: () => {},
+            },
+        });
+        // The anchor is where a row's primary verb is placed, not a way around
+        // `capabilities.row_actions`: with only import declared, the item row's
+        // title is plain text.
+        mount(
+            React.createElement(DataTable, {
+                table: { ...spec, capabilities: { row_actions: ["import"] } },
+            }),
+        );
+        expect(container!.querySelector(".bt-ref-title-button")).toBeNull();
+        expect(container!.querySelector(".bt-ref-reveal")).toBeNull();
+    });
+
     it("renders no row actions without a host, and resolved ones with a host", () => {
         mount(React.createElement(DataTable, { table: spec }));
         expect(container!.querySelector(".bt-td-actions")).toBeNull();
@@ -314,13 +341,15 @@ describe("DataTable", () => {
         });
         mount(React.createElement(DataTable, { table: spec }));
 
-        // Off-library external row gets the labelled Add, not a bare glyph;
-        // reveal is not offered because there is nothing to reveal.
+        // Off-library external row gets the labelled Add, not a bare glyph.
+        // The host component keeps its reveal glyph so it can flip to it once
+        // the import lands; opening stays off, since the row has no file yet.
         expect(externalReferenceActions).toHaveBeenCalledWith(
             expect.objectContaining({
                 item: externalRef,
                 importButtonMode: "full",
-                revealButtonMode: "none",
+                revealButtonMode: "icon-only",
+                pdfButtonMode: "none",
             }),
         );
 

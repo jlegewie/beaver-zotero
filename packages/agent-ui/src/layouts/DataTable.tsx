@@ -343,6 +343,7 @@ function TableRow({
                             cell={row.cells[column.id]}
                             column={column}
                             row={row}
+                            table={table}
                             renderText={renderText}
                             onSelectClick={selectClickFor(column)}
                             onRetry={
@@ -533,6 +534,7 @@ function RowDetail({
                                 cell={row.cells[column.id]}
                                 column={column}
                                 row={row}
+                                table={table}
                                 renderText={renderText}
                                 onRetry={
                                     onRetryCell

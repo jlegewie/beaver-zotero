@@ -1231,6 +1231,27 @@
     content: none;
 }
 
+/* An annotation's comment is context, not the row's identity: it appears only
+   where the row is tall enough to hold a second thought. */
+.beaver-root .bt-ann-comment {
+    display: none;
+    color: var(--fill-secondary);
+    font-size: 0.92rem;
+    line-height: var(--bt-subtitle-h);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.beaver-root .bt[data-density="tall"] .bt-ann-comment,
+.beaver-root .bt-detail .bt-ann-comment {
+    display: block;
+}
+
+.beaver-root .bt-detail .bt-ann-comment {
+    white-space: normal;
+}
+
 .beaver-root .bt-ref-reveal {
     position: absolute;
     top: 0.3rem;

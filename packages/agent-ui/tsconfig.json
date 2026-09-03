@@ -246,6 +246,7 @@
     "./src/layouts/useTableState.ts",
     "./src/layouts/cells.tsx",
     "./src/layouts/columnHeader.tsx",
+    "./src/layouts/rowActionHandlers.ts",
     "./src/layouts/rowActions.tsx",
     "./src/layouts/DataTable.tsx",
     "./src/layouts/chrome/TableSurface.tsx",

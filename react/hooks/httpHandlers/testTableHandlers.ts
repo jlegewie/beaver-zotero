@@ -43,7 +43,7 @@ import type {
     Row,
     TableSpec,
 } from '@beaver/agent-core/layouts/table';
-import { rowIdFor, validateTableSpec } from '@beaver/agent-core/layouts/table';
+import { rowIdFor, validateTableSpec, type RowRef } from '@beaver/agent-core/layouts/table';
 import { store } from '../../store';
 import { windowSurfaceAtom, type WindowSurface } from '../../atoms/windowSurface';
 import { BeaverUIFactory } from '../../../src/ui/ui';
@@ -210,7 +210,8 @@ interface DemoItem {
     itemType: string;
     abstract: string;
     doi: string;
-    hasPdf: boolean;
+    /** Key of the item's PDF attachment, which the row's `open` verb targets. */
+    attachmentKey?: string;
 }
 
 async function collectDemoItems(limit: number): Promise<DemoItem[]> {
@@ -238,10 +239,9 @@ async function collectDemoItems(limit: number): Promise<DemoItem[]> {
             .map((c: any) => c.lastName || c.name)
             .filter(Boolean);
         const attachments = item.getAttachments() as number[];
-        const hasPdf = attachments.some((id) => {
-            const attachment = Zotero.Items.get(id);
-            return attachment?.attachmentContentType === 'application/pdf';
-        });
+        const pdf = attachments
+            .map((id) => Zotero.Items.get(id))
+            .find((attachment) => attachment?.attachmentContentType === 'application/pdf');
         return {
             libraryID: item.libraryID,
             key: item.key,
@@ -256,7 +256,7 @@ async function collectDemoItems(limit: number): Promise<DemoItem[]> {
             itemType: item.itemType,
             abstract: item.getField('abstractNote') || '',
             doi: item.getField('DOI') || '',
-            hasPdf,
+            attachmentKey: pdf?.key,
         };
     });
 }
@@ -302,11 +302,14 @@ async function buildDemoTable(
 }
 
 function referenceRow(item: DemoItem, index: number, withAbstract = true): Row {
-    const ref = {
-        kind: 'item' as const,
+    const ref: RowRef = {
+        kind: 'item',
         library_id: item.libraryID,
         zotero_key: item.key,
         library_ref: item.libraryRef,
+        attachment: item.attachmentKey
+            ? { library_id: item.libraryID, zotero_key: item.attachmentKey, library_ref: item.libraryRef }
+            : undefined,
     };
     return {
         id: rowIdFor(ref),

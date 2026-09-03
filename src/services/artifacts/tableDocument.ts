@@ -73,7 +73,7 @@ import {
     type Cell,
     type Column,
     type Row,
-    type RowRef,
+    type RowAction,
     type TableSpec,
 } from '@beaver/agent-core/layouts/table';
 import {
@@ -84,12 +84,12 @@ import {
 import type { Citation } from '@beaver/agent-core/types/citations';
 import { countTopLevelCssRules, escapeHtml, CSS_RULE_BUDGET } from '../../utils/html';
 
-export interface TableHtmlLinks {
-    /** `zotero://select/...` for a row, or null when it cannot be revealed. */
-    selectUri?: string | null;
-    /** `zotero://open/...` for a row's file attachment, or null. */
-    openUri?: string | null;
-}
+/**
+ * The href behind each of a row's verbs, keyed by verb. A verb with no entry
+ * gets no link; a verb that cannot be a link at all (`import` is a library
+ * write) is never emitted here.
+ */
+export type TableHtmlLinks = Partial<Record<RowAction, string | null>>;
 
 export interface TableHtmlOptions {
     /**
@@ -99,7 +99,7 @@ export interface TableHtmlOptions {
      */
     controls?: boolean;
     /** Per-row links. Rows it returns nothing for get no action links. */
-    linksFor?: (ref: RowRef, row: Row) => TableHtmlLinks;
+    linksFor?: (row: Row) => TableHtmlLinks;
     /**
      * The `zotero://` path scope for a cited item's library (`library` or
      * `groups/<groupID>`). This module has no Zotero, so the host supplies it —
@@ -283,6 +283,25 @@ function renderCellValue(
             const meta =
                 authors || venue ? `<span class="bt-sub">${authors}${venue}</span>` : '';
             return `<span class="bt-ref"><span class="bt-title">${escapeHtml(value.display_name)}</span>${meta}</span>`;
+        }
+
+        case 'annotation': {
+            // Same frame as a reference: the passage where the title goes, the
+            // source and page where the authors go. The comment is context and
+            // shows only in the expanded row.
+            const title = value.text ?? value.comment ?? 'Annotation';
+            const meta = [
+                value.source_display_name,
+                value.page_label ? `p. ${value.page_label}` : undefined,
+            ]
+                .filter(Boolean)
+                .join(' · ');
+            const sub = meta ? `<span class="bt-sub">${escapeHtml(meta)}</span>` : '';
+            const comment =
+                value.text && value.comment
+                    ? `<span class="bt-ann-comment">${escapeHtml(value.comment)}</span>`
+                    : '';
+            return `<span class="bt-ref"><span class="bt-title">${escapeHtml(title)}</span>${sub}${comment}</span>`;
         }
 
         case 'link': {
@@ -574,43 +593,37 @@ function rowFilterClasses(
 }
 
 /**
- * The action links for one row, resolved once.
- *
- * `linksFor` consults live Zotero state, so it is asked once per row and the
- * answer is handed to both places that need it — the actions cell and the
- * expanded detail — rather than being asked again for each.
+ * The action links for one row, resolved once and handed to both places that
+ * show them — the actions cell and the expanded detail.
  */
 function resolveRowLinks(
     row: Row,
     links: TableHtmlOptions['linksFor'] | undefined
 ): TableHtmlLinks | null {
     if (!links || !row.ref) return null;
-    return links(row.ref, row) ?? {};
+    return links(row) ?? {};
 }
+
+/** Glyph and label of each verb a static rendering can draw as a link. */
+const ACTION_LINKS: Partial<Record<RowAction, { glyph: string; label: string }>> = {
+    reveal: { glyph: ARROW_UP_RIGHT_SVG, label: 'Reveal in library' },
+    open: { glyph: '▤', label: 'Open' },
+};
 
 function renderActions(row: Row, spec: TableSpec, links: TableHtmlLinks | null): string {
     if (!links) return '';
-    const verbs = rowActions(spec, row);
-    if (verbs.length === 0) return '';
-    const { selectUri, openUri } = links;
-
     const parts: string[] = [];
-    const select = safeHref(selectUri);
-    const open = safeHref(openUri);
-    if (verbs.includes('reveal') && select) {
+    for (const verb of rowActions(spec, row)) {
+        // A verb the host gave no URI for gets no link rather than a dead one.
+        // Import never has one: it is a library write that needs the approval
+        // pipeline, which no static document can reach.
+        const link = ACTION_LINKS[verb];
+        const href = safeHref(links[verb]);
+        if (!link || !href) continue;
         parts.push(
-            `<a class="bt-act" href="${escapeHtml(select)}" title="Reveal in library" aria-label="Reveal in library">${ARROW_UP_RIGHT_SVG}</a>`
+            `<a class="bt-act" href="${escapeHtml(href)}" title="${link.label}" aria-label="${link.label}">${link.glyph}</a>`
         );
     }
-    if (verbs.includes('open') && open) {
-        parts.push(
-            `<a class="bt-act" href="${escapeHtml(open)}" title="Open" aria-label="Open">▤</a>`
-        );
-    }
-    // A row that is not in the library would take an Add button here. Nothing
-    // emits one yet: importing is a library write that needs the approval
-    // pipeline, which no static document can reach — so the space stays empty
-    // rather than carrying a control that does nothing.
     return parts.join('');
 }
 
@@ -669,8 +682,16 @@ export function renderTableHtml(
     const cites = new CitationNumbering(spec.citations, options.citationScopeFor);
     const rows = sortRows(spec, spec.sort);
     const ranks = sortRanks(rows, spec.columns);
-    const hasActions =
-        !!options.linksFor && rows.some((row) => rowActions(spec, row).length > 0);
+    // Asked once per row, used twice: the actions cell and the expanded detail
+    // show the same links. The column exists only if some row has a verb the
+    // host gave a link for — an import-only or context-file table would
+    // otherwise reserve the width for cells that are all empty.
+    const rowLinks = new Map(
+        rows.map((row) => [row.id, resolveRowLinks(row, options.linksFor)] as const)
+    );
+    const hasActions = rows.some(
+        (row) => renderActions(row, spec, rowLinks.get(row.id) ?? null) !== ''
+    );
 
     const hasQuestions = spec.columns.some((c) => !!c.description);
 
@@ -814,12 +835,9 @@ export function renderTableHtml(
                 })
                 .join('');
 
-            // Asked once, used twice: the actions cell and the detail below it
-            // show the same links, and `linksFor` is a live Zotero lookup.
-            const rowLinks = resolveRowLinks(row, options.linksFor);
-
+            const links = rowLinks.get(row.id) ?? null;
             const actions = hasActions
-                ? `<span class="bt-c bt-acts">${renderActions(row, spec, rowLinks)}</span>`
+                ? `<span class="bt-c bt-acts">${renderActions(row, spec, links)}</span>`
                 : '';
 
             return [
@@ -829,7 +847,7 @@ export function renderTableHtml(
                 cells,
                 actions,
                 '</summary>',
-                renderDetail(row, spec, rowLinks, cites),
+                renderDetail(row, spec, links, cites),
                 '</details>',
             ].join('');
         })
@@ -1095,6 +1113,9 @@ export const TABLE_CSS = `
 .bt-authors + .bt-venue::before { content: ' · '; font-style: normal; }
 .bt-d .bt-venue { display: block; }
 .bt-d .bt-authors + .bt-venue::before { content: none; }
+/* An annotation's comment is context, shown only in the expanded row. */
+.bt-ann-comment { display: none; font-size: 13px; color: var(--t-mut); }
+.bt-d .bt-ann-comment { display: block; white-space: normal; }
 .bt-pill { display: inline-block; max-width: 100%; padding: 1px 8px; border-radius: 999px;
   font-size: 12px; line-height: 17px; white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; border: 1px solid transparent; }

@@ -108,6 +108,7 @@
     "./src/run-state/batchProgress.ts",
     "./src/run-state/toolResultViews.ts",
     "./src/layouts/table.ts",
+    "./src/layouts/rowKinds.ts",
     "./src/layouts/tableMutations.ts",
     "./src/run-state/toolResultTypes.ts",
     "./src/run-state/toolCallRequest.ts",

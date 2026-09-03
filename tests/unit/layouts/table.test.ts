@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Citation } from "@beaver/agent-core/types/citations";
+import type { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import {
     anchorColumn,
     cellIdFor,
@@ -17,14 +18,17 @@ import {
     readSpec,
     stripCitationTags,
     summarizeCoverage,
+    rowActionTarget,
     rowActions,
     rowIdFor,
+    rowPrimaryAction,
     selectLabelsInColumn,
     sortRows,
     TABLE_SPEC_VERSION,
     toCsv,
     validateTableSpec,
     type Column,
+    type Cell,
     type Row,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
@@ -114,6 +118,16 @@ describe("ids", () => {
         expect(
             rowIdFor({ kind: "item", library_id: 3, zotero_key: "ABCD1234" }),
         ).toBe("item:3:ABCD1234");
+        // A Zotero key is the identity whatever the object is, so an
+        // attachment or annotation row shares the scheme.
+        expect(
+            rowIdFor({
+                kind: "annotation",
+                library_id: 3,
+                zotero_key: "ANNO1234",
+                attachment: { library_id: 3, zotero_key: "ABCD1234" },
+            }),
+        ).toBe("item:3:ANNO1234");
         expect(
             rowIdFor({
                 kind: "external",
@@ -798,15 +812,19 @@ describe("row actions", () => {
         return { id: "r", cells: {}, ...partial };
     }
 
-    it("treats an item ref, an explicit flag and a library copy as in-library", () => {
+    const libraryCopy = { library_id: 1, zotero_key: "K" };
+    const externalRef: ExternalReference = {
+        source: "openalex",
+        source_id: "W1",
+        title: "Alpha",
+        library_items: [],
+    };
+
+    it("treats a Zotero object, an explicit flag and an external reference with a library copy as in-library", () => {
         expect(
             isRowInLibrary(
                 mkRow({
-                    ref: {
-                        kind: "item",
-                        library_id: 1,
-                        zotero_key: "K",
-                    },
+                    ref: { kind: "item", library_id: 1, zotero_key: "K" },
                 }),
             ),
         ).toBe(true);
@@ -815,41 +833,182 @@ describe("row actions", () => {
         expect(
             isRowInLibrary(
                 mkRow({
-                    cells: {
-                        item: {
-                            value: {
-                                kind: "reference",
-                                display_name: "Smith",
-                                library_items: [
-                                    { library_id: 1, zotero_key: "K" },
-                                ],
-                            },
+                    ref: {
+                        kind: "external",
+                        source: "openalex",
+                        source_id: "W1",
+                        reference: {
+                            ...externalRef,
+                            library_items: [libraryCopy],
                         },
                     },
                 }),
             ),
         ).toBe(true);
+        expect(
+            isRowInLibrary(
+                mkRow({
+                    ref: {
+                        kind: "external",
+                        source: "openalex",
+                        source_id: "W1",
+                    },
+                }),
+            ),
+        ).toBe(false);
     });
 
-    it("offers import only off-library and reveal/open only in-library", () => {
+    it("offers import only off-library and only with the payload to import", () => {
         const external = mkRow({
             id: "ext",
-            ref: { kind: "external", source: "openalex", source_id: "W1" },
+            ref: {
+                kind: "external",
+                source: "openalex",
+                source_id: "W1",
+                reference: externalRef,
+            },
         });
         expect(rowActions(spec, external)).toEqual(["import"]);
-        expect(rowActions(spec, { ...external, in_library: true })).toEqual([
-            "reveal",
-            "open",
-        ]);
+        expect(rowActionTarget(external, "import")).toEqual({
+            kind: "import_reference",
+            reference: externalRef,
+        });
+        // No bibliographic payload: nothing to import, whatever the table says.
+        expect(
+            rowActions(
+                spec,
+                mkRow({
+                    ref: {
+                        kind: "external",
+                        source: "openalex",
+                        source_id: "W1",
+                    },
+                }),
+            ),
+        ).toEqual([]);
     });
 
-    it("offers nothing on a context-file row: neither in the library nor importable", () => {
+    it("reveals and opens an external row through its library copy once it has one", () => {
+        const inLibrary = mkRow({
+            ref: {
+                kind: "external",
+                source: "openalex",
+                source_id: "W1",
+                reference: { ...externalRef, library_items: [libraryCopy] },
+            },
+        });
+        expect(rowActions(spec, inLibrary)).toEqual(["reveal", "open"]);
+        expect(rowActionTarget(inLibrary, "reveal")).toEqual({
+            kind: "reveal_item",
+            ref: { ...libraryCopy, library_ref: undefined },
+        });
+        expect(rowActionTarget(inLibrary, "open")?.kind).toBe("open_item");
+    });
+
+    it("opens a library item's named file, and lets the host pick one otherwise", () => {
+        const attachment = { library_id: 1, zotero_key: "F" };
+        const withFile = mkRow({
+            ref: { kind: "item", library_id: 1, zotero_key: "K", attachment },
+        });
+        expect(rowActions(spec, withFile)).toEqual(["reveal", "open"]);
+        expect(rowActionTarget(withFile, "open")).toEqual({
+            kind: "open_file",
+            ref: attachment,
+        });
+        const withoutFile = mkRow({
+            ref: { kind: "item", library_id: 1, zotero_key: "K" },
+        });
+        expect(rowActionTarget(withoutFile, "open")).toEqual({
+            kind: "open_item",
+            ref: { library_id: 1, zotero_key: "K", library_ref: undefined },
+        });
+        expect(rowActionTarget(withFile, "import")).toBeUndefined();
+    });
+
+    it("withdraws a Zotero row's verbs when the producer marks it out of the library", () => {
+        // `in_library: false` is the producer knowing better — the item was
+        // deleted or is out of reach — so reveal and open go with it.
+        const gone = mkRow({
+            ref: { kind: "item", library_id: 1, zotero_key: "K" },
+            in_library: false,
+        });
+        expect(rowActions(spec, gone)).toEqual([]);
+        expect(
+            rowActions(
+                spec,
+                mkRow({
+                    ref: {
+                        kind: "annotation",
+                        library_id: 1,
+                        zotero_key: "A",
+                        attachment: { library_id: 1, zotero_key: "F" },
+                    },
+                    in_library: false,
+                }),
+            ),
+        ).toEqual([]);
+    });
+
+    it("opens an attachment row itself and reveals it in the library", () => {
+        const row = mkRow({
+            ref: {
+                kind: "attachment",
+                library_id: 1,
+                zotero_key: "F",
+                parent_item: { library_id: 1, zotero_key: "K" },
+            },
+        });
+        expect(rowActions(spec, row)).toEqual(["reveal", "open"]);
+        expect(rowActionTarget(row, "open")?.kind).toBe("open_file");
+        expect(rowActionTarget(row, "reveal")?.ref.zotero_key).toBe("F");
+    });
+
+    it("opens an annotation in the reader and reveals its bibliographic item", () => {
+        const attachment = { library_id: 1, zotero_key: "F" };
+        const parent = { library_id: 1, zotero_key: "K" };
+        const row = mkRow({
+            ref: {
+                kind: "annotation",
+                library_id: 1,
+                zotero_key: "A",
+                attachment,
+                parent_item: parent,
+            },
+        });
+        expect(rowPrimaryAction(row)).toBe("open");
+        expect(rowActionTarget(row, "open")).toEqual({
+            kind: "open_annotation",
+            ref: { library_id: 1, zotero_key: "A", library_ref: undefined },
+            attachment,
+        });
+        expect(rowActionTarget(row, "reveal")).toEqual({
+            kind: "reveal_item",
+            ref: parent,
+        });
+        // Without a bibliographic item, the attachment is what there is to reveal.
+        const standalone = mkRow({
+            ref: {
+                kind: "annotation",
+                library_id: 1,
+                zotero_key: "A",
+                attachment,
+            },
+        });
+        expect(rowActionTarget(standalone, "reveal")?.ref).toEqual(attachment);
+    });
+
+    it("offers a context-file row only its file: neither in the library nor importable", () => {
         const file = mkRow({
             id: "file",
             ref: { kind: "file", ext_key: "AB12CD34", label: "notes.pdf" },
         });
         expect(isRowInLibrary(file)).toBe(false);
-        expect(rowActions(spec, file)).toEqual([]);
+        expect(rowActions(spec, file)).toEqual(["open"]);
+        expect(rowActionTarget(file, "open")).toEqual({
+            kind: "open_external_file",
+            ext_key: "AB12CD34",
+        });
+        expect(rowPrimaryAction(file)).toBe("open");
     });
 
     it("lets a row narrow the table's verbs, and offers none without a ref", () => {
@@ -859,6 +1018,66 @@ describe("row actions", () => {
         });
         expect(rowActions(spec, inLib)).toEqual(["reveal"]);
         expect(rowActions(spec, mkRow({ in_library: true }))).toEqual([]);
+        expect(rowPrimaryAction(mkRow({}))).toBeUndefined();
+    });
+});
+
+describe("anchor cells and row kinds", () => {
+    const spec: TableSpec = {
+        id: "t",
+        columns: [{ id: "item", header: "Item", type: "reference" }],
+        rows: [
+            {
+                id: "item:1:K",
+                ref: { kind: "item", library_id: 1, zotero_key: "K" },
+                cells: {
+                    item: {
+                        value: { kind: "annotation", text: "A passage" },
+                        provenance: "imported",
+                    },
+                },
+            },
+            {
+                id: "item:1:A",
+                ref: {
+                    kind: "annotation",
+                    library_id: 1,
+                    zotero_key: "A",
+                    attachment: { library_id: 1, zotero_key: "F" },
+                },
+                cells: {
+                    item: {
+                        value: { kind: "annotation", text: "A passage" },
+                        provenance: "imported",
+                    },
+                },
+            },
+        ],
+    };
+
+    it("accepts an annotation value in a reference column only under an annotation ref", () => {
+        const issues = validateTableSpec(spec);
+        expect(issues.map((i) => [i.code, i.row_id])).toEqual([
+            ["anchor_kind_mismatch", "item:1:K"],
+        ]);
+    });
+
+    it("sorts, filters and exports an annotation by its passage", () => {
+        const cell: Cell = {
+            value: {
+                kind: "annotation",
+                text: "Bold claim",
+                comment: "Check this",
+            },
+        };
+        expect(cellSortKey(cell)).toBe("bold claim");
+        expect(cellValueText(cell.value)).toBe("Bold claim — Check this");
+        expect(
+            cellSortKey({
+                value: { kind: "annotation", comment: "Only a note" },
+            }),
+        ).toBe("only a note");
+        expect(cellSortKey({ value: { kind: "annotation" } })).toBeNull();
     });
 });
 

@@ -33,13 +33,14 @@ export {
 } from "./tableView";
 export type { TableDensity, TextRenderer } from "./tableView";
 
-export { CellView, CellValueView, DetailsView, revealHandler } from "./cells";
+export { CellView, CellValueView, DetailsView } from "./cells";
 export type { CellViewProps, CellValueViewProps } from "./cells";
 
 export { ColumnHeaderCell } from "./columnHeader";
 export type { ColumnHeaderCellProps } from "./columnHeader";
 
 export { RowActionsView, tableHasRowActions } from "./rowActions";
+export { anchorActionHandler, rowActionHandler } from "./rowActionHandlers";
 
 export { TableSurface } from "./chrome/TableSurface";
 export type { TableSurfaceProps } from "./chrome/TableSurface";

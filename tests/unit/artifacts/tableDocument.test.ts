@@ -195,17 +195,35 @@ describe("renderTableHtml", () => {
 
     it("emits a row's verbs only where the host supplied a URI for them", () => {
         const { html } = renderTableHtml(spec, {
-            linksFor: (ref) =>
-                ref.kind === "item" && ref.zotero_key === "K1"
-                    ? {
-                          selectUri: "zotero://select/library/items/K1",
-                          openUri: null,
-                      }
+            linksFor: (row) =>
+                row.ref?.kind === "item" && row.ref.zotero_key === "K1"
+                    ? { reveal: "zotero://select/library/items/K1" }
                     : {},
         });
         expect(html).toContain('href="zotero://select/library/items/K1"');
         // K2 got no URI, so it gets no link rather than a dead one.
         expect(html).not.toContain("items/K2");
+    });
+
+    it("draws no actions column when no row's verb has a link", () => {
+        // A context-file row declares `open`, but a static document has no
+        // link for a local file; the column would be all empty cells.
+        const files: TableSpec = {
+            ...spec,
+            capabilities: { row_actions: ["open", "import"] },
+            rows: [
+                {
+                    id: "file:AB12CD34",
+                    ref: { kind: "file", ext_key: "AB12CD34" },
+                    cells: {
+                        ref: { value: { kind: "reference", display_name: "notes.pdf" } },
+                    },
+                },
+            ],
+        };
+        const { html } = renderTableHtml(files, { linksFor: () => ({}) });
+        expect(html).not.toContain("bt-acts");
+        expect(renderTableHtml(spec, { linksFor: () => ({ reveal: "zotero://select/library/items/K1" }) }).html).toContain("bt-acts");
     });
 });
 
@@ -570,7 +588,6 @@ const fullSpec: TableSpec = {
                         subtitle: "Bloom et al.",
                         venue: "QJE",
                         item_type: "journalArticle",
-                        library_items: [{ library_id: 1, zotero_key: "K1" }],
                     },
                     provenance: "imported",
                 },
@@ -839,8 +856,8 @@ describe("a stored table stands on its own", () => {
     it("references no external resource", () => {
         const { html } = buildTableDocument(fullSpec, {
             linksFor: () => ({
-                selectUri: "zotero://select/library/items/K1",
-                openUri: "zotero://open/library/items/K1",
+                reveal: "zotero://select/library/items/K1",
+                open: "zotero://open/library/items/K1",
             }),
         });
         // No stylesheet, script or image to fetch — the only `src`-less

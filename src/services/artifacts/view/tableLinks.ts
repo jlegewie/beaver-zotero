@@ -1,21 +1,32 @@
 /**
- * Opening the links a rendered table document carries.
+ * `zotero://` links for a stored table's rows and citations.
  *
- * The renderer emits exactly two schemes (`tableDocument.ts`'s `linkHref`), and
- * the rule for opening them lives here rather than in the host, so a link means
- * the same thing wherever the document is rendered:
+ * The renderer emits exactly two schemes (`tableDocument.ts`'s `safeHref`), and
+ * this module builds the `zotero://` ones: a row's verbs become links here, and
+ * `zoteroLinkScope` names a cited item's library.
  *
- * - `https:` goes to the system browser. Loading it in place would replace the
- *   table with the publisher's page and leave no way back — and in the reader
- *   the snapshot's blocking observer would refuse it outright.
- * - `zotero:` goes to `ZoteroPane.loadURI`, which is where Zotero's own reader
- *   sends the links it opens (`ReaderInstance`'s `onOpenLink`). For the
- *   `select` and `open` extensions the table uses, that runs the same
- *   `doAction` a navigation to the URI would have run.
+ * Stateless, and deliberately kept apart from the reader host: every bundle
+ * that renders or stores a table needs these links, while
+ * `view/readerTableView.ts`, which owns the enhanced-view registry, must exist
+ * in the **esbuild bundle only**. A stateless helper living in a stateful
+ * module is how a second copy of that registry gets created.
+ *
+ * **Best effort throughout.** `zoteroLinksFor` runs once per row inside
+ * `buildTableDocument`, which every write goes through, so a lookup that throws
+ * here would abort the write with an error naming none of it. Nothing here asks
+ * Zotero about an item: what a verb points at is in the spec (`rowActionTarget`),
+ * and the only lookup is the library's URI scope, which degrades to the
+ * personal library.
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
-import type { RowRef } from '@beaver/agent-core/layouts/table';
+import {
+    ROW_ACTIONS,
+    rowActionTarget,
+    type Row,
+    type RowActionTarget,
+} from '@beaver/agent-core/layouts/table';
+import type { TableHtmlLinks } from '../tableDocument';
 import { getZoteroUriScope } from '../../../utils/zoteroUris';
 
 /**
@@ -30,53 +41,35 @@ export function zoteroLinkScope(libraryID: number): string {
     return getZoteroUriScope(libraryID) ?? 'library';
 }
 
-/**
- * `zotero://` URIs for a row, built here because only Zotero knows whether a
- * library id is the user library or a group.
- *
- * Stateless, and deliberately kept apart from the reader host: every bundle
- * that renders or stores a table needs these links, while
- * `view/readerTableView.ts`, which owns the enhanced-view registry, must exist
- * in the **esbuild bundle only**. A stateless helper living in a stateful
- * module is how a second copy of that registry gets created.
- *
- * **Best effort throughout.** This runs once per row inside `buildTableDocument`,
- * which every write goes through, so a lookup that throws here would abort the
- * write with an error naming none of it. Every step is therefore guarded and
- * degrades to a missing link.
- */
-export function zoteroLinksFor(ref: RowRef): { selectUri?: string | null; openUri?: string | null } {
-    if (ref.kind !== 'item') return {};
-    const { library_id: libraryID, zotero_key: key } = ref;
-    const scope = zoteroLinkScope(libraryID);
-
-    return {
-        selectUri: `zotero://select/${scope}/items/${key}`,
-        openUri: hasOpenableFile(libraryID, key) ? `zotero://open/${scope}/items/${key}` : null,
-    };
+/** The `zotero://` href for one row-action target, or null when it has none. */
+export function rowActionHref(target: RowActionTarget): string | null {
+    switch (target.kind) {
+        case 'reveal_item':
+            return `zotero://select/${zoteroLinkScope(target.ref.library_id)}/items/${target.ref.zotero_key}`;
+        case 'open_file':
+            return `zotero://open/${zoteroLinkScope(target.ref.library_id)}/items/${target.ref.zotero_key}`;
+        case 'open_annotation':
+            // `zotero://open` accepts only a file attachment, and scrolls to the
+            // annotation named in the query.
+            return `zotero://open/${zoteroLinkScope(target.attachment.library_id)}/items/${target.attachment.zotero_key}?annotation=${encodeURIComponent(target.ref.zotero_key)}`;
+        // The host resolves these at click time (best attachment, local file
+        // copy) or carries them through approval (import); no static link.
+        case 'open_item':
+        case 'open_external_file':
+        case 'import_reference':
+            return null;
+    }
 }
 
-/**
- * Whether the row's item has a file the reader could open.
- *
- * `getAttachments()` throws in two ordinary cases: the item *is* an attachment,
- * and its child items are not loaded — which is true of any item nothing has
- * touched this session. Neither can be pre-empted here: this is synchronous and
- * called per row while a document renders, so there is no point at which the
- * `childItems` load that `tableItemPane.ts` does before its own
- * `getAnnotations()` call could be awaited. A row whose item cannot be asked
- * simply gets no open link.
- */
-function hasOpenableFile(libraryID: number, key: string): boolean {
-    try {
-        const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
-        if (!item || typeof (item as Zotero.Item).getAttachments !== 'function') {
-            return false;
-        }
-        return (item as Zotero.Item).getAttachments().length > 0;
-    } catch {
-        return false;
+/** `zotero://` URIs for a row's verbs, keyed by verb. Verbs without a link are omitted. */
+export function zoteroLinksFor(row: Row): TableHtmlLinks {
+    const links: TableHtmlLinks = {};
+    for (const action of ROW_ACTIONS) {
+        const target = rowActionTarget(row, action);
+        const href = target ? rowActionHref(target) : null;
+        if (href) links[action] = href;
     }
+    return links;
 }
 
 export function openTableLink(href: string): void {
