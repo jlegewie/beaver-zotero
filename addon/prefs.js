@@ -155,6 +155,14 @@ pref("librarySuggestionsGeneratedAt", "");
 // Account-scoped first-run assignment map, keyed by Beaver user id.
 pref("firstRunAssignments", "{}");
 
+// Size budget for the local document-extraction cache
+// (profile/beaver/document-cache). When the total compressed payload size
+// exceeds this, the least-recently-used payloads are evicted down to 90% of
+// it. Cached metadata (page counts, labels, OCR verdicts) is never evicted,
+// and an evicted payload is simply re-extracted on demand. 0 disables the
+// budget.
+pref("documentCacheMaxBytes", 1073741824);
+
 // Largest attachment file, in MB, that Beaver will read
 // for document extraction, page and image rendering, in-file search, and
 // attaching an external file. It also decides which attachments count as

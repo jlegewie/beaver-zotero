@@ -5,12 +5,15 @@ import type {
     BackgroundProcessingFailureSummary,
 } from '../../src/services/database';
 import type { IndexStatusResponse } from '../../src/services/searchIndex/searchIndexApiClient';
+import type { DocumentCacheStats } from '../../src/services/documentCache';
 
 export interface BackgroundProcessingStatus {
     queue: BackgroundQueueStats;
     ledger: AttachmentProcessingAggregates;
     coverage: IndexStatusResponse | null;
     failures: BackgroundProcessingFailureSummary[];
+    /** Local extraction-cache size and budget; null until first read. */
+    documentCache: DocumentCacheStats | null;
     error: string | null;
     updatedAt: number | null;
 }
@@ -39,6 +42,7 @@ export const backgroundProcessingStatusAtom = atom<BackgroundProcessingStatus>({
     ledger: EMPTY_ATTACHMENT_PROCESSING_AGGREGATES,
     coverage: null,
     failures: [],
+    documentCache: null,
     error: null,
     updatedAt: null,
 });

@@ -16,6 +16,19 @@ import {
 import Button from '@beaver/agent-ui/primitives/Button';
 import { SettingsGroup, SettingsRow, SectionLabel } from './components/SettingsElements';
 
+/** Format a byte count with one decimal in the largest fitting binary unit. */
+function formatBytes(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB';
+    const units = ['bytes', 'KB', 'MB', 'GB', 'TB'];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+        value /= 1024;
+        unit++;
+    }
+    return `${unit === 0 ? value : value.toFixed(1)} ${units[unit]}`;
+}
+
 export default function BackgroundProcessingSection(props: {
     placement?: 'search' | 'advanced';
 }): React.ReactElement | null {
@@ -162,6 +175,16 @@ export default function BackgroundProcessingSection(props: {
                         <Button variant="outline" onClick={() => void refresh()}>Refresh</Button>
                         <Button variant="outline" onClick={() => void processNow()}>Process now</Button>
                     </div>}
+                />
+                <SettingsRow
+                    title="Local extraction cache"
+                    hasBorder
+                    description={status.documentCache
+                        ? `${formatBytes(status.documentCache.payload_total_bytes)} in ${status.documentCache.payload_count.toLocaleString()} cached document(s)`
+                            + (status.documentCache.payload_budget_bytes > 0
+                                ? ` · limit ${formatBytes(status.documentCache.payload_budget_bytes)}`
+                                : ' · no size limit')
+                        : 'Extracted document text Beaver keeps on disk to avoid re-reading files.'}
                 />
                 {(status.ledger.failed > 0 || status.queue.dead > 0) && (
                     <SettingsRow

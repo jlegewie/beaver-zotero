@@ -17,6 +17,7 @@ import {
     gunzipToString,
 } from '../utils/gzip';
 import { createAbortController } from '../utils/abortController';
+import { getPref } from '../utils/prefs';
 import type {
     BeaverExtractResult,
     SerializedBeaverExtractResult,
@@ -43,6 +44,15 @@ import { validateSnapshotDocument, type SnapshotDocument } from './documentExtra
 export const DOCUMENT_METADATA_FORMAT_VERSION = 1;
 export const DOCUMENT_PAYLOAD_FORMAT_VERSION = 1;
 
+/** Fraction of the budget an eviction pass frees down to (hysteresis). */
+const BUDGET_EVICTION_TARGET_RATIO = 0.9;
+/** Payload rows fetched per eviction batch. */
+const BUDGET_EVICTION_BATCH = 500;
+/** Minimum wall-clock gap between write-triggered eviction passes. */
+const BUDGET_PASS_MIN_INTERVAL_MS = 60_000;
+/** Bytes written that force an eviction pass before the interval elapses. */
+const BUDGET_PASS_BYTES_THRESHOLD = 50 * 1024 * 1024;
+
 export type ExtractionMode = DocumentCacheExtractionMode;
 export type PayloadKind = DocumentCachePayloadKind;
 export type PageLabels = DocumentCachePageLabels;
@@ -61,6 +71,10 @@ export interface DocumentCacheStats {
     metadata_count: number;
     payload_count: number;
     payload_cache_dir: string;
+    /** Total compressed size of all cached payloads. */
+    payload_total_bytes: number;
+    /** Configured size budget; 0 when the budget is disabled. */
+    payload_budget_bytes: number;
 }
 
 type DocumentRef = { libraryId: number; zoteroKey: string };
@@ -132,6 +146,14 @@ export class DocumentCache {
     private payloadCacheDir = '';
     private writeLocks = new Map<string, Promise<void>>();
     private extractionLocks = new Map<string, ExtractionLockEntry<CacheablePayload>>();
+    /** Wall-clock time of the last size-budget pass; 0 = never run. */
+    private lastBudgetPassAt = 0;
+    /** Payload bytes written since the last size-budget pass. */
+    private bytesWrittenSinceBudgetPass = 0;
+    /** In-flight size-budget pass, so passes never overlap. */
+    private budgetPass: Promise<{ evicted: number; bytesFreed: number }> | null = null;
+    /** Set while a follow-up pass is already armed behind the in-flight one. */
+    private budgetPassFollowUp = false;
 
     constructor(db: BeaverDB) {
         this.db = db;
@@ -962,6 +984,8 @@ export class DocumentCache {
         } catch (error) {
             logger(`DocumentCache.runStartupGC error: ${error}`, 1);
         }
+
+        await this.enforceSizeBudget();
     }
 
     /** Return compact document-cache counts and directory information. */
@@ -970,7 +994,170 @@ export class DocumentCache {
             metadata_count: await this.db.getDocumentCacheMetadataCount(),
             payload_count: await this.db.getDocumentCachePayloadCount(),
             payload_cache_dir: this.payloadCacheDir,
+            payload_total_bytes: await this.db.getDocumentCachePayloadTotalBytes(),
+            payload_budget_bytes: DocumentCache.budgetBytes(),
         };
+    }
+
+    /**
+     * Evict least-recently-used payloads until the cache fits its size budget.
+     *
+     * Only payload rows and files are removed; `document_cache_metadata` is
+     * kept, so page counts, page labels and the OCR verdict survive and an
+     * evicted document is just re-extracted on demand. Concurrent calls share
+     * a single pass.
+     *
+     * Two kinds of payload are skipped: one an extraction or write lock is
+     * held on, and one a queued `fulltext_upsert` job is about to read —
+     * evicting the latter turns that job into a cache miss that re-extracts
+     * the same document. Retention keys come from `background_jobs` rather
+     * than from the ledger plus `hasSearchIndexAccess`, because the queue is
+     * durable (so it is already populated during startup GC, before the
+     * webpack bundle mirrors the entitlement) and is bounded by queue depth
+     * rather than by the size of the extracted library.
+     */
+    async enforceSizeBudget(): Promise<{ evicted: number; bytesFreed: number }> {
+        if (this.budgetPass) return this.budgetPass;
+        const pass = this.runSizeBudgetPass()
+            .catch((error) => {
+                logger(`DocumentCache.enforceSizeBudget error: ${error}`, 1);
+                return { evicted: 0, bytesFreed: 0 };
+            })
+            .finally(() => {
+                this.budgetPass = null;
+                this.lastBudgetPassAt = Date.now();
+                this.bytesWrittenSinceBudgetPass = 0;
+            });
+        this.budgetPass = pass;
+        return pass;
+    }
+
+    private async runSizeBudgetPass(): Promise<{ evicted: number; bytesFreed: number }> {
+        const budget = DocumentCache.budgetBytes();
+        if (budget <= 0) return { evicted: 0, bytesFreed: 0 };
+
+        let total = await this.db.getDocumentCachePayloadTotalBytes();
+        if (total <= budget) return { evicted: 0, bytesFreed: 0 };
+
+        const target = budget * BUDGET_EVICTION_TARGET_RATIO;
+        // Fail closed: a retention set we could not compute would let this pass
+        // evict payloads a queued index job still needs. `enforceSizeBudget`
+        // turns the throw into a logged no-op, and the next pass retries.
+        const retained = await this.db.getPendingFulltextUpsertKeys();
+
+        let evicted = 0;
+        let bytesFreed = 0;
+        let examined = 0;
+        // Rows examined and kept stay at the head of the LRU order, so the
+        // running skip count is the offset of the first unexamined row.
+        //
+        // The walk is deliberately uncapped: it ends only when the target is
+        // met or the table is exhausted, so a cache far above its budget is
+        // brought all the way down in one pass instead of needing a
+        // continuation that nothing would schedule. Each full batch advances
+        // `offset + deletions` by the batch size, so it terminates in at most
+        // one iteration per batch of rows. Per-row work for a kept row is
+        // in-memory only; the surrounding startup GC already reads every
+        // payload row and stats every payload file.
+        let offset = 0;
+        while (total > target) {
+            const candidates = await this.db.getDocumentCachePayloadsForEviction(
+                BUDGET_EVICTION_BATCH,
+                offset,
+            );
+            if (candidates.length === 0) break;
+
+            let skipped = 0;
+            for (const candidate of candidates) {
+                if (Zotero.__beaverShuttingDown) break;
+                examined++;
+                const keep = this.isLockedInFlight(candidate)
+                    || retained.has(DocumentCache.itemKey(candidate.libraryId, candidate.zoteroKey))
+                    || !(await this.deletePayload(candidate));
+                if (keep) {
+                    skipped++;
+                    continue;
+                }
+                evicted++;
+                bytesFreed += candidate.payloadSizeBytes;
+                total -= candidate.payloadSizeBytes;
+                if (total <= target) break;
+            }
+            if (Zotero.__beaverShuttingDown) break;
+            offset += skipped;
+            // A short batch means the table is exhausted.
+            if (candidates.length < BUDGET_EVICTION_BATCH) break;
+        }
+
+        if (evicted) {
+            logger(
+                `DocumentCache budget: evicted ${evicted} payload(s), freed `
+                + `${bytesFreed} bytes (budget ${budget}, remaining ~${total})`,
+            );
+        }
+        if (total > budget) {
+            logger(
+                `DocumentCache budget: ${total} bytes still exceeds budget ${budget} `
+                + `after examining ${examined} payload(s)`,
+                2,
+            );
+        }
+        return { evicted, bytesFreed };
+    }
+
+    /** Configured payload budget in bytes; 0 when unset or disabled. */
+    private static budgetBytes(): number {
+        const raw = Number(getPref('documentCacheMaxBytes'));
+        return Number.isFinite(raw) && raw > 0 ? raw : 0;
+    }
+
+    /**
+     * True while an extraction or a payload write is in flight for the
+     * candidate's attachment. Payload files are content-addressed, so a writer
+     * that finds its file already present skips writing it — evicting from
+     * under that writer would leave a fresh row pointing at a deleted file.
+     */
+    private isLockedInFlight(payload: DocumentCachePayloadRecord): boolean {
+        const prefix = `${payload.libraryId}/${payload.zoteroKey}/`;
+        for (const key of this.extractionLocks.keys()) {
+            if (key.startsWith(prefix)) return true;
+        }
+        for (const key of this.writeLocks.keys()) {
+            if (key.startsWith(prefix)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Run a size-budget pass after a payload write, at most once a minute or
+     * once per 50 MB written. Fire-and-forget: never blocks the write path.
+     *
+     * A write that lands while a pass is running arms one follow-up pass. The
+     * running pass read its totals and candidates before this row existed, so
+     * it can neither count nor evict it, and joining it would clear the write
+     * counter — leaving the cache over budget with nothing queued to retry.
+     */
+    private scheduleSizeBudgetPass(bytesWritten: number): void {
+        if (DocumentCache.budgetBytes() <= 0) return;
+        this.bytesWrittenSinceBudgetPass += bytesWritten;
+
+        const inFlight = this.budgetPass;
+        if (inFlight) {
+            if (this.budgetPassFollowUp) return;
+            this.budgetPassFollowUp = true;
+            void inFlight
+                .then(() => {
+                    this.budgetPassFollowUp = false;
+                    return this.enforceSizeBudget();
+                })
+                .catch(() => { this.budgetPassFollowUp = false; });
+            return;
+        }
+
+        const due = Date.now() - this.lastBudgetPassAt >= BUDGET_PASS_MIN_INTERVAL_MS
+            || this.bytesWrittenSinceBudgetPass >= BUDGET_PASS_BYTES_THRESHOLD;
+        if (!due) return;
+        void this.enforceSizeBudget().catch(() => undefined);
     }
 
     private async putResultUnlocked<T extends CacheablePayload>(input: {
@@ -1029,6 +1216,7 @@ export class DocumentCache {
         await this.removePayloadFiles(
             cleanup.filter((payload) => payload.payloadPath !== payloadWrite.path),
         );
+        this.scheduleSizeBudgetPass(payloadWrite.size);
     }
 
     private async putSerializedResultUnlocked(input: {
@@ -1086,6 +1274,7 @@ export class DocumentCache {
         await this.removePayloadFiles(
             cleanup.filter((payload) => payload.payloadPath !== payloadWrite.path),
         );
+        this.scheduleSizeBudgetPass(payloadWrite.size);
     }
 
     private async isMetadataStale(record: DocumentCacheMetadataRecord, filePath: string): Promise<boolean> {
@@ -1371,18 +1560,25 @@ export class DocumentCache {
         }
     }
 
-    private async deletePayload(payload: DocumentCachePayloadRecord, removeFile = true): Promise<void> {
+    /**
+     * Compare-and-set delete of one payload row; returns whether the row was
+     * removed. A `false` result means the row changed under us and the caller's
+     * copy is stale.
+     */
+    private async deletePayload(payload: DocumentCachePayloadRecord, removeFile = true): Promise<boolean> {
         const deleted = await this.db.deleteDocumentCachePayloadIfUnchanged(payload);
-        if (!deleted) return;
+        if (!deleted) return false;
         if (removeFile) {
             const current = await this.db.getDocumentCachePayload(
                 payload.libraryId,
                 payload.zoteroKey,
                 payload.payloadKind,
             );
-            if (current?.payloadPath === payload.payloadPath) return;
+            // A replacement row already claims this file; leave it on disk.
+            if (current?.payloadPath === payload.payloadPath) return true;
             await this.removePayloadFiles([deleted]);
         }
+        return true;
     }
 
     private async removePayloadFiles(payloads: DocumentCachePayloadRecord[]): Promise<void> {

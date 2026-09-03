@@ -797,6 +797,17 @@ export class BeaverDB {
             ON document_cache_payloads(library_id, zotero_key, payload_kind);
         `);
 
+        // Orders the size-budget eviction scan (least-recently-used first).
+        // Must index the ORDER BY expression itself: a plain last_accessed_at
+        // index cannot satisfy COALESCE(last_accessed_at, created_at) and
+        // leaves every batch sorting the whole table. The `id` tie-breaker
+        // needs no column — it is the rowid, which every index carries.
+        await this.conn.queryAsync(`DROP INDEX IF EXISTS idx_dcp_last_accessed`);
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_dcp_lru
+            ON document_cache_payloads(COALESCE(last_accessed_at, created_at));
+        `);
+
         // User-attached external files (registry behind the `ext-<KEY>` ids).
         // One row per attached file; the copy lives in the Beaver-managed
         // external-files folder at stored_path.
@@ -3441,6 +3452,41 @@ export class BeaverDB {
         );
     }
 
+    /** Total compressed size of every cached payload, in bytes. */
+    public async getDocumentCachePayloadTotalBytes(): Promise<number> {
+        const rows: number[] = [];
+        await this.conn.queryAsync(
+            `SELECT COALESCE(SUM(payload_size_bytes), 0) FROM document_cache_payloads`,
+            [],
+            { onRow: (row: any) => rows.push(Number(row.getResultByIndex(0))) },
+        );
+        return rows[0] ?? 0;
+    }
+
+    /**
+     * Get one batch of least-recently-used payload rows, oldest first.
+     *
+     * A never-read payload falls back to `created_at` rather than sorting
+     * first: during a backlog sweep it is the newest thing in the cache and is
+     * usually the one still awaiting an index upsert.
+     *
+     * `offset` lets a caller walk past rows it already examined and chose to
+     * keep. The order is fully deterministic (`id` breaks ties), so a caller
+     * that deletes some rows and skips `n` others can pass `offset = n` to
+     * reach unexamined rows in the next batch.
+     */
+    public async getDocumentCachePayloadsForEviction(
+        limit: number,
+        offset = 0,
+    ): Promise<DocumentCachePayloadRecord[]> {
+        return this.selectDocumentCachePayloads(
+            `${BeaverDB.documentCachePayloadSelect()}
+             ORDER BY COALESCE(last_accessed_at, created_at) ASC, id ASC
+             LIMIT ? OFFSET ?`,
+            [Math.max(1, Math.floor(limit)), Math.max(0, Math.floor(offset))],
+        );
+    }
+
     private async deleteDocumentCachePayloadRowsForMetadata(metadataId: number): Promise<void> {
         await this.conn.queryAsync(
             `DELETE FROM document_cache_payloads WHERE metadata_id = ?`,
@@ -4085,6 +4131,29 @@ export class BeaverDB {
             `UPDATE background_jobs SET available_at = ? WHERE id = ?`,
             [now, id],
         );
+    }
+
+    /**
+     * Attachment keys (`libraryId/zoteroKey`) with a queued `fulltext_upsert`
+     * job, whose executor reads the cached payload.
+     *
+     * Rows live in `background_jobs` until the job completes — claiming only
+     * pushes `available_at` forward — so this covers available, deferred and
+     * in-flight work, and survives a restart.
+     */
+    public async getPendingFulltextUpsertKeys(): Promise<Set<string>> {
+        const keys = new Set<string>();
+        await this.conn.queryAsync(
+            `SELECT library_id, zotero_key FROM background_jobs
+             WHERE job_type = 'fulltext_upsert'`,
+            [],
+            {
+                onRow: (row: any) => {
+                    keys.add(`${row.getResultByIndex(0)}/${row.getResultByIndex(1)}`);
+                },
+            },
+        );
+        return keys;
     }
 
     /** Counts surfaced through the dev queue-stats endpoint. */

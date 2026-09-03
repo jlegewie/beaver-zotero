@@ -24,7 +24,7 @@ export function useBackgroundProcessingStatus(options: {
         const db = Zotero.Beaver?.db;
         if (!db) return;
         try {
-            const [queue, ledger, failures, coverage] = await Promise.all([
+            const [queue, ledger, failures, coverage, documentCache] = await Promise.all([
                 db.getBackgroundQueueStats(Date.now()),
                 db.getAttachmentProcessingAggregates(undefined, {
                     ocr: hasOcrAccess || hasSearchAccess,
@@ -37,12 +37,15 @@ export function useBackgroundProcessingStatus(options: {
                     ? searchIndexApiClient.status(getZoteroUserIdentifier().localUserKey)
                         .catch(() => null)
                     : Promise.resolve(undefined),
+                Zotero.Beaver?.documentCache?.getStats().catch(() => null)
+                    ?? Promise.resolve(null),
             ]);
             setStatus((previous) => ({
                 queue,
                 ledger,
                 coverage: coverage === undefined ? previous.coverage : coverage,
                 failures: failures ?? previous.failures,
+                documentCache: documentCache ?? previous.documentCache,
                 error: null,
                 updatedAt: Date.now(),
             }));

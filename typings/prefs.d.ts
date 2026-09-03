@@ -85,6 +85,7 @@ declare namespace _ZoteroTypes {
       "librarySuggestions": string;
       "librarySuggestionsGeneratedAt": string;
       "firstRunAssignments": string;
+      "documentCacheMaxBytes": number;
       "maxAttachmentFileSizeMB": number;
     };
   }
