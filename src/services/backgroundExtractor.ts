@@ -23,7 +23,7 @@ import type {
     JobOutcome,
     QueueDB,
 } from './backgroundQueue/jobExecutor';
-import { MuPDFLane } from './backgroundQueue/muPDFLane';
+import { MuPDFSerialLane } from './backgroundQueue/muPDFSerialLane';
 import { isLibraryInScope, isLibraryScopeKnown } from './libraryScope';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { createAbortController } from '../utils/abortController';
@@ -34,7 +34,6 @@ import { getSystemIdleTimeMs, registerIdleObserver } from '../utils/idleService'
 const IDLE_INTERVAL_MS = 30_000;
 const BUSY_INTERVAL_MS = 10;
 const VISIBILITY_TIMEOUT_MS = 6 * 60_000;
-const RECYCLE_AFTER_N = 8;
 const MAX_ATTEMPTS = 3;
 const BACKOFF_MS = (attempt: number) =>
     Math.min(60_000 * Math.pow(2, attempt - 1), 30 * 60_000);
@@ -96,7 +95,7 @@ export class BackgroundExtractor {
     private workerRunning = false;
     private readonly executors = new Map<BackgroundJobType, ExecutorRegistration>();
     private readonly laneInFlight = new Map<BackgroundJobType, Map<number, LaneEntry>>();
-    private readonly muPDFLane = new MuPDFLane(RECYCLE_AFTER_N);
+    private readonly muPDFLane = new MuPDFSerialLane();
 
     constructor() {
         this.registerExecutor(new DocumentExtractExecutor(), { maxInFlight: 1 });

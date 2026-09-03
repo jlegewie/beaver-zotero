@@ -634,11 +634,12 @@ describe('background queue — worker slot isolation', () => {
         const stats = await backgroundStats();
         expect(stats.workers).toBeDefined();
         expect(stats.workers!.background).not.toBeNull();
-        // `spawnCount`, not `hasWorker`: the processor recycles the background
-        // worker every `RECYCLE_AFTER_N` completed jobs, and that counter runs
-        // for the life of the instance, so a drain that happens to be the Nth
-        // one leaves the slot legitimately empty. The cumulative spawn count is
-        // the durable evidence that this slot got its own worker.
+        // `spawnCount`, not `hasWorker`: the background client retires its
+        // worker once it crosses its completed-operation threshold, so a drain
+        // that happens to be the Nth one leaves the slot legitimately empty.
+        // The client — and with it this cumulative counter — survives that
+        // recycle, so the spawn count is the durable evidence that this slot
+        // got its own worker.
         expect(stats.workers!.background!.spawnCount).toBeGreaterThanOrEqual(1);
         // hot may or may not have a worker depending on prior tests — but
         // when both exist they must be distinct instances tracked under
