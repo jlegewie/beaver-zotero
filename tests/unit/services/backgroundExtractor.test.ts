@@ -1902,6 +1902,86 @@ describe('BackgroundExtractor', () => {
             });
             await t1;
             expect((proc as any).tickRunning).toBe(false);
+            // The finished tick armed the next one; leaving it running would
+            // let this processor claim a later test's rows.
+            await proc.stop();
+        });
+    });
+
+    describe('tick rescheduling', () => {
+        it('follows a pass that launched work with a short re-tick', async () => {
+            await db.enqueueBackgroundJob({
+                jobType: 'document_extract',
+                libraryId: 1,
+                zoteroKey: 'AAAAAAAA',
+                contentKind: 'pdf',
+                payloadKind: 'structured',
+                payload: payload(),
+                now: 0,
+            });
+            mockState.nextResult = {
+                kind: 'ok',
+                cached: false,
+                result: { mode: 'structured', document: { pageCount: 1, pages: [] } },
+                totalPages: 1,
+                resolvedAttachment: { libraryId: 1, zoteroKey: 'AAAAAAAA' },
+                contentType: 'application/pdf',
+            };
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+            try {
+                await (proc as any).tick();
+                expect(setTimeoutSpy.mock.calls.at(-1)?.[1]).toBe(10);
+            } finally {
+                setTimeoutSpy.mockRestore();
+                await proc.stop();
+            }
+        });
+
+        it('falls back to the slow backstop when a job is in flight but nothing was claimed', async () => {
+            await db.enqueueBackgroundJob({
+                jobType: 'document_extract',
+                libraryId: 1,
+                zoteroKey: 'AAAAAAAA',
+                contentKind: 'pdf',
+                payloadKind: 'structured',
+                payload: payload(),
+                now: 0,
+            });
+            // Park the extract so the lane stays occupied across the tick
+            // that follows.
+            mockState.nextResult = new Promise<any>((resolve) => {
+                mockState.extractResolve = resolve;
+            });
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            const processOncePromise = proc.processOnce();
+            await new Promise((r) => setTimeout(r, 0));
+            expect((proc as any).totalInFlight()).toBe(1);
+
+            const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+            try {
+                // Queue is empty and the only lane is full, so this pass
+                // claims nothing: the settle handler, not a fast poll, is
+                // what has to move the queue on.
+                await (proc as any).tick();
+                expect(setTimeoutSpy.mock.calls.at(-1)?.[1]).toBe(500);
+            } finally {
+                setTimeoutSpy.mockRestore();
+                mockState.extractResolve!({
+                    kind: 'ok',
+                    cached: false,
+                    result: {} as any,
+                    totalPages: 1,
+                    resolvedAttachment: { libraryId: 1, zoteroKey: 'AAAAAAAA' },
+                    contentType: 'application/pdf',
+                });
+                await processOncePromise;
+                await proc.stop();
+            }
         });
     });
 

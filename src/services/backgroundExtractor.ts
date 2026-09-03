@@ -32,7 +32,16 @@ import { getPref } from '../utils/prefs';
 import { getSystemIdleTimeMs, registerIdleObserver } from '../utils/idleService';
 
 const IDLE_INTERVAL_MS = 30_000;
-const BUSY_INTERVAL_MS = 10;
+/** Re-tick delay after a pass that launched work, so a backlog keeps draining. */
+const PROGRESS_INTERVAL_MS = 10;
+/**
+ * Backstop re-tick while jobs are in flight but nothing could be claimed (every
+ * lane with queued work is full). Lane progress is driven by `notify()` when a
+ * job settles, so this only has to catch what never notifies; ticking faster
+ * just burns main-thread time on the pref, idle-time and worker-stats reads
+ * every pass makes.
+ */
+const BUSY_BACKSTOP_INTERVAL_MS = 500;
 const VISIBILITY_TIMEOUT_MS = 6 * 60_000;
 const MAX_ATTEMPTS = 3;
 const BACKOFF_MS = (attempt: number) =>
@@ -732,9 +741,17 @@ export class BackgroundExtractor {
                 return;
             }
 
+            // A pass that launched something is followed up promptly: the next
+            // row (or the next free lane slot) should not wait. A pass that
+            // launched nothing while work is still in flight only needs the
+            // slow backstop, because the settle handler notifies.
+            if (result.processed) {
+                this.scheduleTick(PROGRESS_INTERVAL_MS);
+                return;
+            }
             this.scheduleTick(
-                result.processed || this.totalInFlight() > 0
-                    ? BUSY_INTERVAL_MS
+                this.totalInFlight() > 0
+                    ? BUSY_BACKSTOP_INTERVAL_MS
                     : IDLE_INTERVAL_MS,
             );
         } finally {
