@@ -29,4 +29,17 @@ describe('getToolCallLabel', () => {
         expect(getToolCallLabel(part, 'in_progress', { noChange: true }))
             .toBe('Edit metadata: Applying edits');
     });
+
+    // create_items normally renders as an agent-action card, so its label is only
+    // reached when the call created nothing. Without a base label the row read
+    // "Calling function".
+    it('names create_items rather than falling back to the generic label', () => {
+        const part = toolCall({
+            tool_name: 'create_items',
+            args: { external_reference_ids: ['W123'] },
+        });
+        expect(getToolCallLabel(part, 'completed')).toBe('Import items');
+        expect(getToolCallLabel(part, 'completed', { noChange: true }))
+            .toBe('Import items: no change needed');
+    });
 });

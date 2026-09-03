@@ -234,3 +234,53 @@ describe('getLabelEnrichmentNeeds', () => {
         expect(getLabelEnrichmentNeeds(tc('list_collections', { library: 1 }), view)).toEqual({ itemName: false, scope: true });
     });
 });
+
+describe('find_related_works labels', () => {
+    const ref = (id: string) => ({ source: 'openalex' as const, source_id: id, library_items: [] });
+    const relatedWorksView = (withWork: boolean, refCount = 0): ExternalReferenceListView => ({
+        view_type: 'external_reference_list',
+        tool_name: 'find_related_works',
+        references: Array.from({ length: refCount }, (_, i) => ref(`W10${i}`)),
+        tool_info: {
+            info_type: 'related_works',
+            relation: 'cited_by',
+            total_count: 13,
+            work: withWork
+                ? {
+                      ...ref('W1'),
+                      title: 'Attention Is All You Need',
+                      authors: ['Ashish Vaswani', 'Noam Shazeer'],
+                      year: 2017,
+                  }
+                : null,
+        },
+    });
+
+    it('pending labels name the direction', () => {
+        expect(getToolCallLabel(tc('find_related_works', { relation: 'references', work: 'W1' }), 'in_progress')).toBe(
+            'Finding references',
+        );
+        expect(getToolCallLabel(tc('find_related_works', { relation: 'cited_by', work: 'W1' }), 'in_progress')).toBe(
+            'Finding citing works',
+        );
+    });
+
+    it('completed label names the resolved work and the page window', () => {
+        const view = relatedWorksView(true, 10);
+        expect(getToolCallLabel(tc('find_related_works', { relation: 'cited_by', work: 'W1' }), 'completed', { view })).toBe(
+            'Citations to Vaswani et al. 2017 (10 of 13)',
+        );
+    });
+
+    it('completed label without a resolved work stays generic', () => {
+        const view = relatedWorksView(false);
+        expect(
+            getToolCallLabel(tc('find_related_works', { relation: 'cited_by', work: 'W1' }), 'completed', { view }),
+        ).toBe('Citations');
+    });
+
+    it('suffix collapses to a plain count when the page holds everything', () => {
+        const view = relatedWorksView(true, 13);
+        expect(getToolResultLabelSuffix(view, 'find_related_works')).toBe(' (13 results)');
+    });
+});

@@ -1,9 +1,10 @@
 import React, { useState, useCallback } from "react";
 import Button from "@beaver/agent-ui/primitives/Button";
-import {SettingsGroup, SettingsRow, SectionLabel, DocLink, SectionHeader, SectionDescription} from "./components/SettingsElements";
+import {SettingsGroup, SettingsRow, SectionLabel, DocLink, ExternalLink, SectionHeader, SectionDescription, INTELLIGENCE_INDEX_URL} from "./components/SettingsElements";
 import ApiKeyInput from "./ApiKeyInput";
 import CustomProviderCard from "./CustomProviderCard";
 import PlusSignIcon from "@beaver/agent-ui/icons/PlusSignIcon";
+import { Icon, AlertIcon } from "../icons/icons";
 import { getPref, setPref } from "../../../src/utils/prefs";
 import { handlePrefSave } from "./utils";
 import { activePreferencePageTabAtom, requestPlusToolsAtom } from "../../atoms/ui";
@@ -191,6 +192,21 @@ const ApiKeysSection: React.FC = () => {
                     Requests are routed through Beaver's server. Each endpoint must be reachable from the public
                     internet over HTTPS.
                     {' '}<DocLink path="custom-models">Learn more</DocLink>
+                </div>
+
+                <div
+                    className="display-flex flex-row items-start gap-2 rounded-md px-2 py-15 text-base mb-2"
+                    style={{ border: '1px solid var(--tag-orange-tertiary)', background: 'var(--tag-orange-quinary)' }}
+                >
+                    <Icon icon={AlertIcon} className="flex-shrink-0 mt-020 stroke-width-2" style={{ color: 'var(--tag-orange-secondary)' }} />
+                    <span style={{ color: 'var(--tag-orange)' }} >
+                        <span className="font-medium">Choose a capable model.</span>
+                        {' '}Beaver plans, calls tools, and reads long documents. Small or older
+                        models often produce poor results. Pick a model scoring at
+                        least <span className="font-medium">30</span> on the{' '}
+                        <ExternalLink href={INTELLIGENCE_INDEX_URL}>Artificial Analysis Intelligence Index</ExternalLink>.
+                        {' '}We recommend a score of <span className="font-medium">38</span> or higher for the best experience.
+                    </span>
                 </div>
 
                 {customProviders.length > 0 ? (

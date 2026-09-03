@@ -93,6 +93,18 @@ export interface PendingBatchApproval {
     learnMoreLabel?: string;
     /** Docs path resolved against the client's environment-specific docs URL */
     learnMorePath?: string;
+    /**
+     * Initial contents of the instructions box; a non-empty value also opens it.
+     * Carried forward from an earlier batch's approval. Editable default —
+     * the response is what binds.
+     */
+    userInstructionsPrefill: string;
+    /**
+     * The batch changes nothing in the library, so the card offers no
+     * coverage choice: there is nothing for full access to cover, and asking
+     * would put a write-access warning on a job that never writes.
+     */
+    readOnly: boolean;
     /** How long the backend will wait for a response, in seconds */
     timeoutSeconds: number;
 }
@@ -133,6 +145,12 @@ export const addPendingBatchApprovalAtom = atom(
                     event.decline_with_instructions_label || event.decline_label,
                 learnMoreLabel: event.learn_more_label,
                 learnMorePath: event.learn_more_path,
+                // Absent from a backend that predates the field, which is the
+                // same thing as a batch that continues nothing.
+                userInstructionsPrefill: event.user_instructions_prefill || '',
+                // Absent from a backend that predates the field, which is the
+                // same thing as a batch that writes.
+                readOnly: event.read_only === true,
                 timeoutSeconds: event.timeout_seconds,
             });
             return next;

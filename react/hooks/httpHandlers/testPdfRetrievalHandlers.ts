@@ -25,6 +25,7 @@
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
+import { refuseCaptchaChallengeUrls } from '../../utils/pdfChallengeUrls';
 
 interface ItemSpec {
     item_type?: string;
@@ -42,6 +43,11 @@ interface StrategySpec {
     url?: string;
     resolvers?: Record<string, unknown>[];
     timeout_ms?: number;
+    skip_challenge_urls?: boolean;
+    /** Stop starting new downloads after this long, by refusing URLs in
+     * `onBeforeRequest`.
+     */
+    budget_ms?: number;
 }
 
 interface AttemptResult {
@@ -52,6 +58,14 @@ interface AttemptResult {
     timed_out: boolean;
     error?: string;
     access_method?: string;
+}
+
+/** One URL the resolver cascade tried, in the order it tried them. */
+interface AttemptedUrl {
+    url: string;
+    /** Milliseconds after the strategy started. */
+    ms: number;
+    skipped: boolean;
 }
 
 interface OpenedWindow {
@@ -133,10 +147,9 @@ const DEFAULT_STRATEGY_TIMEOUT_MS = 30_000;
 const DEFAULT_PLAN_TIMEOUT_MS = 120_000;
 
 /**
- * Same shape as `addItemActions.ts::withTimeout`: the losing promise is NOT
- * cancelled, so a strategy that times out may still attach a PDF afterwards.
- * Reproduced rather than imported because that leak is part of what is being
- * measured.
+ * Bounds the wait only: the losing promise is NOT cancelled, so a strategy that
+ * times out may still attach a PDF afterwards. That leak is part of what these
+ * measurements are for.
  */
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: string): Promise<T> {
     return Promise.race([
@@ -197,6 +210,8 @@ async function describeAttachment(attachment: Zotero.Item): Promise<Record<strin
     }
     return {
         key: attachment.key,
+        // Which URL actually produced the file.
+        source_url: attachment.getField('url') || null,
         content_type: attachment.attachmentContentType || null,
         filename: attachment.attachmentFilename || null,
         byte_size: byteSize,
@@ -207,7 +222,8 @@ async function describeAttachment(attachment: Zotero.Item): Promise<Record<strin
 async function runStrategy(
     item: Zotero.Item,
     libraryID: number,
-    strategy: StrategySpec
+    strategy: StrategySpec,
+    attemptedUrls: AttemptedUrl[]
 ): Promise<{ attachment: Zotero.Item | null; accessMethod?: string }> {
     const timeout = strategy.timeout_ms ?? DEFAULT_STRATEGY_TIMEOUT_MS;
 
@@ -238,11 +254,32 @@ async function runStrategy(
     }
 
     if (strategy.kind === 'add_file_from_urls') {
-        if (!strategy.resolvers?.length) throw new Error('add_file_from_urls requires resolvers');
+        // Empty resolvers = Zotero's own cascade (same as production strategy 3).
+        // skip_challenge_urls applies the same onBeforeRequest hook.
+        // Recording every attempted URL is what makes the resolver-cap question
+        // answerable from a single run: the winning URL's rank in our candidate
+        // list says directly which caps would still have found it.
+        const startedAt = Date.now();
+        const onBeforeRequest = (url: string) => {
+            const record: AttemptedUrl = { url, ms: Date.now() - startedAt, skipped: false };
+            attemptedUrls.push(record);
+            if (strategy.budget_ms && Date.now() - startedAt > strategy.budget_ms) {
+                record.skipped = true;
+                throw new Error(`budget spent before ${url}`);
+            }
+            if (strategy.skip_challenge_urls) {
+                try {
+                    refuseCaptchaChallengeUrls(url);
+                } catch (e) {
+                    record.skipped = true;
+                    throw e;
+                }
+            }
+        };
         // Zotero's own doi/url/oa/custom resolvers are appended so this arm is
         // a superset of `addAvailableFile`, never a narrower substitute.
         const resolvers = [
-            ...strategy.resolvers,
+            ...(strategy.resolvers ?? []),
             ...(Zotero.Attachments as any).getFileResolvers(item),
         ];
         let accessMethod: string | undefined;
@@ -251,6 +288,7 @@ async function runStrategy(
                 onAccessMethodStart: (method: string) => {
                     accessMethod = method;
                 },
+                onBeforeRequest,
             }),
             timeout,
             'addFileFromURLs'
@@ -297,6 +335,7 @@ export async function handleTestPdfRetrievalHttpRequest(request: any) {
     const startedAt = Date.now();
     const windowWatch = watch_windows ? watchWindows(startedAt, close_windows !== false) : null;
     const attempts: AttemptResult[] = [];
+    const attemptedUrls: AttemptedUrl[] = [];
     let item: Zotero.Item | null = null;
     let attached: Zotero.Item | null = null;
     let winning: AttemptResult | null = null;
@@ -331,7 +370,9 @@ export async function handleTestPdfRetrievalHttpRequest(request: any) {
                 timed_out: false,
             };
             try {
-                const { attachment, accessMethod } = await runStrategy(item, libraryID, strategy);
+                const { attachment, accessMethod } = await runStrategy(
+                    item, libraryID, strategy, attemptedUrls
+                );
                 attempt.access_method = accessMethod;
                 if (attachment) {
                     attached = attachment;
@@ -396,6 +437,7 @@ export async function handleTestPdfRetrievalHttpRequest(request: any) {
         winning_access_method: winning?.access_method ?? null,
         attachment: attachmentInfo,
         attempts,
+        attempted_urls: attemptedUrls,
         create_ms: createMs,
         total_ms: Date.now() - startedAt,
         cleaned_up: cleanedUp,

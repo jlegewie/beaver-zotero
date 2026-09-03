@@ -67,11 +67,12 @@ function trackCaption(batch: BatchProgressEntry): string {
 }
 
 /**
- * The segmented progress track: changed, examined-and-left-alone, failed.
+ * The segmented progress track: changed, examined-and-left-alone, flagged
+ * with a finding, failed.
  *
- * Both kinds of decision fill the track, because both are results — a track
- * that counted only changes would report an honest no-change batch as having
- * done nothing.
+ * Every kind of decision fills the track, because each is a result — a track
+ * that counted only changes would report an honest no-change batch, or a
+ * review that flagged half its items, as having done nothing.
  */
 export const BatchProgressTrack: React.FC<{
     batch: BatchProgressEntry;
@@ -82,13 +83,15 @@ export const BatchProgressTrack: React.FC<{
     const total = batch.total ?? 0;
     const resolved = batch.resolved ?? 0;
     const noChange = batch.no_change ?? 0;
+    const findings = batch.findings ?? 0;
     const failed = batch.failed ?? 0;
     const share = (count: number) => (total > 0 ? (count / total) * 100 : 0);
     // Nothing decided yet on a batch that is still running: a determinate track
     // at zero reads as stalled, which is wrong at the one moment the model is
     // busiest — working out what the first slice should get.
     const isIndeterminate =
-        (batch.status ?? 'active') === 'active' && resolved + noChange + failed === 0;
+        (batch.status ?? 'active') === 'active' &&
+        resolved + noChange + findings + failed === 0;
     const caption = showDetail ? trackCaption(batch) : undefined;
 
     if (isIndeterminate) {
@@ -121,6 +124,12 @@ export const BatchProgressTrack: React.FC<{
                     style={{
                         width: `${share(noChange)}%`,
                         backgroundColor: 'var(--fill-tertiary)',
+                    }}
+                />
+                <div
+                    style={{
+                        width: `${share(findings)}%`,
+                        backgroundColor: 'var(--tag-purple)',
                     }}
                 />
                 <div
@@ -224,8 +233,10 @@ export const BatchTallyRow: React.FC<{
  * One labelled group of outcome rows.
  *
  * `kind` is the only thing that varies: destinations get an accent bar and a
- * `new` badge, removals the same bar muted, failure reasons no bar at all. The
- * heading and every label arrive composed — nothing here is per-operation.
+ * `new` badge, removals the same bar muted, findings the accent bar with no
+ * link (a finding names no place in the library), failure reasons no bar at
+ * all. The heading and every label arrive composed — nothing here is
+ * per-operation.
  */
 export const BatchOutcomeBlockView: React.FC<{
     block: BatchOutcomeBlock;

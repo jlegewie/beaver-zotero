@@ -22,6 +22,7 @@ export type {
     HostButtonVariant,
     ResolvedItemDisplay,
     CitationActivation,
+    CitationActivationIntent,
     CitationExportRequest,
     CitationExportRender,
 } from './types';

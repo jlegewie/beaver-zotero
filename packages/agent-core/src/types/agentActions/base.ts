@@ -218,6 +218,10 @@ export interface OrganizeItemsResultData {
     collections_removed?: string[];
     /** Items that failed (item_id -> error message) */
     failed_items?: Record<string, string>;
+    /** Items that could not be resolved on this device (not found, or library unavailable) */
+    skipped_items?: string[];
+    /** Items that already held every requested change so nothing was written for them. */
+    unchanged_items?: string[];
 }
 
 // =============================================================================

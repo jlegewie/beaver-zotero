@@ -14,6 +14,8 @@ import {
 } from '../../utils/citationPreprocessing';
 import { processPartialContent } from '../../utils/markdownPartialContent';
 import { getHost } from '@beaver/agent-ui/host';
+import { resolveObjectIdReference } from '@beaver/agent-core/identity/libraryRef';
+import { itemLinkExportHref, parseItemLinkHref, type ItemLinkTarget } from '../../utils/itemLinks';
 import { useFindQuery } from '@beaver/agent-ui/chat/findContext';
 import { rehypeFindHighlight } from '@beaver/agent-ui/chat/rehypeFindHighlight';
 
@@ -126,23 +128,50 @@ function urlTransform(url: string): string {
 }
 
 /**
+ * Export variant: the rendered HTML is saved into a Zotero note, where a bare
+ * object id (`u-KEY`) is not a working href, so item links are written as
+ * `zotero://select` URIs the note editor can follow.
+ */
+function exportUrlTransform(url: string): string {
+    return itemLinkExportHref(url) ?? urlTransform(url);
+}
+
+/**
+ * Follow a link to a Zotero object. The object id is resolved here, at click
+ * time, so rendering never touches the host's libraries.
+ */
+function activateItemLink(link: ItemLinkTarget): void {
+    const ref = resolveObjectIdReference(link.objectId);
+    if (!ref) return;
+    const navigation = getHost().navigation;
+    if (link.kind === 'collection') void navigation?.revealCollection(ref);
+    else void navigation?.revealObject?.(ref);
+}
+
+/**
  * Anchor rendered inside the chat.
  *
  * The UI is hosted in a chrome document, where a bare `<a href>` has no
  * navigation behavior — clicking one only selects its text. Links must be
  * opened explicitly through the host, so the default click is always
  * suppressed. Fragment-only links have no target to open and stay inert.
+ *
+ * A link whose href is a Zotero object id (`[Smith 2004](u-KEY)`, see
+ * `itemLinks.ts`) reveals that object in the host instead of opening a URL.
  */
 function MarkdownLink({ href, children, title, ...props }: any) {
-    const isExternal = Boolean(href) && !href.startsWith('#');
+    const itemLink = parseItemLinkHref(href);
+    const isExternal = !itemLink && Boolean(href) && !href.startsWith('#');
+    const defaultTitle = itemLink ? 'Show in Zotero' : isExternal ? href : undefined;
     return (
         <a
             {...props}
             href={href}
-            title={title ?? (isExternal ? href : undefined)}
+            title={title ?? defaultTitle}
             onClick={(event) => {
                 event.preventDefault();
-                if (isExternal) getHost().navigation?.openExternalUrl(href);
+                if (itemLink) activateItemLink(itemLink);
+                else if (isExternal) getHost().navigation?.openExternalUrl(href);
             }}
         >
             {children}
@@ -358,7 +387,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function Ma
                         <ReactMarkdown
                             remarkPlugins={[remarkMath, remarkGfm]}
                             rehypePlugins={rehypePlugins}
-                            urlTransform={urlTransform}
+                            urlTransform={exportRendering ? exportUrlTransform : urlTransform}
                             components={{
                                 // @ts-expect-error - Custom component not in ReactMarkdown types
                                 citation: ({node, ...props}: any) => {

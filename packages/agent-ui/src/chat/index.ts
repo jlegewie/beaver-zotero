@@ -14,6 +14,9 @@ export type { CitationDisplayState, CitationViewModel } from './useCitationViewM
 
 export { useCitationMarker } from './useCitationMarker';
 
+export { hasAlternateModifier, useAlternateActivation } from './useAlternateActivation';
+export type { AlternateActivation } from './useAlternateActivation';
+
 export { default as ChipWithPopup, ChipPopupCard, ChipWithListPopup } from './ChipPopup';
 export type {
     ChipPopupAction,

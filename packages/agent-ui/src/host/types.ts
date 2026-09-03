@@ -12,6 +12,17 @@ import type { AgentActionType } from '@beaver/agent-core/protocol/agentProtocol'
 import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgress';
 
 /**
+ * What a citation click should act on.
+ *
+ * - `passage` — navigate to the cited location: open the reader at the page and
+ *   highlight the quoted text, open the note, launch the external file, ... This
+ *   is the default.
+ * - `item` — reveal the cited work itself where the user keeps it, ignoring the
+ *   locator. Selected by holding the platform accelerator (Cmd / Ctrl).
+ */
+export type CitationActivationIntent = 'passage' | 'item';
+
+/**
  * Everything the host needs to activate (navigate to / open) a cited location.
  *
  * The render layer derives this from the client-agnostic citation view model and
@@ -23,6 +34,12 @@ import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgr
 export interface CitationActivation {
     /** Self-contained citation metadata (content kind, locations, pages, preview, ...). */
     metadata: Citation;
+    /**
+     * What the click should act on. Optional: a host that does not distinguish
+     * the two treats every click as `passage`, which is the behavior it had
+     * before the alternate activation existed.
+     */
+    intent?: CitationActivationIntent;
     isExternal: boolean;
     isExternalFile: boolean;
     externalFileKey: string | null;
@@ -92,6 +109,15 @@ export interface NavigationHost {
      * `zotero_key` is the collection key (not an item key).
      */
     revealCollection(ref: ZoteroItemReference): void;
+    /**
+     * Reveal whatever `zotero_key` names in the referenced library: a regular
+     * item, attachment, or note is selected in the library view, an annotation
+     * is opened in the reader, and a collection is selected. Used by the object
+     * links the model writes in prose (`[Smith 2004](u-KEY)`), which carry a
+     * key but not the object type. Optional — clients without it leave such
+     * links inert.
+     */
+    revealObject?(ref: ZoteroItemReference): void | Promise<void>;
     /** Open a local file (e.g. a PDF/text attachment) in the host's default handler. */
     launchFile(filePath: string): void;
     /** Open an external URL. */

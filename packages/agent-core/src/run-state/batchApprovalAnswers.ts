@@ -41,14 +41,24 @@ export const DEFAULT_BATCH_APPROVAL_DRAFT: BatchApprovalDraft = {
 /**
  * The draft a card starts from for a request that preselects `defaultMode`.
  *
- * Takes the mode rather than the request so these rules stay independent of
- * the pending-store shape, and so a card never has to assemble a draft literal
- * of its own — the seeding rule is part of the shared semantics, not chrome.
+ * Takes the mode and the prefill rather than the request so these rules stay
+ * independent of the pending-store shape, and so a card never has to assemble
+ * a draft literal of its own.
+ *
+ * `instructionsPrefill` seeds an editable draft; the user may change or
+ * clear it, and `buildResponse` sends whatever is left.
  *
  * Always a fresh object, so no two cards ever seed onto the same draft.
  */
-export function initialDraft(defaultMode: BatchApprovalMode): BatchApprovalDraft {
-    return { ...DEFAULT_BATCH_APPROVAL_DRAFT, mode: defaultMode };
+export function initialDraft(
+    defaultMode: BatchApprovalMode,
+    instructionsPrefill = '',
+): BatchApprovalDraft {
+    return {
+        ...DEFAULT_BATCH_APPROVAL_DRAFT,
+        mode: defaultMode,
+        userInstructions: instructionsPrefill,
+    };
 }
 
 /** Choose the coverage the decision grants. */
