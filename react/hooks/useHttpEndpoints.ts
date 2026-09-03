@@ -92,6 +92,10 @@ import {
     handleTestCollectionDeleteHttpRequest,
 } from './httpHandlers/testCollectionHandlers';
 import {
+    handleTestPdfRetrievalHttpRequest,
+    handleTestPdfCaptchaEligibilityHttpRequest,
+} from './httpHandlers/testPdfRetrievalHandlers';
+import {
     handleTestAnnotationCreateHttpRequest,
 } from './httpHandlers/testAnnotationHandlers';
 import {
@@ -275,6 +279,9 @@ const ENDPOINT_PATHS = [
     // Test-only endpoints (collection seeding/teardown)
     '/beaver/test/collection-create',
     '/beaver/test/collection-delete',
+
+    '/beaver/test/pdf-retrieval',
+    '/beaver/test/pdf-captcha-eligibility',
     // Test-only endpoints (headless PDF annotations)
     '/beaver/test/annotation-create',
     // Test-only endpoints (batch progress bar preview)
@@ -677,6 +684,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         item_category: request.item_category === 'attachment' ? 'attachment' : 'regular',
         has_attachments: request.has_attachments ?? null,
         max_items: request.max_items ?? 1000,
+        exclude_item_ids: request.exclude_item_ids ?? [],
     };
 
     const response = await handleResolvePopulationRequest(wsRequest);
@@ -684,6 +692,10 @@ async function handleResolvePopulationHttpRequest(request: any) {
     return {
         item_ids: response.item_ids,
         total_count: response.total_count,
+        // Presence tells the caller this build applied `exclude_item_ids`.
+        // Forwarded here too, like `conditions_join_mode`, or a localhost
+        // run cannot continue a batch.
+        excluded_count: response.excluded_count,
         // How many bibliographic items matched, before an attachment population
         // was derived from them. Without it the caller cannot tell an empty
         // attachment population from filters that matched nothing.
@@ -809,6 +821,8 @@ async function handleListTagsHttpRequest(request: any) {
         collection_key: request.collection_key,
         min_item_count: request.min_item_count ?? 0,
         name_query: request.name_query,
+        // Pass through so omitted stays 'all' in the handler.
+        tag_type: request.tag_type,
         limit: request.limit ?? 50,
         offset: request.offset ?? 0,
     };
@@ -818,6 +832,8 @@ async function handleListTagsHttpRequest(request: any) {
     return {
         tags: response.tags,
         total_count: response.total_count,
+        manual_count: response.manual_count,
+        automatic_count: response.automatic_count,
         library_id: response.library_id,
         library_name: response.library_name,
         error: response.error,
@@ -1127,6 +1143,13 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/collection-delete'] =
             createEndpoint(handleTestCollectionDeleteHttpRequest);
+
+        // PDF-retrieval measurement (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/pdf-retrieval'] =
+            createEndpoint(handleTestPdfRetrievalHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-captcha-eligibility'] =
+            createEndpoint(handleTestPdfCaptchaEligibilityHttpRequest);
 
         // Headless PDF annotation primitives (dev-only)
         Zotero.Server.Endpoints['/beaver/test/annotation-create'] =

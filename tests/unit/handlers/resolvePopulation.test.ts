@@ -1428,4 +1428,161 @@ describe('handleResolvePopulationRequest', () => {
             expect(response.matched_item_count).toBeUndefined();
         });
     });
+
+    describe('exclude_item_ids', () => {
+        it('drops excluded matches BEFORE truncating, so the next tranche is reachable', async () => {
+            searchResultIds = [1, 2, 3, 4, 5];
+            for (const id of searchResultIds) seedItem(id);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                max_items: 2,
+                exclude_item_ids: ['u-KEY1', 'u-KEY2'],
+            }));
+
+            expect(response.item_ids).toEqual(['u-KEY3', 'u-KEY4']);
+            expect(response.excluded_count).toBe(2);
+            // Truncation is judged on what survived the exclusion.
+            expect(response.truncated).toBe(true);
+            expect(response.total_count).toBe(3);
+        });
+
+        it('counts what is still outstanding, not what the filters matched', async () => {
+            searchResultIds = [1, 2, 3, 4, 5];
+            for (const id of searchResultIds) seedItem(id);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                max_items: 10,
+                exclude_item_ids: ['u-KEY1', 'u-KEY2'],
+            }));
+
+            expect(response.total_count).toBe(3);
+            expect(response.matched_item_count).toBe(3);
+            expect(response.truncated).toBe(false);
+        });
+
+        it('keeps both regular counts at zero when every match is excluded', async () => {
+            searchResultIds = [1, 2];
+            seedItem(1);
+            seedItem(2);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                exclude_item_ids: ['u-KEY1', 'u-KEY2'],
+            }));
+
+            expect(response.item_ids).toEqual([]);
+            expect(response.total_count).toBe(0);
+            expect(response.matched_item_count).toBe(0);
+            expect(response.excluded_count).toBe(2);
+        });
+
+        it('preserves the pre-derivation item count for attachment populations', async () => {
+            searchResultIds = [1, 2];
+            seedItem(1, { attachments: [101, 102] });
+            seedItem(2, { attachments: [103] });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                item_category: 'attachment',
+                exclude_item_ids: ['u-ATT101', 'u-ATT102'],
+            }));
+
+            expect(response.item_ids).toEqual(['u-ATT103']);
+            expect(response.total_count).toBe(1);
+            expect(response.matched_item_count).toBe(2);
+            expect(response.excluded_count).toBe(2);
+        });
+
+        it('normalizes id grammars while preserving the searched library', async () => {
+            (globalThis as any).Zotero.Groups = {
+                getLibraryIDFromGroupID: vi.fn((groupID: number) => groupID === 9999 ? 9 : false),
+            };
+            searchResultIds = [1, 2, 3];
+            seedItem(1);
+            seedItem(2);
+            seedItem(3);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                exclude_item_ids: [`${LIBRARY_ID}-KEY1`, 'g9999-KEY2'],
+            }));
+
+            // The legacy id names KEY1 in this user library. The portable
+            // group id names a different library, even though KEY2 collides.
+            expect(response.item_ids).toEqual(['u-KEY2', 'u-KEY3']);
+            expect(response.excluded_count).toBe(1);
+        });
+
+        it('excludes a portable group id only from its matching group library', async () => {
+            const groupLibraryID = 3;
+            vi.mocked(validateLibraryAccess).mockReturnValue({
+                valid: true,
+                library: { libraryID: groupLibraryID, name: 'Some Group' },
+            } as any);
+            (globalThis as any).Zotero.Groups = {
+                getLibraryIDFromGroupID: vi.fn((groupID: number) =>
+                    groupID === 287629 ? groupLibraryID : 9),
+                getGroupIDFromLibraryID: vi.fn(() => 287629),
+            };
+            searchResultIds = [1, 2];
+            seedItem(1, { libraryID: groupLibraryID });
+            seedItem(2, { libraryID: groupLibraryID });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                exclude_item_ids: ['g9999-KEY1', 'g287629-KEY2'],
+            }));
+
+            expect(response.item_ids).toEqual(['g287629-KEY1']);
+            expect(response.excluded_count).toBe(1);
+        });
+
+        it('ignores ids it cannot parse, and still applies the ones it can', async () => {
+            // A bare key (`KEY3`) must not match. A fallback to the raw string
+            // would exclude it; junk alone can't catch that (it never equals an
+            // 8-char key).
+            searchResultIds = [1, 2, 3];
+            for (const id of [1, 2, 3]) seedItem(id);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                exclude_item_ids: ['not-an-id', '', 'KEY3', 'u-KEY1'],
+            }));
+
+            expect(response.item_ids).toEqual(['u-KEY2', 'u-KEY3']);
+            expect(response.excluded_count).toBe(1);
+        });
+
+        it('reports excluded_count on the count-only path too', async () => {
+            searchResultIds = [1, 2, 3];
+            for (const id of [1, 2, 3]) seedItem(id);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                max_items: 0,
+                exclude_item_ids: ['u-KEY1'],
+            }));
+
+            expect(response.item_ids).toEqual([]);
+            expect(response.total_count).toBe(2);
+            expect(response.excluded_count).toBe(1);
+        });
+
+        it('reports excluded_count on the count-only fast path', async () => {
+            searchResultIds = [1, 2, 3];
+            for (const id of [1, 2, 3]) seedItem(id);
+
+            const response = await handleResolvePopulationRequest(
+                makeRequest({ max_items: 0 }),
+            );
+
+            expect(response.item_ids).toEqual([]);
+            expect(response.total_count).toBe(3);
+            expect(response.excluded_count).toBe(0);
+        });
+
+        it('reports excluded_count as 0 when nothing was asked to be excluded', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            const response = await handleResolvePopulationRequest(makeRequest());
+
+            expect(response.excluded_count).toBe(0);
+        });
+
+    });
 });

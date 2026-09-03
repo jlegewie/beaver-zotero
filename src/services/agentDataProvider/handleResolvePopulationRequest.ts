@@ -32,7 +32,7 @@ import {
     WSResolvePopulationResponse,
     ZoteroSearchCondition,
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { modelObjectId } from '../../utils/libraryIdentity';
+import { modelObjectId, parseItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
 import { resolveStoredTagName, validateLibraryAccess } from './utils';
 import { addSearchCondition } from './searchConditions';
 
@@ -133,6 +133,24 @@ async function readPopulationRows(itemIds: number[]): Promise<PopulationRow[]> {
     }
 
     return rows;
+}
+
+/** Zotero keys to leave out of one library's population. */
+function excludedZoteroKeys(
+    excludeItemIds: string[] | null | undefined,
+    libraryID: number,
+): Set<string> {
+    const keys = new Set<string>();
+    for (const objectId of excludeItemIds ?? []) {
+        const parsed = parseItemReference(objectId);
+        if (!parsed) continue;
+
+        // Zotero keys are unique only within a library.
+        if (resolveLibraryRef(parsed) === libraryID) {
+            keys.add(parsed.zotero_key);
+        }
+    }
+    return keys;
 }
 
 /** Empty response carrying an error. A failed resolution must never look like an empty match. */
@@ -500,10 +518,15 @@ export async function handleResolvePopulationRequest(
         const maxItems = typeof request.max_items === 'number' && request.max_items >= 0
             ? request.max_items
             : DEFAULT_MAX_ITEMS;
-        const totalCount = matchedIds.length;
+        // Drop excluded ids before truncating. After would keep returning the
+        // same first `max_items` matches, and later items would be unreachable.
+        const excludedKeys = excludedZoteroKeys(request.exclude_item_ids, library.libraryID);
+        const hasExclusion = excludedKeys.size > 0;
 
-        // Count-only: total_count is already known, so skip the id/order query.
-        if (maxItems === 0) {
+        // Count-only: skip the id/order query. Unavailable when excluding —
+        // which items to drop (and thus the count) is only knowable from the rows.
+        if (maxItems === 0 && !hasExclusion) {
+            const totalCount = matchedIds.length;
             logger(
                 `handleResolvePopulationRequest: Returning 0/${totalCount} item ids`
                     + `${totalCount > 0 ? ' (truncated)' : ''}`,
@@ -521,10 +544,9 @@ export async function handleResolvePopulationRequest(
                 // Echoed so a caller that asked for 'any' can tell an applied
                 // 'any' from a provider that never knew the field.
                 conditions_join_mode: conditionsJoinMode,
+                excluded_count: 0,
             };
         }
-
-        const truncated = totalCount > maxItems;
 
         // Ids and a stable order in one query — no getAsync, no loadDataTypes,
         // no serialization. The order must be deterministic across chunks
@@ -535,7 +557,21 @@ export async function handleResolvePopulationRequest(
             return a.itemID - b.itemID;
         });
 
-        const orderedIds = rows.map(row => modelObjectId(row.libraryID, row.key));
+        const keptRows = hasExclusion
+            ? rows.filter(row => !excludedKeys.has(row.key))
+            : rows;
+        const excludedCount = rows.length - keptRows.length;
+
+        const totalCount = keptRows.length;
+        // Regular: both counts describe the same residual. Attachments: keep
+        // the pre-derivation item count — exclusions remove attachment rows,
+        // not the bibliographic matches they came from.
+        const responseMatchedItemCount = itemCategory === 'regular'
+            ? totalCount
+            : matchedItemCount;
+        const truncated = totalCount > maxItems;
+
+        const orderedIds = keptRows.map(row => modelObjectId(row.libraryID, row.key));
         const resultIds = truncated ? orderedIds.slice(0, maxItems) : orderedIds;
 
         logger(
@@ -549,7 +585,7 @@ export async function handleResolvePopulationRequest(
             request_id: request.request_id,
             item_ids: resultIds,
             total_count: totalCount,
-            matched_item_count: matchedItemCount,
+            matched_item_count: responseMatchedItemCount,
             truncated,
             // Where the population lives, in the names the user gave those
             // places. The approval card states the location from these alone.
@@ -558,6 +594,9 @@ export async function handleResolvePopulationRequest(
             // Echoed so a caller that asked for 'any' can tell an applied
             // 'any' from a provider that never knew the field.
             conditions_join_mode: conditionsJoinMode,
+            // Always set, including 0. Presence tells the caller this build
+            // applied `exclude_item_ids`.
+            excluded_count: excludedCount,
         };
     } catch (error) {
         logger(`handleResolvePopulationRequest: Error: ${error}`, 1);

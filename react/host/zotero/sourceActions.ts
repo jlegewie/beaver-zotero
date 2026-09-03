@@ -17,10 +17,11 @@ function notifyExternalFileUnavailable(): void {
 }
 
 /**
- * A navigation target (item, collection, annotation, saved action, tag) that
- * was rendered from persisted run history but no longer exists on this computer.
+ * A navigation target (item, collection, annotation, saved action, tag, or the
+ * object an in-prose link names) that was rendered from persisted run history
+ * but does not exist on this computer.
  */
-export type UnavailableReferenceKind = 'item' | 'collection' | 'annotation' | 'action' | 'tag';
+export type UnavailableReferenceKind = 'item' | 'collection' | 'annotation' | 'action' | 'tag' | 'link';
 export type UnavailableReferenceCause = 'missing' | 'library_unavailable';
 
 const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: string; text: string }> = {
@@ -44,6 +45,12 @@ const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: stri
         title: 'Tag Not Available',
         text: 'This tag is no longer on any item in your Zotero libraries. It may have been renamed or removed.',
     },
+    // The link was written by the model, so unlike the other kinds the target
+    // may never have existed.
+    link: {
+        title: 'Item Not Found',
+        text: "This link doesn't match any item or collection in your Zotero library. It may have been deleted, or the link may be incorrect.",
+    },
 };
 
 const LIBRARY_UNAVAILABLE_COPY: Record<Exclude<UnavailableReferenceKind, 'action'>, { title: string; text: string }> = {
@@ -62,6 +69,10 @@ const LIBRARY_UNAVAILABLE_COPY: Record<Exclude<UnavailableReferenceKind, 'action
     tag: {
         title: 'Tag Not Available',
         text: "This tag was applied in a library that isn't available on this computer. It may be a group library you haven't joined on this device.",
+    },
+    link: {
+        title: 'Item Not Found',
+        text: "This link points to a library that isn't available on this computer. It may be a group library you haven't joined on this device.",
     },
 };
 

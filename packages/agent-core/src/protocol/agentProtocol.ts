@@ -1493,6 +1493,18 @@ export interface WSResolvePopulationRequest extends WSBaseEvent {
      * returned. 0 returns no ids (total_count is still the true match count).
      */
     max_items: number;
+    /**
+     * Item ids to leave out of the result. Applied before truncation to
+     * `max_items`, so a caller paging one tranche at a time can reach the
+     * next — excluding after would return the same first `max_items` matches
+     * every time. Entries may use any id grammar; resolve each to this
+     * device's library before comparing, do not match on the raw string.
+     *
+     * A handler that applies this MUST set `excluded_count` (including 0)
+     * so the caller can tell a build that honoured the field from one that
+     * ignored it.
+     */
+    exclude_item_ids?: string[] | null;
 }
 
 /** Response to resolve_population request */
@@ -1505,8 +1517,21 @@ export interface WSResolvePopulationResponse {
      * id), deterministic order, length <= max_items.
      */
     item_ids: string[];
-    /** True number of matches, counted before truncation. */
+    /**
+     * True number of matches, counted after any `exclude_item_ids` were
+     * removed but before truncation.
+     */
     total_count: number;
+    /**
+     * How many matching items `exclude_item_ids` removed.
+     *
+     * Presence confirms this build applied the exclusion. Set on every
+     * successful resolution (0 when nothing was excluded); absent from a
+     * failure and from a build that predates the field. A shrinking
+     * population and an ignored field both come back short, so the ids
+     * alone cannot tell them apart.
+     */
+    excluded_count?: number | null;
     /**
      * Number of bibliographic items the filters matched, counted before any
      * attachment population is derived from them and before truncation.
@@ -1742,6 +1767,15 @@ export interface WSListTagsRequest extends WSBaseEvent {
      * silently returns the unfiltered list.
      */
     name_query?: string | null;
+    /**
+     * Which tags to return: `manual` (the user added the tag to at least one
+     * item), `automatic` (every occurrence was imported with an item's
+     * metadata) or `all`. Defaults to `all` when absent.
+     *
+     * Gated by the `list_tags_types` client feature: a client without it
+     * ignores the field and returns every tag.
+     */
+    tag_type?: 'manual' | 'automatic' | 'all' | null;
     limit: number;
     offset: number;
 }
@@ -1758,6 +1792,12 @@ export interface TagInfo {
     /** Number of annotations carrying this tag. Omitted by older frontends. */
     annotation_count?: number;
     color?: string | null;
+    /**
+     * `manual` if any occurrence is user-added, `automatic` if every
+     * occurrence was imported with an item's metadata. One name can be both
+     * (`itemTags.type` is per pair); manual wins. Omitted by older clients.
+     */
+    tag_type?: 'manual' | 'automatic';
 }
 
 /** Response to list_tags request */
@@ -1766,6 +1806,16 @@ export interface WSListTagsResponse {
     request_id: string;
     tags: TagInfo[];
     total_count: number;
+    /**
+     * Manual tags in scope after the other filters, whatever `tag_type` asked
+     * for. Always 0 from clients that do not report types.
+     */
+    manual_count?: number;
+    /**
+     * Automatic tags in scope after the other filters, whatever `tag_type`
+     * asked for. Always 0 from clients that do not report types.
+     */
+    automatic_count?: number;
     library_id?: number | null;
     /** Device-portable library identity ('u' / 'g<groupID>') of the listed library. */
     library_ref?: string;
@@ -2196,6 +2246,20 @@ export interface WSBatchApprovalRequest extends WSBaseEvent {
     learn_more_label?: string;
     /** Docs path resolved against the client's environment-specific docs URL */
     learn_more_path?: string;
+    /**
+     * Initial contents of the instructions box; a non-empty value also
+     * opens it. Set only for a continuation, from the instructions the
+     * earlier batch was approved with. An editable default — whatever
+     * the response carries is what binds.
+     */
+    user_instructions_prefill?: string;
+    /**
+     * Whether the batch changes nothing in the library. The card then offers
+     * no coverage choice — there is nothing for full access to cover — and
+     * answers with `default_mode`. Absent from a backend that predates the
+     * field, which is the same thing as a batch that writes.
+     */
+    read_only?: boolean;
     /** How long the backend will wait for a response */
     timeout_seconds: number;
 }
@@ -2502,6 +2566,13 @@ export const CLIENT_FEATURES = {
      */
     LIST_TAGS_NAME_QUERY: 'list_tags_name_query',
     /**
+     * `list_tags` reports each tag as `manual` or `automatic`, honors
+     * `tag_type` and returns both per-type counts. A client without it ignores
+     * the field and returns every tag untyped, which must not be presented as
+     * the user's vocabulary.
+     */
+    LIST_TAGS_TYPES: 'list_tags_types',
+    /**
      * `credit_confirmation_request`: the run's credit cost is confirmed once per
      * run instead of per tool call. A client declaring it is asked at the
      * threshold its `ChargingPermissions` carry; a client without it keeps the
@@ -2510,6 +2581,20 @@ export const CLIENT_FEATURES = {
     CREDIT_CONFIRMATION: 'credit_confirmation',
     /** `batch_jobs` capability (batch_start / batch_resolve). */
     BATCH_JOBS: 'batch_jobs',
+    /** `citation_graph` capability (`find_related_works`). */
+    CITATION_GRAPH: 'citation_graph',
+    /**
+     * `create_item` actions carry `pdf_candidates`: a ranked list of places the
+     * PDF might be downloaded from.
+     */
+    PDF_CANDIDATES: 'pdf_candidates',
+    /**
+     * Chat markdown follows `[label](u-KEY)` (and `zotero://select/...`) as a
+     * link that reveals the named library object. Without it those hrefs render
+     * as ordinary relative links, so the backend must not instruct the model to
+     * write them.
+     */
+    ITEM_LINKS: 'item_links',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */

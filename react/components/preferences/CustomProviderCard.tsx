@@ -16,7 +16,7 @@ import {
     ScissorIcon,
 } from "../icons/icons";
 import { CustomChatModel, validateCustomProviderApiBase } from "../../types/settings";
-import { DocLink } from "./components/SettingsElements";
+import { DocLink, ExternalLink, INTELLIGENCE_INDEX_URL } from "./components/SettingsElements";
 import {
     chatService,
     RockPaperScissorsMove,
@@ -238,6 +238,10 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                         aria-label="Model snapshot"
                         className="chat-input text-base font-color-primary"
                     />
+                    <span className="text-sm font-color-tertiary">
+                        Small or older models struggle with Beaver's tools. Aim for 30+ on the{' '}
+                        <ExternalLink href={INTELLIGENCE_INDEX_URL}>Intelligence Index</ExternalLink>, 38+ for a good experience.
+                    </span>
                 </label>
 
                 {/* API base */}

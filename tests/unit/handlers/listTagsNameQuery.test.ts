@@ -27,9 +27,9 @@ vi.mock('../../../src/utils/libraryIdentity', () => ({
 
 import { handleListTagsRequest } from '../../../src/services/agentDataProvider/handleListTagsRequest';
 
-/** One grouped row: name plus the four per-type counts. */
-function tagRow(name: string, itemCount = 1) {
-    const values = [name, itemCount, 0, 0, 0];
+/** One grouped row: name, the four per-type counts, and the manual flag. */
+function tagRow(name: string, itemCount = 1, hasManual = 1) {
+    const values = [name, itemCount, 0, 0, 0, hasManual];
     return { getResultByIndex: (i: number) => values[i] };
 }
 

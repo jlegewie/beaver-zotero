@@ -23,6 +23,12 @@ interface TagCounts {
     attachmentCount: number;
     noteCount: number;
     annotationCount: number;
+    /**
+     * True if any item carries this tag as a user-added tag (`itemTags.type`
+     * 0). Type is per (item, tag) pair, so one name can be both; a single
+     * manual use is enough.
+     */
+    hasManual: boolean;
 }
 
 /** Upper bound on `limit`. */
@@ -53,7 +59,7 @@ function likeContainsPattern(query: string): string {
 export async function handleListTagsRequest(
     request: WSListTagsRequest
 ): Promise<WSListTagsResponse> {
-    logger(`handleListTagsRequest: library=${request.library_id}, collection=${request.collection_key}, name_query=${request.name_query ?? ''}`, 1);
+    logger(`handleListTagsRequest: library=${request.library_id}, collection=${request.collection_key}, name_query=${request.name_query ?? ''}, tag_type=${request.tag_type ?? 'all'}`, 1);
     
     try {
         // Validate library (checks both existence and searchability)
@@ -119,7 +125,8 @@ export async function handleListTagsRequest(
         // Build tag counts broken down by tagged-object type
         const tagMap: Map<string, TagCounts> = new Map();
 
-        // Columns per row: name, itemCount, attachmentCount, noteCount, annotationCount.
+        // Columns per row: name, itemCount, attachmentCount, noteCount,
+        // annotationCount, hasManual.
         // Each (itemID, tagID) pair yields exactly one row, and the item-type
         // LEFT JOINs are 1:1, so SUM(CASE ...) counts each object exactly once.
         const accumulateRow = (row: any) => {
@@ -128,6 +135,7 @@ export async function handleListTagsRequest(
             const attachmentCount = (row.getResultByIndex(2) as number) || 0;
             const noteCount = (row.getResultByIndex(3) as number) || 0;
             const annotationCount = (row.getResultByIndex(4) as number) || 0;
+            const hasManual = ((row.getResultByIndex(5) as number) || 0) > 0;
 
             const existing = tagMap.get(name);
             if (existing) {
@@ -135,8 +143,9 @@ export async function handleListTagsRequest(
                 existing.attachmentCount += attachmentCount;
                 existing.noteCount += noteCount;
                 existing.annotationCount += annotationCount;
+                existing.hasManual = existing.hasManual || hasManual;
             } else {
-                tagMap.set(name, { itemCount, attachmentCount, noteCount, annotationCount });
+                tagMap.set(name, { itemCount, attachmentCount, noteCount, annotationCount, hasManual });
             }
         };
 
@@ -147,7 +156,8 @@ export async function handleListTagsRequest(
                 SUM(CASE WHEN IA.itemID IS NULL AND INo.itemID IS NULL AND IAn.itemID IS NULL THEN 1 ELSE 0 END) AS itemCount,
                 SUM(CASE WHEN IA.itemID IS NOT NULL THEN 1 ELSE 0 END) AS attachmentCount,
                 SUM(CASE WHEN INo.itemID IS NOT NULL THEN 1 ELSE 0 END) AS noteCount,
-                SUM(CASE WHEN IAn.itemID IS NOT NULL THEN 1 ELSE 0 END) AS annotationCount`;
+                SUM(CASE WHEN IAn.itemID IS NOT NULL THEN 1 ELSE 0 END) AS annotationCount,
+                MAX(CASE WHEN IT.type = 0 THEN 1 ELSE 0 END) AS hasManual`;
 
         const COUNT_JOINS = `
                 LEFT JOIN itemAttachments IA ON I.itemID = IA.itemID
@@ -215,13 +225,32 @@ export async function handleListTagsRequest(
             });
         }
 
-        // Build tag info array
+        // Default 'all': callers that omit the field expect the whole list.
+        // Filter is per tag, not per occurrence — mixed tags count as manual and
+        // keep their full counts.
+        const tagType = request.tag_type ?? 'all';
+
+        // Build tag info array. Both per-type counts are taken after the other
+        // filters but before the type filter, so the caller always learns how
+        // many tags of the other kind the listing left out.
         const tags: TagInfo[] = [];
+        let manualCount = 0;
+        let automaticCount = 0;
         for (const [name, data] of tagMap) {
             // Filter on the total number of tagged objects so a tag is kept even
             // when it lives only on attachments/notes/annotations.
             const totalCount = data.itemCount + data.attachmentCount + data.noteCount + data.annotationCount;
             if (totalCount < (request.min_item_count ?? 0)) {
+                continue;
+            }
+
+            const type = data.hasManual ? 'manual' : 'automatic';
+            if (type === 'manual') {
+                manualCount++;
+            } else {
+                automaticCount++;
+            }
+            if (tagType !== 'all' && type !== tagType) {
                 continue;
             }
 
@@ -235,6 +264,7 @@ export async function handleListTagsRequest(
                 note_count: data.noteCount,
                 annotation_count: data.annotationCount,
                 color: colorInfo?.color || null,
+                tag_type: type,
             });
         }
 
@@ -257,13 +287,15 @@ export async function handleListTagsRequest(
         const limit = Math.max(0, Math.min(request.limit ?? DEFAULT_LIMIT, MAX_LIMIT));
         const paginatedTags = tags.slice(offset, offset + limit);
         
-        logger(`handleListTagsRequest: Returning ${paginatedTags.length}/${totalCount} tags`, 1);
+        logger(`handleListTagsRequest: Returning ${paginatedTags.length}/${totalCount} tags (${manualCount} manual, ${automaticCount} automatic, tag_type=${tagType})`, 1);
         
         return {
             type: 'list_tags',
             request_id: request.request_id,
             tags: paginatedTags,
             total_count: totalCount,
+            manual_count: manualCount,
+            automatic_count: automaticCount,
             library_id: library.libraryID,
             library_ref: libraryRefForLibraryID(library.libraryID) ?? undefined,
             library_name: libraryName,
