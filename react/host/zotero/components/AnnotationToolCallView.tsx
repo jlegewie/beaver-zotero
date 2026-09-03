@@ -35,6 +35,7 @@ import {
 } from '../../../components/icons/icons';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
+import { inFlightProgressMessage } from './agentActionViewHelpers';
 import {
     annotationAttachmentTitlesAtom,
     annotationBusyAtom,
@@ -642,6 +643,9 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
 
     const isButtonDisabled = isInProgress || isError || (isCompleted && !hasAnnotationsToShow);
 
+    // Backend-side wait on Zotero (a slow save), reported while the call is open.
+    const progressMessage = inFlightProgressMessage(part.progress, isInProgress);
+
     return (
         <div
             id={`tool-${toolCallId}`}
@@ -658,20 +662,25 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
             >
                 <button
                     type="button"
-                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left ${canToggleResults ? 'cursor-pointer' : ''} ${isError ? 'font-color-warning' : ''}`}
+                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left min-w-0 ${canToggleResults ? 'cursor-pointer' : ''} ${isError ? 'font-color-warning' : ''}`}
                     style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
                     aria-expanded={resultsVisible}
                     aria-controls={`annotation-list-${toolCallId}`}
                     onClick={toggleResults}
                     disabled={isButtonDisabled && !canToggleResults}
                 >
-                    <div className="display-flex flex-row gap-2">
+                    <div className="display-flex flex-row gap-2 min-w-0">
                         <div className="flex-1 display-flex mt-010">
                             <Icon icon={getIcon()} />
                         </div>
-                        <div className={`display-flex ${isInProgress ? 'shimmer-text' : ''}`}>
+                        <div className={`display-flex whitespace-nowrap ${isInProgress ? 'shimmer-text' : ''}`}>
                             {getButtonText()}
                         </div>
+                        {progressMessage && (
+                            <div className="two-line-header font-color-tertiary min-w-0 shimmer-text">
+                                {progressMessage}
+                            </div>
+                        )}
                         {/* Annotation metrics */}
                         {isCompleted && hasAnnotationsToShow && (
                             <div className="display-flex flex-row items-center gap-1">

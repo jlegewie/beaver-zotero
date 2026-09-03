@@ -28,6 +28,7 @@ import {
 import {
     STATUS_CONFIGS,
     hasFailedUndo,
+    inFlightProgressMessage,
     type ActionStatus,
 } from './agentActionViewHelpers';
 import {
@@ -171,6 +172,20 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         () => partStates.flatMap((state) => state.actions),
         [partStates],
     );
+
+    // One card covers every edit_note call in the group, so the note comes from
+    // whichever call is still open. Not shown while a call waits on the user:
+    // there the card's own approval state is the story.
+    const progressMessage = useMemo(() => {
+        for (const state of partStates) {
+            const message = inFlightProgressMessage(
+                state.part.progress,
+                state.toolCallStatus === 'in_progress' && state.pendingApproval === null,
+            );
+            if (message) return message;
+        }
+        return null;
+    }, [partStates]);
 
     const pendingApprovalsForGroup: PendingApproval[] = useMemo(
         () => partStates.flatMap((state) => (state.pendingApproval ? [state.pendingApproval] : [])),
@@ -774,6 +789,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                         </Tooltip>
                                     )}
                                 </>
+                            )}
+                            {progressMessage && (
+                                <span className="font-color-tertiary ml-15 shimmer-text">{progressMessage}</span>
                             )}
                         </div>
                     </div>
