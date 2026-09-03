@@ -51,6 +51,23 @@ export function confirmOverwriteManualChanges(modifiedFields: string[]): boolean
 export const NEVER_AUTO_COLLAPSE_TOOLS = new Set(['create_note', 'create_highlight_annotations', 'create_note_annotations']);
 
 /**
+ * The progress note the backend posts on a tool call that is waiting on Zotero
+ * (e.g. "Zotero is still applying this change…" while a long save runs).
+ *
+ * Action cards render their own header instead of the tool-call label, which is
+ * the only other place a progress message shows, so each card has to pick the
+ * note up here or the user sees nothing during the wait. The note is not cleared
+ * when the response finally arrives, so it must only be shown while the card's
+ * call is still outstanding — what that means is the caller's to decide.
+ */
+export function inFlightProgressMessage(
+    progress: string | undefined,
+    isInFlight: boolean,
+): string | null {
+    return isInFlight && progress ? progress : null;
+}
+
+/**
  * Shorten a backend error_message for inline display in action previews.
  *
  * Backend messages include agent-facing detail (multi-line lists, Zotero keys,
