@@ -476,10 +476,10 @@ async function handleAsyncRender({
         }
         setSectionSummary(data.fields.headerSummary);
 
-        const reader = body.querySelector<HTMLButtonElement>(
-            '[data-beaver-action="reader"]'
+        const open = body.querySelector<HTMLButtonElement>(
+            '[data-beaver-action="open"]'
         );
-        if (reader) reader.disabled = !data.hasFile;
+        if (open) open.disabled = !data.hasFile;
 
         const restore = body.querySelector<HTMLButtonElement>(
             '[data-beaver-action="restore-shadow"]'
@@ -548,8 +548,8 @@ function renderDistribution(
 
 /** Which of the section's buttons can do anything for this item right now. */
 export interface TableSectionActions {
-    openInBeaver: boolean;
-    openInReader: boolean;
+    /** Opening needs the surfaces registered and a file for the reader to show. */
+    open: boolean;
     showInLibrary: boolean;
     /**
      * True only for a table another device's copy replaced whose own version is
@@ -568,9 +568,9 @@ function canShowInLibrary(win: Window | null): boolean {
 /**
  * What the section's buttons would do for this item.
  *
- * `openInReader` needs a file on disk and `restoreShadow` needs a retained
- * version, neither of which is knowable without a read, so both are passed in
- * rather than guessed.
+ * `open` needs a file on disk and `restoreShadow` needs a retained version,
+ * neither of which is knowable without a read, so both are passed in rather
+ * than guessed.
  */
 export function tableSectionActions(
     win: Window | null,
@@ -579,8 +579,7 @@ export function tableSectionActions(
 ): TableSectionActions {
     const api = !!getTablesApi();
     return {
-        openInBeaver: api,
-        openInReader: api && hasFile,
+        open: api && hasFile,
         showInLibrary: canShowInLibrary(win),
         restoreShadow: api && canRestoreShadow,
     };
@@ -595,20 +594,20 @@ function refOf(item: Zotero.Item): TableRef {
 }
 
 /**
- * Opens the table on a surface, through the shared namespace.
+ * Opens the table in the reader, through the shared namespace.
  *
  * `Zotero.__beaverTables` rather than a direct import even though this module
  * is in the same bundle as `openTable`: the namespace is the one seam every
  * caller of a table surface uses, and going through it means a torn-down bundle
  * reports "not up" instead of running a dead realm's closure.
  */
-async function open(ref: TableRef, where?: 'tab' | 'reader'): Promise<void> {
+async function openTable(ref: TableRef): Promise<void> {
     const api = getTablesApi();
     if (!api) {
         logger('tableItemPane: the table surfaces are not registered', 1);
         return;
     }
-    const outcome = await api.openTable(ref, where ? { where } : {});
+    const outcome = await api.openTable(ref);
     if ('error' in outcome) logger(`tableItemPane: ${outcome.error}`, 1);
 }
 
@@ -661,13 +660,10 @@ function renderActions(doc: Document, item: Zotero.Item): HTMLElement {
 
     const ref = refOf(item);
     wrapper.append(
-        button(doc, 'beaver', 'Open in Beaver', actions.openInBeaver, () =>
-            void open(ref)
-        ),
         // Enabled optimistically; the async half disables it when the item has
         // no file, which is the only way to know.
-        button(doc, 'reader', 'Open in reader', actions.openInReader, () =>
-            void open(ref, 'reader')
+        button(doc, 'open', 'Open table', actions.open, () =>
+            void openTable(ref)
         ),
         button(doc, 'library', 'Show in library', actions.showInLibrary, () =>
             showInLibrary(win, item)

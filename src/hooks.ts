@@ -24,13 +24,6 @@ import {
     cleanupReaderTableViews,
     cleanupReaderTableViewsForWindow,
 } from "./services/artifacts/view/readerTableView";
-import { closeAllTableTabs, closeTableTabsForWindow } from "./ui/tableTab";
-import {
-    initTableDoubleClick,
-    installTableDoubleClick,
-    uninstallTableDoubleClick,
-    cleanupTableDoubleClick,
-} from "./ui/tableDoubleClick";
 import {
     initTableItemPane,
     cleanupTableItemPane,
@@ -318,12 +311,10 @@ async function onStartup() {
         await initReaderToolbarMenu();
 
         // -------- Enhance stored tables opened in the reader --------
+        // The reader is the only surface a stored table has, so every way of
+        // opening one — double-click, `zotero://open`, the item pane — arrives
+        // here and needs no interception anywhere.
         initReaderTableViews();
-
-        // -------- Learn which items are stored tables --------
-        // The double-click guard has to decide synchronously, so the item data
-        // `isTableItem` reads is loaded ahead of the click, not during it.
-        initTableDoubleClick();
 
         // -------- Describe a stored table in the item pane --------
         // Registered once, globally: Zotero re-creates the section in every
@@ -331,10 +322,10 @@ async function onStartup() {
         initTableItemPane();
 
         // -------- Publish the table surfaces to the other bundle --------
-        // The tab deck, the double-click guard and the reader views keep module
-        // state, so they live in this bundle only. Anything on the webpack side
-        // reaches them through `Zotero.__beaverTables` rather than importing
-        // them, which would give it a second, permanently empty copy.
+        // The reader views and the item-pane registration keep module state, so
+        // they live in this bundle only. Anything on the webpack side reaches
+        // them through `Zotero.__beaverTables` rather than importing them,
+        // which would give it a second, permanently empty copy.
         registerTablesApi();
 
         // -------- Register Zotero preferences pane --------
@@ -413,11 +404,6 @@ async function onMainWindowLoad(win: Window): Promise<void> {
     win.__beaverEventBus = eventBus;
 
     BeaverUIFactory.registerChatPanel(win);
-
-    // Wrap this window's ZoteroPane.viewItems / viewAttachment so a
-    // double-clicked stored table opens Beaver's table surface. Every other
-    // double-click falls through untouched — see src/ui/tableDoubleClick.ts.
-    installTableDoubleClick(win);
 
     ztoolkit.log("UI ready");
     
@@ -581,15 +567,12 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // next popup translation, breaking Zotero's right-click menu.
         unregisterMainWindowFtl(win);
 
-        // Release this window's table surfaces. Window-specific, so it runs on
-        // every unload and not only during global cleanup: a table tab or a
-        // reader-hosted table left behind holds the closed window's iframe and
-        // its rendered document — a dead realm kept alive, which on macOS
-        // (close the last window, app keeps running) survives indefinitely.
-        closeTableTabsForWindow(win);
+        // Release this window's table views. Window-specific, so it runs on
+        // every unload and not only during global cleanup: a reader-hosted
+        // table left behind holds the closed window's iframe and its rendered
+        // document — a dead realm kept alive, which on macOS (close the last
+        // window, app keeps running) survives indefinitely.
         cleanupReaderTableViewsForWindow(win);
-        // Give this window's ZoteroPane its own handlers back before it goes.
-        uninstallTableDoubleClick(win);
 
         if (!isLastWindow) {
             ztoolkit.log("onMainWindowUnload: Other windows remain, skipping global cleanup");
@@ -690,13 +673,11 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         cleanupContextMenus();
 
         // 12. Unregister reader integration listeners, and release the table
-        //     surfaces: a table tab left open holds a detached iframe and the
-        //     whole rendered document, and a reader view holds its reader.
+        //     views: one left behind holds its reader, that reader's document
+        //     and the window both live in.
         cleanupReaderIntegration();
         unregisterTablesApi();
         cleanupReaderTableViews();
-        closeAllTableTabs();
-        cleanupTableDoubleClick();
         cleanupTableItemPane();
 
         // 13. Unregister reader toolbar menu
@@ -923,8 +904,6 @@ async function onShutdown(): Promise<void> {
         cleanupReaderIntegration();
         unregisterTablesApi();
         cleanupReaderTableViews();
-        closeAllTableTabs();
-        cleanupTableDoubleClick();
         cleanupTableItemPane();
         cleanupReaderToolbarMenu();
         unregisterBeaverProtocolHandler();

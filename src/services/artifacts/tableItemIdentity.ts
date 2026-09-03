@@ -370,7 +370,7 @@ export async function readTableHistory(
  * A stored table, by the item that holds it.
  *
  * Declared here rather than in the store because the esbuild side addresses
- * tables too — the double-click guard and `src/ui/openTable.ts` both take one —
+ * tables too — `src/ui/openTable.ts` and the item-pane section both take one —
  * and `tableStore.ts` cannot be reached from that bundle. `tableStore.ts`
  * re-exports it, so nothing that already imports it from there has to change.
  */

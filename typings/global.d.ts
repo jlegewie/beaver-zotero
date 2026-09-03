@@ -69,9 +69,9 @@ declare namespace Zotero {
     let __beaverWrittenAnnotationKeys: Map<string, number> | undefined;
     /**
      * The stored-table surfaces, published by the esbuild bundle at startup.
-     * The tab registry, the double-click guard and the reader-view registry all
-     * keep module state, so they must exist in one bundle only; the webpack side
-     * reaches them through here. See src/services/artifacts/tablesApi.ts.
+     * The reader-view registry and the item-pane registration keep module
+     * state, so they must exist in one bundle only; the webpack side reaches
+     * them through here. See src/services/artifacts/tablesApi.ts.
      */
     let __beaverTables:
         | import("../src/services/artifacts/tablesApi").TablesApi

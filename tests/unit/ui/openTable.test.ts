@@ -1,171 +1,119 @@
+/**
+ * `openTable`: the one way a stored table gets on screen.
+ *
+ * A stored table has a single surface — Zotero's snapshot reader — so what is
+ * tested here is the contract around that: the preflight that keeps the reader
+ * off a table with no file, and the promise that nothing throws, because every
+ * caller is a UI path that has to degrade rather than raise.
+ */
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const getPref = vi.hoisted(() => vi.fn());
-const canOpenTableTab = vi.hoisted(() => vi.fn());
-const openTableTab = vi.hoisted(() => vi.fn());
-const readTable = vi.hoisted(() => vi.fn());
 const resolveTableItem = vi.hoisted(() => vi.fn());
 
-vi.mock('../../../src/utils/prefs', () => ({
-    getPref,
-    setPref: vi.fn(),
-    clearPref: vi.fn(),
-}));
-
-vi.mock('../../../src/ui/tableTab', () => ({
-    canOpenTableTab,
-    openTableTab,
-    zoteroLinksFor: vi.fn(() => ({})),
-}));
-
 vi.mock('../../../src/services/artifacts/tableItemIdentity', () => ({
-    readTable,
     resolveTableItem,
 }));
 
-import {
-    canOpenTable,
-    openTable,
-    resolveTableTarget,
-} from '../../../src/ui/openTable';
+import { openTable } from '../../../src/ui/openTable';
 
 const REF = { libraryID: 1, key: 'TABLEKEY' };
-const SPEC = { id: 't1', title: 'Table', columns: [], rows: [] };
-
-const win = {} as unknown as Window;
 
 let readerOpen: ReturnType<typeof vi.fn>;
 
-function stubZotero(): void {
-    readerOpen = vi.fn().mockResolvedValue(undefined);
-    (Zotero as any).getMainWindow = vi.fn(() => win);
-    (Zotero as any).Reader = { open: readerOpen };
+function fileItem(path: string | null) {
+    return {
+        id: 42,
+        key: REF.key,
+        libraryID: REF.libraryID,
+        getFilePathAsync: vi.fn().mockResolvedValue(path),
+    };
 }
 
-function fileItem(path: string | null) {
-    return { id: 42, key: REF.key, libraryID: REF.libraryID, getFilePathAsync: vi.fn().mockResolvedValue(path) };
-}
+let prefs: Record<string, unknown>;
 
 beforeEach(() => {
     vi.clearAllMocks();
-    stubZotero();
-    getPref.mockReturnValue('tab');
-    canOpenTableTab.mockReturnValue(true);
-    openTableTab.mockReturnValue('tab-1');
-    readTable.mockResolvedValue({ spec: SPEC, version: 3 });
+    prefs = {};
+    readerOpen = vi.fn().mockResolvedValue(undefined);
+    (Zotero as any).Reader = { open: readerOpen };
+    (Zotero as any).Prefs = { get: vi.fn((key: string) => prefs[key]) };
     resolveTableItem.mockResolvedValue(fileItem('/tmp/table.html'));
 });
 
-describe('resolveTableTarget', () => {
-    it('prefers an explicit target over the preference', () => {
-        getPref.mockReturnValue('reader');
-        expect(resolveTableTarget('tab')).toBe('tab');
-        expect(resolveTableTarget('reader')).toBe('reader');
+describe('openTable', () => {
+    it('opens the table item in the reader', async () => {
+        await expect(openTable(REF)).resolves.toEqual({ ok: true });
+        expect(readerOpen).toHaveBeenCalledWith(42, undefined, {
+            openInWindow: false,
+            allowDuplicate: false,
+        });
     });
 
-    it('falls back to the preference when no target is given', () => {
-        getPref.mockReturnValue('reader');
-        expect(resolveTableTarget()).toBe('reader');
-        getPref.mockReturnValue('tab');
-        expect(resolveTableTarget()).toBe('tab');
+    it("honours Zotero's own openReaderInNewWindow preference", async () => {
+        // Zotero's other open paths pass this through `FileHandlers.open`, so
+        // the item-pane button has to as well or it contradicts the setting.
+        prefs.openReaderInNewWindow = true;
+
+        await expect(openTable(REF)).resolves.toEqual({ ok: true });
+        // `allowDuplicate` tracks it, exactly as `FileHandlers.open` does:
+        // without it `Zotero.Reader.open` selects any existing tab for the item
+        // — including a session-restored unloaded one — and never reaches the
+        // window branch, so the table would open in a tab instead.
+        expect(readerOpen).toHaveBeenCalledWith(42, undefined, {
+            openInWindow: true,
+            allowDuplicate: true,
+        });
     });
 
-    it('reads an unrecognised or unreadable preference as the tab', () => {
-        getPref.mockReturnValue('window');
-        expect(resolveTableTarget()).toBe('tab');
-        getPref.mockReturnValue(undefined);
-        expect(resolveTableTarget()).toBe('tab');
-        getPref.mockImplementation(() => {
+    it('still opens when the preference cannot be read', async () => {
+        (Zotero as any).Prefs.get = vi.fn(() => {
             throw new Error('prefs unavailable');
         });
-        expect(resolveTableTarget()).toBe('tab');
+
+        await expect(openTable(REF)).resolves.toEqual({ ok: true });
+        expect(readerOpen).toHaveBeenCalledWith(42, undefined, {
+            openInWindow: false,
+            allowDuplicate: false,
+        });
     });
-});
 
-describe('canOpenTable', () => {
-    it('is true while either surface exists', () => {
-        expect(canOpenTable(win)).toBe(true);
+    it('refuses on a build with no reader API, without looking the item up', async () => {
+        (Zotero as any).Reader = undefined;
 
-        canOpenTableTab.mockReturnValue(false);
-        expect(canOpenTable(win)).toBe(true);
+        const result = await openTable(REF);
 
-        (Zotero as any).Reader = {};
-        expect(canOpenTable(win)).toBe(false);
+        expect(result).toEqual({ error: expect.stringContaining('no reader API') });
+        expect(resolveTableItem).not.toHaveBeenCalled();
     });
-});
 
-describe('openTable', () => {
-    it('renders the stored spec into a tab, reading it through the store', async () => {
-        const result = await openTable(REF, { where: 'tab', win });
+    it('refuses before opening when the table has no file on disk', async () => {
+        resolveTableItem.mockResolvedValue(fileItem(null));
 
-        expect(result).toEqual({ opened: 'tab' });
-        expect(readTable).toHaveBeenCalledWith(REF);
-        expect(openTableTab).toHaveBeenCalledWith(SPEC, expect.objectContaining({ win }));
+        const result = await openTable(REF);
+
+        expect(result).toEqual({ error: expect.stringContaining('no file on disk') });
+        expect(result).toEqual({ error: expect.stringContaining(REF.key) });
+        // The reader on a fileless snapshot is an error dialog, so it is never
+        // reached — the caller gets a message it can use instead.
         expect(readerOpen).not.toHaveBeenCalled();
     });
 
-    it('opens the item in the reader when that is the target', async () => {
-        const result = await openTable(REF, { where: 'reader', win });
+    it('never throws: a lookup that rejects becomes a returned error', async () => {
+        resolveTableItem.mockRejectedValue(new Error('Item NOSUCH is not a table.'));
 
-        expect(result).toEqual({ opened: 'reader' });
-        expect(readerOpen).toHaveBeenCalledWith(42);
-        expect(openTableTab).not.toHaveBeenCalled();
-    });
-
-    it('follows the preference when no target is given', async () => {
-        getPref.mockReturnValue('reader');
-
-        await expect(openTable(REF, { win })).resolves.toEqual({ opened: 'reader' });
-    });
-
-    it('falls back to the reader when the tab API is missing, and says so', async () => {
-        canOpenTableTab.mockReturnValue(false);
-
-        const result = await openTable(REF, { where: 'tab', win });
-
-        expect(result).toEqual({ opened: 'reader' });
-        expect(readerOpen).toHaveBeenCalledWith(42);
-    });
-
-    it('falls back to the tab when the table has no file on disk', async () => {
-        resolveTableItem.mockResolvedValue(fileItem(null));
-
-        const result = await openTable(REF, { where: 'reader', win });
-
-        expect(result).toEqual({ opened: 'tab' });
-        expect(openTableTab).toHaveBeenCalled();
-    });
-
-    it('returns an error naming both refusals when neither surface works', async () => {
-        canOpenTableTab.mockReturnValue(false);
-        resolveTableItem.mockResolvedValue(fileItem(null));
-
-        const result = await openTable(REF, { where: 'tab', win });
-
-        expect(result).toHaveProperty('error');
-        const { error } = result as { error: string };
-        expect(error).toContain('tab:');
-        expect(error).toContain('reader:');
-        expect(error).toContain(REF.key);
-    });
-
-    it('never throws: a store read that rejects becomes a returned error', async () => {
-        readTable.mockRejectedValue(new Error('no spec in file'));
-        resolveTableItem.mockRejectedValue(new Error('not a table'));
-
-        const result = await openTable(REF, { where: 'tab', win });
-
-        expect(result).toEqual({
-            error: expect.stringContaining('no spec in file'),
+        // The thrown message carries its own period, so the wrapper adds none —
+        // `... is not a table..` reads like a typo wherever it is logged.
+        await expect(openTable(REF)).resolves.toEqual({
+            error: `Could not open table ${REF.key} — Item NOSUCH is not a table.`,
         });
-        expect(result).toEqual({ error: expect.stringContaining('not a table') });
     });
 
-    it('reports the tab as unavailable when the tab could not be added', async () => {
-        openTableTab.mockReturnValue(null);
+    it('never throws: a reader open that rejects becomes a returned error', async () => {
+        readerOpen.mockRejectedValue(new Error('reader exploded'));
 
-        await expect(openTable(REF, { where: 'tab', win })).resolves.toEqual({
-            opened: 'reader',
+        await expect(openTable(REF)).resolves.toEqual({
+            error: expect.stringContaining('reader exploded'),
         });
     });
 });

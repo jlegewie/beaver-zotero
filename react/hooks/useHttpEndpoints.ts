@@ -181,10 +181,7 @@ import {
 import {
     handleTestOpenTableHttpRequest,
     handleTestCloseTableHttpRequest,
-    handleTestOpenTableTabHttpRequest,
-    handleTestOpenTableTargetHttpRequest,
-    handleTestTableDoubleClickHttpRequest,
-    handleTestCloseTableTabHttpRequest,
+    handleTestOpenStoredTableHttpRequest,
     handleTestTableCreateHttpRequest,
     handleTestTableReadHttpRequest,
     handleTestTableListHttpRequest,
@@ -392,10 +389,7 @@ const ENDPOINT_PATHS = [
     // Table renderer, driven until a producer routes to it (dev-only)
     '/beaver/test/open-table',
     '/beaver/test/close-table',
-    '/beaver/test/open-table-tab',
-    '/beaver/test/open-table-target',
-    '/beaver/test/table-double-click',
-    '/beaver/test/close-table-tab',
+    '/beaver/test/open-stored-table',
     // Stored tables: the snapshot attachment behind a table (dev-only)
     '/beaver/test/table-create',
     '/beaver/test/table-read',
@@ -1386,19 +1380,9 @@ function registerEndpoints(): boolean {
         Zotero.Server.Endpoints['/beaver/test/close-table'] =
             createEndpoint(handleTestCloseTableHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/open-table-tab'] =
-            createEndpoint(handleTestOpenTableTabHttpRequest);
-
-        // `openTable` itself — which surface a stored table lands on, and the
-        // double-click guard driven without a mouse.
-        Zotero.Server.Endpoints['/beaver/test/open-table-target'] =
-            createEndpoint(handleTestOpenTableTargetHttpRequest);
-
-        Zotero.Server.Endpoints['/beaver/test/table-double-click'] =
-            createEndpoint(handleTestTableDoubleClickHttpRequest);
-
-        Zotero.Server.Endpoints['/beaver/test/close-table-tab'] =
-            createEndpoint(handleTestCloseTableTabHttpRequest);
+        // `openTable` itself — the product path the item-pane button takes.
+        Zotero.Server.Endpoints['/beaver/test/open-stored-table'] =
+            createEndpoint(handleTestOpenStoredTableHttpRequest);
 
         // Stored tables (dev-only): create the real snapshot attachment, read
         // the spec back out of the file, and list what is in the library.

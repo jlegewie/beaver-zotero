@@ -27,7 +27,14 @@ export type WindowSurface =
 /**
  * Lives in the shared store like every other atom, so the main window can set
  * it and the separate window — which reuses the main window's React bundle —
- * renders the result. A future custom tab is a third reader of the same atom.
+ * renders the result.
+ *
+ * This is the surface for a table that has no Zotero item behind it, and the
+ * one an editing UI belongs on: it renders the real `DataTable`. A *stored*
+ * table goes to Zotero's snapshot reader instead (`view/readerTableView.ts`),
+ * which can never host an editor — its document is a sandboxed iframe with no
+ * scripts. So a future main-window tab for editing is a second reader of this
+ * atom rather than another host for the stored document.
  */
 export const windowSurfaceAtom = atom<WindowSurface>({ kind: 'thread' });
 

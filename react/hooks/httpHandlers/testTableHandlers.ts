@@ -22,21 +22,17 @@
  * Zotero file conflict does. `-table-shadow` and `-table-restore-shadow` are the
  * other side of that: what this device last wrote, and putting it back.
  *
- * `-open-reader` and `-view-state` drive the reader host: the first opens a
- * stored table in Zotero's reader and reports which of the enhancer's seams
- * attached, the second lists what is currently enhanced in either host.
+ * `-open-reader` and `-view-state` drive the reader host, which is the only
+ * surface a *stored* table has: the first opens one in Zotero's reader and
+ * reports which of the enhancer's seams attached, the second lists what is
+ * currently enhanced. `/beaver/test/open-stored-table` is the plainer one next
+ * to them — it takes the product path the item-pane button takes and reports
+ * only whether the table got there.
  *
- * `/beaver/test/open-table-target` and `/beaver/test/table-double-click` drive
- * the way in: the first calls `openTable` with an explicit target so both
- * surfaces can be exercised without changing the `tables.openIn` preference,
- * the second invokes the wrapped `ZoteroPane.viewItems` exactly as a
- * double-click does and reports whether the guard took the click or handed it
- * back to Zotero.
- *
- * Everything that touches a live table surface — the tabs, the reader views and
- * the double-click guard — goes through `Zotero.__beaverTables` rather than
- * importing the owning module. Those modules keep registries and are compiled
- * into the esbuild bundle; importing them here would give this bundle a second,
+ * Everything that touches a live table surface — the reader views and the
+ * item-pane section — goes through `Zotero.__beaverTables` rather than importing
+ * the owning module. Those modules keep registries and are compiled into the
+ * esbuild bundle; importing them here would give this bundle a second,
  * permanently empty copy, and the endpoint would report on that. A handler that
  * finds no namespace answers `tables_api_unavailable` instead of guessing.
  */
@@ -55,16 +51,15 @@ import {
     zoteroLinkScope,
     zoteroLinksFor,
 } from '../../../src/services/artifacts/view/tableLinks';
-// The tab deck, the reader views and the double-click guard keep module state
-// and are compiled into the *esbuild* bundle by `src/hooks.ts`. Importing them
-// here would give this bundle a second, permanently empty copy — the endpoint
-// would then report on a registry nothing ever writes. They are reached through
-// the shared namespace instead; see `tablesApi.ts`.
+// The reader views and the item-pane section keep module state and are compiled
+// into the *esbuild* bundle by `src/hooks.ts`. Importing them here would give
+// this bundle a second, permanently empty copy — the endpoint would then report
+// on a registry nothing ever writes. They are reached through the shared
+// namespace instead; see `tablesApi.ts`.
 import {
     getTablesApi,
     TABLES_API_UNAVAILABLE,
 } from '../../../src/services/artifacts/tablesApi';
-import type { TableTarget } from '../../../src/ui/openTable';
 import { getSearchableLibraryIds } from '../../../src/services/agentDataProvider/utils';
 import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
 import { safeAttachmentFilename } from '../../../src/utils/attachmentFiles';
@@ -165,169 +160,33 @@ export async function handleTestOpenTableHttpRequest(
     };
 }
 
-interface OpenTableTabRequest extends OpenTableRequest {
-    /** A stored table to open. Routed through `openTable`, target `tab`. */
-    key?: string;
-    libraryID?: number;
-    /** Reuse (and re-render) this tab instead of adding another. */
-    tab_id?: string;
-}
-
 /**
- * A table in a Zotero tab — the static HTML rendering, which is what a saved
- * snapshot holds.
+ * `openTable` itself: the product path the item-pane button takes.
  *
- * Given a `key` this goes through `openTable`, the single entry point the
- * double-click and a later item-pane button use, so the endpoint exercises the
- * product path rather than a parallel one. Without a key it renders an
- * unsaved spec (the demo, or one supplied in `table`) straight into a tab —
- * there is no stored item for `openTable` to address.
+ * A stored table has one surface — Zotero's reader — so this reports only
+ * whether it got there. `-open-reader` is the richer probe: it waits for the
+ * enhancement and describes which of the enhancer's seams attached.
  */
-export async function handleTestOpenTableTabHttpRequest(
-    request: OpenTableTabRequest = {}
-): Promise<any> {
-    const api = getTablesApi();
-    if (!api) return TABLES_API_MISSING;
-
-    if (request.key) {
-        const ref: TableRef = {
-            libraryID: request.libraryID ?? Zotero.Libraries.userLibraryID,
-            key: request.key,
-        };
-        const outcome = await api.openTable(ref, { where: 'tab' });
-        if ('error' in outcome) return { ok: false, error: outcome.error };
-        return {
-            ok: true,
-            opened: outcome.opened,
-            key: ref.key,
-            library_id: ref.libraryID,
-            views: api.listViews(),
-        };
-    }
-
-    const variant = request.variant === 'extraction' ? 'extraction' : 'search';
-    const table =
-        request.table ??
-        (await buildDemoTable(variant, request.limit ?? DEMO_ROW_LIMIT));
-
-    const tabId = api.openSpecInTab(table, {
-        title: request.title ?? (variant === 'extraction' ? 'Extraction' : 'Search results'),
-        tabId: request.tab_id,
-    });
-
-    return {
-        ok: !!tabId,
-        tab_id: tabId,
-        variant,
-        rows: table.rows.length,
-        columns: table.columns.map((c) => c.id),
-    };
-}
-
-/**
- * `openTable` itself: which surface a stored table lands on, without touching
- * the `tables.openIn` preference.
- *
- * `where` overrides the preference for this call; omitting it reports what the
- * preference currently resolves to. `opened` is what actually happened, which
- * differs from `requested` when the first surface was unavailable and the
- * fallback took it.
- */
-export async function handleTestOpenTableTargetHttpRequest(
-    request: { key?: string; libraryID?: number; where?: string } = {}
+export async function handleTestOpenStoredTableHttpRequest(
+    request: { key?: string; libraryID?: number } = {}
 ): Promise<any> {
     if (!request.key) return MISSING_KEY;
     const api = getTablesApi();
     if (!api) return TABLES_API_MISSING;
-    const where =
-        request.where === 'tab' || request.where === 'reader'
-            ? (request.where as TableTarget)
-            : undefined;
     const ref: TableRef = {
         libraryID: request.libraryID ?? Zotero.Libraries.userLibraryID,
         key: request.key,
     };
-
-    const requested = api.resolveTableTarget(where);
-    const outcome = await api.openTable(ref, { where });
+    const outcome = await api.openTable(ref);
     if ('error' in outcome) {
-        return { ok: false, key: ref.key, library_id: ref.libraryID, requested, error: outcome.error };
+        return { ok: false, key: ref.key, library_id: ref.libraryID, error: outcome.error };
     }
     return {
         ok: true,
         key: ref.key,
         library_id: ref.libraryID,
-        requested,
-        opened: outcome.opened,
-        fell_back: outcome.opened !== requested,
         views: api.listViews(),
     };
-}
-
-/**
- * Invokes the wrapped `ZoteroPane.viewItems` exactly as a double-click does,
- * and reports which path the guard took.
- *
- * `path` is `beaver` when Beaver's surface took the click and `original` when
- * Zotero's own handler ran; `reason` says why. `warm` (default true) loads the
- * item data the synchronous decision depends on first — pass `false` to
- * exercise the cold path, which must fall through.
- */
-export async function handleTestTableDoubleClickHttpRequest(
-    request: { key?: string; libraryID?: number; warm?: boolean } = {}
-): Promise<any> {
-    if (!request.key) return MISSING_KEY;
-    const api = getTablesApi();
-    if (!api) return TABLES_API_MISSING;
-
-    const libraryID = request.libraryID ?? Zotero.Libraries.userLibraryID;
-    const item = Zotero.Items.getByLibraryAndKey(libraryID, request.key) as
-        | Zotero.Item
-        | false;
-    if (!item) {
-        return {
-            ok: false,
-            code: 'not_found',
-            error: `No item ${request.key} in library ${libraryID}`,
-        };
-    }
-
-    if (request.warm !== false) await api.doubleClick.warm([item]);
-
-    const win = Zotero.getMainWindow();
-    const pane = (win as any)?.ZoteroPane;
-    if (!pane?.viewItems) {
-        return { ok: false, code: 'no_pane', error: 'This window has no ZoteroPane.viewItems.' };
-    }
-
-    const installed = api.doubleClick.isInstalled(win);
-    await pane.viewItems([item], null);
-    // The guard decides synchronously and opens in the background, so the
-    // record exists now and its outcome lands when the open settles.
-    await api.doubleClick.settled();
-
-    const record = api.doubleClick.last();
-    return {
-        ok: true,
-        installed,
-        key: item.key,
-        library_id: item.libraryID,
-        path: record?.path ?? null,
-        reason: record?.reason ?? null,
-        handler: record?.handler ?? null,
-        opened: record?.opened ?? null,
-        open_error: record?.error ?? null,
-        views: api.listViews(),
-    };
-}
-
-export async function handleTestCloseTableTabHttpRequest(
-    request: { tab_id?: string } = {}
-): Promise<any> {
-    const api = getTablesApi();
-    if (!api) return TABLES_API_MISSING;
-    if (request.tab_id) api.closeTab(request.tab_id);
-    return { ok: true, views: api.listViews() };
 }
 
 /** Hands the window back to the thread. */
@@ -1426,6 +1285,9 @@ export async function handleTestTableOpenReaderHttpRequest(
         document_found: report.documentFound,
         card_mounted: report.cardMounted,
         listeners_attached: report.listenersAttached,
+        // False can mean either "already read-only" or "this build has no
+        // setReadOnly"; `failures` says which.
+        annotations_disabled: report.annotationsDisabled,
         markers: report.markers,
         links: report.links,
         failures: report.failures,
@@ -1434,19 +1296,13 @@ export async function handleTestTableOpenReaderHttpRequest(
 }
 
 /**
- * Every table document currently enhanced, in either host — so lifecycle and
- * cleanup can be checked without driving the UI.
+ * Every table document currently enhanced — so lifecycle and cleanup can be
+ * checked without driving the UI.
  */
 export async function handleTestTableViewStateHttpRequest(): Promise<any> {
     const api = getTablesApi();
     if (!api) return TABLES_API_MISSING;
-    const views = api.listViews();
-    return {
-        ok: true,
-        views,
-        tabs: views.filter((v) => v.host === 'tab').length,
-        readers: views.filter((v) => v.host === 'reader').length,
-    };
+    return { ok: true, views: api.listViews() };
 }
 
 /**

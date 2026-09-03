@@ -1,32 +1,57 @@
 /**
- * The reader as a second host for a rendered table document.
+ * The reader as the host for a rendered table document.
  *
  * A stored table is a snapshot attachment, so double-clicking it, following a
  * `zotero://open` link or opening it from the item pane lands it in Zotero's
  * reader — where, left alone, it is an inert page: the citation markers show a
  * native tooltip at best, and the reader swallows the `zotero:` links. This
- * module gives the reader the same interactivity the temporary tab has, through
- * the same {@link enhanceTableDocument}.
+ * module makes that page interactive through {@link enhanceTableDocument}, and
+ * it is the only surface a stored table has.
+ *
+ * **One entry point escapes it, by the user's own choice.** Zotero's
+ * double-click and `zotero://open` both end at `Zotero.FileHandlers.open`,
+ * which consults the `fileHandler.snapshot` preference — Settings → General →
+ * "Open snapshots using". Set to anything but Zotero, the file is handed to the
+ * browser or another application and no reader is created, so a table opened
+ * that way is the plain static document with no card and no link routing. That
+ * is honoured rather than intercepted: overriding it would mean patching a
+ * Zotero function to defeat a preference the user set deliberately. The item
+ * pane's own button calls `Zotero.Reader.open` directly (`src/ui/openTable.ts`)
+ * and so always gets the interactive surface.
  *
  * ## Everything here is optional
  *
  * It reaches into reader internals that are not a plugin API. Every step is
  * therefore checked on its own, and every failure is silent: a table that
  * renders as a plain static page is the correct fallback, a broken reader is
- * not. The reader is left exactly as it was found — this module adds listeners
- * and a card, and replaces nothing, so there is no patched state to restore and
- * no way for a half-finished attempt to leave the reader worse off.
+ * not.
+ *
+ * Nothing is *replaced*. All but one of the steps only add — listeners, a card
+ * — so a half-finished attempt leaves the reader exactly as it was found. The
+ * exception is `setReadOnly`, which changes one reader's state, and it is
+ * therefore the only thing with an undo to get wrong: it runs last, after the
+ * enhancement has already succeeded, and its undo is registered together with
+ * the view that owns it. Adding an early `return` between those two points
+ * would strand a reader with its annotation tools off for the session.
  *
  * ## What the seams are
  *
- * Exactly one: **the document.** `reader._internalReader._primaryView` holds
- * the sandboxed snapshot iframe; `initializedPromise` is the thing to await and
- * `_iframeDocument` is the document inside it. Chrome-registered listeners do
- * fire in there — the reader relies on that itself. Nothing else about the
- * reader is touched, patched or restored; in particular the reader's
- * `_isExternalLink` is deliberately left alone (see the comment on the click
- * listener in `enhanceTableDocument.ts` for why overriding it is worse than
- * useless here).
+ * Two, both reached through `reader._internalReader`:
+ *
+ * 1. **The document.** `_primaryView` holds the sandboxed snapshot iframe;
+ *    `initializedPromise` is the thing to await and `iframeDocument` is the
+ *    document inside it. Chrome-registered listeners do fire in there — the
+ *    reader relies on that itself.
+ * 2. **`setReadOnly(true)`**, which disables the annotation tools for this
+ *    reader only. A table's file is rewritten in place on every mutation
+ *    (`tableStore`), so a highlight anchored into it is orphaned by the next
+ *    edit. This is the reader's own public method rather than a patch, it is
+ *    per-instance, and it leaves selection, copy and Find working.
+ *
+ * Nothing else about the reader is touched, patched or restored; in particular
+ * the reader's `_isExternalLink` is deliberately left alone (see the comment on
+ * the click listener in `enhanceTableDocument.ts` for why overriding it is
+ * worse than useless here).
  *
  * ## Lifecycle
  *
@@ -87,6 +112,12 @@ export interface ReaderTableDiagnostics {
     documentFound: boolean;
     cardMounted: boolean;
     listenersAttached: boolean;
+    /**
+     * Whether this reader's annotation tools were turned off for the table.
+     * False when the reader was already read-only (nothing to do) or when the
+     * build has no `setReadOnly` — neither stops the table working.
+     */
+    annotationsDisabled: boolean;
     markers: number;
     links: number;
     /** One line per seam that did not come up, in the order they were tried. */
@@ -108,6 +139,7 @@ function blankDiagnostics(): ReaderTableDiagnostics {
         documentFound: false,
         cardMounted: false,
         listenersAttached: false,
+        annotationsDisabled: false,
         markers: 0,
         links: 0,
         failures: [],
@@ -263,6 +295,80 @@ function onReaderWindowUnload(reader: any): (() => void) | null {
     };
 }
 
+/**
+ * Whether this reader is read-only right now, or null if that cannot be told.
+ *
+ * `_state.readOnly` is the value `setReadOnly` writes, so it is the one to read
+ * before overwriting it. `reader._isReadOnly()` is *not* a substitute: it
+ * recomputes item editability on every call (`ReaderInstance._isReadOnly`),
+ * which Zotero itself does only once, at open time — so after the item is
+ * trashed or restored under an open reader the two disagree, and acting on the
+ * recomputation is how an undo ends up *granting* annotation tools on a reader
+ * Zotero had locked.
+ *
+ * It is only the fallback, and only an explicit `true` counts: for an editable,
+ * un-trashed, parentless attachment — every stored table — that method returns
+ * `undefined` rather than `false`, because its last clause is
+ * `item.parentItem && item.parentItem.deleted`. Absent altogether, it answers
+ * null rather than assuming `false`: "no state was read" is not the same as
+ * "the state is writable", and only the first is safe to build an undo on.
+ */
+function readerReadOnly(reader: any, internal: any): boolean | null {
+    const state = internal?._state;
+    if (typeof state?.readOnly === 'boolean') return state.readOnly;
+    if (typeof reader?._isReadOnly !== 'function') return null;
+    try {
+        return reader._isReadOnly() === true;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Turns this reader's annotation tools off, and returns the undo.
+ *
+ * A table's file is rewritten in place on every mutation, so a highlight
+ * anchored into it is orphaned by the next edit. `setReadOnly` is the reader's
+ * own public method (it disables the highlight/underline/note buttons and pins
+ * the tool to `pointer`, leaving selection, copy and Find alone), so this
+ * changes one reader's state rather than patching anything.
+ *
+ * Returns null when there is nothing to undo — the reader is *already*
+ * read-only, its state cannot be read, or the build has no `setReadOnly`. All
+ * three are recorded and none is fatal: annotation tools on a table are a
+ * nuisance, not a reason to leave the table inert.
+ *
+ * The undo restores `false` because that is the value just read, and this
+ * returns null on every path where it was anything else.
+ */
+function disableAnnotations(reader: any, failures: string[]): (() => void) | null {
+    const internal = reader?._internalReader;
+    if (typeof internal?.setReadOnly !== 'function') {
+        failures.push('set_read_only_unavailable');
+        return null;
+    }
+    const wasReadOnly = readerReadOnly(reader, internal);
+    if (wasReadOnly === null) {
+        // Cannot tell what to restore to, so nothing is changed.
+        failures.push('read_only_state_unreadable');
+        return null;
+    }
+    if (wasReadOnly) return null;
+    try {
+        internal.setReadOnly(true);
+    } catch (error) {
+        failures.push(`set_read_only_failed: ${error}`);
+        return null;
+    }
+    return () => {
+        try {
+            internal.setReadOnly(false);
+        } catch {
+            // The reader went with its tab; there is nothing left to restore.
+        }
+    };
+}
+
 // ---------------------------------------------------------------------------
 // Enhancing
 // ---------------------------------------------------------------------------
@@ -318,7 +424,9 @@ async function enhanceReader(
         if (!view) return diagnostics;
         diagnostics.viewInitialized = view.initialized !== false;
 
-        const doc: Document | undefined = view._iframeDocument;
+        // `iframeDocument` is the reader's own public getter for this; the
+        // private field is the fallback for a build that predates it.
+        const doc: Document | undefined = view.iframeDocument ?? view._iframeDocument;
         if (!doc?.documentElement) {
             diagnostics.failures.push('iframe_document_missing');
             return diagnostics;
@@ -361,15 +469,11 @@ async function enhanceReader(
             return diagnostics;
         }
 
-        // A window-hosted reader closes without a tab event, so it says so
-        // itself. Tabs need nothing: the tab notifier already covers them, and
-        // their window is the main one, which tears everything down anyway.
-        if (!reader.tabID) {
-            const release = onReaderWindowUnload(reader);
-            if (release) undo.push(release);
-            else diagnostics.failures.push('window_unload_listener_failed');
-        }
-
+        // Registered the moment `undo` holds anything at all, and before every
+        // step below: any statement between a push and this line is a window in
+        // which a throw discards that undo, and the steps below read reader
+        // properties that throw outright on a dead compartment. The entry
+        // closes over the array, so every later push lands in this dispose.
         views.set(reader, {
             reader,
             itemKey: diagnostics.itemKey,
@@ -387,7 +491,28 @@ async function enhanceReader(
                 }
             },
         });
+        // Set with the registration: the table *is* enhanced from here, so a
+        // throw in a step below must not make the diagnostics disagree with
+        // `views`. Such a throw reports through `failures` instead.
         diagnostics.enhanced = true;
+
+        // The one piece of reader *state* the module changes, so it comes after
+        // the registration that owns its undo rather than before.
+        const restoreReadOnly = disableAnnotations(reader, diagnostics.failures);
+        if (restoreReadOnly) {
+            diagnostics.annotationsDisabled = true;
+            undo.push(restoreReadOnly);
+        }
+
+        // A window-hosted reader closes without a tab event, so it says so
+        // itself. Tabs need nothing: the tab notifier already covers them, and
+        // their window is the main one, which tears everything down anyway.
+        if (!reader.tabID) {
+            const release = onReaderWindowUnload(reader);
+            if (release) undo.push(release);
+            else diagnostics.failures.push('window_unload_listener_failed');
+        }
+
         logger(
             `readerTableView: enhanced table ${diagnostics.itemKey} (${diagnostics.markers} markers)`,
             3
@@ -526,7 +651,6 @@ export function cleanupReaderTableViews(): void {
 export function listReaderTableViews(): TableViewSummary[] {
     pruneViews();
     return [...views.values()].map((view) => ({
-        host: 'reader' as const,
         id: view.tabID ?? String(view.reader?._instanceID ?? ''),
         key: view.itemKey,
         markers: view.markers,

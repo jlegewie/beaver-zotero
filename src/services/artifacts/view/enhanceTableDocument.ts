@@ -15,12 +15,11 @@
  *    unknown scheme.
  *
  * This module knows nothing about Zotero or about which surface the document is
- * rendered on: the surface arrives as a {@link TableViewHost}. Two hosts use
- * it — the temporary tab (`src/ui/tableTab.ts`) and the reader
- * (`readerTableView.ts`) — and they differ in ways that have to stay theirs:
- * the tab has one iframe, the reader has a sandboxed snapshot iframe nested
- * inside the reader's own iframe, which is why the frame's rectangle is a
- * callback rather than an element.
+ * rendered on: the surface arrives as a {@link TableViewHost}. Today exactly
+ * one host uses it — the reader (`readerTableView.ts`) — but the seam stays,
+ * because what the reader needs is peculiar to it: its snapshot iframe is
+ * nested inside the reader's own iframe, which is why the frame's rectangle is
+ * a callback rather than an element.
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -48,9 +47,7 @@ export interface TableViewHost {
 
 /** One enhanced document, for the dev view-state endpoint. */
 export interface TableViewSummary {
-    /** Which surface the document is rendered on. */
-    host: 'tab' | 'reader';
-    /** Tab id (tab host) or reader tab/instance id (reader host). */
+    /** The reader's tab id, or its instance id for a reader window. */
     id: string;
     /** The stored table's Zotero item key, where the document has one. */
     key: string | null;

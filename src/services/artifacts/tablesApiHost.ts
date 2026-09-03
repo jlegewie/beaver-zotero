@@ -4,8 +4,7 @@
  * The counterpart to `tablesApi.ts`: that module is the seam both bundles may
  * hold (types and an accessor, no value imports), this one is the half only the
  * esbuild bundle may load, because it imports the modules that own the state —
- * the open-tab registry, the wrapped `ZoteroPane` handlers, the enhanced-reader
- * registry.
+ * the enhanced-reader registry and the item-pane registration.
  *
  * Nothing here adds behaviour. It is a binding: every method forwards to the
  * module that already owns the surface, so there is exactly one registry per
@@ -23,15 +22,8 @@ import {
     type TablesApi,
 } from './tablesApi';
 import { inspectTableShadow } from './recoveryShadow';
-import { openTable, resolveTableTarget } from '../../ui/openTable';
-import { closeTableTab, listTableTabViews, openTableTab } from '../../ui/tableTab';
+import { openTable } from '../../ui/openTable';
 import { listReaderTableViews, openTableInReader } from './view/readerTableView';
-import {
-    isTableDoubleClickInstalled,
-    lastTableDoubleClick,
-    warmTableItems,
-    whenTableDoubleClickSettles,
-} from '../../ui/tableDoubleClick';
 import {
     describeTableItemPane,
     isTableItemPaneRegistered,
@@ -45,19 +37,8 @@ import {
 export function registerTablesApi(): void {
     const api: TablesApi = {
         openTable,
-        resolveTableTarget,
-        openSpecInTab: (spec, options) => openTableTab(spec, options),
-        closeTab: (id) => closeTableTab(id),
-        // Both hosts in one list, because "which table documents are live" is
-        // one question and answering half of it is how a leak stays hidden.
-        listViews: () => [...listTableTabViews(), ...listReaderTableViews()],
+        listViews: () => listReaderTableViews(),
         openInReader: (item, options) => openTableInReader(item, options),
-        doubleClick: {
-            isInstalled: (win?: Window) => isTableDoubleClickInstalled(win),
-            last: () => lastTableDoubleClick(),
-            warm: (items) => warmTableItems(items),
-            settled: () => whenTableDoubleClickSettles(),
-        },
         itemPane: {
             isRegistered: () => isTableItemPaneRegistered(),
             paneID: () => tableItemPaneID(),

@@ -2,8 +2,8 @@
  * Opening the links a rendered table document carries.
  *
  * The renderer emits exactly two schemes (`tableDocument.ts`'s `linkHref`), and
- * both hosts must open them the same way, so the rule lives here rather than
- * once per host:
+ * the rule for opening them lives here rather than in the host, so a link means
+ * the same thing wherever the document is rendered:
  *
  * - `https:` goes to the system browser. Loading it in place would replace the
  *   table with the publisher's page and leave no way back — and in the reader
@@ -34,12 +34,11 @@ export function zoteroLinkScope(libraryID: number): string {
  * `zotero://` URIs for a row, built here because only Zotero knows whether a
  * library id is the user library or a group.
  *
- * Stateless, and deliberately kept apart from the tab host: the stored
- * document, the tab rendering and the reader must offer the same links, so
- * every bundle needs this — while `src/ui/tableTab.ts`, which owns the open-tab
- * registry, must exist in the **esbuild bundle only**. A stateless helper
- * living in a stateful module is how a second copy of that registry gets
- * created.
+ * Stateless, and deliberately kept apart from the reader host: every bundle
+ * that renders or stores a table needs these links, while
+ * `view/readerTableView.ts`, which owns the enhanced-view registry, must exist
+ * in the **esbuild bundle only**. A stateless helper living in a stateful
+ * module is how a second copy of that registry gets created.
  *
  * **Best effort throughout.** This runs once per row inside `buildTableDocument`,
  * which every write goes through, so a lookup that throws here would abort the

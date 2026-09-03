@@ -311,7 +311,7 @@ function renderCellValue(
  * link — which navigates on its own from a content docshell — and a native
  * `title`, because the cell it sits in is clamped with `overflow: hidden` and
  * would clip any card drawn inside it. A host that can do better upgrades the
- * hover from outside the document; see `tableTab.ts`.
+ * hover from outside the document; see `view/enhanceTableDocument.ts`.
  *
  * Markers are assigned in document order across the whole table, so the same
  * source keeps one number wherever it is cited and the bibliography reads in

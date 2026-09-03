@@ -1,30 +1,22 @@
 /**
  * The cross-bundle seam, and the rule that the dev handlers go through it.
  *
- * `src/ui/tableTab.ts`, `src/ui/tableDoubleClick.ts` and `readerTableView.ts`
- * keep module-level state and are compiled into the esbuild bundle. A handler
- * in the webpack bundle that imports one of them gets a *second* copy of that
- * state — one that nothing ever writes — and then reports `installed: false`
- * about a `ZoteroPane` that is demonstrably wrapped.
+ * `view/readerTableView.ts` and `src/ui/tableItemPane.ts` keep module-level
+ * state and are compiled into the esbuild bundle. A handler in the webpack
+ * bundle that imports one of them gets a *second* copy of that state — one
+ * that nothing ever writes — and then reports an empty view list for readers
+ * that are demonstrably enhanced.
  *
  * These tests fail if a handler goes back to reading module state:
  *
  * - with no namespace published, a handler must say so rather than answer from
  *   a private copy that would always look idle;
  * - with a namespace published, the handler's answer must be the namespace's,
- *   even while a *real* guard is installed and holding a different answer in
- *   its own module state.
+ *   even while the *real* reader registry in this module instance is holding a
+ *   different answer in its own module state.
  */
 
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-
-const getPref = vi.hoisted(() => vi.fn());
-
-vi.mock('../../../src/utils/prefs', () => ({
-    getPref,
-    setPref: vi.fn(),
-    clearPref: vi.fn(),
-}));
 
 // The handler module's webpack-side dependencies, none of which these tests
 // exercise. Stubbed so it can be imported outside a browser bundle.
@@ -49,6 +41,16 @@ vi.mock('../../../src/services/artifacts/tableStore', () => ({
     revertTable: vi.fn(),
     writeTable: vi.fn(),
 }));
+// The real reader host needs these two to reach a document without a Zotero.
+vi.mock('../../../src/services/artifacts/view/enhanceTableDocument', () => ({
+    enhanceTableDocument: vi.fn(() => vi.fn()),
+    countCitationMarkers: vi.fn(() => 3),
+}));
+vi.mock('../../../src/services/artifacts/tableItemIdentity', () => ({
+    isTableItem: vi.fn(() => true),
+    loadTableItemFields: vi.fn(async () => undefined),
+    resolveTableItem: vi.fn(),
+}));
 
 import {
     getTablesApi,
@@ -57,92 +59,116 @@ import {
     type TablesApi,
 } from '../../../src/services/artifacts/tablesApi';
 import {
-    handleTestCloseTableTabHttpRequest,
-    handleTestTableDoubleClickHttpRequest,
+    handleTestOpenStoredTableHttpRequest,
+    handleTestTableItemPaneHttpRequest,
     handleTestTableViewStateHttpRequest,
 } from '../../../react/hooks/httpHandlers/testTableHandlers';
-// The real guard, deliberately not mocked: these tests need its module state to
-// exist and to disagree with the namespace.
+// The real reader host, deliberately not mocked: these tests need its module
+// state to exist and to disagree with the namespace.
 import {
-    cleanupTableDoubleClick,
-    installTableDoubleClick,
-    isTableDoubleClickInstalled,
-    lastTableDoubleClick,
-    warmTableItems,
-} from '../../../src/ui/tableDoubleClick';
+    cleanupReaderTableViews,
+    listReaderTableViews,
+    openTableInReader,
+} from '../../../src/services/artifacts/view/readerTableView';
 
-/**
- * Shaped enough for the real guard's `isTableItem` to classify it without
- * throwing. It classifies as *not* a table, which is fine: what this fixture
- * has to produce is real module state that disagrees with the namespace.
- */
-const ITEM = {
-    id: 7,
-    key: 'TABLEKEY',
-    libraryID: 1,
-    isAttachment: () => false,
-    isTopLevelItem: () => true,
-    hasTag: () => false,
-    getField: () => '',
-};
+const ITEM = { id: 7, key: 'TABLEKEY', libraryID: 1 };
 
-let pane: any;
+/** A reader shaped enough for the real host to enhance it. */
+function fakeReader(win: any, itemID: number): any {
+    const doc = {
+        documentURI: 'about:srcdoc',
+        readyState: 'complete',
+        documentElement: { getAttribute: () => '1' },
+        querySelectorAll: () => ({ length: 0 }),
+    };
+    return {
+        type: 'snapshot',
+        itemID,
+        tabID: `real-tab-${itemID}`,
+        _window: win,
+        _internalReader: {
+            // The live state the host reads before locking it.
+            _state: { readOnly: false },
+            setReadOnly: vi.fn(),
+            _primaryView: {
+                initializedPromise: Promise.resolve(),
+                initialized: true,
+                iframeDocument: doc,
+                _iframe: {
+                    getBoundingClientRect: () => ({ left: 0, top: 0, right: 0, bottom: 0 }),
+                },
+            },
+        },
+        _iframe: {
+            parentElement: {},
+            getBoundingClientRect: () => ({ left: 0, top: 0, right: 0, bottom: 0 }),
+        },
+    };
+}
+
 let win: any;
+let readers: any[];
 
 /** A namespace whose answers cannot be confused with the real module's. */
 function sentinelApi(overrides: Partial<TablesApi> = {}): TablesApi {
     return {
-        openTable: vi.fn(async () => ({ opened: 'tab' as const })),
-        resolveTableTarget: vi.fn(() => 'tab' as const),
-        openSpecInTab: vi.fn(() => 'sentinel-tab'),
-        closeTab: vi.fn(),
+        openTable: vi.fn(async () => ({ ok: true as const })),
         listViews: vi.fn(() => [
-            { host: 'tab' as const, id: 'sentinel-view', key: 'SENTINEL', markers: 99 },
+            { id: 'sentinel-view', key: 'SENTINEL', markers: 99 },
         ]),
         openInReader: vi.fn(),
-        doubleClick: {
-            isInstalled: vi.fn(() => true),
-            last: vi.fn(() => ({
-                at: '2026-01-01T00:00:00.000Z',
-                handler: 'viewItems' as const,
-                path: 'beaver' as const,
-                reason: 'table' as const,
-                itemID: ITEM.id,
-                key: ITEM.key,
+        itemPane: {
+            isRegistered: vi.fn(() => true),
+            paneID: vi.fn(() => 'sentinel-pane'),
+            describe: vi.fn(async () => ({
+                registered: true,
+                paneID: 'sentinel-pane',
                 libraryID: ITEM.libraryID,
-                opened: 'tab' as const,
+                key: ITEM.key,
+                applies: true,
+                reason: null,
+                fields: null,
+                actions: { open: true, showInLibrary: true, restoreShadow: false },
             })),
-            warm: vi.fn(async () => 1),
-            settled: vi.fn(async () => undefined),
         },
         ...overrides,
-    } as TablesApi;
+    } as unknown as TablesApi;
 }
 
 beforeEach(() => {
     vi.clearAllMocks();
-    cleanupTableDoubleClick();
+    cleanupReaderTableViews();
     setTablesApi(null);
-    getPref.mockReturnValue(true);
 
-    pane = { viewItems: vi.fn().mockResolvedValue(undefined), viewAttachment: vi.fn() };
-    win = { ZoteroPane: pane };
+    readers = [];
+    win = {};
     (Zotero as any).getMainWindow = vi.fn(() => win);
+    (Zotero as any).Beaver = { data: { config: { addonID: 'beaver@test' } } };
     (Zotero as any).Items = {
         getByLibraryAndKey: vi.fn(() => ITEM),
         getAsync: vi.fn(async () => [ITEM]),
         get: vi.fn(() => ITEM),
         loadDataTypes: vi.fn(async () => undefined),
     };
-    (Zotero as any).Libraries = { userLibraryID: 1, getAll: vi.fn(() => []), get: vi.fn(() => null) };
+    (Zotero as any).Libraries = {
+        userLibraryID: 1,
+        getAll: vi.fn(() => []),
+        get: vi.fn(() => null),
+    };
     (Zotero as any).Notifier = {
         registerObserver: vi.fn(() => 'obs'),
         unregisterObserver: vi.fn(),
     };
+    (Zotero as any).Reader = {
+        _readers: readers,
+        open: vi.fn(async (itemID: number) => {
+            readers.push(fakeReader(win, itemID));
+        }),
+    };
 });
 
 afterEach(() => {
-    cleanupTableDoubleClick();
+    cleanupReaderTableViews();
     setTablesApi(null);
 });
 
@@ -165,101 +191,98 @@ describe('the shared namespace', () => {
 });
 
 describe('handlers report honestly when the esbuild half is not up', () => {
-    it('refuses the double-click endpoint instead of answering from a private copy', async () => {
-        const result = await handleTestTableDoubleClickHttpRequest({ key: ITEM.key });
-
-        expect(result).toMatchObject({ ok: false, code: 'tables_api_unavailable' });
-        expect(result.error).toBe(TABLES_API_UNAVAILABLE);
-        // The lie this replaces: `installed: false` with a null path, which
-        // reads as "the guard is not wrapped" rather than "ask the other half".
-        expect(result).not.toHaveProperty('installed');
-        expect(pane.viewItems).not.toHaveBeenCalled();
-    });
-
     it('refuses the view-state endpoint rather than reporting an empty registry', async () => {
         const result = await handleTestTableViewStateHttpRequest();
 
         expect(result).toMatchObject({ ok: false, code: 'tables_api_unavailable' });
+        expect(result.error).toBe(TABLES_API_UNAVAILABLE);
         // An empty `views: []` here would look exactly like "no tables open".
         expect(result).not.toHaveProperty('views');
     });
 
-    it('refuses to close a tab it cannot see', async () => {
-        const result = await handleTestCloseTableTabHttpRequest({ tab_id: 'tab-1' });
+    it('refuses to open a stored table it cannot reach', async () => {
+        const result = await handleTestOpenStoredTableHttpRequest({ key: ITEM.key });
 
         expect(result).toMatchObject({ ok: false, code: 'tables_api_unavailable' });
+        expect((Zotero as any).Reader.open).not.toHaveBeenCalled();
+    });
+
+    it('refuses the item-pane endpoint instead of guessing at the registration', async () => {
+        const result = await handleTestTableItemPaneHttpRequest({ key: ITEM.key });
+
+        expect(result).toMatchObject({ ok: false, code: 'tables_api_unavailable' });
+        // The lie this replaces: `registered: false`, which reads as "the
+        // section is not up" rather than "ask the other half".
+        expect(result).not.toHaveProperty('registered');
     });
 });
 
 describe('handlers read the namespace, not module state', () => {
-    it('reports the namespace even while a real guard holds a different answer', async () => {
-        // A real install, in this module instance, with its own decision record.
-        installTableDoubleClick(win as unknown as Window);
-        await warmTableItems([{ ...ITEM } as unknown as Zotero.Item]);
-        expect(isTableDoubleClickInstalled(win as unknown as Window)).toBe(true);
-
-        // The namespace disagrees with it on every field.
-        const api = sentinelApi({
-            doubleClick: {
-                isInstalled: vi.fn(() => false),
-                last: vi.fn(() => ({
-                    at: '2026-01-01T00:00:00.000Z',
-                    handler: 'viewAttachment' as const,
-                    path: 'original' as const,
-                    reason: 'not_a_table' as const,
-                    itemID: null,
-                    key: null,
-                    libraryID: null,
-                })),
-                warm: vi.fn(async () => 0),
-                settled: vi.fn(async () => undefined),
-            },
-        });
-        setTablesApi(api);
-
-        const result = await handleTestTableDoubleClickHttpRequest({ key: ITEM.key });
-
-        // Every one of these would differ if the handler had read its own copy.
-        expect(result.installed).toBe(false);
-        expect(result.handler).toBe('viewAttachment');
-        expect(result.path).toBe('original');
-        expect(result.reason).toBe('not_a_table');
-        expect(result.views).toEqual([
-            { host: 'tab', id: 'sentinel-view', key: 'SENTINEL', markers: 99 },
+    it('lists the namespace views even while the real registry holds others', async () => {
+        // A real enhancement, in this module instance, with its own registry.
+        const diagnostics = await openTableInReader(ITEM as unknown as Zotero.Item);
+        expect(diagnostics.enhanced).toBe(true);
+        expect(listReaderTableViews()).toEqual([
+            { id: 'real-tab-7', key: ITEM.key, markers: 3 },
         ]);
-        expect(api.doubleClick.warm).toHaveBeenCalled();
-        expect(api.doubleClick.settled).toHaveBeenCalled();
-    });
 
-    it('drives the pane through the namespace-published guard', async () => {
-        setTablesApi(sentinelApi());
-
-        const result = await handleTestTableDoubleClickHttpRequest({ key: ITEM.key });
-
-        // Still the real double-click, invoked exactly as Zotero would.
-        expect(pane.viewItems).toHaveBeenCalledWith([ITEM], null);
-        expect(result.path).toBe('beaver');
-        expect(result.reason).toBe('table');
-        // The un-installed local module must not have recorded anything.
-        expect(lastTableDoubleClick()).toBeNull();
-    });
-
-    it('lists views from the namespace', async () => {
         setTablesApi(sentinelApi());
 
         const result = await handleTestTableViewStateHttpRequest();
 
-        expect(result).toMatchObject({ ok: true, tabs: 1, readers: 0 });
-        expect(result.views[0].id).toBe('sentinel-view');
+        // Every field would differ if the handler had read its own copy.
+        expect(result).toMatchObject({ ok: true });
+        expect(result.views).toEqual([
+            { id: 'sentinel-view', key: 'SENTINEL', markers: 99 },
+        ]);
     });
 
-    it('closes a tab through the namespace', async () => {
+    it('opens a stored table through the namespace', async () => {
         const api = sentinelApi();
         setTablesApi(api);
 
-        const result = await handleTestCloseTableTabHttpRequest({ tab_id: 'tab-9' });
+        const result = await handleTestOpenStoredTableHttpRequest({ key: ITEM.key });
 
-        expect(api.closeTab).toHaveBeenCalledWith('tab-9');
-        expect(result.ok).toBe(true);
+        expect(api.openTable).toHaveBeenCalledWith({
+            libraryID: ITEM.libraryID,
+            key: ITEM.key,
+        });
+        expect(result).toMatchObject({ ok: true, key: ITEM.key, library_id: ITEM.libraryID });
+    });
+
+    it('reports the open failure the namespace returns, rather than throwing', async () => {
+        setTablesApi(
+            sentinelApi({
+                openTable: vi.fn(async () => ({ error: 'it has no file on disk' })),
+            } as unknown as Partial<TablesApi>)
+        );
+
+        const result = await handleTestOpenStoredTableHttpRequest({ key: ITEM.key });
+
+        expect(result).toMatchObject({ ok: false, error: 'it has no file on disk' });
+    });
+
+    it('describes the item-pane section through the namespace', async () => {
+        const api = sentinelApi();
+        setTablesApi(api);
+
+        const result = await handleTestTableItemPaneHttpRequest({ key: ITEM.key });
+
+        expect(api.itemPane.describe).toHaveBeenCalledWith({
+            libraryID: ITEM.libraryID,
+            key: ITEM.key,
+        });
+        expect(result).toMatchObject({ ok: true, pane_id: 'sentinel-pane' });
+    });
+
+    it('requires a key before it reaches the namespace at all', async () => {
+        const api = sentinelApi();
+        setTablesApi(api);
+
+        await expect(handleTestOpenStoredTableHttpRequest({})).resolves.toMatchObject({
+            ok: false,
+            code: 'invalid_request',
+        });
+        expect(api.openTable).not.toHaveBeenCalled();
     });
 });
