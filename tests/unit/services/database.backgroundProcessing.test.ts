@@ -194,6 +194,83 @@ describe('BeaverDB background processing state', () => {
         });
     });
 
+    it('records OCR and upsert completion when the claimed guards are null', async () => {
+        await db.ensureAttachmentProcessingState({
+            libraryId: 1,
+            zoteroKey: 'ABCDEFGH',
+            itemId: null,
+            contentKind: 'pdf',
+        });
+        const extractHash = 'e'.repeat(64);
+        await db.markAttachmentExtracted({
+            libraryId: 1,
+            zoteroKey: 'ABCDEFGH',
+            expectedFileMtimeMs: null,
+            expectedFileSizeBytes: null,
+            previousDocumentHash: null,
+            expectedExtractStatus: null,
+            fileMtimeMs: 1,
+            fileSizeBytes: 2,
+            fileHash: 'file',
+            structuredDocumentHash: extractHash,
+            extractSchemaVersion: '4',
+            ocrStatus: 'needed',
+        });
+        const claimed = await db.getAttachmentProcessingState(1, 'ABCDEFGH');
+        expect(claimed?.ocrEngineVersion).toBeNull();
+
+        const ocrHash = 'f'.repeat(64);
+        await expect(db.markAttachmentOcrDone({
+            libraryId: 1,
+            zoteroKey: 'ABCDEFGH',
+            fileHash: 'file',
+            ocrEngineVersion: 'engine-1',
+            structuredDocumentHash: ocrHash,
+            expectedOcrStatus: claimed!.ocrStatus,
+            expectedOcrEngineVersion: claimed!.ocrEngineVersion,
+            expectedExtractStatus: claimed!.extractStatus,
+        })).resolves.toBe(true);
+
+        const ocrDone = await db.getAttachmentProcessingState(1, 'ABCDEFGH');
+        expect(ocrDone).toMatchObject({
+            ocrStatus: 'done',
+            ocrEngineVersion: 'engine-1',
+            structuredDocumentHash: ocrHash,
+            upsertStatus: null,
+        });
+
+        await expect(db.markAttachmentUpsertDone({
+            libraryId: 1,
+            zoteroKey: 'ABCDEFGH',
+            structuredDocumentHash: ocrHash,
+            upsertIndexVersion: '1',
+            expectedUpsertStatus: ocrDone!.upsertStatus,
+            expectedUpsertIndexVersion: ocrDone!.upsertIndexVersion,
+            expectedExtractStatus: ocrDone!.extractStatus,
+        })).resolves.toBe(true);
+        expect((await db.getAttachmentProcessingState(1, 'ABCDEFGH'))?.upsertStatus)
+            .toBe('done');
+    });
+
+    it('refreshes the content kind of an identity row that has no item id', async () => {
+        await db.ensureAttachmentProcessingState({
+            libraryId: 1,
+            zoteroKey: 'ABCDEFGH',
+            itemId: null,
+            contentKind: 'pdf',
+        });
+        await db.ensureAttachmentProcessingState({
+            libraryId: 1,
+            zoteroKey: 'ABCDEFGH',
+            itemId: null,
+            contentKind: 'epub',
+        });
+        expect(await db.getAttachmentProcessingState(1, 'ABCDEFGH')).toMatchObject({
+            itemId: null,
+            contentKind: 'epub',
+        });
+    });
+
     it('stores scan cursors and reports aggregate progress', async () => {
         await db.ensureAttachmentProcessingState({
             libraryId: 2,

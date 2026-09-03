@@ -21,6 +21,82 @@ export type { DocumentCachePageLabels } from '@beaver/agent-core/extract/documen
 
 type PdfCachedDocumentMetadata = Extract<CachedDocumentMetadata, { content_kind: 'pdf' }>;
 
+/**
+ * Splice NULL parameters into the SQL text so nothing null is ever bound.
+ *
+ * Zotero does not bind NULL parameters. `Zotero.DBConnection.parseQueryAndParams`
+ * replaces them with a literal NULL in the SQL, locating the placeholder to
+ * replace by scanning for `/\s*[=,(]\s*\?/g` and advancing that scan once per
+ * parameter. A placeholder in any other position — `IS ?`, `IS NOT ?`,
+ * `CASE WHEN ?` — is invisible to the scan, so a single NULL parameter
+ * desynchronizes it: the NULL lands on an unrelated placeholder (silently
+ * mangling the statement) or the scan runs out and the query throws
+ * "Null parameter provided for a query without placeholders".
+ *
+ * Doing the substitution ourselves, positionally, is exactly equivalent to
+ * binding NULL and keeps null-safe `IS ?` guards usable. `undefined` is left
+ * alone so Zotero still rejects it as the programming error it is.
+ */
+export function inlineNullParams(sql: string, params: readonly unknown[]): [string, unknown[]] {
+    if (!params.some((param) => param === null)) return [sql, [...params]];
+
+    let out = '';
+    const remaining: unknown[] = [];
+    let paramIndex = 0;
+    let i = 0;
+    while (i < sql.length) {
+        const char = sql[i];
+        // Skip over anything a bare `?` could hide in.
+        if (char === "'" || char === '"') {
+            let end = i + 1;
+            while (end < sql.length) {
+                if (sql[end] === char) {
+                    if (sql[end + 1] === char) end += 2; // doubled quote escape
+                    else break;
+                } else end += 1;
+            }
+            out += sql.slice(i, end + 1);
+            i = end + 1;
+            continue;
+        }
+        if (char === '-' && sql[i + 1] === '-') {
+            const end = sql.indexOf('\n', i);
+            const stop = end === -1 ? sql.length : end;
+            out += sql.slice(i, stop);
+            i = stop;
+            continue;
+        }
+        if (char === '/' && sql[i + 1] === '*') {
+            const end = sql.indexOf('*/', i + 2);
+            const stop = end === -1 ? sql.length : end + 2;
+            out += sql.slice(i, stop);
+            i = stop;
+            continue;
+        }
+        if (char === '?') {
+            if (sql[i + 1] !== undefined && /\d/.test(sql[i + 1])) {
+                throw new Error(`Numbered SQL placeholders are not supported [QUERY: ${sql}]`);
+            }
+            const value = params[paramIndex];
+            paramIndex += 1;
+            if (value === null) out += 'NULL';
+            else {
+                out += '?';
+                remaining.push(value);
+            }
+            i += 1;
+            continue;
+        }
+        out += char;
+        i += 1;
+    }
+    if (paramIndex !== params.length) {
+        throw new Error(
+            `Incorrect number of parameters provided for query (${params.length}, expecting ${paramIndex}) [QUERY: ${sql}]`,
+        );
+    }
+    return [out, remaining];
+}
 
 /* 
  * Interface for the 'embeddings' table row
@@ -419,18 +495,32 @@ export class BeaverDB {
     }
 
     /**
+     * Every BeaverDB query runs through here so NULL parameters are spliced
+     * into the SQL rather than bound; see `inlineNullParams` for why Zotero
+     * cannot be trusted to do that itself.
+     */
+    private queryAsync(
+        sql: string,
+        params: readonly unknown[] = [],
+        options?: { onRow?: (row: any) => void },
+    ): Promise<any[]> {
+        const [preparedSql, preparedParams] = inlineNullParams(sql, params);
+        return this.conn.queryAsync(preparedSql, preparedParams, options);
+    }
+
+    /**
      * Initialize the database by creating tables if they don't exist.
      * Should be called once after constructing the class.
      */
     public async initDatabase(pluginVersion: string): Promise<void> {
         const previousVersion = getPref('installedVersion') || '0.1';
 
-        await this.conn.queryAsync(`PRAGMA foreign_keys = ON`);
+        await this.queryAsync(`PRAGMA foreign_keys = ON`);
 
         // Tracks the schema version of the disposable drop-and-recreate tables
         // (document cache, background queue). Created first so the version
         // checks below can read it. Outlives those tables' drops.
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE TABLE IF NOT EXISTS schema_versions (
                 component  TEXT PRIMARY KEY,
                 version    INTEGER NOT NULL
@@ -439,16 +529,16 @@ export class BeaverDB {
 
         // Delete all tables in test versions
         if (previousVersion.startsWith('0.1') || previousVersion == '0.2.4') {
-            await this.conn.queryAsync(`DROP TABLE IF EXISTS items`);
-            await this.conn.queryAsync(`DROP TABLE IF EXISTS attachments`);
-            await this.conn.queryAsync(`DROP TABLE IF EXISTS upload_queue`);
-            await this.conn.queryAsync(`DROP TABLE IF EXISTS threads`);
-            await this.conn.queryAsync(`DROP TABLE IF EXISTS messages`);
-            await this.conn.queryAsync(`DROP TABLE IF EXISTS library_sync_state`);
-            await this.conn.queryAsync(`DROP TABLE IF EXISTS sync_logs`);
+            await this.queryAsync(`DROP TABLE IF EXISTS items`);
+            await this.queryAsync(`DROP TABLE IF EXISTS attachments`);
+            await this.queryAsync(`DROP TABLE IF EXISTS upload_queue`);
+            await this.queryAsync(`DROP TABLE IF EXISTS threads`);
+            await this.queryAsync(`DROP TABLE IF EXISTS messages`);
+            await this.queryAsync(`DROP TABLE IF EXISTS library_sync_state`);
+            await this.queryAsync(`DROP TABLE IF EXISTS sync_logs`);
         }
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE TABLE IF NOT EXISTS threads (
                 id                       TEXT(36) PRIMARY KEY,
                 user_id                  TEXT(36) NOT NULL,
@@ -458,7 +548,7 @@ export class BeaverDB {
             );
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE TABLE IF NOT EXISTS messages (
                 id                       TEXT(36) PRIMARY KEY,
                 user_id                  TEXT(36) NOT NULL,
@@ -478,7 +568,7 @@ export class BeaverDB {
             );
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE TABLE IF NOT EXISTS sync_logs (
                 id                       TEXT(36) PRIMARY KEY,
                 session_id               TEXT(36) NOT NULL,
@@ -496,7 +586,7 @@ export class BeaverDB {
             );
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE TABLE IF NOT EXISTS embeddings (
                 item_id                  INTEGER NOT NULL,
                 library_id               INTEGER NOT NULL,
@@ -514,7 +604,7 @@ export class BeaverDB {
 
         // Table for tracking embedding index state per library
         // Used to optimize startup by skipping full diff when nothing changed
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE TABLE IF NOT EXISTS embedding_index_state (
                 library_id               INTEGER PRIMARY KEY,
                 last_scan_timestamp      TEXT NOT NULL,
@@ -526,7 +616,7 @@ export class BeaverDB {
 
         // Table for tracking failed embedding attempts
         // Items are retried with exponential backoff
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE TABLE IF NOT EXISTS failed_embeddings (
                 item_id                  INTEGER PRIMARY KEY,
                 library_id               INTEGER NOT NULL,
@@ -537,7 +627,7 @@ export class BeaverDB {
             );
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE TABLE IF NOT EXISTS document_processing_failures (
                 file_hash        TEXT NOT NULL,
                 task             TEXT NOT NULL,
@@ -562,14 +652,14 @@ export class BeaverDB {
             ['attachment_processing_state'],
             () => this.attachmentProcessingStateSchemaIsCurrent(),
         )) {
-            await this.conn.queryAsync(`DROP TABLE IF EXISTS attachment_processing_state`);
+            await this.queryAsync(`DROP TABLE IF EXISTS attachment_processing_state`);
             await this.setSchemaVersion(
                 'attachment_processing_state',
                 ATTACHMENT_PROCESSING_STATE_SCHEMA_VERSION,
             );
         }
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE TABLE IF NOT EXISTS attachment_processing_state (
                 library_id                 INTEGER NOT NULL,
                 zotero_key                 TEXT NOT NULL,
@@ -591,23 +681,23 @@ export class BeaverDB {
                 UNIQUE(library_id, zotero_key)
             );
         `);
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_attachment_processing_extract
             ON attachment_processing_state(library_id, extract_status);
         `);
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_attachment_processing_ocr
             ON attachment_processing_state(library_id, ocr_status);
         `);
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_attachment_processing_upsert
             ON attachment_processing_state(library_id, upsert_status);
         `);
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_attachment_processing_file_hash
             ON attachment_processing_state(file_hash);
         `);
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_attachment_processing_document_hash
             ON attachment_processing_state(structured_document_hash);
         `);
@@ -618,14 +708,14 @@ export class BeaverDB {
             ['processing_index_state'],
             () => this.processingIndexStateSchemaIsCurrent(),
         )) {
-            await this.conn.queryAsync(`DROP TABLE IF EXISTS processing_index_state`);
+            await this.queryAsync(`DROP TABLE IF EXISTS processing_index_state`);
             await this.setSchemaVersion(
                 'processing_index_state',
                 PROCESSING_INDEX_STATE_SCHEMA_VERSION,
             );
         }
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE TABLE IF NOT EXISTS processing_index_state (
                 library_id                 INTEGER PRIMARY KEY,
                 max_client_date_modified   TEXT,
@@ -636,71 +726,71 @@ export class BeaverDB {
         `);
 
         // DB indexes
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_messages_user_thread
             ON messages(user_id, thread_id);
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_threads_user_updated
             ON threads(user_id, updated_at DESC);
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_messages_user_thread_created
             ON messages(user_id, thread_id, created_at);
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_sync_logs_user_library
             ON sync_logs(user_id, library_id);
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_sync_logs_user_library_version
             ON sync_logs(user_id, library_id, library_version DESC);
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_sync_logs_user_library_date
             ON sync_logs(user_id, library_id, library_date_modified DESC);
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_sync_logs_session
             ON sync_logs(session_id);
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_embeddings_library
             ON embeddings(library_id);
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_embeddings_content_hash
             ON embeddings(content_hash);
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_embeddings_zotero_key
             ON embeddings(zotero_key);
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_failed_embeddings_library
             ON failed_embeddings(library_id);
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_failed_embeddings_retry
             ON failed_embeddings(next_retry_after);
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             DROP INDEX IF EXISTS idx_doc_proc_failures_retry;
         `);
 
-        await this.conn.queryAsync(`DROP TABLE IF EXISTS attachment_file_cache`);
+        await this.queryAsync(`DROP TABLE IF EXISTS attachment_file_cache`);
 
         // Drop and recreate the document cache tables when their schema version
         // changes. The cache re-warms on demand, so resetting is safe. Bump
@@ -711,12 +801,12 @@ export class BeaverDB {
             ['document_cache_metadata', 'document_cache_payloads'],
             () => this.documentCacheSchemaIsCurrent(),
         )) {
-            await this.conn.queryAsync(`DROP TABLE IF EXISTS document_cache_payloads`);
-            await this.conn.queryAsync(`DROP TABLE IF EXISTS document_cache_metadata`);
+            await this.queryAsync(`DROP TABLE IF EXISTS document_cache_payloads`);
+            await this.queryAsync(`DROP TABLE IF EXISTS document_cache_metadata`);
             await this.setSchemaVersion('document_cache', DOCUMENT_CACHE_SCHEMA_VERSION);
         }
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE TABLE IF NOT EXISTS document_cache_metadata (
                 id                         INTEGER PRIMARY KEY,
                 item_id                    INTEGER NOT NULL,
@@ -739,17 +829,17 @@ export class BeaverDB {
             );
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_dcm_item_id
             ON document_cache_metadata(item_id);
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_dcm_library
             ON document_cache_metadata(library_id);
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE TABLE IF NOT EXISTS document_cache_payloads (
                 id                         INTEGER PRIMARY KEY,
                 metadata_id                INTEGER NOT NULL,
@@ -777,22 +867,22 @@ export class BeaverDB {
             );
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_dcp_metadata_id
             ON document_cache_payloads(metadata_id);
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_dcp_item_id
             ON document_cache_payloads(item_id);
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_dcp_library
             ON document_cache_payloads(library_id);
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_dcp_library_key_payload_kind
             ON document_cache_payloads(library_id, zotero_key, payload_kind);
         `);
@@ -802,8 +892,8 @@ export class BeaverDB {
         // index cannot satisfy COALESCE(last_accessed_at, created_at) and
         // leaves every batch sorting the whole table. The `id` tie-breaker
         // needs no column — it is the rowid, which every index carries.
-        await this.conn.queryAsync(`DROP INDEX IF EXISTS idx_dcp_last_accessed`);
-        await this.conn.queryAsync(`
+        await this.queryAsync(`DROP INDEX IF EXISTS idx_dcp_last_accessed`);
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_dcp_lru
             ON document_cache_payloads(COALESCE(last_accessed_at, created_at));
         `);
@@ -811,7 +901,7 @@ export class BeaverDB {
         // User-attached external files (registry behind the `ext-<KEY>` ids).
         // One row per attached file; the copy lives in the Beaver-managed
         // external-files folder at stored_path.
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE TABLE IF NOT EXISTS external_files (
                 ext_key        TEXT PRIMARY KEY,
                 filename       TEXT NOT NULL,
@@ -830,16 +920,16 @@ export class BeaverDB {
         // Pre-release tables were created without the sha256 column; add it
         // in place rather than dropping the registry.
         const externalFileColumns: string[] = [];
-        await this.conn.queryAsync(`PRAGMA table_info(external_files)`, [], {
+        await this.queryAsync(`PRAGMA table_info(external_files)`, [], {
             onRow: (row: any) => externalFileColumns.push(row.getResultByIndex(1)),
         });
         if (!externalFileColumns.includes('sha256')) {
-            await this.conn.queryAsync(`ALTER TABLE external_files ADD COLUMN sha256 TEXT`);
+            await this.queryAsync(`ALTER TABLE external_files ADD COLUMN sha256 TEXT`);
         }
 
         // Content-hash lookup for attach-time deduplication (non-unique:
         // dedup is best-effort and concurrent attaches may race).
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_external_files_sha256
             ON external_files(sha256);
         `);
@@ -854,14 +944,14 @@ export class BeaverDB {
             ['background_jobs', 'background_jobs_dead'],
             () => this.backgroundJobsSchemaIsCurrent(),
         )) {
-            await this.conn.queryAsync(`DROP TABLE IF EXISTS background_jobs_dead`);
-            await this.conn.queryAsync(`DROP TABLE IF EXISTS background_jobs`);
+            await this.queryAsync(`DROP TABLE IF EXISTS background_jobs_dead`);
+            await this.queryAsync(`DROP TABLE IF EXISTS background_jobs`);
             await this.setSchemaVersion('background_jobs', BACKGROUND_JOBS_SCHEMA_VERSION);
         }
 
         // Background job queue: one row per logical request. `dedupe_key`
         // separates multiple content-addressed untag intents for one item.
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE TABLE IF NOT EXISTS background_jobs (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 job_type        TEXT NOT NULL,
@@ -881,19 +971,19 @@ export class BeaverDB {
             );
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             DELETE FROM background_jobs
             WHERE job_type NOT IN ('document_extract','document_ocr','fulltext_upsert','fulltext_untag')
         `);
 
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_background_jobs_visible
             ON background_jobs (available_at, priority);
         `);
 
         // Dead-letter table for jobs that exceeded MAX_ATTEMPTS. Surfaced
         // through the dev queue-stats endpoint; no automatic retry.
-        await this.conn.queryAsync(`
+        await this.queryAsync(`
             CREATE TABLE IF NOT EXISTS background_jobs_dead (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 job_type        TEXT NOT NULL,
@@ -993,7 +1083,7 @@ export class BeaverDB {
         const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
         const dbName = name || null; // Convert empty string to null for database
         
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `INSERT INTO threads (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
             [id, user_id, dbName, now, now]
         );
@@ -1014,7 +1104,7 @@ export class BeaverDB {
      * @returns The ThreadData if found, otherwise null
      */
     public async getThread(user_id: string, id: string): Promise<ThreadData | null> {
-        const rows = await this.conn.queryAsync(
+        const rows = await this.queryAsync(
             `SELECT * FROM threads WHERE user_id = ? AND id = ?`,
             [user_id, id]
         );
@@ -1037,7 +1127,7 @@ export class BeaverDB {
         limit: number,
         offset: number
     ): Promise<{ threads: ThreadData[]; has_more: boolean }> {
-        const rows = await this.conn.queryAsync(
+        const rows = await this.queryAsync(
             `SELECT * FROM threads WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
             [user_id, limit + 1, offset]
         );
@@ -1061,7 +1151,7 @@ export class BeaverDB {
      * @param id The ID of the thread to delete
      */
     public async deleteThread(user_id: string, id: string): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `DELETE FROM threads WHERE user_id = ? AND id = ?`,
             [user_id, id]
         );
@@ -1074,7 +1164,7 @@ export class BeaverDB {
      * @param name The new name for the thread
      */
     public async renameThread(user_id: string, id: string, name: string): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `UPDATE threads SET name = ?, updated_at = datetime('now') WHERE user_id = ? AND id = ?`,
             [name, user_id, id]
         );
@@ -1113,7 +1203,7 @@ export class BeaverDB {
 
         values.push(user_id, id);
         
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `UPDATE threads SET ${fieldsToUpdate.join(', ')} WHERE user_id = ? AND id = ?`,
             values
         );
@@ -1138,7 +1228,7 @@ export class BeaverDB {
         const id = uuidv4();
         const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
         
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `INSERT INTO sync_logs (id, session_id, user_id, sync_type, method, zotero_local_id, zotero_user_id, library_id, total_upserts, total_deletions, library_version, library_date_modified, timestamp) 
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
@@ -1172,7 +1262,7 @@ export class BeaverDB {
      * @returns The SyncLogsRecord with highest library_version, or null if not found
      */
     public async getSyncLogWithHighestVersion(user_id: string, library_id: number): Promise<SyncLogsRecord | null> {
-        const rows = await this.conn.queryAsync(
+        const rows = await this.queryAsync(
             `SELECT * FROM sync_logs 
              WHERE user_id = ? AND library_id = ? 
              ORDER BY library_version DESC 
@@ -1194,7 +1284,7 @@ export class BeaverDB {
      * @returns The SyncLogsRecord with most recent library_date_modified, or null if not found
      */
     public async getSyncLogWithMostRecentDate(user_id: string, library_id: number): Promise<SyncLogsRecord | null> {
-        const rows = await this.conn.queryAsync(
+        const rows = await this.queryAsync(
             `SELECT * FROM sync_logs 
              WHERE user_id = ? AND library_id = ? 
              ORDER BY library_date_modified DESC 
@@ -1234,7 +1324,7 @@ export class BeaverDB {
             throw new Error(`Invalid order direction: ${orderDirection}`);
         }
         
-        const rows = await this.conn.queryAsync(
+        const rows = await this.queryAsync(
             `SELECT * FROM sync_logs 
              WHERE user_id = ? AND library_id = ? 
              ORDER BY ${orderBy} ${orderDirection}`,
@@ -1248,7 +1338,7 @@ export class BeaverDB {
         if (!library_ids || library_ids.length === 0) return null;
 
         const placeholders = library_ids.map(() => '?').join(',');
-        const rows = await this.conn.queryAsync(
+        const rows = await this.queryAsync(
             `SELECT * FROM sync_logs
              WHERE user_id = ? AND library_id IN (${placeholders})
              ORDER BY timestamp DESC
@@ -1273,7 +1363,7 @@ export class BeaverDB {
         }
 
         const placeholders = library_ids.map(() => '?').join(',');
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `DELETE FROM sync_logs WHERE user_id = ? AND library_id IN (${placeholders})`,
             [user_id, ...library_ids]
         );
@@ -1285,7 +1375,7 @@ export class BeaverDB {
      * @param user_id The user_id to delete logs for
      */
     public async deleteAllSyncLogsForUser(user_id: string): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `DELETE FROM sync_logs WHERE user_id = ?`,
             [user_id]
         );
@@ -1349,7 +1439,7 @@ export class BeaverDB {
     public async upsertEmbedding(embedding: Omit<EmbeddingRecord, 'indexed_at'> & { indexed_at?: string }): Promise<void> {
         const now = embedding.indexed_at || new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
         
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `INSERT OR REPLACE INTO embeddings 
              (item_id, library_id, zotero_key, version, client_date_modified, 
               content_hash, embedding, dimensions, model_id, indexed_at)
@@ -1382,7 +1472,7 @@ export class BeaverDB {
         await this.conn.executeTransaction(async () => {
             for (const embedding of embeddings) {
                 const indexedAt = embedding.indexed_at || now;
-                await this.conn.queryAsync(
+                await this.queryAsync(
                     `INSERT OR REPLACE INTO embeddings 
                      (item_id, library_id, zotero_key, version, client_date_modified, 
                       content_hash, embedding, dimensions, model_id, indexed_at)
@@ -1410,7 +1500,7 @@ export class BeaverDB {
      * @returns The embedding record or null if not found
      */
     public async getEmbedding(itemId: number): Promise<EmbeddingRecord | null> {
-        const rows = await this.conn.queryAsync(
+        const rows = await this.queryAsync(
             `SELECT * FROM embeddings WHERE item_id = ?`,
             [itemId]
         );
@@ -1437,7 +1527,7 @@ export class BeaverDB {
             const chunk = itemIds.slice(i, i + chunkSize);
             const placeholders = chunk.map(() => '?').join(',');
             
-            const rows = await this.conn.queryAsync(
+            const rows = await this.queryAsync(
                 `SELECT * FROM embeddings WHERE item_id IN (${placeholders})`,
                 chunk
             );
@@ -1456,7 +1546,7 @@ export class BeaverDB {
      * @returns Array of embedding records
      */
     public async getEmbeddingsByLibrary(libraryId: number): Promise<EmbeddingRecord[]> {
-        const rows = await this.conn.queryAsync(
+        const rows = await this.queryAsync(
             `SELECT * FROM embeddings WHERE library_id = ?`,
             [libraryId]
         );
@@ -1469,7 +1559,7 @@ export class BeaverDB {
      * @returns Array of embedding records
      */
     public async getAllEmbeddings(): Promise<EmbeddingRecord[]> {
-        const rows = await this.conn.queryAsync(
+        const rows = await this.queryAsync(
             `SELECT * FROM embeddings ORDER BY library_id, item_id`
         );
         
@@ -1485,7 +1575,7 @@ export class BeaverDB {
         if (libraryIds.length === 0) return [];
 
         const placeholders = libraryIds.map(() => '?').join(',');
-        const rows = await this.conn.queryAsync(
+        const rows = await this.queryAsync(
             `SELECT * FROM embeddings WHERE library_id IN (${placeholders})`,
             libraryIds
         );
@@ -1522,7 +1612,7 @@ export class BeaverDB {
                 ? `SELECT * FROM embeddings WHERE library_id IN (${libraryPlaceholders}) AND item_id IN (${itemPlaceholders})`
                 : `SELECT * FROM embeddings WHERE item_id IN (${itemPlaceholders})`;
 
-            const rows = await this.conn.queryAsync(sql, filterInSql ? [...libraryFilter, ...chunk] : chunk);
+            const rows = await this.queryAsync(sql, filterInSql ? [...libraryFilter, ...chunk] : chunk);
             records.push(...rows.map((row: any) => BeaverDB.rowToEmbeddingRecord(row)));
         }
 
@@ -1549,7 +1639,7 @@ export class BeaverDB {
             const chunk = itemIds.slice(i, i + chunkSize);
             const placeholders = chunk.map(() => '?').join(',');
             
-            const rows = await this.conn.queryAsync(
+            const rows = await this.queryAsync(
                 `SELECT item_id, content_hash FROM embeddings WHERE item_id IN (${placeholders})`,
                 chunk
             );
@@ -1567,7 +1657,7 @@ export class BeaverDB {
      * @param itemId The Zotero item ID
      */
     public async deleteEmbedding(itemId: number): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `DELETE FROM embeddings WHERE item_id = ?`,
             [itemId]
         );
@@ -1584,7 +1674,7 @@ export class BeaverDB {
         for (let i = 0; i < itemIds.length; i += chunkSize) {
             const chunk = itemIds.slice(i, i + chunkSize);
             const placeholders = chunk.map(() => '?').join(',');
-            await this.conn.queryAsync(
+            await this.queryAsync(
                 `DELETE FROM embeddings WHERE item_id IN (${placeholders})`,
                 chunk
             );
@@ -1596,7 +1686,7 @@ export class BeaverDB {
      * @param libraryId The Zotero library ID
      */
     public async deleteEmbeddingsByLibrary(libraryId: number): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `DELETE FROM embeddings WHERE library_id = ?`,
             [libraryId]
         );
@@ -1616,7 +1706,7 @@ export class BeaverDB {
             params.push(libraryId);
         }
 
-        const rows = await this.conn.queryAsync(sql, params);
+        const rows = await this.queryAsync(sql, params);
         return rows[0]?.count || 0;
     }
 
@@ -1634,7 +1724,7 @@ export class BeaverDB {
             params.push(libraryId);
         }
 
-        const rows = await this.conn.queryAsync(sql, params);
+        const rows = await this.queryAsync(sql, params);
         return rows.map((row: any) => row.item_id);
     }
 
@@ -1644,7 +1734,7 @@ export class BeaverDB {
      * @returns Array of library IDs
      */
     public async getEmbeddedLibraryIds(): Promise<number[]> {
-        const rows = await this.conn.queryAsync(
+        const rows = await this.queryAsync(
             'SELECT DISTINCT library_id FROM embeddings'
         );
         return rows.map((row: any) => row.library_id);
@@ -1665,7 +1755,7 @@ export class BeaverDB {
             params.push(libraryId);
         }
 
-        const rows = await this.conn.queryAsync(sql, params);
+        const rows = await this.queryAsync(sql, params);
         const result = new Map<number, string>();
         
         for (const row of rows) {
@@ -1686,7 +1776,7 @@ export class BeaverDB {
      */
     public async getEmbeddingIndexState(libraryId: number): Promise<EmbeddingIndexStateRecord | null> {
         const sql = 'SELECT * FROM embedding_index_state WHERE library_id = ?';
-        const rows = await this.conn.queryAsync(sql, [libraryId]);
+        const rows = await this.queryAsync(sql, [libraryId]);
         
         if (rows.length === 0) return null;
         
@@ -1716,7 +1806,7 @@ export class BeaverDB {
                 embedding_count = excluded.embedding_count
         `;
         
-        await this.conn.queryAsync(sql, [
+        await this.queryAsync(sql, [
             state.library_id,
             state.last_scan_timestamp,
             state.max_client_date_modified,
@@ -1730,7 +1820,7 @@ export class BeaverDB {
      * @param libraryId The Zotero library ID
      */
     public async deleteEmbeddingIndexState(libraryId: number): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             'DELETE FROM embedding_index_state WHERE library_id = ?',
             [libraryId]
         );
@@ -1743,7 +1833,7 @@ export class BeaverDB {
      */
     public async getEmbeddingsMaxClientDateModified(libraryId: number): Promise<string | null> {
         const sql = 'SELECT MAX(client_date_modified) as max_date FROM embeddings WHERE library_id = ?';
-        const rows = await this.conn.queryAsync(sql, [libraryId]);
+        const rows = await this.queryAsync(sql, [libraryId]);
         return rows[0]?.max_date || null;
     }
 
@@ -1827,7 +1917,7 @@ export class BeaverDB {
             const newFailureCount = existing.failure_count + 1;
             const nextRetry = BeaverDB.calculateNextRetryTime(newFailureCount);
             
-            await this.conn.queryAsync(
+            await this.queryAsync(
                 `UPDATE failed_embeddings 
                  SET failure_count = ?, last_error = ?, last_attempt = ?, next_retry_after = ?
                  WHERE item_id = ?`,
@@ -1837,7 +1927,7 @@ export class BeaverDB {
             // Insert new record
             const nextRetry = BeaverDB.calculateNextRetryTime(1);
             
-            await this.conn.queryAsync(
+            await this.queryAsync(
                 `INSERT INTO failed_embeddings 
                  (item_id, library_id, failure_count, last_error, last_attempt, next_retry_after)
                  VALUES (?, ?, 1, ?, ?, ?)`,
@@ -1882,7 +1972,7 @@ export class BeaverDB {
                         const newFailureCount = existingRecord.failure_count + 1;
                         const nextRetry = BeaverDB.calculateNextRetryTime(newFailureCount);
 
-                        await this.conn.queryAsync(
+                        await this.queryAsync(
                             `UPDATE failed_embeddings
                              SET failure_count = ?, last_error = ?, last_attempt = ?, next_retry_after = ?
                              WHERE item_id = ?`,
@@ -1893,7 +1983,7 @@ export class BeaverDB {
                         // existing failure_count and retry schedule. This keeps
                         // healthy items from being escalated toward permanent
                         // failure on a string of local DB errors.
-                        await this.conn.queryAsync(
+                        await this.queryAsync(
                             `UPDATE failed_embeddings
                              SET last_error = ?, last_attempt = ?
                              WHERE item_id = ?`,
@@ -1901,7 +1991,7 @@ export class BeaverDB {
                         );
                     }
                 } else {
-                    await this.conn.queryAsync(
+                    await this.queryAsync(
                         `INSERT INTO failed_embeddings
                          (item_id, library_id, failure_count, last_error, last_attempt, next_retry_after)
                          VALUES (?, ?, ?, ?, ?, ?)`,
@@ -1925,7 +2015,7 @@ export class BeaverDB {
      * @returns The failed embedding record or null
      */
     public async getFailedEmbedding(itemId: number): Promise<FailedEmbeddingRecord | null> {
-        const rows = await this.conn.queryAsync(
+        const rows = await this.queryAsync(
             'SELECT * FROM failed_embeddings WHERE item_id = ?',
             [itemId]
         );
@@ -1949,7 +2039,7 @@ export class BeaverDB {
             const chunk = itemIds.slice(i, i + chunkSize);
             const placeholders = chunk.map(() => '?').join(',');
             
-            const rows = await this.conn.queryAsync(
+            const rows = await this.queryAsync(
                 `SELECT * FROM failed_embeddings WHERE item_id IN (${placeholders})`,
                 chunk
             );
@@ -1980,7 +2070,7 @@ export class BeaverDB {
             params.push(libraryId);
         }
         
-        const rows = await this.conn.queryAsync(sql, params);
+        const rows = await this.queryAsync(sql, params);
         return rows.map((row: any) => row.item_id);
     }
 
@@ -1998,7 +2088,7 @@ export class BeaverDB {
             params.push(libraryId);
         }
         
-        const rows = await this.conn.queryAsync(sql, params);
+        const rows = await this.queryAsync(sql, params);
         return rows.map((row: any) => BeaverDB.rowToFailedEmbeddingRecord(row));
     }
 
@@ -2007,7 +2097,7 @@ export class BeaverDB {
      * @param itemId The Zotero item ID
      */
     public async removeFailedEmbedding(itemId: number): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             'DELETE FROM failed_embeddings WHERE item_id = ?',
             [itemId]
         );
@@ -2024,7 +2114,7 @@ export class BeaverDB {
         for (let i = 0; i < itemIds.length; i += chunkSize) {
             const chunk = itemIds.slice(i, i + chunkSize);
             const placeholders = chunk.map(() => '?').join(',');
-            await this.conn.queryAsync(
+            await this.queryAsync(
                 `DELETE FROM failed_embeddings WHERE item_id IN (${placeholders})`,
                 chunk
             );
@@ -2036,7 +2126,7 @@ export class BeaverDB {
      * @param libraryId The Zotero library ID
      */
     public async deleteFailedEmbeddingsByLibrary(libraryId: number): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             'DELETE FROM failed_embeddings WHERE library_id = ?',
             [libraryId]
         );
@@ -2064,7 +2154,7 @@ export class BeaverDB {
             params.push(libraryId);
         }
 
-        const rows = await this.conn.queryAsync(sql, params);
+        const rows = await this.queryAsync(sql, params);
         return rows[0]?.count || 0;
     }
 
@@ -2079,7 +2169,7 @@ export class BeaverDB {
         const nextRetryAfter = BeaverDB.calculateDocumentProcessingRetryTime(1);
         const terminalCode = input.terminalCode ?? null;
 
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `INSERT INTO document_processing_failures (
                 file_hash, task, engine_version, source_type, source_key,
                 failure_count, terminal_code, last_error, last_attempt,
@@ -2124,7 +2214,7 @@ export class BeaverDB {
         engineVersion = '',
     ): Promise<DocumentProcessingFailureRecord | null> {
         const records: DocumentProcessingFailureRecord[] = [];
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT file_hash, task, engine_version, source_type, source_key,
                     failure_count, terminal_code, last_error, last_attempt,
                     next_retry_after
@@ -2179,7 +2269,7 @@ export class BeaverDB {
         task: DocumentProcessingTask,
         engineVersion = '',
     ): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `DELETE FROM document_processing_failures
              WHERE file_hash = ? AND task = ? AND engine_version = ?`,
             [fileHash, task, engineVersion],
@@ -2197,13 +2287,13 @@ export class BeaverDB {
     public async ensureAttachmentProcessingState(
         input: AttachmentProcessingStateInput,
     ): Promise<AttachmentProcessingStateRecord> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `INSERT OR IGNORE INTO attachment_processing_state (
                 library_id, zotero_key, item_id, content_kind
              ) VALUES (?, ?, ?, ?)`,
             [input.libraryId, input.zoteroKey, input.itemId ?? null, input.contentKind],
         );
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `UPDATE attachment_processing_state
              SET item_id = ?, content_kind = ?, updated_at = datetime('now')
              WHERE library_id = ? AND zotero_key = ?
@@ -2252,7 +2342,7 @@ export class BeaverDB {
     ): Promise<AttachmentProcessingStateRecord | null> {
         const existing = await this.getAttachmentProcessingState(libraryId, zoteroKey);
         if (!existing) return null;
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `DELETE FROM attachment_processing_state
              WHERE library_id = ? AND zotero_key = ?`,
             [libraryId, zoteroKey],
@@ -2261,7 +2351,7 @@ export class BeaverDB {
     }
 
     public async deleteAttachmentProcessingStatesByLibrary(libraryId: number): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `DELETE FROM attachment_processing_state WHERE library_id = ?`,
             [libraryId],
         );
@@ -2269,7 +2359,7 @@ export class BeaverDB {
 
     /** Drop content-reading work when a library leaves Beaver's scope. */
     public async deleteBackgroundJobsByLibrary(libraryId: number): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `DELETE FROM background_jobs
              WHERE library_id = ? AND job_type != 'fulltext_untag'`,
             [libraryId],
@@ -2290,7 +2380,7 @@ export class BeaverDB {
             payloadKind: DocumentCachePayloadKind;
             payload: BackgroundJobPayload;
         }> = [];
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT id, library_id, zotero_key, content_kind,
                     payload_kind, payload_json
              FROM background_jobs_dead
@@ -2331,7 +2421,7 @@ export class BeaverDB {
                     payload: candidate.payload,
                     now,
                 });
-                await this.conn.queryAsync(
+                await this.queryAsync(
                     `DELETE FROM background_jobs_dead WHERE id = ?`,
                     [candidate.id],
                 );
@@ -2347,7 +2437,7 @@ export class BeaverDB {
         zoteroKey: string,
         reason: string | null,
     ): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `UPDATE attachment_processing_state SET
                 ${column} = NULL,
                 last_error = ?,
@@ -2401,7 +2491,7 @@ export class BeaverDB {
     }): Promise<boolean> {
         const hashChanged = input.previousDocumentHash !== input.structuredDocumentHash;
         const refreshDownstream = hashChanged || input.ocrStatus === 'needed';
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `UPDATE attachment_processing_state SET
                 file_mtime_ms = ?, file_size_bytes = ?, file_hash = ?,
                 structured_document_hash = ?, extract_status = 'done',
@@ -2442,7 +2532,7 @@ export class BeaverDB {
         status: Extract<AttachmentExtractStatus, 'failed' | 'skipped'>;
         error: string;
     }): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `UPDATE attachment_processing_state SET
                 extract_status = ?, last_error = ?, updated_at = datetime('now')
              WHERE library_id = ? AND zotero_key = ? AND extract_status IS NULL`,
@@ -2461,7 +2551,7 @@ export class BeaverDB {
         expectedOcrEngineVersion: string | null;
         expectedExtractStatus: AttachmentExtractStatus;
     }): Promise<boolean> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `UPDATE attachment_processing_state SET
                 ocr_status = 'done', ocr_engine_version = ?,
                 structured_document_hash = ?,
@@ -2493,7 +2583,7 @@ export class BeaverDB {
         zoteroKey: string,
         fileHash: string,
     ): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `UPDATE attachment_processing_state SET
                 file_hash = COALESCE(file_hash, ?), updated_at = datetime('now')
              WHERE library_id = ? AND zotero_key = ?`,
@@ -2507,7 +2597,7 @@ export class BeaverDB {
         fileHash: string,
         error: string,
     ): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `UPDATE attachment_processing_state SET
                 ocr_status = 'failed', last_error = ?, updated_at = datetime('now')
              WHERE library_id = ? AND zotero_key = ? AND file_hash = ?`,
@@ -2527,7 +2617,7 @@ export class BeaverDB {
         const guardStatus = input.expectedUpsertStatus !== undefined;
         const guardVersion = input.expectedUpsertIndexVersion !== undefined;
         const guardExtract = input.expectedExtractStatus !== undefined;
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `UPDATE attachment_processing_state SET
                 upsert_status = 'done', upsert_index_version = ?,
                 last_error = NULL, updated_at = datetime('now')
@@ -2558,7 +2648,7 @@ export class BeaverDB {
         structuredDocumentHash: string,
         error: string,
     ): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `UPDATE attachment_processing_state SET
                 upsert_status = 'failed', last_error = ?, updated_at = datetime('now')
              WHERE library_id = ? AND zotero_key = ?
@@ -2583,7 +2673,7 @@ export class BeaverDB {
                 AND (ocr_status IS NULL OR ocr_status IN ('na', 'done'))
             )`);
         }
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT
                 COUNT(*),
                 SUM(CASE WHEN extract_status = 'done' THEN 1 ELSE 0 END),
@@ -2624,7 +2714,7 @@ export class BeaverDB {
         limit = 50,
     ): Promise<BackgroundProcessingFailureSummary[]> {
         const rows: BackgroundProcessingFailureSummary[] = [];
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT library_id, zotero_key,
                     CASE
                         WHEN upsert_status = 'failed' THEN 'fulltext_upsert'
@@ -2646,7 +2736,7 @@ export class BeaverDB {
                 timestamp: row.getResultByIndex(4) ?? null,
             }) },
         );
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT job_type, library_id, zotero_key, last_error,
                     attempt_count, died_at
              FROM background_jobs_dead ORDER BY died_at DESC LIMIT ?`,
@@ -2661,7 +2751,7 @@ export class BeaverDB {
                 timestamp: row.getResultByIndex(5) ?? null,
             }) },
         );
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT task, source_key, last_error, failure_count, last_attempt
              FROM document_processing_failures
              ORDER BY last_attempt DESC LIMIT ?`,
@@ -2687,7 +2777,7 @@ export class BeaverDB {
         libraryId: number,
     ): Promise<ProcessingIndexStateRecord | null> {
         const rows: ProcessingIndexStateRecord[] = [];
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT library_id, max_client_date_modified, attachment_count,
                     ledger_row_count, last_scan_timestamp
              FROM processing_index_state WHERE library_id = ? LIMIT 1`,
@@ -2706,7 +2796,7 @@ export class BeaverDB {
     }
 
     public async upsertProcessingIndexState(state: ProcessingIndexStateRecord): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `INSERT INTO processing_index_state (
                 library_id, max_client_date_modified, attachment_count,
                 ledger_row_count, last_scan_timestamp
@@ -2727,7 +2817,7 @@ export class BeaverDB {
     }
 
     public async deleteProcessingIndexState(libraryId: number): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `DELETE FROM processing_index_state WHERE library_id = ?`,
             [libraryId],
         );
@@ -2735,7 +2825,7 @@ export class BeaverDB {
 
     private async lastStatementChangedRow(): Promise<boolean> {
         const changes: number[] = [];
-        await this.conn.queryAsync(`SELECT changes()`, [], {
+        await this.queryAsync(`SELECT changes()`, [], {
             onRow: (row: any) => changes.push(row.getResultByIndex(0)),
         });
         return (changes[0] ?? 0) === 1;
@@ -2746,7 +2836,7 @@ export class BeaverDB {
         params: any[] = [],
     ): Promise<AttachmentProcessingStateRecord[]> {
         const rows: AttachmentProcessingStateRecord[] = [];
-        await this.conn.queryAsync(sql, params, {
+        await this.queryAsync(sql, params, {
             onRow: (row: any) => rows.push({
                 libraryId: row.getResultByIndex(0),
                 zoteroKey: row.getResultByIndex(1),
@@ -2844,7 +2934,7 @@ export class BeaverDB {
     /** Read the recorded schema version for a disposable table group; null if unset. */
     private async getSchemaVersion(component: string): Promise<number | null> {
         let version: number | null = null;
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT version FROM schema_versions WHERE component = ?`,
             [component],
             { onRow: (row: any) => { version = row.getResultByIndex(0); } },
@@ -2882,7 +2972,7 @@ export class BeaverDB {
 
     /** Record the schema version for a disposable table group. */
     private async setSchemaVersion(component: string, version: number): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `INSERT INTO schema_versions (component, version) VALUES (?, ?)
              ON CONFLICT(component) DO UPDATE SET version = excluded.version`,
             [component, version],
@@ -2902,7 +2992,7 @@ export class BeaverDB {
     /** Check for a SQLite table by name. */
     private async tableExists(tableName: string): Promise<boolean> {
         let exists = false;
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`,
             [tableName],
             { onRow: () => { exists = true; } },
@@ -3075,7 +3165,7 @@ export class BeaverDB {
     private async getTableColumns(tableName: string): Promise<Set<string>> {
         const columns = new Set<string>();
         const escapedName = tableName.replace(/'/g, `''`);
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT name FROM pragma_table_info('${escapedName}')`,
             [],
             { onRow: (row: any) => columns.add(row.getResultByIndex(0)) },
@@ -3086,7 +3176,7 @@ export class BeaverDB {
     /** Verify the live queue has the exact current dedupe key. */
     private async backgroundJobsUniqueKeyIsCurrent(): Promise<boolean> {
         const uniqueIndexNames: string[] = [];
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT name, [unique] FROM pragma_index_list('background_jobs')`,
             [],
             {
@@ -3104,7 +3194,7 @@ export class BeaverDB {
         for (const indexName of uniqueIndexNames) {
             const escapedName = indexName.replace(/'/g, `''`);
             const columns: string[] = [];
-            await this.conn.queryAsync(
+            await this.queryAsync(
                 `SELECT name FROM pragma_index_info('${escapedName}') ORDER BY seqno`,
                 [],
                 { onRow: (row: any) => columns.push(row.getResultByIndex(0)) },
@@ -3122,7 +3212,7 @@ export class BeaverDB {
 
     private async selectDocumentCacheMetadata(sql: string, params: any[] = []): Promise<DocumentCacheMetadataRecord[]> {
         const rows: any[] = [];
-        await this.conn.queryAsync(sql, params, {
+        await this.queryAsync(sql, params, {
             onRow: (row: any) => {
                 // These indices must match the SELECT column order above.
                 rows.push({
@@ -3151,7 +3241,7 @@ export class BeaverDB {
 
     private async selectDocumentCachePayloads(sql: string, params: any[] = []): Promise<DocumentCachePayloadRecord[]> {
         const rows: any[] = [];
-        await this.conn.queryAsync(sql, params, {
+        await this.queryAsync(sql, params, {
             onRow: (row: any) => {
                 // These indices must match the SELECT column order above.
                 rows.push({
@@ -3241,7 +3331,7 @@ export class BeaverDB {
                 deletedPayloads = await this.getDocumentCachePayloadsForMetadata(existing.id);
                 await this.deleteDocumentCachePayloadRowsForMetadata(existing.id);
             }
-            await this.conn.queryAsync(
+            await this.queryAsync(
                 `INSERT INTO document_cache_metadata
                     (item_id, library_id, zotero_key, content_kind, file_path, file_mtime_ms,
                      file_size_bytes, source_size_bytes, content_type, document_metadata_json, error_code,
@@ -3320,7 +3410,7 @@ export class BeaverDB {
         const metadata = await this.getDocumentCacheMetadataByKey(libraryId, zoteroKey);
         if (!metadata) return [];
         const payloads = await this.getDocumentCachePayloadsForMetadata(metadata.id);
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `DELETE FROM document_cache_metadata WHERE library_id = ? AND zotero_key = ?`,
             [libraryId, zoteroKey],
         );
@@ -3344,7 +3434,7 @@ export class BeaverDB {
             }
 
             deletedPayloads = await this.getDocumentCachePayloadsForMetadata(metadata.id);
-            await this.conn.queryAsync(
+            await this.queryAsync(
                 `DELETE FROM document_cache_metadata WHERE id = ?`,
                 [metadata.id],
             );
@@ -3358,7 +3448,7 @@ export class BeaverDB {
             `${BeaverDB.documentCachePayloadSelect()} WHERE library_id = ?`,
             [libraryId],
         );
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `DELETE FROM document_cache_metadata WHERE library_id = ?`,
             [libraryId],
         );
@@ -3367,7 +3457,7 @@ export class BeaverDB {
 
     /** Insert or update a document-cache payload by metadata/payload kind. */
     public async upsertDocumentCachePayload(record: DocumentCachePayloadInput): Promise<DocumentCachePayloadRecord> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `INSERT INTO document_cache_payloads
                 (metadata_id, item_id, library_id, zotero_key, payload_kind, content_kind,
                  source_file_path, source_file_mtime_ms, source_file_size_bytes,
@@ -3455,7 +3545,7 @@ export class BeaverDB {
     /** Total compressed size of every cached payload, in bytes. */
     public async getDocumentCachePayloadTotalBytes(): Promise<number> {
         const rows: number[] = [];
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT COALESCE(SUM(payload_size_bytes), 0) FROM document_cache_payloads`,
             [],
             { onRow: (row: any) => rows.push(Number(row.getResultByIndex(0))) },
@@ -3488,7 +3578,7 @@ export class BeaverDB {
     }
 
     private async deleteDocumentCachePayloadRowsForMetadata(metadataId: number): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `DELETE FROM document_cache_payloads WHERE metadata_id = ?`,
             [metadataId],
         );
@@ -3502,7 +3592,7 @@ export class BeaverDB {
     ): Promise<DocumentCachePayloadRecord | null> {
         const payload = await this.getDocumentCachePayload(libraryId, zoteroKey, payloadKind);
         if (!payload) return null;
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `DELETE FROM document_cache_payloads WHERE id = ?`,
             [payload.id],
         );
@@ -3513,7 +3603,7 @@ export class BeaverDB {
     public async deleteDocumentCachePayloadIfUnchanged(
         payload: DocumentCachePayloadRecord,
     ): Promise<DocumentCachePayloadRecord | null> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `DELETE FROM document_cache_payloads
              WHERE id = ?
                AND metadata_id = ?
@@ -3587,7 +3677,7 @@ export class BeaverDB {
             `${BeaverDB.documentCachePayloadSelect()} WHERE library_id = ?`,
             [libraryId],
         );
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `DELETE FROM document_cache_payloads WHERE library_id = ?`,
             [libraryId],
         );
@@ -3596,7 +3686,7 @@ export class BeaverDB {
 
     /** Mark a metadata row as accessed. */
     public async touchDocumentCacheMetadata(id: number): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `UPDATE document_cache_metadata SET last_accessed_at = datetime('now') WHERE id = ?`,
             [id],
         );
@@ -3604,7 +3694,7 @@ export class BeaverDB {
 
     /** Mark a payload row as accessed. */
     public async touchDocumentCachePayload(id: number): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `UPDATE document_cache_payloads SET last_accessed_at = datetime('now') WHERE id = ?`,
             [id],
         );
@@ -3616,7 +3706,7 @@ export class BeaverDB {
         const sql = libraryId == null
             ? `SELECT COUNT(*) FROM document_cache_metadata`
             : `SELECT COUNT(*) FROM document_cache_metadata WHERE library_id = ?`;
-        await this.conn.queryAsync(sql, libraryId == null ? [] : [libraryId], {
+        await this.queryAsync(sql, libraryId == null ? [] : [libraryId], {
             onRow: (row: any) => rows.push({ count: row.getResultByIndex(0) }),
         });
         return rows[0]?.count ?? 0;
@@ -3628,7 +3718,7 @@ export class BeaverDB {
         const sql = libraryId == null
             ? `SELECT COUNT(*) FROM document_cache_payloads`
             : `SELECT COUNT(*) FROM document_cache_payloads WHERE library_id = ?`;
-        await this.conn.queryAsync(sql, libraryId == null ? [] : [libraryId], {
+        await this.queryAsync(sql, libraryId == null ? [] : [libraryId], {
             onRow: (row: any) => rows.push({ count: row.getResultByIndex(0) }),
         });
         return rows[0]?.count ?? 0;
@@ -3637,8 +3727,8 @@ export class BeaverDB {
     /** Delete every document-cache metadata and payload row. */
     public async deleteAllDocumentCache(): Promise<void> {
         await this.conn.executeTransaction(async () => {
-            await this.conn.queryAsync(`DELETE FROM document_cache_payloads`);
-            await this.conn.queryAsync(`DELETE FROM document_cache_metadata`);
+            await this.queryAsync(`DELETE FROM document_cache_payloads`);
+            await this.queryAsync(`DELETE FROM document_cache_metadata`);
         });
     }
 
@@ -3665,7 +3755,7 @@ export class BeaverDB {
 
     private async selectExternalFiles(sql: string, params: any[] = []): Promise<ExternalFileRecord[]> {
         const rows: ExternalFileRecord[] = [];
-        await this.conn.queryAsync(sql, params, {
+        await this.queryAsync(sql, params, {
             onRow: (row: any) => {
                 // These indices must match the SELECT column order above.
                 rows.push({
@@ -3688,7 +3778,7 @@ export class BeaverDB {
 
     /** Insert or replace the registry row for an external file. */
     public async upsertExternalFile(input: ExternalFileInput): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `INSERT INTO external_files (
                 ext_key, filename, original_path, stored_path, content_kind,
                 mime_type, file_size, mtime_ms, page_count, sha256
@@ -3741,7 +3831,7 @@ export class BeaverDB {
 
     /** Set the best-effort page count once it is known (async after attach). */
     public async setExternalFilePageCount(extKey: string, pageCount: number | null): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `UPDATE external_files SET page_count = ? WHERE ext_key = ?`,
             [pageCount, extKey],
         );
@@ -3749,7 +3839,7 @@ export class BeaverDB {
 
     /** Delete one external file registry row. */
     public async deleteExternalFile(extKey: string): Promise<void> {
-        await this.conn.queryAsync(`DELETE FROM external_files WHERE ext_key = ?`, [extKey]);
+        await this.queryAsync(`DELETE FROM external_files WHERE ext_key = ?`, [extKey]);
     }
 
     /** List all external file registry rows (newest first). */
@@ -3762,7 +3852,7 @@ export class BeaverDB {
     /** Count and total size of all external file registry rows. */
     public async getExternalFileStats(): Promise<{ count: number; totalBytes: number }> {
         const rows: Array<{ count: number; totalBytes: number }> = [];
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT COUNT(*), COALESCE(SUM(file_size), 0) FROM external_files`,
             [],
             {
@@ -3777,7 +3867,7 @@ export class BeaverDB {
 
     /** Delete every external file registry row. */
     public async deleteAllExternalFiles(): Promise<void> {
-        await this.conn.queryAsync(`DELETE FROM external_files`);
+        await this.queryAsync(`DELETE FROM external_files`);
     }
 
     // =====================================================================
@@ -3844,7 +3934,7 @@ export class BeaverDB {
         let enqueued = false;
         let id = 0;
 
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `INSERT OR IGNORE INTO background_jobs (
                 job_type, library_id, item_id, zotero_key, content_kind,
                 payload_kind, dedupe_key,
@@ -3867,7 +3957,7 @@ export class BeaverDB {
         );
 
         const changesRows: number[] = [];
-        await this.conn.queryAsync(`SELECT changes()`, [], {
+        await this.queryAsync(`SELECT changes()`, [], {
             onRow: (row: any) => {
                 changesRows.push(row.getResultByIndex(0));
             },
@@ -3875,7 +3965,7 @@ export class BeaverDB {
         enqueued = (changesRows[0] ?? 0) === 1;
 
         if (!enqueued) {
-            await this.conn.queryAsync(
+            await this.queryAsync(
                 `UPDATE background_jobs SET
                     priority      = MIN(priority, ?),
                     available_at  = CASE WHEN content_kind != ? OR ? < priority
@@ -3910,7 +4000,7 @@ export class BeaverDB {
         }
 
         const idRows: number[] = [];
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT id FROM background_jobs
              WHERE job_type = ? AND library_id = ? AND zotero_key = ?
                AND payload_kind = ? AND dedupe_key = ?`,
@@ -3951,7 +4041,7 @@ export class BeaverDB {
     ): Promise<{ exists: boolean; promoted: boolean }> {
         // Current priority doubles as the existence check (dedup key is UNIQUE).
         const current: number[] = [];
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT priority FROM background_jobs
              WHERE job_type = ? AND library_id = ? AND zotero_key = ? AND payload_kind = ?
                AND dedupe_key = ''
@@ -3964,7 +4054,7 @@ export class BeaverDB {
 
         // Lower priority only. The `priority > ?` guard keeps the value
         // monotonically decreasing if the row changed since the read above.
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `UPDATE background_jobs SET priority = ?
              WHERE job_type = ? AND library_id = ? AND zotero_key = ? AND payload_kind = ?
                AND dedupe_key = ''
@@ -4019,13 +4109,13 @@ export class BeaverDB {
         const newAvailableAt = now + visibilityTimeoutMs;
         const changesRows: number[] = [];
         await this.conn.executeTransaction(async () => {
-            await this.conn.queryAsync(
+            await this.queryAsync(
                 `UPDATE background_jobs
                  SET available_at = ?
                  WHERE id = ? AND available_at <= ?`,
                 [newAvailableAt, candidate.id, now],
             );
-            await this.conn.queryAsync(`SELECT changes()`, [], {
+            await this.queryAsync(`SELECT changes()`, [], {
                 onRow: (row: any) => {
                     changesRows.push(row.getResultByIndex(0));
                 },
@@ -4049,7 +4139,7 @@ export class BeaverDB {
 
     /** Mark a claimed job as completed by removing its row. */
     public async completeBackgroundJob(id: number): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `DELETE FROM background_jobs WHERE id = ?`,
             [id],
         );
@@ -4081,7 +4171,7 @@ export class BeaverDB {
 
         if (nextAttempt >= opts.maxAttempts) {
             await this.conn.executeTransaction(async () => {
-                await this.conn.queryAsync(
+                await this.queryAsync(
                     `INSERT INTO background_jobs_dead (
                         job_type, library_id, zotero_key, content_kind,
                         payload_kind, payload_json, enqueued_at, died_at,
@@ -4100,7 +4190,7 @@ export class BeaverDB {
                         error,
                     ],
                 );
-                await this.conn.queryAsync(
+                await this.queryAsync(
                     `DELETE FROM background_jobs WHERE id = ?`,
                     [id],
                 );
@@ -4109,7 +4199,7 @@ export class BeaverDB {
         }
 
         const nextAvailableAt = opts.now + opts.backoffMs(nextAttempt);
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `UPDATE background_jobs
              SET attempt_count = attempt_count + 1,
                  last_error = ?,
@@ -4127,7 +4217,7 @@ export class BeaverDB {
      * attempt or recording a misleading error.
      */
     public async releaseBackgroundJob(id: number, now: number): Promise<void> {
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `UPDATE background_jobs SET available_at = ? WHERE id = ?`,
             [now, id],
         );
@@ -4143,7 +4233,7 @@ export class BeaverDB {
      */
     public async getPendingFulltextUpsertKeys(): Promise<Set<string>> {
         const keys = new Set<string>();
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT library_id, zotero_key FROM background_jobs
              WHERE job_type = 'fulltext_upsert'`,
             [],
@@ -4161,7 +4251,7 @@ export class BeaverDB {
         now: number,
     ): Promise<BackgroundQueueStats> {
         const totalsRows: number[] = [];
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT COUNT(*) FROM background_jobs`,
             [],
             { onRow: (row: any) => totalsRows.push(row.getResultByIndex(0)) },
@@ -4169,7 +4259,7 @@ export class BeaverDB {
         const pending = totalsRows[0] ?? 0;
 
         const availableRows: number[] = [];
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT COUNT(*) FROM background_jobs WHERE available_at <= ?`,
             [now],
             { onRow: (row: any) => availableRows.push(row.getResultByIndex(0)) },
@@ -4178,7 +4268,7 @@ export class BeaverDB {
         const deferred = pending - available;
 
         const deadRows: number[] = [];
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT COUNT(*) FROM background_jobs_dead`,
             [],
             { onRow: (row: any) => deadRows.push(row.getResultByIndex(0)) },
@@ -4186,7 +4276,7 @@ export class BeaverDB {
         const dead = deadRows[0] ?? 0;
 
         const byJobType: Record<string, number> = {};
-        await this.conn.queryAsync(
+        await this.queryAsync(
             `SELECT job_type, COUNT(*) FROM background_jobs GROUP BY job_type`,
             [],
             {
@@ -4206,7 +4296,7 @@ export class BeaverDB {
         params: any[] = [],
     ): Promise<BackgroundJobRecord[]> {
         const rows: BackgroundJobRecord[] = [];
-        await this.conn.queryAsync(sql, params, {
+        await this.queryAsync(sql, params, {
             onRow: (row: any) => {
                 const contentKind = row.getResultByIndex(5);
                 const payloadJson = row.getResultByIndex(8);
