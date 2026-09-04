@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     buildReviewRows,
+    buildReviewRowsForRunChain,
     getChangesCardHeading,
     hasPendingReviewRows,
     getOpenNoteTarget,
@@ -153,6 +154,31 @@ describe('buildReviewRows grouping', () => {
         expect(rows.map((row) => row.toolcallId))
             .toEqual(['call-2', 'call-4', 'call-1', 'call-3']);
     });
+
+    it('keeps a reused tool-call id separate across continuation runs', () => {
+        const first = action({ id: 'a1', run_id: 'run-1', toolcall_id: 'call-1' });
+        const continuation = action({ id: 'a2', run_id: 'run-2', toolcall_id: 'call-1' });
+
+        const rows = buildReviewRowsForRunChain([[first], [continuation]]);
+
+        expect(rows).toHaveLength(2);
+        expect(rows.map((row) => row.runId)).toEqual(['run-1', 'run-2']);
+        expect(rows[0].actions).toEqual([first]);
+        expect(rows[1].actions).toEqual([continuation]);
+    });
+
+    it('scopes a live approval exclusion to its originating run', () => {
+        const live = action({ id: 'a1', run_id: 'run-1', toolcall_id: 'call-1' });
+        const continuation = action({ id: 'a2', run_id: 'run-2', toolcall_id: 'call-1' });
+
+        const rows = buildReviewRowsForRunChain([[live], [continuation]], {
+            liveApprovalActionIds: new Set([live.id]),
+        });
+
+        expect(rows).toHaveLength(1);
+        expect(rows[0].runId).toBe('run-2');
+        expect(rows[0].actions).toEqual([continuation]);
+    });
 });
 
 describe('hasPendingReviewRows', () => {
@@ -281,6 +307,42 @@ describe('getChangesCardHeading trail', () => {
 
         expect(getChangesCardHeading(rows))
             .toEqual({ lead: 'Library changes', trail: '1 failed, 1 applied with errors' });
+    });
+
+    it('keeps a change whose outcome Zotero never reported out of the failed count', () => {
+        const rows = rowsOf([
+            // Sent, then the plugin went quiet: whether it landed is unknown.
+            action({
+                toolcall_id: 'call-1',
+                action_type: 'create_collection',
+                status: 'error',
+                error_details: { outcome: 'unconfirmed', reason: 'acked_cap' },
+            } as Partial<AgentAction>),
+            // Queued behind it and never sent: that one really did not land.
+            action({
+                toolcall_id: 'call-2',
+                action_type: 'create_collection',
+                status: 'error',
+                error_details: { outcome: 'not_sent', reason: 'acked_cap' },
+            } as Partial<AgentAction>),
+        ]);
+
+        expect(getChangesCardHeading(rows))
+            .toEqual({ lead: 'Library changes', trail: '1 unconfirmed, 1 failed' });
+    });
+
+    it('does not report a change that landed and lost its acknowledgement as unconfirmed', () => {
+        const rows = rowsOf([
+            action({
+                toolcall_id: 'call-1',
+                action_type: 'create_collection',
+                status: 'error',
+                result_data: { library_id: 1, zotero_key: 'NOTE1' },
+            } as Partial<AgentAction>),
+        ]);
+
+        expect(getChangesCardHeading(rows))
+            .toEqual({ lead: 'Library changes', trail: '1 applied with errors' });
     });
 
     it('reports a run the user undid entirely', () => {

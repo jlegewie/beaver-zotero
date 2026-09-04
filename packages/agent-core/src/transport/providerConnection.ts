@@ -26,9 +26,15 @@ import {
     PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER,
     notifySyncPauseOwnerSettled,
     unknownDataRequestErrorResponse,
+    NOOP_KEEPALIVE,
+    REQUEST_KEEPALIVE_INTERVAL_MS,
+    isBackendRequestEvent,
+    isRequestSignal,
+    type AgentDataRequestContext,
+    type RequestKeepalive,
 } from './agentDataDispatch';
 import { getWSAuthToken } from './agentService';
-import { WSAuthMessage, WSRequestReceivedAck } from '../protocol/agentProtocol';
+import { WSAuthMessage, WSRequestKeepalive, WSRequestReceivedAck } from '../protocol/agentProtocol';
 import { resolveBusyContext } from './busyContextProvider';
 import {
     isPreparedJsonMessage,
@@ -70,6 +76,12 @@ export class ProviderConnection {
     /** Queue to serialize mutating action execution */
     private actionExecutionQueue: Promise<void> = Promise.resolve();
     private serverSupportsRequestAcks: boolean = false;
+    private serverSupportsRequestKeepalive: boolean = false;
+    /** Arrival times of inbound messages not yet fully handled, including the current one (see AgentService). */
+    private queuedMessageArrivals: number[] = [];
+    /** Keepalives started on receipt, parked by request id until dispatched, plus all still ticking (see AgentService). */
+    private pendingKeepalives: Map<string, RequestKeepalive> = new Map();
+    private activeKeepalives: Set<RequestKeepalive> = new Set();
     /**
      * Resolved lazily from the registered default (see
      * `resolveDefaultAgentDataProvider`) on first use, so this module-level
@@ -222,12 +234,28 @@ export class ProviderConnection {
                 };
 
                 wsInstance.onmessage = (event) => {
+                    // Frames from a socket close() already replaced are dropped
+                    // before they can be acked or counted against the new one.
+                    if (this.connectionId !== connId || this.ws !== wsInstance) return;
                     const receivedAt = Date.now();
+                    const parsed = this.parseMessage(event.data);
+                    if (parsed === null) return;
+                    // Ack and start keepalives before queueing, for the same
+                    // reason as AgentService: they must report arrival, not
+                    // queue progress.
+                    this.maybeAckRequest(parsed, receivedAt);
+                    this.maybeStartKeepalive(parsed, receivedAt);
+                    // Captured per message so a handler from a reset connection
+                    // shifts its own array (see AgentService).
+                    const arrivals = this.queuedMessageArrivals;
+                    arrivals.push(receivedAt);
                     this.messageQueue = this.messageQueue.then(() => {
                         if (this.connectionId !== connId || this.ws !== wsInstance) return;
-                        return this.handleMessage(event.data, receivedAt, () => finish());
+                        return this.handleMessage(parsed, receivedAt, () => finish());
                     }).catch(err => {
                         logger(`ProviderConnection: Unhandled error in message queue: ${err}`, 1);
+                    }).finally(() => {
+                        arrivals.shift();
                     });
                 };
 
@@ -290,6 +318,9 @@ export class ProviderConnection {
         this.messageQueue = Promise.resolve();
         this.actionExecutionQueue = Promise.resolve();
         this.serverSupportsRequestAcks = false;
+        this.serverSupportsRequestKeepalive = false;
+        this.queuedMessageArrivals = [];
+        this.stopAllKeepalives();
         this.connectedAt = null;
     }
 
@@ -329,7 +360,7 @@ export class ProviderConnection {
         // extra `timing` field).
         if (isPreparedJsonMessage(data)) {
             const envelope = preparedJsonEnvelope(data);
-            if ('request_id' in envelope && 'type' in envelope && envelope.type !== 'request_received') {
+            if ('request_id' in envelope && 'type' in envelope && !isRequestSignal(envelope.type)) {
                 try {
                     data = withPreparedJsonEnvelope(data, (current) => ({
                         ...current,
@@ -339,7 +370,7 @@ export class ProviderConnection {
                     logger(`ProviderConnection: Failed to attach busy context: ${error}`, 1);
                 }
             }
-        } else if ('request_id' in data && 'type' in data && data.type !== 'request_received') {
+        } else if ('request_id' in data && 'type' in data && !isRequestSignal(data.type)) {
             try {
                 data = { ...data, timing: { ...(data as any).timing, ...resolveBusyContext() } };
             } catch (error) {
@@ -363,25 +394,27 @@ export class ProviderConnection {
         );
     }
 
-    /** Ack a backend request before its handler runs (mirrors AgentService). */
+    private transportBusyContext(receivedAt: number): Record<string, number> {
+        const now = Date.now();
+        const oldest = this.queuedMessageArrivals[0];
+        return {
+            ...resolveBusyContext(),
+            dispatch_lag_ms: Math.max(0, now - receivedAt),
+            queue_depth: this.queuedMessageArrivals.length,
+            queue_oldest_ms: oldest === undefined ? 0 : Math.max(0, now - oldest),
+        };
+    }
+
+    /** Ack a backend request on arrival, before it is queued (mirrors AgentService). */
     private maybeAckRequest(event: any, receivedAt: number): void {
         if (!this.serverSupportsRequestAcks) return;
         const requestId = event.request_id;
-        const eventName = event.event;
-        if (typeof requestId !== 'string' || typeof eventName !== 'string') return;
-        if (
-            !eventName.endsWith('_request')
-            && eventName !== 'agent_action_validate'
-            && eventName !== 'agent_action_execute'
-        ) return;
+        if (typeof requestId !== 'string' || !isBackendRequestEvent(event.event)) return;
         try {
             const ack: WSRequestReceivedAck = {
                 type: 'request_received',
                 request_id: requestId,
-                busy: {
-                    ...resolveBusyContext(),
-                    dispatch_lag_ms: Math.max(0, Date.now() - receivedAt),
-                },
+                busy: this.transportBusyContext(receivedAt),
             };
             this.send(ack);
         } catch (error) {
@@ -389,26 +422,86 @@ export class ProviderConnection {
         }
     }
 
+    /** Start keepalives on receipt of a backend request (mirrors AgentService). */
+    private maybeStartKeepalive(event: any, receivedAt: number): void {
+        if (!this.serverSupportsRequestKeepalive) return;
+        const requestId = event?.request_id;
+        if (typeof requestId !== 'string' || !isBackendRequestEvent(event.event)) return;
+        this.pendingKeepalives.set(requestId, this.startKeepalive(requestId, receivedAt, 'queued'));
+    }
+
+    private takeKeepalive(requestId: string | null): RequestKeepalive {
+        if (requestId === null) return NOOP_KEEPALIVE;
+        const keepalive = this.pendingKeepalives.get(requestId);
+        if (!keepalive) return NOOP_KEEPALIVE;
+        this.pendingKeepalives.delete(requestId);
+        return keepalive;
+    }
+
+    private startKeepalive(requestId: string, receivedAt: number, initialPhase: string): RequestKeepalive {
+        const connId = this.connectionId;
+        let phase = initialPhase;
+        const controller: RequestKeepalive = {
+            setPhase: (next: string) => { phase = next; },
+            stop: () => {
+                clearInterval(timer);
+                this.activeKeepalives.delete(controller);
+                this.pendingKeepalives.delete(requestId);
+            },
+        };
+        const timer = setInterval(() => {
+            if (this.connectionId !== connId) {
+                controller.stop();
+                return;
+            }
+            try {
+                const keepalive: WSRequestKeepalive = {
+                    type: 'request_keepalive',
+                    request_id: requestId,
+                    phase,
+                    elapsed_ms: Math.max(0, Date.now() - receivedAt),
+                    busy: this.transportBusyContext(receivedAt),
+                };
+                this.send(keepalive);
+            } catch (error) {
+                logger(`ProviderConnection: Failed to send request_keepalive: ${error}`, 1);
+            }
+        }, REQUEST_KEEPALIVE_INTERVAL_MS);
+        this.activeKeepalives.add(controller);
+        return controller;
+    }
+
+    private stopAllKeepalives(): void {
+        for (const keepalive of Array.from(this.activeKeepalives)) {
+            keepalive.stop();
+        }
+        this.activeKeepalives.clear();
+        this.pendingKeepalives.clear();
+    }
+
+    private parseMessage(rawData: unknown): any | null {
+        if (typeof rawData !== 'string' || !rawData) return null;
+        try {
+            return JSON.parse(rawData);
+        } catch (error) {
+            logger(`ProviderConnection: Failed to parse message: ${error}`, 1);
+            return null;
+        }
+    }
+
     private async handleMessage(
-        rawData: string,
+        message: any,
         receivedAt: number,
         onReady: () => void,
     ): Promise<void> {
-        if (typeof rawData !== 'string' || !rawData) return;
-
-        let event: any;
-        try {
-            event = JSON.parse(rawData);
-        } catch (error) {
-            logger(`ProviderConnection: Failed to parse message: ${error}`, 1);
-            return;
-        }
-
-        this.maybeAckRequest(event, receivedAt);
-
+        // Normally called with the event `onmessage` already parsed (and
+        // acked); a raw frame is still accepted for direct dispatch.
+        const event = typeof message === 'string' ? this.parseMessage(message) : message;
+        if (event === null || typeof event !== 'object') return;
         switch (event.event) {
             case 'ready': {
                 this.serverSupportsRequestAcks = event.supports_request_acks === true;
+                this.serverSupportsRequestKeepalive = event.supports_request_keepalive === true;
                 this.connectedAt = Date.now();
                 logger('ProviderConnection: Ready — registered as provider', 1);
                 onReady();
@@ -422,8 +515,11 @@ export class ProviderConnection {
 
             default: {
                 const eventName = event.event;
+                const requestId = typeof event.request_id === 'string' ? event.request_id : null;
+                const keepalive = this.takeKeepalive(requestId);
                 const entry = this.getDataProvider()[eventName];
                 if (!entry) {
+                    keepalive.stop();
                     logger(`ProviderConnection: Unknown event type: ${eventName}`, 1);
                     const errorResponse = unknownDataRequestErrorResponse(event);
                     if (errorResponse) {
@@ -434,10 +530,16 @@ export class ProviderConnection {
                 logger(`ProviderConnection: Received ${eventName}`, 1);
                 this.requestsServed++;
                 this.lastRequestAt = Date.now();
-                const runRequest = () =>
-                    entry.handle(event)
-                        .then(res => this.send(res))
+                const context: AgentDataRequestContext = {
+                    receivedAt,
+                    reportPhase: (phase) => keepalive.setPhase(phase),
+                };
+                const runRequest = () => {
+                    keepalive.setPhase('running');
+                    return entry.handle(event, context)
+                        .then(res => { keepalive.stop(); this.send(res); })
                         .catch(err => {
+                            keepalive.stop();
                             logger(`ProviderConnection: ${eventName} failed: ${err}`, 1);
                             this.send(entry.errorResponse(event, err));
                         })
@@ -446,10 +548,14 @@ export class ProviderConnection {
                                 notifySyncPauseOwnerSettled(entry.syncPauseOwner);
                             }
                         });
+                };
                 if (entry.serialize) {
                     const actionConnId = this.connectionId;
                     this.actionExecutionQueue = this.actionExecutionQueue.then(() => {
-                        if (this.connectionId !== actionConnId) return;
+                        if (this.connectionId !== actionConnId) {
+                            keepalive.stop();
+                            return;
+                        }
                         return runRequest();
                     });
                 } else {

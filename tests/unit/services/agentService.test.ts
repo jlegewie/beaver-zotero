@@ -700,3 +700,294 @@ describe('AgentService unknown data-request events', () => {
         expect(socket.send.mock.calls.length).toBe(sentBefore);
     });
 });
+
+describe('AgentService request acks and keepalives', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        MockWebSocket.instances = [];
+        vi.stubGlobal('WebSocket', MockWebSocket);
+
+        mockSupabase.auth.getSession.mockReset();
+        mockSupabase.auth.refreshSession.mockReset();
+        mockSupabase.auth.getSession.mockResolvedValue({
+            data: {
+                session: {
+                    access_token: 'token',
+                    expires_at: Math.floor(Date.now() / 1000) + 3600,
+                },
+            },
+            error: null,
+        });
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+    });
+
+    /** Connect against a backend that advertises acks and (optionally) keepalives. */
+    async function connectWithFlags(
+        service: AgentService,
+        callbacks: WSCallbacks,
+        flags: { supports_request_acks?: boolean; supports_request_keepalive?: boolean },
+    ): Promise<MockWebSocket> {
+        const initialCount = MockWebSocket.instances.length;
+        const connectPromise = service.connect({ type: 'unknown-event' } as AgentRunRequest, callbacks);
+        for (let i = 0; i < 20 && MockWebSocket.instances.length === initialCount; i++) {
+            await Promise.resolve();
+        }
+        const socket = MockWebSocket.instances[initialCount];
+        if (!socket) throw new Error('Expected AgentService.connect() to create a WebSocket');
+        socket.emitOpen();
+        await vi.advanceTimersByTimeAsync(50);
+        socket.emitMessage({
+            event: 'ready',
+            subscription_status: 'active',
+            processing_mode: 'fast',
+            indexing_complete: true,
+            ...flags,
+        });
+        await connectPromise;
+        return socket;
+    }
+
+    const sentMessages = (socket: MockWebSocket) =>
+        socket.send.mock.calls.map(([raw]) => JSON.parse(raw as string));
+
+    it('acks a request on arrival even while the message queue is blocked on a callback', async () => {
+        const callbacks = createCallbacks();
+        // A streamed part whose UI callback never settles blocks the serialized
+        // message queue, the way an item load stuck behind a Zotero transaction does.
+        callbacks.onPart = vi.fn(() => new Promise<void>(() => {}));
+        const service = new AgentService('https://api.example.com', {});
+        const socket = await connectWithFlags(service, callbacks, { supports_request_acks: true });
+
+        socket.emitMessage({ event: 'part', run_id: 'run-1', part: {} });
+        await flushMicrotasks();
+        socket.emitMessage({ event: 'zotero_data_request', request_id: 'req-1' });
+        await flushMicrotasks();
+
+        const acks = sentMessages(socket).filter((m) => m.type === 'request_received');
+        expect(acks).toHaveLength(1);
+        expect(acks[0].request_id).toBe('req-1');
+        // One message (the stuck part) is queued ahead of this request
+        expect(acks[0].busy.queue_depth).toBe(1);
+        expect(acks[0].busy.queue_oldest_ms).toBeGreaterThanOrEqual(0);
+        expect(acks[0].busy.dispatch_lag_ms).toBeGreaterThanOrEqual(0);
+    });
+
+    it('sends keepalives every 5s while a request runs and stops once it is answered', async () => {
+        let resolveHandler: (value: Record<string, any>) => void = () => {};
+        const provider = {
+            zotero_data_request: {
+                handle: vi.fn(() => new Promise<Record<string, any>>((resolve) => { resolveHandler = resolve; })),
+                errorResponse: () => ({ type: 'zotero_data', request_id: 'req-1', error: 'x' }),
+            },
+        };
+        const service = new AgentService('https://api.example.com', provider);
+        const socket = await connectWithFlags(service, createCallbacks(), {
+            supports_request_acks: true,
+            supports_request_keepalive: true,
+        });
+
+        socket.emitMessage({ event: 'zotero_data_request', request_id: 'req-1' });
+        await flushMicrotasks();
+        expect(provider.zotero_data_request.handle).toHaveBeenCalledTimes(1);
+        // The handler receives the transport context
+        const [, context] = provider.zotero_data_request.handle.mock.calls[0] as any[];
+        expect(typeof context.receivedAt).toBe('number');
+        expect(typeof context.reportPhase).toBe('function');
+
+        await vi.advanceTimersByTimeAsync(5_000);
+        await vi.advanceTimersByTimeAsync(5_000);
+        let keepalives = sentMessages(socket).filter((m) => m.type === 'request_keepalive');
+        expect(keepalives).toHaveLength(2);
+        expect(keepalives[0]).toMatchObject({ request_id: 'req-1', phase: 'running' });
+        expect(keepalives[0].elapsed_ms).toBeGreaterThanOrEqual(5_000);
+        expect(keepalives[0].busy.queue_depth).toBe(0);
+
+        // A handler-reported phase shows up in the next keepalive
+        context.reportPhase('saving');
+        await vi.advanceTimersByTimeAsync(5_000);
+        keepalives = sentMessages(socket).filter((m) => m.type === 'request_keepalive');
+        expect(keepalives[2].phase).toBe('saving');
+
+        resolveHandler({ type: 'zotero_data', request_id: 'req-1', items: [] });
+        await flushMicrotasks();
+        await vi.advanceTimersByTimeAsync(15_000);
+        keepalives = sentMessages(socket).filter((m) => m.type === 'request_keepalive');
+        expect(keepalives).toHaveLength(3);
+        // The response itself carries no keepalive/ack timing pollution
+        const response = sentMessages(socket).find((m) => m.type === 'zotero_data');
+        expect(response.request_id).toBe('req-1');
+    });
+
+    it('reports a serialized execute as queued until the one ahead of it finishes', async () => {
+        const pending: Array<(value: Record<string, any>) => void> = [];
+        const provider = {
+            agent_action_execute: {
+                serialize: true,
+                handle: vi.fn((event: any) => new Promise<Record<string, any>>((resolve) => {
+                    pending.push(() => resolve({ type: 'agent_action_execute_response', request_id: event.request_id, success: true }));
+                })),
+                errorResponse: (event: any) => ({ type: 'agent_action_execute_response', request_id: event.request_id, success: false }),
+            },
+        };
+        const service = new AgentService('https://api.example.com', provider);
+        const socket = await connectWithFlags(service, createCallbacks(), {
+            supports_request_acks: true,
+            supports_request_keepalive: true,
+        });
+
+        socket.emitMessage({ event: 'agent_action_execute', request_id: 'exec-1' });
+        socket.emitMessage({ event: 'agent_action_execute', request_id: 'exec-2' });
+        await flushMicrotasks();
+        expect(provider.agent_action_execute.handle).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(5_000);
+        const phases = (id: string) =>
+            sentMessages(socket).filter((m) => m.type === 'request_keepalive' && m.request_id === id).map((m) => m.phase);
+        expect(phases('exec-1')).toEqual(['running']);
+        expect(phases('exec-2')).toEqual(['queued']);
+
+        pending[0]();
+        await flushMicrotasks();
+        expect(provider.agent_action_execute.handle).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(phases('exec-1')).toEqual(['running']);
+        expect(phases('exec-2')).toEqual(['queued', 'running']);
+
+        pending[1]();
+        await flushMicrotasks();
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(phases('exec-2')).toEqual(['queued', 'running']);
+    });
+
+    it('keeps a request alive with the queued phase while the message queue is blocked', async () => {
+        const callbacks = createCallbacks();
+        callbacks.onPart = vi.fn(() => new Promise<void>(() => {}));
+        const provider = {
+            zotero_data_request: {
+                handle: vi.fn(async () => ({ type: 'zotero_data', request_id: 'req-1', items: [] })),
+                errorResponse: () => ({ type: 'zotero_data', request_id: 'req-1', error: 'x' }),
+            },
+        };
+        const service = new AgentService('https://api.example.com', provider);
+        const socket = await connectWithFlags(service, callbacks, {
+            supports_request_acks: true,
+            supports_request_keepalive: true,
+        });
+
+        socket.emitMessage({ event: 'part', run_id: 'run-1', part: {} });
+        await flushMicrotasks();
+        socket.emitMessage({ event: 'zotero_data_request', request_id: 'req-1' });
+        await flushMicrotasks();
+        // The handler never runs: the queue is stuck behind the part.
+        expect(provider.zotero_data_request.handle).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(10_000);
+        const keepalives = sentMessages(socket).filter((m) => m.type === 'request_keepalive');
+        expect(keepalives.map((m) => m.phase)).toEqual(['queued', 'queued']);
+        expect(keepalives[0].busy.queue_depth).toBe(2);
+    });
+
+    it('stops keepalives when the connection is closed and ignores frames from the old socket', async () => {
+        let resolveHandler: (value: Record<string, any>) => void = () => {};
+        const provider = {
+            zotero_data_request: {
+                handle: vi.fn(() => new Promise<Record<string, any>>((resolve) => { resolveHandler = resolve; })),
+                errorResponse: () => ({ type: 'zotero_data', request_id: 'req-1', error: 'x' }),
+            },
+        };
+        const service = new AgentService('https://api.example.com', provider);
+        const oldSocket = await connectWithFlags(service, createCallbacks(), {
+            supports_request_acks: true,
+            supports_request_keepalive: true,
+        });
+        oldSocket.emitMessage({ event: 'zotero_data_request', request_id: 'req-1' });
+        await flushMicrotasks();
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(sentMessages(oldSocket).filter((m) => m.type === 'request_keepalive')).toHaveLength(1);
+
+        service.close();
+        const newSocket = await connectWithFlags(service, createCallbacks(), {
+            supports_request_acks: true,
+            supports_request_keepalive: true,
+        });
+
+        // The hung handler's keepalive must not reach the replacement socket.
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(sentMessages(newSocket).filter((m) => m.type === 'request_keepalive')).toHaveLength(0);
+
+        // A frame buffered on the closed socket is neither acked nor queued.
+        oldSocket.emitMessage({ event: 'zotero_data_request', request_id: 'req-stale' });
+        await flushMicrotasks();
+        await vi.advanceTimersByTimeAsync(5_000);
+        const onNewSocket = sentMessages(newSocket);
+        expect(onNewSocket.find((m) => m.request_id === 'req-stale')).toBeUndefined();
+        const newAck = onNewSocket.filter((m) => m.type === 'request_received');
+        expect(newAck).toHaveLength(0);
+
+        resolveHandler({ type: 'zotero_data', request_id: 'req-1', items: [] });
+        await flushMicrotasks();
+    });
+
+    it('does not let a handler from a reset connection shift the new queue accounting', async () => {
+        let resolveOld: (value: Record<string, any>) => void = () => {};
+        const provider = {
+            zotero_data_request: {
+                handle: vi.fn(() => new Promise<Record<string, any>>((resolve) => { resolveOld = resolve; })),
+                errorResponse: () => ({ type: 'zotero_data', request_id: 'x', error: 'x' }),
+            },
+        };
+        const service = new AgentService('https://api.example.com', provider);
+        const oldSocket = await connectWithFlags(service, createCallbacks(), { supports_request_acks: true });
+        oldSocket.emitMessage({ event: 'zotero_data_request', request_id: 'old-1' });
+        await flushMicrotasks();
+
+        service.close();
+        const callbacks = createCallbacks();
+        callbacks.onPart = vi.fn(() => new Promise<void>(() => {}));
+        const newSocket = await connectWithFlags(service, callbacks, { supports_request_acks: true });
+
+        // New connection: a stuck part, then a request whose ack sees depth 1.
+        newSocket.emitMessage({ event: 'part', run_id: 'run-2', part: {} });
+        await flushMicrotasks();
+        newSocket.emitMessage({ event: 'zotero_data_request', request_id: 'new-1' });
+        await flushMicrotasks();
+
+        // The old connection's handler settles now; it must shift only its own array.
+        resolveOld({ type: 'zotero_data', request_id: 'old-1', items: [] });
+        await flushMicrotasks();
+
+        newSocket.emitMessage({ event: 'zotero_data_request', request_id: 'new-2' });
+        await flushMicrotasks();
+
+        const acks = sentMessages(newSocket).filter((m) => m.type === 'request_received');
+        expect(acks.map((m) => [m.request_id, m.busy.queue_depth])).toEqual([
+            ['new-1', 1],
+            ['new-2', 2],
+        ]);
+    });
+
+    it('does not send keepalives to a backend that does not advertise them', async () => {
+        let resolveHandler: (value: Record<string, any>) => void = () => {};
+        const provider = {
+            zotero_data_request: {
+                handle: vi.fn(() => new Promise<Record<string, any>>((resolve) => { resolveHandler = resolve; })),
+                errorResponse: () => ({ type: 'zotero_data', request_id: 'req-1', error: 'x' }),
+            },
+        };
+        const service = new AgentService('https://api.example.com', provider);
+        const socket = await connectWithFlags(service, createCallbacks(), { supports_request_acks: true });
+
+        socket.emitMessage({ event: 'zotero_data_request', request_id: 'req-1' });
+        await flushMicrotasks();
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(sentMessages(socket).filter((m) => m.type === 'request_keepalive')).toHaveLength(0);
+        expect(sentMessages(socket).filter((m) => m.type === 'request_received')).toHaveLength(1);
+
+        resolveHandler({ type: 'zotero_data', request_id: 'req-1', items: [] });
+        await flushMicrotasks();
+    });
+});

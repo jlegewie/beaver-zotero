@@ -16,6 +16,7 @@ import {
 } from '../../../atoms/agentRunAtoms';
 import {
     agentActionItemTitlesAtom,
+    getAgentActionItemTitleKey,
     setAgentActionItemTitleAtom,
     toolExpandedAtom,
     setToolExpandedAtom,
@@ -28,6 +29,7 @@ import {
 import {
     STATUS_CONFIGS,
     hasFailedUndo,
+    inFlightProgressMessage,
     type ActionStatus,
 } from './agentActionViewHelpers';
 import {
@@ -172,6 +174,20 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         [partStates],
     );
 
+    // One card covers every edit_note call in the group, so the note comes from
+    // whichever call is still open. Not shown while a call waits on the user:
+    // there the card's own approval state is the story.
+    const progressMessage = useMemo(() => {
+        for (const state of partStates) {
+            const message = inFlightProgressMessage(
+                state.part.progress,
+                state.toolCallStatus === 'in_progress' && state.pendingApproval === null,
+            );
+            if (message) return message;
+        }
+        return null;
+    }, [partStates]);
+
     const pendingApprovalsForGroup: PendingApproval[] = useMemo(
         () => partStates.flatMap((state) => (state.pendingApproval ? [state.pendingApproval] : [])),
         [partStates],
@@ -202,7 +218,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         : `pending:${parts[0]?.tool_call_id ?? 'unknown'}`;
 
     const itemTitleKey = resolvedTarget
-        ? `${responseIndex}:group:${resolvedTarget.libraryId}-${resolvedTarget.zoteroKey}`
+        ? `${runId}:${responseIndex}:group:${resolvedTarget.libraryId}-${resolvedTarget.zoteroKey}`
         : null;
     const itemTitleMap = useAtomValue(agentActionItemTitlesAtom);
     const noteTitle = itemTitleKey ? (itemTitleMap[itemTitleKey] ?? null) : null;
@@ -315,10 +331,12 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                 if (!item || cancelled) return;
                 const title = item.isNote?.() ? (item.getNoteTitle?.() || '(untitled)') : '(untitled)';
                 setItemTitle({ key: itemTitleKey, title });
-                // The terminal review rows are keyed by toolcall id. Seed the
-                // same title under those keys so they can reuse this lookup.
+                // Seed each terminal review row so it can reuse this lookup.
                 for (const part of parts) {
-                    setItemTitle({ key: part.tool_call_id, title });
+                    setItemTitle({
+                        key: getAgentActionItemTitleKey(runId, part.tool_call_id),
+                        title,
+                    });
                 }
             } catch {
                 /* best-effort */
@@ -327,7 +345,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         return () => {
             cancelled = true;
         };
-    }, [resolvedTarget, itemTitleKey, noteTitle, parts, setItemTitle]);
+    }, [resolvedTarget, itemTitleKey, noteTitle, parts, runId, setItemTitle]);
 
     const [isLocallyProcessing, setIsLocallyProcessing] = useState(false);
     const [isExternallyProcessing, setIsExternallyProcessing] = useState(false);
@@ -774,6 +792,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                         </Tooltip>
                                     )}
                                 </>
+                            )}
+                            {progressMessage && (
+                                <span className="font-color-tertiary ml-15 shimmer-text">{progressMessage}</span>
                             )}
                         </div>
                     </div>

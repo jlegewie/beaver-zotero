@@ -18,6 +18,7 @@ import {
 } from '../../../atoms/agentRunAtoms';
 import {
     agentActionItemTitlesAtom,
+    getAgentActionItemTitleKey,
     setAgentActionItemTitleAtom,
     toolExpandedAtom,
     setToolExpandedAtom,
@@ -58,6 +59,7 @@ import {
     PreviewData,
     getCreateAnnotationsDisplayStatus,
     getAgentActionToolIcon,
+    inFlightProgressMessage,
 } from './agentActionViewHelpers';
 import { ActionPreview } from './ActionPreview';
 import { useApprovalRecovery } from './useApprovalRecovery';
@@ -78,6 +80,8 @@ interface AgentActionViewProps {
     hasToolReturn?: boolean;
     streamingArgs?: Record<string, any> | null;
     runStatus?: AgentRunStatus;
+    /** Progress note posted on the tool call while the backend waits on Zotero. */
+    progress?: string;
 }
 
 type HeaderLinkAction = {
@@ -98,6 +102,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     hasToolReturn = false,
     streamingArgs,
     runStatus,
+    progress,
 }) => {
     const [isHovered, setIsHovered] = useState(false);
 
@@ -162,9 +167,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
     const undoAgentActions = useSetAtom(undoAgentActionsAtom);
 
-    // Keyed on the tool call id alone: surfaces without a responseIndex then
-    // share the same resolved title and the same fetch.
-    const itemTitleKey = toolcallId;
+    // Shared with the terminal review row for this tool call. The run belongs
+    // in the identity because continuation runs may reuse tool-call ids.
+    const itemTitleKey = getAgentActionItemTitleKey(runId, toolcallId);
     const itemTitleMap = useAtomValue(agentActionItemTitlesAtom);
     const itemTitle = itemTitleMap[itemTitleKey] ?? null;
     const setItemTitle = useSetAtom(setAgentActionItemTitleAtom);
@@ -296,6 +301,18 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         !hasToolReturn &&
         status !== 'awaiting' &&
         status !== 'pending';
+
+    // The wait this reports is the backend's, not the user's: an approved edit
+    // whose save is taking Zotero a long time. Suppressed while the card waits
+    // on the user (`isAwaitingApproval`) and once the action has settled, since
+    // the note outlives the request that produced it.
+    const progressMessage = inFlightProgressMessage(
+        progress,
+        runStatus === 'in_progress'
+        && !hasToolReturn
+        && !isAwaitingApproval
+        && (status === 'awaiting' || status === 'pending'),
+    );
 
     const handleApprove = useCallback(() => {
         if (!pendingApproval) return;
@@ -530,31 +547,36 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         <div className="flex-1 display-flex mt-010 font-color-primary">
                             <Icon icon={getHeaderIcon()} className={shouldShowStatusIcon() ? config.iconClassName : undefined} />
                         </div>
-                        <div className={`two-line-header${isAwaitingToolReturn ? ' shimmer-text' : ''}`}>
-                            {/* Label off the same data the preview renders: a
-                                count-carrying label would otherwise read as
-                                singular while an approval is still pending and
-                                no action row exists yet. */}
-                            <span className="font-color-primary font-medium">{getActionLabel(toolName, previewData?.actionData ?? action?.proposed_data)}</span>
-                            {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
-                            {headerLinkAction && (
-                                <>
-                                    {'\u00A0'}
-                                    <Tooltip content={headerLinkAction.tooltip} singleLine>
-                                        <span
-                                            className="font-color-secondary scale-10"
-                                            style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
-                                            role="button"
-                                            onClick={async (e) => {
-                                                e.stopPropagation();
-                                                e.preventDefault();
-                                                await headerLinkAction.onClick();
-                                            }}
-                                        >
-                                            <Icon icon={ArrowUpRightIcon} />
-                                        </span>
-                                    </Tooltip>
-                                </>
+                        <div className="display-flex flex-col min-w-0 gap-1">
+                            <div className={`two-line-header${isAwaitingToolReturn ? ' shimmer-text' : ''}`}>
+                                {/* Label off the same data the preview renders: a
+                                    count-carrying label would otherwise read as
+                                    singular while an approval is still pending and
+                                    no action row exists yet. */}
+                                <span className="font-color-primary font-medium">{getActionLabel(toolName, previewData?.actionData ?? action?.proposed_data)}</span>
+                                {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
+                                {headerLinkAction && (
+                                    <>
+                                        {'\u00A0'}
+                                        <Tooltip content={headerLinkAction.tooltip} singleLine>
+                                            <span
+                                                className="font-color-secondary scale-10"
+                                                style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
+                                                role="button"
+                                                onClick={async (e) => {
+                                                    e.stopPropagation();
+                                                    e.preventDefault();
+                                                    await headerLinkAction.onClick();
+                                                }}
+                                            >
+                                                <Icon icon={ArrowUpRightIcon} />
+                                            </span>
+                                        </Tooltip>
+                                    </>
+                                )}
+                            </div>
+                            {progressMessage && (
+                                <span className="font-color-tertiary shimmer-text">{progressMessage}</span>
                             )}
                         </div>
                     </div>

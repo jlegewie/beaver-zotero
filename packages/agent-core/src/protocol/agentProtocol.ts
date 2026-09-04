@@ -31,16 +31,40 @@ export interface WSReadyEvent extends WSBaseEvent {
     processing_mode: ProcessingMode;
     indexing_complete: boolean;
     supports_request_acks?: boolean;
+    /** Backend accepts `request_keepalive` messages for in-flight requests */
+    supports_request_keepalive?: boolean;
 }
 
 /**
- * Per-request ack sent to the backend synchronously when a backend→frontend
- * request is dispatched.
+ * Per-request ack sent to the backend as soon as a backend→frontend request
+ * arrives on the socket, before it enters the message queue.
  */
 export interface WSRequestReceivedAck {
     type: 'request_received';
     request_id: string;
-    /** Busy-context snapshot plus dispatch lag, all numeric (booleans as 0/1) */
+    /**
+     * Busy-context snapshot plus transport state, all numeric (booleans as
+     * 0/1): `dispatch_lag_ms` (time between socket receipt and the ack),
+     * `queue_depth` (inbound messages ahead of this one, including the one
+     * being handled) and `queue_oldest_ms` (age of the oldest of those).
+     */
+    busy: Record<string, number>;
+}
+
+/**
+ * Periodic keepalive for a backend→frontend request that is still queued or
+ * running. The backend keeps waiting while these arrive and treats silence
+ * after the first one as a frozen client. Gated on
+ * `WSReadyEvent.supports_request_keepalive`.
+ */
+export interface WSRequestKeepalive {
+    type: 'request_keepalive';
+    request_id: string;
+    /** `queued` while waiting behind other work, `running` once the handler started, or a handler-reported phase */
+    phase: string;
+    /** Milliseconds since the request arrived on the socket */
+    elapsed_ms: number;
+    /** Same snapshot as the ack, so a keepalive can stand in for a lost ack */
     busy: Record<string, number>;
 }
 

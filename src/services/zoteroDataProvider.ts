@@ -306,9 +306,13 @@ export function createZoteroDataProvider(options: ZoteroDataProviderOptions = {}
             }),
         },
         agent_action_execute: {
-            handle: async (event) => {
+            handle: async (event, context) => {
                 pauseSyncForMutatingRun(syncPauseOwner);
-                return handleAgentActionExecuteRequest(event);
+                // The context carries the socket arrival time, so the execute
+                // deadline covers time spent queued behind other executes.
+                return context
+                    ? handleAgentActionExecuteRequest(event, context)
+                    : handleAgentActionExecuteRequest(event);
             },
             syncPauseOwner,
             // Serialized: concurrent edit_note actions on the same note otherwise

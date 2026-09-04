@@ -187,13 +187,12 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
             {showBatchReceipt && <BatchRunReceipt runs={chainRuns} />}
 
             {/* Agent actions (e.g., create item from citations) — client-specific
-                UI injected by the host; absent for clients without it. Actions
-                are recorded per run, so a continued answer lists each run's. */}
-            {showRunOutcomes && chainRuns.map((chainRun) => (
-                <React.Fragment key={chainRun.id}>
-                    {getHost().components?.pendingActionsReview({ run: chainRun }) ?? null}
-                </React.Fragment>
-            ))}
+                UI injected by the host; absent for clients without it. The whole
+                chain is one answer, so its per-run action records are reviewed in
+                one block. */}
+            {showRunOutcomes && (
+                getHost().components?.pendingActionsReview({ runs: chainRuns }) ?? null
+            )}
 
             {/* Suggestions (only for the last run, rendered below footer) */}
             {suggestionParts.length > 0 && !suggestionsDismissed && (
