@@ -557,7 +557,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
             },
             {
                 title: "Review library changes",
-                description: "Easy review of library changes: Beaver now shows a summary of all library changes at the bottom of every response.",
+                description: "Easily review, approve, reject or undo library changes from the bottom of any Beaver response.",
             },
             {
                 title: "Pinned chats, search in chats and more",
