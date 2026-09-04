@@ -2,7 +2,7 @@
  * The chrome-side half of a rendered table document.
  *
  * {@link buildTableDocument} produces a document that sorts, filters and
- * expands with no script of its own. Two things it cannot do for itself:
+ * expands with no script of its own. Three things it cannot do for itself:
  *
  * 1. **Show a citation card.** A marker sits inside a cell clamped with
  *    `overflow: hidden`, so any card the document draws beside it is clipped by
@@ -13,6 +13,11 @@
  *    publisher's page *into the frame*, replacing the table with no way back,
  *    and a `zotero:` link is at the mercy of whatever the frame does with an
  *    unknown scheme.
+ * 3. **Know that it is being enhanced.** The document ships a notice saying
+ *    that its cards, its library links and its editing need the plugin, which
+ *    is true of every viewer that is not this one. Attaching here is what makes
+ *    it untrue, so this marks the document and the notice's own stylesheet
+ *    hides it — see {@link BEAVER_ACTIVE_ATTRIBUTE}.
  *
  * This module knows nothing about Zotero or about which surface the document is
  * rendered on: the surface arrives as a {@link TableViewHost}. Today exactly
@@ -23,6 +28,7 @@
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
+import { BEAVER_ACTIVE_ATTRIBUTE } from '../tableDocument';
 
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
 
@@ -172,9 +178,20 @@ export function enhanceTableDocument(doc: Document, host: TableViewHost): () => 
         }
     });
 
+    // Last, so that a throw anywhere above leaves the document saying what is
+    // then true of it: that nothing enhanced it. Runtime only — the stored file
+    // is never rewritten, so the mark lives exactly as long as this view.
+    const root = doc.documentElement;
+    root?.setAttribute(BEAVER_ACTIVE_ATTRIBUTE, '');
+
     return () => {
         for (const remove of removers) remove();
         removers.length = 0;
+        try {
+            root?.removeAttribute(BEAVER_ACTIVE_ATTRIBUTE);
+        } catch {
+            // The document may already be gone with its frame.
+        }
         try {
             card.remove();
         } catch {

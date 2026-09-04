@@ -1248,6 +1248,53 @@ export const TABLE_CSS = `
 /** Id of the `<script>` element that carries the embedded spec. */
 export const TABLE_SPEC_SCRIPT_ID = 'beaver-table-spec';
 
+/** Where the notice below sends a reader who does not have the plugin. */
+export const BEAVER_HOME_URL = 'https://www.beaverapp.ai';
+
+/**
+ * The mark a host sets on `<html>` while it is enhancing this document, which
+ * is what stands the notice down.
+ *
+ * Set by `view/enhanceTableDocument.ts` on the live DOM and removed when that
+ * enhancement is disposed. The stored file never carries it: the file has to be
+ * the un-enhanced document, or a viewer without the plugin would be told the
+ * plugin was there.
+ */
+export const BEAVER_ACTIVE_ATTRIBUTE = 'data-beaver-active';
+
+/** The checkbox that dismisses the notice; one notice per document, so one id. */
+const NOTICE_DISMISS_ID = 'beaver-table-notice-dismiss';
+
+/**
+ * The notice a viewer without the plugin gets.
+ *
+ * The document is deliberately readable anywhere — it sorts, filters and
+ * expands with no script — but the citation cards, the links into the library
+ * and every kind of editing do need the plugin, and without it they are
+ * silently inert (Zotero's snapshot reader turns a `zotero:` link into a hash
+ * change and nothing else). The notice does not enumerate that: it says one
+ * thing, so that it can be read in a glance and stay true as the table gains
+ * features.
+ *
+ * It is dismissible with the same checkbox-and-label the rest of the document's
+ * controls use, and it hides itself when {@link BEAVER_ACTIVE_ATTRIBUTE} is
+ * present. Emitted only by {@link buildTableDocument}: a fragment embedded in a
+ * larger document is that document's business, not this one's.
+ */
+function renderPluginNotice(): string {
+    return [
+        `<input type="checkbox" id="${NOTICE_DISMISS_ID}" class="bt-ctl">`,
+        '<aside class="bt-nb">',
+        '<span class="bt-nb-b">',
+        '<strong>This table was created with Beaver.</strong> ',
+        'Install Beaver for Zotero for full table support.',
+        '</span>',
+        `<a class="bt-nb-a" href="${BEAVER_HOME_URL}" target="_blank" rel="noopener noreferrer">Get Beaver</a>`,
+        `<label class="bt-nb-x" for="${NOTICE_DISMISS_ID}" title="Dismiss" aria-label="Dismiss">×</label>`,
+        '</aside>',
+    ].join('');
+}
+
 /**
  * The spec as it is embedded in the document.
  *
@@ -1298,6 +1345,10 @@ export function buildTableDocument(
         `<style>\n${DOCUMENT_CSS}\n${TABLE_CSS}\n</style>`,
         '</head>',
         '<body>',
+        // Above the table because that is where it is read, and part of every
+        // render so that re-rendering the same spec still produces the same
+        // bytes — the notice is a constant, not a decision made per file.
+        renderPluginNotice(),
         table.html,
         // Last in the body, after the table, and it has to stay there: snapshot
         // annotations anchor by character offset into the document's text, so
@@ -1388,4 +1439,23 @@ const DOCUMENT_CSS = `
 html { font-size: 14px; }
 body { margin: 0; padding: 20px 24px 32px; background: #fff; color: #16181d;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+/* The "needs Beaver" notice. Its meaning is carried by the border and the text
+   rather than by the background, so it survives the reader's static theme.
+   The delay is what keeps it from flashing on every open in a Zotero that
+   *does* have the plugin: the host sets the attribute below once the snapshot
+   frame has loaded, which is a moment after the document is first painted. */
+.bt-nb { display: flex; align-items: baseline; gap: 10px; margin: 0 0 14px;
+  padding: 8px 12px; font-size: 12px; line-height: 1.45; color: #5b6472;
+  border: 1px solid #dbe2f0; border-left: 3px solid #2f5bd7; border-radius: 6px;
+  background: #f6f8fd; animation: bt-nb-in 1ms linear 800ms both; }
+.bt-nb strong { color: #16181d; font-weight: 600; }
+.bt-nb-b { flex: 1 1 auto; }
+.bt-nb-a { flex: 0 0 auto; white-space: nowrap; font-weight: 600;
+  color: #2f5bd7; text-decoration: none; }
+.bt-nb-a:hover { text-decoration: underline; }
+.bt-nb-x { flex: 0 0 auto; cursor: pointer; color: #8b93a1; font-size: 15px; line-height: 1; }
+.bt-nb-x:hover { color: #5b6472; }
+#${NOTICE_DISMISS_ID}:checked ~ .bt-nb { display: none; }
+html[${BEAVER_ACTIVE_ATTRIBUTE}] .bt-nb { display: none; }
+@keyframes bt-nb-in { from { opacity: 0; } to { opacity: 1; } }
 `.trim();

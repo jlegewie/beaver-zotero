@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { BEAVER_ACTIVE_ATTRIBUTE } from "../../../src/services/artifacts/tableDocument";
 import {
     citationCardPosition,
     countCitationMarkers,
@@ -189,6 +190,24 @@ describe("enhanceTableDocument link routing", () => {
 
         expect(host.opened).toEqual([]);
         expect(event.defaultPrevented).toBe(false);
+    });
+});
+
+describe("enhanceTableDocument plugin notice", () => {
+    beforeEach(() => {
+        doc.body.innerHTML = "";
+        doc.documentElement.removeAttribute(BEAVER_ACTIVE_ATTRIBUTE);
+    });
+
+    it("marks the document, so the notice the file ships stands down", () => {
+        const { card } = mount("<span></span>");
+        const dispose = enhanceTableDocument(doc, hostFor(card));
+
+        expect(doc.documentElement.hasAttribute(BEAVER_ACTIVE_ATTRIBUTE)).toBe(true);
+
+        // The notice is only untrue while this view is attached.
+        dispose();
+        expect(doc.documentElement.hasAttribute(BEAVER_ACTIVE_ATTRIBUTE)).toBe(false);
     });
 });
 

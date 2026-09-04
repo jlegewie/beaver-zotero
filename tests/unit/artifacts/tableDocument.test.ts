@@ -5,6 +5,8 @@ import {
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
 import {
+    BEAVER_ACTIVE_ATTRIBUTE,
+    BEAVER_HOME_URL,
     buildTableDocument,
     parseTableDocument,
     renderTableHtml,
@@ -246,9 +248,30 @@ describe("buildTableDocument", () => {
         expect([...html.matchAll(/<script\b[^>]*>/gi)].map((m) => m[0])).toEqual([
             '<script type="application/json" id="beaver-table-spec">',
         ]);
-        expect(html).not.toMatch(/https?:\/\/(?!doi\.org)/);
+        // Nothing is fetched over the network: the only external URL the
+        // document carries is the notice's own link, which is not a resource.
+        expect(html.match(/https?:\/\/(?!doi\.org)[^"']*/g) ?? []).toEqual([
+            BEAVER_HOME_URL,
+        ]);
         // rem is meaningless without a pinned root.
         expect(html).toContain("html { font-size: 14px; }");
+    });
+
+    it("says the table needs the plugin, and links to it", () => {
+        const { html } = buildTableDocument(spec);
+        expect(html).toContain('<aside class="bt-nb">');
+        expect(html).toContain(`href="${BEAVER_HOME_URL}"`);
+        // The notice is above the table, where it is read.
+        expect(html.indexOf('class="bt-nb"')).toBeLessThan(
+            html.indexOf('class="bt-wrap"'),
+        );
+    });
+
+    it("hides the notice for a host that is enhancing the document", () => {
+        const { html } = buildTableDocument(spec);
+        expect(html).toContain(`html[${BEAVER_ACTIVE_ATTRIBUTE}] .bt-nb { display: none; }`);
+        // The stored file is the un-enhanced document; only a live host marks it.
+        expect(html).not.toContain(`<html lang="en" ${BEAVER_ACTIVE_ATTRIBUTE}`);
     });
 
     it("marks the document so a viewer can recognise it without parsing", () => {
