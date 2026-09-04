@@ -415,8 +415,8 @@
 
 /* Send is a touch larger than the row's square buttons, and fully rounded. */
 .beaver-root button.composer-send {
-    width: 24px;
-    height: 24px;
+    width: 23px;
+    height: 23px;
     margin-left: 4px;
     padding: 0;
     justify-content: center;
