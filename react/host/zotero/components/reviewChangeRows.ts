@@ -3,7 +3,9 @@ import { getActionToolGroup } from '../../../atoms/runApprovalPolicy';
 
 /** A tool call the changes card lists, with all of its actions. */
 export interface ReviewRow {
-    /** Tool call this row represents; stable react key. */
+    /** Run that owns this row. Tool-call ids are unique only within a run. */
+    runId: string;
+    /** Tool call this row represents. */
     toolcallId: string;
     /** action_type of the row's first action (all actions in a row share it). */
     actionType: string;
@@ -31,6 +33,11 @@ export interface BuildReviewRowsOptions {
  * reported twice.
  */
 export type RunActionRowSet = 'changes' | 'artifacts';
+
+/** Stable identity for a row within an answer that may span several runs. */
+export function getReviewRowKey(row: ReviewRow): string {
+    return `${row.runId}:${row.toolcallId}`;
+}
 
 /** These gate a run rather than propose a change, so they are never review material. */
 const GATING_ACTION_TYPES = new Set<string>(['confirm_extraction', 'confirm_external_search']);
@@ -152,6 +159,7 @@ export function buildReviewRows(
             row.actions.push(action);
         } else {
             rowsByToolcall.set(toolcallId, {
+                runId: action.run_id,
                 toolcallId,
                 actionType: action.action_type,
                 actions: [action],
@@ -171,6 +179,18 @@ export function buildReviewRows(
     // card then freezes; it is not an invariant the card holds, since rows
     // resolved after it mounts keep the place they were given here. Stable
     // within each half, so rows keep their tool-call order.
+    return [...rows.filter((row) => !row.resolved), ...rows.filter((row) => row.resolved)];
+}
+
+/**
+ * Build the rows for a continued answer without widening tool-call identity
+ * beyond its owning run. Pending rows still lead across the complete answer.
+ */
+export function buildReviewRowsForRunChain(
+    actionsByRun: AgentAction[][],
+    options: BuildReviewRowsOptions = {},
+): ReviewRow[] {
+    const rows = actionsByRun.flatMap((actions) => buildReviewRows(actions, options));
     return [...rows.filter((row) => !row.resolved), ...rows.filter((row) => row.resolved)];
 }
 

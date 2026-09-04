@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     buildReviewRows,
+    buildReviewRowsForRunChain,
     getChangesCardHeading,
     hasPendingReviewRows,
     getOpenNoteTarget,
@@ -152,6 +153,31 @@ describe('buildReviewRows grouping', () => {
 
         expect(rows.map((row) => row.toolcallId))
             .toEqual(['call-2', 'call-4', 'call-1', 'call-3']);
+    });
+
+    it('keeps a reused tool-call id separate across continuation runs', () => {
+        const first = action({ id: 'a1', run_id: 'run-1', toolcall_id: 'call-1' });
+        const continuation = action({ id: 'a2', run_id: 'run-2', toolcall_id: 'call-1' });
+
+        const rows = buildReviewRowsForRunChain([[first], [continuation]]);
+
+        expect(rows).toHaveLength(2);
+        expect(rows.map((row) => row.runId)).toEqual(['run-1', 'run-2']);
+        expect(rows[0].actions).toEqual([first]);
+        expect(rows[1].actions).toEqual([continuation]);
+    });
+
+    it('scopes a live approval exclusion to its originating run', () => {
+        const live = action({ id: 'a1', run_id: 'run-1', toolcall_id: 'call-1' });
+        const continuation = action({ id: 'a2', run_id: 'run-2', toolcall_id: 'call-1' });
+
+        const rows = buildReviewRowsForRunChain([[live], [continuation]], {
+            liveApprovalActionIds: new Set([live.id]),
+        });
+
+        expect(rows).toHaveLength(1);
+        expect(rows[0].runId).toBe('run-2');
+        expect(rows[0].actions).toEqual([continuation]);
     });
 });
 

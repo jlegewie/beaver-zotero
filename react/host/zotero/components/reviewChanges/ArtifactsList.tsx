@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { ReviewRow } from '../reviewChangeRows';
+import { getReviewRowKey, type ReviewRow } from '../reviewChangeRows';
 import { ReviewActionRow } from './ReviewActionRow';
 import Button from '@beaver/agent-ui/primitives/Button';
 
@@ -11,8 +11,7 @@ import Button from '@beaver/agent-ui/primitives/Button';
 const MAX_VISIBLE_ROWS = 4;
 
 interface ArtifactsListProps {
-    runId: string;
-    /** From `useArtifactRows`; the caller derives them so it can skip an empty run. */
+    /** From `useArtifactRows`; the caller derives them so it can skip an empty list. */
     rows: ReviewRow[];
 }
 
@@ -31,7 +30,7 @@ interface ArtifactsListProps {
  * artifact therefore looks like a single bordered row, which is what a run that
  * wrote one note should look like; the frame is the list's, not a card's.
  */
-export const ArtifactsList: React.FC<ArtifactsListProps> = ({ runId, rows }) => {
+export const ArtifactsList: React.FC<ArtifactsListProps> = ({ rows }) => {
     const [showAllRows, setShowAllRows] = useState(false);
 
     if (rows.length === 0) return null;
@@ -44,8 +43,8 @@ export const ArtifactsList: React.FC<ArtifactsListProps> = ({ runId, rows }) => 
     return (
         <div className="border-card rounded-card bg-senary overflow-hidden display-flex flex-col min-w-0">
             {visibleRows.map((row, idx) => (
-                <div key={row.toolcallId} className={idx > 0 ? 'border-top-quinary' : undefined}>
-                    <ReviewActionRow runId={runId} row={row} inGroup />
+                <div key={getReviewRowKey(row)} className={idx > 0 ? 'border-top-quinary' : undefined}>
+                    <ReviewActionRow row={row} inGroup />
                 </div>
             ))}
 

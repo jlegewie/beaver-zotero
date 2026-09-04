@@ -18,6 +18,7 @@ import {
 } from '../../../atoms/agentRunAtoms';
 import {
     agentActionItemTitlesAtom,
+    getAgentActionItemTitleKey,
     setAgentActionItemTitleAtom,
     toolExpandedAtom,
     setToolExpandedAtom,
@@ -166,9 +167,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
     const undoAgentActions = useSetAtom(undoAgentActionsAtom);
 
-    // Keyed on the tool call id alone: surfaces without a responseIndex then
-    // share the same resolved title and the same fetch.
-    const itemTitleKey = toolcallId;
+    // Shared with the terminal review row for this tool call. The run belongs
+    // in the identity because continuation runs may reuse tool-call ids.
+    const itemTitleKey = getAgentActionItemTitleKey(runId, toolcallId);
     const itemTitleMap = useAtomValue(agentActionItemTitlesAtom);
     const itemTitle = itemTitleMap[itemTitleKey] ?? null;
     const setItemTitle = useSetAtom(setAgentActionItemTitleAtom);

@@ -1,6 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { AgentRun } from '@beaver/agent-core/agents/types';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { getAgentActionsByToolcallAtom } from '../../../../agents/agentActions';
 import {
@@ -14,7 +13,12 @@ import {
     inFlightAgentActionIdsAtom,
     rejectAgentActionsAtom,
 } from '../../agentActionExecution';
-import { getChangesCardHeading, hasPendingReviewRows, ReviewRow } from '../reviewChangeRows';
+import {
+    getChangesCardHeading,
+    getReviewRowKey,
+    hasPendingReviewRows,
+    ReviewRow,
+} from '../reviewChangeRows';
 import { ReviewActionRow } from './ReviewActionRow';
 import {
     ArrowDownIcon,
@@ -31,22 +35,23 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 const MAX_VISIBLE_ROWS = 10;
 
 interface ChangesCardProps {
-    run: AgentRun;
+    /** Last run in the answer, used to persist this chain-level card's expansion. */
+    runId: string;
     /** From `useChangesRows`; the caller derives them so it can skip an empty card. */
     rows: ReviewRow[];
 }
 
 /**
- * Bottom-of-thread card for a terminal run's agent actions: one row per tool
- * call under a collapsible heading, whatever became of the change.
+ * Bottom-of-thread card for a terminal answer's agent actions: one row per
+ * tool call under a collapsible heading, whatever became of the change.
  *
- * The run's durable record, rebuilt from the thread's actions rather than from
- * session state, so reopening a thread shows what the run did and still offers
- * the undo. Every run with changes gets one, under the same label and with the
- * same controls, and nothing dismisses it. What the run *produced* is not in
- * here — `ArtifactsList` has it, so nothing is reported twice.
+ * The answer's durable record, rebuilt from the thread's actions rather than
+ * from session state, so reopening a thread shows what the answer did and still
+ * offers the undo. Every answer with changes gets one, under the same label and
+ * controls, and nothing dismisses it. What the answer *produced* is not in here
+ * — `ArtifactsList` has it, so nothing is reported twice.
  */
-export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows }) => {
+export const ChangesCard: React.FC<ChangesCardProps> = ({ runId, rows }) => {
     const [showAllRows, setShowAllRows] = useState(false);
     const [isBulkRunning, setIsBulkRunning] = useState(false);
     // Only meaningful while a bulk apply runs; it drives the header's progress
@@ -63,7 +68,7 @@ export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows }) => {
 
     // Expansion lives in the global panel state so it survives pane switches and
     // the separate window, like the other action cards.
-    const groupId = `${run.id}:changes`;
+    const groupId = `${runId}:changes`;
     const panelStates = useAtomValue(annotationPanelStateAtom);
     const isExpanded = (panelStates[groupId] ?? defaultAnnotationPanelState).resultsVisible;
     const togglePanelVisibility = useSetAtom(toggleAnnotationPanelVisibilityAtom);
@@ -96,12 +101,12 @@ export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows }) => {
     // where the user just clicked.
     const rowOrder = useRef<Map<string, number> | null>(null);
     if (rowOrder.current === null) {
-        rowOrder.current = new Map(rows.map((row, index) => [row.toolcallId, index]));
+        rowOrder.current = new Map(rows.map((row, index) => [getReviewRowKey(row), index]));
     }
     const orderedRows = useMemo(() => {
         const order = rowOrder.current!;
         // A tool call the card has not seen before sorts to the end.
-        const rank = (row: ReviewRow) => order.get(row.toolcallId) ?? Number.MAX_SAFE_INTEGER;
+        const rank = (row: ReviewRow) => order.get(getReviewRowKey(row)) ?? Number.MAX_SAFE_INTEGER;
         return [...rows].sort((left, right) => rank(left) - rank(right));
     }, [rows]);
 
@@ -127,14 +132,15 @@ export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows }) => {
                 // snapshot can never see a status change, so applying it could
                 // re-run a tool call another surface has since applied — or worse,
                 // re-create an item the user undone or rejected in the meantime.
+                const rowRunId = row.runId;
                 const actions = getActionsByToolcall(
                     row.toolcallId,
-                    (action) => action.run_id === run.id && action.status === 'pending',
+                    (action) => action.run_id === rowRunId && action.status === 'pending',
                 );
                 if (actions.length === 0) continue;
 
                 try {
-                    await applyAgentActions({ actions, runId: run.id });
+                    await applyAgentActions({ actions, runId: rowRunId });
                 } catch (error) {
                     // The executor records per-action failures itself; catching
                     // here only keeps one bad row from aborting the rest.
@@ -144,7 +150,7 @@ export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows }) => {
         } finally {
             setIsBulkRunning(false);
         }
-    }, [applyAgentActions, getActionsByToolcall, hasWritingRow, isBulkRunning, rows, run.id]);
+    }, [applyAgentActions, getActionsByToolcall, hasWritingRow, isBulkRunning, rows]);
 
     const handleBulkReject = useCallback(() => {
         if (isBulkRunning || hasWritingRow) return;
@@ -167,12 +173,12 @@ export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows }) => {
     const toggleExpanded = useCallback(() => {
         if (!isExpanded && rows.length === 1) {
             setToolExpanded({
-                key: `${run.id}:changes:${rows[0].toolcallId}`,
+                key: `${rows[0].runId}:changes:${rows[0].toolcallId}`,
                 expanded: true,
             });
         }
         togglePanelVisibility(groupId);
-    }, [groupId, isExpanded, rows, run.id, setToolExpanded, togglePanelVisibility]);
+    }, [groupId, isExpanded, rows, setToolExpanded, togglePanelVisibility]);
 
     if (rows.length === 0) return null;
 
@@ -297,11 +303,10 @@ export const ChangesCard: React.FC<ChangesCardProps> = ({ run, rows }) => {
                 <div className="display-flex flex-col">
                     {visibleRows.map((row, idx) => (
                         <div
-                            key={row.toolcallId}
+                            key={getReviewRowKey(row)}
                             className={idx > 0 ? 'border-top-quinary' : undefined}
                         >
                             <ReviewActionRow
-                                runId={run.id}
                                 row={row}
                                 isBulkRunning={isBulkRunning}
                                 inGroup

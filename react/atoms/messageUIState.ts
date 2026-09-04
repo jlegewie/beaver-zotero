@@ -202,8 +202,14 @@ export const annotationAttachmentTitlesAtom = atom<AnnotationAttachmentTitleMap>
 type AgentActionItemTitleMap = Record<string, string | null>;
 
 /**
- * Caches item titles for agent actions (when applicable) by toolcallId
+ * Cache identity for a tool call's item title. Tool-call ids are unique only
+ * within a run, and continued answers can render several runs together.
  */
+export function getAgentActionItemTitleKey(runId: string, toolcallId: string): string {
+    return `${runId}:${toolcallId}`;
+}
+
+/** Caches item titles for agent-action surfaces by their scoped cache key. */
 export const agentActionItemTitlesAtom = atom<AgentActionItemTitleMap>({});
 
 export const setAgentActionItemTitleAtom = atom(
