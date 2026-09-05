@@ -86,6 +86,7 @@ describe('validateItem — attachment content kinds (default capabilities)', () 
     }, 60_000);
 
     it('blocks a scanned PDF that needs OCR when OCR is unavailable', async () => {
+        await invalidateCache(NO_TEXT_PDF.library_id, NO_TEXT_PDF.zotero_key);
         const res = await validateItem(NO_TEXT_PDF.library_id, NO_TEXT_PDF.zotero_key);
         expect(res.ok).toBe(true);
         expect(res.state).toBe('blocked');
@@ -155,6 +156,7 @@ describe('validateItem — capability-dependent gating', () => {
     });
 
     it('admits a scanned PDF when OCR can run locally', async () => {
+        await invalidateCache(NO_TEXT_PDF.library_id, NO_TEXT_PDF.zotero_key);
         const res = await validateItem(NO_TEXT_PDF.library_id, NO_TEXT_PDF.zotero_key, {
             canHandleOCRLocally: true,
         });

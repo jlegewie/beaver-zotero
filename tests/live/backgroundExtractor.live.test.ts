@@ -63,13 +63,11 @@ const MISSING_KEY_ZOTERO = 'ZZZZTEST';
 /**
  * Priority for every job a test expects to be claimed.
  *
- * `BackgroundExtractor` claims jobs at or above `LOW_PRIORITY_CEILING` (100,
- * also the enqueue default) only once the OS has been idle for 30s, so a job
- * enqueued at the default drains or not depending on whether someone is
- * touching the keyboard. Anything below the ceiling — the priority production
- * uses for hot-path timeout retries — is claimed regardless of idle time, which
- * is the behavior these tests are actually about. Tests that assert queue
- * bookkeeping rather than draining still use explicit priorities of their own.
+ * Jobs at or above `LOW_PRIORITY_CEILING` (100, also the enqueue default)
+ * require background processing to be enabled (off by default), plus either
+ * continuous processing or at least 30s of OS idle time. Use a priority below
+ * the ceiling so drain tests do not depend on those preferences or idle time.
+ * Tests that assert queue bookkeeping use explicit priorities of their own.
  */
 const DRAIN_PRIORITY = 10;
 
@@ -397,7 +395,15 @@ describe('background queue — processOnce endpoint', () => {
         expect(res.reason).toBe('job_done');
 
         const peek = await backgroundPeek();
-        expect(peek.jobs?.length).toBe(0);
+        expect(peek.ok).toBe(true);
+        expect(peek.jobs).toBeDefined();
+        // Entitled accounts can enqueue OCR after extraction finds no text.
+        // The extraction job itself must complete without a retry.
+        for (const job of peek.jobs!) {
+            expect(job.jobType).toBe('document_ocr');
+            expect(job.libraryId).toBe(NO_TEXT_PDF.library_id);
+            expect(job.zoteroKey).toBe(NO_TEXT_PDF.zotero_key);
+        }
     });
 
     it('drains multiple jobs across repeated calls', async () => {
@@ -625,7 +631,6 @@ describe('background queue — worker slot isolation', () => {
             job_type: 'document_extract',
             priority: DRAIN_PRIORITY,
             payload: { content_kind: 'pdf', maxPages: null, timeoutSeconds: 180 },
-            notify: true,
         });
 
         const res = await backgroundProcessOnce();
