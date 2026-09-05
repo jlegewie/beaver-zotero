@@ -7,7 +7,6 @@ import { openPreferencesWindow } from '../../../../src/ui/openPreferencesWindow'
 
 export default function BackgroundProcessingWelcomeContent(props: {
     messageId: string;
-    title: string;
     reminder: boolean;
 }): React.ReactElement {
     const remove = useSetAtom(removeFloatingPopupMessageAtom);
@@ -36,7 +35,6 @@ export default function BackgroundProcessingWelcomeContent(props: {
 
     return (
         <div className="display-flex flex-col gap-3">
-            <div className="font-color-primary text-lg font-semibold">{props.title}</div>
             <div className="font-color-secondary text-base">
                 {props.reminder
                     ? 'Background processing keeps the document search features available to you up to date. You can turn it on whenever you are ready.'

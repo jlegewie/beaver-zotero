@@ -681,6 +681,40 @@ describe('BackgroundExtractor', () => {
         expect(rows).toHaveLength(0);
     });
 
+    it('completes a structured retry as item_missing when Zotero returns bare false', async () => {
+        Zotero.Items.getByLibraryAndKeyAsync = vi.fn(() => false);
+        await db.enqueueBackgroundJob({
+            jobType: 'document_extract',
+            libraryId: 1,
+            zoteroKey: 'AAAAAAAA',
+            contentKind: 'pdf',
+            payloadKind: 'structured',
+            priority: 50,
+            payload: payload(),
+            now: 0,
+        });
+        const { DocumentExtractExecutor } = await import(
+            '../../../src/services/backgroundQueue/documentExtractExecutor'
+        );
+        const execute = vi.spyOn(DocumentExtractExecutor.prototype, 'execute');
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+
+        try {
+            expect((await proc.processOnce()).processed).toBe(true);
+            expect(execute).toHaveBeenCalledOnce();
+            await expect(execute.mock.results[0].value).resolves.toEqual({
+                kind: 'complete',
+                reason: 'item_missing',
+            });
+            expect(await db.peekBackgroundJobs()).toHaveLength(0);
+            expect(mockState.extractCalls).toHaveLength(0);
+            expect(await db.getAttachmentProcessingState(1, 'AAAAAAAA')).toBeNull();
+        } finally {
+            execute.mockRestore();
+        }
+    });
+
     it('does not stamp the structured ledger for a markdown extraction job', async () => {
         await db.enqueueBackgroundJob({
             jobType: 'document_extract',

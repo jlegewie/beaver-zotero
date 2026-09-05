@@ -4,6 +4,7 @@ import {
     hasOcrAccessAtom,
     hasSearchIndexAccessAtom,
     localZoteroLibrariesAtom,
+    searchableLibraryIdsAtom,
 } from '../../atoms/profile';
 import { backgroundProcessingStatusAtom } from '../../atoms/backgroundProcessing';
 import { useBackgroundProcessingStatus } from '../../hooks/useBackgroundProcessingStatus';
@@ -34,7 +35,11 @@ export default function BackgroundProcessingSection(props: {
 }): React.ReactElement | null {
     const hasOcrAccess = useAtomValue(hasOcrAccessAtom);
     const hasSearchAccess = useAtomValue(hasSearchIndexAccessAtom);
-    const libraries = useAtomValue(localZoteroLibrariesAtom);
+    const localLibraries = useAtomValue(localZoteroLibrariesAtom);
+    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
+    const libraries = localLibraries.filter((library) =>
+        searchableLibraryIds.includes(library.library_id),
+    );
     const status = useAtomValue(backgroundProcessingStatusAtom);
     const refresh = useBackgroundProcessingStatus({
         includeCoverage: true,

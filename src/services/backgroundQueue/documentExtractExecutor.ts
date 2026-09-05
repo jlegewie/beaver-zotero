@@ -63,12 +63,15 @@ export class DocumentExtractExecutor implements JobExecutor {
         // Lightweight adapters used by existing integrations expose primary
         // item fields but not Zotero's lazy-data methods. Keep those callers on
         // the established non-ledger path.
-        const compatibilityItem = record.libraryId === UNRESOLVED_LIBRARY_ID
-            ? null
-            : await Zotero.Items.getByLibraryAndKeyAsync(
-                record.libraryId,
-                record.zoteroKey,
-            ).catch(() => null);
+        let compatibilityItem: Zotero.Item | null = null;
+        if (record.libraryId !== UNRESOLVED_LIBRARY_ID) {
+            try {
+                compatibilityItem = await Zotero.Items.getByLibraryAndKeyAsync(
+                    record.libraryId,
+                    record.zoteroKey,
+                ) || null;
+            } catch { /* resolveItem handles missing items below */ }
+        }
         const postCompat = this.checkScope(record);
         if (postCompat) return postCompat;
         if (

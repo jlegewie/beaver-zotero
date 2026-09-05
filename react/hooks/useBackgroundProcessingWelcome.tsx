@@ -34,16 +34,15 @@ export function useBackgroundProcessingWelcome(): void {
         addPopup({
             id: POPUP_ID,
             type: 'info',
+            title,
             expire: false,
             cancelable: false,
             customContent: (
                 <BackgroundProcessingWelcomeContent
                     messageId={POPUP_ID}
-                    title={title}
                     reminder={reminder}
                 />
             ),
         });
     }, [addPopup, hasOcr, hasSearch, label]);
 }
-
