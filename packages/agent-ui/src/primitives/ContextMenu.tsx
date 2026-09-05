@@ -167,9 +167,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         if (onAfterClose) onAfterClose();
     }, [onClose, onAfterClose]);
     const [hoveredIndex, setHoveredIndex] = useState<number>(-1);
-    // Focus is in the footer. The roving index is kept — it is the options'
-    // only tab stop, and Shift+Tab has to be able to come back — so this is
-    // what takes the highlight off the option instead.
+    // Focus is in the footer. The last option keeps the roving tab stop so
+    // Shift+Tab can come back; this is what takes the highlight off it.
     const [isFooterFocused, setIsFooterFocused] = useState<boolean>(false);
     const [activeActionsIndex, setActiveActionsIndex] = useState<number>(-1);
     const [adjustedPosition, setAdjustedPosition] = useState<MenuPosition>(position);
@@ -196,7 +195,18 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 
         return -1;
     };
-    
+
+    // Tab does not wrap: after the last option it should reach the footer,
+    // and before the first it should leave the menu.
+    const findLinearFocusableIndex = (startIndex: number, step: 1 | -1): number => {
+        for (let index = startIndex + step; index >= 0 && index < menuItems.length; index += step) {
+            if (isFocusableItem(menuItems[index])) {
+                return index;
+            }
+        }
+        return -1;
+    };
+
     // Block scrolling when menu is open
     useEffect(() => {
         if (!isOpen) return;
@@ -369,6 +379,28 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                         return findFocusableIndex(prev >= 0 ? prev - 1 : menuItems.length - 1, -1);
                     });
                     break;
+                case 'Tab': {
+                    // A footer is its own tab stop. Without this, Tab jumps
+                    // there from the focused option and skips every later row.
+                    // Arrows still wrap; Tab walks the remaining options, then
+                    // the browser's tab order takes over (footer, or out).
+                    // Ctrl/Alt/Meta+Tab are host shortcuts (tab switching);
+                    // only unmodified Tab (and Shift+Tab) move between rows.
+                    if (!footer || e.ctrlKey || e.altKey || e.metaKey) break;
+                    const target = e.target as Node | null;
+                    const menuEl = menuRef.current;
+                    if (!target || !menuEl || !menuEl.contains(target)) break;
+                    const inItem = itemRefs.current.some(
+                        (item) => item === target || item?.contains(target),
+                    );
+                    if (!inItem) break;
+                    const next = findLinearFocusableIndex(focusedIndex, e.shiftKey ? -1 : 1);
+                    if (next < 0) break;
+                    e.preventDefault();
+                    setIsFooterFocused(false);
+                    setFocusedIndex(next);
+                    break;
+                }
                 case 'Enter':
                 case ' ': {
                     // Focus can sit on something inside the menu that is not an
@@ -399,7 +431,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         
         doc.addEventListener('keydown', handleKeyNav);
         return () => doc.removeEventListener('keydown', handleKeyNav);
-    }, [isOpen, menuItems, focusedIndex, onClose, onAfterClose]);
+    }, [isOpen, menuItems, focusedIndex, footer, onClose, onAfterClose]);
     
     // Set initial focus
     useEffect(() => {
