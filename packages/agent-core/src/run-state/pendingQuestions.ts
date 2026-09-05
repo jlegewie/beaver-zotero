@@ -13,6 +13,7 @@ import type {
     AskUserQuestionItem,
     WSAskUserQuestionRequest,
 } from '../protocol/agentProtocol';
+import { backendExpiresAt } from './askUserQuestionCountdown';
 
 /**
  * Pending ask_user_question request from the backend.
@@ -28,6 +29,8 @@ export interface PendingQuestion {
     title?: string | null;
     /** The questions to present */
     questions: AskUserQuestionItem[];
+    /** When the backend stops waiting for an answer (ms epoch); caps the card's countdown. */
+    expiresAt: number;
 }
 
 /**
@@ -50,6 +53,7 @@ export const addPendingQuestionAtom = atom(
                 toolcallId: event.toolcall_id,
                 title: event.title,
                 questions: event.questions,
+                expiresAt: backendExpiresAt(Date.now(), event.timeout_seconds),
             });
             return next;
         });

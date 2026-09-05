@@ -3346,14 +3346,17 @@ export const approveToolGroupForRunAtom = atom(
  */
 export const sendAskUserQuestionResponseAtom = atom(
     null,
-    (_get, set, { questionId, toolcallId, answers, cancelled }: {
+    (_get, set, { questionId, toolcallId, answers, cancelled, timedOut }: {
         questionId: string;
         toolcallId: string;
         answers: AskUserQuestionAnswer[];
         cancelled?: boolean;
+        /** The card's countdown ran out: sent as a cancel flagged timed_out. */
+        timedOut?: boolean;
     }) => {
-        logger(`sendAskUserQuestionResponseAtom: Sending question response for ${questionId}: ${cancelled ? 'cancelled' : `${answers.length} answer(s)`}`, 1);
-        agentService.sendAskUserQuestionResponse(questionId, answers, cancelled ?? false);
+        const outcome = timedOut ? 'timed out' : cancelled ? 'cancelled' : `${answers.length} answer(s)`;
+        logger(`sendAskUserQuestionResponseAtom: Sending question response for ${questionId}: ${outcome}`, 1);
+        agentService.sendAskUserQuestionResponse(questionId, answers, cancelled ?? false, timedOut ?? false);
         set(removePendingQuestionAtom, toolcallId);
     }
 );

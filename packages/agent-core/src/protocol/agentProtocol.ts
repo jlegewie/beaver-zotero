@@ -2313,6 +2313,12 @@ export interface WSAskUserQuestionRequest extends WSBaseEvent {
     title?: string | null;
     /** The questions to present (1-4) */
     questions: AskUserQuestionItem[];
+    /**
+     * How long the backend waits for the response. The card keeps its own
+     * countdown inside this window. Absent from older backends, which wait a
+     * fixed two minutes.
+     */
+    timeout_seconds?: number | null;
 }
 
 /** The user's answer to a single question of an ask_user_question request */
@@ -2321,17 +2327,25 @@ export interface AskUserQuestionAnswer {
     item_id: string;
     /** Ids of the selected options */
     selected_option_ids: string[];
-    /** Free-text 'Other' answer the user typed, if any */
+    /**
+     * Free text the user typed: their Other answer, a note on the selection,
+     * or both joined when they filled in both.
+     */
     custom_text?: string | null;
 }
 
-/** Response to an ask_user_question request (user's answers, or a skip) */
+/** Response to an ask_user_question request (user's answers, a skip, or an expired card) */
 export interface WSAskUserQuestionResponse {
     type: 'ask_user_question_response';
     question_id: string;
     answers: AskUserQuestionAnswer[];
     /** True when the user skipped the question(s) (or no handler is registered) */
     cancelled: boolean;
+    /**
+     * True when the card's own countdown expired with no submit. Sent with
+     * `cancelled` so the backend reports the card as unanswered, not skipped.
+     */
+    timed_out?: boolean;
 }
 
 /** Union type for all WebSocket events */
@@ -2490,6 +2504,11 @@ export const CLIENT_FEATURES = {
     EDIT_METADATA_CREATORS: 'edit_metadata_creators',
     EXTERNAL_FILES: 'external_files',
     ASK_USER_QUESTION: 'ask_user_question',
+    /**
+     * The question card runs its own activity-extended countdown and answers
+     * with `timed_out` when it expires; the backend only keeps a long safety net.
+     */
+    ASK_USER_QUESTION_CLIENT_TIMEOUT: 'ask_user_question_client_timeout',
     PORTABLE_IDS: 'portable_ids',
     LIST_ITEMS_INCLUDE_CHILDREN: 'list_items_include_children',
     CREATE_NOTE_TAGS_COLLECTIONS: 'create_note_tags_collections',

@@ -285,6 +285,43 @@ describe('AgentService ask_user_question transport', () => {
             cancelled: true,
         });
     });
+
+    it('flags an expired card as a cancel with timed_out and keeps the partial answers', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks({ onAskUserQuestionRequest: vi.fn() });
+        const socket = await completeConnect(service, callbacks, { type: 'q' } as AgentRunRequest);
+
+        service.sendAskUserQuestionResponse(
+            'qid-1',
+            [{ item_id: 'q0', selected_option_ids: ['q0-o1'], custom_text: null }],
+            true,
+            true,
+        );
+
+        const responses = socket.sentMessages().filter(
+            (m) => m.type === 'ask_user_question_response',
+        );
+        expect(responses).toHaveLength(1);
+        expect(responses[0]).toMatchObject({
+            question_id: 'qid-1',
+            answers: [{ item_id: 'q0', selected_option_ids: ['q0-o1'] }],
+            cancelled: true,
+            timed_out: true,
+        });
+    });
+
+    it('omits timed_out from an ordinary submit or skip', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks({ onAskUserQuestionRequest: vi.fn() });
+        const socket = await completeConnect(service, callbacks, { type: 'q' } as AgentRunRequest);
+
+        service.sendAskUserQuestionResponse('qid-1', [], true);
+
+        const [response] = socket.sentMessages().filter(
+            (m) => m.type === 'ask_user_question_response',
+        );
+        expect(response).not.toHaveProperty('timed_out');
+    });
 });
 
 describe('pendingQuestions atoms', () => {
@@ -301,7 +338,20 @@ describe('pendingQuestions atoms', () => {
             title: 'Scope',
         });
         expect(pending?.questions).toHaveLength(1);
+        // The backend's window caps the card's countdown; this event names none,
+        // so the legacy two-minute wait applies.
+        expect(pending?.expiresAt).toBeGreaterThan(Date.now() + 110_000);
+        expect(pending?.expiresAt).toBeLessThanOrEqual(Date.now() + 120_000);
         expect(map.get('other-call')).toBeUndefined();
+    });
+
+    it('takes the backend window from the request when it names one', () => {
+        const store = createStore();
+        store.set(addPendingQuestionAtom, { ...questionEvent(), timeout_seconds: 600 });
+
+        const pending = store.get(pendingQuestionsAtom).get('call-1');
+        expect(pending?.expiresAt).toBeGreaterThan(Date.now() + 590_000);
+        expect(pending?.expiresAt).toBeLessThanOrEqual(Date.now() + 600_000);
     });
 
     it('removes a pending question by toolcallId (the tool-return path)', () => {

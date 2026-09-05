@@ -36,6 +36,9 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // Features the backend never derives from version. ask_user_question is
 // declaration-only because client-feature declaration predates it — every
 // client that ships the question card also declares features explicitly.
+// ask_user_question_client_timeout is declaration-only because it tells the
+// backend the card paces itself: without it the backend keeps its short fixed
+// wait, so an older card is never left up for the long safety net.
 // portable_ids is declaration-only because it gates emission of the
 // device-portable model-facing id format, which every declaring client both
 // emits and resolves — there is no version threshold to derive it from.
@@ -78,6 +81,7 @@ const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'pdf_candidates',
     'ask_user_question',
+    'ask_user_question_client_timeout',
     'portable_ids',
     'list_items_include_children',
     'create_note_tags_collections',

@@ -1261,13 +1261,16 @@ export class AgentService {
         questionId: string,
         answers: AskUserQuestionAnswer[],
         cancelled: boolean = false,
+        timedOut: boolean = false,
     ): boolean {
-        logger(`AgentService: Sending ask_user_question response for ${questionId}: ${cancelled ? 'cancelled' : `${answers.length} answer(s)`}`, 1);
+        const outcome = timedOut ? 'timed out' : cancelled ? 'cancelled' : `${answers.length} answer(s)`;
+        logger(`AgentService: Sending ask_user_question response for ${questionId}: ${outcome}`, 1);
         return this.send({
             type: 'ask_user_question_response',
             question_id: questionId,
             answers,
             cancelled,
+            ...(timedOut ? { timed_out: true } : {}),
         });
     }
 

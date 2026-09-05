@@ -2,10 +2,11 @@
  * The answer rules behind the ask_user_question card.
  *
  * These pin the semantics a client's card must not drift from: radio vs.
- * checkbox selection, when a free-text 'Other' answer counts as an answer, and
- * exactly what leaves the client on the wire. The rules live in a host-free
- * module precisely so they can be exercised here as plain functions, with no
- * DOM and no component in the way.
+ * checkbox selection, when a free-text Other answer counts, that the note is
+ * independent of the selection and of Other, and exactly what leaves the
+ * client on the wire — including Other and the note joined when both are
+ * present. The rules live in a host-free module precisely so they can be
+ * exercised here as plain functions, with no DOM and no component in the way.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -13,12 +14,17 @@ import type { AskUserQuestionItem } from '@beaver/agent-core/protocol/agentProto
 import type { QuestionDraft } from '@beaver/agent-core/run-state/askUserQuestionAnswers';
 import {
     EMPTY_QUESTION_DRAFT,
+    hasAnyAnswer,
     allowsCustomAnswer,
     buildAnswers,
     clearAnswer,
+    customText,
     isQuestionAnswered,
+    noteText,
+    otherText,
     selectOther,
     setCustomText,
+    setNote,
     toggleOption,
     toggleOther,
 } from '@beaver/agent-core/run-state/askUserQuestionAnswers';
@@ -41,7 +47,7 @@ const multi = question({ allow_multiple: true });
 const noCustom = question({ allow_custom: false });
 
 describe('allowsCustomAnswer', () => {
-    it('offers the free-text answer unless the backend opted out', () => {
+    it('offers Other and the note unless the backend opted out', () => {
         expect(allowsCustomAnswer(single)).toBe(true);
         expect(allowsCustomAnswer(question({ allow_custom: true }))).toBe(true);
         expect(allowsCustomAnswer(noCustom)).toBe(false);
@@ -90,6 +96,15 @@ describe('toggleOption', () => {
         expect(picked.otherSelected.q0).toBe(true);
         expect(picked.selections.q0).toEqual(['q0-o1']);
     });
+
+    it('leaves the note alone — selection and note are independent', () => {
+        const noted = setNote(single, 'but only from 2020 on', EMPTY_QUESTION_DRAFT);
+
+        const picked = toggleOption(single, 'q0-o1', noted);
+
+        expect(picked.selections.q0).toEqual(['q0-o1']);
+        expect(picked.notes.q0).toBe('but only from 2020 on');
+    });
 });
 
 describe('selectOther / toggleOther', () => {
@@ -134,6 +149,32 @@ describe('setCustomText', () => {
         expect(typed.otherSelected.q0).toBe(true);
         expect(typed.customTexts.q0).toBe('  a third way  ');
     });
+
+    it('clears a listed selection on a single-select question', () => {
+        const picked = toggleOption(single, 'q0-o2', EMPTY_QUESTION_DRAFT);
+
+        const typed = setCustomText(single, 'a third way', picked);
+
+        expect(typed.selections.q0).toEqual([]);
+        expect(typed.otherSelected.q0).toBe(true);
+    });
+});
+
+describe('setNote', () => {
+    it('stores the text untrimmed and leaves the selection and Other alone', () => {
+        const picked = toggleOption(single, 'q0-o2', EMPTY_QUESTION_DRAFT);
+
+        const typed = setNote(single, '  from 2020 on  ', picked);
+
+        expect(typed.notes.q0).toBe('  from 2020 on  ');
+        expect(typed.selections.q0).toEqual(['q0-o2']);
+        expect(typed.otherSelected.q0).toBeUndefined();
+    });
+
+    it('reads back trimmed, and empty for a question that offers no note', () => {
+        expect(noteText(single, setNote(single, '  from 2020 on  ', EMPTY_QUESTION_DRAFT))).toBe('from 2020 on');
+        expect(noteText(noCustom, setNote(noCustom, 'from 2020 on', EMPTY_QUESTION_DRAFT))).toBe('');
+    });
 });
 
 describe('isQuestionAnswered', () => {
@@ -153,21 +194,73 @@ describe('isQuestionAnswered', () => {
         expect(isQuestionAnswered(single, setCustomText(single, '   ', EMPTY_QUESTION_DRAFT))).toBe(false);
     });
 
-    it('is true once real text is typed', () => {
+    it('is true once real Other text is typed', () => {
         expect(isQuestionAnswered(single, setCustomText(single, 'a third way', EMPTY_QUESTION_DRAFT))).toBe(true);
     });
 
-    it('is false when the text was typed and Other was then deselected', () => {
+    it('is false when the Other text was typed and Other was then deselected', () => {
         const typed = setCustomText(single, 'a third way', EMPTY_QUESTION_DRAFT);
 
         expect(isQuestionAnswered(single, toggleOther(single, typed))).toBe(false);
     });
 
-    it('is false when the question offers no custom answer, text or not', () => {
-        const typed = setCustomText(noCustom, 'a third way', EMPTY_QUESTION_DRAFT);
+    it('is true for a note alone — the note is the user\'s own answer', () => {
+        expect(isQuestionAnswered(single, setNote(single, 'a third way', EMPTY_QUESTION_DRAFT))).toBe(true);
+    });
+
+    it('is false for a whitespace-only note', () => {
+        expect(isQuestionAnswered(single, setNote(single, '   ', EMPTY_QUESTION_DRAFT))).toBe(false);
+    });
+
+    it('is true for a selection with a note', () => {
+        const both = setNote(single, 'from 2020 on', toggleOption(single, 'q0-o1', EMPTY_QUESTION_DRAFT));
+
+        expect(isQuestionAnswered(single, both)).toBe(true);
+    });
+
+    it('ignores Other and the note when the question offers none', () => {
+        const typed = setCustomText(noCustom, 'a third way', setNote(noCustom, 'from 2020 on', EMPTY_QUESTION_DRAFT));
 
         expect(typed.otherSelected.q0).toBe(true);
         expect(isQuestionAnswered(noCustom, typed)).toBe(false);
+        expect(isQuestionAnswered(noCustom, toggleOption(noCustom, 'q0-o1', typed))).toBe(true);
+    });
+});
+
+describe('customText', () => {
+    it('is the Other text while Other is selected', () => {
+        expect(customText(single, setCustomText(single, '  a third way  ', EMPTY_QUESTION_DRAFT))).toBe('a third way');
+        expect(otherText(single, setCustomText(single, '  a third way  ', EMPTY_QUESTION_DRAFT))).toBe('a third way');
+    });
+
+    it('is the note when there is no Other answer', () => {
+        expect(customText(single, setNote(single, '  from 2020 on  ', EMPTY_QUESTION_DRAFT))).toBe('from 2020 on');
+    });
+
+    it('joins Other and the note when both are present', () => {
+        const both = setNote(
+            single,
+            'skip anything before 2015',
+            setCustomText(single, 'a third way', EMPTY_QUESTION_DRAFT),
+        );
+
+        expect(customText(single, both)).toBe('a third way\n\nskip anything before 2015');
+    });
+
+    it('drops Other text after Other is deselected, but keeps the note', () => {
+        const both = setNote(
+            single,
+            'from 2020 on',
+            setCustomText(single, 'a third way', EMPTY_QUESTION_DRAFT),
+        );
+
+        expect(customText(single, toggleOther(single, both))).toBe('from 2020 on');
+    });
+
+    it('is empty for a question that offers no custom answer', () => {
+        const typed = setCustomText(noCustom, 'a third way', setNote(noCustom, 'from 2020 on', EMPTY_QUESTION_DRAFT));
+
+        expect(customText(noCustom, typed)).toBe('');
     });
 });
 
@@ -184,32 +277,62 @@ describe('buildAnswers', () => {
         ]);
     });
 
-    it('trims the custom text', () => {
+    it('trims the Other text', () => {
         const draft = setCustomText(q0, '  a third way  ', EMPTY_QUESTION_DRAFT);
 
         expect(buildAnswers([q0], draft)[0].custom_text).toBe('a third way');
     });
 
-    it('sends null for a whitespace-only custom text', () => {
+    it('sends a selection and its note together', () => {
+        const draft = setNote(q0, '  from 2020 on  ', toggleOption(q0, 'q0-o1', EMPTY_QUESTION_DRAFT));
+
+        expect(buildAnswers([q0], draft)[0]).toEqual({
+            item_id: 'q0',
+            selected_option_ids: ['q0-o1'],
+            custom_text: 'from 2020 on',
+        });
+    });
+
+    it('sends a note alone as the answer', () => {
+        const draft = setNote(q0, 'a third way', EMPTY_QUESTION_DRAFT);
+
+        expect(buildAnswers([q0], draft)[0]).toEqual({
+            item_id: 'q0',
+            selected_option_ids: [],
+            custom_text: 'a third way',
+        });
+    });
+
+    it('joins Other and the note onto one custom_text', () => {
+        const draft = setNote(q0, 'skip anything before 2015', setCustomText(q0, 'a third way', EMPTY_QUESTION_DRAFT));
+
+        expect(buildAnswers([q0], draft)[0]).toEqual({
+            item_id: 'q0',
+            selected_option_ids: [],
+            custom_text: 'a third way\n\nskip anything before 2015',
+        });
+    });
+
+    it('sends null for a whitespace-only Other text', () => {
         const draft = setCustomText(q0, '   ', EMPTY_QUESTION_DRAFT);
 
         expect(buildAnswers([q0], draft)[0].custom_text).toBeNull();
     });
 
-    it('sends null for text left behind after Other was deselected', () => {
+    it('sends null for Other text left behind after Other was deselected', () => {
         const draft = toggleOther(q0, setCustomText(q0, 'a third way', EMPTY_QUESTION_DRAFT));
 
         expect(buildAnswers([q0], draft)[0].custom_text).toBeNull();
     });
 
     it('never sends custom text for a question that offers none', () => {
-        const draft = setCustomText(noCustom, 'a third way', EMPTY_QUESTION_DRAFT);
+        const draft = setCustomText(noCustom, 'a third way', setNote(noCustom, 'from 2020 on', EMPTY_QUESTION_DRAFT));
 
         expect(buildAnswers([noCustom], draft)[0].custom_text).toBeNull();
     });
 
     it('sends an empty answer for a cleared question', () => {
-        const answered = setCustomText(q0, 'a third way', toggleOption(q0, 'q0-o1', EMPTY_QUESTION_DRAFT));
+        const answered = setNote(q0, 'from 2020 on', setCustomText(q0, 'a third way', toggleOption(q0, 'q0-o1', EMPTY_QUESTION_DRAFT)));
 
         const [answer] = buildAnswers([q0], clearAnswer(q0, answered));
 
@@ -232,6 +355,12 @@ describe('draft identity', () => {
         expect(setCustomText(single, 'a third way', typed)).toBe(typed);
     });
 
+    it('setNote returns the same draft for unchanged text', () => {
+        const typed = setNote(single, 'from 2020 on', EMPTY_QUESTION_DRAFT);
+
+        expect(setNote(single, 'from 2020 on', typed)).toBe(typed);
+    });
+
     it('clearAnswer returns the same draft when there is nothing to clear', () => {
         const draft: QuestionDraft = EMPTY_QUESTION_DRAFT;
 
@@ -243,9 +372,31 @@ describe('draft identity', () => {
 
         toggleOption(single, 'q0-o1', before);
         setCustomText(single, 'a third way', before);
+        setNote(single, 'from 2020 on', before);
 
         expect(before.selections).toEqual({});
         expect(before.customTexts).toEqual({});
         expect(before.otherSelected).toEqual({});
+        expect(before.notes).toEqual({});
+    });
+});
+
+describe('hasAnyAnswer', () => {
+    it('is false when every wire answer is empty', () => {
+        expect(hasAnyAnswer([
+            { item_id: 'q0', selected_option_ids: [], custom_text: null },
+            { item_id: 'q1', selected_option_ids: [], custom_text: '   ' },
+        ])).toBe(false);
+        expect(hasAnyAnswer([])).toBe(false);
+    });
+
+    it('is true for a selection or free text on any question', () => {
+        expect(hasAnyAnswer([
+            { item_id: 'q0', selected_option_ids: [], custom_text: null },
+            { item_id: 'q1', selected_option_ids: ['q1-o1'], custom_text: null },
+        ])).toBe(true);
+        expect(hasAnyAnswer([
+            { item_id: 'q0', selected_option_ids: [], custom_text: 'my own answer' },
+        ])).toBe(true);
     });
 });

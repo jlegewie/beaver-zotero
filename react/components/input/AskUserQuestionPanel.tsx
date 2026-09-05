@@ -2,6 +2,7 @@ import React, { useCallback } from 'react';
 import { useSetAtom } from 'jotai';
 import type { PendingQuestion } from '@beaver/agent-core/run-state/pendingQuestions';
 import type { AskUserQuestionAnswer } from '@beaver/agent-core/protocol/agentProtocol';
+import { hasAnyAnswer } from '@beaver/agent-core/run-state/askUserQuestionAnswers';
 import {
     closeWSConnectionAtom,
     sendAskUserQuestionResponseAtom,
@@ -23,10 +24,11 @@ interface AskUserQuestionPanelProps {
  * the draft when it returns.
  *
  * The answers travel back over the run's WebSocket connection, correlated on
- * the question and toolcall ids the request arrived with. Stop cancels the run
- * outright by closing that connection, which is a different outcome from
- * skipping every question — a response with nothing answered still lets the
- * run continue.
+ * the question and toolcall ids the request arrived with. Three outcomes leave
+ * the run alive: a submit, a skip (a response with nothing answered), and the
+ * card's own countdown running out (a cancel flagged `timed_out`, carrying
+ * whatever the user had picked so far). Stop cancels the run outright by
+ * closing that connection.
  */
 export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pendingQuestion }) => {
     const sendResponse = useSetAtom(sendAskUserQuestionResponseAtom);
@@ -41,6 +43,23 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
         });
     }, [sendResponse, pendingQuestion]);
 
+    // The card expired with the draft as it stood. Anything the user did pick
+    // is their answer, so it goes out as one — `cancelled` only when nothing
+    // was picked — and `timedOut` tells the backend the rest fell to the clock,
+    // not to a skip. A backend that predates the flag reads the same message
+    // as a plain submit or skip, which is the right fallback either way.
+    const handleExpire = useCallback((answers: AskUserQuestionAnswer[]) => {
+        const answered = hasAnyAnswer(answers);
+        logger(`AskUserQuestionPanel: Question card expired ${answered ? 'with partial answers' : 'without an answer'}`);
+        sendResponse({
+            questionId: pendingQuestion.questionId,
+            toolcallId: pendingQuestion.toolcallId,
+            answers,
+            cancelled: !answered,
+            timedOut: true,
+        });
+    }, [sendResponse, pendingQuestion]);
+
     const handleStop = useCallback(() => {
         logger('AskUserQuestionPanel: Stopping run while question pending');
         closeWSConnection(); // Also clears pending questions -> panel unmounts
@@ -48,8 +67,10 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
 
     return (
         <AskUserQuestionCard
+            key={pendingQuestion.questionId}
             pendingQuestion={pendingQuestion}
             onSubmit={handleSubmit}
+            onExpire={handleExpire}
             onStop={handleStop}
         />
     );

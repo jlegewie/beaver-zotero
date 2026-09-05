@@ -197,6 +197,7 @@
     "./src/chat/CitedSourcesList.tsx",
     "./src/chat/ChipPopup.tsx",
     "./src/chat/AskUserQuestionCard.tsx",
+    "./src/chat/useQuestionCountdown.ts",
     "./src/chat/BatchApprovalCard.tsx",
     "./src/chat/BatchDoneRows.tsx",
     "./src/chat/BatchRunReceipt.tsx",

@@ -7,6 +7,13 @@
  * All transitions are pure and return a NEW draft — never mutate one. They
  * return the SAME draft object when nothing changes, which is what keeps a
  * React caller holding the draft in state from re-rendering for nothing.
+ *
+ * A question is answered by a listed selection, by an Other answer, by a
+ * free-text note, or by any combination. Other is a custom option: its text
+ * counts only while Other is selected. The note is independent of the
+ * selection — on its own it is the user's own answer, alongside a selection
+ * or Other it qualifies the choice. The wire has one `custom_text`, so Other
+ * and the note are joined when both are present.
  */
 
 import type {
@@ -22,6 +29,8 @@ export interface QuestionDraft {
     customTexts: Record<string, string>;
     /** Whether 'Other' is selected, per question id. */
     otherSelected: Record<string, boolean>;
+    /** The free-text note, per question id. Independent of Other and the selection. */
+    notes: Record<string, string>;
 }
 
 /** A draft with nothing answered yet. */
@@ -29,26 +38,50 @@ export const EMPTY_QUESTION_DRAFT: QuestionDraft = {
     selections: {},
     customTexts: {},
     otherSelected: {},
+    notes: {},
 };
 
-/** Whether the question offers a free-text 'Other' answer. Absent means yes. */
+/** Whether the question offers a free-text 'Other' answer and a note. Absent means yes. */
 export function allowsCustomAnswer(question: AskUserQuestionItem): boolean {
     return question.allow_custom ?? true;
 }
 
+/** The Other text, trimmed, only while Other is selected; empty otherwise. */
+export function otherText(question: AskUserQuestionItem, draft: QuestionDraft): string {
+    if (!allowsCustomAnswer(question) || !draft.otherSelected[question.id]) return '';
+    return draft.customTexts[question.id]?.trim() ?? '';
+}
+
+/** The note the user typed, trimmed; empty when there is none. */
+export function noteText(question: AskUserQuestionItem, draft: QuestionDraft): string {
+    if (!allowsCustomAnswer(question)) return '';
+    return draft.notes[question.id]?.trim() ?? '';
+}
+
 /**
- * Whether the question carries an answer that may be submitted.
+ * The free text that leaves on the wire: Other, the note, or both joined.
+ * Empty when neither is present (or the question offers none).
+ */
+export function customText(question: AskUserQuestionItem, draft: QuestionDraft): string {
+    const other = otherText(question, draft);
+    const note = noteText(question, draft);
+    if (other && note) return `${other}\n\n${note}`;
+    return other || note;
+}
+
+/**
+ * Whether the question carries an answer that may be submitted: at least one
+ * selected option, a non-blank Other answer while Other is selected, or a
+ * non-blank note when the question offers one.
  *
- * Custom text counts only while 'Other' is selected: an 'Other' selection with
- * nothing typed is not an answer, and text left behind after deselecting
- * 'Other' neither counts nor gets sent.
+ * An Other selection with nothing typed is not an answer, and Other text left
+ * behind after deselecting Other neither counts nor gets sent.
  */
 export function isQuestionAnswered(question: AskUserQuestionItem, draft: QuestionDraft): boolean {
     return (
         (draft.selections[question.id]?.length ?? 0) > 0 ||
-        (allowsCustomAnswer(question) &&
-            !!draft.otherSelected[question.id] &&
-            (draft.customTexts[question.id]?.trim() ?? '') !== '')
+        otherText(question, draft) !== '' ||
+        noteText(question, draft) !== ''
     );
 }
 
@@ -79,7 +112,7 @@ export function toggleOption(
 /**
  * Select 'Other'. Idempotent — for the path where focusing the text field
  * selects it. Radio semantics: clears the listed selections when the question
- * is single-select.
+ * is single-select. Leaves the note alone.
  */
 export function selectOther(question: AskUserQuestionItem, draft: QuestionDraft): QuestionDraft {
     const otherSelected = draft.otherSelected[question.id]
@@ -106,7 +139,7 @@ export function toggleOther(question: AskUserQuestionItem, draft: QuestionDraft)
 /**
  * Record what the user typed as their 'Other' answer. Stored verbatim —
  * trimming happens at read time — and typing selects 'Other', so the text
- * counts towards the answer.
+ * counts towards the answer. Leaves the note alone.
  */
 export function setCustomText(
     question: AskUserQuestionItem,
@@ -121,17 +154,35 @@ export function setCustomText(
     };
 }
 
+/**
+ * Record what the user typed as their note. Stored verbatim — trimming
+ * happens at read time. Leaves the selection and Other alone.
+ */
+export function setNote(
+    question: AskUserQuestionItem,
+    text: string,
+    draft: QuestionDraft,
+): QuestionDraft {
+    if ((draft.notes[question.id] ?? '') === text) return draft;
+    return {
+        ...draft,
+        notes: { ...draft.notes, [question.id]: text },
+    };
+}
+
 /** Drop the question's answer entirely. */
 export function clearAnswer(question: AskUserQuestionItem, draft: QuestionDraft): QuestionDraft {
     const alreadyClear =
         (draft.selections[question.id]?.length ?? 0) === 0 &&
         (draft.customTexts[question.id] ?? '') === '' &&
-        !draft.otherSelected[question.id];
+        !draft.otherSelected[question.id] &&
+        (draft.notes[question.id] ?? '') === '';
     if (alreadyClear) return draft;
     return {
         selections: { ...draft.selections, [question.id]: [] },
         customTexts: { ...draft.customTexts, [question.id]: '' },
         otherSelected: { ...draft.otherSelected, [question.id]: false },
+        notes: { ...draft.notes, [question.id]: '' },
     };
 }
 
@@ -147,9 +198,13 @@ export function buildAnswers(
     return questions.map((question) => ({
         item_id: question.id,
         selected_option_ids: draft.selections[question.id] ?? [],
-        custom_text:
-            allowsCustomAnswer(question) && draft.otherSelected[question.id]
-                ? (draft.customTexts[question.id]?.trim() || null)
-                : null,
+        custom_text: customText(question, draft) || null,
     }));
+}
+
+/** Whether any wire answer carries a selection or free text. */
+export function hasAnyAnswer(answers: AskUserQuestionAnswer[]): boolean {
+    return answers.some(
+        (answer) => answer.selected_option_ids.length > 0 || !!answer.custom_text?.trim(),
+    );
 }
