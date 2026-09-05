@@ -10,7 +10,7 @@ import {
 } from '../../../agents/agentActions';
 import type { PendingApproval } from '@beaver/agent-ui/host';
 import {
-    approveToolGroupForRunAtom,
+    setRunPermissionModeAtom,
     approvalResponseIntentsAtom,
     isWSChatPendingAtom,
     removeApprovalResponseIntentAtom,
@@ -46,8 +46,8 @@ import { revealSource, openNoteByKey, getCurrentCollectionKeyForItem } from '../
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import SplitApplyButton from '../../../components/ui/buttons/SplitApplyButton';
 import DeferredToolPreferenceButton from '../../../components/ui/buttons/DeferredToolPreferenceButton';
+import RunPermissionButton, { RunPermissionMode } from '../../../components/ui/buttons/RunPermissionButton';
 import {
     ActionStatus,
     STATUS_CONFIGS,
@@ -64,9 +64,11 @@ import {
 import { ActionPreview } from './ActionPreview';
 import { useApprovalRecovery } from './useApprovalRecovery';
 import {
-    getToolGroupRunApprovalLabel,
-    getToolGroupRunApprovalScope,
+    isCoveredByFullAccess,
+    isFullAccessGrantedForRun,
+    runApprovalPolicyAtom,
 } from '../../../atoms/runApprovalPolicy';
+import { dismissActiveEditNotePreview } from '../editNotePreviewLifecycle';
 
 export { STATUS_CONFIGS, getOverallStatus } from './agentActionViewHelpers';
 export type { ActionStatus } from './agentActionViewHelpers';
@@ -160,7 +162,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const isMultiAction = (toolName === 'create_items' || toolName === 'create_item') && actions.length > 1;
 
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
-    const approveToolGroupForRun = useSetAtom(approveToolGroupForRunAtom);
+    const setRunPermissionMode = useSetAtom(setRunPermissionModeAtom);
+    const runApprovalPolicy = useAtomValue(runApprovalPolicyAtom);
     const removeApprovalResponseIntent = useSetAtom(removeApprovalResponseIntentAtom);
     const removePendingApproval = useSetAtom(removePendingApprovalAtom);
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
@@ -332,13 +335,43 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         removePendingApproval(pendingApproval.actionId);
     }, [pendingApproval, sendApprovalResponse, removePendingApproval]);
 
-    const handleApproveForRun = useCallback(() => {
-        if (!pendingApproval) return;
-        setIsProcessingApproval(true);
-        setProcessingApproval({ actionId: pendingApproval.actionId, kind: 'approve' });
-        setClickedButton('approve');
-        approveToolGroupForRun({ runId, toolName });
-    }, [pendingApproval, approveToolGroupForRun, runId, toolName]);
+    // Switching to full access answers every covered card in the run, this one
+    // included, so the click is tracked as an approval of it — the card stays in
+    // its "sending" state until the run comes back, exactly as a direct Apply
+    // would. A card the grant does not cover keeps its own controls instead.
+    const handleRunPermissionChange = useCallback(async (mode: RunPermissionMode) => {
+        const fullAccess = mode === 'full_access';
+        if (!fullAccess) {
+            setRunPermissionMode({ runId, fullAccess: false });
+            return;
+        }
+        const answersThisCard = pendingApproval !== null
+            && isCoveredByFullAccess(pendingApproval.actionType, pendingApproval.actionData);
+        if (answersThisCard) {
+            setIsProcessingApproval(true);
+            setProcessingApproval({ actionId: pendingApproval.actionId, kind: 'approve' });
+            setClickedButton('approve');
+        }
+        // The sweep can answer a note edit whose diff preview is live in the
+        // editor, even from a card of another tool, so tear it down first — as
+        // every other surface that applies or rejects an action does. The grant
+        // is applied either way: a teardown that fails must not strand the card
+        // on a decision the user has already made.
+        let approvedCount = 0;
+        try {
+            await dismissActiveEditNotePreview();
+        } finally {
+            approvedCount = setRunPermissionMode({ runId, fullAccess: true });
+        }
+        // Refused when the run ended while the preview was being torn down.
+        // Nothing was sent, so release the card rather than leaving it waiting
+        // for a reply that cannot come.
+        if (answersThisCard && approvedCount === 0) {
+            setIsProcessingApproval(false);
+            setProcessingApproval(null);
+            setClickedButton(null);
+        }
+    }, [pendingApproval, setRunPermissionMode, runId, setProcessingApproval]);
 
     const handleApplyPending = useCallback(async () => {
         if (actions.length === 0 || isProcessing) return;
@@ -398,8 +431,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     const toggleExpanded = () => setExpanded({ key: expansionKey, expanded: !isExpanded });
     const previewData = buildPreviewData(toolName, pendingApproval, action);
-    const runApprovalLabel = getToolGroupRunApprovalLabel(toolName);
-    const runApprovalScope = getToolGroupRunApprovalScope(toolName);
+    const runPermissionMode: RunPermissionMode =
+        isFullAccessGrantedForRun(runApprovalPolicy, runId) ? 'full_access' : 'ask';
 
     const getHeaderIcon = () => {
         if (isAwaitingApproval) return getAgentActionToolIcon(toolName);
@@ -644,9 +677,20 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     )}
 
                     <div className="display-flex flex-row gap-2 px-2 py-2">
-                        {/* A cost confirmation has no per-tool preference to offer:
-                            what a request may spend is set once by the credit limit. */}
-                        {(isAwaitingApproval || status === 'pending') && !hasNoActionData && !isConfirmAction && (
+                        {/* A cost confirmation has no permission control to offer:
+                            what a request may spend is set once by the credit
+                            limit. While the run is waiting on this card the
+                            control is about this run; once it is not, there is
+                            no run left to grant, so it goes back to being the
+                            standing per-tool preference. */}
+                        {isAwaitingApproval && !hasNoActionData && !isConfirmAction && (
+                            <RunPermissionButton
+                                mode={runPermissionMode}
+                                onChange={handleRunPermissionChange}
+                                disabled={isProcessing}
+                            />
+                        )}
+                        {!isAwaitingApproval && status === 'pending' && !hasNoActionData && !isConfirmAction && (
                             <DeferredToolPreferenceButton
                                 toolName={toolName}
                                 disabled={toolName === 'delete_annotations'}
@@ -703,25 +747,14 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         )}
 
                         {config.showApply && (!isProcessing || clickedButton === 'approve') && (
-                            isAwaitingApproval && runApprovalLabel ? (
-                                <SplitApplyButton
-                                    onApply={handleApprove}
-                                    onApplyAll={handleApproveForRun}
-                                    loading={isProcessing && clickedButton === 'approve'}
-                                    disabled={isProcessing}
-                                    applyAllLabel={runApprovalLabel}
-                                    applyAllScope={runApprovalScope ?? undefined}
-                                />
-                            ) : (
-                                <Button
-                                    variant="solid"
-                                    onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
-                                    loading={isProcessing && clickedButton === 'approve'}
-                                    disabled={isProcessing}
-                                >
-                                    <span>{isConfirmAction ? 'Confirm' : 'Apply'}</span>
-                                </Button>
-                            )
+                            <Button
+                                variant="solid"
+                                onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
+                                loading={isProcessing && clickedButton === 'approve'}
+                                disabled={isProcessing}
+                            >
+                                <span>{isConfirmAction ? 'Confirm' : 'Apply'}</span>
+                            </Button>
                         )}
                     </div>
                 </div>

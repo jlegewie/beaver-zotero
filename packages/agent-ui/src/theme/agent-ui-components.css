@@ -383,6 +383,10 @@
     display: flex;
     flex-direction: row;
     align-items: center;
+    /* Wraps only when it has to: the approval verdict pair carries labels and
+     * a count, which a narrow sidebar cannot always fit on one line. */
+    flex-wrap: wrap;
+    row-gap: 4px;
     gap: 4px;
     margin-top: 0.5rem;
     margin-right: -0.2rem;
@@ -444,12 +448,14 @@
     height: 13px;
 }
 
-/* Reject sits in Send's slot while an approval is pending, and matches its
- * pill shape rather than the square buttons elsewhere in the row. */
-.beaver-root button.composer-reject {
+/* The verdict pair sits in Send's slot while an approval is pending. It carries
+ * labels rather than an icon, so it keeps the row's control radius (set above
+ * for every button in it) instead of Send's pill, and is padded to read as a
+ * text button rather than a squeezed icon one. */
+.beaver-root button.composer-reject,
+.beaver-root button.composer-approve {
     margin-left: 4px;
-    padding: 0 10px;
-    border-radius: var(--beaver-radius-pill);
+    padding: 3px 8px;
 }
 
 /* ───── Bars docked to the composer's top edge ───── */

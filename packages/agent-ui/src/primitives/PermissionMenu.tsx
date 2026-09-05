@@ -32,6 +32,8 @@ export interface PermissionMenuProps<T extends string = string> {
     onChange: (value: T) => void;
     /** Question shown above the options, e.g. "How should library changes be approved?". */
     heading?: string;
+    /** Note shown under the options, e.g. where the standing default lives. */
+    footnote?: string;
     /** Button variant for the trigger. */
     variant?: string;
     /** Render the trigger as its icon alone. */
@@ -82,6 +84,7 @@ function PermissionMenu<T extends string>({
     value,
     onChange,
     heading,
+    footnote,
     variant = 'ghost-secondary',
     iconOnly = false,
     disabled = false,
@@ -143,6 +146,10 @@ function PermissionMenu<T extends string>({
         ? <div className="px-2 pt-1 pb-1 text-base font-color-secondary">{heading}</div>
         : undefined;
 
+    const footer = footnote
+        ? <div className="px-2 py-1 text-sm font-color-tertiary">{footnote}</div>
+        : undefined;
+
     // The trigger only takes a color of its own for a `warning` option, so the
     // resting state sits quietly among the other composer controls and a
     // standing grant stands out against them.
@@ -173,6 +180,7 @@ function PermissionMenu<T extends string>({
             tooltipContent={tooltipContent}
             disabled={disabled}
             header={header}
+            footer={footer}
             onAfterClose={onAfterClose}
         />
     );

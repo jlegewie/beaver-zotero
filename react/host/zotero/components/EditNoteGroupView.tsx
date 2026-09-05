@@ -9,7 +9,7 @@ import {
 } from '../../../agents/agentActions';
 import type { EditNoteResolvedTarget, PendingApproval } from '@beaver/agent-ui/host';
 import {
-    approveToolGroupForRunAtom,
+    setRunPermissionModeAtom,
     isWSChatPendingAtom,
     sendApprovalResponseAtom,
     staleApprovalActionIdsAtom,
@@ -22,9 +22,8 @@ import {
     setToolExpandedAtom,
 } from '../../../atoms/messageUIState';
 import {
-    canOfferToolGroupRunApproval,
-    getToolGroupRunApprovalLabel,
-    getToolGroupRunApprovalScope,
+    isFullAccessGrantedForRun,
+    runApprovalPolicyAtom,
 } from '../../../atoms/runApprovalPolicy';
 import {
     STATUS_CONFIGS,
@@ -48,7 +47,7 @@ import {
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import SplitApplyButton from '../../../components/ui/buttons/SplitApplyButton';
+import RunPermissionButton, { RunPermissionMode } from '../../../components/ui/buttons/RunPermissionButton';
 import { openNoteByKey } from '../../../utils/sourceUtils';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
@@ -118,7 +117,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
     const undoAgentActions = useSetAtom(undoAgentActionsAtom);
     const inFlightActionIds = useAtomValue(inFlightAgentActionIdsAtom);
-    const approveToolGroupForRun = useSetAtom(approveToolGroupForRunAtom);
+    const setRunPermissionMode = useSetAtom(setRunPermissionModeAtom);
+    const runApprovalPolicy = useAtomValue(runApprovalPolicyAtom);
 
     const partStates = useMemo(() => {
         return parts.map((part) => {
@@ -419,27 +419,35 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         runId,
     ]);
 
-    const handleApproveNoteEditsForRun = useCallback(async () => {
+    // Switching to full access answers every pending card in this group too, so
+    // the click is tracked like an Apply All: the group stays in its "sending"
+    // state until the run comes back.
+    const handleRunPermissionChange = useCallback(async (mode: RunPermissionMode) => {
         if (isProcessing) return;
+        const fullAccess = mode === 'full_access';
+        if (!fullAccess) {
+            setRunPermissionMode({ runId, fullAccess: false });
+            return;
+        }
         setIsLocallyProcessing(true);
         setClickedButton('approve');
         const shouldWaitForExternalProcessing = hasPendingApprovals && isRunPending;
+        let approvedCount = 0;
         try {
             await dismissActiveEditNotePreview();
-            const approvedCount = approveToolGroupForRun({
-                runId,
-                toolName: 'edit_note',
-            });
-            if (shouldWaitForExternalProcessing) {
+            // Refused when the run ended while the preview was being torn down.
+            // Nothing was sent, so there is no reply to wait for.
+            approvedCount = setRunPermissionMode({ runId, fullAccess: true });
+            if (shouldWaitForExternalProcessing && approvedCount > 0) {
                 setIsExternallyProcessing(true);
             }
             logger(
-                `EditNoteGroupView: Allowed note edits for run ${runId} and approved ${approvedCount} pending action(s)`,
+                `EditNoteGroupView: Granted full access for run ${runId} and approved ${approvedCount} pending action(s)`,
                 1,
             );
         } finally {
             setIsLocallyProcessing(false);
-            if (!shouldWaitForExternalProcessing) {
+            if (!shouldWaitForExternalProcessing || approvedCount === 0) {
                 setClickedButton(null);
             }
         }
@@ -447,7 +455,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         isProcessing,
         hasPendingApprovals,
         isRunPending,
-        approveToolGroupForRun,
+        setRunPermissionMode,
         runId,
     ]);
 
@@ -703,14 +711,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const groupLabel = isWholeNoteRewrite
         ? 'Rewrite Note'
         : (editCount === 1 ? 'Note Edit' : `${editCount} Note Edits`);
-    // A rewrite validation classified as destructive is authorized on its own,
-    // so a note-edit run grant neither approves it nor sweeps it up. Offering
-    // "Allow all note edits for this run" here would look like it applies the
-    // card and then leave it sitting there, so drop to a plain Apply All.
-    const canOfferNoteEditRunApproval = useMemo(
-        () => canOfferToolGroupRunApproval(pendingApprovalsForGroup, 'edit_note'),
-        [pendingApprovalsForGroup],
-    );
+    const runPermissionMode: RunPermissionMode =
+        isFullAccessGrantedForRun(runApprovalPolicy, runId) ? 'full_access' : 'ask';
     const showCollapsedHeaderActions =
         !isProcessing && !hasStreamingChild && (aggregateStatus === 'awaiting' || aggregateStatus === 'pending') && !isExpanded;
     const rejectableActionCount = useMemo(
@@ -879,8 +881,17 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                         })}
                     </div>
 
-                    {(showFooterApply || showFooterReject || showFooterUndo || showFooterRetry || canShowPreview) && (
+                    {(showFooterApply || showFooterReject || showFooterUndo || showFooterRetry || canShowPreview || hasPendingApprovals) && (
                         <div className="display-flex flex-row gap-2 px-2 py-2">
+                            {/* Only while the run is waiting on this card: once
+                                it is not, there is no run left to grant. */}
+                            {hasPendingApprovals && (
+                                <RunPermissionButton
+                                    mode={runPermissionMode}
+                                    onChange={handleRunPermissionChange}
+                                    disabled={isProcessing}
+                                />
+                            )}
                             <div className="flex-1" />
 
                             {canShowPreview && (
@@ -930,26 +941,14 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                             )}
 
                             {showFooterApply && (!isProcessing || clickedButton === 'approve') && (
-                                hasPendingApprovals && canOfferNoteEditRunApproval ? (
-                                    <SplitApplyButton
-                                        onApply={handleApplyAll}
-                                        onApplyAll={handleApproveNoteEditsForRun}
-                                        loading={isProcessing && clickedButton === 'approve'}
-                                        disabled={isProcessing}
-                                        primaryLabel="Apply All"
-                                        applyAllLabel={getToolGroupRunApprovalLabel('edit_note') ?? undefined}
-                                        applyAllScope={getToolGroupRunApprovalScope('edit_note') ?? undefined}
-                                    />
-                                ) : (
-                                    <Button
-                                        variant="solid"
-                                        onClick={handleApplyAll}
-                                        loading={isProcessing && clickedButton === 'approve'}
-                                        disabled={isProcessing}
-                                    >
-                                        <span>Apply All</span>
-                                    </Button>
-                                )
+                                <Button
+                                    variant="solid"
+                                    onClick={handleApplyAll}
+                                    loading={isProcessing && clickedButton === 'approve'}
+                                    disabled={isProcessing}
+                                >
+                                    <span>Apply All</span>
+                                </Button>
                             )}
                         </div>
                     )}
