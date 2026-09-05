@@ -70,6 +70,10 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // pdf_candidates is declaration-only because the backend would otherwise send a
 // ranked candidate list to clients that ignore it, paying the payload for
 // nothing.
+// population_any_conditions is declaration-only because it gates a
+// resolve_population request field: a build that predates it drops the ORed
+// condition group and resolves a WIDER population than the batch described, so
+// the backend refuses the field up front rather than infer support.
 // item_links is declaration-only because it describes what the chat client's
 // markdown renderer does with object-id hrefs; a client that predates it would
 // treat `[Smith 2004](u-KEY)` as a broken relative link, so the backend only
@@ -92,6 +96,7 @@ const DECLARATION_ONLY_FEATURES = [
     'credit_confirmation',
     'batch_jobs',
     'citation_graph',
+    'population_any_conditions',
     'item_links',
 ];
 
@@ -193,6 +198,13 @@ describe('client feature declaration (Lane C)', () => {
 
     it('always declares citation_graph', () => {
         expect(ZOTERO_PLUGIN_FEATURES).toContain('citation_graph');
+    });
+
+    it('always declares population_any_conditions', () => {
+        // The resolve_population handler applies the ORed condition group, so
+        // the backend may send it. Without the declaration a batch that mixes
+        // the joins is refused before it reaches this build.
+        expect(ZOTERO_PLUGIN_FEATURES).toContain('population_any_conditions');
     });
 });
 

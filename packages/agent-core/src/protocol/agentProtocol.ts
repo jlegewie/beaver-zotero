@@ -2578,6 +2578,13 @@ export const CLIENT_FEATURES = {
     /** `citation_graph` capability (`find_related_works`). */
     CITATION_GRAPH: 'citation_graph',
     /**
+     * `resolve_population` honors `any_conditions`: a second condition list,
+     * ORed among itself and ANDed with `conditions`. Without it the backend
+     * must not send the group — a handler that predates it drops the field and
+     * resolves a population WIDER than the one the batch described.
+     */
+    POPULATION_ANY_CONDITIONS: 'population_any_conditions',
+    /**
      * `create_item` actions carry `pdf_candidates`: a ranked list of places the
      * PDF might be downloaded from.
      */
