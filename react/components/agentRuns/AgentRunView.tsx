@@ -172,7 +172,7 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 <RunErrorDisplay runId={run.id} error={run.error} isLastRun={isLastRun} />
             )}
 
-            {/* Offer to continue a run that ended without being finished */}
+            {/* Offer to resume the response or request the next part of the work */}
             {continuationOffer && (
                 <RunContinueDisplay
                     runId={run.id}

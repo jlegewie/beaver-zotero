@@ -5,6 +5,7 @@ import { Icon, AlertCircleIcon, ArrowRightIcon } from '../icons/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
 import InstructionsDisclosure from '@beaver/agent-ui/primitives/InstructionsDisclosure';
 import { resumeFromRunAtom } from '../../atoms/agentRunAtoms';
+import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
 
 /** The only copy this component owns; everything else comes from the offer. */
 const INSTRUCTIONS_HEADING = 'Your instructions';
@@ -26,17 +27,8 @@ interface RunContinueDisplayProps {
 }
 
 /**
- * Offers to carry on from a run that ended without being finished — Beaver
- * closed, the connection dropped, the server restarted, or a decision the run
- * was waiting on never came.
- *
- * Deliberately not an error card: nothing failed, and the run was not billed.
- * It renders below the response rather than over the composer, so the user can
- * always ignore it and type something else instead.
- *
- * Every word about the run comes from the offer and is rendered verbatim, which
- * is what lets the backend add a case without a client release. Nothing here
- * may switch on `offer.kind` to compose prose of its own.
+ * Renders a backend-composed offer to resume a response or request more work.
+ * The card sits below the answer so the user can also send an unrelated message.
  */
 export const RunContinueDisplay: React.FC<RunContinueDisplayProps> = ({
     runId,
@@ -76,7 +68,7 @@ export const RunContinueDisplay: React.FC<RunContinueDisplayProps> = ({
                             {offer.title}
                         </div>
                         <div className="text-base font-color-secondary">
-                            {offer.message}
+                            {parseTextWithLinksAndNewlines(offer.message)}
                         </div>
                     </div>
                 </div>

@@ -602,7 +602,7 @@ function createAgentRunShell(
     return { run, request };
 }
 
-type StartResumeRunOptions = {
+type StartContinuationRunOptions = {
     requireResumable: boolean;
     /**
      * Who is asking. Sent to the backend, which reorders its model chain only
@@ -613,21 +613,17 @@ type StartResumeRunOptions = {
     logPrefix: string;
     failureErrorType: string;
     failureMessage: string;
-    /**
-     * What the user typed on the continue card, if anything. Sent as the
-     * resume's own content, which the backend appends after the preamble as
-     * the user's own message.
-     */
+    /** Additional instructions typed on the continue card. */
     userMessage?: string;
 };
 
-async function startResumeRun(
+async function startContinuationRun(
     get: Getter,
     set: Setter,
     failedRunId: string,
-    options: StartResumeRunOptions,
+    options: StartContinuationRunOptions,
 ): Promise<void> {
-    logger(`${options.logPrefix}: Resuming from run ${failedRunId}`, 1);
+    logger(`${options.logPrefix}: Continuing from run ${failedRunId}`, 1);
 
     // A resume overwriting the active slot mid-commit would be clobbered
     // when the retry installs its own replacement shell.
@@ -657,11 +653,7 @@ async function startResumeRun(
             return;
         }
 
-        // Two shapes resume. A failed run carries the backend's own verdict in
-        // `is_resumable`, which the user-driven path insists on. Anything else
-        // needs a continuation offer — the backend saying outright that this
-        // run has something left to carry on from. Status alone cannot decide
-        // it: a run that stopped waiting on a decision finished cleanly.
+        // Failed runs need a resumability verdict; completed runs need an offer.
         const offer = continuationOfferFor(failedRun);
         const isResumableError =
             failedRun.status === 'error'
@@ -669,6 +661,17 @@ async function startResumeRun(
         if (!isResumableError && offer === null) {
             logger(`${options.logPrefix}: Run ${failedRunId} is not resumable`, 1);
             return;
+        }
+
+        const isNewRun = offer?.mode === 'new_run';
+        if (isNewRun) {
+            const latestRun = activeRun ?? threadRuns[threadRuns.length - 1];
+            if (
+                options.trigger !== 'user'
+                || get(isWSChatPendingAtom)
+                || latestRun?.id !== failedRunId
+                || failedRun.thread_id !== get(currentThreadIdAtom)
+            ) return;
         }
 
         const threadId = get(currentThreadIdAtom) || failedRun.thread_id;
@@ -688,23 +691,25 @@ async function startResumeRun(
         const modelOptions = buildModelSelectionOptions(model);
         const customInstructions = getPref('customInstructions') || undefined;
 
-        const resumePrompt: BeaverAgentPrompt = {
-            // Empty on every automatic path and on a continue the user clicked
-            // straight through; only instructions typed on the card land here.
-            content: options.userMessage?.trim() || '',
+        const userMessage = options.userMessage?.trim() || '';
+        const continuation = offer
+            ? { kind: offer.kind, payload: offer.payload }
+            : undefined;
+        // Card actions use their own input and leave the composer draft intact.
+        const prompt: BeaverAgentPrompt = isNewRun ? {
+            content: [offer!.prompt!.trim(), userMessage].filter(Boolean).join('\n\n'),
+            is_resume: false,
+            continuation,
+        } : {
+            content: userMessage,
             is_resume: true,
             resumes_run_id: failedRunId,
             resume_trigger: options.trigger,
-            // Which preamble the continuing run leads with. Only the kind and
-            // its payload travel back — the copy was for the user, and the
-            // backend does not take it from the client.
-            ...(offer
-                ? { continuation: { kind: offer.kind, payload: offer.payload } }
-                : {}),
+            ...(continuation ? { continuation } : {}),
         };
 
         const { run: newRun, request } = createAgentRunShell(
-            resumePrompt,
+            prompt,
             threadId,
             userId,
             model.name,
@@ -2747,7 +2752,7 @@ async function startRegenerateRun(
         // If the target is a resume run, walk the resume chain back to the
         // root so we regenerate from the original user message, not from an
         // intermediate resume prompt (whose content is empty). The root
-        // always lives in threadRuns — startResumeRun guarantees the failed
+        // always lives in threadRuns — startContinuationRun guarantees the failed
         // run is appended to threadRuns before the resume is started.
         if (walkResumeChain) {
             const allRunsForChain: AgentRun[] = activeRun && !threadRuns.some(r => r.id === activeRun.id)
@@ -3056,7 +3061,7 @@ export const autoResumeErroredRunAtom = atom(
     null,
     async (get, set, failedRunId: string) => {
         try {
-            await startResumeRun(get, set, failedRunId, {
+            await startContinuationRun(get, set, failedRunId, {
                 requireResumable: false,
                 trigger: 'auto',
                 logPrefix: 'autoResumeErroredRunAtom',
@@ -3107,7 +3112,7 @@ export const resumeFromRunAtom = atom(
         // which may carry what the user typed.
         const { runId, userMessage } =
             typeof params === 'string' ? { runId: params, userMessage: undefined } : params;
-        await startResumeRun(get, set, runId, {
+        await startContinuationRun(get, set, runId, {
             requireResumable: true,
             trigger: 'user',
             logPrefix: 'resumeFromRunAtom',

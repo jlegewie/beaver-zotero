@@ -92,6 +92,23 @@ describe('continuationOfferFor', () => {
         expect(continuationOfferFor(makeRun('run-1', 'completed'))).toBeNull();
     });
 
+    it('does not display a new-run offer without a usable prompt', () => {
+        for (const prompt of [undefined, null, '', '  ']) {
+            const run = makeRun('run-1', 'completed', {
+                continuation: { ...BATCH_OFFER, mode: 'new_run', prompt },
+            });
+            expect(continuationOfferFor(run)).toBeNull();
+        }
+    });
+
+    it('hides an unknown mode instead of routing it as a resume', () => {
+        const run = makeRun('run-1', 'completed', {
+            continuation: { ...BATCH_OFFER, mode: 'future_mode' },
+        });
+        expect(continuationOfferFor(run)).toBeNull();
+        expect(shouldOfferResume(run, { isLastRun: true, resumedRunIds: new Set() })).toBe(false);
+    });
+
     it('offers nothing for no run', () => {
         expect(continuationOfferFor(null)).toBeNull();
     });

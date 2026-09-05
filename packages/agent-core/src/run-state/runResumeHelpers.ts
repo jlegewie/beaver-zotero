@@ -65,7 +65,14 @@ export function continuationOfferFor(
     run: AgentRun | null | undefined,
 ): ContinuationOffer | null {
     if (!run) return null;
-    if (run.continuation) return run.continuation;
+    if (run.continuation) {
+        const offer = run.continuation;
+        if (offer.mode !== undefined && offer.mode !== 'resume' && offer.mode !== 'new_run') {
+            return null;
+        }
+        if (offer.mode === 'new_run' && !offer.prompt?.trim()) return null;
+        return offer;
+    }
     if (!isInterruptedRun(run)) return null;
     return {
         kind: 'interrupted',
