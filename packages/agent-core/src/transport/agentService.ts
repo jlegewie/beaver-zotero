@@ -19,6 +19,7 @@ import {
     resolveDefaultAgentDataProvider,
     unknownDataRequestErrorResponse,
     NOOP_KEEPALIVE,
+    QUESTION_KEEPALIVE_INTERVAL_MS,
     REQUEST_KEEPALIVE_INTERVAL_MS,
     isBackendRequestEvent,
     isRequestSignal,
@@ -26,6 +27,7 @@ import {
     type RequestKeepalive,
 } from './agentDataDispatch';
 import { AgentRunRequest, ZoteroInstanceWire } from '../protocol/agentProtocol';
+import { DEFAULT_BACKEND_TIMEOUT_MS } from '../run-state/askUserQuestionCountdown';
 import {
     WSEvent,
     WSErrorEvent,
@@ -33,6 +35,7 @@ import {
     WSAuthMessage,
     WSReadyData,
     WSRequestAckData,
+    WSQuestionKeepalive,
     WSRequestKeepalive,
     WSRequestReceivedAck,
     AskUserQuestionAnswer,
@@ -180,6 +183,8 @@ export class AgentService {
     private serverSupportsRequestAcks: boolean = false;
     /** Whether the connected backend understands `request_keepalive` messages (from the ready event) */
     private serverSupportsRequestKeepalive: boolean = false;
+    /** Whether the connected backend understands `question_keepalive` messages (from the ready event) */
+    private serverSupportsQuestionKeepalive: boolean = false;
     /**
      * Arrival times of inbound messages not yet fully handled: the one being
      * handled plus those queued behind it. Reported in acks as `queue_depth`
@@ -194,6 +199,8 @@ export class AgentService {
      * hung handler cannot keep sending keepalives on a replacement socket.
      */
     private pendingKeepalives: Map<string, RequestKeepalive> = new Map();
+    /** Running `question_keepalive` timers, by question id. */
+    private questionKeepalives: Map<string, () => void> = new Map();
     private activeKeepalives: Set<RequestKeepalive> = new Set();
     /**
      * Map of backend data-request event -> handler. Injectable so a non-Zotero
@@ -238,6 +245,7 @@ export class AgentService {
         this.actionExecutionQueue = Promise.resolve();
         this.serverSupportsRequestAcks = false;
         this.serverSupportsRequestKeepalive = false;
+        this.serverSupportsQuestionKeepalive = false;
         this.queuedMessageArrivals = [];
         this.stopAllKeepalives();
     }
@@ -551,6 +559,7 @@ export class AgentService {
                 // its keepalives report the `queued` phase.
                 this.maybeAckRequest(parsed, receivedAt);
                 this.maybeStartKeepalive(parsed, receivedAt);
+                this.maybeStartQuestionKeepalive(parsed);
                 // Chain onto the queue so async callbacks are processed in order.
                 // Captured per message: a reset swaps in a fresh array, and a
                 // handler from the old connection that settles afterwards must
@@ -794,6 +803,75 @@ export class AgentService {
         }
         this.activeKeepalives.clear();
         this.pendingKeepalives.clear();
+        for (const stop of Array.from(this.questionKeepalives.values())) stop();
+        this.questionKeepalives.clear();
+    }
+
+    /**
+     * Start reporting that this client can still answer a question card.
+     *
+     * The backend waits a long time for a card that paces itself, so silence is
+     * what tells it the client cannot answer — the plugin's single JS thread
+     * frozen — and lets the run continue instead of parking for the whole
+     * window. Started at socket receipt, like the request keepalive, so the
+     * first one is on the wire before the card renders and a blocked message
+     * queue does not look like a dead client.
+     *
+     * Deliberately NOT owned by the card: it unmounts whenever the Beaver pane
+     * is closed or collapsed (the sidebars render null), and a question the
+     * user can still come back to must not be reclaimed for that.
+     */
+    private maybeStartQuestionKeepalive(event: WSEvent): void {
+        if (!this.serverSupportsQuestionKeepalive) return;
+        if (event.event !== 'ask_user_question_request') return;
+        const questionId = event.question_id;
+        if (typeof questionId !== 'string' || this.questionKeepalives.has(questionId)) return;
+
+        const connId = this.connectionId;
+        // The backend stops listening at the end of its own window, which it
+        // states in the request. Self-limiting here is what retires a timer for
+        // a card the backend gave up on: no response is ever sent for one, so
+        // there is nothing else to stop it.
+        //
+        // Counted in ticks rather than against a wall-clock deadline: a clock
+        // step (NTP, resume) would otherwise stop the pings while the backend —
+        // which measures monotonically — is still waiting, and be reported as a
+        // frozen client. Overrunning the window instead is harmless; the frames
+        // are simply unroutable.
+        const windowMs = typeof event.timeout_seconds === 'number' && event.timeout_seconds > 0
+            ? event.timeout_seconds * 1000
+            : DEFAULT_BACKEND_TIMEOUT_MS;
+        let ticksLeft = Math.ceil(windowMs / QUESTION_KEEPALIVE_INTERVAL_MS);
+
+        const tick = () => {
+            // The connection was replaced under a card that is still up: the
+            // new socket knows nothing about this question id.
+            if (this.connectionId !== connId || ticksLeft-- <= 0) {
+                this.stopQuestionKeepalive(questionId);
+                return;
+            }
+            try {
+                const keepalive: WSQuestionKeepalive = {
+                    type: 'question_keepalive',
+                    question_id: questionId,
+                };
+                this.send(keepalive);
+            } catch (error) {
+                logger(`AgentService: Failed to send question_keepalive: ${error}`, 1);
+            }
+        };
+
+        const timer = setInterval(tick, QUESTION_KEEPALIVE_INTERVAL_MS);
+        this.questionKeepalives.set(questionId, () => clearInterval(timer));
+        tick();
+    }
+
+    /** Stop reporting on a question (its answer went out, or its window closed). */
+    private stopQuestionKeepalive(questionId: string): void {
+        const stop = this.questionKeepalives.get(questionId);
+        if (!stop) return;
+        this.questionKeepalives.delete(questionId);
+        stop();
     }
 
     /** Parse a raw socket frame; null (after reporting) when it is not a usable event. */
@@ -831,6 +909,7 @@ export class AgentService {
                 case 'ready': {
                     this.serverSupportsRequestAcks = event.supports_request_acks === true;
                     this.serverSupportsRequestKeepalive = event.supports_request_keepalive === true;
+                    this.serverSupportsQuestionKeepalive = event.supports_question_keepalive === true;
                     // Convert snake_case backend response to camelCase frontend data
                     const readyData: WSReadyData = {
                         subscriptionStatus: event.subscription_status,
@@ -1010,14 +1089,12 @@ export class AgentService {
                     if (this.callbacks?.onAskUserQuestionRequest) {
                         this.callbacks.onAskUserQuestionRequest(event);
                     } else {
-                        // No handler - auto-cancel so the agent never hangs
+                        // No handler - auto-cancel so the agent never hangs.
+                        // Through the sender, not `send`: it is what stops this
+                        // question's keepalive, which would otherwise keep
+                        // firing at a backend that has already moved on.
                         logger("AgentService: No ask_user_question handler, auto-cancelling", 1);
-                        this.send({
-                            type: 'ask_user_question_response',
-                            question_id: event.question_id,
-                            answers: [],
-                            cancelled: true,
-                        });
+                        this.sendAskUserQuestionResponse(event.question_id, [], true);
                     }
                     break;
 
@@ -1265,6 +1342,7 @@ export class AgentService {
     ): boolean {
         const outcome = timedOut ? 'timed out' : cancelled ? 'cancelled' : `${answers.length} answer(s)`;
         logger(`AgentService: Sending ask_user_question response for ${questionId}: ${outcome}`, 1);
+        this.stopQuestionKeepalive(questionId);
         return this.send({
             type: 'ask_user_question_response',
             question_id: questionId,

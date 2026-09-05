@@ -39,6 +39,10 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // ask_user_question_client_timeout is declaration-only because it tells the
 // backend the card paces itself: without it the backend keeps its short fixed
 // wait, so an older card is never left up for the long safety net.
+// ask_user_question_keepalive is declaration-only because it promises an
+// outbound message a client only sends if it has the sender: silence from a
+// client that never promised them says nothing, so the backend only reads it
+// as a dead card when the client declared it would speak.
 // portable_ids is declaration-only because it gates emission of the
 // device-portable model-facing id format, which every declaring client both
 // emits and resolves — there is no version threshold to derive it from.
@@ -82,6 +86,7 @@ const DECLARATION_ONLY_FEATURES = [
     'pdf_candidates',
     'ask_user_question',
     'ask_user_question_client_timeout',
+    'ask_user_question_keepalive',
     'portable_ids',
     'list_items_include_children',
     'create_note_tags_collections',

@@ -64,6 +64,9 @@ export interface AgentDataRequestEntry {
 /** Interval between `request_keepalive` messages for an in-flight request. */
 export const REQUEST_KEEPALIVE_INTERVAL_MS = 5000;
 
+/** Interval between `question_keepalive` messages for a pending question card. */
+export const QUESTION_KEEPALIVE_INTERVAL_MS = 10_000;
+
 /**
  * Whether an inbound event is a backend request that awaits a response keyed
  * by `request_id`: every `*_request` event plus the agent-action

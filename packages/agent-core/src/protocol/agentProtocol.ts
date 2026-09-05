@@ -33,6 +33,8 @@ export interface WSReadyEvent extends WSBaseEvent {
     supports_request_acks?: boolean;
     /** Backend accepts `request_keepalive` messages for in-flight requests */
     supports_request_keepalive?: boolean;
+    /** Backend accepts `question_keepalive` messages for on-screen question cards */
+    supports_question_keepalive?: boolean;
 }
 
 /**
@@ -2348,6 +2350,25 @@ export interface WSAskUserQuestionResponse {
     timed_out?: boolean;
 }
 
+/**
+ * Periodic proof that this client can still deliver an answer to a question.
+ *
+ * The backend's wait for a paced card is a long safety net, so without this a
+ * client that goes quiet without dropping the connection — the plugin's single
+ * JS thread frozen — would park the run for the whole window. Sent by the
+ * transport every few seconds from the moment the request lands until the
+ * response goes out; silence ends the backend's wait early. Gated on
+ * `WSReadyEvent.supports_question_keepalive`.
+ *
+ * Deliberately owned by the transport rather than the card: the card unmounts
+ * whenever the Beaver pane is closed or collapsed, and a question the user can
+ * still come back to must not be reclaimed for that.
+ */
+export interface WSQuestionKeepalive {
+    type: 'question_keepalive';
+    question_id: string;
+}
+
 /** Union type for all WebSocket events */
 export type WSEvent =
     | WSReadyEvent
@@ -2509,6 +2530,12 @@ export const CLIENT_FEATURES = {
      * with `timed_out` when it expires; the backend only keeps a long safety net.
      */
     ASK_USER_QUESTION_CLIENT_TIMEOUT: 'ask_user_question_client_timeout',
+    /**
+     * The client sends `question_keepalive` while a question is pending, so the
+     * backend can stop waiting as soon as this client goes quiet instead of
+     * sitting out the whole safety-net window.
+     */
+    ASK_USER_QUESTION_KEEPALIVE: 'ask_user_question_keepalive',
     PORTABLE_IDS: 'portable_ids',
     LIST_ITEMS_INCLUDE_CHILDREN: 'list_items_include_children',
     CREATE_NOTE_TAGS_COLLECTIONS: 'create_note_tags_collections',

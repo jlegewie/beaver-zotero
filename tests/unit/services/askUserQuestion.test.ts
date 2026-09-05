@@ -97,6 +97,11 @@ class MockWebSocket {
         } as MessageEvent);
     }
 
+    emitClose(code = 1006, reason = '', wasClean = false): void {
+        this.readyState = MockWebSocket.CLOSED;
+        this.onclose?.({ code, reason, wasClean } as CloseEvent);
+    }
+
     sentMessages(): Record<string, any>[] {
         return this.send.mock.calls.map(([raw]) => JSON.parse(raw as string));
     }
@@ -137,6 +142,7 @@ async function completeConnect(
     service: AgentService,
     callbacks: WSCallbacks,
     request: AgentRunRequest,
+    ready: Record<string, unknown> = {},
 ): Promise<MockWebSocket> {
     const initialCount = MockWebSocket.instances.length;
     const connectPromise = service.connect(request, callbacks);
@@ -157,6 +163,7 @@ async function completeConnect(
         subscription_status: 'active',
         processing_mode: 'fast',
         indexing_complete: true,
+        ...ready,
     });
     await connectPromise;
 
@@ -308,6 +315,123 @@ describe('AgentService ask_user_question transport', () => {
             cancelled: true,
             timed_out: true,
         });
+    });
+
+    /** Connects with keepalive support and delivers one question request. */
+    async function connectWithQuestion(
+        service: AgentService,
+        overrides: Partial<WSAskUserQuestionRequest> = {},
+    ): Promise<MockWebSocket> {
+        const callbacks = createCallbacks({ onAskUserQuestionRequest: vi.fn() });
+        const socket = await completeConnect(
+            service,
+            callbacks,
+            { type: 'q' } as AgentRunRequest,
+            { supports_question_keepalive: true },
+        );
+        socket.emitMessage(questionEvent({ timeout_seconds: 600, ...overrides }));
+        await vi.advanceTimersByTimeAsync(0);
+        return socket;
+    }
+
+    const keepalivesOn = (socket: MockWebSocket) =>
+        socket.sentMessages().filter((m) => m.type === 'question_keepalive');
+
+    it('reports in as soon as a question arrives, and keeps reporting', async () => {
+        const service = new AgentService('https://api.example.com');
+        const socket = await connectWithQuestion(service);
+
+        // The first one is on the wire before the card can have rendered: a
+        // blocked message queue must not look like a dead client.
+        expect(keepalivesOn(socket)).toHaveLength(1);
+        expect(keepalivesOn(socket)[0]).toMatchObject({ question_id: 'qid-1' });
+
+        await vi.advanceTimersByTimeAsync(25_000);
+        expect(keepalivesOn(socket).length).toBeGreaterThanOrEqual(3);
+    });
+
+    it('stops reporting once the answer goes out', async () => {
+        const service = new AgentService('https://api.example.com');
+        const socket = await connectWithQuestion(service);
+
+        service.sendAskUserQuestionResponse('qid-1', [], true);
+        const sentByThen = keepalivesOn(socket).length;
+
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(keepalivesOn(socket)).toHaveLength(sentByThen);
+    });
+
+    it('stops reporting at the end of the backend window', async () => {
+        // Nothing else retires the timer for a card the backend gave up on:
+        // no response is ever sent for one.
+        const service = new AgentService('https://api.example.com');
+        const socket = await connectWithQuestion(service, { timeout_seconds: 30 });
+
+        await vi.advanceTimersByTimeAsync(30_000);
+        const sentByThen = keepalivesOn(socket).length;
+
+        await vi.advanceTimersByTimeAsync(120_000);
+        expect(keepalivesOn(socket)).toHaveLength(sentByThen);
+    });
+
+    it('clears the timer when the connection goes away', async () => {
+        // Asserted on the timer, not on frames: after a close the socket is
+        // detached and the connection-id guard would retire the timer on its
+        // next tick anyway, so a frame count cannot tell a cleared timer from a
+        // leaked one. This pins the immediate clear.
+        const service = new AgentService('https://api.example.com');
+        const socket = await connectWithQuestion(service);
+        const timersWhilePending = vi.getTimerCount();
+
+        socket.emitClose(1006, 'gone', false);
+
+        expect(vi.getTimerCount()).toBeLessThan(timersWhilePending);
+    });
+
+    it('does not start a second timer for a repeated question id', async () => {
+        const service = new AgentService('https://api.example.com');
+        const socket = await connectWithQuestion(service);
+
+        socket.emitMessage(questionEvent({ timeout_seconds: 600 }));
+        await vi.advanceTimersByTimeAsync(0);
+        const afterRepeat = keepalivesOn(socket).length;
+
+        await vi.advanceTimersByTimeAsync(10_000);
+        // One tick's worth, not two: the repeat did not arm a second interval.
+        expect(keepalivesOn(socket)).toHaveLength(afterRepeat + 1);
+    });
+
+    it('stops reporting when a client with no question handler auto-cancels', async () => {
+        // The auto-cancel answers the question, so the timer must stop with it
+        // rather than ping a backend that has already moved on.
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        delete (callbacks as { onAskUserQuestionRequest?: unknown }).onAskUserQuestionRequest;
+        const socket = await completeConnect(
+            service,
+            callbacks,
+            { type: 'q' } as AgentRunRequest,
+            { supports_question_keepalive: true },
+        );
+
+        socket.emitMessage(questionEvent({ timeout_seconds: 600 }));
+        await vi.advanceTimersByTimeAsync(0);
+        const sentByThen = keepalivesOn(socket).length;
+
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(keepalivesOn(socket)).toHaveLength(sentByThen);
+    });
+
+    it('does not report in to a backend that never declared support', async () => {
+        // An older backend has no route for the message.
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks({ onAskUserQuestionRequest: vi.fn() });
+        const socket = await completeConnect(service, callbacks, { type: 'q' } as AgentRunRequest);
+
+        socket.emitMessage(questionEvent());
+        await vi.advanceTimersByTimeAsync(30_000);
+
+        expect(keepalivesOn(socket)).toHaveLength(0);
     });
 
     it('omits timed_out from an ordinary submit or skip', async () => {
