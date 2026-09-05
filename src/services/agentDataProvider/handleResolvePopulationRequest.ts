@@ -350,22 +350,32 @@ export async function handleResolvePopulationRequest(
         // widening). Refuse it rather than resolve a population that does not
         // match the description the user is about to approve. Checked on every
         // list that becomes an OR-group.
-        const oredConditions = [
-            ...(conditionsJoinMode === 'any' ? requestedConditions : []),
-            ...requestedAnyConditions,
+        const oredLists: [string, ZoteroSearchCondition[], string][] = [
+            [
+                "conditions_join_mode='any'",
+                conditionsJoinMode === 'any' ? requestedConditions : [],
+                "Join `conditions` with 'all' instead",
+            ],
+            [
+                'any_conditions',
+                requestedAnyConditions,
+                'Move it to the ANDed `conditions` list',
+            ],
         ];
-        const flagCondition = oredConditions.find(
-            (condition) => NON_DISJUNCT_CONDITION_FIELDS.has(condition.field));
-        if (flagCondition) {
-            return errorResponse(
-                request.request_id,
-                `An ORed condition list cannot contain field='${flagCondition.field}': `
-                    + 'Zotero applies it as a search-wide flag, so it would be ANDed with the other '
-                    + 'conditions rather than ORed with them and the population would be narrower than '
-                    + 'described. Move it to the ANDed `conditions` list (unfiled has its own request '
-                    + 'flag), or resolve it as a separate batch.',
-                'invalid_request',
-            );
+        for (const [listName, conditions, remedy] of oredLists) {
+            const flagCondition = conditions.find(
+                (condition) => NON_DISJUNCT_CONDITION_FIELDS.has(condition.field));
+            if (flagCondition) {
+                return errorResponse(
+                    request.request_id,
+                    `${listName} cannot carry field='${flagCondition.field}': `
+                        + 'Zotero applies it as a search-wide flag, so it would be ANDed with the other '
+                        + 'conditions rather than ORed with them and the population would be narrower than '
+                        + `described. ${remedy} (unfiled has its own request flag), or resolve it as a `
+                        + 'separate batch.',
+                    'invalid_request',
+                );
+            }
         }
 
         // Resolve the collection scope. The wire always carries BARE keys; the

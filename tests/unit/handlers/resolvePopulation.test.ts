@@ -914,6 +914,29 @@ describe('handleResolvePopulationRequest', () => {
             },
         );
 
+        it('never nests one OR-group inside another when all four are built', async () => {
+            // A nested scope is silently dropped by Zotero 7, and a dropped
+            // group WIDENS the population to everything the outer one matched.
+            searchResultIds = [1];
+            seedItem(1);
+            collections.set(`${LIBRARY_ID}/ABCD2345`, { id: 77, name: 'Methods' });
+
+            await handleResolvePopulationRequest(makeRequest({
+                collection_keys: ['ABCD2345'],
+                tags: ['to-read'],
+                conditions_join_mode: 'any',
+                conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+                any_conditions: [{ field: 'publicationTitle', operator: 'is', value: '' }],
+            }));
+
+            expect(orGroupSearches()).toHaveLength(4);
+            // One scope, three groups run on their own and intersected.
+            expect(scopeChain()).toHaveLength(1);
+            for (const group of orGroupSearches()) {
+                expect(group.setScope).not.toHaveBeenCalled();
+            }
+        });
+
         it('refuses a negation in the group that excludes nothing', async () => {
             searchResultIds = [1];
             seedItem(1);
