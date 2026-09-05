@@ -1409,6 +1409,7 @@ export interface WSListItemsResponse {
  * round trip, so a batch job never has to page through `list_items`.
  * Every filter is ANDed with every other one; `conditions_join_mode` sets how
  * the `conditions` list is joined among itself, and joins nothing else.
+ * `any_conditions` is one more OR-group, ANDed with all of them.
  * Filters left unset do not constrain the result, so an otherwise empty
  * request selects the whole library.
  */
@@ -1450,6 +1451,24 @@ export interface WSResolvePopulationRequest extends WSBaseEvent {
      * narrower than described.
      */
     conditions_join_mode?: 'all' | 'any' | null;
+    /**
+     * A second condition list, ORed among itself and ANDed with `conditions`
+     * and with every other filter.
+     *
+     * This is what expresses a filter that mixes the two joins — one condition
+     * that must always hold AND several alternatives of which one must — which
+     * `conditions_join_mode` cannot: it joins the whole `conditions` list one
+     * way or the other.
+     *
+     * Subject to the same search-wide-flag restriction as an ORed `conditions`
+     * list: a `unfiled`, `retracted`, `publications` or `feed` entry is
+     * rejected with `invalid_request` rather than resolved as an ANDed one.
+     *
+     * A handler that applies this MUST set `any_conditions_applied` on the
+     * response. Ignoring the field drops the group and resolves a population
+     * WIDER than described, which the caller has to be able to detect.
+     */
+    any_conditions?: ZoteroSearchCondition[] | null;
     /** 'regular' = bibliographic items, 'attachment' = child attachments. */
     item_category: 'regular' | 'attachment';
     /** Filter regular items by attachment presence; null = no filter. */
@@ -1541,6 +1560,16 @@ export interface WSResolvePopulationResponse {
      * from a correct answer.
      */
     conditions_join_mode?: 'all' | 'any' | null;
+    /**
+     * True when the request's `any_conditions` group was applied.
+     *
+     * Set on every successful resolution by a build that knows the field —
+     * true even for an empty group — and absent from a failure and from a
+     * build that predates it. A caller that sent a non-empty group must check
+     * it: a build that does not know `any_conditions` drops the group and
+     * resolves a WIDER population, which its ids alone cannot reveal.
+     */
+    any_conditions_applied?: boolean | null;
     error?: string | null;
     error_code?: string | null;
     /** Available libraries (only included when error_code is 'library_not_found') */

@@ -796,6 +796,142 @@ describe('handleResolvePopulationRequest', () => {
         });
     });
 
+    describe('any_conditions', () => {
+        it('ORs its own list while conditions stay ANDed on the main search', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'itemType', operator: 'is', value: 'journalArticle' }],
+                any_conditions: [
+                    { field: 'DOI', operator: 'is', value: '' },
+                    { field: 'publicationTitle', operator: 'is', value: '' },
+                ],
+            }));
+
+            expect(response.error).toBeUndefined();
+            // The always-true half stays on the main search. ORed with the
+            // alternatives it would admit every journal article in the library.
+            expect(addedConditions()).toContainEqual(['itemType', 'is', 'journalArticle']);
+            const group = groupWith('DOI');
+            expect(conditionsOn(group)).toContainEqual(['joinMode', 'any', '']);
+            expect(conditionsOn(group)).toContainEqual(['DOI', 'doesNotContain', '']);
+            expect(conditionsOn(group)).toContainEqual(['publicationTitle', 'doesNotContain', '']);
+        });
+
+        it('intersects its group with the main search, in both directions', async () => {
+            // The tag group takes the scope slot, so the any_conditions group
+            // is the one run on its own and intersected.
+            searchResultIds = [1, 2, 3];
+            groupResults = [[hasCondition('DOI'), [2, 3, 4]]];
+            seedItem(1);
+            seedItem(2);
+            seedItem(3);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                tags: ['to-read'],
+                any_conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+            }));
+
+            expect(response.item_ids).toEqual(['u-KEY2', 'u-KEY3']);
+            expect(response.total_count).toBe(2);
+        });
+
+        it('carries a group of its own alongside an ORed conditions list', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions_join_mode: 'any',
+                conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+                any_conditions: [{ field: 'publicationTitle', operator: 'is', value: '' }],
+            }));
+
+            expect(response.error).toBeUndefined();
+            // Two independent OR-groups, ANDed with each other.
+            expect(orGroupSearches()).toHaveLength(2);
+            expect(groupWith('DOI')).not.toBe(groupWith('publicationTitle'));
+        });
+
+        it('builds no group and never sets a join mode on the main search when empty', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                any_conditions: [],
+                conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+            }));
+
+            expect(orGroupSearches()).toHaveLength(0);
+            expect(addedConditions().some(([field]) => field === 'joinMode')).toBe(false);
+            // The echo is set even for an empty group: it reports the build,
+            // not the request.
+            expect(response.any_conditions_applied).toBe(true);
+        });
+
+        it('echoes that it applied the group, on every successful resolution', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                any_conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+            }));
+
+            expect(response.any_conditions_applied).toBe(true);
+        });
+
+        it('echoes the group on a count-only resolution too', async () => {
+            searchResultIds = [1, 2];
+            seedItem(1);
+            seedItem(2);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                max_items: 0,
+                any_conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+            }));
+
+            expect(response.item_ids).toEqual([]);
+            expect(response.total_count).toBe(2);
+            expect(response.any_conditions_applied).toBe(true);
+        });
+
+        it.each(['unfiled', 'retracted', 'publications', 'feed'])(
+            'rejects a %s condition, which Zotero would AND instead of OR',
+            async (field) => {
+                const response = await handleResolvePopulationRequest(makeRequest({
+                    any_conditions: [
+                        { field, operator: 'true', value: '' },
+                        { field: 'DOI', operator: 'is', value: '' },
+                    ],
+                }));
+
+                expect(response.error_code).toBe('invalid_request');
+                expect(response.error).toContain(field);
+                expect(response.item_ids).toEqual([]);
+                // A failed resolution carries no echo.
+                expect(response.any_conditions_applied).toBeUndefined();
+                expect(searches).toHaveLength(0);
+            },
+        );
+
+        it('refuses a negation in the group that excludes nothing', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+            // The probe for the positive form finds no item carrying the
+            // phrase, so the disjunct is always true and the group with it.
+            groupResults = [[hasCondition('abstractNote'), []]];
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                any_conditions: [
+                    { field: 'abstractNote', operator: 'doesNotContain', value: 'machine learning' },
+                ],
+            }));
+
+            expect(response.error_code).toBe('invalid_condition');
+            expect(response.item_ids).toEqual([]);
+        });
+    });
+
     describe('display names', () => {
         it('names the library and the collections the filters resolved against', async () => {
             searchResultIds = [1];

@@ -681,6 +681,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         untagged: request.untagged ?? false,
         conditions: request.conditions || [],
         conditions_join_mode: request.conditions_join_mode ?? null,
+        any_conditions: request.any_conditions || [],
         item_category: request.item_category === 'attachment' ? 'attachment' : 'regular',
         has_attachments: request.has_attachments ?? null,
         max_items: request.max_items ?? 1000,
@@ -710,6 +711,10 @@ async function handleResolvePopulationHttpRequest(request: any) {
         // caller detects a provider that predates the field, so it has to be
         // forwarded here too.
         conditions_join_mode: response.conditions_join_mode,
+        // Same again for the `any_conditions` group, and it matters more: a
+        // provider that predates the field drops the group and resolves a
+        // WIDER population than the caller described.
+        any_conditions_applied: response.any_conditions_applied,
         // A dropped condition widens the population; the caller must not act on
         // ids that came back with a warning.
         warnings: response.warnings,
