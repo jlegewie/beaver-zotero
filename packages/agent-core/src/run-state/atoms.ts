@@ -700,6 +700,12 @@ export function updateRunComplete(run: AgentRun, event: WSRunCompleteEvent): Age
         total_usage: event.usage ?? undefined,
         total_cost: event.cost ?? undefined,
         completed_at: new Date().toISOString(),
+        // What this run left undone, when it left anything. The same offer is
+        // on the row, so reopening the thread shows the same card; this is
+        // only what saves the live client a refetch. Taken verbatim, an
+        // explicit null included, so the run carries what the wire said rather
+        // than this function's reading of it.
+        continuation: event.continuation,
     };
 }
 

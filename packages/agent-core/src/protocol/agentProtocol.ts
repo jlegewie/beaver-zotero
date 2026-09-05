@@ -119,6 +119,30 @@ export interface WSToolCallArgsStreamEvent extends WSBaseEvent {
  * soon as the run is durable rather than holding it through a Zotero lookup.
  * The field stays on the type for historical runs and for the un-split path.
  */
+/**
+ * An offer to carry on from a run that ended without being finished.
+ *
+ * Composed entirely by the backend and rendered verbatim; the client owns only
+ * its own chrome (the instructions heading and the disclosure label). That is
+ * what lets a new `kind` ship without a client release, so nothing here may be
+ * switched on `kind` to compose different prose.
+ *
+ * Also stored on the run, which is where a client that reopens the thread
+ * reads it. `payload` is opaque and is echoed back untouched on the request
+ * that continues the run.
+ */
+export interface ContinuationOffer {
+    /** Which case this covers, e.g. 'interrupted' or 'batch_approval'. */
+    kind: string;
+    title: string;
+    message: string;
+    continue_label: string;
+    /** Whether the card offers to attach instructions to the continuation. */
+    allow_message?: boolean;
+    instructions_placeholder?: string;
+    payload?: Record<string, unknown>;
+}
+
 export interface WSRunCompleteEvent extends WSBaseEvent {
     event: 'run_complete';
     run_id: string;
@@ -128,6 +152,11 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
     agent_actions: import('../agents/agentActionTypes').AgentAction[] | null;
     /** Whether the run had high input token usage (backend-assessed). */
     high_token_usage?: boolean;
+    /**
+     * Offer to carry on from this run. Absent from a backend that predates the
+     * field, and null on the ordinary run that finished what it set out to do.
+     */
+    continuation?: ContinuationOffer | null;
     /**
      * @deprecated Always false. Runs are no longer paused at a turn threshold;
      * a long run is metered and confirmed through the credit limit. Still on

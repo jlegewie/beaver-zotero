@@ -180,6 +180,7 @@
     "./src/primitives/ContextMenu.tsx",
     "./src/primitives/DocsLink.tsx",
     "./src/primitives/IconButton.tsx",
+    "./src/primitives/InstructionsDisclosure.tsx",
     "./src/primitives/MenuButton.tsx",
     "./src/primitives/PermissionMenu.tsx",
     "./src/primitives/SearchMenu.tsx",

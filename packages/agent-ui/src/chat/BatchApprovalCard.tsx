@@ -15,8 +15,9 @@ import Button from '../primitives/Button';
 import DocsLink from '../primitives/DocsLink';
 import Tooltip from '../primitives/Tooltip';
 import PermissionMenu from '../primitives/PermissionMenu';
+import InstructionsDisclosure from '../primitives/InstructionsDisclosure';
 import type { PermissionMenuOption } from '../primitives/PermissionMenu';
-import { DollarCircleIcon, HandIcon, Icon, LayersIcon, PlusSignIcon, SecurityWarningIcon } from '../icons';
+import { DollarCircleIcon, HandIcon, Icon, LayersIcon, SecurityWarningIcon } from '../icons';
 
 /**
  * The coverage choices, and the only prose on this card the client owns.
@@ -289,53 +290,23 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                     while the run blocks, so there is nothing else to type
                     into. They constrain an approval and say what to do instead
                     of a cancellation, so the affordance leans toward neither. */}
-                {wantsInstructions ? (
-                    <div className="display-flex flex-col min-w-0" style={{ gap: LABEL_GAP }}>
-                        <div
-                            className="text-xs font-semibold uppercase font-color-secondary"
-                            style={{ letterSpacing: '0.06em' }}
-                        >
-                            {INSTRUCTIONS_HEADING}
-                        </div>
-                        <textarea
-                            className="chat-input"
-                            rows={2}
-                            // The field only exists because the user just asked
-                            // for it, so the caret belongs in it.
-                            autoFocus
-                            placeholder="What to change, or what you want done instead"
-                            aria-label="Instructions for this batch (optional)"
-                            value={draft.userInstructions}
-                            disabled={isDecided}
-                            onChange={(e) => {
-                                const text = e.target.value;
-                                setDraft((prev) => setUserInstructions(text, prev));
-                            }}
-                            onKeyDown={(e) => {
-                                // Enter inserts a newline and never decides:
-                                // the field takes focus, so approving stays an
-                                // explicit click. Stopping propagation keeps a
-                                // keystroke meant for this field from reaching
-                                // a host shortcut that could answer for the
-                                // user.
-                                if (e.key === 'Enter') e.stopPropagation();
-                            }}
-                        />
-                    </div>
-                ) : (
-                    <Button
-                        variant="ghost"
-                        icon={PlusSignIcon}
-                        ariaLabel="Add instructions for this batch"
-                        // Pulled back by its own padding so the label lines up
-                        // with the text above it rather than the button box.
-                        style={{ alignSelf: 'flex-start', marginLeft: '-6px' }}
-                        disabled={isDecided}
-                        onClick={() => setWantsInstructions(true)}
-                    >
-                        {ADD_INSTRUCTIONS_LABEL}
-                    </Button>
-                )}
+                <InstructionsDisclosure
+                    open={wantsInstructions}
+                    onOpen={() => setWantsInstructions(true)}
+                    value={draft.userInstructions}
+                    onChange={(text) =>
+                        setDraft((prev) => setUserInstructions(text, prev))
+                    }
+                    revealLabel={ADD_INSTRUCTIONS_LABEL}
+                    revealAriaLabel="Add instructions for this batch"
+                    heading={INSTRUCTIONS_HEADING}
+                    placeholder="What to change, or what you want done instead"
+                    ariaLabel="Instructions for this batch (optional)"
+                    disabled={isDecided}
+                    // A card that opens with the prefill already showing was
+                    // not opened by the user, so nothing asked for the caret.
+                    autoFocus={(approval.userInstructionsPrefill ?? '').length === 0}
+                />
 
                 {/* Footer: coverage ... cancel, approve. Both answers leave the
                     run alive, so neither is an escape hatch and the destructive

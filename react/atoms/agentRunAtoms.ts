@@ -190,7 +190,7 @@ import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { createZoteroItemReference } from '../utils/zoteroReferences';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
-import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, isInterruptedRun, lingeringCompletedRun, resolveErrorRunId, toRunError } from '@beaver/agent-core/run-state/runResumeHelpers';
+import { appendRunIfMissing, continuationOfferFor, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
@@ -613,6 +613,12 @@ type StartResumeRunOptions = {
     logPrefix: string;
     failureErrorType: string;
     failureMessage: string;
+    /**
+     * What the user typed on the continue card, if anything. Sent as the
+     * resume's own content, which the backend appends after the preamble as
+     * the user's own message.
+     */
+    userMessage?: string;
 };
 
 async function startResumeRun(
@@ -652,13 +658,15 @@ async function startResumeRun(
         }
 
         // Two shapes resume. A failed run carries the backend's own verdict in
-        // `is_resumable`, which the user-driven path insists on. A run that was
-        // cut off has no such flag — nothing failed, the client went away — so
-        // its termination cause is the signal instead.
+        // `is_resumable`, which the user-driven path insists on. Anything else
+        // needs a continuation offer — the backend saying outright that this
+        // run has something left to carry on from. Status alone cannot decide
+        // it: a run that stopped waiting on a decision finished cleanly.
+        const offer = continuationOfferFor(failedRun);
         const isResumableError =
             failedRun.status === 'error'
             && (!options.requireResumable || !!failedRun.error?.is_resumable);
-        if (!isResumableError && !isInterruptedRun(failedRun)) {
+        if (!isResumableError && offer === null) {
             logger(`${options.logPrefix}: Run ${failedRunId} is not resumable`, 1);
             return;
         }
@@ -681,10 +689,18 @@ async function startResumeRun(
         const customInstructions = getPref('customInstructions') || undefined;
 
         const resumePrompt: BeaverAgentPrompt = {
-            content: '',
+            // Empty on every automatic path and on a continue the user clicked
+            // straight through; only instructions typed on the card land here.
+            content: options.userMessage?.trim() || '',
             is_resume: true,
             resumes_run_id: failedRunId,
             resume_trigger: options.trigger,
+            // Which preamble the continuing run leads with. Only the kind and
+            // its payload travel back — the copy was for the user, and the
+            // backend does not take it from the client.
+            ...(offer
+                ? { continuation: { kind: offer.kind, payload: offer.payload } }
+                : {}),
         };
 
         const { run: newRun, request } = createAgentRunShell(
@@ -3081,13 +3097,23 @@ export const autoRetryErroredRunAtom = atom(
 
 export const resumeFromRunAtom = atom(
     null,
-    async (get, set, failedRunId: string) => {
-        await startResumeRun(get, set, failedRunId, {
+    async (
+        get,
+        set,
+        params: string | { runId: string; userMessage?: string },
+    ) => {
+        // A bare id from the callers that have nothing to add (the error
+        // card's resume button), or the object form from the continue card,
+        // which may carry what the user typed.
+        const { runId, userMessage } =
+            typeof params === 'string' ? { runId: params, userMessage: undefined } : params;
+        await startResumeRun(get, set, runId, {
             requireResumable: true,
             trigger: 'user',
             logPrefix: 'resumeFromRunAtom',
             failureErrorType: 'resume_error',
             failureMessage: 'Failed to resume run',
+            userMessage,
         });
     }
 );

@@ -1,4 +1,5 @@
 import type { AgentRun, RunUsage } from '../agents/types';
+import type { ContinuationOffer } from '../protocol/agentProtocol';
 import type { WSErrorEvent } from '../protocol/agentProtocol';
 
 export function appendRunIfMissing(runs: AgentRun[], run: AgentRun): AgentRun[] {
@@ -44,12 +45,57 @@ export function isInterruptedRun(run: AgentRun | null | undefined): boolean {
 }
 
 /**
- * True when a later run continued this one, so this run's own error card,
- * footer and resume offer all give way to the continuation's — a run that was
- * picked up is not one the reader acts on.
+ * The offer to continue this run, or null when there is nothing to offer.
  *
- * Only a run that could be continued qualifies: a failed one, or one that was
- * cut off. Any other run sharing its id with a `resumes_run_id` is a data
+ * The backend composes the offer and stores it on the run, so every kind of
+ * unfinished run — a response cut off, a batch nobody approved in time —
+ * arrives already worded. New kinds must never be added below; a kind the
+ * backend does not send is a kind the user should not be offered.
+ *
+ * The fallback covers a cut-off run that reaches us WITHOUT an offer, which is
+ * not the same as the backend declining to make one. That happens two ways,
+ * and both still deserve the button: a run stored before the field existed,
+ * and one whose terminal write shed the offer to get its status saved at all.
+ * An absent offer and an explicit null therefore mean the same thing here on
+ * purpose — the backend expresses "do not offer" by the run not being a
+ * cut-off one (a stop the user chose is never `INTERRUPTED_REASON_CODES`), not
+ * by nulling a field the fallback can see past.
+ */
+export function continuationOfferFor(
+    run: AgentRun | null | undefined,
+): ContinuationOffer | null {
+    if (!run) return null;
+    if (run.continuation) return run.continuation;
+    if (!isInterruptedRun(run)) return null;
+    return {
+        kind: 'interrupted',
+        title: 'Response interrupted',
+        message: legacyInterruptionText(run.error?.reason_code),
+        continue_label: 'Continue response',
+        allow_message: false,
+    };
+}
+
+/** Copy for interrupted runs stored before the backend composed it. */
+function legacyInterruptionText(reasonCode?: string): string {
+    switch (reasonCode) {
+        case 'connection_lost':
+            return 'The connection dropped before this response finished. Continuing picks up where it left off.';
+        case 'server_shutdown':
+            return 'The server restarted before this response finished. Continuing picks up where it left off.';
+        case 'client_closed':
+        default:
+            return 'Beaver closed before this response finished. Continuing picks up where it left off.';
+    }
+}
+
+/**
+ * True when a later run continued this one, so this run's own error card,
+ * footer and continue offer all give way to the continuation's — a run that
+ * was picked up is not one the reader acts on.
+ *
+ * Only a run that could be continued qualifies: a failed one, or one carrying
+ * an offer. Any other run sharing its id with a `resumes_run_id` is a data
  * error, not a continuation.
  */
 export function wasRunContinued(
@@ -57,7 +103,7 @@ export function wasRunContinued(
     resumedRunIds: ReadonlySet<string>,
 ): boolean {
     if (!resumedRunIds.has(run.id)) return false;
-    return run.status === 'error' || isInterruptedRun(run);
+    return run.status === 'error' || continuationOfferFor(run) !== null;
 }
 
 /**
@@ -73,7 +119,7 @@ export function shouldOfferResume(
 ): boolean {
     if (!options.isLastRun) return false;
     if (options.resumedRunIds.has(run.id)) return false;
-    return isInterruptedRun(run);
+    return continuationOfferFor(run) !== null;
 }
 
 export function findRunForResume(

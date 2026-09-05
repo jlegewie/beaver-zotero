@@ -384,6 +384,7 @@ export default tseslint.config(
             // Shared agent-run dispatchers + the request-side action fallback.
             "react/components/agentRuns/ModelResponseView.tsx",
             "react/components/agentRuns/AgentRunView.tsx",
+            "react/components/agentRuns/RunContinueDisplay.tsx",
             "react/components/agentRuns/GenericAgentActionView.tsx",
             "react/components/agentRuns/AgentRunFooter.tsx",
             "react/components/agentRuns/UserRequestView.tsx",

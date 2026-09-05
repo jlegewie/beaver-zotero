@@ -2,7 +2,7 @@ import React, { forwardRef, useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
 import { AgentRun, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
-import { shouldOfferResume, wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
+import { continuationOfferFor, shouldOfferResume, wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
@@ -10,7 +10,7 @@ import { SuggestionsView } from './SuggestionsView';
 import { RunErrorDisplay } from './RunErrorDisplay';
 import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
-import { RunInterruptedDisplay } from './RunInterruptedDisplay';
+import { RunContinueDisplay } from './RunContinueDisplay';
 import { threadWarningsAtom } from '../../atoms/warnings';
 import { resumeChainAtom, runToolResultsAtom, resumedRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
@@ -64,10 +64,12 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // undone, and flashing it up would report a problem the reader never had.
     const autoReplacementPending = useAtomValue(autoReplacementPendingRunIdsAtom).has(run.id);
 
-    // A run that was cut off (Beaver closed, connection dropped, server
-    // restarted) rather than finished or stopped by the user gets an offer to
-    // continue it.
+    // A run that ended without being finished — cut off mid-response, or
+    // stopped waiting on a decision that never came — gets an offer to carry
+    // on from it. The backend composes the offer; this only decides whether
+    // this run is the one to show it on.
     const offerResume = shouldOfferResume(run, { isLastRun, resumedRunIds });
+    const continuationOffer = offerResume ? continuationOfferFor(run) : null;
 
     // Don't show user message for resume runs (empty content)
     const showUserMessage = !run.user_prompt.is_resume || run.user_prompt.content.length > 0;
@@ -170,9 +172,13 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 <RunErrorDisplay runId={run.id} error={run.error} isLastRun={isLastRun} />
             )}
 
-            {/* Offer to continue a run that was cut off mid-response */}
-            {offerResume && (
-                <RunInterruptedDisplay runId={run.id} reasonCode={run.error?.reason_code} />
+            {/* Offer to continue a run that ended without being finished */}
+            {continuationOffer && (
+                <RunContinueDisplay
+                    runId={run.id}
+                    offer={continuationOffer}
+                    isPostProcessing={isPostProcessing}
+                />
             )}
 
             {/* Footer with sources and action buttons (only for completed runs, or error runs that were resumed) */}
@@ -207,8 +213,11 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 </div>
             )}
 
-            {/* Resuming failed request display */}
-            {wasResumed && <RunResumeDisplay runId={run.id} />}
+            {/* Resuming failed request display. Not for a run that finished:
+                a completed run can now be continued too — it had work left,
+                not an interruption — and this line would call an answer that
+                arrived in full an interrupted one. */}
+            {wasResumed && run.status !== 'completed' && <RunResumeDisplay runId={run.id} />}
 
         </div>
     );
