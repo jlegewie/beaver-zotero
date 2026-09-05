@@ -21,7 +21,7 @@ import { ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
 import { validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem, degradedAttachmentRow, isReadableItemField, readItemField } from './utils';
-import { addSearchCondition } from './searchConditions';
+import { addSearchCondition, findVacuousNegation, vacuousNegationMessage } from './searchConditions';
 
 
 /**
@@ -185,6 +185,19 @@ export async function handleZoteroSearchRequest(
             if (added && isScoped) {
                 scopedConditionCount++;
             }
+        }
+
+        // A negated prose phrase that matches nothing excludes nothing, so the
+        // results below are every item the other filters allow rather than a
+        // narrowed set. A read can hand those back — it changes nothing — but
+        // it must say so, or the caller reads a library-sized answer as a
+        // filtered one and works from it. `handleResolvePopulationRequest`
+        // refuses the same condition, because its answer IS about to be mutated.
+        const vacuous = await findVacuousNegation(
+            library.libraryID, request.conditions, 'handleZoteroSearchRequest',
+        );
+        if (vacuous) {
+            warnings.push(vacuousNegationMessage(vacuous, 'applied'));
         }
 
         // Item category filter.

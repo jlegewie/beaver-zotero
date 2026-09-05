@@ -1175,6 +1175,133 @@ describe('handleResolvePopulationRequest', () => {
         });
     });
 
+    describe('negations that exclude nothing', () => {
+        /** Every search built after the main one, as [field, operator, value] triples. */
+        const probeConditions = () => orGroupSearches().flatMap(search => conditionsOn(search));
+
+        it('fails the resolution when a negated prose phrase matches no item', async () => {
+            searchResultIds = [1, 2];
+            seedItem(1);
+            seedItem(2);
+            // The probe — `abstractNote contains <phrase>` — finds nothing, so
+            // its negation holds for every item in the library.
+            groupResults = [[hasCondition('abstractNote'), []]];
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [
+                    { field: 'abstractNote', operator: 'doesNotContain', value: 'flow and team cohesion' },
+                ],
+            }));
+
+            expect(response.error_code).toBe('invalid_condition');
+            expect(response.item_ids).toEqual([]);
+            expect(response.total_count).toBe(0);
+            expect(response.error).toContain("field='abstractNote'");
+            expect(response.error).toContain('flow and team cohesion');
+            expect(response.error).toContain('literal substring');
+            expect(probeConditions()).toContainEqual([
+                'abstractNote', 'contains', 'flow and team cohesion',
+            ]);
+        });
+
+        it('fails an ORed disjunct that excludes nothing, which would make the group always true', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+            groupResults = [
+                [conditions => conditions.some(([, operator]) => operator === 'contains'), []],
+            ];
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [
+                    { field: 'title', operator: 'contains', value: 'climate' },
+                    { field: 'abstractNote', operator: 'doesNotContain', value: 'flow and team cohesion' },
+                ],
+                conditions_join_mode: 'any',
+            }));
+
+            expect(response.error_code).toBe('invalid_condition');
+            expect(response.error).toContain('flow and team cohesion');
+        });
+
+        it('keeps a negated prose phrase that does exclude something', async () => {
+            searchResultIds = [1, 2];
+            seedItem(1);
+            seedItem(2);
+            groupResults = [[hasCondition('abstractNote'), [3]]];
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [
+                    { field: 'abstractNote', operator: 'doesNotContain', value: 'randomized controlled trial' },
+                ],
+            }));
+
+            expect(response.error).toBeUndefined();
+            expect(response.total_count).toBe(2);
+            expect(addedConditions()).toContainEqual([
+                'abstractNote', 'doesNotContain', 'randomized controlled trial',
+            ]);
+        });
+
+        it('leaves a single-word negation alone, matching or not', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+            // Would resolve to "excludes nothing" if it were probed at all.
+            groupResults = [[hasCondition('abstractNote'), []]];
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'abstractNote', operator: 'doesNotContain', value: 'cohesion' }],
+            }));
+
+            expect(response.error).toBeUndefined();
+            expect(response.total_count).toBe(1);
+            expect(probeConditions()).not.toContainEqual(['abstractNote', 'contains', 'cohesion']);
+        });
+
+        it('leaves a negation on a non-prose field alone', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+            groupResults = [[hasCondition('tag'), []]];
+
+            // No item carries the tag yet, so "the ones without it" really is
+            // the whole library and the caller meant it.
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'tag', operator: 'doesNotContain', value: 'not yet reviewed' }],
+            }));
+
+            expect(response.error).toBeUndefined();
+            expect(response.total_count).toBe(1);
+            expect(probeConditions()).not.toContainEqual(['tag', 'contains', 'not yet reviewed']);
+        });
+
+        it('resolves the population when the probe itself throws', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+            groupResults = [[hasCondition('abstractNote'), []]];
+            const RealSearch = (globalThis as any).Zotero.Search;
+            (globalThis as any).Zotero.Search = class ProbeThrowingSearch extends RealSearch {
+                constructor() {
+                    super();
+                    // Only the probe carries a positive prose condition.
+                    this.addCondition = vi.fn((field: string, operator: string) => {
+                        if (field === 'abstractNote' && operator === 'contains') {
+                            throw new Error('Invalid operator');
+                        }
+                        return 1;
+                    });
+                }
+            };
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [
+                    { field: 'abstractNote', operator: 'doesNotContain', value: 'flow and team cohesion' },
+                ],
+            }));
+
+            expect(response.error).toBeUndefined();
+            expect(response.total_count).toBe(1);
+        });
+    });
+
     describe('library access', () => {
         it('returns the library error with available libraries and runs no search when the library is excluded', async () => {
             vi.mocked(validateLibraryAccess).mockReturnValue({

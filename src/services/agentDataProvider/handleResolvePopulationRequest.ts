@@ -23,7 +23,9 @@
  * A filter that cannot be applied as described FAILS the request; this handler
  * never answers with ids beside a warning. The population it resolves is about
  * to be mutated, so an answer that no longer matches the description has to be
- * impossible to act on, not merely flagged.
+ * impossible to act on, not merely flagged. A filter applied exactly as
+ * described that still excludes nothing fails for the same reason — see
+ * `findVacuousNegation`.
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -34,7 +36,7 @@ import {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { modelObjectId, parseItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
 import { resolveStoredTagName, validateLibraryAccess } from './utils';
-import { addSearchCondition } from './searchConditions';
+import { addSearchCondition, findVacuousNegation, vacuousNegationMessage } from './searchConditions';
 
 /** SQLite's bound-variable limit is well above this; 500 keeps a margin. */
 const SQL_CHUNK_SIZE = 500;
@@ -453,6 +455,21 @@ export async function handleResolvePopulationRequest(
         if (warnings.length > 0) {
             logger(`handleResolvePopulationRequest: Refused ${warnings.length} condition(s)`, 1);
             return errorResponse(request.request_id, warnings.join(' '), 'invalid_condition');
+        }
+
+        // Every condition Zotero accepted is applied by now, and one of them
+        // may still mean nothing. Under join mode 'any' a disjunct that
+        // excludes nothing makes the whole group always true; under 'all' it
+        // simply drops out, leaving a population the approval card describes
+        // by a filter that did not narrow it. Both are refused here.
+        const vacuous = await findVacuousNegation(
+            library.libraryID, requestedConditions, 'handleResolvePopulationRequest',
+        );
+        if (vacuous) {
+            logger('handleResolvePopulationRequest: Refused a negation that excludes nothing', 1);
+            return errorResponse(
+                request.request_id, vacuousNegationMessage(vacuous, 'refused'), 'invalid_condition',
+            );
         }
 
         const [scope, ...extraGroups] = groups;
