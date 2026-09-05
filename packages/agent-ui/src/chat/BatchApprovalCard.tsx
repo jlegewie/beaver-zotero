@@ -24,18 +24,20 @@ import { DollarCircleIcon, HandIcon, Icon, LayersIcon, SecurityWarningIcon } fro
  * Everything else the user reads comes from the backend.
  */
 const MODE_OPTIONS: readonly PermissionMenuOption<BatchApprovalMode>[] = [
+    // The option that keeps asking comes first, as in every permission menu:
+    // the safe choice is the one to land on, the grant is the one to reach for.
+    {
+        value: 'ask_each_time',
+        label: 'Ask permission',
+        description: 'Review every change before it is applied',
+        icon: HandIcon,
+    },
     {
         value: 'full_access',
         label: 'Full access',
         description: "Apply library changes without asking again",
         icon: SecurityWarningIcon,
         tone: 'warning',
-    },
-    {
-        value: 'ask_each_time',
-        label: 'Ask permission',
-        description: 'Review every change before it is applied',
-        icon: HandIcon,
     },
 ];
 

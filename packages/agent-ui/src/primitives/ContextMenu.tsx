@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, ReactNode } from 'react';
 import React from 'react';
 import ReactDOM from 'react-dom';
 import Icon from '../icons/Icon';
@@ -71,6 +71,9 @@ export interface MenuPosition {
 /**
 * Props for the ContextMenu component
 */
+/** Footer content, or a renderer given the menu's `close` for its own controls. */
+export type MenuFooter = ReactNode | ((controls: { close: () => void }) => ReactNode);
+
 export interface ContextMenuProps {
     /** Array of menu items */
     menuItems: MenuItem[];
@@ -107,8 +110,13 @@ export interface ContextMenuProps {
     showArrow?: boolean;
     /** Optional custom header content to render at the top of the menu */
     header?: ReactNode;
-    /** Optional custom footer content to render at the bottom of the menu */
-    footer?: ReactNode;
+    /**
+     * Optional custom footer content to render at the bottom of the menu. A
+     * function form receives `close`, for a footer control that should dismiss
+     * the menu when activated: a click inside the menu never reaches the
+     * outside-click handler, so nothing else would close it.
+     */
+    footer?: MenuFooter;
 }
 
 /**
@@ -153,7 +161,15 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     const menuRef = useRef<HTMLDivElement | null>(null);
     const itemRefs = useRef<Array<HTMLDivElement | null>>([]);
     const [focusedIndex, setFocusedIndex] = useState<number>(-1);
+    // The same close path an option takes, for the footer's controls.
+    const closeMenu = useCallback(() => {
+        onClose();
+        if (onAfterClose) onAfterClose();
+    }, [onClose, onAfterClose]);
     const [hoveredIndex, setHoveredIndex] = useState<number>(-1);
+    // Focus is in the footer. The last option keeps the roving tab stop so
+    // Shift+Tab can come back; this is what takes the highlight off it.
+    const [isFooterFocused, setIsFooterFocused] = useState<boolean>(false);
     const [activeActionsIndex, setActiveActionsIndex] = useState<number>(-1);
     const [adjustedPosition, setAdjustedPosition] = useState<MenuPosition>(position);
     const [arrowPosition, setArrowPosition] = useState<string>('50%');
@@ -179,7 +195,18 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 
         return -1;
     };
-    
+
+    // Tab does not wrap: after the last option it should reach the footer,
+    // and before the first it should leave the menu.
+    const findLinearFocusableIndex = (startIndex: number, step: 1 | -1): number => {
+        for (let index = startIndex + step; index >= 0 && index < menuItems.length; index += step) {
+            if (isFocusableItem(menuItems[index])) {
+                return index;
+            }
+        }
+        return -1;
+    };
+
     // Block scrolling when menu is open
     useEffect(() => {
         if (!isOpen) return;
@@ -352,8 +379,42 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                         return findFocusableIndex(prev >= 0 ? prev - 1 : menuItems.length - 1, -1);
                     });
                     break;
+                case 'Tab': {
+                    // A footer is its own tab stop. Without this, Tab jumps
+                    // there from the focused option and skips every later row.
+                    // Arrows still wrap; Tab walks the remaining options, then
+                    // the browser's tab order takes over (footer, or out).
+                    // Ctrl/Alt/Meta+Tab are host shortcuts (tab switching);
+                    // only unmodified Tab (and Shift+Tab) move between rows.
+                    if (!footer || e.ctrlKey || e.altKey || e.metaKey) break;
+                    const target = e.target as Node | null;
+                    const menuEl = menuRef.current;
+                    if (!target || !menuEl || !menuEl.contains(target)) break;
+                    const inItem = itemRefs.current.some(
+                        (item) => item === target || item?.contains(target),
+                    );
+                    if (!inItem) break;
+                    const next = findLinearFocusableIndex(focusedIndex, e.shiftKey ? -1 : 1);
+                    if (next < 0) break;
+                    e.preventDefault();
+                    setIsFooterFocused(false);
+                    setFocusedIndex(next);
+                    break;
+                }
                 case 'Enter':
-                case ' ':
+                case ' ': {
+                    // Focus can sit on something inside the menu that is not an
+                    // option — a button in the footer, reached with Tab. That
+                    // element's own activation is what the user asked for, and
+                    // the highlighted option is not; leave the key to it.
+                    const target = e.target as Element | null;
+                    const menuEl = menuRef.current;
+                    if (
+                        target && menuEl && menuEl !== target && menuEl.contains(target)
+                        && !itemRefs.current.some((item) => item === target || item?.contains(target))
+                    ) {
+                        break;
+                    }
                     e.preventDefault();
                     if (focusedIndex >= 0 && !menuItems[focusedIndex].disabled && 
                         !menuItems[focusedIndex].isGroupHeader && !menuItems[focusedIndex].isDivider) {
@@ -362,6 +423,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                         if (onAfterClose) onAfterClose();
                     }
                     break;
+                }
                     default:
                     break;
             }
@@ -369,7 +431,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         
         doc.addEventListener('keydown', handleKeyNav);
         return () => doc.removeEventListener('keydown', handleKeyNav);
-    }, [isOpen, menuItems, focusedIndex, onClose, onAfterClose]);
+    }, [isOpen, menuItems, focusedIndex, footer, onClose, onAfterClose]);
     
     // Set initial focus
     useEffect(() => {
@@ -385,6 +447,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         
         // Reset hovered index when menu opens/closes
         setHoveredIndex(-1);
+        setIsFooterFocused(false);
     }, [isOpen]);
 
     useEffect(() => {
@@ -445,7 +508,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                           item.isGroupHeader ? 'px-2 py-1 font-color-tertiary text-xs font-medium mt-1 first:mt-0' :
                           `beaver-menu-item display-flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none
                           ${item.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-                          ${(focusedIndex === index || hoveredIndex === index) && !item.disabled ? 'bg-quinary' : ''}`
+                          ${((focusedIndex === index && !isFooterFocused) || hoveredIndex === index) && !item.disabled ? 'bg-quinary' : ''}`
                         }
                     `}
                     style={!item.isDivider && !item.isGroupHeader ? { maxWidth: '100%', minWidth: 0 } : undefined}
@@ -530,8 +593,17 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             
             {/* Custom footer section */}
             {footer && (
-                <div className="mt-1">
-                    {footer}
+                <div
+                    className="mt-1"
+                    // Tabbing into the footer moves focus off the options; the
+                    // highlight follows, so one thing looks focused at a time.
+                    // Only the highlight: the focused option keeps its tabIndex
+                    // of 0, so Shift+Tab lands back on it rather than outside
+                    // the still-open menu.
+                    onFocus={() => setIsFooterFocused(true)}
+                    onBlur={() => setIsFooterFocused(false)}
+                >
+                    {typeof footer === 'function' ? footer({ close: closeMenu }) : footer}
                 </div>
             )}
             

@@ -1,10 +1,12 @@
-import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { StopIcon, GlobalSearchIcon, ArrowUpLineIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
-import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom } from '../../atoms/messageComposition';
-import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
-import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
+import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom, clearComposerAtom } from '../../atoms/messageComposition';
+import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, answerPendingApprovalsAtom, setRunPermissionModeAtom, approvalVerdictInFlightAtom, beginApprovalVerdictAtom, releaseApprovalVerdictAtom } from '../../atoms/agentRunAtoms';
+import { pendingApprovalsAtom, agentActionsByRunAtom } from '../../agents/agentActions';
+import { isCoveredByFullAccess, runApprovalPolicyAtom } from '../../atoms/runApprovalPolicy';
+import RunPermissionButton, { RunPermissionMode } from '../ui/buttons/RunPermissionButton';
 import Button from '@beaver/agent-ui/primitives/Button';
 import SearchMenu from '@beaver/agent-ui/primitives/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
@@ -34,6 +36,7 @@ import { useAddSourcesMenu, AddSourcesMenuHandle } from '@beaver/agent-ui/compos
 import { useComposerPasteHandlers } from '../../hooks/useComposerPasteHandlers';
 import { useActionPopupResolver } from '../../hooks/useActionPopupResolver';
 import { sendComposedMessageAtom } from '../../atoms/actions';
+import { dismissActiveEditNotePreview } from '../../host/zotero/editNotePreviewLifecycle';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
 
@@ -129,12 +132,55 @@ const InputArea: React.FC<InputAreaProps> = ({
     // Pending approval state (for deferred tools)
     // With parallel tool calls, there can be multiple pending approvals
     const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
-    const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
-    const removePendingApproval = useSetAtom(removePendingApprovalAtom);
+    const answerPendingApprovals = useSetAtom(answerPendingApprovalsAtom);
+    const clearComposer = useSetAtom(clearComposerAtom);
     const isAwaitingApproval = pendingApprovalsMap.size > 0;
-    // Reject stands in for Send only once there are instructions to reject
-    // with; an approval pending against an empty composer leaves Stop in place.
-    const showRejectButton = isAwaitingApproval && messageContent.trim().length > 0;
+    // The run holding a full-access grant, if one does. The policy is cleared at
+    // every run boundary, so holding it means the grant is live right now — and
+    // once it is, no further card is raised, so this bar is the only place left
+    // that says so and the only way back to being asked.
+    const runApprovalPolicy = useAtomValue(runApprovalPolicyAtom);
+    const setRunPermissionMode = useSetAtom(setRunPermissionModeAtom);
+    const fullAccessRunId = runApprovalPolicy.fullAccess ? runApprovalPolicy.runId : null;
+    // A running tally for the band: with no cards raised, this count is the
+    // only live sign of what the grant is doing until the changes card renders
+    // at the end of the run. It counts every applied library change in the
+    // run, the ones approved by hand before the switch included — "in this
+    // response" is what the user is supervising, not the grant's bookkeeping.
+    // Only changes the grant covers count, though: a confirmed extraction or
+    // external search is recorded as an action too, and the band is making a
+    // claim about library changes.
+    //
+    // Subscribed to the run map itself, not the getter atom: the getter's
+    // closure reads the map only when called, after its own read has finished,
+    // so Jotai would never see the map as a dependency and the count would sit
+    // stale until something else re-rendered this component.
+    const actionsByRun = useAtomValue(agentActionsByRunAtom);
+    const fullAccessAppliedCount = useMemo(() => (
+        fullAccessRunId
+            ? (actionsByRun.get(fullAccessRunId) ?? []).filter((action) =>
+                action.status === 'applied'
+                && isCoveredByFullAccess(action.action_type, action.proposed_data)).length
+            : 0
+    ), [actionsByRun, fullAccessRunId]);
+    // The verdict buttons stand in for Send whenever the composer holds text
+    // and a decision is pending, whenever that text was typed; an approval
+    // pending against an empty composer leaves Stop in place and the bar above
+    // owns the decision. No rule can tell a follow-up written while the run
+    // streamed from an instruction written for the cards — every one of them
+    // is a diff between two arbitrary edits — and a rule that tried would
+    // leave text sitting in the field that silently does not count.
+    //
+    // Both verdicts are offered, and neither is the default: a typed message is
+    // the user telling Beaver what to do, and reading it as a decision on its
+    // own inverts "you can apply all" into a rejection of exactly the changes
+    // they were approving.
+    const showVerdictButtons = isAwaitingApproval && messageContent.trim().length > 0;
+    // Held from the click until the decision is delivered, so a second click
+    // cannot overtake the first while a note preview is being torn down.
+    const isVerdictInFlight = useAtomValue(approvalVerdictInFlightAtom);
+    const beginApprovalVerdict = useSetAtom(beginApprovalVerdictAtom);
+    const releaseApprovalVerdict = useSetAtom(releaseApprovalVerdictAtom);
     // Note: while an ask_user_question request is pending (and no approval is),
     // Sidebar renders AskUserQuestionPanel INSTEAD of this component, so no
     // question-mode handling is needed here.
@@ -187,21 +233,30 @@ const InputArea: React.FC<InputAreaProps> = ({
     // The follow-up run's origin
     const firstRunBackTarget: FirstRunBackTarget = hasWhereToStartRun ? 'launcher' : 'suggestions';
 
+    // Counted labels, so the destructive verdict states its blast radius where
+    // the decision is actually taken rather than only in the bar above.
+    const verdictCountSuffix = pendingApprovalsMap.size > 1 ? ` all (${pendingApprovalsMap.size})` : '';
+    const approveVerdictLabel = `Approve${verdictCountSuffix}`;
+    const rejectVerdictLabel = `Reject${verdictCountSuffix}`;
+
     // Exactly one band between the batch panel and the attachment row.
-    // Priority: blocked decision, then first-run guidance, then the cost warning.
+    // Priority: blocked decision, then the standing grant that stops decisions
+    // being asked for at all, then first-run guidance, then the cost warning.
     // One ordered list (not a suppression clause in each predicate) so a new
     // band takes a place here instead of stacking. Laid out lowest-priority
     // first so the winner sits nearest the composer.
-    const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'approvals' | null =
+    const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'approvals' | 'full-access' | null =
         isAwaitingApproval
             ? 'approvals'
-            : canShowNextSteps
-                ? 'next-steps'
-                : canShowBackToSuggestions
-                    ? 'back-to-suggestions'
-                    : canShowHighTokenWarning
-                        ? 'high-token'
-                        : null;
+            : fullAccessRunId
+                ? 'full-access'
+                : canShowNextSteps
+                    ? 'next-steps'
+                    : canShowBackToSuggestions
+                        ? 'back-to-suggestions'
+                        : canShowHighTokenWarning
+                            ? 'high-token'
+                            : null;
 
     const {
         isSlashMenuOpen,
@@ -255,6 +310,16 @@ const InputArea: React.FC<InputAreaProps> = ({
             dismissAddSourcesMenu();
         }
     }, [dismissAddSourcesMenu, isAddSourcesMenuOpen, isAwaitingApproval]);
+
+    // Same for the slash menu, which cards arriving mid-stream can leave open.
+    // Picking an entry from it would insert a /command pill the decision path
+    // cannot resolve, and while it is open it also suspends the editor's
+    // keyboard navigation — over the very field the instructions go in.
+    useEffect(() => {
+        if (isAwaitingApproval && isSlashMenuOpen) {
+            handleSlashDismiss();
+        }
+    }, [handleSlashDismiss, isSlashMenuOpen, isAwaitingApproval]);
 
     // Consume a staged /command pill (home launcher, context menu, reader
     // toolbar). This component owns the editor handle, so the pill is inserted
@@ -327,7 +392,10 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
 
         const inputEl = inputRef.current;
-        if (inputEl && handleSlashTrigger(value, inputEl.getBoundingClientRect())) {
+        // No action pills while a decision is pending: this text is sent as the
+        // instructions for that decision, and a pill's prompt and attachments
+        // are resolved only on the send path.
+        if (inputEl && !isAwaitingApproval && handleSlashTrigger(value, inputEl.getBoundingClientRect())) {
             queueSelectionRestore(value.length, false);
             return;
         }
@@ -409,25 +477,38 @@ const InputArea: React.FC<InputAreaProps> = ({
         closeWSConnection(); // Also clears all pending approvals
     };
 
-    const handleRejectWithInstructions = (e?: React.MouseEvent | React.FormEvent) => {
-        if (e) {
-            e.preventDefault();
-            e.stopPropagation();
-        }
+    /**
+     * Answer every pending approval.
+     *
+     * The composer's verdict buttons and the docked bar both send what is in
+     * the field as user instructions and empty it, the way sending does. The
+     * cards' own Apply/Reject is a decision on the changes alone, so it
+     * carries no message and leaves the field untouched.
+     */
+    const handleApprovalVerdict = (approved: boolean, withInstructions: boolean) => {
         if (pendingApprovalsMap.size === 0) return;
+        // Claimed before the wait below, and synchronously, so the first of two
+        // quick clicks is the one that decides.
+        if (!beginApprovalVerdict()) return;
         // As in sendMessage: pick up a composition the user has just committed.
         const content = editorHandleRef.current?.flushPendingText() ?? messageContent;
-        const instructions = content.trim() || null;
-        for (const pendingApproval of pendingApprovalsMap.values()) {
-            logger(`Rejecting approval ${pendingApproval.actionId} with instructions: ${instructions}`);
-            sendApprovalResponse({
-                actionId: pendingApproval.actionId,
-                approved: false,
-                userInstructions: instructions,
-            });
-            removePendingApproval(pendingApproval.actionId);
-        }
-        setMessageContent('');
+        const instructions = withInstructions && content.trim().length > 0 ? content : null;
+        // The cards the user was actually answering, taken now. Tearing down a
+        // note preview below can take over a second, and a parallel approval
+        // arriving in that window was neither counted on the button they
+        // pressed nor on screen for them to read.
+        const actionIds = [...pendingApprovalsMap.keys()];
+        logger(`${approved ? 'Approving' : 'Rejecting'} ${actionIds.length} pending approval(s)${instructions ? ' with instructions' : ''}`);
+        void (async () => {
+            try {
+                // Runs in this tick — the body before the first await does.
+                if (instructions) clearComposer();
+                await dismissActiveEditNotePreview();
+                answerPendingApprovals({ actionIds, approved, userInstructions: instructions });
+            } finally {
+                releaseApprovalVerdict();
+            }
+        })();
     };
 
     const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -474,7 +555,7 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     const getPlaceholderText = () => {
         if (placeholder !== undefined) return placeholder;
-        if (isAwaitingApproval) return "Add instructions to reject";
+        if (isAwaitingApproval) return "Optional instructions, then approve or reject";
         if (isLibraryTab) return "@ to add a source, / for actions";
         if (currentNoteItem) return "@ to add a source, / for actions";
         return "@ to add a source, / for actions, drag to add annotations";
@@ -529,9 +610,39 @@ const InputArea: React.FC<InputAreaProps> = ({
                 </div>
             )}
 
+            {/* The standing grant, while it is in force. Nothing else reports
+                it: with full access no card is raised, so without this bar the
+                user has no sign that library changes are applying unasked and
+                no way to switch back. */}
+            {composerBand === 'full-access' && fullAccessRunId && (
+                <div className="composer-docked-bar pending-actions-bar display-flex flex-row items-center px-3 py-2 border-bottom-quinary gap-2">
+                    <span className="font-color-secondary text-sm truncate">
+                        Applying library changes without asking
+                    </span>
+                    {fullAccessAppliedCount > 0 && (
+                        <span className="font-color-secondary opacity-70 text-sm flex-none">
+                            {fullAccessAppliedCount === 1 ? '1 applied' : `${fullAccessAppliedCount} applied`}
+                        </span>
+                    )}
+                    <div className="flex-1" />
+                    <RunPermissionButton
+                        mode="full_access"
+                        onChange={(mode: RunPermissionMode) => setRunPermissionMode({
+                            runId: fullAccessRunId,
+                            fullAccess: mode === 'full_access',
+                        })}
+                    />
+                </div>
+            )}
+
             {/* Pending approvals. Last of the bands so it sits on the composer
-                — Send becomes Reject, and the field is where rejection is written. */}
-            {composerBand === 'approvals' && <PendingActionsBar />}
+                — the field is where the instructions for the decision go. */}
+            {composerBand === 'approvals' && (
+                <PendingActionsBar
+                    onDecide={(approved) => handleApprovalVerdict(approved, true)}
+                    disabled={isVerdictInFlight}
+                />
+            )}
 
             {/* Message attachments — absent entirely when nothing is attached.
                 Hidden during approval: the message cannot be sent until the
@@ -583,7 +694,9 @@ const InputArea: React.FC<InputAreaProps> = ({
                         }
                         placeholder={getPlaceholderText()}
                         ariaLabel="Message Beaver"
-                        disabled={isAwaitingApproval}
+                        // Never disabled while an approval is pending: with the
+                        // run blocked, this field is the only channel to the
+                        // model, and its text is what the verdict carries.
                         onKeyDown={handleEditorKeyDown}
                         suspendKeyboardNavigation={isSlashMenuOpen || isAddSourcesMenuOpen}
                         onContentEditableRef={(el) => {
@@ -621,6 +734,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <span id={webSearchDescriptionId} className="sr-only">
                         {webSearchDescription}
                     </span>
+                    {!showVerdictButtons && (
                     <Tooltip
                         key={String(isWebSearchAllowed)}
                         content={webSearchTooltipContent}
@@ -657,20 +771,34 @@ const InputArea: React.FC<InputAreaProps> = ({
                             disabled={isAwaitingApproval || !isWebSearchAllowed}
                         />
                     </Tooltip>
+                    )}
 
                     {/* Send, and the two things that take its place: Stop while
-                        a run is live, Reject once there are instructions to
-                        reject a pending approval with. */}
-                    {showRejectButton ? (
-                        <Button
-                            type="button"
-                            variant="surface"
-                            className="composer-reject"
-                            ariaLabel={pendingApprovalsMap.size > 1 ? 'Reject all proposed actions' : 'Reject proposed action'}
-                            onClick={handleRejectWithInstructions}
-                        >
-                            {pendingApprovalsMap.size > 1 ? 'Reject All' : 'Reject'}
-                        </Button>
+                        a run is live, and the pair of verdict buttons once
+                        there are instructions for a pending approval. */}
+                    {showVerdictButtons ? (
+                        <>
+                            <Button
+                                type="button"
+                                variant="surface"
+                                className="composer-reject"
+                                ariaLabel={rejectVerdictLabel}
+                                disabled={isVerdictInFlight}
+                                onClick={() => handleApprovalVerdict(false, true)}
+                            >
+                                {rejectVerdictLabel}
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="solid"
+                                className="composer-approve"
+                                ariaLabel={approveVerdictLabel}
+                                disabled={isVerdictInFlight}
+                                onClick={() => handleApprovalVerdict(true, true)}
+                            >
+                                {approveVerdictLabel}
+                            </Button>
+                        </>
                     ) : isPending ? (
                         <IconButton
                             icon={StopIcon}
@@ -686,13 +814,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             className="composer-send"
                             ariaLabel="Send message"
                             onClick={handleSubmit}
-                            disabled={
-                                // Awaiting approval without instructions: left
-                                // live, as it was before the row was rebuilt.
-                                isAwaitingApproval
-                                    ? false
-                                    : (messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles)
-                            }
+                            disabled={messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles}
                         />
                     )}
                 </div>

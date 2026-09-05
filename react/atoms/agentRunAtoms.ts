@@ -172,11 +172,11 @@ import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreat
 import { extractZoteroReferencesFromToolCall } from '@beaver/agent-core/run-state/toolLabels';
 import {
     clearRunApprovalPolicyAtom,
-    getPendingApprovalIdsForToolGroup,
-    getToolGroup,
-    grantToolGroupForRunAtom,
+    getPendingApprovalIdsCoveredByFullAccess,
     isActionApprovedForCurrentRun,
+    isFullAccessGrantedForRun,
     runApprovalPolicyAtom,
+    setRunFullAccessAtom,
 } from './runApprovalPolicy';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
@@ -3333,36 +3333,152 @@ export const sendApprovalResponseAtom = atom(
 );
 
 /**
- * Grant a tool group for the rest of a run and approve every request from that
- * group that is already pending. Future validations and late-arriving approval
- * requests read the same transient policy.
+ * True while a bulk approval verdict is on its way out.
+ *
+ * Answering can wait on a note preview being torn down, which takes up to a
+ * second and a half, and that teardown short-circuits for anyone who asks
+ * again while it is running — so a second click would overtake the first and
+ * be the one that decides the changes. Claiming this before the wait makes the
+ * first verdict the one that counts; it also drives the disabled state on the
+ * controls, so the user is not left clicking into silence.
  */
-export const approveToolGroupForRunAtom = atom(
+export const approvalVerdictInFlightAtom = atom(false);
+
+/**
+ * Claim the right to answer the pending approvals. Returns false when another
+ * verdict already holds it.
+ *
+ * Synchronous, deliberately: a React re-render is too late to stop a second
+ * click in the same tick as the first.
+ */
+export const beginApprovalVerdictAtom = atom(null, (get, set): boolean => {
+    if (get(approvalVerdictInFlightAtom)) return false;
+    set(approvalVerdictInFlightAtom, true);
+    return true;
+});
+
+/** Release the claim. Callers must do this on every exit, including failure. */
+export const releaseApprovalVerdictAtom = atom(null, (_get, set) => {
+    set(approvalVerdictInFlightAtom, false);
+});
+
+/**
+ * Answer a set of pending agent-action approvals, carrying the user's typed
+ * instructions if they wrote any.
+ *
+ * One place decides how a bulk answer is delivered, so the docked bar and the
+ * composer cannot drift apart on whether the instructions travel. The
+ * instructions ride with either verdict: a message written while the run is
+ * blocked is the user telling Beaver what to do, not a decision in itself.
+ *
+ * The caller passes the ids it captured when the user decided, not "whatever is
+ * pending now". Tearing down a note preview first can take over a second, and
+ * an approval that arrives during it was neither counted on the button the user
+ * pressed nor rendered for them to read — it must not inherit their verdict.
+ * Ids no longer pending are skipped, so a card answered on its own in the
+ * meantime is not answered twice.
+ *
+ * The set may include the backend's spend and off-device confirmations. Those
+ * are carved out of the run's *standing* full-access grant, which is about
+ * future library writes the user has not seen; this is the opposite — an
+ * explicit yes or no to the exact cards in front of them, counted in the label
+ * on the button they pressed.
+ *
+ * Callers own the note-edit preview: tear it down with
+ * `dismissActiveEditNotePreview()` before calling, as every other
+ * apply/reject surface does.
+ *
+ * Returns how many approvals were answered.
+ */
+export const answerPendingApprovalsAtom = atom(
     null,
     (
         get,
         set,
-        { runId, toolName }: { runId: string; toolName: string },
+        { actionIds, approved, userInstructions }: {
+            actionIds: readonly string[];
+            approved: boolean;
+            userInstructions?: string | null;
+        },
     ): number => {
-        const group = getToolGroup(toolName);
-        if (!group) return 0;
+        const pending = get(pendingApprovalsAtom);
+        const answerable = actionIds.filter((actionId) => pending.has(actionId));
+        if (answerable.length === 0) return 0;
 
-        set(grantToolGroupForRunAtom, { runId, toolName });
-
-        const matchingActionIds = getPendingApprovalIdsForToolGroup(
-            get(pendingApprovalsAtom).values(),
-            toolName,
-        );
-        for (const actionId of matchingActionIds) {
-            set(sendApprovalResponseAtom, { actionId, approved: true });
+        const instructions = userInstructions?.trim() || null;
+        for (const actionId of answerable) {
+            set(sendApprovalResponseAtom, { actionId, approved, userInstructions: instructions });
         }
-        set(removePendingApprovalsAtom, matchingActionIds);
-
+        set(removePendingApprovalsAtom, answerable);
         logger(
-            `approveToolGroupForRunAtom: Granted ${group} for run ${runId} and approved ${matchingActionIds.length} pending action(s)`,
+            `answerPendingApprovalsAtom: ${approved ? 'Approved' : 'Rejected'} ${answerable.length} of ${actionIds.length} action(s)${instructions ? ' with instructions' : ''}`,
             1,
         );
-        return matchingActionIds.length;
+        return answerable.length;
+    },
+);
+
+/**
+ * Set the run's permission mode.
+ *
+ * Granting full access also answers every pending request the grant covers, so
+ * the run is not left blocked on cards the user has just said yes to. Future
+ * validations and late-arriving approval requests read the same transient
+ * policy, so the grant holds for the rest of the run without being re-sent.
+ *
+ * A grant only lands on the run that is still active. Callers tear down the
+ * note preview first, which can take over a second, and in that time the user
+ * may have stopped the run or started another: re-granting authority to a run
+ * that has ended would leave the composer flying a banner for a dead run, and
+ * the sweep below would answer approvals belonging to a run the user never
+ * granted anything.
+ *
+ * Revoking is not gated the same way. It only takes authority away, so
+ * refusing it could strand the user under a grant they are trying to cancel;
+ * it is scoped to the run actually holding the grant so a late call cannot
+ * rebind the policy to a stale run.
+ *
+ * Returns how many pending approvals were approved, for the caller's logging
+ * and its "waiting for the backend" state.
+ */
+export const setRunPermissionModeAtom = atom(
+    null,
+    (
+        get,
+        set,
+        { runId, fullAccess }: { runId: string; fullAccess: boolean },
+    ): number => {
+        if (!fullAccess) {
+            if (isFullAccessGrantedForRun(get(runApprovalPolicyAtom), runId)) {
+                set(setRunFullAccessAtom, { runId, fullAccess: false });
+                logger(`setRunPermissionModeAtom: Revoked full access for run ${runId}`, 1);
+            }
+            return 0;
+        }
+
+        const activeRunId = get(activeRunAtom)?.id ?? null;
+        if (runId !== activeRunId) {
+            logger(
+                `setRunPermissionModeAtom: Not granting full access to run ${runId}; the active run is ${activeRunId ?? 'none'}`,
+                1,
+            );
+            return 0;
+        }
+        set(setRunFullAccessAtom, { runId, fullAccess: true });
+
+        const coveredActionIds = getPendingApprovalIdsCoveredByFullAccess(
+            get(pendingApprovalsAtom).values(),
+        );
+        for (const actionId of coveredActionIds) {
+            set(sendApprovalResponseAtom, { actionId, approved: true });
+        }
+        set(removePendingApprovalsAtom, coveredActionIds);
+
+        logger(
+            `setRunPermissionModeAtom: Granted full access for run ${runId} and approved ${coveredActionIds.length} pending action(s)`,
+            1,
+        );
+        return coveredActionIds.length;
     },
 );
 

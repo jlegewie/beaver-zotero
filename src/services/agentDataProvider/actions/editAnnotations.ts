@@ -33,7 +33,7 @@ import {
     refreshMovedAnnotationsInOpenReaders,
     unsetTrashedAnnotationsInOpenReaders,
 } from "../../annotations/readerSync";
-import { checkLibraryExcluded, getDeferredToolPreference } from "../utils";
+import { checkLibraryExcluded, getDeferredToolPreference, hasFullAccessForCurrentRun } from "../utils";
 import { checkAborted, TimeoutContext, TimeoutError } from "../timeout";
 import {
     prepareRelocation,
@@ -987,6 +987,10 @@ function resolvePreference(
     data: EditAnnotationsProposedData,
     targets: ResolvedTarget[],
 ): DeferredToolPreference {
+    // The run's "Full access" grant sits above all of it: the user asked for
+    // every library change in this response to apply on its own, so an edit
+    // that would otherwise escalate back to a prompt is not raised again.
+    if (hasFullAccessForCurrentRun()) return "always_apply";
     if (data.operation === "delete") {
         const deletionPreference = getDeferredToolPreference(
             "delete_annotations",

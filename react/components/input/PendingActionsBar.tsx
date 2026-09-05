@@ -1,20 +1,28 @@
 import React from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue } from 'jotai';
 import { pendingApprovalsAtom } from '../../agents/agentActions';
-import { sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
-import { dismissDiffPreview } from '../../utils/noteEditorDiffPreview';
-import { diffPreviewNoteKeyAtom } from '../../utils/diffPreviewCoordinator';
 import Button from '@beaver/agent-ui/primitives/Button';
+
+interface PendingActionsBarProps {
+    /** Answer every pending approval. Owned by the composer, which holds the editor. */
+    onDecide: (approved: boolean) => void;
+    /** A decision is already on its way out; a second one must not overtake it. */
+    disabled?: boolean;
+}
 
 /**
  * Bar that appears above the input area when there are pending agent actions.
  * Shows the count and provides "Approve All" / "Reject All" buttons.
+ *
+ * A click here is the same decision as the composer's verdict pair: typed text
+ * goes with the answer as user instructions. The composer owns the editor and
+ * the one-at-a-time claim on answering.
  */
-const PendingActionsBar: React.FC = () => {
+const PendingActionsBar: React.FC<PendingActionsBarProps> = ({
+    onDecide,
+    disabled = false,
+}) => {
     const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
-    const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
-    const setPendingApprovals = useSetAtom(pendingApprovalsAtom);
-    const setDiffPreviewNoteKey = useSetAtom(diffPreviewNoteKeyAtom);
 
     const pendingCount = pendingApprovalsMap.size;
 
@@ -23,58 +31,37 @@ const PendingActionsBar: React.FC = () => {
         return null;
     }
 
-    const handleBatchAction = async (e: React.FormEvent | React.MouseEvent, approved: boolean) => {
+    const handleBatchAction = (e: React.FormEvent | React.MouseEvent, approved: boolean) => {
         e.preventDefault();
         e.stopPropagation();
-
-        // Dismiss the diff preview first to prevent re-showing during removal.
-        await dismissDiffPreview();
-        setDiffPreviewNoteKey(null);
-
-        const idsToRemove: string[] = [];
-        for (const pendingApproval of pendingApprovalsMap.values()) {
-            sendApprovalResponse({
-                actionId: pendingApproval.actionId,
-                approved,
-            });
-            idsToRemove.push(pendingApproval.actionId);
-        }
-        if (idsToRemove.length > 0) {
-            setPendingApprovals((prev) => {
-                const next = new Map(prev);
-                for (const id of idsToRemove) next.delete(id);
-                return next;
-            });
-        }
+        onDecide(approved);
     };
 
-    const handleApproveAll = (e: React.FormEvent | React.MouseEvent) => { void handleBatchAction(e, true); };
-    const handleRejectAll = (e: React.FormEvent | React.MouseEvent) => { void handleBatchAction(e, false); };
-
-    const label = pendingCount === 1 
-        ? '1 Pending Approval' 
+    const label = pendingCount === 1
+        ? '1 Pending Approval'
         : `${pendingCount} Pending Approvals`;
 
     return (
         <div className="composer-docked-bar pending-actions-bar display-flex flex-row items-center px-3 py-2 border-bottom-quinary gap-2">
-            {/* Left side: Count */}
-            <span className="font-color-primary text-sm">{label}</span>
+            <span className="font-color-primary text-sm flex-none">{label}</span>
 
             {/* Spacer */}
             <div className="flex-1" />
 
-            {/* Right side: Action buttons */}
-            <div className="display-flex flex-row items-center gap-2">
+            {/* Right side: approve / reject every pending card */}
+            <div className="display-flex flex-row items-center gap-2 flex-none">
                 <Button
                     variant="ghost-secondary"
-                    onClick={handleRejectAll}
+                    onClick={(e) => handleBatchAction(e, false)}
+                    disabled={disabled}
                     style={{ padding: '2px 8px', fontSize: '0.875rem' }}
                 >
                     Reject All
                 </Button>
                 <Button
                     variant="outline"
-                    onClick={handleApproveAll}
+                    onClick={(e) => handleBatchAction(e, true)}
+                    disabled={disabled}
                     style={{ padding: '2px 8px', fontSize: '0.875rem' }}
                 >
                     Approve All
