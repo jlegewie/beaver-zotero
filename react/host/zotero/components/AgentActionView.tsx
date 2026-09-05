@@ -1,10 +1,11 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { navigateToAnnotation } from '../../../utils/readerUtils';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus } from '@beaver/agent-core/agents/types';
 import {
     AgentAction,
     getAgentActionsByToolcallAtom,
+    pendingApprovalsAtom,
     removePendingApprovalAtom,
     isCreateAnnotationsAgentAction,
 } from '../../../agents/agentActions';
@@ -64,6 +65,7 @@ import {
 import { ActionPreview } from './ActionPreview';
 import { useApprovalRecovery } from './useApprovalRecovery';
 import {
+    getPendingApprovalIdsCoveredByFullAccess,
     isCoveredByFullAccess,
     isFullAccessGrantedForRun,
     runApprovalPolicyAtom,
@@ -164,6 +166,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const setRunPermissionMode = useSetAtom(setRunPermissionModeAtom);
     const runApprovalPolicy = useAtomValue(runApprovalPolicyAtom);
+    // How many cards a switch to full access would answer at once, so the menu
+    // row can say so before the user reaches for it.
+    const allPendingApprovals = useAtomValue(pendingApprovalsAtom);
+    const pendingCoveredCount = useMemo(
+        () => getPendingApprovalIdsCoveredByFullAccess(allPendingApprovals.values()).length,
+        [allPendingApprovals],
+    );
     const removeApprovalResponseIntent = useSetAtom(removeApprovalResponseIntentAtom);
     const removePendingApproval = useSetAtom(removePendingApprovalAtom);
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
@@ -688,8 +697,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 mode={runPermissionMode}
                                 onChange={handleRunPermissionChange}
                                 disabled={isProcessing}
+                                pendingCoveredCount={pendingCoveredCount}
                             />
                         )}
+                        {/* The same slot held the run-scoped menu a moment ago,
+                            so this one says which scope it is. */}
                         {!isAwaitingApproval && status === 'pending' && !hasNoActionData && !isConfirmAction && (
                             <DeferredToolPreferenceButton
                                 toolName={toolName}
@@ -697,7 +709,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 tooltipContent={
                                     toolName === 'delete_annotations'
                                         ? 'The approval preference cannot be changed for annotation deletion'
-                                        : undefined
+                                        : 'Default for this kind of change in future responses'
                                 }
                             />
                         )}

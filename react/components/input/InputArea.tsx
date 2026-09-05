@@ -1,11 +1,11 @@
-import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { StopIcon, GlobalSearchIcon, ArrowUpLineIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
 import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom, clearComposerAtom } from '../../atoms/messageComposition';
 import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, answerPendingApprovalsAtom, setRunPermissionModeAtom, approvalVerdictInFlightAtom, beginApprovalVerdictAtom, releaseApprovalVerdictAtom } from '../../atoms/agentRunAtoms';
-import { pendingApprovalsAtom } from '../../agents/agentActions';
-import { runApprovalPolicyAtom } from '../../atoms/runApprovalPolicy';
+import { pendingApprovalsAtom, agentActionsByRunAtom } from '../../agents/agentActions';
+import { isCoveredByFullAccess, runApprovalPolicyAtom } from '../../atoms/runApprovalPolicy';
 import RunPermissionButton, { RunPermissionMode } from '../ui/buttons/RunPermissionButton';
 import Button from '@beaver/agent-ui/primitives/Button';
 import SearchMenu from '@beaver/agent-ui/primitives/SearchMenu';
@@ -142,6 +142,27 @@ const InputArea: React.FC<InputAreaProps> = ({
     const runApprovalPolicy = useAtomValue(runApprovalPolicyAtom);
     const setRunPermissionMode = useSetAtom(setRunPermissionModeAtom);
     const fullAccessRunId = runApprovalPolicy.fullAccess ? runApprovalPolicy.runId : null;
+    // A running tally for the band: with no cards raised, this count is the
+    // only live sign of what the grant is doing until the changes card renders
+    // at the end of the run. It counts every applied library change in the
+    // run, the ones approved by hand before the switch included — "in this
+    // response" is what the user is supervising, not the grant's bookkeeping.
+    // Only changes the grant covers count, though: a confirmed extraction or
+    // external search is recorded as an action too, and the band is making a
+    // claim about library changes.
+    //
+    // Subscribed to the run map itself, not the getter atom: the getter's
+    // closure reads the map only when called, after its own read has finished,
+    // so Jotai would never see the map as a dependency and the count would sit
+    // stale until something else re-rendered this component.
+    const actionsByRun = useAtomValue(agentActionsByRunAtom);
+    const fullAccessAppliedCount = useMemo(() => (
+        fullAccessRunId
+            ? (actionsByRun.get(fullAccessRunId) ?? []).filter((action) =>
+                action.status === 'applied'
+                && isCoveredByFullAccess(action.action_type, action.proposed_data)).length
+            : 0
+    ), [actionsByRun, fullAccessRunId]);
     // The verdict buttons stand in for Send whenever the composer holds text
     // and a decision is pending, whenever that text was typed; an approval
     // pending against an empty composer leaves Stop in place and the bar above
@@ -536,7 +557,7 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     const getPlaceholderText = () => {
         if (placeholder !== undefined) return placeholder;
-        if (isAwaitingApproval) return "Add instructions, then approve or reject";
+        if (isAwaitingApproval) return "Optional instructions, then approve or reject";
         if (isLibraryTab) return "@ to add a source, / for actions";
         if (currentNoteItem) return "@ to add a source, / for actions";
         return "@ to add a source, / for actions, drag to add annotations";
@@ -600,6 +621,11 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <span className="font-color-secondary text-sm truncate">
                         Applying library changes without asking
                     </span>
+                    {fullAccessAppliedCount > 0 && (
+                        <span className="font-color-secondary opacity-70 text-sm flex-none">
+                            {fullAccessAppliedCount === 1 ? '1 applied' : `${fullAccessAppliedCount} applied`}
+                        </span>
+                    )}
                     <div className="flex-1" />
                     <RunPermissionButton
                         mode="full_access"
@@ -617,6 +643,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 <PendingActionsBar
                     onDecide={(approved) => handleApprovalVerdict(approved, false)}
                     disabled={isVerdictInFlight}
+                    decisionsInComposer={showVerdictButtons}
                 />
             )}
 

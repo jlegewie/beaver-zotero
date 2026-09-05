@@ -220,6 +220,24 @@
     text-decoration: underline;
 }
 
+/* Underlined path inside a tertiary footnote. Resting colour matches the
+   surrounding note; hover/focus lifts it to primary so the target is obvious. */
+.beaver-root .text-link-footnote {
+    color: var(--fill-tertiary);
+    text-decoration: underline;
+    cursor: pointer;
+    border: 0;
+    padding: 0;
+    background-color: transparent;
+    box-shadow: none;
+    transition: color 0.2s ease-in-out;
+}
+
+.beaver-root .text-link-footnote:hover,
+.beaver-root .text-link-footnote:focus-visible {
+    color: var(--fill-primary);
+}
+
 .beaver-root .text-link-red {
     color: var(--tag-red);
     opacity: 0.8;

@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import MenuButton from './MenuButton';
-import type { MenuItem } from './ContextMenu';
+import type { MenuFooter, MenuItem } from './ContextMenu';
 import Icon from '../icons/Icon';
 import TickIcon from '../icons/TickIcon';
 
@@ -34,6 +34,17 @@ export interface PermissionMenuProps<T extends string = string> {
     heading?: string;
     /** Note shown under the options, e.g. where the standing default lives. */
     footnote?: string;
+    /**
+     * Clickable span inside the footnote. The rest stays plain text. Falls
+     * back to the whole note when omitted.
+     */
+    footnoteLink?: string;
+    /**
+     * Makes `footnoteLink` (or the whole note) a link. Given when the note
+     * names somewhere the user can go, so the menu offers the way there
+     * instead of only describing it.
+     */
+    onFootnoteClick?: () => void;
     /** Button variant for the trigger. */
     variant?: string;
     /** Render the trigger as its icon alone. */
@@ -85,6 +96,8 @@ function PermissionMenu<T extends string>({
     onChange,
     heading,
     footnote,
+    footnoteLink,
+    onFootnoteClick,
     variant = 'ghost-secondary',
     iconOnly = false,
     disabled = false,
@@ -146,8 +159,34 @@ function PermissionMenu<T extends string>({
         ? <div className="px-2 pt-1 pb-1 text-base font-color-secondary">{heading}</div>
         : undefined;
 
-    const footer = footnote
-        ? <div className="px-2 py-1 text-sm font-color-tertiary">{footnote}</div>
+    // The link closes the menu before it navigates: the click lands inside the
+    // menu, so the outside-click handler never sees it, and the popup would
+    // still be open when the user came back from wherever the link took them.
+    const footer: MenuFooter | undefined = footnote
+        ? (onFootnoteClick
+            ? ({ close }: { close: () => void }) => {
+                const link = footnoteLink && footnote.includes(footnoteLink)
+                    ? footnoteLink
+                    : footnote;
+                const linkAt = footnote.indexOf(link);
+                return (
+                    <div className="px-2 py-1 text-sm font-color-tertiary">
+                        {linkAt > 0 && footnote.slice(0, linkAt)}
+                        <button
+                            type="button"
+                            className="text-sm text-link-footnote"
+                            onClick={() => {
+                                close();
+                                onFootnoteClick();
+                            }}
+                        >
+                            {link}
+                        </button>
+                        {linkAt >= 0 && footnote.slice(linkAt + link.length)}
+                    </div>
+                );
+            }
+            : <div className="px-2 py-1 text-sm font-color-tertiary">{footnote}</div>)
         : undefined;
 
     // The trigger only takes a color of its own for a `warning` option, so the

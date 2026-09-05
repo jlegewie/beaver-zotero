@@ -22,6 +22,7 @@ import {
     setToolExpandedAtom,
 } from '../../../atoms/messageUIState';
 import {
+    getPendingApprovalIdsCoveredByFullAccess,
     isFullAccessGrantedForRun,
     runApprovalPolicyAtom,
 } from '../../../atoms/runApprovalPolicy';
@@ -713,6 +714,12 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         : (editCount === 1 ? 'Note Edit' : `${editCount} Note Edits`);
     const runPermissionMode: RunPermissionMode =
         isFullAccessGrantedForRun(runApprovalPolicy, runId) ? 'full_access' : 'ask';
+    // Every card a switch to full access would answer, not only this group's,
+    // so the menu row can say how far the switch reaches.
+    const pendingCoveredCount = useMemo(
+        () => getPendingApprovalIdsCoveredByFullAccess(allPendingApprovals.values()).length,
+        [allPendingApprovals],
+    );
     const showCollapsedHeaderActions =
         !isProcessing && !hasStreamingChild && (aggregateStatus === 'awaiting' || aggregateStatus === 'pending') && !isExpanded;
     const rejectableActionCount = useMemo(
@@ -890,6 +897,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                     mode={runPermissionMode}
                                     onChange={handleRunPermissionChange}
                                     disabled={isProcessing}
+                                    pendingCoveredCount={pendingCoveredCount}
                                 />
                             )}
                             <div className="flex-1" />

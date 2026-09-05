@@ -8,6 +8,12 @@ interface PendingActionsBarProps {
     onDecide: (approved: boolean) => void;
     /** A decision is already on its way out; a second one must not overtake it. */
     disabled?: boolean;
+    /**
+     * The composer is showing its own verdict pair. This bar then keeps only
+     * the count: two "Approve All" buttons a line apart, one sending the typed
+     * message and one leaving it behind, would be a coin toss.
+     */
+    decisionsInComposer?: boolean;
 }
 
 /**
@@ -21,7 +27,11 @@ interface PendingActionsBarProps {
  * Taking the decision still belongs to the composer, which owns the editor and
  * the one-at-a-time claim on answering.
  */
-const PendingActionsBar: React.FC<PendingActionsBarProps> = ({ onDecide, disabled = false }) => {
+const PendingActionsBar: React.FC<PendingActionsBarProps> = ({
+    onDecide,
+    disabled = false,
+    decisionsInComposer = false,
+}) => {
     const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
 
     const pendingCount = pendingApprovalsMap.size;
@@ -49,8 +59,12 @@ const PendingActionsBar: React.FC<PendingActionsBarProps> = ({ onDecide, disable
             {/* Spacer */}
             <div className="flex-1" />
 
-            {/* Right side: Action buttons */}
-            <div className="display-flex flex-row items-center gap-2 flex-none">
+            {/* Right side: the decision, or a pointer to where it moved */}
+            {decisionsInComposer ? (
+                <span className="font-color-secondary text-sm truncate">
+                    Approve or reject below to send your message
+                </span>
+            ) : <div className="display-flex flex-row items-center gap-2 flex-none">
                 <Button
                     variant="ghost-secondary"
                     onClick={(e) => handleBatchAction(e, false)}
@@ -67,7 +81,7 @@ const PendingActionsBar: React.FC<PendingActionsBarProps> = ({ onDecide, disable
                 >
                     Approve All
                 </Button>
-            </div>
+            </div>}
         </div>
     );
 };
