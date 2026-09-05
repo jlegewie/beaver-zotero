@@ -480,21 +480,19 @@ const InputArea: React.FC<InputAreaProps> = ({
     /**
      * Answer every pending approval.
      *
-     * Whether the composer's text goes with the decision follows the control
-     * the user pressed, not the text. The composer's own verdict buttons stand
-     * in for Send: they send what is in the field and empty it, the way sending
-     * does. Every control outside the composer — the docked bar, and the
-     * cards' own Apply/Reject — is a decision on the changes alone, so it
+     * The composer's verdict buttons and the docked bar both send what is in
+     * the field as user instructions and empty it, the way sending does. The
+     * cards' own Apply/Reject is a decision on the changes alone, so it
      * carries no message and leaves the field untouched.
      */
-    const handleApprovalVerdict = (approved: boolean, fromComposer: boolean) => {
+    const handleApprovalVerdict = (approved: boolean, withInstructions: boolean) => {
         if (pendingApprovalsMap.size === 0) return;
         // Claimed before the wait below, and synchronously, so the first of two
         // quick clicks is the one that decides.
         if (!beginApprovalVerdict()) return;
         // As in sendMessage: pick up a composition the user has just committed.
         const content = editorHandleRef.current?.flushPendingText() ?? messageContent;
-        const instructions = fromComposer && content.trim().length > 0 ? content : null;
+        const instructions = withInstructions && content.trim().length > 0 ? content : null;
         // The cards the user was actually answering, taken now. Tearing down a
         // note preview below can take over a second, and a parallel approval
         // arriving in that window was neither counted on the button they
@@ -641,9 +639,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                 — the field is where the instructions for the decision go. */}
             {composerBand === 'approvals' && (
                 <PendingActionsBar
-                    onDecide={(approved) => handleApprovalVerdict(approved, false)}
+                    onDecide={(approved) => handleApprovalVerdict(approved, true)}
                     disabled={isVerdictInFlight}
-                    decisionsInComposer={showVerdictButtons}
                 />
             )}
 

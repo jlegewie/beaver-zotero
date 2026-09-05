@@ -8,29 +8,19 @@ interface PendingActionsBarProps {
     onDecide: (approved: boolean) => void;
     /** A decision is already on its way out; a second one must not overtake it. */
     disabled?: boolean;
-    /**
-     * The composer is showing its own verdict pair. This bar then keeps only
-     * the count: two "Approve All" buttons a line apart, one sending the typed
-     * message and one leaving it behind, would be a coin toss.
-     */
-    decisionsInComposer?: boolean;
 }
 
 /**
  * Bar that appears above the input area when there are pending agent actions.
  * Shows the count and provides "Approve All" / "Reject All" buttons.
  *
- * A decision on the changes alone: it neither sends what the user has typed nor
- * clears it. Sending a message with the decision is the composer's own pair of
- * verdict buttons, which stand in for Send once the field holds anything.
- *
- * Taking the decision still belongs to the composer, which owns the editor and
+ * A click here is the same decision as the composer's verdict pair: typed text
+ * goes with the answer as user instructions. The composer owns the editor and
  * the one-at-a-time claim on answering.
  */
 const PendingActionsBar: React.FC<PendingActionsBarProps> = ({
     onDecide,
     disabled = false,
-    decisionsInComposer = false,
 }) => {
     const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
 
@@ -53,18 +43,13 @@ const PendingActionsBar: React.FC<PendingActionsBarProps> = ({
 
     return (
         <div className="composer-docked-bar pending-actions-bar display-flex flex-row items-center px-3 py-2 border-bottom-quinary gap-2">
-            {/* Left side: Count, and what happens to a typed message */}
             <span className="font-color-primary text-sm flex-none">{label}</span>
 
             {/* Spacer */}
             <div className="flex-1" />
 
-            {/* Right side: the decision, or a pointer to where it moved */}
-            {decisionsInComposer ? (
-                <span className="font-color-secondary text-sm truncate">
-                    Approve or reject below to send your message
-                </span>
-            ) : <div className="display-flex flex-row items-center gap-2 flex-none">
+            {/* Right side: approve / reject every pending card */}
+            <div className="display-flex flex-row items-center gap-2 flex-none">
                 <Button
                     variant="ghost-secondary"
                     onClick={(e) => handleBatchAction(e, false)}
@@ -81,7 +66,7 @@ const PendingActionsBar: React.FC<PendingActionsBarProps> = ({
                 >
                     Approve All
                 </Button>
-            </div>}
+            </div>
         </div>
     );
 };
