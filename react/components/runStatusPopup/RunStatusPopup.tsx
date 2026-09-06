@@ -1,4 +1,35 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
+
+/**
+ * The shimmering status line, cut with a visible ellipsis.
+ *
+ * Drawn by hand because the shimmer paints its text through a transparent
+ * fill, and Gecko paints `text-overflow`'s marker the same way — the line
+ * looked cut off. The text itself is clipped, and a plain "…" in the line's
+ * own color follows it whenever the text does not fit.
+ */
+const StatusLine: React.FC<{ text: string }> = ({ text }) => {
+    const textRef = useRef<HTMLSpanElement>(null);
+    const [clipped, setClipped] = useState(false);
+
+    useLayoutEffect(() => {
+        const el = textRef.current;
+        const win = el?.ownerDocument.defaultView;
+        if (!el || !win) return;
+        const measure = () => setClipped(el.scrollWidth > el.clientWidth + 1);
+        measure();
+        const observer = new win.ResizeObserver(measure);
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, [text]);
+
+    return (
+        <span className="beaver-run-status-popup__status" title={text}>
+            <span ref={textRef} className="shimmer-text beaver-run-status-popup__status-text">{text}</span>
+            {clipped && <span aria-hidden="true">…</span>}
+        </span>
+    );
+};
 import { useAtomValue } from 'jotai';
 import { isSidebarVisibleAtom } from '../../atoms/ui';
 import { runStatusPopupForceVisibleAtom } from '../../atoms/runStatusPopup';
@@ -84,7 +115,7 @@ const RunningView: React.FC<{ card: RunningCard }> = ({ card }) => (
     <Header
         card={card}
         leading={<RunPulse />}
-        detail={<span className="shimmer-text" title={card.statusLine}>{card.statusLine}</span>}
+        detail={<StatusLine text={card.statusLine} />}
     />
 );
 

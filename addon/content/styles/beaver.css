@@ -310,13 +310,21 @@
     text-overflow: ellipsis;
 }
 
-/* The shimmer paints its gradient across the whole box; keep the box to the text. */
-.beaver-run-status-popup__detail > .shimmer-text {
-    display: inline-block;
-    max-width: 100%;
+/* The shimmering status line: the text clips, and the component appends a
+ * plain ellipsis beside it. Gecko does not paint `text-overflow`'s own marker
+ * through the shimmer's transparent text fill. */
+.beaver-run-status-popup__status {
+    display: flex;
+    flex-direction: row;
+    min-width: 0;
+}
+
+.beaver-run-status-popup__status-text {
+    display: block;
+    flex: 0 1 auto;
+    min-width: 0;
     overflow: hidden;
-    text-overflow: ellipsis;
-    vertical-align: top;
+    white-space: nowrap;
 }
 
 .beaver-run-status-popup__body {
@@ -444,16 +452,16 @@
 .beaver-run-pulse {
     position: relative;
     display: inline-block;
-    width: 16px;
-    height: 16px;
+    width: 20px;
+    height: 20px;
 }
 
 .beaver-run-pulse__dot {
     position: absolute;
-    top: 5px;
-    left: 5px;
-    width: 6px;
-    height: 6px;
+    top: 6px;
+    left: 6px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
     background: var(--accent-blue);
 }
@@ -462,9 +470,9 @@
     position: absolute;
     inset: 0;
     border-radius: 50%;
-    border: 1.5px solid var(--accent-blue);
+    border: 2px solid var(--accent-blue);
     opacity: 0;
-    transform: scale(0.35);
+    transform: scale(0.4);
     animation: beaverRunPulseRing 2.2s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
 }
 
@@ -473,9 +481,9 @@
 }
 
 @keyframes beaverRunPulseRing {
-    0% { transform: scale(0.35); opacity: 0.85; }
-    70% { transform: scale(1); opacity: 0; }
-    100% { transform: scale(1); opacity: 0; }
+    0% { transform: scale(0.4); opacity: 1; }
+    75% { transform: scale(1.05); opacity: 0; }
+    100% { transform: scale(1.05); opacity: 0; }
 }
 
 /* Toolbar Button */
