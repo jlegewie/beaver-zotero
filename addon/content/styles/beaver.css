@@ -186,6 +186,298 @@
     pointer-events: auto;
 }
 
+/* Run status popup: the open thread's run, in the corner of the main window
+ * while the sidebar is closed (react/components/runStatusPopup). Sits inside
+ * #beaver-pane-floating-popup, under any message popups. */
+.beaver-run-status-popup {
+    position: relative;
+    align-self: flex-end;
+    width: 324px;
+    max-width: 100%;
+    margin: 0 4px 12px 0;
+    /* Room above the card for the layers that stand for other threads. */
+    padding-top: calc(var(--beaver-run-status-stack, 0) * 6px);
+}
+
+.beaver-run-status-popup[data-stack-depth="1"] { --beaver-run-status-stack: 1; }
+.beaver-run-status-popup[data-stack-depth="2"] { --beaver-run-status-stack: 2; }
+
+/* One sliver per further thread, narrower and higher the further back it is. */
+.beaver-run-status-popup__layer {
+    position: absolute;
+    top: calc((var(--beaver-run-status-stack, 0) - var(--beaver-stack-depth)) * 6px);
+    left: calc(var(--beaver-stack-depth) * 10px);
+    right: calc(var(--beaver-stack-depth) * 10px);
+    height: 16px;
+    border: 1px solid var(--beaver-border-strong);
+    border-bottom: 0;
+    border-radius: 12px 12px 0 0;
+    background: var(--beaver-surface-overlay);
+    opacity: calc(1 - var(--beaver-stack-depth) * 0.3);
+}
+
+.beaver-run-status-popup__card {
+    position: relative;
+    box-sizing: border-box;
+    overflow: hidden;
+    border: 1px solid var(--beaver-border-strong);
+    border-radius: 12px;
+    background: var(--beaver-surface-overlay);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14), 0 1px 3px rgba(0, 0, 0, 0.08);
+    cursor: pointer;
+    transition: border-color 120ms ease;
+}
+
+.beaver-run-status-popup__card--settled {
+    transition: border-color 120ms ease, height 220ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.beaver-run-status-popup__card:hover {
+    border-color: var(--fill-tertiary);
+}
+
+.beaver-run-status-popup__card:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 1px;
+}
+
+.beaver-run-status-popup__content {
+    display: flex;
+    flex-direction: column;
+    padding: 10px 12px 10px 12px;
+    gap: 8px;
+}
+
+.beaver-run-status-popup__header {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 10px;
+    min-width: 0;
+}
+
+/* The pulse and the icons share one slot so the title column lines up across states. */
+.beaver-run-status-popup__leading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+}
+
+.beaver-run-status-popup__text {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 2px;
+}
+
+.beaver-run-status-popup__trailing {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    /* Pull the dismiss button flush with the padding, as on the version card. */
+    margin: -4px -6px -4px 0;
+}
+
+/* The close button only appears while the pointer or focus is on the card. */
+.beaver-run-status-popup__dismiss {
+    opacity: 0;
+    transition: opacity 120ms ease;
+}
+
+.beaver-run-status-popup__card:hover .beaver-run-status-popup__dismiss,
+.beaver-run-status-popup__card:focus-within .beaver-run-status-popup__dismiss {
+    opacity: 1;
+}
+
+.beaver-run-status-popup__title {
+    font-size: 0.95rem;
+    font-weight: 500;
+    line-height: 20px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.beaver-run-status-popup__detail {
+    font-size: 0.875rem;
+    line-height: 18px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The shimmer paints its gradient across the whole box; keep the box to the text. */
+.beaver-run-status-popup__detail > .shimmer-text {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: top;
+}
+
+.beaver-run-status-popup__body {
+    font-size: 0.875rem;
+    line-height: 1.35;
+    padding-left: 30px;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.beaver-run-status-popup__footer {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding-top: 2px;
+}
+
+.beaver-run-status-popup .beaver-run-status-popup__footer > button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+/* The permission menu gives way first: its label truncates before a
+ * decision button wraps. */
+.beaver-run-status-popup__permission {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.beaver-run-status-popup__permission > *,
+.beaver-run-status-popup .beaver-run-status-popup__permission button {
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.beaver-run-status-popup .beaver-run-status-popup__permission button > * {
+    min-width: 0;
+}
+
+.beaver-run-status-popup__rows {
+    display: flex;
+    flex-direction: column;
+    margin-left: 30px;
+    border: 1px solid var(--beaver-border-subtle);
+    border-radius: 8px;
+    background: var(--beaver-fill-subtle);
+    overflow: hidden;
+}
+
+/* Doubled selector: the pane-wide `[id^="beaver-pane-"] button { all: revert }`
+ * reset outranks a single class. */
+.beaver-run-status-popup .beaver-run-status-popup__row {
+    appearance: none;
+    -moz-appearance: none;
+    margin: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 5px 8px;
+    font-size: 0.875rem;
+    line-height: 18px;
+    cursor: pointer;
+}
+
+.beaver-run-status-popup__row + .beaver-run-status-popup__row {
+    border-top: 1px solid var(--beaver-border-subtle);
+}
+
+.beaver-run-status-popup__row:hover {
+    background: var(--beaver-fill-hover);
+}
+
+.beaver-run-status-popup__row:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -2px;
+}
+
+.beaver-run-status-popup__row-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* A fixed label keeps its width; the trail beside it truncates first. */
+.beaver-run-status-popup__row-text--fixed {
+    flex: 0 0 auto;
+}
+
+.beaver-run-status-popup__row-trail {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.beaver-run-status-popup__row-arrow {
+    flex: 0 0 auto;
+    opacity: 0;
+    transition: opacity 120ms ease;
+}
+
+.beaver-run-status-popup__row:hover .beaver-run-status-popup__row-arrow {
+    opacity: 1;
+}
+
+/* A working run: a dot with a ring that keeps expanding out of it and fading. */
+.beaver-run-pulse {
+    position: relative;
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+}
+
+.beaver-run-pulse__dot {
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent-blue);
+}
+
+.beaver-run-pulse__ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 1.5px solid var(--accent-blue);
+    opacity: 0;
+    transform: scale(0.35);
+    animation: beaverRunPulseRing 2.2s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
+}
+
+.beaver-run-pulse__ring:nth-child(2) {
+    animation-delay: 1.1s;
+}
+
+@keyframes beaverRunPulseRing {
+    0% { transform: scale(0.35); opacity: 0.85; }
+    70% { transform: scale(1); opacity: 0; }
+    100% { transform: scale(1); opacity: 0; }
+}
+
 /* Toolbar Button */
 #zotero-beaver-tb-chat-toggle {
     list-style-image: url("chrome://beaver/content/icons/magic-wand.svg");

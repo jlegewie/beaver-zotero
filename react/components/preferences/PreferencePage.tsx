@@ -5,6 +5,7 @@ import { getPref, setPref } from '../../../src/utils/prefs';
 import { UserIcon, LogoutIcon, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, DollarCircleIcon } from '../icons/icons';
 import Button from "@beaver/agent-ui/primitives/Button";
 import { useSetAtom } from 'jotai';
+import { runStatusPopupEnabledAtom } from '../../atoms/runStatusPopup';
 import { profileWithPlanAtom, creditPlanAtom, hasCreditPlanAtom } from "../../atoms/profile";
 import { activePreferencePageTabAtom, PreferencePageTab } from "../../atoms/ui";
 import { logger } from "@beaver/agent-core/platform/logger";
@@ -41,6 +42,7 @@ const PreferencePage: React.FC = () => {
     });
     const [addSelectedOnNewThread, setAddSelectedOnNewThread] = useState(() => getPref('addSelectedItemsOnNewThread'));
     const [addSelectedOnOpen, setAddSelectedOnOpen] = useState(() => getPref('addSelectedItemsOnOpen'));
+    const [runStatusPopupEnabled, setRunStatusPopupEnabled] = useAtom(runStatusPopupEnabledAtom);
     const [addProvenanceNote, setAddProvenanceNote] = useState(() => getPref('addBeaverProvenanceNote'));
     const [focusResponseForScreenReaders, setFocusResponseForScreenReaders] = useState(() => getPref('focusResponseForScreenReaders'));
     const [showDiffPreview, setShowDiffPreview] = useState(() => getPref('showDiffPreviewInNoteEditor') !== false);
@@ -147,6 +149,10 @@ const PreferencePage: React.FC = () => {
         setPref("addSelectedItemsOnOpen", newValue);
         setAddSelectedOnOpen(newValue);
     }, [addSelectedOnOpen]);
+
+    const handleRunStatusPopupToggle = useCallback(() => {
+        setRunStatusPopupEnabled(!runStatusPopupEnabled);
+    }, [runStatusPopupEnabled, setRunStatusPopupEnabled]);
 
     const handleAddProvenanceNoteToggle = useCallback(() => {
         const newValue = !addProvenanceNote;
@@ -417,6 +423,22 @@ const PreferencePage: React.FC = () => {
                                         type="checkbox"
                                         checked={addSelectedOnOpen}
                                         onChange={handleAddSelectedOnOpenToggle}
+                                        onClick={(e) => e.stopPropagation()}
+                                        style={{ cursor: 'pointer', margin: 0 }}
+                                    />
+                                }
+                            />
+                            <SettingsRow
+                                title="Run Status Popup"
+                                description="Show what Beaver is doing in the corner of the window while the sidebar is closed"
+                                onClick={handleRunStatusPopupToggle}
+                                hasBorder
+                                tooltip="When enabled, a small card in the bottom-right corner of the Zotero window shows the current run's progress, lets you approve pending changes, and reports when a response is ready."
+                                control={
+                                    <input
+                                        type="checkbox"
+                                        checked={runStatusPopupEnabled}
+                                        onChange={handleRunStatusPopupToggle}
                                         onClick={(e) => e.stopPropagation()}
                                         style={{ cursor: 'pointer', margin: 0 }}
                                     />

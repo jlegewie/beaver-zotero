@@ -39,6 +39,7 @@ declare namespace _ZoteroTypes {
       "showDiffPreviewInNoteEditor": boolean;
       "enableSystemNotifications": boolean;
       "enableResponseCompleteNotifications": boolean;
+      "enableRunStatusPopup": boolean;
       "deferredToolPreferences": string;
       "customInstructions": string;
       "googleGenerativeAiApiKey": string;
