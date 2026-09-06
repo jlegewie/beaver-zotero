@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, DollarCircleIcon, ArrowUpRightIcon } from '../icons/icons';
+import { UserIcon, LogoutIcon, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, DollarCircleIcon } from '../icons/icons';
 import Button from "@beaver/agent-ui/primitives/Button";
 import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, creditPlanAtom, hasCreditPlanAtom } from "../../atoms/profile";
@@ -264,21 +264,14 @@ const PreferencePage: React.FC = () => {
             id="beaver-preferences"
             className="flex-1 min-h-0 min-w-0 display-flex flex-row"
         >
-            {/* ===== SIDEBAR: title, section tabs, account ===== */}
+            {/* ===== SIDEBAR: section tabs, account ===== */}
             <div className="beaver-prefs-sidebar display-flex flex-col flex-shrink-0 min-h-0 border-right-quinary">
-                <div className="display-flex flex-row items-center gap-2" style={{ padding: '16px 16px 12px' }}>
-                    <Icon icon={SettingsIcon} className="scale-12" aria-hidden="true" focusable="false" />
-                    <h1 id="beaver-preferences-title" className="text-lg font-semibold font-color-primary" style={{ marginBlock: 0 }}>
-                        Settings
-                    </h1>
-                </div>
-
                 <div
                     role="tablist"
-                    aria-labelledby="beaver-preferences-title"
+                    aria-label="Settings sections"
                     aria-orientation="vertical"
                     className="display-flex flex-col gap-05 flex-1 min-h-0 overflow-y-auto scrollbar"
-                    style={{ padding: '0 10px' }}
+                    style={{ padding: '14px 10px 0' }}
                     onKeyDown={handleTabKeyDown}
                 >
                     {tabs.map((tab) => (
@@ -291,7 +284,7 @@ const PreferencePage: React.FC = () => {
                             aria-selected={tab.id === effectiveActiveTab}
                             aria-controls="beaver-preferences-panel"
                             tabIndex={tab.id === effectiveActiveTab ? 0 : -1}
-                            className="beaver-prefs-nav-item text-base"
+                            className="beaver-prefs-nav-item"
                         >
                             <Icon icon={tab.icon} aria-hidden="true" focusable="false" />
                             <span className="truncate">{tab.label}</span>
@@ -299,29 +292,28 @@ const PreferencePage: React.FC = () => {
                     ))}
                 </div>
 
-                {/* Account stays visible whichever section is open. */}
-                <div className="display-flex flex-col gap-2 border-top-quinary" style={{ padding: '12px 14px' }}>
+                {/* Account stays visible whichever section is open; it doubles as
+                    the shortcut to the Plan & Usage page. */}
+                <div className="display-flex flex-col gap-2 border-top-quinary" style={{ padding: '10px 10px 12px' }}>
                     {user ? (
                         <>
-                            <div className="display-flex flex-row items-center gap-2 min-w-0">
+                            <button
+                                type="button"
+                                className="beaver-prefs-account"
+                                onClick={() => setActiveTab('billing')}
+                                title={`${user.email} — open Plan & Usage`}
+                                aria-label={`Account ${user.email}, ${planLabel}. Open Plan & Usage`}
+                                aria-current={effectiveActiveTab === 'billing' ? 'page' : undefined}
+                            >
                                 <div className="beaver-prefs-avatar" aria-hidden="true">{accountInitial}</div>
-                                <div className="display-flex flex-col min-w-0">
-                                    <div className="text-sm font-color-primary font-medium truncate" title={user.email}>
+                                <div className="display-flex flex-col min-w-0" aria-hidden="true">
+                                    <div className="text-base font-color-primary font-medium truncate">
                                         {user.email}
                                     </div>
-                                    <div className="text-xs font-color-secondary truncate">{planLabel}</div>
+                                    <div className="text-sm font-color-secondary truncate">{planLabel}</div>
                                 </div>
-                            </div>
-                            <div className="display-flex flex-row items-center gap-2">
-                                <Button
-                                    variant="outline"
-                                    rightIcon={ArrowUpRightIcon}
-                                    onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/login')}
-                                    style={{ padding: '3px 6px' }}
-                                    title="Manage your account in the browser"
-                                >
-                                    Manage
-                                </Button>
+                            </button>
+                            <div className="display-flex flex-row items-center" style={{ paddingLeft: '4px' }}>
                                 <Button
                                     variant="outline"
                                     icon={LogoutIcon}
@@ -334,14 +326,14 @@ const PreferencePage: React.FC = () => {
                             </div>
                         </>
                     ) : (
-                        <div className="display-flex flex-row items-center gap-2 min-w-0">
+                        <div className="display-flex flex-row items-center gap-2 min-w-0" style={{ padding: '4px' }}>
                             <div className="beaver-prefs-avatar" aria-hidden="true">
-                                <Icon icon={UserIcon} className="scale-90" />
+                                <Icon icon={UserIcon} />
                             </div>
-                            <div className="text-sm font-color-secondary">Not signed in</div>
+                            <div className="text-base font-color-secondary">Not signed in</div>
                         </div>
                     )}
-                    <div className="display-flex flex-row items-center gap-1" style={{ paddingLeft: '2px' }}>
+                    <div className="display-flex flex-row items-center gap-1" style={{ paddingLeft: '6px' }}>
                         <button
                             type="button"
                             onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/terms')}

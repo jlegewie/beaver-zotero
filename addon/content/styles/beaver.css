@@ -78,15 +78,16 @@
 #beaver-pane-preferences .beaver-prefs-nav-item {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 9px;
     width: 100%;
     margin: 0;
-    padding: 6px 10px;
+    padding: 7px 10px;
     border: none;
     border-radius: 6px;
     background-color: transparent;
     color: var(--fill-primary);
     font: inherit;
+    font-size: 1.0625rem;
     line-height: 1.3;
     text-align: left;
     white-space: nowrap;
@@ -110,6 +111,8 @@
 
 #beaver-pane-preferences .beaver-prefs-nav-item svg {
     flex-shrink: 0;
+    width: 18px;
+    height: 18px;
     color: var(--fill-secondary);
 }
 
@@ -117,18 +120,49 @@
     color: var(--fill-primary);
 }
 
-/* Account block at the bottom of the sidebar. */
+/* Account block at the bottom of the sidebar: a button that opens Plan & Usage,
+ * styled like the navigation entries above it. */
+#beaver-pane-preferences .beaver-prefs-account {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 6px 8px;
+    border: none;
+    border-radius: 8px;
+    background-color: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+#beaver-pane-preferences .beaver-prefs-account:hover {
+    background-color: var(--fill-quinary);
+}
+
+#beaver-pane-preferences .beaver-prefs-account[aria-current="page"] {
+    background-color: var(--fill-quarternary);
+}
+
+#beaver-pane-preferences .beaver-prefs-account:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+}
+
 #beaver-pane-preferences .beaver-prefs-avatar {
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    width: 30px;
-    height: 30px;
+    width: 38px;
+    height: 38px;
     border-radius: 50%;
     background-color: var(--fill-quarternary);
     color: var(--fill-primary);
-    font-size: 0.85rem;
+    font-size: 1.05rem;
     font-weight: 600;
     text-transform: uppercase;
 }
