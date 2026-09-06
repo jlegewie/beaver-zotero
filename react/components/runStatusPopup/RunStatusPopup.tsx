@@ -47,6 +47,7 @@ import {
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import RunPermissionButton from '../ui/buttons/RunPermissionButton';
+import AskUserQuestionCard from '@beaver/agent-ui/chat/AskUserQuestionCard';
 import { getAgentActionToolIcon } from '../../host/zotero/components/agentActionViewHelpers';
 import RunPulse from './RunPulse';
 import { useRunStatusPopupCard } from './useRunStatusPopupCard';
@@ -77,7 +78,9 @@ const Mark: React.FC<{ icon: React.FC<React.SVGProps<SVGSVGElement>>; className?
  */
 function isCardBackgroundClick(event: React.MouseEvent<HTMLElement>): boolean {
     const target = event.target as Element | null;
-    return !target?.closest('button, a, [role="menu"], [role="menuitem"], [role="menuitemradio"]');
+    return !target?.closest(
+        'button, a, input, textarea, label, [role="menu"], [role="menuitem"], [role="menuitemradio"], [data-run-status-popup-interactive]',
+    );
 }
 
 const Header: React.FC<{
@@ -214,19 +217,23 @@ const BatchView: React.FC<{ card: BatchCard }> = ({ card }) => (
     </>
 );
 
+/**
+ * The question is answered right here, with the same card the composer shows
+ * for it. Without Stop: a corner popup is not the place to abandon a run.
+ */
 const QuestionView: React.FC<{ card: QuestionCard }> = ({ card }) => (
     <>
         <Header
             card={card}
             leading={<Mark icon={HelpCircleIcon} className="font-color-secondary" />}
-            detail={<span title={card.title}>{card.title}</span>}
-            detailClassName="font-color-primary"
+            detail={null}
         />
-        <div className="beaver-run-status-popup__footer">
-            <div className="flex-1" />
-            <Button variant="solid" style={FOOTER_BUTTON_STYLE} rightIcon={ArrowUpRightIcon} onClick={card.onOpen}>
-                Answer
-            </Button>
+        <div className="beaver-run-status-popup__question" data-run-status-popup-interactive>
+            <AskUserQuestionCard
+                key={card.question.questionId}
+                pendingQuestion={card.question}
+                onSubmit={card.onSubmit}
+            />
         </div>
     </>
 );

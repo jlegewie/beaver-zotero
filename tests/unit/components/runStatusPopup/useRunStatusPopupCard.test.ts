@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
     answerPendingApprovals: vi.fn(),
     setRunPermissionMode: vi.fn(),
     sendCreditConfirmation: vi.fn(),
+    sendQuestionResponse: vi.fn(),
     dismissPreview: vi.fn(async () => {}),
     openNoteByKey: vi.fn(),
     artifactRows: [] as any[],
@@ -53,6 +54,7 @@ vi.mock('../../../../react/atoms/agentRunAtoms', async () => {
         answerPendingApprovalsAtom: atom(null, (_get, _set, args: unknown) => mocks.answerPendingApprovals(args)),
         setRunPermissionModeAtom: atom(null, (_get, _set, args: unknown) => mocks.setRunPermissionMode(args)),
         sendCreditConfirmationResponseAtom: atom(null, (_get, _set, args: unknown) => mocks.sendCreditConfirmation(args)),
+        sendAskUserQuestionResponseAtom: atom(null, (_get, _set, args: unknown) => mocks.sendQuestionResponse(args)),
     };
 });
 vi.mock('../../../../react/host/zotero/editNotePreviewLifecycle', () => ({
@@ -239,7 +241,11 @@ describe('while a run waits on the user', () => {
         store.set(activeRunAtom, run({ status: 'awaiting_deferred' }));
         store.set(pendingQuestionsAtom, new Map([['tc-q', { questionId: 'q', toolcallId: 'tc-q', title: 'Which years?', questions: [] }]]));
         mount();
-        expect(latest).toMatchObject({ kind: 'question', title: 'Which years?' });
+        expect(latest).toMatchObject({ kind: 'question', question: { questionId: 'q', title: 'Which years?' } });
+        (latest as any).onSubmit([{ item_id: 'q0', selected_option_ids: ['q0-o1'] }]);
+        expect(mocks.sendQuestionResponse).toHaveBeenCalledExactlyOnceWith({
+            questionId: 'q', toolcallId: 'tc-q', answers: [{ item_id: 'q0', selected_option_ids: ['q0-o1'] }], cancelled: false,
+        });
 
         set(pendingCreditConfirmationsAtom, new Map([['c', {
             confirmationId: 'c', runId: 'run-1', title: 'Continue past 50 credits?', message: 'Body',

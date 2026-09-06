@@ -337,6 +337,20 @@
     overflow: hidden;
 }
 
+/* The shared question card, drawn inside the popup: the popup is the frame,
+ * so the card gives up its own. */
+.beaver-run-status-popup__question {
+    cursor: default;
+}
+
+.beaver-run-status-popup__question > .user-message-display {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
 .beaver-run-status-popup__footer {
     display: flex;
     flex-direction: row;

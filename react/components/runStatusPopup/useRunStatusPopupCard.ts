@@ -24,7 +24,8 @@ import {
     pendingCreditConfirmationsAtom,
     type PendingCreditConfirmation,
 } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
-import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
+import { pendingQuestionsAtom, type PendingQuestion } from '@beaver/agent-core/run-state/pendingQuestions';
+import type { AskUserQuestionAnswer } from '@beaver/agent-core/protocol/agentProtocol';
 import type { PendingApproval } from '@beaver/agent-ui/host';
 import { pendingApprovalsAtom } from '../../agents/agentActions';
 import {
@@ -33,6 +34,7 @@ import {
     autoReplacementPendingRunIdsAtom,
     beginApprovalVerdictAtom,
     releaseApprovalVerdictAtom,
+    sendAskUserQuestionResponseAtom,
     sendCreditConfirmationResponseAtom,
     setRunPermissionModeAtom,
 } from '../../atoms/agentRunAtoms';
@@ -263,6 +265,17 @@ function useApprovalControls(runId: string | null, approvals: readonly PendingAp
     return { mode, pendingCoveredCount, onDecide, onPermissionChange, decideDisabled: isVerdictInFlight };
 }
 
+/** The question card's answers, sent the way the composer panel sends them. */
+function useQuestionControls(question: PendingQuestion | null) {
+    const sendResponse = useSetAtom(sendAskUserQuestionResponseAtom);
+    const questionId = question?.questionId ?? null;
+    const toolcallId = question?.toolcallId ?? null;
+    return useCallback((answers: AskUserQuestionAnswer[]) => {
+        if (!questionId || !toolcallId) return;
+        sendResponse({ questionId, toolcallId, answers, cancelled: false });
+    }, [questionId, toolcallId, sendResponse]);
+}
+
 /** The credit card's decision, one-shot per confirmation like the composer panel's. */
 function useCreditControls(confirmation: PendingCreditConfirmation | null) {
     const sendResponse = useSetAtom(sendCreditConfirmationResponseAtom);
@@ -381,6 +394,7 @@ function useLiveCard(): RunStatusPopupCard | null {
     const singleTitle = useSingleApprovalTitle(approvals.length === 1 ? approvals[0] : null);
     const approvalControls = useApprovalControls(liveRun?.id ?? null, approvals);
     const creditControls = useCreditControls(credit);
+    const onSubmitQuestion = useQuestionControls(question);
     const completed = useCompletedDetails(isLive ? null : completion?.runId ?? null);
     const setPanelState = useSetAtom(setAnnotationPanelStateAtom);
     // The changes card keys its expansion by the answer's last run, so the
@@ -457,7 +471,7 @@ function useLiveCard(): RunStatusPopupCard | null {
             };
         }
         if (question) {
-            return { ...base, kind: 'question', title: question.title?.trim() || 'Beaver has a question for you' };
+            return { ...base, kind: 'question', question, onSubmit: onSubmitQuestion };
         }
         return { ...base, kind: 'running', statusLine: isAutoRetrying ? 'Retrying' : statusLine };
     }
@@ -540,7 +554,27 @@ function usePreviewCard(preview: RunStatusPopupPreview | null): RunStatusPopupCa
                 scope: preview.scope ?? '568 items in Methods and its subcollections',
             };
         case 'question':
-            return { ...base, kind: 'question', title: preview.title ?? 'Beaver has a question for you' };
+            return {
+                ...base,
+                kind: 'question',
+                question: {
+                    questionId: 'preview-question',
+                    toolcallId: 'preview-toolcall',
+                    title: preview.title ?? 'Scope',
+                    questions: [{
+                        id: 'q0',
+                        header: 'Time range',
+                        question: 'Which years should the literature review cover?',
+                        options: [
+                            { id: 'q0-o1', label: 'Last 5 years', description: 'Recent work only' },
+                            { id: 'q0-o2', label: 'Last 20 years' },
+                            { id: 'q0-o3', label: 'Everything' },
+                        ],
+                        allow_custom: true,
+                    }],
+                },
+                onSubmit: clear,
+            };
         case 'completed':
             return {
                 ...base,

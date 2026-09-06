@@ -8,6 +8,8 @@ import type { AgentRun, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { isAutoLoadingToolCall, isThinkingInProgress } from '@beaver/agent-core/agents/messageVisibility';
 import { getToolCallStatus, type ToolResult } from '@beaver/agent-core/run-state/atoms';
 import type { PendingApproval } from '@beaver/agent-ui/host';
+import type { PendingQuestion } from '@beaver/agent-core/run-state/pendingQuestions';
+import type { AskUserQuestionAnswer } from '@beaver/agent-core/protocol/agentProtocol';
 import type { RunPermissionMode } from '../ui/buttons/RunPermissionButton';
 import { getActionLabel } from '../../host/zotero/components/agentActionViewHelpers';
 
@@ -91,7 +93,9 @@ export interface BatchCard extends RunStatusCardBase {
 
 export interface QuestionCard extends RunStatusCardBase {
     kind: 'question';
-    title: string;
+    /** The request itself; the card draws the shared question UI for it. */
+    question: PendingQuestion;
+    onSubmit: (answers: AskUserQuestionAnswer[]) => void;
 }
 
 export interface CompletedCard extends RunStatusCardBase {
