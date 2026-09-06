@@ -84,6 +84,7 @@ import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuesti
 import { pendingApprovalsAtom } from '../../../../react/agents/agentActions';
 import { autoReplacementPendingRunIdsAtom } from '../../../../react/atoms/agentRunAtoms';
 import { isSidebarVisibleAtom } from '../../../../react/atoms/ui';
+import { annotationPanelStateAtom } from '../../../../react/atoms/messageUIState';
 import { runStatusPopupCompletionAtom, runStatusPopupPreviewAtom } from '../../../../react/atoms/runStatusPopup';
 import { useRunStatusPopupCard } from '../../../../react/components/runStatusPopup/useRunStatusPopupCard';
 import type { RunStatusPopupCard } from '../../../../react/components/runStatusPopup/runStatusPopupModel';
@@ -303,9 +304,14 @@ describe('when a run finishes', () => {
 
         expect(latest).toMatchObject({ kind: 'completed', changes: '1 pending' });
         expect((latest as any).artifacts).toHaveLength(1);
-        expect((latest as any).artifacts[0].title).toBe('Summary: Smith 2014');
+        expect((latest as any).artifacts[0]).toMatchObject({ actionType: 'create_note', label: 'Created Note', title: 'Summary: Smith 2014' });
         (latest as any).artifacts[0].open();
         expect(mocks.openNoteByKey).toHaveBeenCalledExactlyOnceWith(1, 'ABCD1234');
+
+        // Reviewing the changes opens Beaver on the answer with its card expanded.
+        act(() => { (latest as any).onReviewChanges(); });
+        expect(store.get(annotationPanelStateAtom)['run-1:changes']).toMatchObject({ resultsVisible: true });
+        expect(mocks.dispatch).toHaveBeenCalledWith('toggleChat', { forceOpen: true });
     });
 
     it('does not report a run that finished in front of the user', () => {

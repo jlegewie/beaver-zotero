@@ -42,6 +42,7 @@ import {
     runApprovalPolicyAtom,
 } from '../../atoms/runApprovalPolicy';
 import { isSidebarVisibleAtom } from '../../atoms/ui';
+import { setAnnotationPanelStateAtom } from '../../atoms/messageUIState';
 import {
     dismissRunStatusPopupCardAtom,
     runStatusPopupCompletionAtom,
@@ -275,10 +276,15 @@ function useCreditControls(confirmation: PendingCreditConfirmation | null) {
     return { onDecide, decideDisabled: confirmationId !== null && decidedId === confirmationId };
 }
 
-function artifactTitle(row: ReviewRow): string {
+/** The row's label and title, worded as the sidebar's artifacts list words them. */
+function describeArtifact(row: ReviewRow): { label: string; title: string | null } {
     const [first] = row.actions;
-    return getActionTitle(row.actionType, first.proposed_data, null, row.actions)
-        ?? getActionLabel(row.actionType, first.proposed_data, true);
+    const isInEffect = row.actions.some((action) => action.status === 'applied'
+        || (action.status === 'error' && action.result_data != null));
+    return {
+        label: getActionLabel(row.actionType, first.proposed_data, isInEffect),
+        title: getActionTitle(row.actionType, first.proposed_data, null, row.actions),
+    };
 }
 
 function artifactOpener(row: ReviewRow): (() => void) | undefined {
@@ -318,7 +324,8 @@ function useCompletedDetails(runId: string | null): CompletedDetails {
             run,
             artifacts: shown.map((row) => ({
                 key: getReviewRowKey(row),
-                title: artifactTitle(row),
+                actionType: row.actionType,
+                ...describeArtifact(row),
                 open: artifactOpener(row),
             })),
             hiddenArtifactCount: artifactRows.length - shown.length,
@@ -375,6 +382,16 @@ function useLiveCard(): RunStatusPopupCard | null {
     const approvalControls = useApprovalControls(liveRun?.id ?? null, approvals);
     const creditControls = useCreditControls(credit);
     const completed = useCompletedDetails(isLive ? null : completion?.runId ?? null);
+    const setPanelState = useSetAtom(setAnnotationPanelStateAtom);
+    // The changes card keys its expansion by the answer's last run, so the
+    // card is open by the time the sidebar draws it.
+    const completedRunId = completed.run?.id ?? null;
+    const onReviewChanges = useCallback(() => {
+        if (completedRunId) {
+            setPanelState({ key: `${completedRunId}:changes`, updates: { resultsVisible: true } });
+        }
+        openBeaver();
+    }, [completedRunId, setPanelState]);
 
     if (!enabled) return null;
 
@@ -462,6 +479,7 @@ function useLiveCard(): RunStatusPopupCard | null {
             artifacts: completed.artifacts,
             hiddenArtifactCount: completed.hiddenArtifactCount,
             changes: completed.changes,
+            onReviewChanges,
         };
     }
 
@@ -533,11 +551,14 @@ function usePreviewCard(preview: RunStatusPopupPreview | null): RunStatusPopupCa
                     : preview.outcome === 'canceled' ? 'Response was interrupted' : null,
                 artifacts: (preview.artifacts ?? ['Summary: Smith 2014']).map((title, index) => ({
                     key: `preview-${index}`,
+                    actionType: 'create_note',
+                    label: 'Created Note',
                     title,
                     open: clear,
                 })),
                 hiddenArtifactCount: 0,
                 changes: preview.changes === undefined ? '2 applied, 1 pending' : preview.changes,
+                onReviewChanges: openBeaver,
             };
     }
 }

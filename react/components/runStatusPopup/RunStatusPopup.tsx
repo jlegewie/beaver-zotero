@@ -12,7 +12,6 @@ import {
     Icon,
     LayersIcon,
     LibraryIcon,
-    NoteIcon,
 } from '../icons/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
@@ -138,7 +137,7 @@ const CreditView: React.FC<{ card: CreditCard }> = ({ card }) => (
     <>
         <Header
             card={card}
-            leading={<Mark icon={DollarCircleIcon} className="font-color-orange" />}
+            leading={<Mark icon={DollarCircleIcon} className="font-color-secondary" />}
             detail={<span title={card.title}>{card.title}</span>}
             detailClassName="font-color-primary"
         />
@@ -226,10 +225,13 @@ const CompletedView: React.FC<{ card: CompletedCard }> = ({ card }) => {
                             type="button"
                             className="beaver-run-status-popup__row"
                             onClick={artifact.open ?? card.onOpen}
-                            title={artifact.title}
+                            title={artifact.title ?? artifact.label}
                         >
-                            <Icon icon={NoteIcon} className="font-color-secondary" />
-                            <span className="beaver-run-status-popup__row-text font-color-primary">{artifact.title}</span>
+                            <Icon icon={getAgentActionToolIcon(artifact.actionType)} className="font-color-secondary" />
+                            <span className="beaver-run-status-popup__row-text">
+                                <span className="font-color-primary font-medium">{artifact.label}</span>
+                                {artifact.title && <span className="font-color-secondary"> {artifact.title}</span>}
+                            </span>
                             <Icon icon={ArrowUpRightIcon} className="font-color-tertiary beaver-run-status-popup__row-arrow" />
                         </button>
                     ))}
@@ -241,7 +243,7 @@ const CompletedView: React.FC<{ card: CompletedCard }> = ({ card }) => {
                         </button>
                     )}
                     {card.changes !== null && (
-                        <button type="button" className="beaver-run-status-popup__row" onClick={card.onOpen}>
+                        <button type="button" className="beaver-run-status-popup__row" onClick={card.onReviewChanges}>
                             <Icon icon={LibraryIcon} className="font-color-secondary" />
                             <span className="beaver-run-status-popup__row-text beaver-run-status-popup__row-text--fixed font-color-primary">Review library changes</span>
                             {card.changes && (

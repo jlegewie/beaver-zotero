@@ -22,7 +22,12 @@ const MAX_PROMPT_TITLE_CHARS = 60;
 
 export interface RunStatusArtifact {
     key: string;
-    title: string;
+    /** The action type that produced it, for its icon. */
+    actionType: string;
+    /** What was made, in the sidebar's words: "Created Note". */
+    label: string;
+    /** The artifact's own name; null when the action has none. */
+    title: string | null;
     /** Opens the artifact itself; absent when it has not been written yet. */
     open?: () => void;
 }
@@ -99,6 +104,8 @@ export interface CompletedCard extends RunStatusCardBase {
     hiddenArtifactCount: number;
     /** The changes card's trail ("2 applied, 1 pending"), or null with no changes. */
     changes: string | null;
+    /** Opens Beaver with the answer's changes card expanded. */
+    onReviewChanges: () => void;
 }
 
 export type RunStatusPopupCard =
