@@ -3,7 +3,7 @@ import { StopIcon, GlobalSearchIcon, ArrowUpLineIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
 import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom, clearComposerAtom } from '../../atoms/messageComposition';
-import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, answerPendingApprovalsAtom, setRunPermissionModeAtom, approvalVerdictInFlightAtom, beginApprovalVerdictAtom, releaseApprovalVerdictAtom } from '../../atoms/agentRunAtoms';
+import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, answerPendingApprovalsAtom, setRunPermissionModeAtom, approvalVerdictInFlightAtom, beginApprovalVerdictAtom, releaseApprovalVerdictAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, agentActionsByRunAtom } from '../../agents/agentActions';
 import { isCoveredByFullAccess, runApprovalPolicyAtom } from '../../atoms/runApprovalPolicy';
 import RunPermissionButton, { RunPermissionMode } from '../ui/buttons/RunPermissionButton';
@@ -22,8 +22,9 @@ import PendingActionsBar from './PendingActionsBar';
 import BatchProgressPanel from './BatchProgressPanel';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
+import RunContinueDisplay from '../agentRuns/RunContinueDisplay';
 import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToSuggestions';
-import { hasWhereToStartRunAtom, lastRunSummaryAtom, threadRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
+import { continuationOfferAtom, hasWhereToStartRunAtom, lastRunSummaryAtom, threadRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { PromptOrigin } from '@beaver/agent-core/agents/types';
 import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
 import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, backendHighTokenUsageRunsAtom } from '../../atoms/messageUIState';
@@ -215,6 +216,18 @@ const InputArea: React.FC<InputAreaProps> = ({
             return next;
         });
     }, [setNextStepsDismissedRunIds, lastRunId]);
+    // An offer to carry on from a run that ended unfinished — cut off, or
+    // stopped waiting on a decision that never came. The backend composes it
+    // and stores it on the run; only the newest run can carry one.
+    const continuation = useAtomValue(continuationOfferAtom);
+    // That run is still sending its terminal frames (citations, agent
+    // actions). Continuing opens a new connection, which closes the current
+    // one, so the button waits while the rest of the run lands.
+    const streamingDoneRunIds = useAtomValue(streamingDoneRunIdsAtom);
+    const isContinuationPostProcessing = continuation
+        ? streamingDoneRunIds.has(continuation.runId)
+        : false;
+
     // Guided next steps surface after a suggestion-card run or a "Where should
     // we start?" launcher run — both carry the context NextStepsPanel needs.
     const lastRunOriginKind = lastRun?.origin?.kind;
@@ -241,22 +254,25 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     // Exactly one band between the batch panel and the attachment row.
     // Priority: blocked decision, then the standing grant that stops decisions
-    // being asked for at all, then first-run guidance, then the cost warning.
+    // being asked for at all, then the offer to finish an unfinished response,
+    // then first-run guidance, then the cost warning.
     // One ordered list (not a suppression clause in each predicate) so a new
     // band takes a place here instead of stacking. Laid out lowest-priority
     // first so the winner sits nearest the composer.
-    const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'approvals' | 'full-access' | null =
+    const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'continue' | 'approvals' | 'full-access' | null =
         isAwaitingApproval
             ? 'approvals'
             : fullAccessRunId
                 ? 'full-access'
-                : canShowNextSteps
-                    ? 'next-steps'
-                    : canShowBackToSuggestions
-                        ? 'back-to-suggestions'
-                        : canShowHighTokenWarning
-                            ? 'high-token'
-                            : null;
+                : continuation
+                    ? 'continue'
+                    : canShowNextSteps
+                        ? 'next-steps'
+                        : canShowBackToSuggestions
+                            ? 'back-to-suggestions'
+                            : canShowHighTokenWarning
+                                ? 'high-token'
+                                : null;
 
     const {
         isSlashMenuOpen,
@@ -608,6 +624,20 @@ const InputArea: React.FC<InputAreaProps> = ({
                 <div className="composer-docked-bar next-steps-panel px-3 py-2">
                     <BackToSuggestions onDismiss={handleDismissNextSteps} backTarget={firstRunBackTarget} />
                 </div>
+            )}
+
+            {/* Offer to carry on from a run that ended unfinished. Above the
+                first-run bands: an answer that stopped short is the thread's
+                open question, and guidance for a finished one is not. */}
+            {composerBand === 'continue' && continuation && (
+                <RunContinueDisplay
+                    // Instructions typed for one offer must not carry over to
+                    // the next run's.
+                    key={continuation.runId}
+                    runId={continuation.runId}
+                    offer={continuation.offer}
+                    isPostProcessing={isContinuationPostProcessing}
+                />
             )}
 
             {/* The standing grant, while it is in force. Nothing else reports
