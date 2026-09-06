@@ -462,6 +462,26 @@
     opacity: 1;
 }
 
+/* The onboarding tip's visual: the real card's top-left corner, run off the
+ * tip's right edge and faded out toward the right and the bottom. */
+.beaver-run-status-tip__preview {
+    height: 78px;
+    overflow: hidden;
+    /* Room for the card's shadow on the left and top. */
+    padding: 6px 0 0 6px;
+    margin-left: -6px;
+    mask-image: linear-gradient(to bottom, black 55%, transparent 100%);
+}
+
+.beaver-run-status-tip__preview-clip {
+    mask-image: linear-gradient(to right, black 60%, transparent 100%);
+}
+
+.beaver-run-status-tip__preview-card {
+    width: 324px;
+    cursor: default;
+}
+
 /* A working run: a dot with a ring that keeps expanding out of it and fading. */
 .beaver-run-pulse {
     position: relative;

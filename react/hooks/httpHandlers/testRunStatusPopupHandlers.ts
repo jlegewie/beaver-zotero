@@ -7,12 +7,15 @@
  * the preview card, `{ clear: true }` removes it, and `{ forceVisible: true }`
  * keeps the popup on screen while the sidebar is open. The preview's own
  * controls only clear the preview. Every field but `kind` is optional and
- * falls back to sample copy — see `RunStatusPopupPreview`.
+ * falls back to sample copy — see `RunStatusPopupPreview`. `{ tip: true }`
+ * shows the one-time onboarding tip about the popup (`tipInPanel` overrides
+ * where it goes); `{ tip: false }` removes it.
  *
  * Wired to its path in `useHttpEndpoints.ts`.
  */
 
 import { store } from '../../store';
+import { dismissFeatureTipAtom, showFeatureTipAtom } from '../../atoms/featureTips';
 import {
     runStatusPopupCompletionAtom,
     runStatusPopupForceVisibleAtom,
@@ -31,6 +34,14 @@ export async function handleTestRunStatusPopupHttpRequest(request: any): Promise
     }
     if (typeof request?.forceVisible === 'boolean') {
         store.set(runStatusPopupForceVisibleAtom, request.forceVisible);
+    }
+    if (request?.tip === true) {
+        store.set(showFeatureTipAtom, 'run-status-popup', {
+            force: true,
+            inPanel: typeof request.tipInPanel === 'boolean' ? request.tipInPanel : undefined,
+        });
+    } else if (request?.tip === false) {
+        store.set(dismissFeatureTipAtom, 'run-status-popup');
     }
     if (request?.clearCompletion) {
         store.set(runStatusPopupCompletionAtom, null);

@@ -1,10 +1,11 @@
 import { FileStatusSummary } from "./fileStatus";
 import { FeatureStep } from "../constants/versionUpdateMessages";
 import { ButtonVariant } from "@beaver/agent-ui/primitives/Button";
+import type { FeatureTipId } from "../constants/featureTips";
 
 export const POPUP_MESSAGE_DURATION = 4000; // 4 seconds
 
-export type PopupMessageType = 'info' | 'warning' | 'error' | 'plan_change' | 'indexing_complete' | 'version_update' | 'items_summary' | 'welcome_onboarding' | 'reader_tip' | 'note_tip' | 'citation_tip';
+export type PopupMessageType = 'info' | 'warning' | 'error' | 'plan_change' | 'indexing_complete' | 'version_update' | 'items_summary' | 'welcome_onboarding' | 'reader_tip' | 'note_tip' | 'citation_tip' | 'feature_tip';
 
 export interface PopupMessageFeature {
     title: string;
@@ -21,6 +22,8 @@ export interface PopupMessageButton {
 
 export interface PopupMessage {
     id: string;
+    /** Which tip a `feature_tip` message shows — see `react/constants/featureTips.tsx`. */
+    tipId?: FeatureTipId;
     cancelable?: boolean; // Defaults to true
     type: PopupMessageType;
     /** Release version shown by version update messages. */

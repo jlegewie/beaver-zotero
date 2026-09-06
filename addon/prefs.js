@@ -113,6 +113,10 @@ pref("onboardingWelcomeShown", false);
 pref("onboardingReaderTipShown", false);
 pref("onboardingReaderTipShownV2", false);
 pref("onboardingNoteTipShown", false);
+
+// One-time feature tips: JSON { shown: { [tipId]: isoDate }, lastShownAt: isoDate }
+// (see react/utils/featureTipPrefs.ts)
+pref("featureTips", "{}");
 pref("onboardingCitationTipShown", false);
 pref("onboardingWelcomeShownAt", "");
 pref("versionUpdatePopupShownAt", "");

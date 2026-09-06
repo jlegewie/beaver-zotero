@@ -64,6 +64,7 @@ declare namespace _ZoteroTypes {
       "onboardingReaderTipShown": boolean;
       "onboardingReaderTipShownV2": boolean;
       "onboardingNoteTipShown": boolean;
+      "featureTips": string;
       "onboardingCitationTipShown": boolean;
       "onboardingWelcomeShownAt": string;
       "versionUpdatePopupShownAt": string;
