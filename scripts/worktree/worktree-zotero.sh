@@ -697,7 +697,7 @@ cmd_reload() {
     echo
     if [[ -n "$pids" ]]; then
       if port_listening "$WT_RDP"; then
-        echo "Triggering zotero_plugin_reload over RDP $WT_RDP…"
+        echo "Triggering zotero_plugin_reload over RDP ${WT_RDP}…"
         rdp_exec zotero_plugin_reload '{}' || die "plugin reload failed"
         echo "Forced one reload. Ordinary saves already hot-reload."
       else
