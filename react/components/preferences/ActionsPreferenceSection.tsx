@@ -14,7 +14,7 @@ import { isBuiltinAction, getActionCustomizations, getHiddenBuiltinActions, hasO
 import ActionCard from "./ActionCard";
 import MenuButton from "@beaver/agent-ui/primitives/MenuButton";
 import { MenuItem } from "@beaver/agent-ui/primitives/ContextMenu";
-import {SectionLabel, DocLink, SectionHeader} from "./components/SettingsElements";
+import {DocLink, PageHeader} from "./components/SettingsElements";
 
 // Filter dimensions. `targets` is what an action binds to (the filter matches
 // any action accepting the kind); `category` is the kind of work it is (both
@@ -213,9 +213,10 @@ const ActionsPreferenceSection: React.FC = () => {
 
     return (
         <>
-            <div className="display-flex flex-row items-end justify-between">
-                <SectionHeader>Actions</SectionHeader>
-                <div className="display-flex flex-row items-center gap-4 mb-15">
+            <PageHeader
+                title="Actions"
+                actions={
+                <div className="display-flex flex-row items-center gap-3">
                     <Button
                         variant="outline"
                         className="text-base"
@@ -236,13 +237,13 @@ const ActionsPreferenceSection: React.FC = () => {
                         Add Action
                     </Button>
                 </div>
-            </div>
-            <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
+                }
+            >
                 Actions are reusable prompts for common research tasks.
                 They appear based on what you're doing in Zotero: on the Beaver homepage, in the slash menu, and Zotero's right-click menu.
                 Each action targets items, collections, or your whole library, and Beaver shows the relevant ones automatically.
                 {' '}<DocLink path="actions">Learn more</DocLink>.
-            </div>
+            </PageHeader>
 
             {/* Filter toolbar — narrow the list by target and/or category */}
             <div className="display-flex flex-row flex-1 items-center gap-3 flex-wrap mb-15 mt-4" style={{ paddingLeft: '2px' }}>

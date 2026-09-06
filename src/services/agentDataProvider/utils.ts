@@ -27,6 +27,7 @@ import { DeferredToolPreference, type AttachmentRowResult } from '@beaver/agent-
 import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
 import {
     isActionApprovedForCurrentRun,
+    isFullAccessGrantedForRun,
     runApprovalPolicyAtom,
 } from '../../../react/atoms/runApprovalPolicy';
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
@@ -1610,6 +1611,28 @@ export function validateLibraryAccess(libraryIdOrName: number | string | null | 
         valid: true,
         library,
     };
+}
+
+/**
+ * Whether the active run holds the "Full access" grant the user can make on an
+ * approval card.
+ *
+ * `getDeferredToolPreference` already honors it, so this exists for the one
+ * caller that overrides its own answer: an action that escalates back to a
+ * prompt has to know the user already decided this run applies everything.
+ *
+ * Reading it never throws for a caller: an unavailable store means no grant.
+ */
+export function hasFullAccessForCurrentRun(): boolean {
+    try {
+        return isFullAccessGrantedForRun(
+            store.get(runApprovalPolicyAtom),
+            store.get(activeRunAtom)?.id ?? null,
+        );
+    } catch (error) {
+        logger(`hasFullAccessForCurrentRun: Failed to read the run policy: ${error}`, 1);
+        return false;
+    }
 }
 
 /**

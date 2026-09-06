@@ -179,6 +179,7 @@ import {
     handleTestBeaverWindowHttpRequest,
     handleTestSelectTabHttpRequest,
 } from './httpHandlers/testApplicationStateHandlers';
+import { handleTestRunStatusPopupHttpRequest } from './httpHandlers/testRunStatusPopupHandlers';
 import type {
     WSZoteroDataRequest,
     WSExternalReferenceCheckRequest,
@@ -368,6 +369,7 @@ const ENDPOINT_PATHS = [
     '/beaver/test/beaver-window',
     '/beaver/test/beaver-sidebar',
     '/beaver/test/select-tab',
+    '/beaver/test/run-status-popup',
 ] as const;
 
 /**
@@ -683,6 +685,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         untagged: request.untagged ?? false,
         conditions: request.conditions || [],
         conditions_join_mode: request.conditions_join_mode ?? null,
+        any_conditions: request.any_conditions || [],
         item_category: request.item_category === 'attachment' ? 'attachment' : 'regular',
         has_attachments: request.has_attachments ?? null,
         max_items: request.max_items ?? 1000,
@@ -712,6 +715,10 @@ async function handleResolvePopulationHttpRequest(request: any) {
         // caller detects a provider that predates the field, so it has to be
         // forwarded here too.
         conditions_join_mode: response.conditions_join_mode,
+        // Same again for the `any_conditions` group, and it matters more: a
+        // provider that predates the field drops the group and resolves a
+        // WIDER population than the caller described.
+        any_conditions_applied: response.any_conditions_applied,
         // A dropped condition widens the population; the caller must not act on
         // ids that came back with a warning.
         warnings: response.warnings,
@@ -1341,6 +1348,9 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/select-tab'] =
             createEndpoint(handleTestSelectTabHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/run-status-popup'] =
+            createEndpoint(handleTestRunStatusPopupHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);

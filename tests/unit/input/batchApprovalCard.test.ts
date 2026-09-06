@@ -54,6 +54,7 @@ import React from 'react';
 import type { PendingBatchApproval } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import type { BatchApprovalDecision } from '@beaver/agent-core/run-state/batchApprovalAnswers';
 import { BatchApprovalCard } from '@beaver/agent-ui/chat/BatchApprovalCard';
+import InstructionsDisclosure from '@beaver/agent-ui/primitives/InstructionsDisclosure';
 
 const GOAL = 'Assign one broad topic tag to every item and remove all prior tags';
 const WARNING = 'Removes every existing tag from these items';
@@ -93,7 +94,15 @@ function approval(overrides: Partial<PendingBatchApproval> = {}): PendingBatchAp
 
 type Element = React.ReactElement<Record<string, any>>;
 
-/** Every element in the tree matching the predicate, in render order. */
+/**
+ * Every element in the tree matching the predicate, in render order.
+ *
+ * The walk is shallow — the card is called as a plain function, not mounted —
+ * so a child component appears as one element and its own tree does not. The
+ * instructions disclosure is the exception: it is a shared primitive that owns
+ * no state and calls no hooks, so it can be expanded in place, and these tests
+ * are about the field it renders rather than about the element that holds it.
+ */
 function findAll(node: React.ReactNode, match: (el: Element) => boolean, out: Element[] = []): Element[] {
     if (Array.isArray(node)) {
         node.forEach((child) => findAll(child, match, out));
@@ -102,6 +111,10 @@ function findAll(node: React.ReactNode, match: (el: Element) => boolean, out: El
     if (!React.isValidElement(node)) return out;
     const el = node as Element;
     if (match(el)) out.push(el);
+    if (el.type === InstructionsDisclosure) {
+        findAll((el.type as any)(el.props), match, out);
+        return out;
+    }
     findAll(el.props.children ?? null, match, out);
     return out;
 }
@@ -123,7 +136,11 @@ function renderedText(node: React.ReactNode, out: string[] = []): string[] {
         return out;
     }
     if (!React.isValidElement(node)) return out;
-    renderedText((node as Element).props.children ?? null, out);
+    const el = node as Element;
+    if (el.type === InstructionsDisclosure) {
+        return renderedText((el.type as any)(el.props), out);
+    }
+    renderedText(el.props.children ?? null, out);
     return out;
 }
 

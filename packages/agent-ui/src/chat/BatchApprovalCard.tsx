@@ -15,26 +15,30 @@ import Button from '../primitives/Button';
 import DocsLink from '../primitives/DocsLink';
 import Tooltip from '../primitives/Tooltip';
 import PermissionMenu from '../primitives/PermissionMenu';
+import InstructionsDisclosure from '../primitives/InstructionsDisclosure';
 import type { PermissionMenuOption } from '../primitives/PermissionMenu';
-import { DollarCircleIcon, HandIcon, Icon, LayersIcon, PlusSignIcon, SecurityWarningIcon } from '../icons';
+import { DollarCircleIcon, HandIcon, Icon, LayersIcon, SecurityWarningIcon } from '../icons';
+import { useOverflowCollapse } from '../utils/useOverflowCollapse';
 
 /**
  * The coverage choices, and the only prose on this card the client owns.
  * Everything else the user reads comes from the backend.
  */
 const MODE_OPTIONS: readonly PermissionMenuOption<BatchApprovalMode>[] = [
+    // The option that keeps asking comes first, as in every permission menu:
+    // the safe choice is the one to land on, the grant is the one to reach for.
+    {
+        value: 'ask_each_time',
+        label: 'Ask permission',
+        description: 'Review every change before it is applied',
+        icon: HandIcon,
+    },
     {
         value: 'full_access',
         label: 'Full access',
         description: "Apply library changes without asking again",
         icon: SecurityWarningIcon,
         tone: 'warning',
-    },
-    {
-        value: 'ask_each_time',
-        label: 'Ask permission',
-        description: 'Review every change before it is applied',
-        icon: HandIcon,
     },
 ];
 
@@ -141,6 +145,11 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
 
     const handleApprove = useCallback(() => decide(true), [decide]);
     const handleDecline = useCallback(() => decide(false), [decide]);
+
+    // The footer's buttons never wrap; when the row is too narrow for them,
+    // the mode trigger drops to its icon.
+    const footerRef = useRef<HTMLDivElement>(null);
+    const modeIconOnly = useOverflowCollapse(footerRef, 1) >= 1;
 
     return (
         <div
@@ -289,58 +298,29 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                     while the run blocks, so there is nothing else to type
                     into. They constrain an approval and say what to do instead
                     of a cancellation, so the affordance leans toward neither. */}
-                {wantsInstructions ? (
-                    <div className="display-flex flex-col min-w-0" style={{ gap: LABEL_GAP }}>
-                        <div
-                            className="text-xs font-semibold uppercase font-color-secondary"
-                            style={{ letterSpacing: '0.06em' }}
-                        >
-                            {INSTRUCTIONS_HEADING}
-                        </div>
-                        <textarea
-                            className="chat-input"
-                            rows={2}
-                            // The field only exists because the user just asked
-                            // for it, so the caret belongs in it.
-                            autoFocus
-                            placeholder="What to change, or what you want done instead"
-                            aria-label="Instructions for this batch (optional)"
-                            value={draft.userInstructions}
-                            disabled={isDecided}
-                            onChange={(e) => {
-                                const text = e.target.value;
-                                setDraft((prev) => setUserInstructions(text, prev));
-                            }}
-                            onKeyDown={(e) => {
-                                // Enter inserts a newline and never decides:
-                                // the field takes focus, so approving stays an
-                                // explicit click. Stopping propagation keeps a
-                                // keystroke meant for this field from reaching
-                                // a host shortcut that could answer for the
-                                // user.
-                                if (e.key === 'Enter') e.stopPropagation();
-                            }}
-                        />
-                    </div>
-                ) : (
-                    <Button
-                        variant="ghost"
-                        icon={PlusSignIcon}
-                        ariaLabel="Add instructions for this batch"
-                        // Pulled back by its own padding so the label lines up
-                        // with the text above it rather than the button box.
-                        style={{ alignSelf: 'flex-start', marginLeft: '-6px' }}
-                        disabled={isDecided}
-                        onClick={() => setWantsInstructions(true)}
-                    >
-                        {ADD_INSTRUCTIONS_LABEL}
-                    </Button>
-                )}
+                <InstructionsDisclosure
+                    open={wantsInstructions}
+                    onOpen={() => setWantsInstructions(true)}
+                    value={draft.userInstructions}
+                    onChange={(text) =>
+                        setDraft((prev) => setUserInstructions(text, prev))
+                    }
+                    revealLabel={ADD_INSTRUCTIONS_LABEL}
+                    revealAriaLabel="Add instructions for this batch"
+                    heading={INSTRUCTIONS_HEADING}
+                    placeholder="What to change, or what you want done instead"
+                    ariaLabel="Instructions for this batch (optional)"
+                    disabled={isDecided}
+                    // A card that opens with the prefill already showing was
+                    // not opened by the user, so nothing asked for the caret.
+                    autoFocus={(approval.userInstructionsPrefill ?? '').length === 0}
+                />
 
                 {/* Footer: coverage ... cancel, approve. Both answers leave the
                     run alive, so neither is an escape hatch and the destructive
                     one is not given a leading position. */}
                 <div
+                    ref={footerRef}
                     className="display-flex flex-row items-center gap-2 min-w-0"
                     style={{ borderTop: '1px solid var(--fill-quinary)', paddingTop: '0.7rem' }}
                 >
@@ -349,15 +329,18 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                         would contradict the scope line. The answer then carries
                         the mode the backend preselected. */}
                     {!approval.readOnly && (
-                        <PermissionMenu
-                            options={MODE_OPTIONS}
-                            value={draft.mode}
-                            onChange={(mode) => setDraft((prev) => setMode(mode, prev))}
-                            heading={MODE_HEADING}
-                            disabled={isDecided}
-                            tooltipContent="How this batch's changes are approved"
-                            style={{ padding: '2px 6px', fontSize: '0.95rem' }}
-                        />
+                        <div className="flex-none">
+                            <PermissionMenu
+                                options={MODE_OPTIONS}
+                                value={draft.mode}
+                                onChange={(mode) => setDraft((prev) => setMode(mode, prev))}
+                                heading={MODE_HEADING}
+                                disabled={isDecided}
+                                iconOnly={modeIconOnly}
+                                tooltipContent="How this batch's changes are approved"
+                                style={{ padding: '2px 6px', fontSize: '0.95rem' }}
+                            />
+                        </div>
                     )}
                     <div className="flex-1" />
                     {/* Typed instructions turn a decline into a request for
@@ -367,7 +350,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                         ariaLabel={hasInstructions ? 'Cancel batch job and send instructions' : 'Cancel batch job'}
                         onClick={handleDecline}
                         disabled={isDecided}
-                        className="mr-1"
+                        className="mr-1 flex-none whitespace-nowrap"
                     >
                         {hasInstructions ? approval.declineWithInstructionsLabel : approval.declineLabel}
                     </Button>
@@ -377,6 +360,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                         style={{ padding: '3px 5px' }}
                         onClick={handleApprove}
                         disabled={isDecided}
+                        className="flex-none whitespace-nowrap"
                     >
                         {approval.approveLabel}
                     </Button>

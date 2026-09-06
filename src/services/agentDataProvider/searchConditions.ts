@@ -215,3 +215,102 @@ export function addSearchCondition(
         return false;
     }
 }
+
+/**
+ * Negation operators paired with the operator that selects what they exclude.
+ *
+ * Used to probe whether a negated condition excludes anything at all: running
+ * the positive counterpart answers that in one ids-only query.
+ */
+const NEGATED_OPERATOR_INVERSES: Record<string, string> = {
+    'doesNotContain': 'contains',
+    'isNot': 'is',
+};
+
+/**
+ * Fields whose values are prose about what an item is about.
+ *
+ * A negated condition on one of these is the only kind worth probing.
+ * Elsewhere a value that matches nothing is ordinary: no item carries the tag
+ * `reviewed` yet, nothing is published by that publisher, so "the ones without
+ * it" really is the whole library and the caller meant it. On a prose field a
+ * multi-word value that matches nothing means something else — see
+ * `findVacuousNegation`.
+ */
+const PROSE_CONDITION_FIELDS = new Set(['abstractNote', 'title', 'note']);
+
+/**
+ * What the probe needs of a search.
+ *
+ * Declared structurally for the same reason `SearchConditionTarget` is:
+ * `Zotero.Search.addCondition` is typed against literal condition and operator
+ * unions, and a probe's are only known at runtime.
+ */
+interface ProbeSearch {
+    libraryID: number;
+    addCondition(condition: string, operator: string, value: string): number;
+    search(): Promise<number[]>;
+}
+
+/**
+ * The first negated prose condition that excludes nothing, or null.
+ */
+export async function findVacuousNegation(
+    libraryID: number,
+    conditions: ZoteroSearchCondition[],
+    logLabel: string,
+): Promise<ZoteroSearchCondition | null> {
+    for (const condition of conditions) {
+        const positiveOperator = NEGATED_OPERATOR_INVERSES[condition.operator];
+        if (!positiveOperator) continue;
+        if (!PROSE_CONDITION_FIELDS.has(condition.field)) continue;
+
+        const value = (condition.value ?? '').trim();
+        // A single word, or the empty value that spells "this field is unset".
+        if (!/\s/.test(value)) continue;
+
+        let matched: number[];
+        try {
+            const probe = new Zotero.Search() as unknown as ProbeSearch;
+            probe.libraryID = libraryID;
+            probe.addCondition(condition.field, positiveOperator, value);
+            matched = await probe.search();
+        } catch (err) {
+            // A probe that cannot run must never block a caller: the condition
+            // itself was already accepted by `addSearchCondition`.
+            const msg = err instanceof Error ? err.message : String(err);
+            logger(`${logLabel}: Skipped negation probe for '${condition.field}': ${msg}`, 1);
+            continue;
+        }
+
+        if (matched.length === 0) return condition;
+    }
+
+    return null;
+}
+
+/**
+ * What to tell the model about a negation that excludes nothing.
+ *
+ * `outcome` is the caller's, not this module's: a population about to be
+ * mutated refuses the request, while a read hands back the results it really
+ * did match and says what they are. The diagnosis and the correction are the
+ * same either way, so they are written once here.
+ */
+export function vacuousNegationMessage(
+    condition: ZoteroSearchCondition,
+    outcome: 'refused' | 'applied',
+): string {
+    const value = (condition.value ?? '').trim();
+    const where = `field='${condition.field}' operator='${condition.operator}' value='${value}'`;
+    const lead = outcome === 'refused'
+        ? `Refused condition ${where}: no item in this library has that exact phrase in its `
+            + `${condition.field}, so the condition excludes nothing and selects EVERY item. `
+        : `Condition ${where} excluded nothing: no item in this library has that exact phrase in `
+            + `its ${condition.field}, so these results are EVERY item the other filters allow. `;
+    return lead
+        + 'Text conditions match a literal substring — the whole value, word for word — not a '
+        + 'topic. To work items that are about something, find them first (search by topic, then '
+        + 'read what came back) and work from those ids. To filter on a literal string, use a '
+        + 'short distinctive fragment of it.';
+}

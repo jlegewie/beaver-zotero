@@ -17,6 +17,9 @@ export type { TooltipProps } from './Tooltip';
 export { default as DocsLink } from './DocsLink';
 export type { DocsLinkProps } from './DocsLink';
 
+export { default as InstructionsDisclosure } from './InstructionsDisclosure';
+export type { InstructionsDisclosureProps } from './InstructionsDisclosure';
+
 export { default as MenuButton } from './MenuButton';
 
 export { default as PermissionMenu } from './PermissionMenu';

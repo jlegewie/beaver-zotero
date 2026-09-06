@@ -98,6 +98,11 @@ import {
 } from '../../../react/atoms/agentRunAtoms';
 import { selectedModelAtom } from '../../../react/atoms/models';
 import { sessionAtom } from '../../../react/atoms/auth';
+import {
+    currentMessageContentAtom, currentMessageItemsAtom,
+    currentMessageFiltersAtom, currentReaderAttachmentAtom,
+} from '../../../react/atoms/messageComposition';
+
 import { ApiError, ServerError } from '@beaver/agent-core/types/apiErrors';
 
 function makeRun(id: string, overrides: Partial<AgentRun> = {}): AgentRun {
@@ -201,6 +206,111 @@ describe('retry via synchronous truncation', () => {
         store.set(popupMessagesAtom, []);
         store.set(retryPendingRunIdAtom, null);
         store.set(threadNavigationSeqAtom, 0);
+    });
+
+    describe('new-run continuation offers', () => {
+        function offeredRun() {
+            return makeRun('batch-run', {
+                continuation: {
+                    kind: 'batch_next_tranche',
+                    mode: 'new_run',
+                    prompt: 'Continue with the next tranche of tagging papers.',
+                    title: 'Continue batch job',
+                    message: '100 items handled; 374 remained.',
+                    continue_label: 'Continue with the next tranche',
+                    payload: { batch_id: 'b1' },
+                },
+            });
+        }
+
+        it('sends the persisted prompt as a normal message and preserves the completed run', async () => {
+            const run = offeredRun();
+            store.set(activeRunAtom, run);
+
+            await store.set(resumeFromRunAtom, {
+                runId: run.id, userMessage: 'Only use existing tags.',
+            });
+
+            const request = sentRequest();
+            expect(request.user_prompt.content).toBe(
+                `${run.continuation!.prompt}\n\nOnly use existing tags.`,
+            );
+            expect(request.user_prompt.is_resume).toBe(false);
+            expect(request.user_prompt.resumes_run_id).toBeUndefined();
+            expect(request.user_prompt.resume_trigger).toBeUndefined();
+            expect(request.user_prompt.continuation).toEqual({
+                kind: 'batch_next_tranche', payload: { batch_id: 'b1' },
+            });
+            expect(threadRunIds()).toContain(run.id);
+            expect(truncateMock).not.toHaveBeenCalled();
+            expect(store.get(activeRunAtom)?.user_prompt.content).toBe(request.user_prompt.content);
+
+            await store.set(resumeFromRunAtom, run.id);
+            expect(connectMock).toHaveBeenCalledTimes(1);
+        });
+
+        it.each([false, true])('preserves composer input when connection failure is %s', async (fails) => {
+            const run = offeredRun();
+            store.set(threadRunsAtom, [run]);
+            const draft = 'My unrelated follow-up';
+            const items = [{ id: 1 }, { id: 2 }] as any;
+            const reader = { id: 3 } as any;
+            const filters = { libraryIds: [1], collectionIds: [], tagSelections: [] };
+            store.set(currentMessageContentAtom, draft);
+            store.set(currentMessageItemsAtom, items);
+            store.set(currentMessageFiltersAtom, filters);
+            store.set(currentReaderAttachmentAtom, reader);
+            if (fails) connectMock.mockRejectedValue(new Error('connection failed'));
+            try {
+                await store.set(resumeFromRunAtom, run.id);
+                const request = sentRequest();
+                expect(request.user_prompt.attachments).toBeUndefined();
+                expect(request.user_prompt.filters).toBeUndefined();
+                expect(store.get(currentMessageContentAtom)).toBe(draft);
+                expect(store.get(currentMessageItemsAtom)).toBe(items);
+                expect(store.get(currentMessageFiltersAtom)).toBe(filters);
+                expect(store.get(currentReaderAttachmentAtom)).toBe(reader);
+            } finally {
+                store.set(currentMessageContentAtom, '');
+                store.set(currentMessageItemsAtom, []);
+                store.set(currentMessageFiltersAtom, { libraryIds: [], collectionIds: [], tagSelections: [] });
+                store.set(currentReaderAttachmentAtom, null);
+            }
+        });
+
+        it('submits an offer reloaded from thread history', async () => {
+            const run = JSON.parse(JSON.stringify(offeredRun()));
+            store.set(threadRunsAtom, [run]);
+            await store.set(resumeFromRunAtom, run.id);
+            expect(sentRequest().user_prompt.content).toBe(run.continuation.prompt);
+        });
+
+        it('does not submit an offer from an earlier run', async () => {
+            const run = offeredRun();
+            store.set(threadRunsAtom, [run, makeRun('later-run')]);
+            await store.set(resumeFromRunAtom, run.id);
+            expect(connectMock).not.toHaveBeenCalled();
+        });
+
+        it('does not fall back to resume when the new-run prompt is missing', async () => {
+            const run = offeredRun();
+            delete run.continuation!.prompt;
+            store.set(threadRunsAtom, [run]);
+            await store.set(resumeFromRunAtom, run.id);
+            expect(connectMock).not.toHaveBeenCalled();
+        });
+
+        it('keeps approval-timeout offers on the resume path', async () => {
+            const run = offeredRun();
+            run.continuation = {
+                ...run.continuation!, kind: 'batch_approval', mode: 'resume', prompt: null,
+            };
+            store.set(threadRunsAtom, [run]);
+            await store.set(resumeFromRunAtom, run.id);
+            expect(sentRequest().user_prompt.is_resume).toBe(true);
+            expect(sentRequest().user_prompt.resumes_run_id).toBe(run.id);
+            expect(sentRequest().user_prompt.content).toBe('');
+        });
     });
 
     it('cancel in the confirm dialog aborts with no POST and no local change', async () => {

@@ -9,9 +9,12 @@
  * deterministic.
  *
  * Filters are ANDed. Some of them are internally an OR-group inside that AND:
- * `collection_keys`, `tags`, and — when `conditions_join_mode` is 'any' — the
- * `conditions` list. So the population is the items in ANY of the collections
- * that also carry ANY of the tags and also satisfy the conditions group.
+ * `collection_keys`, `tags`, `any_conditions`, and — when
+ * `conditions_join_mode` is 'any' — the `conditions` list. So the population is
+ * the items in ANY of the collections that also carry ANY of the tags and also
+ * satisfy each conditions group. Two condition groups is what lets a caller mix
+ * the joins: `conditions` that must all hold AND `any_conditions` of which one
+ * must.
  *
  * An OR-group is expressed as its own search (see `valuesOrGroup` and
  * `conditionsOrGroup`) rather than as conditions on the main search, because
@@ -23,7 +26,9 @@
  * A filter that cannot be applied as described FAILS the request; this handler
  * never answers with ids beside a warning. The population it resolves is about
  * to be mutated, so an answer that no longer matches the description has to be
- * impossible to act on, not merely flagged.
+ * impossible to act on, not merely flagged. A filter applied exactly as
+ * described that still excludes nothing fails for the same reason — see
+ * `findVacuousNegation`.
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -34,7 +39,7 @@ import {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { modelObjectId, parseItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
 import { resolveStoredTagName, validateLibraryAccess } from './utils';
-import { addSearchCondition } from './searchConditions';
+import { addSearchCondition, findVacuousNegation, vacuousNegationMessage } from './searchConditions';
 
 /** SQLite's bound-variable limit is well above this; 500 keeps a margin. */
 const SQL_CHUNK_SIZE = 500;
@@ -276,7 +281,12 @@ function conditionsOrGroup(
 export async function handleResolvePopulationRequest(
     request: WSResolvePopulationRequest
 ): Promise<WSResolvePopulationResponse> {
-    logger(`handleResolvePopulationRequest: Resolving population (${request.conditions?.length ?? 0} conditions)`, 1);
+    logger(
+        'handleResolvePopulationRequest: Resolving population '
+            + `(${request.conditions?.length ?? 0} conditions, `
+            + `${request.any_conditions?.length ?? 0} any_conditions)`,
+        1,
+    );
 
     try {
         // Validate library (checks both existence and searchability)
@@ -329,21 +339,40 @@ export async function handleResolvePopulationRequest(
         const conditionsJoinMode = request.conditions_join_mode === 'any' ? 'any' : 'all';
         const requestedConditions = request.conditions ?? [];
 
+        // The second condition list, ORed among itself and ANDed with
+        // everything else — including with `conditions`, whatever its join
+        // mode. It is its own OR-group below, so nothing here depends on
+        // `conditions_join_mode`.
+        const requestedAnyConditions = request.any_conditions ?? [];
+
         // A condition Zotero applies as a search-wide flag cannot be one of the
         // disjuncts, and silently behaves as its opposite (narrowing, not
         // widening). Refuse it rather than resolve a population that does not
-        // match the description the user is about to approve.
-        if (conditionsJoinMode === 'any') {
-            const flagCondition = requestedConditions.find(
+        // match the description the user is about to approve. Checked on every
+        // list that becomes an OR-group.
+        const oredLists: [string, ZoteroSearchCondition[], string][] = [
+            [
+                "conditions_join_mode='any'",
+                conditionsJoinMode === 'any' ? requestedConditions : [],
+                "Join `conditions` with 'all' instead",
+            ],
+            [
+                'any_conditions',
+                requestedAnyConditions,
+                'Move it to the ANDed `conditions` list',
+            ],
+        ];
+        for (const [listName, conditions, remedy] of oredLists) {
+            const flagCondition = conditions.find(
                 (condition) => NON_DISJUNCT_CONDITION_FIELDS.has(condition.field));
             if (flagCondition) {
                 return errorResponse(
                     request.request_id,
-                    `conditions_join_mode='any' cannot be combined with field='${flagCondition.field}': `
+                    `${listName} cannot carry field='${flagCondition.field}': `
                         + 'Zotero applies it as a search-wide flag, so it would be ANDed with the other '
                         + 'conditions rather than ORed with them and the population would be narrower than '
-                        + 'described. Give it as a filter that always applies (unfiled has its own request '
-                        + 'flag), or resolve it as a separate batch.',
+                        + `described. ${remedy} (unfiled has its own request flag), or resolve it as a `
+                        + 'separate batch.',
                     'invalid_request',
                 );
             }
@@ -441,6 +470,7 @@ export async function handleResolvePopulationRequest(
             conditionsJoinMode === 'any'
                 ? conditionsOrGroup(library.libraryID, requestedConditions, recursive, warnings)
                 : null,
+            conditionsOrGroup(library.libraryID, requestedAnyConditions, recursive, warnings),
         ].filter((group): group is Zotero.Search => group !== null);
 
         // Every condition is now in place, so this is the first point at which
@@ -453,6 +483,23 @@ export async function handleResolvePopulationRequest(
         if (warnings.length > 0) {
             logger(`handleResolvePopulationRequest: Refused ${warnings.length} condition(s)`, 1);
             return errorResponse(request.request_id, warnings.join(' '), 'invalid_condition');
+        }
+
+        // Every condition Zotero accepted is applied by now, and one of them
+        // may still mean nothing. Under join mode 'any' a disjunct that
+        // excludes nothing makes the whole group always true; under 'all' it
+        // simply drops out, leaving a population the approval card describes
+        // by a filter that did not narrow it. Both are refused here.
+        const vacuous = await findVacuousNegation(
+            library.libraryID,
+            [...requestedConditions, ...requestedAnyConditions],
+            'handleResolvePopulationRequest',
+        );
+        if (vacuous) {
+            logger('handleResolvePopulationRequest: Refused a negation that excludes nothing', 1);
+            return errorResponse(
+                request.request_id, vacuousNegationMessage(vacuous, 'refused'), 'invalid_condition',
+            );
         }
 
         const [scope, ...extraGroups] = groups;
@@ -544,6 +591,10 @@ export async function handleResolvePopulationRequest(
                 // Echoed so a caller that asked for 'any' can tell an applied
                 // 'any' from a provider that never knew the field.
                 conditions_join_mode: conditionsJoinMode,
+                // Presence tells the caller this build applied `any_conditions`
+                // rather than dropping a group it does not know — which would
+                // WIDEN the population.
+                any_conditions_applied: true,
                 excluded_count: 0,
             };
         }
@@ -594,6 +645,10 @@ export async function handleResolvePopulationRequest(
             // Echoed so a caller that asked for 'any' can tell an applied
             // 'any' from a provider that never knew the field.
             conditions_join_mode: conditionsJoinMode,
+            // Presence tells the caller this build applied `any_conditions`
+            // rather than dropping a group it does not know — which would
+            // WIDEN the population.
+            any_conditions_applied: true,
             // Always set, including 0. Presence tells the caller this build
             // applied `exclude_item_ids`.
             excluded_count: excludedCount,

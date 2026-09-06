@@ -49,10 +49,123 @@
     min-height: 600px;
 }
 
-/* Preferences window: sizing and constraints. */
+/* Preferences window: sizing and constraints. The minimum keeps the sidebar
+ * (see .beaver-prefs-sidebar) plus a usable settings column on screen. */
 #beaver-preferences-window {
-    min-width: 695px;
-    min-height: 600px;
+    min-width: 840px;
+    min-height: 560px;
+}
+
+/* Preferences window: two-column shell. The sidebar keeps the window's
+ * sidepane material; the settings column sits on the plain background so the
+ * cards read against it the way they do in Zotero's own settings. */
+#beaver-pane-preferences .beaver-prefs-sidebar {
+    width: 212px;
+    background-color: var(--material-sidepane);
+}
+
+#beaver-pane-preferences .beaver-prefs-content {
+    background-color: var(--color-background);
+}
+
+#beaver-pane-preferences .beaver-prefs-page {
+    max-width: 860px;
+    padding: 22px 28px 40px;
+}
+
+/* Sidebar navigation entries. Plain buttons: the chrome default look is
+ * removed so only the selected / hovered pill shows. */
+#beaver-pane-preferences .beaver-prefs-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    margin: 0;
+    padding: 7px 10px;
+    border: none;
+    border-radius: 6px;
+    background-color: transparent;
+    color: var(--fill-primary);
+    font: inherit;
+    font-size: 1.0625rem;
+    line-height: 1.3;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+#beaver-pane-preferences .beaver-prefs-nav-item:hover {
+    background-color: var(--fill-quinary);
+}
+
+#beaver-pane-preferences .beaver-prefs-nav-item[aria-selected="true"] {
+    background-color: var(--fill-quarternary);
+    font-weight: 500;
+}
+
+#beaver-pane-preferences .beaver-prefs-nav-item:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+}
+
+#beaver-pane-preferences .beaver-prefs-nav-item svg {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    color: var(--fill-secondary);
+}
+
+#beaver-pane-preferences .beaver-prefs-nav-item[aria-selected="true"] svg {
+    color: var(--fill-primary);
+}
+
+/* Account block at the bottom of the sidebar: a button that opens Plan & Usage,
+ * styled like the navigation entries above it. */
+#beaver-pane-preferences .beaver-prefs-account {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 6px 8px;
+    border: none;
+    border-radius: 8px;
+    background-color: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+#beaver-pane-preferences .beaver-prefs-account:hover {
+    background-color: var(--fill-quinary);
+}
+
+#beaver-pane-preferences .beaver-prefs-account:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+}
+
+/* Legal links: a footnote under the account, indented to the avatar's edge. */
+#beaver-pane-preferences .beaver-prefs-legal {
+    padding: 6px 8px 0;
+}
+
+#beaver-pane-preferences .beaver-prefs-avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background-color: var(--fill-quarternary);
+    color: var(--fill-primary);
+    font-size: 1.05rem;
+    font-weight: 600;
+    text-transform: uppercase;
 }
 
 /* Floating Popup Overlay - renders over main Zotero window, bottom-right */
@@ -71,6 +184,340 @@
 
 #beaver-pane-floating-popup > * {
     pointer-events: auto;
+}
+
+/* Run status popup: the open thread's run, in the corner of the main window
+ * while the sidebar is closed (react/components/runStatusPopup). Sits inside
+ * #beaver-pane-floating-popup, under any message popups. */
+.beaver-run-status-popup {
+    position: relative;
+    align-self: flex-end;
+    width: 324px;
+    max-width: 100%;
+    margin: 0 4px 12px 0;
+    /* Room above the card for the layers that stand for other threads. */
+    padding-top: calc(var(--beaver-run-status-stack, 0) * 6px);
+}
+
+.beaver-run-status-popup[data-stack-depth="1"] { --beaver-run-status-stack: 1; }
+.beaver-run-status-popup[data-stack-depth="2"] { --beaver-run-status-stack: 2; }
+
+/* One sliver per further thread, narrower and higher the further back it is. */
+.beaver-run-status-popup__layer {
+    position: absolute;
+    top: calc((var(--beaver-run-status-stack, 0) - var(--beaver-stack-depth)) * 6px);
+    left: calc(var(--beaver-stack-depth) * 10px);
+    right: calc(var(--beaver-stack-depth) * 10px);
+    height: 16px;
+    border: 1px solid var(--beaver-border-strong);
+    border-bottom: 0;
+    border-radius: 12px 12px 0 0;
+    background: var(--beaver-surface-overlay);
+    opacity: calc(1 - var(--beaver-stack-depth) * 0.3);
+}
+
+.beaver-run-status-popup__card {
+    position: relative;
+    box-sizing: border-box;
+    overflow: hidden;
+    border: 1px solid var(--beaver-border-strong);
+    border-radius: 12px;
+    background: var(--beaver-surface-overlay);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14), 0 1px 3px rgba(0, 0, 0, 0.08);
+    cursor: pointer;
+    transition: border-color 120ms ease;
+}
+
+.beaver-run-status-popup__card--settled {
+    transition: border-color 120ms ease, height 220ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.beaver-run-status-popup__card:hover {
+    border-color: var(--fill-tertiary);
+}
+
+.beaver-run-status-popup__card:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 1px;
+}
+
+.beaver-run-status-popup__content {
+    display: flex;
+    flex-direction: column;
+    padding: 10px 12px 10px 12px;
+    gap: 8px;
+}
+
+.beaver-run-status-popup__header {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 10px;
+    min-width: 0;
+}
+
+/* The pulse and the icons share one slot so the title column lines up across states. */
+.beaver-run-status-popup__leading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+}
+
+.beaver-run-status-popup__text {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 2px;
+}
+
+.beaver-run-status-popup__trailing {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    /* Pull the dismiss button flush with the padding, as on the version card. */
+    margin: -4px -6px -4px 0;
+}
+
+/* The close button only appears while the pointer or focus is on the card. */
+.beaver-run-status-popup__dismiss {
+    opacity: 0;
+    transition: opacity 120ms ease;
+}
+
+.beaver-run-status-popup__card:hover .beaver-run-status-popup__dismiss,
+.beaver-run-status-popup__card:focus-within .beaver-run-status-popup__dismiss {
+    opacity: 1;
+}
+
+.beaver-run-status-popup__title {
+    font-size: 0.95rem;
+    font-weight: 500;
+    line-height: 20px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.beaver-run-status-popup__detail {
+    font-size: 0.875rem;
+    line-height: 18px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The shimmering status line: the text clips, and the component appends a
+ * plain ellipsis beside it. Gecko does not paint `text-overflow`'s own marker
+ * through the shimmer's transparent text fill. */
+.beaver-run-status-popup__status {
+    display: flex;
+    flex-direction: row;
+    min-width: 0;
+}
+
+.beaver-run-status-popup__status-text {
+    display: block;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.beaver-run-status-popup__body {
+    font-size: 0.875rem;
+    line-height: 1.35;
+    padding-left: 30px;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* The shared question card, drawn inside the popup: the popup is the frame,
+ * so the card gives up its own. */
+.beaver-run-status-popup__question {
+    cursor: default;
+}
+
+.beaver-run-status-popup__question > .user-message-display {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.beaver-run-status-popup__footer {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding-top: 2px;
+}
+
+.beaver-run-status-popup .beaver-run-status-popup__footer > button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+/* The permission menu gives way first: its label truncates before a
+ * decision button wraps. */
+.beaver-run-status-popup__permission {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.beaver-run-status-popup__permission > *,
+.beaver-run-status-popup .beaver-run-status-popup__permission button {
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.beaver-run-status-popup .beaver-run-status-popup__permission button > * {
+    min-width: 0;
+}
+
+.beaver-run-status-popup__rows {
+    display: flex;
+    flex-direction: column;
+    margin-left: 30px;
+    border: 1px solid var(--beaver-border-subtle);
+    border-radius: 8px;
+    background: var(--beaver-fill-subtle);
+    overflow: hidden;
+}
+
+/* Doubled selector: the pane-wide `[id^="beaver-pane-"] button { all: revert }`
+ * reset outranks a single class. */
+.beaver-run-status-popup .beaver-run-status-popup__row {
+    appearance: none;
+    -moz-appearance: none;
+    margin: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 5px 8px;
+    font-size: 0.875rem;
+    line-height: 18px;
+    cursor: pointer;
+}
+
+.beaver-run-status-popup__row + .beaver-run-status-popup__row {
+    border-top: 1px solid var(--beaver-border-subtle);
+}
+
+.beaver-run-status-popup__row:hover {
+    background: var(--beaver-fill-hover);
+}
+
+.beaver-run-status-popup__row:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -2px;
+}
+
+.beaver-run-status-popup__row-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* A fixed label keeps its width; the trail beside it truncates first. */
+.beaver-run-status-popup__row-text--fixed {
+    flex: 0 0 auto;
+}
+
+.beaver-run-status-popup__row-trail {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.beaver-run-status-popup__row-arrow {
+    flex: 0 0 auto;
+    opacity: 0;
+    transition: opacity 120ms ease;
+}
+
+.beaver-run-status-popup__row:hover .beaver-run-status-popup__row-arrow {
+    opacity: 1;
+}
+
+/* The onboarding tip's visual: the real card's top-left corner, run off the
+ * tip's right edge and faded out toward the right and the bottom. */
+.beaver-run-status-tip__preview {
+    height: 78px;
+    overflow: hidden;
+    /* Room for the card's shadow on the left and top. */
+    padding: 6px 0 0 6px;
+    margin-left: -6px;
+    mask-image: linear-gradient(to bottom, black 55%, transparent 100%);
+}
+
+.beaver-run-status-tip__preview-clip {
+    mask-image: linear-gradient(to right, black 60%, transparent 100%);
+}
+
+.beaver-run-status-tip__preview-card {
+    width: 324px;
+    cursor: default;
+}
+
+/* A working run: a dot with a ring that keeps expanding out of it and fading. */
+.beaver-run-pulse {
+    position: relative;
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+}
+
+.beaver-run-pulse__dot {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent-blue);
+}
+
+.beaver-run-pulse__ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid var(--accent-blue);
+    opacity: 0;
+    transform: scale(0.4);
+    animation: beaverRunPulseRing 2.2s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
+}
+
+.beaver-run-pulse__ring:nth-child(2) {
+    animation-delay: 1.1s;
+}
+
+@keyframes beaverRunPulseRing {
+    0% { transform: scale(0.4); opacity: 1; }
+    75% { transform: scale(1.05); opacity: 0; }
+    100% { transform: scale(1.05); opacity: 0; }
 }
 
 /* Toolbar Button */
@@ -229,7 +676,7 @@
 /* Bars docked to the composer's top edge. The geometry — the bleed that cancels
    the card's padding, and the top-corner radius — comes from
    `.composer-docked-bar` (agent-ui-components.css), which each of these also
-   wears. Only what they paint is here, because only these three components are
+   wears. Only what they paint is here, because only these components are
    Zotero's; the batch progress bar is shared, so its fill lives beside the
    geometry. */
 
@@ -247,6 +694,12 @@
 /* First-run "Next steps" panel. */
 [id^="beaver-pane-"] .next-steps-panel {
     border-bottom: 1px solid var(--fill-quarternary);
+}
+
+/* Offer to carry on from a run that ended unfinished. */
+[id^="beaver-pane-"] .run-continue-panel {
+    background-color: var(--beaver-fill-bar);
+    border-bottom: 1px solid var(--fill-quinary);
 }
 
 /* Disclosure hover, shared by the batch progress bar and the run receipt. The
