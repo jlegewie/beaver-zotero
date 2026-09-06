@@ -9,6 +9,7 @@ import VersionUpdateMessageContent from './VersionUpdateMessageContent';
 import WelcomeOnboardingContent from './WelcomeOnboardingContent';
 import ReaderTipContent from './ReaderTipContent';
 import NoteTipContent from './NoteTipContent';
+import FeatureTipContent from './FeatureTipContent';
 import { CitationTipContent } from '../../sources/CitationTipContent';
 import Button from "@beaver/agent-ui/primitives/Button";
 import PopupMessageHeader from './PopupMessageHeader';
@@ -118,8 +119,8 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
                     display-flex flex-col items-start gap-2
                 `}
             >
-                {/* Floating version_update/welcome_onboarding/reader_tip render their own headers */}
-                {!(isFloating && (message.type === 'version_update' || message.type === 'welcome_onboarding' || message.type === 'reader_tip' || message.type === 'note_tip')) && (
+                {/* Floating version_update/welcome_onboarding/reader_tip render their own headers; a feature tip always does */}
+                {!(isFloating && (message.type === 'version_update' || message.type === 'welcome_onboarding' || message.type === 'reader_tip' || message.type === 'note_tip')) && message.type !== 'feature_tip' && (
                     <PopupMessageHeader
                         icon={message.icon || getDefaultIcon()}
                         rightIcon={message.rightIcon}
@@ -194,6 +195,10 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
 
                 {message.type === 'note_tip' && (
                     <NoteTipContent onDismiss={handleDismiss} />
+                )}
+
+                {message.type === 'feature_tip' && message.tipId && (
+                    <FeatureTipContent tipId={message.tipId} onDismiss={handleDismiss} />
                 )}
 
                 {message.type === 'citation_tip' && (

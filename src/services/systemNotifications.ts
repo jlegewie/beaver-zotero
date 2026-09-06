@@ -21,9 +21,9 @@
  * All are gated on whether the user can currently see the Beaver UI. Three
  * visibility scenarios are handled (see getBeaverVisibility):
  *   A) Beaver UI is on screen and focused  -> no notification (user sees it).
- *   B) A Zotero window is focused but Beaver is not visible -> system
- *      notification for now. This is the intended seam for a future in-app
- *      Zotero notification; replace the SCENARIO_B branch when that exists.
+ *   B) A Zotero window is focused but Beaver is not visible -> no
+ *      notification: the run status popup in the main window's corner
+ *      (react/components/runStatusPopup) reports the event there.
  *   C) Zotero is in the background -> system notification (only way to reach
  *      the user).
  *
@@ -121,10 +121,12 @@ function shouldNotifySystem(): boolean {
             // Scenario A: the pending UI is already on screen — nothing to do.
             return false;
         case "zotero-focused":
-            // SCENARIO B: Zotero is focused but Beaver is not visible.
-            // TODO: when an in-app Zotero notification exists, route this case
-            // there instead of falling through to a system notification.
-            return true;
+            // Scenario B: Zotero is focused but Beaver is not visible. The run
+            // status popup in the main window's corner
+            // (react/components/runStatusPopup) already shows the pending
+            // decision or the finished response there, with its controls, so
+            // an OS notification on top of it would say the same thing twice.
+            return false;
         case "zotero-unfocused":
             // Scenario C: Zotero is in the background.
             return true;
@@ -371,9 +373,9 @@ export function notifyRunComplete(): void {
         return;
     }
 
-    // Scenario A: the response is already on screen — nothing to do. Scenarios
-    // B and C (Beaver hidden, or Zotero in the background) both get notified.
-    if (getBeaverVisibility() === "beaver-visible") {
+    // Only scenario C (Zotero in the background) is notified: in A the
+    // response is on screen, and in B the run status popup reports it.
+    if (getBeaverVisibility() !== "zotero-unfocused") {
         return;
     }
 

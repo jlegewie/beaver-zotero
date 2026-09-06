@@ -31,6 +31,7 @@ import { useReaderAnnotationActionHandler } from './hooks/useReaderAnnotationAct
 import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerActionHandler';
 import { useOnboardingPopups } from './hooks/useOnboardingPopups';
 import { useInterruptedThreadPopup } from './hooks/useInterruptedThreadPopup';
+import { useRunStatusTip } from './hooks/useRunStatusTip';
 import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
 import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
@@ -197,6 +198,9 @@ const GlobalContextInitializer = () => {
 
     // Offer to reopen a chat that was cut off when Beaver last shut down
     useInterruptedThreadPopup();
+
+    // One-time tip that the corner card follows a run while the sidebar is closed
+    useRunStatusTip();
 
     // Mirror background extraction activity into the shared Jotai store
     useBackgroundWorkerStatus();

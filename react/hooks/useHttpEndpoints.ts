@@ -178,6 +178,7 @@ import {
     handleTestBeaverWindowHttpRequest,
     handleTestSelectTabHttpRequest,
 } from './httpHandlers/testApplicationStateHandlers';
+import { handleTestRunStatusPopupHttpRequest } from './httpHandlers/testRunStatusPopupHandlers';
 import type {
     WSZoteroDataRequest,
     WSExternalReferenceCheckRequest,
@@ -366,6 +367,7 @@ const ENDPOINT_PATHS = [
     '/beaver/test/beaver-window',
     '/beaver/test/beaver-sidebar',
     '/beaver/test/select-tab',
+    '/beaver/test/run-status-popup',
 ] as const;
 
 /**
@@ -1341,6 +1343,9 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/select-tab'] =
             createEndpoint(handleTestSelectTabHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/run-status-popup'] =
+            createEndpoint(handleTestRunStatusPopupHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
