@@ -110,7 +110,7 @@ def pref(key):
 data = {
     "WT_DATADIR": pref("extensions.zotero.dataDir"),
     "WT_HTTP": pref("extensions.zotero.httpServer.port"),
-    "W": pref("extensions.zotero.extensions.mcp-rdp.port"),
+    "WT_RDP": pref("extensions.zotero.extensions.mcp-rdp.port"),
 }
 for k, v in data.items():
     if v:
