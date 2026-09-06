@@ -49,10 +49,88 @@
     min-height: 600px;
 }
 
-/* Preferences window: sizing and constraints. */
+/* Preferences window: sizing and constraints. The minimum keeps the sidebar
+ * (see .beaver-prefs-sidebar) plus a usable settings column on screen. */
 #beaver-preferences-window {
-    min-width: 695px;
-    min-height: 600px;
+    min-width: 840px;
+    min-height: 560px;
+}
+
+/* Preferences window: two-column shell. The sidebar keeps the window's
+ * sidepane material; the settings column sits on the plain background so the
+ * cards read against it the way they do in Zotero's own settings. */
+#beaver-pane-preferences .beaver-prefs-sidebar {
+    width: 212px;
+    background-color: var(--material-sidepane);
+}
+
+#beaver-pane-preferences .beaver-prefs-content {
+    background-color: var(--color-background);
+}
+
+#beaver-pane-preferences .beaver-prefs-page {
+    max-width: 860px;
+    padding: 22px 28px 40px;
+}
+
+/* Sidebar navigation entries. Plain buttons: the chrome default look is
+ * removed so only the selected / hovered pill shows. */
+#beaver-pane-preferences .beaver-prefs-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    margin: 0;
+    padding: 6px 10px;
+    border: none;
+    border-radius: 6px;
+    background-color: transparent;
+    color: var(--fill-primary);
+    font: inherit;
+    line-height: 1.3;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+#beaver-pane-preferences .beaver-prefs-nav-item:hover {
+    background-color: var(--fill-quinary);
+}
+
+#beaver-pane-preferences .beaver-prefs-nav-item[aria-selected="true"] {
+    background-color: var(--fill-quarternary);
+    font-weight: 500;
+}
+
+#beaver-pane-preferences .beaver-prefs-nav-item:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+}
+
+#beaver-pane-preferences .beaver-prefs-nav-item svg {
+    flex-shrink: 0;
+    color: var(--fill-secondary);
+}
+
+#beaver-pane-preferences .beaver-prefs-nav-item[aria-selected="true"] svg {
+    color: var(--fill-primary);
+}
+
+/* Account block at the bottom of the sidebar. */
+#beaver-pane-preferences .beaver-prefs-avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background-color: var(--fill-quarternary);
+    color: var(--fill-primary);
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
 }
 
 /* Floating Popup Overlay - renders over main Zotero window, bottom-right */

@@ -18,9 +18,24 @@ export const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children
     </div>
 );
 
-export const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-    <div role="heading" aria-level={2} className="text-xl font-color-primary font-bold" style={{ marginTop: '8px', marginBottom: '6px', paddingLeft: '4px' }}>
-        {children}
+/**
+ * Title row at the top of a settings page. `actions` sits on the right of the
+ * title (e.g. the Actions page's Import / Add buttons); `children` render as a
+ * lead paragraph under it.
+ */
+export const PageHeader: React.FC<{ title: string; actions?: React.ReactNode; children?: React.ReactNode }> = ({ title, actions, children }) => (
+    <div className="display-flex flex-col gap-1" style={{ marginBottom: '12px' }}>
+        <div className="display-flex flex-row items-center justify-between gap-4" style={{ minHeight: '30px' }}>
+            <h1 className="text-2xl font-semibold font-color-primary" style={{ marginBlock: 0, paddingLeft: '2px' }}>
+                {title}
+            </h1>
+            {actions}
+        </div>
+        {children && (
+            <div className="font-color-secondary text-base" style={{ paddingLeft: '2px' }}>
+                {children}
+            </div>
+        )}
     </div>
 );
 
