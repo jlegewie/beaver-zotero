@@ -2608,6 +2608,12 @@ export const CLIENT_FEATURES = {
     CREDIT_CONFIRMATION: 'credit_confirmation',
     /** `batch_jobs` capability (batch_start / batch_resolve). */
     BATCH_JOBS: 'batch_jobs',
+    /**
+     * A `ContinuationOffer` may carry `mode: 'new_run'` with a `prompt`: the
+     * continue card submits that visible user message through the normal send
+     * flow instead of resuming the previous run. A client without this feature
+     * ignores both fields, so the backend composes only resume offers for it.
+     */
     CONTINUATION_NEW_RUN: 'continuation_new_run',
     /** `citation_graph` capability (`find_related_works`). */
     CITATION_GRAPH: 'citation_graph',

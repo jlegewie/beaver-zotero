@@ -74,6 +74,11 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // resolve_population request field: a build that predates it drops the ORed
 // condition group and resolves a WIDER population than the batch described, so
 // the backend refuses the field up front rather than infer support.
+// continuation_new_run is declaration-only because it gates an offer shape the
+// client must render and act on: a build that predates it ignores `mode` and
+// `prompt`, so a 'new_run' card would either resume the wrong way or show a
+// button that sends nothing. The backend only composes those offers for a
+// client that declares it.
 // item_links is declaration-only because it describes what the chat client's
 // markdown renderer does with object-id hrefs; a client that predates it would
 // treat `[Smith 2004](u-KEY)` as a broken relative link, so the backend only
@@ -98,6 +103,7 @@ const DECLARATION_ONLY_FEATURES = [
     'citation_graph',
     'population_any_conditions',
     'item_links',
+    'continuation_new_run',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every
