@@ -67,6 +67,8 @@ interface RunPermissionButtonProps {
      * now, this card's included. Shown on the row when it is more than one.
      */
     pendingCoveredCount?: number;
+    /** Render the trigger as its icon alone, for a footer too narrow for the label. */
+    iconOnly?: boolean;
 }
 
 /**
@@ -89,6 +91,7 @@ const RunPermissionButton: React.FC<RunPermissionButtonProps> = ({
     onChange,
     disabled = false,
     pendingCoveredCount = 0,
+    iconOnly = false,
 }) => {
     const options = useMemo(
         () => RUN_PERMISSION_OPTIONS.map((option) => (
@@ -107,6 +110,7 @@ const RunPermissionButton: React.FC<RunPermissionButtonProps> = ({
             footnoteLink={RUN_PERMISSION_FOOTNOTE_LINK}
             onFootnoteClick={() => openPreferencesWindow('permissions')}
             disabled={disabled}
+            iconOnly={iconOnly}
             ariaLabel="How library changes are approved for this run"
             tooltipContent="How library changes are approved for this run"
             style={{ padding: '2px 6px', fontSize: '0.95rem' }}

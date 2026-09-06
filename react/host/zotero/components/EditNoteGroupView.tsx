@@ -48,6 +48,7 @@ import {
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
+import { useOverflowCollapse } from '@beaver/agent-ui/utils/useOverflowCollapse';
 import RunPermissionButton, { RunPermissionMode } from '../../../components/ui/buttons/RunPermissionButton';
 import { openNoteByKey } from '../../../utils/sourceUtils';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -738,6 +739,14 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     // Gate on both the global kill switch and the runtime Zotero capability
     // check so the button is hidden on Zotero 7 (where showDiffPreview would
     // silently no-op) without requiring a version bump of strict_min_version.
+    // The footer's buttons never wrap (a two-line "Apply All" is unreadable).
+    // When the row is too narrow for them, the permission trigger drops to
+    // its icon first and the preview button second.
+    const footerRef = useRef<HTMLDivElement>(null);
+    const footerCollapseLevel = useOverflowCollapse(footerRef, 2);
+    const permissionIconOnly = footerCollapseLevel >= 1;
+    const previewIconOnly = footerCollapseLevel >= 2;
+
     const canShowPreview =
         !isProcessing
         && isDiffPreviewLive()
@@ -889,30 +898,45 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                     </div>
 
                     {(showFooterApply || showFooterReject || showFooterUndo || showFooterRetry || canShowPreview || hasPendingApprovals) && (
-                        <div className="display-flex flex-row gap-2 px-2 py-2">
+                        <div ref={footerRef} className="display-flex flex-row items-center gap-2 px-2 py-2">
                             {/* Only while the run is waiting on this card: once
                                 it is not, there is no run left to grant. */}
                             {hasPendingApprovals && (
-                                <RunPermissionButton
-                                    mode={runPermissionMode}
-                                    onChange={handleRunPermissionChange}
-                                    disabled={isProcessing}
-                                    pendingCoveredCount={pendingCoveredCount}
-                                />
+                                <div className="flex-none">
+                                    <RunPermissionButton
+                                        mode={runPermissionMode}
+                                        onChange={handleRunPermissionChange}
+                                        disabled={isProcessing}
+                                        pendingCoveredCount={pendingCoveredCount}
+                                        iconOnly={permissionIconOnly}
+                                    />
+                                </div>
                             )}
                             <div className="flex-1" />
 
-                            {canShowPreview && (
+                            {canShowPreview && (previewIconOnly ? (
+                                <Tooltip content="Preview" singleLine>
+                                    <Button
+                                        variant="ghost"
+                                        icon={FileDiffIcon}
+                                        onClick={handlePreviewInEditor}
+                                        style={{ padding: '3px 6px' }}
+                                        disabled={isProcessing}
+                                        ariaLabel="Preview"
+                                    />
+                                </Tooltip>
+                            ) : (
                                 <Button
                                     variant="ghost"
                                     icon={FileDiffIcon}
                                     onClick={handlePreviewInEditor}
                                     style={{ padding: '3px 6px' }}
                                     disabled={isProcessing}
+                                    className="flex-none whitespace-nowrap"
                                 >
                                     Preview
                                 </Button>
-                            )}
+                            ))}
 
                             {showFooterReject && (!isProcessing || clickedButton === 'reject') && (
                                 <Button
@@ -920,6 +944,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                     onClick={handleRejectAll}
                                     loading={isProcessing && clickedButton === 'reject'}
                                     disabled={isProcessing}
+                                    className="flex-none whitespace-nowrap"
                                 >
                                     Reject All
                                 </Button>
@@ -931,6 +956,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                     onClick={handleUndoAll}
                                     loading={isProcessing && clickedButton === 'undo'}
                                     disabled={isProcessing}
+                                    className="flex-none whitespace-nowrap"
                                 >
                                     Undo All
                                 </Button>
@@ -943,6 +969,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                     onClick={handleRetryAll}
                                     loading={isProcessing && clickedButton === 'retry'}
                                     disabled={isProcessing}
+                                    className="flex-none whitespace-nowrap"
                                 >
                                     Retry All
                                 </Button>
@@ -954,6 +981,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                     onClick={handleApplyAll}
                                     loading={isProcessing && clickedButton === 'approve'}
                                     disabled={isProcessing}
+                                    className="flex-none whitespace-nowrap"
                                 >
                                     <span>Apply All</span>
                                 </Button>

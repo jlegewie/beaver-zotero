@@ -18,6 +18,7 @@ import PermissionMenu from '../primitives/PermissionMenu';
 import InstructionsDisclosure from '../primitives/InstructionsDisclosure';
 import type { PermissionMenuOption } from '../primitives/PermissionMenu';
 import { DollarCircleIcon, HandIcon, Icon, LayersIcon, SecurityWarningIcon } from '../icons';
+import { useOverflowCollapse } from '../utils/useOverflowCollapse';
 
 /**
  * The coverage choices, and the only prose on this card the client owns.
@@ -144,6 +145,11 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
 
     const handleApprove = useCallback(() => decide(true), [decide]);
     const handleDecline = useCallback(() => decide(false), [decide]);
+
+    // The footer's buttons never wrap; when the row is too narrow for them,
+    // the mode trigger drops to its icon.
+    const footerRef = useRef<HTMLDivElement>(null);
+    const modeIconOnly = useOverflowCollapse(footerRef, 1) >= 1;
 
     return (
         <div
@@ -314,6 +320,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                     run alive, so neither is an escape hatch and the destructive
                     one is not given a leading position. */}
                 <div
+                    ref={footerRef}
                     className="display-flex flex-row items-center gap-2 min-w-0"
                     style={{ borderTop: '1px solid var(--fill-quinary)', paddingTop: '0.7rem' }}
                 >
@@ -322,15 +329,18 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                         would contradict the scope line. The answer then carries
                         the mode the backend preselected. */}
                     {!approval.readOnly && (
-                        <PermissionMenu
-                            options={MODE_OPTIONS}
-                            value={draft.mode}
-                            onChange={(mode) => setDraft((prev) => setMode(mode, prev))}
-                            heading={MODE_HEADING}
-                            disabled={isDecided}
-                            tooltipContent="How this batch's changes are approved"
-                            style={{ padding: '2px 6px', fontSize: '0.95rem' }}
-                        />
+                        <div className="flex-none">
+                            <PermissionMenu
+                                options={MODE_OPTIONS}
+                                value={draft.mode}
+                                onChange={(mode) => setDraft((prev) => setMode(mode, prev))}
+                                heading={MODE_HEADING}
+                                disabled={isDecided}
+                                iconOnly={modeIconOnly}
+                                tooltipContent="How this batch's changes are approved"
+                                style={{ padding: '2px 6px', fontSize: '0.95rem' }}
+                            />
+                        </div>
                     )}
                     <div className="flex-1" />
                     {/* Typed instructions turn a decline into a request for
@@ -340,7 +350,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                         ariaLabel={hasInstructions ? 'Cancel batch job and send instructions' : 'Cancel batch job'}
                         onClick={handleDecline}
                         disabled={isDecided}
-                        className="mr-1"
+                        className="mr-1 flex-none whitespace-nowrap"
                     >
                         {hasInstructions ? approval.declineWithInstructionsLabel : approval.declineLabel}
                     </Button>
@@ -350,6 +360,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                         style={{ padding: '3px 5px' }}
                         onClick={handleApprove}
                         disabled={isDecided}
+                        className="flex-none whitespace-nowrap"
                     >
                         {approval.approveLabel}
                     </Button>

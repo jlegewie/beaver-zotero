@@ -206,6 +206,12 @@ function PermissionMenu<T extends string>({
         </div>
     );
 
+    // An icon alone does not say which option is active, so the tooltip
+    // leads with it.
+    const triggerTooltip = iconOnly && triggerLabel
+        ? (tooltipContent ? `${triggerLabel} · ${tooltipContent}` : triggerLabel)
+        : tooltipContent;
+
     return (
         <MenuButton
             menuItems={menuItems}
@@ -216,7 +222,7 @@ function PermissionMenu<T extends string>({
             className={className}
             style={style}
             ariaLabel={ariaLabel ?? (heading ? `${heading} ${triggerLabel}` : triggerLabel)}
-            tooltipContent={tooltipContent}
+            tooltipContent={triggerTooltip}
             disabled={disabled}
             header={header}
             footer={footer}

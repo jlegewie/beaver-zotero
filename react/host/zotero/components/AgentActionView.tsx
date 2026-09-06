@@ -47,6 +47,7 @@ import { revealSource, openNoteByKey, getCurrentCollectionKeyForItem } from '../
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
+import { useOverflowCollapse } from '@beaver/agent-ui/utils/useOverflowCollapse';
 import DeferredToolPreferenceButton from '../../../components/ui/buttons/DeferredToolPreferenceButton';
 import RunPermissionButton, { RunPermissionMode } from '../../../components/ui/buttons/RunPermissionButton';
 import {
@@ -131,6 +132,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const hasExistingState = expansionState[expansionKey] !== undefined;
     const neverAutoCollapse = NEVER_AUTO_COLLAPSE_TOOLS.has(toolName);
     const isExpanded = expansionState[expansionKey] ?? (isAwaitingApproval || neverAutoCollapse);
+
+    // The footer's buttons never wrap; when the row is too narrow for them,
+    // the permission trigger drops to its icon.
+    const footerRef = useRef<HTMLDivElement>(null);
+    const permissionIconOnly = useOverflowCollapse(footerRef, 1) >= 1;
 
     const prevAwaitingRef = useRef(isAwaitingApproval);
     const hasInitializedRef = useRef(false);
@@ -685,7 +691,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         </div>
                     )}
 
-                    <div className="display-flex flex-row gap-2 px-2 py-2">
+                    <div ref={footerRef} className="display-flex flex-row items-center gap-2 px-2 py-2">
                         {/* A cost confirmation has no permission control to offer:
                             what a request may spend is set once by the credit
                             limit. While the run is waiting on this card the
@@ -693,25 +699,30 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             no run left to grant, so it goes back to being the
                             standing per-tool preference. */}
                         {isAwaitingApproval && !hasNoActionData && !isConfirmAction && (
-                            <RunPermissionButton
-                                mode={runPermissionMode}
-                                onChange={handleRunPermissionChange}
-                                disabled={isProcessing}
-                                pendingCoveredCount={pendingCoveredCount}
-                            />
+                            <div className="flex-none">
+                                <RunPermissionButton
+                                    mode={runPermissionMode}
+                                    onChange={handleRunPermissionChange}
+                                    disabled={isProcessing}
+                                    pendingCoveredCount={pendingCoveredCount}
+                                    iconOnly={permissionIconOnly}
+                                />
+                            </div>
                         )}
                         {/* The same slot held the run-scoped menu a moment ago,
                             so this one says which scope it is. */}
                         {!isAwaitingApproval && status === 'pending' && !hasNoActionData && !isConfirmAction && (
-                            <DeferredToolPreferenceButton
-                                toolName={toolName}
-                                disabled={toolName === 'delete_annotations'}
-                                tooltipContent={
-                                    toolName === 'delete_annotations'
-                                        ? 'The approval preference cannot be changed for annotation deletion'
-                                        : 'Default for this kind of change in future responses'
-                                }
-                            />
+                            <div className="flex-none">
+                                <DeferredToolPreferenceButton
+                                    toolName={toolName}
+                                    disabled={toolName === 'delete_annotations'}
+                                    tooltipContent={
+                                        toolName === 'delete_annotations'
+                                            ? 'The approval preference cannot be changed for annotation deletion'
+                                            : 'Default for this kind of change in future responses'
+                                    }
+                                />
+                            </div>
                         )}
                         <div className="flex-1" />
 
@@ -721,6 +732,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 onClick={isAwaitingApproval ? handleReject : handleRejectPending}
                                 loading={isProcessing && clickedButton === 'reject'}
                                 disabled={isProcessing}
+                                className="flex-none whitespace-nowrap"
                             >
                                 Reject
                             </Button>
@@ -731,6 +743,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 variant="outline"
                                 onClick={handleRevealNote}
                                 disabled={isProcessing}
+                                className="flex-none whitespace-nowrap"
                             >
                                 Reveal
                             </Button>
@@ -742,6 +755,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 onClick={handleUndo}
                                 loading={isProcessing && clickedButton === 'undo'}
                                 disabled={isProcessing}
+                                className="flex-none whitespace-nowrap"
                             >
                                 {toolName === 'create_note' ? 'Delete' : 'Undo'}
                             </Button>
@@ -753,6 +767,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 icon={RepeatIcon}
                                 onClick={handleRetry}
                                 loading={isProcessing}
+                                className="flex-none whitespace-nowrap"
                             >
                                 {isUndoError ? 'Retry Undo' : 'Try Again'}
                             </Button>
@@ -764,6 +779,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
                                 loading={isProcessing && clickedButton === 'approve'}
                                 disabled={isProcessing}
+                                className="flex-none whitespace-nowrap"
                             >
                                 <span>{isConfirmAction ? 'Confirm' : 'Apply'}</span>
                             </Button>
