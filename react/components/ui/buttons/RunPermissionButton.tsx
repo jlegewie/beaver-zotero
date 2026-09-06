@@ -33,7 +33,7 @@ export const FULL_ACCESS_DESCRIPTION =
  */
 export function describeFullAccess(pendingCoveredCount: number): string {
     if (pendingCoveredCount <= 1) return FULL_ACCESS_DESCRIPTION;
-    return `${FULL_ACCESS_DESCRIPTION}. Approves the ${pendingCoveredCount} pending changes now`;
+    return `${FULL_ACCESS_DESCRIPTION} Approves the ${pendingCoveredCount} pending changes now`;
 }
 
 /**
