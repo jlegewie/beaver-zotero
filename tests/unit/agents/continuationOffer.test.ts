@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createStore } from 'jotai';
 
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import type { ContinuationOffer } from '@beaver/agent-core/protocol/agentProtocol';
@@ -7,6 +8,10 @@ import {
     shouldOfferResume,
     wasRunContinued,
 } from '@beaver/agent-core/run-state/runResumeHelpers';
+import {
+    continuationOfferAtom,
+    threadRunsAtom,
+} from '@beaver/agent-core/run-state/atoms';
 
 function makeRun(
     id: string,
@@ -92,6 +97,23 @@ describe('continuationOfferFor', () => {
         expect(continuationOfferFor(makeRun('run-1', 'completed'))).toBeNull();
     });
 
+    it('does not display a new-run offer without a usable prompt', () => {
+        for (const prompt of [undefined, null, '', '  ']) {
+            const run = makeRun('run-1', 'completed', {
+                continuation: { ...BATCH_OFFER, mode: 'new_run', prompt },
+            });
+            expect(continuationOfferFor(run)).toBeNull();
+        }
+    });
+
+    it('hides an unknown mode instead of routing it as a resume', () => {
+        const run = makeRun('run-1', 'completed', {
+            continuation: { ...BATCH_OFFER, mode: 'future_mode' },
+        });
+        expect(continuationOfferFor(run)).toBeNull();
+        expect(shouldOfferResume(run, { isLastRun: true, resumedRunIds: new Set() })).toBe(false);
+    });
+
     it('offers nothing for no run', () => {
         expect(continuationOfferFor(null)).toBeNull();
     });
@@ -133,5 +155,68 @@ describe('wasRunContinued with an offer', () => {
         expect(wasRunContinued(makeRun('run-1', 'completed'), new Set(['run-1']))).toBe(
             false,
         );
+    });
+});
+
+/**
+ * The composer renders its continue band from this atom, so it must stay quiet
+ * while a run streams: a fresh value on every frame would re-render the whole
+ * input area under the response it sits beneath.
+ */
+describe('continuationOfferAtom', () => {
+    it('offers nothing for an empty thread', () => {
+        expect(createStore().get(continuationOfferAtom)).toBeNull();
+    });
+
+    it('names the newest run and its offer', () => {
+        const store = createStore();
+        store.set(threadRunsAtom, [
+            makeRun('run-0', 'completed'),
+            makeRun('run-1', 'completed', { continuation: BATCH_OFFER }),
+        ]);
+
+        expect(store.get(continuationOfferAtom)).toEqual({
+            runId: 'run-1',
+            offer: BATCH_OFFER,
+        });
+    });
+
+    it('offers nothing for an offer further up the thread', () => {
+        const store = createStore();
+        store.set(threadRunsAtom, [
+            makeRun('run-0', 'completed', { continuation: BATCH_OFFER }),
+            makeRun('run-1', 'completed'),
+        ]);
+
+        expect(store.get(continuationOfferAtom)).toBeNull();
+    });
+
+    it('offers nothing once a later run continued it', () => {
+        const store = createStore();
+        store.set(threadRunsAtom, [
+            makeRun('run-0', 'completed', { continuation: BATCH_OFFER }),
+            makeRun('run-1', 'completed', {
+                user_prompt: { content: '', is_resume: true, resumes_run_id: 'run-0' },
+            }),
+        ]);
+
+        expect(store.get(continuationOfferAtom)).toBeNull();
+    });
+
+    it('holds its value while the run it names streams on', () => {
+        const store = createStore();
+        // The legacy fallback composes a fresh offer object per call, so
+        // identity here is only kept by comparing the offers' fields.
+        const interrupted = makeRun('run-1', 'canceled', {
+            error: { type: 'canceled', message: 'x', reason_code: 'client_closed' },
+        });
+        store.set(threadRunsAtom, [interrupted]);
+        const first = store.get(continuationOfferAtom);
+
+        // A new run object with the same contents, as a streamed update to it
+        // produces. The offer it yields is a different object; the value the
+        // composer subscribes to must not be.
+        store.set(threadRunsAtom, [{ ...interrupted }]);
+        expect(store.get(continuationOfferAtom)).toBe(first);
     });
 });

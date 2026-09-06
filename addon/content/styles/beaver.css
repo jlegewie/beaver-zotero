@@ -229,7 +229,7 @@
 /* Bars docked to the composer's top edge. The geometry — the bleed that cancels
    the card's padding, and the top-corner radius — comes from
    `.composer-docked-bar` (agent-ui-components.css), which each of these also
-   wears. Only what they paint is here, because only these three components are
+   wears. Only what they paint is here, because only these components are
    Zotero's; the batch progress bar is shared, so its fill lives beside the
    geometry. */
 
@@ -247,6 +247,12 @@
 /* First-run "Next steps" panel. */
 [id^="beaver-pane-"] .next-steps-panel {
     border-bottom: 1px solid var(--fill-quarternary);
+}
+
+/* Offer to carry on from a run that ended unfinished. */
+[id^="beaver-pane-"] .run-continue-panel {
+    background-color: var(--beaver-fill-bar);
+    border-bottom: 1px solid var(--fill-quinary);
 }
 
 /* Disclosure hover, shared by the batch progress bar and the run receipt. The

@@ -2,7 +2,7 @@ import React, { forwardRef, useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
 import { AgentRun, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
-import { continuationOfferFor, shouldOfferResume, wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
+import { wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
@@ -10,7 +10,6 @@ import { SuggestionsView } from './SuggestionsView';
 import { RunErrorDisplay } from './RunErrorDisplay';
 import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
-import { RunContinueDisplay } from './RunContinueDisplay';
 import { threadWarningsAtom } from '../../atoms/warnings';
 import { resumeChainAtom, runToolResultsAtom, resumedRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
@@ -63,13 +62,6 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // suppressed until the replacement lands — the failure is about to be
     // undone, and flashing it up would report a problem the reader never had.
     const autoReplacementPending = useAtomValue(autoReplacementPendingRunIdsAtom).has(run.id);
-
-    // A run that ended without being finished — cut off mid-response, or
-    // stopped waiting on a decision that never came — gets an offer to carry
-    // on from it. The backend composes the offer; this only decides whether
-    // this run is the one to show it on.
-    const offerResume = shouldOfferResume(run, { isLastRun, resumedRunIds });
-    const continuationOffer = offerResume ? continuationOfferFor(run) : null;
 
     // Don't show user message for resume runs (empty content)
     const showUserMessage = !run.user_prompt.is_resume || run.user_prompt.content.length > 0;
@@ -170,15 +162,6 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
             {/* Error display (includes retry/resume buttons) - hide if run was resumed */}
             {hasError && run.error && !wasResumed && !autoReplacementPending && (
                 <RunErrorDisplay runId={run.id} error={run.error} isLastRun={isLastRun} />
-            )}
-
-            {/* Offer to continue a run that ended without being finished */}
-            {continuationOffer && (
-                <RunContinueDisplay
-                    runId={run.id}
-                    offer={continuationOffer}
-                    isPostProcessing={isPostProcessing}
-                />
             )}
 
             {/* Footer with sources and action buttons (only for completed runs, or error runs that were resumed) */}

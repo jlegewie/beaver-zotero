@@ -132,6 +132,10 @@ export interface WSToolCallArgsStreamEvent extends WSBaseEvent {
  * that continues the run.
  */
 export interface ContinuationOffer {
+    /** Missing mode means resume for persisted offers from older builds. */
+    mode?: string;
+    /** Visible user message submitted through the normal send flow. */
+    prompt?: string | null;
     /** Which case this covers, e.g. 'interrupted' or 'batch_approval'. */
     kind: string;
     title: string;
@@ -2604,6 +2608,7 @@ export const CLIENT_FEATURES = {
     CREDIT_CONFIRMATION: 'credit_confirmation',
     /** `batch_jobs` capability (batch_start / batch_resolve). */
     BATCH_JOBS: 'batch_jobs',
+    CONTINUATION_NEW_RUN: 'continuation_new_run',
     /** `citation_graph` capability (`find_related_works`). */
     CITATION_GRAPH: 'citation_graph',
     /**
