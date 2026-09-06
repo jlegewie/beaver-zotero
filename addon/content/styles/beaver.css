@@ -143,13 +143,14 @@
     background-color: var(--fill-quinary);
 }
 
-#beaver-pane-preferences .beaver-prefs-account[aria-current="page"] {
-    background-color: var(--fill-quarternary);
-}
-
 #beaver-pane-preferences .beaver-prefs-account:focus-visible {
     outline: 2px solid var(--color-accent);
     outline-offset: -2px;
+}
+
+/* Legal links: a footnote under the account, indented to the avatar's edge. */
+#beaver-pane-preferences .beaver-prefs-legal {
+    padding: 6px 8px 0;
 }
 
 #beaver-pane-preferences .beaver-prefs-avatar {

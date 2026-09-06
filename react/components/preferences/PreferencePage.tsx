@@ -292,48 +292,50 @@ const PreferencePage: React.FC = () => {
                     ))}
                 </div>
 
-                {/* Account stays visible whichever section is open; it doubles as
-                    the shortcut to the Plan & Usage page. */}
-                <div className="display-flex flex-col gap-2 border-top-quinary" style={{ padding: '10px 10px 12px' }}>
+                {/* Sign out sits with the navigation, below the tabs, so the
+                    account block underneath stays a single, quiet control. */}
+                {user && (
+                    <div style={{ padding: '8px 10px' }}>
+                        <button
+                            type="button"
+                            className="beaver-prefs-nav-item"
+                            onClick={logout}
+                            title="End your current session"
+                        >
+                            <Icon icon={LogoutIcon} aria-hidden="true" focusable="false" />
+                            <span className="truncate">Sign out</span>
+                        </button>
+                    </div>
+                )}
+
+                {/* Account stays visible whichever section is open; clicking it
+                    opens the Plan & Usage page. */}
+                <div className="display-flex flex-col border-top-quinary" style={{ padding: '10px 10px 10px' }}>
                     {user ? (
-                        <>
-                            <button
-                                type="button"
-                                className="beaver-prefs-account"
-                                onClick={() => setActiveTab('billing')}
-                                title={`${user.email} — open Plan & Usage`}
-                                aria-label={`Account ${user.email}, ${planLabel}. Open Plan & Usage`}
-                                aria-current={effectiveActiveTab === 'billing' ? 'page' : undefined}
-                            >
-                                <div className="beaver-prefs-avatar" aria-hidden="true">{accountInitial}</div>
-                                <div className="display-flex flex-col min-w-0" aria-hidden="true">
-                                    <div className="text-base font-color-primary font-medium truncate">
-                                        {user.email}
-                                    </div>
-                                    <div className="text-sm font-color-secondary truncate">{planLabel}</div>
+                        <button
+                            type="button"
+                            className="beaver-prefs-account"
+                            onClick={() => setActiveTab('billing')}
+                            title={`${user.email} — open Plan & Usage`}
+                            aria-label={`Account ${user.email}, ${planLabel}. Open Plan & Usage`}
+                        >
+                            <div className="beaver-prefs-avatar" aria-hidden="true">{accountInitial}</div>
+                            <div className="display-flex flex-col min-w-0" aria-hidden="true">
+                                <div className="text-base font-color-primary font-medium truncate">
+                                    {user.email}
                                 </div>
-                            </button>
-                            <div className="display-flex flex-row items-center" style={{ paddingLeft: '4px' }}>
-                                <Button
-                                    variant="outline"
-                                    icon={LogoutIcon}
-                                    onClick={logout}
-                                    style={{ padding: '3px 6px' }}
-                                    title="End your current session"
-                                >
-                                    Sign out
-                                </Button>
+                                <div className="text-sm font-color-secondary truncate">{planLabel}</div>
                             </div>
-                        </>
+                        </button>
                     ) : (
-                        <div className="display-flex flex-row items-center gap-2 min-w-0" style={{ padding: '4px' }}>
+                        <div className="display-flex flex-row items-center gap-2 min-w-0" style={{ padding: '6px 8px' }}>
                             <div className="beaver-prefs-avatar" aria-hidden="true">
                                 <Icon icon={UserIcon} />
                             </div>
                             <div className="text-base font-color-secondary">Not signed in</div>
                         </div>
                     )}
-                    <div className="display-flex flex-row items-center gap-1" style={{ paddingLeft: '6px' }}>
+                    <div className="beaver-prefs-legal display-flex flex-row items-center gap-1">
                         <button
                             type="button"
                             onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/terms')}
