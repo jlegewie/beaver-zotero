@@ -977,6 +977,19 @@ export interface WSWorkerDiagnostics {
     oldest_in_flight_age_ms?: number | null;
 }
 
+/**
+ * Facts about the served Zotero attachment that a successful read cannot
+ * derive from the file itself. Gathered from the Zotero database within a
+ * short budget and omitted when that budget runs out, so the backend only
+ * refreshes its metadata cache from a complete picture.
+ */
+export interface ServedAttachmentDiagnostics {
+    /** Whether the served file is its parent item's primary attachment. */
+    is_primary: boolean;
+    /** Number of annotations on the served attachment. */
+    annotations_count: number;
+}
+
 /** Response to whole-document extraction request */
 export interface WSZoteroDocumentResponse {
     type: 'zotero_document';
@@ -997,6 +1010,8 @@ export interface WSZoteroDocumentResponse {
      * `ext-<key>` for external files).
      */
     served_attachment?: AttachmentStub | null;
+    /** Primary flag and annotation count of the served Zotero attachment (success only, best effort). */
+    attachment_diagnostics?: ServedAttachmentDiagnostics | null;
     /** Page count on error responses when available. */
     total_pages?: number | null;
     error?: string | null;
