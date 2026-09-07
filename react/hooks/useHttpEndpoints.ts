@@ -52,6 +52,7 @@ import {
     // Notes
     handleReadNoteRequest,
 } from '../../src/services/agentDataProvider';
+import { handleTestVoiceHttpRequest } from './httpHandlers/testVoiceHandlers';
 import {
     handleTestPingHttpRequest,
     handleTestCacheMetadataHttpRequest,
@@ -272,6 +273,7 @@ const ENDPOINT_PATHS = [
     '/beaver/note/read',
     // Test-only endpoints (cache inspection/manipulation)
     '/beaver/test/ping',
+    '/beaver/test/voice',
     '/beaver/test/cache-metadata',
     '/beaver/test/cache-payload',
     '/beaver/test/cache-invalidate',
@@ -1084,6 +1086,7 @@ function registerEndpoints(): boolean {
 
     // Test-only endpoints (dev builds only)
     if (process.env.NODE_ENV === 'development') {
+        Zotero.Server.Endpoints['/beaver/test/voice'] = createEndpoint(handleTestVoiceHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/ping'] =
             createEndpoint(handleTestPingHttpRequest);
 

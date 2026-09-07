@@ -8,7 +8,12 @@ import { CitationService } from "./services/CitationService";
 import { DocumentCache } from "./services/documentCache";
 import { BackgroundExtractor } from "./services/backgroundExtractor";
 
+import type { VoiceService } from './services/voice/voiceService';
+import type { DevelopmentVoiceHarness } from './services/voice/developmentHarness';
+
 class Addon {
+    public voice?: VoiceService;
+    public voiceHarness?: DevelopmentVoiceHarness;
     public data: {
         alive: boolean;
         config: typeof config;

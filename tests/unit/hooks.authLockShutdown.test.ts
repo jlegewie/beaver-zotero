@@ -32,6 +32,7 @@ vi.mock('../../src/ui/ui', () => ({
         removeChatPanel: mockRemoveChatPanel,
         registerShortcuts: mockRegisterShortcuts,
         unregisterShortcuts: mockUnregisterShortcuts,
+        closeWindowsRenderedBy: vi.fn(),
         closeBeaverWindow: mockCloseBeaverWindow,
         closePreferencesWindow: mockClosePreferencesWindow,
     },
@@ -75,7 +76,10 @@ vi.mock('../../src/services/CitationService', () => ({
 }));
 
 vi.mock('../../src/services/database', () => ({
-    BeaverDB: class MockBeaverDB {},
+    BeaverDB: class MockBeaverDB {
+        initDatabase = vi.fn().mockResolvedValue(undefined);
+        closeDatabase = vi.fn().mockResolvedValue(undefined);
+    },
 }));
 
 vi.mock('../../src/services/backgroundExtractor', () => ({
@@ -101,6 +105,29 @@ vi.mock('../../src/utils/versionNotificationPrefs', () => ({
 
 vi.mock('../../react/constants/versionUpdateMessages', () => ({
     getAllVersionUpdateMessageVersions: vi.fn(() => []),
+}));
+
+vi.mock('../../src/services/voice/voiceService', () => ({
+    createVoiceService: vi.fn(() => { throw new Error('Timer module unavailable'); }),
+}));
+vi.mock('../../src/services/voice/developmentHarness', () => ({
+    DevelopmentVoiceHarness: vi.fn(function () { throw new Error('Timer module unavailable'); }),
+}));
+vi.mock('../../src/services/documentCache', () => ({
+    DocumentCache: class {
+        init = vi.fn().mockResolvedValue(undefined);
+        runStartupGC = vi.fn().mockResolvedValue(undefined);
+    },
+}));
+vi.mock('../../src/utils/configurePDFForBeaver', () => ({ configurePDFForBeaver: vi.fn() }));
+vi.mock('../../src/modules/readerIntegration', () => ({ initReaderIntegration: vi.fn(), cleanupReaderIntegration: vi.fn() }));
+vi.mock('../../src/modules/readerToolbarMenu', () => ({ initReaderToolbarMenu: vi.fn(), cleanupReaderToolbarMenu: vi.fn() }));
+vi.mock('../../src/services/artifacts/view/readerTableView', () => ({
+    initReaderTableViews: vi.fn(), cleanupReaderTableViews: vi.fn(), cleanupReaderTableViewsForWindow: vi.fn(),
+}));
+vi.mock('../../src/ui/tableItemPane', () => ({ initTableItemPane: vi.fn(), cleanupTableItemPane: vi.fn() }));
+vi.mock('../../src/services/artifacts/tablesApiHost', () => ({
+    registerTablesApi: vi.fn(), unregisterTablesApi: vi.fn(), unregisterTableShadowRestore: vi.fn(),
 }));
 
 function makeAuthLock() {
@@ -199,6 +226,65 @@ describe('hooks auth lock shutdown cleanup', () => {
 
     afterEach(() => {
         vi.useRealTimers();
+    });
+
+    it('cancels the originating voice session when a main window unloads', async () => {
+        const hooks = await loadHooks();
+        const win = makeWindow();
+        const voice = { windowUnloaded: vi.fn(), dispose: vi.fn() };
+        (globalThis as any).addon.voice = voice;
+        vi.mocked(Zotero.getMainWindows).mockReturnValue([win, makeWindow()]);
+        await hooks.onMainWindowUnload(win);
+        expect(voice.windowUnloaded).toHaveBeenCalledWith(win);
+        expect(voice.dispose).not.toHaveBeenCalled();
+    });
+
+    it('disposes and removes the plugin voice service on shutdown', async () => {
+        const hooks = await loadHooks();
+        const voice = { dispose: vi.fn() };
+        (globalThis as any).addon.voice = voice;
+        await hooks.onShutdown();
+        expect(voice.dispose).toHaveBeenCalledOnce();
+        expect((globalThis as any).addon.voice).toBeUndefined();
+    });
+
+    it.each(['production', 'development'])('continues essential startup when optional voice initialization fails in %s', async env => {
+        (globalThis as any).__env__ = env;
+        (globalThis as any).Services.startup.shuttingDown = false;
+        const testConnection = vi.fn().mockResolvedValue(undefined);
+        (Zotero as any).DBConnection = vi.fn(function () { return { test: testConnection }; });
+        (Zotero as any).PreferencePanes = { register: vi.fn().mockResolvedValue(undefined) };
+        const hooks = await loadHooks();
+        await hooks.onStartup();
+        expect(testConnection).toHaveBeenCalledOnce();
+        expect((globalThis as any).addon.db.initDatabase).toHaveBeenCalledOnce();
+        expect((globalThis as any).addon.db.closeDatabase).not.toHaveBeenCalled();
+        expect(mockRegisterShortcuts).toHaveBeenCalledOnce();
+        expect(Zotero.PreferencePanes.register).toHaveBeenCalledOnce();
+        expect((globalThis as any).addon.voice).toBeUndefined();
+        expect((globalThis as any).addon.voiceHarness).toBeUndefined();
+    });
+
+    it('continues window cleanup after voice unload throws', async () => {
+        const hooks = await loadHooks(); const win = makeWindow();
+        (globalThis as any).addon.voice = { windowUnloaded: vi.fn(() => { throw new Error('voice failure'); }) };
+        vi.mocked(Zotero.getMainWindows).mockReturnValue([win, makeWindow()]);
+        await hooks.onMainWindowUnload(win);
+        expect(mockRemoveChatPanel).toHaveBeenCalledWith(win);
+    });
+
+    it('closes the database and other services after voice disposal throws', async () => {
+        const hooks = await loadHooks();
+        const stop = vi.fn().mockResolvedValue(undefined), closeDatabase = vi.fn().mockResolvedValue(undefined);
+        (globalThis as any).addon.voice = { dispose: vi.fn(() => { throw new Error('voice failure'); }) };
+        (globalThis as any).addon.voiceHarness = {};
+        (globalThis as any).addon.db = { closeDatabase };
+        (globalThis as any).addon.backgroundExtractor = { stop };
+        await hooks.onShutdown();
+        expect(stop).toHaveBeenCalledOnce(); expect(closeDatabase).toHaveBeenCalledOnce();
+        expect(mockUiManagerCleanup).toHaveBeenCalledOnce();
+        expect((globalThis as any).addon.voice).toBeUndefined();
+        expect((globalThis as any).addon.voiceHarness).toBeUndefined();
     });
 
     // TODO: re-enable. Pre-existing failure unrelated to MuPDF cleanup —

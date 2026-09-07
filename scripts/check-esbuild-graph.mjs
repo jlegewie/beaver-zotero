@@ -73,6 +73,17 @@ const WEBPACK_ONLY_INPUTS = [
     'src/services/artifacts/tableItem.ts',
 ];
 
+// Every voice module is classified so additions/renames require updating the gate.
+const PRODUCTION_VOICE_INPUTS = [
+    'packages/agent-core/src/voice/contracts.ts',
+    'packages/agent-core/src/voice/controller.ts',
+    'src/services/voice/voiceService.ts',
+];
+const DEVELOPMENT_VOICE_INPUTS = [
+    'packages/agent-core/src/voice/fakes.ts',
+    'src/services/voice/developmentHarness.ts',
+];
+
 const HELP = `
 What this means in practice:
 
@@ -99,7 +110,7 @@ How to fix it:
 `;
 
 function fail(lines) {
-    console.error(`\n\u2716 check:bundle — the esbuild bundle's react/ graph changed.\n`);
+    console.error(`\n\u2716 check:bundle — esbuild bundle checks failed.\n`);
     for (const line of lines) console.error(`  ${line}`);
     console.error(HELP);
     process.exit(1);
@@ -145,6 +156,27 @@ const processEnvHits = [...bundleText.matchAll(/process\.env/g)].map((match) =>
 const webpackOnly = WEBPACK_ONLY_INPUTS.filter((p) => inputs.includes(p));
 
 const problems = [];
+const knownVoiceInputs = [...PRODUCTION_VOICE_INPUTS, ...DEVELOPMENT_VOICE_INPUTS];
+const missingVoiceInputs = knownVoiceInputs.filter((file) => !inputs.includes(file));
+const unclassifiedVoiceInputs = inputs.filter((file) =>
+    (file.startsWith('packages/agent-core/src/voice/') || file.startsWith('src/services/voice/'))
+    && !knownVoiceInputs.includes(file));
+if (missingVoiceInputs.length || unclassifiedVoiceInputs.length) {
+    problems.push('Voice module classification drifted; update the explicit production/development lists:');
+    for (const file of missingVoiceInputs) problems.push(`  missing: ${file}`);
+    for (const file of unclassifiedVoiceInputs) problems.push(`  unclassified: ${file}`);
+}
+// Parsed imports include dead development branches; only emitted bytes prove leakage.
+if (process.env.NODE_ENV !== 'development') {
+    const developmentVoiceModules = Object.values(result.metafile.outputs)
+        .flatMap((output) => Object.entries(output.inputs))
+        .filter(([file, input]) => input.bytesInOutput > 0
+            && DEVELOPMENT_VOICE_INPUTS.includes(file.split('\\').join('/')));
+    if (developmentVoiceModules.length) {
+        problems.push('Development voice modules reached production output:');
+        for (const [file] of developmentVoiceModules) problems.push(`  ${file}`);
+    }
+}
 if (webpackOnly.length) {
     problems.push('Webpack-only module(s) reached the esbuild bundle:');
     for (const p of webpackOnly) problems.push(`  - ${p}`);
@@ -185,5 +217,6 @@ if (problems.length) fail(problems);
 
 console.log(
     `\u2713 check:bundle — esbuild bundle contains exactly the ${reactInputs.length} allowlisted ` +
-        'react/ modules, no surviving `process.env`, and no webpack-only module.'
+        'react/ modules, classified voice modules with no production development-code leakage, ' +
+        'no surviving `process.env`, and no webpack-only module.'
 );
