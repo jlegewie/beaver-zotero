@@ -452,8 +452,15 @@ export interface PendingApproval {
  * parts and forwards the target, and the host resolves it to a real note.
  */
 export interface EditNoteResolvedTarget {
+    /** Device-local library rowid, or `0` when the library is not on this device. */
     libraryId: number;
     zoteroKey: string;
+    /**
+     * Device-portable library identity ("u" / "g<groupID>") when the target was
+     * named portably. Zotero keys are unique only within a library, so this is
+     * what tells two unavailable libraries apart — their rowids are both `0`.
+     */
+    libraryRef?: string;
 }
 
 /**

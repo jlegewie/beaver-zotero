@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   resolveLibraryRef: vi.fn(),
 }));
 
-vi.mock("../../../src/utils/libraryIdentity", () => ({
+vi.mock("../../../src/utils/libraryIdentity", async () => ({
   libraryRefForLibraryID: vi.fn(() => null),
   modelObjectIdFromReference: vi.fn(
     ({ library_ref, library_id, zotero_key }) =>
@@ -14,6 +14,11 @@ vi.mock("../../../src/utils/libraryIdentity", () => ({
   ),
   resolveItemReference: mocks.resolveItemReference,
   resolveLibraryRef: mocks.resolveLibraryRef,
+  // The real predicate, not a stand-in: it decides whether a portable-only
+  // reference reaches the exclusion gate at all, so a stub would let a
+  // regression in the grammar check pass unnoticed.
+  hasLibraryIdentity: (await import("@beaver/agent-core/identity/libraryRef"))
+    .hasLibraryIdentity,
 }));
 
 vi.mock("../../../src/services/agentDataProvider/utils", () => ({
@@ -115,6 +120,9 @@ const annotationData = {
   items: [{ index: 0, client_item_id: "client-1" }],
 };
 
+/** The same target named portably only — what the backend sends once it stops pinning a rowid. */
+const portableOnlyReference = { library_ref: "g42", zotero_key: "ITEM1234" };
+
 const editNoteData = {
   ...reference,
   old_string: "before",
@@ -126,6 +134,19 @@ const editNoteBatchData = {
   ...reference,
   edits: [{ index: 0, old_string: "before", new_string: "after" }],
 };
+
+/** Same as `validationCases`, with every numeric `library_id` stripped from the action data. */
+function portableOnly(actionData: Record<string, any>): Record<string, any> {
+  if ("resolved_ref" in actionData) {
+    return {
+      ...actionData,
+      requested_ref: portableOnlyReference,
+      resolved_ref: portableOnlyReference,
+    };
+  }
+  const { library_id: _dropped, ...rest } = actionData;
+  return { ...rest, ...portableOnlyReference };
+}
 
 const validationCases = [
   [
@@ -191,6 +212,27 @@ describe("agent action library-exclusion ordering", () => {
         error_code: "library_not_searchable",
       });
       expect(mocks.resolveLibraryRef).toHaveBeenCalled();
+      expect(mocks.checkLibraryExcluded).toHaveBeenCalledWith(7);
+      expect(mocks.resolveItemReference).not.toHaveBeenCalled();
+    },
+  );
+
+  // A portable `library_ref` is a complete target: the identity guards must not
+  // bail out before the exclusion gate just because no rowid came with it.
+  it.each(validationCases)(
+    "reaches the %s exclusion gate with a portable-only reference",
+    async (actionType, validate, actionData) => {
+      const response = await validate({
+        event: "agent_action_validate",
+        request_id: `validate-portable-${actionType}`,
+        action_type: actionType,
+        action_data: portableOnly(actionData),
+      } as any);
+
+      expect(response).toMatchObject({
+        valid: false,
+        error_code: "library_not_searchable",
+      });
       expect(mocks.checkLibraryExcluded).toHaveBeenCalledWith(7);
       expect(mocks.resolveItemReference).not.toHaveBeenCalled();
     },

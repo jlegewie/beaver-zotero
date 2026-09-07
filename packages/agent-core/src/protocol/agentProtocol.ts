@@ -470,8 +470,12 @@ export interface ExternalReferenceCheckItem {
 export interface WSExternalReferenceCheckRequest extends WSBaseEvent {
     event: 'external_reference_check_request';
     request_id: string;
-    /** Library IDs to search in. If not provided, search all libraries. */
-    library_ids?: number[];
+    /**
+     * Libraries to search in, as portable library tokens (`"u"` / `"g<groupID>"`),
+     * library names, or legacy device-local numeric ids. If not provided, search
+     * every library the user has not excluded from Beaver.
+     */
+    library_ids?: Array<number | string>;
     /** References to check */
     items: ExternalReferenceCheckItem[];
 }
@@ -1398,7 +1402,7 @@ export interface WSZoteroSearchResponse {
     total_count: number;
     error?: string | null;
     error_code?: string | null;
-    /** Available libraries (only included when error_code is 'library_not_found') */
+    /** Available libraries (only included when error_code is 'library_not_found' or 'library_unavailable') */
     available_libraries?: AvailableLibraryInfo[] | null;
     /** Non-fatal warnings (e.g., conditions Zotero rejected). Search still executed. */
     warnings?: string[] | null;
@@ -1446,7 +1450,7 @@ export interface WSListItemsResponse {
     collection_name?: string | null;
     error?: string | null;
     error_code?: string | null;
-    /** Available libraries (only included when error_code is 'library_not_found') */
+    /** Available libraries (only included when error_code is 'library_not_found' or 'library_unavailable') */
     available_libraries?: AvailableLibraryInfo[] | null;
 }
 
@@ -1620,7 +1624,7 @@ export interface WSResolvePopulationResponse {
     any_conditions_applied?: boolean | null;
     error?: string | null;
     error_code?: string | null;
-    /** Available libraries (only included when error_code is 'library_not_found') */
+    /** Available libraries (only included when error_code is 'library_not_found' or 'library_unavailable') */
     available_libraries?: AvailableLibraryInfo[] | null;
     /**
      * Unused by this response: a condition Zotero refuses fails the whole
@@ -1785,7 +1789,7 @@ export interface WSListCollectionsResponse {
     library_name?: string | null;
     error?: string | null;
     error_code?: string | null;
-    /** Available libraries (only included when error_code is 'library_not_found') */
+    /** Available libraries (only included when error_code is 'library_not_found' or 'library_unavailable') */
     available_libraries?: AvailableLibraryInfo[] | null;
 }
 
@@ -1865,7 +1869,7 @@ export interface WSListTagsResponse {
     library_name?: string | null;
     error?: string | null;
     error_code?: string | null;
-    /** Available libraries (only included when error_code is 'library_not_found') */
+    /** Available libraries (only included when error_code is 'library_not_found' or 'library_unavailable') */
     available_libraries?: AvailableLibraryInfo[] | null;
 }
 

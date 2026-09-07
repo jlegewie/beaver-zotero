@@ -2,7 +2,7 @@ import { ToolCallPart } from '@beaver/agent-core/agents/types';
 import type { ToolCallStatus } from '@beaver/agent-core/run-state/atoms';
 import type { AgentAction } from '../../agents/agentActions';
 import type { EditNoteResolvedTarget, PendingApproval } from '@beaver/agent-ui/host';
-import { resolveObjectId } from '../../../src/utils/libraryIdentity';
+import { parseLibraryRef, resolveLibraryRef, resolveObjectId, UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 
 export type EditNoteDisplayStatus =
     | 'awaiting'
@@ -13,7 +13,10 @@ export type EditNoteDisplayStatus =
     | 'error';
 
 export type EditNoteTarget =
-    | { kind: 'known'; libraryId: number; zoteroKey: string }
+    // Reuses `EditNoteResolvedTarget` rather than restating its fields, so a
+    // field added there (e.g. the portable `libraryRef`) cannot be silently
+    // dropped on the way through the grouping pass.
+    | ({ kind: 'known' } & EditNoteResolvedTarget)
     | { kind: 'pending' }
     | null;
 
@@ -147,20 +150,77 @@ export function resolveEditNoteTargetFromData(
     if (typeof noteId === 'string' && noteId) {
         const ref = resolveObjectId(noteId);
         if (ref) {
-            return { libraryId: ref.library_id, zoteroKey: ref.zotero_key };
+            return {
+                libraryId: ref.library_id,
+                zoteroKey: ref.zotero_key,
+                ...(ref.library_ref ? { libraryRef: ref.library_ref } : {}),
+            };
         }
     }
 
-    const libRaw = parsedArgs.library_id;
     const keyRaw = parsedArgs.zotero_key;
-    const libraryId = typeof libRaw === 'number'
+    if (typeof keyRaw !== 'string' || !keyRaw) return null;
+
+    // The portable `library_ref` is the identity and wins; the numeric
+    // `library_id` may be absent or the unresolved sentinel, so it cannot be
+    // read on its own.
+    //
+    // A library this device doesn't have still yields a target, carrying
+    // `UNRESOLVED_LIBRARY_ID` — the same shape the `note_id` branch above
+    // produces for `g<groupID>-KEY`. The target is an identity, and dropping it
+    // would fold this note's edits into the neighbouring note's group
+    // (`buildEditNoteRenderItems` treats a missing target as "still streaming").
+    // Callers gate their Zotero lookups on `isOpenableEditNoteTarget` instead.
+    const libRaw = parsedArgs.library_id;
+    const numericLibraryId = typeof libRaw === 'number'
         ? libRaw
         : (typeof libRaw === 'string' ? parseInt(libRaw, 10) : NaN);
-    if (Number.isFinite(libraryId) && typeof keyRaw === 'string' && keyRaw) {
-        return { libraryId, zoteroKey: keyRaw };
+    const libraryId = resolveLibraryRef({
+        library_ref: parsedArgs.library_ref,
+        library_id: Number.isFinite(numericLibraryId) ? numericLibraryId : null,
+    });
+    const libraryRef = typeof parsedArgs.library_ref === 'string' && parseLibraryRef(parsedArgs.library_ref)
+        ? parsedArgs.library_ref
+        : undefined;
+    if (libraryId && libraryId > 0) {
+        return { libraryId, zoteroKey: keyRaw, ...(libraryRef ? { libraryRef } : {}) };
     }
-
+    if (libraryRef) {
+        return { libraryId: UNRESOLVED_LIBRARY_ID, zoteroKey: keyRaw, libraryRef };
+    }
     return null;
+}
+
+/**
+ * Whether two resolved targets name the same note.
+ *
+ * A rowid identifies a library only when the library is on this device. When
+ * either side is unresolved its rowid is the `UNRESOLVED_LIBRARY_ID` sentinel,
+ * which every unavailable library shares — and Zotero keys are unique only
+ * within a library, so comparing the sentinel would merge two genuinely
+ * different notes. The portable ref is the only thing that separates them.
+ */
+export function sameEditNoteTarget(
+    a: EditNoteResolvedTarget,
+    b: EditNoteResolvedTarget,
+): boolean {
+    if (a.zoteroKey !== b.zoteroKey) return false;
+    if (a.libraryId > 0 && b.libraryId > 0) return a.libraryId === b.libraryId;
+    return a.libraryRef === b.libraryRef;
+}
+
+/**
+ * Whether a resolved target names a note this device can actually open.
+ *
+ * A target may carry `UNRESOLVED_LIBRARY_ID`: it identifies the note, but its
+ * library is not on this computer, so every `Zotero.Items` lookup keyed on it
+ * silently misses. Gate open/preview affordances on this rather than on the
+ * target's mere presence, or the UI offers buttons that do nothing.
+ */
+export function isOpenableEditNoteTarget(
+    target: EditNoteResolvedTarget | null | undefined,
+): target is EditNoteResolvedTarget {
+    return target != null && target.libraryId > 0;
 }
 
 export function findPendingApprovalForToolcall(
@@ -277,31 +337,23 @@ export function buildEditNoteRenderItems(parts: ToolCallPart[]): EditNoteRenderI
     for (const part of parts) {
         const target = getEditNoteTarget(part);
         if (target?.kind === 'known') {
+            // Strip the discriminant; the portable ref must survive, or two
+            // unavailable libraries become indistinguishable further down.
+            const resolved: EditNoteResolvedTarget = {
+                libraryId: target.libraryId,
+                zoteroKey: target.zoteroKey,
+                ...(target.libraryRef ? { libraryRef: target.libraryRef } : {}),
+            };
             if (runParts.length === 0) {
                 runParts = [part];
-                runTarget = {
-                    libraryId: target.libraryId,
-                    zoteroKey: target.zoteroKey,
-                };
-            } else if (
-                runTarget === null
-                || (
-                    runTarget.libraryId === target.libraryId
-                    && runTarget.zoteroKey === target.zoteroKey
-                )
-            ) {
+                runTarget = resolved;
+            } else if (runTarget === null || sameEditNoteTarget(runTarget, resolved)) {
                 runParts.push(part);
-                runTarget = runTarget ?? {
-                    libraryId: target.libraryId,
-                    zoteroKey: target.zoteroKey,
-                };
+                runTarget = runTarget ?? resolved;
             } else {
                 flushRun();
                 runParts = [part];
-                runTarget = {
-                    libraryId: target.libraryId,
-                    zoteroKey: target.zoteroKey,
-                };
+                runTarget = resolved;
             }
         } else if (target?.kind === 'pending') {
             runParts.push(part);

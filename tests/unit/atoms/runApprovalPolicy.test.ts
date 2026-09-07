@@ -1,5 +1,5 @@
 import { createStore } from 'jotai';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     clearRunApprovalPolicyAtom,
     DEFAULT_DEFERRED_TOOL_GROUPS,
@@ -271,5 +271,85 @@ describe('runApprovalPolicy', () => {
                 destructive_rewrite: true,
             }),
         ).toBe(true);
+    });
+});
+
+describe('runApprovalPolicy with portable library identity', () => {
+    // The grant is always recorded from the created note's device-local library
+    // (`zoteroNote.libraryID`), but the approval event that follows names the
+    // note portably — with `library_id` absent or the unresolved sentinel once
+    // the backend stops pinning rowids. Group 555 lives at rowid 100 here.
+    let previousZotero: any;
+
+    beforeEach(() => {
+        previousZotero = (globalThis as any).Zotero;
+        (globalThis as any).Zotero = {
+            Libraries: { userLibraryID: 1 },
+            Groups: {
+                getLibraryIDFromGroupID: vi.fn((groupId: number) => (groupId === 555 ? 100 : false)),
+                getGroupIDFromLibraryID: vi.fn((libId: number) => (libId === 100 ? 555 : false)),
+            },
+        };
+    });
+
+    afterEach(() => {
+        (globalThis as any).Zotero = previousZotero;
+    });
+
+    function grantedPolicy(libraryId: number) {
+        const store = createStore();
+        store.set(grantCreatedNoteEditsForRunAtom, { runId: 'run-1', libraryId, zoteroKey: 'NOTE0001' });
+        return store.get(runApprovalPolicyAtom);
+    }
+
+    it('matches the grant when the edit names the note by library_ref alone', () => {
+        const policy = grantedPolicy(100);
+        expect(
+            isActionApprovedForCurrentRun(policy, 'run-1', 'edit_note', {
+                library_ref: 'g555',
+                zotero_key: 'NOTE0001',
+            }),
+        ).toBe(true);
+        expect(
+            isActionApprovedForCurrentRun(policy, 'run-1', 'edit_note', {
+                library_ref: 'g555',
+                library_id: 0,
+                zotero_key: 'NOTE0001',
+            }),
+        ).toBe(true);
+    });
+
+    it('lets library_ref win over a disagreeing numeric library_id', () => {
+        // Grant is for the personal library; the ref says so too, so a stale
+        // rowid on the event must not defeat it — nor create a match it shouldn't.
+        expect(
+            isActionApprovedForCurrentRun(grantedPolicy(1), 'run-1', 'edit_note', {
+                library_ref: 'u',
+                library_id: 100,
+                zotero_key: 'NOTE0001',
+            }),
+        ).toBe(true);
+        expect(
+            isActionApprovedForCurrentRun(grantedPolicy(100), 'run-1', 'edit_note', {
+                library_ref: 'u',
+                library_id: 100,
+                zotero_key: 'NOTE0001',
+            }),
+        ).toBe(false);
+    });
+
+    it('does not match when the reference names no library this device has', () => {
+        expect(
+            isActionApprovedForCurrentRun(grantedPolicy(100), 'run-1', 'edit_note', {
+                library_ref: 'g999999',
+                zotero_key: 'NOTE0001',
+            }),
+        ).toBe(false);
+        expect(
+            isActionApprovedForCurrentRun(grantedPolicy(100), 'run-1', 'edit_note', {
+                library_id: 0,
+                zotero_key: 'NOTE0001',
+            }),
+        ).toBe(false);
     });
 });

@@ -16,6 +16,7 @@ import {
     parseItemReference,
     parseLibraryRef,
     resolveLibraryRef,
+    UNRESOLVED_LIBRARY_ID,
 } from '../../utils/libraryIdentity';
 import { syncingItemFilterAsync } from '../../utils/sync';
 import { getPref } from '../../utils/prefs';
@@ -509,6 +510,7 @@ export function getLibraryByIdOrName(libraryIdOrName: number | string | null | u
             library: lib || null,
             wasExplicitlyRequested: true,
             searchInput: libraryIdOrName,
+            portableRef: libraryIdOrName,
         };
     }
 
@@ -1322,7 +1324,13 @@ export function resolveLibrariesFilter(filters: Array<string | number>): Librari
         // explicit reference, so it must never reach a library the user excluded
         // from Beaver — enumerating one here would leak its name through the
         // exclusion message.
-        const needle = filter.toLowerCase();
+        // A blank needle would `includes()`-match every library, silently
+        // widening a filter that named nothing into "search everything".
+        const needle = filter.trim().toLowerCase();
+        if (!needle) {
+            unresolved.push(filter);
+            continue;
+        }
         const byName = Zotero.Libraries.getAll()
             .filter((lib) => searchableLibraryIds.includes(lib.libraryID)
                 && lib.name.toLowerCase().includes(needle))
@@ -1357,14 +1365,8 @@ export function librariesFilterError(
     if (resolution.unresolved.length > 0) {
         const label = resolution.unresolved.length === 1 ? 'Library not found' : 'Libraries not found';
         const names = resolution.unresolved.map((entry) => `"${entry}"`).join(', ');
-        const available = getSearchableLibraries()
-            .map((lib) => `"${lib.name}"${lib.library_ref ? ` (${lib.library_ref})` : ''}`)
-            .join(', ');
-        const availableNote = available
-            ? ` Available libraries: ${available}.`
-            : '';
         return {
-            message: `${label}: ${names}. Identify a library by its portable ref ("u" for the personal library, "g<groupID>" for a group).${availableNote}`,
+            message: `${label}: ${names}. Identify a library by its portable ref ("u" for the personal library, "g<groupID>" for a group).${availableLibrariesNote()}`,
             error_code: 'library_not_found',
         };
     }
@@ -1465,8 +1467,12 @@ export function preflightZoteroAttachmentRequest(
     attachment: ZoteroItemReference,
     validateReference: (reference: ZoteroItemReference) => string | null = validateAttachmentReference,
 ): ZoteroAttachmentRequestPreflight {
+    // Echo the identity the request carried, normalizing an omitted numeric id
+    // to the unresolved sentinel: a portable-only request carries no rowid, and
+    // the response reference is typed as if it always does.
     const responseAttachment = {
         ...attachment,
+        library_id: attachment.library_id ?? UNRESOLVED_LIBRARY_ID,
         library_ref:
             attachment.library_ref ??
             libraryRefForLibraryID(attachment.library_id) ??
@@ -1543,6 +1549,23 @@ export function getAvailableLibraries(): AvailableLibraryInfo[] {
 }
 
 /**
+ * The " Available libraries: …" sentence appended to a library error message,
+ * or `''` when there are none to name.
+ *
+ * Duplicates the `available_libraries` field, deliberately: a caller that does
+ * not recognize the error code drops the structured field but still relays the
+ * message, so the model keeps the hint it needs to correct the reference. Only
+ * searchable libraries are named — enumerating an excluded one would leak its
+ * name past the exclusion boundary.
+ */
+function availableLibrariesNote(): string {
+    const available = getSearchableLibraries()
+        .map((lib) => `"${lib.name}"${lib.library_ref ? ` (${lib.library_ref})` : ''}`)
+        .join(', ');
+    return available ? ` Available libraries: ${available}.` : '';
+}
+
+/**
  * Result of library lookup with validation information.
  */
 export interface LibraryLookupResult {
@@ -1552,12 +1575,22 @@ export interface LibraryLookupResult {
     wasExplicitlyRequested: boolean;
     /** The input that was used to search (for error messages) */
     searchInput: string | null;
+    /**
+     * The portable library token the caller used, when the input followed that
+     * grammar. Present whether or not it resolved, so a caller can tell "this
+     * device is not a member of that group" from "no such library".
+     */
+    portableRef?: string;
 }
 
 /**
  * Error codes for library validation failures.
  */
-export type LibraryValidationErrorCode = 'library_not_found' | 'library_not_searchable';
+export type LibraryValidationErrorCode =
+    | 'library_not_found'
+    | 'library_not_searchable'
+    /** A portable library token that names a library this device does not have. */
+    | 'library_unavailable';
 
 /**
  * Result of library validation with searchability check.
@@ -1585,12 +1618,20 @@ export interface LibraryValidationResult {
 export function validateLibraryAccess(libraryIdOrName: number | string | null | undefined): LibraryValidationResult {
     const lookupResult = getLibraryByIdOrName(libraryIdOrName);
     
-    // Check if library was found
+    // Check if library was found. A portable token that doesn't resolve means
+    // this computer is not a member of that library — not that no such library
+    // exists. Only the plugin can tell the two apart, so report them apart.
     if (lookupResult.wasExplicitlyRequested && !lookupResult.library) {
+        const { portableRef } = lookupResult;
         return {
             valid: false,
-            error: `Library not found: "${lookupResult.searchInput}"`,
-            error_code: 'library_not_found',
+            // `library_unavailable` is newer than the backend branches that read
+            // these codes, and an unrecognized code drops `available_libraries`
+            // while still relaying the message — so name them in the message too.
+            error: portableRef
+                ? `The library "${portableRef}" is not available on this computer.${availableLibrariesNote()}`
+                : `Library not found: "${lookupResult.searchInput}"`,
+            error_code: portableRef ? 'library_unavailable' : 'library_not_found',
             available_libraries: getSearchableLibraries(),
         };
     }

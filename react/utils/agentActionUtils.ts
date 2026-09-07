@@ -20,7 +20,37 @@ import { saveStreamingNote } from './noteActions';
 import { currentThreadIdAtom } from '../atoms/threads';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { parseZoteroId } from '@beaver/agent-core/citations/citationGrammar';
-import { libraryRefForLibraryID, resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
+import { hasLibraryIdentity, libraryKeyToken, libraryRefForLibraryID, resolveItemReference, resolveWriteTargetLibrary, UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
+
+/**
+ * Add a `{library_ref?, library_id?, zotero_key}` reference to the dedup map,
+ * ignoring anything that names no library or no key.
+ *
+ * Keyed on the portable `library_ref` when there is one: an unresolved ref
+ * collapses `library_id` to the sentinel, so two references from different
+ * libraries would otherwise dedup onto the same entry and one item would be
+ * loaded for the other.
+ */
+function addItemReference(
+    refs: Map<string, ZoteroItemReference>,
+    source: { library_id?: unknown; library_ref?: unknown },
+    zoteroKey: unknown,
+): void {
+    if (typeof zoteroKey !== 'string' || !zoteroKey) return;
+    const libraryId = typeof source.library_id === 'number' ? source.library_id : undefined;
+    const libraryRef = typeof source.library_ref === 'string' && source.library_ref
+        ? source.library_ref
+        : undefined;
+    if (!hasLibraryIdentity({ library_id: libraryId, library_ref: libraryRef })) return;
+
+    const key = `${libraryKeyToken({ library_ref: libraryRef, library_id: libraryId })}-${zoteroKey}`;
+    if (refs.has(key)) return;
+    refs.set(key, {
+        library_id: libraryId ?? UNRESOLVED_LIBRARY_ID,
+        zotero_key: zoteroKey,
+        ...(libraryRef ? { library_ref: libraryRef } : {}),
+    });
+}
 
 /**
  * Extract all Zotero item references from agent actions that need to be loaded.
@@ -35,36 +65,12 @@ export function extractItemReferencesFromAgentActions(actions: AgentAction[]): Z
     for (const action of actions) {
         // For annotation actions, extract attachment reference from proposed_data
         if (isAnnotationAgentAction(action)) {
-            const libraryId = action.proposed_data.library_id;
-            const attachmentKey = action.proposed_data.attachment_key;
-            const libraryRef = action.proposed_data.library_ref;
-            if (typeof libraryId === 'number' && typeof attachmentKey === 'string' && attachmentKey) {
-                const key = `${libraryId}-${attachmentKey}`;
-                if (!refs.has(key)) {
-                    refs.set(key, {
-                        library_id: libraryId,
-                        zotero_key: attachmentKey,
-                        ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
-                    });
-                }
-            }
+            addItemReference(refs, action.proposed_data, action.proposed_data.attachment_key);
         }
 
         // For zotero_note actions with existing item reference in proposed_data
         if (isZoteroNoteAgentAction(action)) {
-            const libraryId = action.proposed_data.library_id;
-            const zoteroKey = action.proposed_data.zotero_key;
-            const libraryRef = action.proposed_data.library_ref;
-            if (typeof libraryId === 'number' && typeof zoteroKey === 'string' && zoteroKey) {
-                const key = `${libraryId}-${zoteroKey}`;
-                if (!refs.has(key)) {
-                    refs.set(key, {
-                        library_id: libraryId,
-                        zotero_key: zoteroKey,
-                        ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
-                    });
-                }
-            }
+            addItemReference(refs, action.proposed_data, action.proposed_data.zotero_key);
         }
 
         // For create_note actions with parent item reference in proposed_data
@@ -75,7 +81,7 @@ export function extractItemReferencesFromAgentActions(actions: AgentAction[]): Z
                 // Key on library_ref when available: an unresolved portable ref
                 // collapses library_id to UNRESOLVED_LIBRARY_ID, and two refs from
                 // different groups would otherwise collide on the same key.
-                const key = `${parsedParent.library_ref ?? parsedParent.library_id}-${parsedParent.zotero_key}`;
+                const key = `${libraryKeyToken(parsedParent)}-${parsedParent.zotero_key}`;
                 if (!refs.has(key)) {
                     refs.set(key, parsedParent);
                 }
@@ -84,19 +90,7 @@ export function extractItemReferencesFromAgentActions(actions: AgentAction[]): Z
 
         // For applied actions, extract the created item reference from result_data
         if (hasAppliedZoteroItem(action)) {
-            const libraryId = action.result_data!.library_id;
-            const zoteroKey = action.result_data!.zotero_key;
-            const libraryRef = action.result_data!.library_ref;
-            if (typeof libraryId === 'number' && typeof zoteroKey === 'string' && zoteroKey) {
-                const key = `${libraryId}-${zoteroKey}`;
-                if (!refs.has(key)) {
-                    refs.set(key, {
-                        library_id: libraryId,
-                        zotero_key: zoteroKey,
-                        ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
-                    });
-                }
-            }
+            addItemReference(refs, action.result_data!, action.result_data!.zotero_key);
         }
     }
 

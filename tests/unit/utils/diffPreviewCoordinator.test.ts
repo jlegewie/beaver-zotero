@@ -5,7 +5,7 @@
  * edit_note approvals for the note currently being previewed, not on
  * approvals for other notes.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { atom, createStore } from 'jotai';
 
 // ---------------------------------------------------------------------------
@@ -93,7 +93,7 @@ vi.mock('../../../react/atoms/agentRunAtoms', () => ({
 // ---------------------------------------------------------------------------
 
 import { diffPreviewNoteKeyAtom } from '../../../react/utils/diffPreviewCoordinator';
-import { updateDiffPreviewForNote } from '../../../react/utils/diffPreviewCoordinator';
+import { noteLibraryIdFromActionData, updateDiffPreviewForNote } from '../../../react/utils/diffPreviewCoordinator';
 
 // Now create the real atom and assign it
 const pendingApprovalsAtom = atom<Map<string, any>>(new Map());
@@ -106,7 +106,8 @@ testPendingApprovalsAtom.ref = pendingApprovalsAtom;
 function makePendingApproval(overrides: {
     actionId: string;
     actionType?: string;
-    library_id?: number;
+    library_id?: number | null;
+    library_ref?: string;
     zotero_key?: string;
     old_string?: string;
     new_string?: string;
@@ -118,7 +119,10 @@ function makePendingApproval(overrides: {
         toolcallId: `tc-${overrides.actionId}`,
         actionType: overrides.actionType ?? 'edit_note',
         actionData: {
-            library_id: overrides.library_id ?? 1,
+            // `null` opts out entirely, for the portable-only shape the backend
+            // sends once it stops pinning device-local rowids.
+            ...(overrides.library_id === null ? {} : { library_id: overrides.library_id ?? 1 }),
+            ...(overrides.library_ref ? { library_ref: overrides.library_ref } : {}),
             zotero_key: overrides.zotero_key ?? 'AAAA1111',
             old_string: overrides.old_string ?? 'old',
             new_string: overrides.new_string ?? 'new',
@@ -411,6 +415,98 @@ describe('diffPreviewCoordinator — handleBannerAction', () => {
             expect(responses).toHaveLength(3);
             expect(responses.every(r => r.approved === true)).toBe(true);
             expect(storeRef.current.get(pendingApprovalsAtom).size).toBe(0);
+        });
+    });
+
+    // An edit_note approval names its note by portable `library_ref`; the numeric
+    // `library_id` is absent or the unresolved sentinel once the backend stops
+    // pinning rowids. Everything below the coordinator's API works in rowids, so
+    // the ref has to be resolved before any note key is built. Group 555 is the
+    // local library 100 on this device.
+    describe('portable library identity', () => {
+        let previousGroups: any;
+
+        beforeEach(() => {
+            previousGroups = (globalThis as any).Zotero.Groups;
+            (globalThis as any).Zotero.Groups = {
+                getLibraryIDFromGroupID: (groupID: number) => (groupID === 555 ? 100 : false),
+                getGroupIDFromLibraryID: (libraryID: number) => (libraryID === 100 ? 555 : false),
+            };
+        });
+
+        afterEach(() => {
+            (globalThis as any).Zotero.Groups = previousGroups;
+        });
+
+        it('shows the preview for an approval that carries only a library_ref', () => {
+            seedApprovals(
+                makePendingApproval({ actionId: 'a1', library_id: null, library_ref: 'g555', zotero_key: 'NOTE_A' }),
+            );
+
+            updateDiffPreviewForNote(100, 'NOTE_A');
+
+            expect(mockShowDiffPreview).toHaveBeenCalledWith(100, 'NOTE_A', expect.any(Array));
+        });
+
+        it('shows the preview when library_id is the unresolved sentinel', () => {
+            seedApprovals(
+                makePendingApproval({ actionId: 'a1', library_id: 0, library_ref: 'g555', zotero_key: 'NOTE_A' }),
+            );
+
+            updateDiffPreviewForNote(100, 'NOTE_A');
+
+            expect(mockShowDiffPreview).toHaveBeenCalledWith(100, 'NOTE_A', expect.any(Array));
+        });
+
+        it('does not confuse two libraries that both arrive with the sentinel', () => {
+            seedApprovals(
+                makePendingApproval({ actionId: 'a1', library_id: 0, library_ref: 'g555', zotero_key: 'NOTE_A' }),
+                makePendingApproval({ actionId: 'b1', library_id: 0, library_ref: 'u', zotero_key: 'NOTE_A' }),
+            );
+
+            updateDiffPreviewForNote(100, 'NOTE_A');
+
+            // Only the group-library edit belongs to this preview.
+            expect(mockShowDiffPreview).toHaveBeenCalledTimes(1);
+            const [, , edits] = mockShowDiffPreview.mock.calls[0];
+            expect(edits).toHaveLength(1);
+        });
+
+        // The helper `agentActions.ts` calls at both approval entry points, so a
+        // regression there is caught here rather than only through the UI.
+        describe('noteLibraryIdFromActionData', () => {
+            it('resolves a portable ref, with or without the sentinel', () => {
+                expect(noteLibraryIdFromActionData({ library_ref: 'g555' })).toBe(100);
+                expect(noteLibraryIdFromActionData({ library_ref: 'g555', library_id: 0 })).toBe(100);
+            });
+
+            it('lets library_ref win over a disagreeing numeric library_id', () => {
+                expect(noteLibraryIdFromActionData({ library_ref: 'g555', library_id: 7 })).toBe(100);
+            });
+
+            it('keeps reading a legacy numeric library_id when no ref is present', () => {
+                expect(noteLibraryIdFromActionData({ library_id: 7 })).toBe(7);
+            });
+
+            it('returns null when nothing names a library this device has', () => {
+                expect(noteLibraryIdFromActionData({ library_ref: 'g999999' })).toBeNull();
+                expect(noteLibraryIdFromActionData({ library_id: 0 })).toBeNull();
+                expect(noteLibraryIdFromActionData({})).toBeNull();
+                expect(noteLibraryIdFromActionData(undefined)).toBeNull();
+            });
+        });
+
+        it('scopes the banner to the previewed note when approvals name it portably', async () => {
+            capturedHandlers.previewNoteKey = { libraryId: 100, zoteroKey: 'NOTE_A' };
+
+            seedApprovals(
+                makePendingApproval({ actionId: 'a1', library_id: null, library_ref: 'g555', zotero_key: 'NOTE_A' }),
+                makePendingApproval({ actionId: 'b1', library_id: null, library_ref: 'g555', zotero_key: 'NOTE_B' }),
+            );
+            await capturedHandlers.bannerAction!('approveAll');
+
+            expect(getApprovalResponses()).toEqual([{ actionId: 'a1', approved: true }]);
+            expect(storeRef.current.get(pendingApprovalsAtom).size).toBe(1);
         });
     });
 });

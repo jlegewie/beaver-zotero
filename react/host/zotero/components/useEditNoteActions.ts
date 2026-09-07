@@ -38,6 +38,7 @@ import {
     getEffectiveEditNotePendingApproval,
     isEditNoteOrphaned,
     isEditNoteStreamingPlaceholder,
+    isOpenableEditNoteTarget,
     parseEditNoteToolCallArgs,
     resolveEditNoteTargetFromData,
     type EditNoteRowDescriptor,
@@ -409,7 +410,7 @@ export function useEditNoteActions({
     }, [action, handleUndo, runApply]);
 
     const handleOpenNote = useCallback(async () => {
-        if (!resolvedTarget) return;
+        if (!isOpenableEditNoteTarget(resolvedTarget)) return;
         const editData = action?.proposed_data ?? pendingApproval?.actionData;
 
         if (editData) {
@@ -437,7 +438,7 @@ export function useEditNoteActions({
      * and undo contexts are joined from the action payload by edit index.
      */
     const handleOpenNoteForRow = useCallback(async (row: EditNoteRowDescriptor) => {
-        if (!resolvedTarget) return;
+        if (!isOpenableEditNoteTarget(resolvedTarget)) return;
         const batchData = action?.proposed_data ?? pendingApproval?.actionData;
         const edits: any[] = Array.isArray(batchData?.edits) ? batchData.edits : [];
         const fullEdit = row.editIndex !== null
@@ -478,7 +479,9 @@ export function useEditNoteActions({
         showReject,
         showUndo,
         showRetry,
-        showOpenNoteAction: resolvedTarget !== null,
+        // Not merely "we know which note": a note in a library this computer
+        // doesn't have cannot be opened, and offering the button would do nothing.
+        showOpenNoteAction: isOpenableEditNoteTarget(resolvedTarget),
         openNoteTooltip: action || pendingApproval ? 'Open note and jump to edit' : 'Open note',
         handleApprove,
         handleReject,

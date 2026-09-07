@@ -32,6 +32,7 @@ import { store } from '../store';
 import { pendingApprovalsAtom } from '../agents/agentActions';
 import { sendApprovalResponseAtom } from '../atoms/agentRunAtoms';
 import { buildPreviewableEditOperations } from './editNotePreviewOperations';
+import { resolveLibraryRef } from '../../src/utils/libraryIdentity';
 
 /**
  * Convenience gate that combines the user preference and the runtime
@@ -73,6 +74,25 @@ function makeNoteKey(libraryId: number, zoteroKey: string): string {
     return `${libraryId}-${zoteroKey}`;
 }
 
+/**
+ * The device-local library id an edit_note approval targets, or null when it
+ * names no library this device has.
+ *
+ * The portable `library_ref` is the identity and wins; the numeric `library_id`
+ * is a same-device cache of it that may be absent or the unresolved sentinel.
+ * Everything below this point (note keys, `isNoteInSelectedTab`, the editor
+ * preview itself) works in rowids, so resolve once here rather than threading
+ * the pair through.
+ */
+export function noteLibraryIdFromActionData(actionData: any): number | null {
+    if (!actionData) return null;
+    const libraryId = resolveLibraryRef({
+        library_ref: actionData.library_ref,
+        library_id: actionData.library_id,
+    });
+    return libraryId && libraryId > 0 ? libraryId : null;
+}
+
 // =============================================================================
 // Coordinator
 // =============================================================================
@@ -92,7 +112,7 @@ export function updateDiffPreviewForNote(libraryId: number, zoteroKey: string): 
     const edits: EditOperation[] = [];
     for (const [, pa] of allApprovals) {
         if (pa.actionType !== 'edit_note' && pa.actionType !== 'edit_note_batch') continue;
-        const paLib = pa.actionData?.library_id;
+        const paLib = noteLibraryIdFromActionData(pa.actionData);
         const paKey = pa.actionData?.zotero_key;
         if (paLib == null || !paKey || makeNoteKey(paLib, paKey) !== noteKey) continue;
 
@@ -148,7 +168,7 @@ async function handleBannerAction(action: string): Promise<void> {
         if (pa.actionType !== 'edit_note' && pa.actionType !== 'edit_note_batch') continue;
         // Only act on approvals for the previewed note
         if (previewKey) {
-            const paLib = pa.actionData?.library_id;
+            const paLib = noteLibraryIdFromActionData(pa.actionData);
             const paKey = pa.actionData?.zotero_key;
             if (paLib !== previewKey.libraryId || paKey !== previewKey.zoteroKey) continue;
         }

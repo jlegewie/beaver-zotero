@@ -3,7 +3,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryReferencePortable, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import { checkLibraryExcluded } from '../../src/services/agentDataProvider/utils';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
-import { updateDiffPreviewForNote, diffPreviewNoteKeyAtom } from '../utils/diffPreviewCoordinator';
+import { updateDiffPreviewForNote, noteLibraryIdFromActionData, diffPreviewNoteKeyAtom } from '../utils/diffPreviewCoordinator';
 import { agentActionsService, AckActionLink } from '@beaver/agent-core/transport/clients/agentActionsService';
 import { notifyApprovalRequest } from '../../src/services/systemNotifications';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
@@ -514,9 +514,12 @@ export const addPendingApprovalAtom = atom(
 
         // Trigger in-editor diff preview for edit_note / edit_note_batch approvals
         if (event.action_type === 'edit_note' || event.action_type === 'edit_note_batch') {
-            const { library_id, zotero_key } = event.action_data || {};
-            if (library_id != null && zotero_key) {
-                updateDiffPreviewForNote(library_id, zotero_key);
+            // The target may be named portably only, so resolve the library
+            // rather than reading the numeric id off the event.
+            const libraryId = noteLibraryIdFromActionData(event.action_data);
+            const zoteroKey = event.action_data?.zotero_key;
+            if (libraryId != null && zoteroKey) {
+                updateDiffPreviewForNote(libraryId, zoteroKey);
             }
         }
 
@@ -542,7 +545,7 @@ export const removePendingApprovalsAtom = atom(
         for (const actionId of ids) {
             const removed = prev.get(actionId);
             if (removed?.actionType !== 'edit_note' && removed?.actionType !== 'edit_note_batch') continue;
-            const libraryId = removed.actionData?.library_id;
+            const libraryId = noteLibraryIdFromActionData(removed.actionData);
             const zoteroKey = removed.actionData?.zotero_key;
             if (libraryId == null || !zoteroKey) continue;
             affectedNotes.set(`${libraryId}-${zoteroKey}`, { libraryId, zoteroKey });

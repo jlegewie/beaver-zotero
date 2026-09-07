@@ -4,8 +4,8 @@
  * Mocks `batchFindExistingReferences` to verify:
  *   - timing fields propagate into the response
  *   - library_ids default to the searchable (non-excluded) libraries when empty
- *   - explicitly requested libraries are intersected with the searchable set so
- *     excluded libraries are never searched
+ *   - an explicit library_ids is handed to the shared filter resolver verbatim
+ *     (portable tokens included) and only its result is searched
  *   - a thrown error produces an all-null response (no reject)
  */
 
@@ -20,11 +20,13 @@ vi.mock('../../../react/utils/batchFindExistingReferences', () => ({
     batchFindExistingReferences: (...args: any[]) => mockBatchFindExistingReferences(...args),
 }));
 
-const { mockGetSearchableLibraryIds } = vi.hoisted(() => ({
+const { mockGetSearchableLibraryIds, mockResolveLibrariesFilterToSearchableIds } = vi.hoisted(() => ({
     mockGetSearchableLibraryIds: vi.fn(() => [1, 42] as number[]),
+    mockResolveLibrariesFilterToSearchableIds: vi.fn(),
 }));
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getSearchableLibraryIds: mockGetSearchableLibraryIds,
+    resolveLibrariesFilterToSearchableIds: mockResolveLibrariesFilterToSearchableIds,
 }));
 
 import { handleExternalReferenceCheckRequest } from '../../../src/services/agentDataProvider/handleExternalReferenceCheckRequest';
@@ -56,6 +58,8 @@ const baseRequest = {
 beforeEach(() => {
     mockBatchFindExistingReferences.mockReset();
     mockGetSearchableLibraryIds.mockReturnValue([1, 42]);
+    // Matches `baseRequest.library_ids`; cases that care set their own.
+    mockResolveLibrariesFilterToSearchableIds.mockReturnValue([1]);
 });
 
 afterEach(() => {
@@ -145,10 +149,14 @@ describe('handleExternalReferenceCheckRequest', () => {
         );
     });
 
-    it('drops excluded libraries from an explicitly requested library_ids list', async () => {
-        // Library 99 is excluded (absent from the searchable set) and must never
-        // be searched, even though the backend requested it explicitly.
-        mockGetSearchableLibraryIds.mockReturnValue([1]);
+    // The handler's own job for an explicit `library_ids` is to hand the entries
+    // to the shared resolver untouched and search exactly what comes back — it
+    // must not pre-filter, re-map, or widen. The resolver's own contract (portable
+    // tokens, numeric ids, names, and the intersection with the searchable set
+    // that keeps excluded libraries out) is pinned in getLibraryByIdOrName.test.ts.
+    it('forwards an explicit library_ids to the shared resolver verbatim and searches only its result', async () => {
+        mockGetSearchableLibraryIds.mockReturnValue([1, 42]);
+        mockResolveLibrariesFilterToSearchableIds.mockReturnValue([42]);
         mockBatchFindExistingReferences.mockResolvedValue({
             results: baseRequest.items.map(i => ({ id: i.id, item: null })),
             timing: {
@@ -158,13 +166,34 @@ describe('handleExternalReferenceCheckRequest', () => {
             },
         });
 
-        const req = { ...baseRequest, library_ids: [1, 99] };
+        // Portable token, legacy numeric id and a name in one request: none of
+        // them is the handler's to interpret.
+        const req = { ...baseRequest, library_ids: ['g555', 99, 'Group Alpha'] };
         await handleExternalReferenceCheckRequest(req as any);
 
-        expect(mockBatchFindExistingReferences).toHaveBeenCalledWith(
-            expect.any(Array),
-            [1]
-        );
+        expect(mockResolveLibrariesFilterToSearchableIds).toHaveBeenCalledWith(['g555', 99, 'Group Alpha']);
+        expect(mockGetSearchableLibraryIds).not.toHaveBeenCalled();
+        expect(mockBatchFindExistingReferences).toHaveBeenCalledWith(expect.any(Array), [42]);
+    });
+
+    it('searches nothing when an explicit library_ids resolves to nothing', async () => {
+        mockGetSearchableLibraryIds.mockReturnValue([1, 42]);
+        mockResolveLibrariesFilterToSearchableIds.mockReturnValue([]);
+        mockBatchFindExistingReferences.mockResolvedValue({
+            results: baseRequest.items.map(i => ({ id: i.id, item: null })),
+            timing: {
+                total_ms: 1, phase1_identifier_lookup_ms: 0, phase2_title_candidates_ms: 0,
+                phase3_fuzzy_matching_ms: 0, candidates_fetched: 0, matches_by_identifier: 0,
+                matches_by_fuzzy: 0,
+            },
+        });
+
+        // An unresolvable or fully excluded filter must narrow the search to
+        // nothing, never fall back to every searchable library.
+        const req = { ...baseRequest, library_ids: ['g999999'] };
+        await handleExternalReferenceCheckRequest(req as any);
+
+        expect(mockBatchFindExistingReferences).toHaveBeenCalledWith(expect.any(Array), []);
     });
 
     it('returns all items as not found and zero timing on batch failure', async () => {

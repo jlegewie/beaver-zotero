@@ -6,7 +6,7 @@
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
-import { libraryRefForLibraryID, modelObjectId, resolveItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
+import { libraryKeyToken, libraryRefForLibraryID, modelObjectId, resolveItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
 import { ItemDataWithStatus, AttachmentDataWithStatus, ZoteroItemReference, ItemStub } from '@beaver/agent-core/types/zotero';
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
 import { userIdAtom } from '../../../react/atoms/auth';
@@ -84,6 +84,14 @@ export async function lookupZoteroReferences(
     const annotationsToSerialize: Zotero.Item[] = [];
 
     const makeKey = (libraryId: number, zoteroKey: string) => `${libraryId}-${zoteroKey}`;
+    // Request references are keyed by their portable identity: the backend may
+    // send `library_id: 0` (or omit it) for every portable ref, so keying on the
+    // rowid would collapse references from different libraries onto one entry.
+    // `libraryKeyToken` honors the ref only when it parses, exactly as the
+    // resolution below does — a malformed ref shared by two legacy references
+    // would otherwise collapse them while they still load different items.
+    const requestKey = (reference: ZoteroItemReference) =>
+        `${libraryKeyToken(reference)}-${reference.zotero_key}`;
 
     // Phase 1: Collect primary items from references IN PARALLEL
     const primaryItems: Zotero.Item[] = [];
@@ -124,8 +132,7 @@ export async function lookupZoteroReferences(
     for (const result of loadResults) {
         if ('item' in result && result.item) {
             primaryItems.push(result.item);
-            referenceToItem.set(makeKey(result.reference.library_id, result.reference.zotero_key), result.item);
-            referenceToItem.set(makeKey(result.item.libraryID, result.item.key), result.item);
+            referenceToItem.set(requestKey(result.reference), result.item);
         } else if ('error' in result) {
             errors.push({
                 reference: result.reference,
@@ -149,7 +156,7 @@ export async function lookupZoteroReferences(
 
     // First pass: collect IDs and categorize items
     for (const reference of references) {
-        const zoteroItem = referenceToItem.get(makeKey(reference.library_id, reference.zotero_key));
+        const zoteroItem = referenceToItem.get(requestKey(reference));
         if (!zoteroItem) continue;
 
         try {
@@ -256,7 +263,7 @@ export async function lookupZoteroReferences(
 
     // Second pass: add parents, attachments, and child notes using the pre-loaded items
     for (const reference of references) {
-        const zoteroItem = referenceToItem.get(makeKey(reference.library_id, reference.zotero_key));
+        const zoteroItem = referenceToItem.get(requestKey(reference));
         if (!zoteroItem) continue;
 
         try {

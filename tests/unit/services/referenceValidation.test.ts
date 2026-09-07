@@ -18,17 +18,30 @@ describe('validateZoteroItemReference', () => {
         })).toBeNull();
     });
 
+    it('accepts a portable reference that carries no local library id at all', () => {
+        expect(validateZoteroItemReference({
+            library_ref: 'u',
+            zotero_key: '3RRUYX5J',
+        })).toBeNull();
+    });
+
     it('rejects an unresolved local library id without a valid portable ref', () => {
         expect(validateZoteroItemReference({
             library_id: 0,
             zotero_key: '3RRUYX5J',
-        })).toContain('0 with a valid library_ref');
+        })).toContain('Invalid library reference');
 
         expect(validateZoteroItemReference({
             library_id: 0,
             library_ref: 'not-a-library',
             zotero_key: '3RRUYX5J',
-        })).toContain('0 with a valid library_ref');
+        })).toContain('Invalid library reference');
+    });
+
+    it('rejects a reference that names no library at all', () => {
+        expect(validateZoteroItemReference({
+            zotero_key: '3RRUYX5J',
+        })).toContain('Invalid library reference');
     });
 
     it('continues accepting legacy references with a positive local library id', () => {

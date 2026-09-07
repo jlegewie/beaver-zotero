@@ -13,7 +13,7 @@ import {
     type AnnotationPlacement,
 } from "../../annotations/createAnnotation";
 import { getReadableContentKind } from "../../documentExtraction/attachmentResolution";
-import { modelObjectId, resolveLibraryRef } from "../../../utils/libraryIdentity";
+import { modelObjectId, modelObjectIdFromReference, resolveLibraryRef } from "../../../utils/libraryIdentity";
 
 /** Annotation types a move can reposition. */
 export type RelocatableAnnotationType = "highlight" | "note";
@@ -44,11 +44,14 @@ function assertSameAttachment(
         targetLibraryId === attachment.libraryID &&
         relocation.attachment_ref.zotero_key === attachment.key;
     if (!matches) {
+        // Name the attachment portably: an unresolvable ref leaves
+        // `targetLibraryId` null, and the request's own numeric id may be the
+        // unresolved sentinel, neither of which means anything to the model.
+        const label = targetLibraryId !== null
+            ? modelObjectId(targetLibraryId, relocation.attachment_ref.zotero_key)
+            : modelObjectIdFromReference(relocation.attachment_ref);
         throw new RelocationMismatchError(
-            `is not on attachment ${modelObjectId(
-                targetLibraryId ?? relocation.attachment_ref.library_id,
-                relocation.attachment_ref.zotero_key,
-            )}; an annotation cannot move to a different document`,
+            `is not on attachment ${label}; an annotation cannot move to a different document`,
         );
     }
 }
