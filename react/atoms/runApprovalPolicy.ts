@@ -8,7 +8,7 @@ import type { AgentActionType } from '@beaver/agent-core/protocol/agentProtocol'
  * Authorization invariant: run grants use this canonical map, not a persisted
  * toolToGroup remap. Runtime remapping is not currently supported; adding it
  * must update this policy boundary explicitly so stored preferences, pending
- * approval matching, labels, and run grants cannot silently diverge.
+ * approval matching, and run grants cannot silently diverge.
  */
 export const DEFAULT_DEFERRED_TOOL_GROUPS: Record<string, string> = {
     edit_metadata: 'metadata_edits',
@@ -58,18 +58,6 @@ const RUN_APPROVAL_TOOL_GROUPS: Record<string, string> = {
     ...RUN_APPROVAL_ACTION_TYPE_ALIASES,
 };
 
-/** Labels complete the phrase "Allow all … for this run". */
-export const TOOL_GROUP_RUN_LABELS: Record<string, string> = {
-    metadata_edits: 'metadata edits',
-    note_edits: 'note edits',
-    note_creation: 'note creation',
-    library_modifications: 'item organization and collection creation',
-    library_structure: 'library-wide tag and collection changes',
-    annotations: 'annotation creation and editing',
-    annotation_deletion: 'annotation deletion',
-    create_items: 'item creation',
-};
-
 export function getToolGroup(toolName: string): string | null {
     return RUN_APPROVAL_TOOL_GROUPS[toolName] ?? null;
 }
@@ -113,64 +101,47 @@ export function getActionToolGroup(
     return getToolGroup(actionType);
 }
 
-export function getToolGroupRunApprovalLabel(toolName: string): string | null {
-    const scope = getToolGroupRunApprovalScope(toolName);
-    return scope ? `Allow all ${scope} for this run` : null;
+/**
+ * Whether a full-access run grant covers this action.
+ *
+ * The grant is about library writes, so it reaches exactly the actions that
+ * have a deferred-tool group. Everything else — the backend-managed
+ * `confirm_extraction` / `confirm_external_search` cards, which are about
+ * spend and off-device access rather than the library — keeps asking, and so
+ * does any future write tool until it is given a group here.
+ */
+export function isCoveredByFullAccess(
+    actionType: string,
+    actionData?: Record<string, any>,
+): boolean {
+    return getActionToolGroup(actionType, actionData) !== null;
 }
 
-/** Short scope shown beneath the shared "Allow for this run" menu title. */
-export function getToolGroupRunApprovalScope(toolName: string): string | null {
-    const group = getToolGroup(toolName);
-    if (!group) return null;
-    return TOOL_GROUP_RUN_LABELS[group] ?? null;
-}
-
-export function getPendingApprovalIdsForToolGroup(
+/** The pending approvals a full-access grant may answer on the user's behalf. */
+export function getPendingApprovalIdsCoveredByFullAccess(
     approvals: Iterable<{
         actionId: string;
         actionType: string;
         actionData?: Record<string, any>;
     }>,
-    toolName: string,
 ): string[] {
-    const group = getToolGroup(toolName);
-    if (!group) return [];
     const ids: string[] = [];
     for (const approval of approvals) {
-        if (getActionToolGroup(approval.actionType, approval.actionData) === group) {
+        if (isCoveredByFullAccess(approval.actionType, approval.actionData)) {
             ids.push(approval.actionId);
         }
     }
     return ids;
 }
 
-/**
- * Whether a run-level group grant can approve every pending action shown by a
- * grouped approval card. A split-button option must not be offered when it
- * would leave a narrower action (such as a destructive rewrite) pending.
- */
-export function canOfferToolGroupRunApproval(
-    approvals: Iterable<{
-        actionType: string;
-        actionData?: Record<string, any>;
-    }>,
-    toolName: string,
-): boolean {
-    const group = getToolGroup(toolName);
-    if (!group) return false;
-
-    for (const approval of approvals) {
-        if (getActionToolGroup(approval.actionType, approval.actionData) !== group) {
-            return false;
-        }
-    }
-    return true;
-}
-
 export interface RunApprovalPolicy {
     /** The single active agent run. A new run grant replaces stale state. */
     runId: string | null;
-    approvedGroups: Set<string>;
+    /**
+     * Full access for this run: every library change applies without asking,
+     * with no carve-outs among the write tools (see `isCoveredByFullAccess`).
+     */
+    fullAccess: boolean;
     /** Narrow grants derived from resources created during this run. */
     approvedResources: Set<string>;
 }
@@ -178,7 +149,7 @@ export interface RunApprovalPolicy {
 function emptyRunApprovalPolicy(): RunApprovalPolicy {
     return {
         runId: null,
-        approvedGroups: new Set<string>(),
+        fullAccess: false,
         approvedResources: new Set<string>(),
     };
 }
@@ -187,13 +158,13 @@ function policyForRun(previous: RunApprovalPolicy, runId: string): RunApprovalPo
     if (previous.runId !== runId) {
         return {
             runId,
-            approvedGroups: new Set<string>(),
+            fullAccess: false,
             approvedResources: new Set<string>(),
         };
     }
     return {
         runId,
-        approvedGroups: new Set(previous.approvedGroups),
+        fullAccess: previous.fullAccess,
         approvedResources: new Set(previous.approvedResources),
     };
 }
@@ -216,15 +187,19 @@ function getNoteEditTarget(actionData?: Record<string, any>): {
 /** Transient approval grants for the active run. Never persisted to prefs. */
 export const runApprovalPolicyAtom = atom<RunApprovalPolicy>(emptyRunApprovalPolicy());
 
-export const grantToolGroupForRunAtom = atom(
+/**
+ * Turn full access on or off for a run.
+ *
+ * Granting is scoped to the run that is asking: a grant made against a run that
+ * is no longer current cannot leak into the next one, because `policyForRun`
+ * discards state from a different run.
+ */
+export const setRunFullAccessAtom = atom(
     null,
-    (_get, set, { runId, toolName }: { runId: string; toolName: string }) => {
-        const group = getToolGroup(toolName);
-        if (!group) return;
-
+    (_get, set, { runId, fullAccess }: { runId: string; fullAccess: boolean }) => {
         set(runApprovalPolicyAtom, (previous) => {
             const next = policyForRun(previous, runId);
-            next.approvedGroups.add(group);
+            next.fullAccess = fullAccess;
             return next;
         });
     },
@@ -257,14 +232,12 @@ export const clearRunApprovalPolicyAtom = atom(null, (_get, set) => {
     set(runApprovalPolicyAtom, emptyRunApprovalPolicy());
 });
 
-export function isToolGroupApprovedForRun(
+/** Whether this run currently holds the full-access grant. */
+export function isFullAccessGrantedForRun(
     policy: RunApprovalPolicy,
-    runId: string,
-    toolName: string,
+    runId: string | null,
 ): boolean {
-    if (policy.runId !== runId) return false;
-    const group = getToolGroup(toolName);
-    return group !== null && policy.approvedGroups.has(group);
+    return runId !== null && policy.runId === runId && policy.fullAccess;
 }
 
 export function isActionApprovedForRun(
@@ -274,8 +247,7 @@ export function isActionApprovedForRun(
     actionData?: Record<string, any>,
 ): boolean {
     if (policy.runId !== runId) return false;
-    const group = getActionToolGroup(toolName, actionData);
-    if (group !== null && policy.approvedGroups.has(group)) return true;
+    if (policy.fullAccess && isCoveredByFullAccess(toolName, actionData)) return true;
     // The resource grant covers destructive rewrites too: it is only ever
     // granted for a note Beaver created during this same run, so a rewrite of
     // one can discard nothing the user wrote.

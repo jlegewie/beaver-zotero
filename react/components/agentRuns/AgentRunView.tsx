@@ -2,7 +2,7 @@ import React, { forwardRef, useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
 import { AgentRun, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
-import { shouldOfferResume, wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
+import { wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
@@ -10,7 +10,6 @@ import { SuggestionsView } from './SuggestionsView';
 import { RunErrorDisplay } from './RunErrorDisplay';
 import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
-import { RunInterruptedDisplay } from './RunInterruptedDisplay';
 import { threadWarningsAtom } from '../../atoms/warnings';
 import { resumeChainAtom, runToolResultsAtom, resumedRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
@@ -63,11 +62,6 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // suppressed until the replacement lands — the failure is about to be
     // undone, and flashing it up would report a problem the reader never had.
     const autoReplacementPending = useAtomValue(autoReplacementPendingRunIdsAtom).has(run.id);
-
-    // A run that was cut off (Beaver closed, connection dropped, server
-    // restarted) rather than finished or stopped by the user gets an offer to
-    // continue it.
-    const offerResume = shouldOfferResume(run, { isLastRun, resumedRunIds });
 
     // Don't show user message for resume runs (empty content)
     const showUserMessage = !run.user_prompt.is_resume || run.user_prompt.content.length > 0;
@@ -170,11 +164,6 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 <RunErrorDisplay runId={run.id} error={run.error} isLastRun={isLastRun} />
             )}
 
-            {/* Offer to continue a run that was cut off mid-response */}
-            {offerResume && (
-                <RunInterruptedDisplay runId={run.id} reasonCode={run.error?.reason_code} />
-            )}
-
             {/* Footer with sources and action buttons (only for completed runs, or error runs that were resumed) */}
             {(showAgentRunFooter && !wasResumed) && (
                 <AgentRunFooter run={run} />
@@ -187,13 +176,12 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
             {showBatchReceipt && <BatchRunReceipt runs={chainRuns} />}
 
             {/* Agent actions (e.g., create item from citations) — client-specific
-                UI injected by the host; absent for clients without it. Actions
-                are recorded per run, so a continued answer lists each run's. */}
-            {showRunOutcomes && chainRuns.map((chainRun) => (
-                <React.Fragment key={chainRun.id}>
-                    {getHost().components?.pendingActionsReview({ run: chainRun }) ?? null}
-                </React.Fragment>
-            ))}
+                UI injected by the host; absent for clients without it. The whole
+                chain is one answer, so its per-run action records are reviewed in
+                one block. */}
+            {showRunOutcomes && (
+                getHost().components?.pendingActionsReview({ runs: chainRuns }) ?? null
+            )}
 
             {/* Suggestions (only for the last run, rendered below footer) */}
             {suggestionParts.length > 0 && !suggestionsDismissed && (
@@ -208,8 +196,11 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 </div>
             )}
 
-            {/* Resuming failed request display */}
-            {wasResumed && <RunResumeDisplay runId={run.id} />}
+            {/* Resuming failed request display. Not for a run that finished:
+                a completed run can now be continued too — it had work left,
+                not an interruption — and this line would call an answer that
+                arrived in full an interrupted one. */}
+            {wasResumed && run.status !== 'completed' && <RunResumeDisplay runId={run.id} />}
 
         </div>
     );

@@ -26,10 +26,21 @@
 
 import type { PreparedJsonMessage } from './preparedJsonMessage';
 
+/**
+ * Transport-level context for one data request. Optional on the handler
+ * signature so hand-written providers and tests can omit it.
+ */
+export interface AgentDataRequestContext {
+    /** `Date.now()` when the request arrived on the socket, before any queueing */
+    receivedAt: number;
+    /** Report what the handler is doing; surfaces in keepalives sent to the backend */
+    reportPhase: (phase: string) => void;
+}
+
 /** A single data-request handler plus its error-fallback response. */
 export interface AgentDataRequestEntry {
     /** Run the request and resolve with the response object to send back. */
-    handle: (event: any) => Promise<Record<string, any> | PreparedJsonMessage>;
+    handle: (event: any, context?: AgentDataRequestContext) => Promise<Record<string, any> | PreparedJsonMessage>;
     /** Build the response to send when `handle` rejects (keeps the backend from timing out). */
     errorResponse: (event: any, err: unknown) => Record<string, any>;
     /**
@@ -45,6 +56,49 @@ export interface AgentDataRequestEntry {
      */
     syncPauseOwner?: string;
 }
+
+// =============================================================================
+// Request acks and keepalives
+// =============================================================================
+
+/** Interval between `request_keepalive` messages for an in-flight request. */
+export const REQUEST_KEEPALIVE_INTERVAL_MS = 5000;
+
+/**
+ * Whether an inbound event is a backend request that awaits a response keyed
+ * by `request_id`: every `*_request` event plus the agent-action
+ * validate/execute pair. Only these are acked and kept alive.
+ */
+export function isBackendRequestEvent(eventName: unknown): eventName is string {
+    return typeof eventName === 'string' && (
+        eventName.endsWith('_request')
+        || eventName === 'agent_action_validate'
+        || eventName === 'agent_action_execute'
+    );
+}
+
+/**
+ * Whether an outbound message carrying a `request_id` is an ack or keepalive
+ * rather than the response itself. Transports attach a busy-context snapshot
+ * to responses only.
+ */
+export function isRequestSignal(type: unknown): boolean {
+    return type === 'request_received' || type === 'request_keepalive';
+}
+
+/** Controller for the keepalive timer of one in-flight request. */
+export interface RequestKeepalive {
+    /** Update the phase reported in the next keepalive (`queued`, `running`, `saving`, ...) */
+    setPhase: (phase: string) => void;
+    /** Stop sending keepalives; called once the response (or error reply) is sent */
+    stop: () => void;
+}
+
+/** Used when the backend does not accept keepalives or the event has no request id. */
+export const NOOP_KEEPALIVE: RequestKeepalive = {
+    setPhase: () => {},
+    stop: () => {},
+};
 
 // =============================================================================
 // Sync-pause owner tokens

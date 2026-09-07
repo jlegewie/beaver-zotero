@@ -9,9 +9,12 @@
  * deterministic.
  *
  * Filters are ANDed. Some of them are internally an OR-group inside that AND:
- * `collection_keys`, `tags`, and — when `conditions_join_mode` is 'any' — the
- * `conditions` list. So the population is the items in ANY of the collections
- * that also carry ANY of the tags and also satisfy the conditions group.
+ * `collection_keys`, `tags`, `any_conditions`, and — when
+ * `conditions_join_mode` is 'any' — the `conditions` list. So the population is
+ * the items in ANY of the collections that also carry ANY of the tags and also
+ * satisfy each conditions group. Two condition groups is what lets a caller mix
+ * the joins: `conditions` that must all hold AND `any_conditions` of which one
+ * must.
  *
  * An OR-group is expressed as its own search (see `valuesOrGroup` and
  * `conditionsOrGroup`) rather than as conditions on the main search, because
@@ -23,7 +26,9 @@
  * A filter that cannot be applied as described FAILS the request; this handler
  * never answers with ids beside a warning. The population it resolves is about
  * to be mutated, so an answer that no longer matches the description has to be
- * impossible to act on, not merely flagged.
+ * impossible to act on, not merely flagged. A filter applied exactly as
+ * described that still excludes nothing fails for the same reason — see
+ * `findVacuousNegation`.
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -34,7 +39,7 @@ import {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { modelObjectId, parseItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
 import { resolveStoredTagName, validateLibraryAccess } from './utils';
-import { addSearchCondition } from './searchConditions';
+import { addSearchCondition, findVacuousNegation, vacuousNegationMessage } from './searchConditions';
 
 /** SQLite's bound-variable limit is well above this; 500 keeps a margin. */
 const SQL_CHUNK_SIZE = 500;
@@ -102,6 +107,169 @@ async function attachmentIdsForItems(itemIds: number[]): Promise<number[]> {
     }
 
     return attachmentIds;
+}
+
+/**
+ * Item types the population search always excludes.
+ *
+ * Every filter describes a bibliographic item, so these never belong to a
+ * population — an attachment population is DERIVED from the items that matched
+ * rather than searched for. Shared with `searchableItemTypes`, so that a type
+ * the search already drops is never counted as a reason to narrow further.
+ */
+const NON_BIBLIOGRAPHIC_ITEM_TYPES = ['attachment', 'note', 'annotation'];
+
+/** Item types a population can hold: everything the search does not exclude. */
+function searchableItemTypes(): { id: number; name: string }[] {
+    return Zotero.ItemTypes.getAll()
+        .filter(itemType => !NON_BIBLIOGRAPHIC_ITEM_TYPES.includes(itemType.name));
+}
+
+/**
+ * Whether a condition asks "is this field unset".
+ *
+ * Both spellings: `addSearchCondition` rewrites `is ''` into `doesNotContain
+ * ''`, so the two reach Zotero as the same search.
+ */
+function isEmptyValueCheck(condition: ZoteroSearchCondition): boolean {
+    return (condition.operator === 'is' || condition.operator === 'doesNotContain')
+        && (condition.value === null || condition.value === undefined || condition.value === '');
+}
+
+/**
+ * Which of `itemTypes` can hold `fieldName`, as item type ids, or null when
+ * the answer is not knowable.
+ *
+ * Not a plain `isValidForType` check: Zotero maps a base field onto a
+ * type-specific name — a film's `distributor` IS `publisher` — and an item
+ * carrying the variant does hold the field a condition on the base field
+ * names. `getFieldIDFromTypeAndBase` answers for both spellings at once.
+ *
+ * Null means "do not restrict": the condition field is not an item-data field
+ * at all (`tag`, `year`, `creator`, `note`), or item-field data is not loaded
+ * yet. A cold cache must never narrow a population.
+ */
+function itemTypeIdsWithField(
+    fieldName: string,
+    itemTypes: { id: number; name: string }[],
+): number[] | null {
+    try {
+        // Item-data fields only. Every other condition field either lives in
+        // its own table or is a search-only predicate, and neither has an
+        // item-type validity to check.
+        if (!Zotero.ItemFields.getID(fieldName)) return null;
+
+        const typeIds = itemTypes
+            .filter(itemType => Zotero.ItemFields.getFieldIDFromTypeAndBase(itemType.id, fieldName))
+            .map(itemType => itemType.id);
+        // No field Zotero knows is valid for no type, so an empty answer says
+        // the lookup came back wrong rather than that the field is exotic.
+        // Refusing to narrow on it is the answer that cannot empty a
+        // population by mistake.
+        return typeIds.length > 0 ? typeIds : null;
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger(`handleResolvePopulationRequest: Skipped field-validity check for '${fieldName}': ${msg}`, 1);
+        return null;
+    }
+}
+
+/** What the empty-value conditions in an ANDed list say about item types. */
+interface EmptyFieldTypeRestriction {
+    /** The types that hold EVERY one of those fields. Empty: no type does. */
+    allowedTypeIds: Set<number>;
+    /** Whether it excludes a type the search itself does not already exclude. */
+    narrows: boolean;
+    /** The fields it was read off, in the order the caller gave them. */
+    fields: string[];
+}
+
+/**
+ * The item types a population may hold, given the "this field is unset"
+ * conditions in an ANDed condition list — or null when none of them says
+ * anything about item types.
+ *
+ * An empty value compiles to "no value stored for this field", which every
+ * item of a type that HAS no such field satisfies for free: `publisher is ""`
+ * matches every blog post and presentation, and an operation that fills
+ * publishers in can do nothing with one. Under join mode 'all' every condition
+ * holds of every item, so the answer is the intersection.
+ *
+ * Only the empty-value spelling is restricted. `publisher doesNotContain
+ * "springer"` matches a blog post for the same reason, but there the caller is
+ * asking about the text of a field rather than about whether it is filled in,
+ * and that reading is the documented one.
+ */
+function emptyFieldTypeRestriction(
+    conditions: ZoteroSearchCondition[],
+): EmptyFieldTypeRestriction | null {
+    let itemTypes: { id: number; name: string }[];
+    try {
+        itemTypes = searchableItemTypes();
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger(`handleResolvePopulationRequest: Skipped field-validity check: ${msg}`, 1);
+        return null;
+    }
+
+    let allowed: number[] | null = null;
+    const fields: string[] = [];
+
+    for (const condition of conditions) {
+        if (!isEmptyValueCheck(condition)) continue;
+
+        const typeIds = itemTypeIdsWithField(condition.field, itemTypes);
+        if (typeIds === null) continue;
+
+        fields.push(condition.field);
+        // ANDed conditions all hold of every item, so each one narrows what is
+        // left rather than adding to it.
+        allowed = allowed === null ? typeIds : allowed.filter(id => typeIds.indexOf(id) !== -1);
+    }
+
+    if (allowed === null) return null;
+
+    const allowedTypeIds = new Set(allowed);
+    return {
+        allowedTypeIds,
+        // Read off the same list the allowed ids were chosen from, so the two
+        // cannot end up counted over different universes.
+        narrows: itemTypes.some(itemType => !allowedTypeIds.has(itemType.id)),
+        fields,
+    };
+}
+
+/**
+ * The subset of `itemIds` whose item type is one of `allowedTypeIds`, in the
+ * order given.
+ *
+ * Reads the type rather than filtering in SQL against the excluded ids: the
+ * excluded list can hold most of Zotero's item types, and keeping them out of
+ * the statement keeps the bound-variable count a function of the chunk alone.
+ */
+async function filterItemIdsByTypes(
+    itemIds: number[],
+    allowedTypeIds: Set<number>,
+): Promise<number[]> {
+    const kept = new Set<number>();
+
+    for (let i = 0; i < itemIds.length; i += SQL_CHUNK_SIZE) {
+        const chunk = itemIds.slice(i, i + SQL_CHUNK_SIZE);
+        const placeholders = chunk.map(() => '?').join(', ');
+        await Zotero.DB.queryAsync(
+            `SELECT itemID, itemTypeID FROM items WHERE itemID IN (${placeholders})`,
+            chunk,
+            {
+                onRow: (row: any) => {
+                    if (allowedTypeIds.has(row.getResultByIndex(1))) {
+                        kept.add(row.getResultByIndex(0));
+                    }
+                },
+            },
+        );
+    }
+
+    return itemIds.filter(id => kept.has(id));
 }
 
 /**
@@ -276,7 +444,12 @@ function conditionsOrGroup(
 export async function handleResolvePopulationRequest(
     request: WSResolvePopulationRequest
 ): Promise<WSResolvePopulationResponse> {
-    logger(`handleResolvePopulationRequest: Resolving population (${request.conditions?.length ?? 0} conditions)`, 1);
+    logger(
+        'handleResolvePopulationRequest: Resolving population '
+            + `(${request.conditions?.length ?? 0} conditions, `
+            + `${request.any_conditions?.length ?? 0} any_conditions)`,
+        1,
+    );
 
     try {
         // Validate library (checks both existence and searchability)
@@ -329,21 +502,40 @@ export async function handleResolvePopulationRequest(
         const conditionsJoinMode = request.conditions_join_mode === 'any' ? 'any' : 'all';
         const requestedConditions = request.conditions ?? [];
 
+        // The second condition list, ORed among itself and ANDed with
+        // everything else — including with `conditions`, whatever its join
+        // mode. It is its own OR-group below, so nothing here depends on
+        // `conditions_join_mode`.
+        const requestedAnyConditions = request.any_conditions ?? [];
+
         // A condition Zotero applies as a search-wide flag cannot be one of the
         // disjuncts, and silently behaves as its opposite (narrowing, not
         // widening). Refuse it rather than resolve a population that does not
-        // match the description the user is about to approve.
-        if (conditionsJoinMode === 'any') {
-            const flagCondition = requestedConditions.find(
+        // match the description the user is about to approve. Checked on every
+        // list that becomes an OR-group.
+        const oredLists: [string, ZoteroSearchCondition[], string][] = [
+            [
+                "conditions_join_mode='any'",
+                conditionsJoinMode === 'any' ? requestedConditions : [],
+                "Join `conditions` with 'all' instead",
+            ],
+            [
+                'any_conditions',
+                requestedAnyConditions,
+                'Move it to the ANDed `conditions` list',
+            ],
+        ];
+        for (const [listName, conditions, remedy] of oredLists) {
+            const flagCondition = conditions.find(
                 (condition) => NON_DISJUNCT_CONDITION_FIELDS.has(condition.field));
             if (flagCondition) {
                 return errorResponse(
                     request.request_id,
-                    `conditions_join_mode='any' cannot be combined with field='${flagCondition.field}': `
+                    `${listName} cannot carry field='${flagCondition.field}': `
                         + 'Zotero applies it as a search-wide flag, so it would be ANDed with the other '
                         + 'conditions rather than ORed with them and the population would be narrower than '
-                        + 'described. Give it as a filter that always applies (unfiled has its own request '
-                        + 'flag), or resolve it as a separate batch.',
+                        + `described. ${remedy} (unfiled has its own request flag), or resolve it as a `
+                        + 'separate batch.',
                     'invalid_request',
                 );
             }
@@ -441,6 +633,7 @@ export async function handleResolvePopulationRequest(
             conditionsJoinMode === 'any'
                 ? conditionsOrGroup(library.libraryID, requestedConditions, recursive, warnings)
                 : null,
+            conditionsOrGroup(library.libraryID, requestedAnyConditions, recursive, warnings),
         ].filter((group): group is Zotero.Search => group !== null);
 
         // Every condition is now in place, so this is the first point at which
@@ -455,6 +648,52 @@ export async function handleResolvePopulationRequest(
             return errorResponse(request.request_id, warnings.join(' '), 'invalid_condition');
         }
 
+        // Every condition Zotero accepted is applied by now, and one of them
+        // may still mean nothing. Under join mode 'any' a disjunct that
+        // excludes nothing makes the whole group always true; under 'all' it
+        // simply drops out, leaving a population the approval card describes
+        // by a filter that did not narrow it. Both are refused here.
+        const vacuous = await findVacuousNegation(
+            library.libraryID,
+            [...requestedConditions, ...requestedAnyConditions],
+            'handleResolvePopulationRequest',
+        );
+        if (vacuous) {
+            logger('handleResolvePopulationRequest: Refused a negation that excludes nothing', 1);
+            return errorResponse(
+                request.request_id, vacuousNegationMessage(vacuous, 'refused'), 'invalid_condition',
+            );
+        }
+
+        // What the "field is unset" conditions say about item types. A type
+        // that HAS no such field satisfies the check for free — `publisher is
+        // ""` matches every blog post — so the population is restricted to the
+        // types that can hold every field checked this way. Under join mode
+        // 'any' the conditions are ORed and an item may have matched through a
+        // different disjunct, so the restriction is not true of it and is not
+        // computed.
+        const typeRestriction = conditionsJoinMode === 'all'
+            ? emptyFieldTypeRestriction(requestedConditions)
+            : null;
+
+        // No item type has all of those fields at once. Items missing all of
+        // them exist — every item missing a field it cannot have counts — but
+        // none of them could ever hold the fields, so there is nothing an
+        // operation could fill in. Refused rather than resolved as an empty
+        // population: "no items matched" reads as a filter to loosen, while
+        // this one cannot be loosened into anything workable.
+        if (typeRestriction && typeRestriction.allowedTypeIds.size === 0) {
+            logger('handleResolvePopulationRequest: Refused empty-value conditions no item type can satisfy', 1);
+            return errorResponse(
+                request.request_id,
+                `Refused the empty-value conditions on ${typeRestriction.fields.join(', ')}: `
+                    + 'no Zotero item type has all of those fields, so every item this would select is '
+                    + 'one that cannot hold them in the first place. Check one of those fields per '
+                    + 'batch, or drop the ones that do not apply to the item types you mean.',
+                'invalid_condition',
+            );
+        }
+
         const [scope, ...extraGroups] = groups;
         if (scope) {
             search.setScope(scope, true);
@@ -467,9 +706,9 @@ export async function handleResolvePopulationRequest(
         // `conditions` against the attachment rows instead, where a field like
         // DOI is never present and the population silently becomes every
         // attachment in the library.
-        search.addCondition('itemType', 'isNot', 'attachment');
-        search.addCondition('itemType', 'isNot', 'note');
-        search.addCondition('itemType', 'isNot', 'annotation');
+        for (const itemType of NON_BIBLIOGRAPHIC_ITEM_TYPES) {
+            search.addCondition('itemType', 'isNot', itemType);
+        }
         search.addCondition('noChildren', 'true', '');
 
         let itemIds = await search.search();
@@ -483,6 +722,27 @@ export async function handleResolvePopulationRequest(
             if (itemIds.length === 0) break;
             const matched = new Set(await group.search());
             itemIds = itemIds.filter(id => matched.has(id));
+        }
+
+        // The item-type restriction, applied to the matched ids. `narrows` is
+        // false for the fields these conditions almost always ask about
+        // (`abstractNote` and `DOI` are valid for every type the search can
+        // return), and then there is nothing to read from the database.
+        //
+        // Dropping every match is a real empty population, not the refusal
+        // above: those conditions CAN be satisfied, this library just holds no
+        // item of a type that could carry the field.
+        if (typeRestriction && typeRestriction.narrows && itemIds.length > 0) {
+            const matchedCount = itemIds.length;
+            itemIds = await filterItemIdsByTypes(itemIds, typeRestriction.allowedTypeIds);
+            if (itemIds.length < matchedCount) {
+                logger(
+                    'handleResolvePopulationRequest: Dropped '
+                        + `${matchedCount - itemIds.length} item(s) of a type that cannot hold `
+                        + `${typeRestriction.fields.join(', ')}`,
+                    1,
+                );
+            }
         }
 
         // has_attachments, in SQL. This is the only filter that could
@@ -544,6 +804,10 @@ export async function handleResolvePopulationRequest(
                 // Echoed so a caller that asked for 'any' can tell an applied
                 // 'any' from a provider that never knew the field.
                 conditions_join_mode: conditionsJoinMode,
+                // Presence tells the caller this build applied `any_conditions`
+                // rather than dropping a group it does not know — which would
+                // WIDEN the population.
+                any_conditions_applied: true,
                 excluded_count: 0,
             };
         }
@@ -594,6 +858,10 @@ export async function handleResolvePopulationRequest(
             // Echoed so a caller that asked for 'any' can tell an applied
             // 'any' from a provider that never knew the field.
             conditions_join_mode: conditionsJoinMode,
+            // Presence tells the caller this build applied `any_conditions`
+            // rather than dropping a group it does not know — which would
+            // WIDEN the population.
+            any_conditions_applied: true,
             // Always set, including 0. Presence tells the caller this build
             // applied `exclude_item_ids`.
             excluded_count: excludedCount,

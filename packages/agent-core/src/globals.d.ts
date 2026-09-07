@@ -57,6 +57,11 @@ declare function setTimeout(
   timeoutMs?: number,
 ): TimerHandle;
 declare function clearTimeout(handle: TimerHandle | null | undefined): void;
+declare function setInterval(
+  handler: (...args: any[]) => void,
+  intervalMs?: number,
+): TimerHandle;
+declare function clearInterval(handle: TimerHandle | null | undefined): void;
 
 /** Cancellation for in-flight requests. */
 declare interface AbortSignal {

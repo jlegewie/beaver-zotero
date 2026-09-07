@@ -3,7 +3,9 @@ import { getActionToolGroup } from '../../../atoms/runApprovalPolicy';
 
 /** A tool call the changes card lists, with all of its actions. */
 export interface ReviewRow {
-    /** Tool call this row represents; stable react key. */
+    /** Run that owns this row. Tool-call ids are unique only within a run. */
+    runId: string;
+    /** Tool call this row represents. */
     toolcallId: string;
     /** action_type of the row's first action (all actions in a row share it). */
     actionType: string;
@@ -31,6 +33,11 @@ export interface BuildReviewRowsOptions {
  * reported twice.
  */
 export type RunActionRowSet = 'changes' | 'artifacts';
+
+/** Stable identity for a row within an answer that may span several runs. */
+export function getReviewRowKey(row: ReviewRow): string {
+    return `${row.runId}:${row.toolcallId}`;
+}
 
 /** These gate a run rather than propose a change, so they are never review material. */
 const GATING_ACTION_TYPES = new Set<string>(['confirm_extraction', 'confirm_external_search']);
@@ -152,6 +159,7 @@ export function buildReviewRows(
             row.actions.push(action);
         } else {
             rowsByToolcall.set(toolcallId, {
+                runId: action.run_id,
                 toolcallId,
                 actionType: action.action_type,
                 actions: [action],
@@ -171,6 +179,18 @@ export function buildReviewRows(
     // card then freezes; it is not an invariant the card holds, since rows
     // resolved after it mounts keep the place they were given here. Stable
     // within each half, so rows keep their tool-call order.
+    return [...rows.filter((row) => !row.resolved), ...rows.filter((row) => row.resolved)];
+}
+
+/**
+ * Build the rows for a continued answer without widening tool-call identity
+ * beyond its owning run. Pending rows still lead across the complete answer.
+ */
+export function buildReviewRowsForRunChain(
+    actionsByRun: AgentAction[][],
+    options: BuildReviewRowsOptions = {},
+): ReviewRow[] {
+    const rows = actionsByRun.flatMap((actions) => buildReviewRows(actions, options));
     return [...rows.filter((row) => !row.resolved), ...rows.filter((row) => row.resolved)];
 }
 
@@ -319,6 +339,26 @@ function countUnits(actions: AgentAction[]): number {
     return units;
 }
 
+/**
+ * `error_details.outcome` when the backend closed an action out without an
+ * answer from Zotero: the change was sent and the plugin stopped responding
+ * before it reported what happened.
+ */
+const UNCONFIRMED_OUTCOME = 'unconfirmed';
+
+/**
+ * True when an errored action's effect on the library is unknown, rather than
+ * known to have failed or known to have landed.
+ *
+ * Only the backend can tell these apart — it knows whether the plugin ever
+ * received the request — so it says so explicitly instead of leaving the
+ * client to read it out of `result_data`, which is absent both for a change
+ * that never ran and for one whose outcome never came back.
+ */
+export function isUnconfirmedAction(action: AgentAction): boolean {
+    return action.status === 'error' && action.error_details?.outcome === UNCONFIRMED_OUTCOME;
+}
+
 /** The card's heading names the surface; its trail carries all of the state. */
 const CHANGES_CARD_LEAD = 'Library changes';
 
@@ -338,22 +378,34 @@ export function getChangesCardHeading(rows: ReviewRow[]): { lead: string; trail?
     const actions = uniqueActionsFromRows(rows);
     const applied = actions.filter((action) => action.status === 'applied');
 
-    // `error` splits in two by whether a result survived. Without one the write
-    // never landed, so the change is not in the library. With one it is: either
-    // an undo failed, or an apply succeeded and only its acknowledgement failed
-    // (see `hasFailedUndo`). The copy must not name the failed operation, since
-    // the record cannot tell those two apart — only that the change is applied
-    // and something went wrong. Reporting both under one word would misstate
-    // what the library holds, and neither is counted among the clean applies.
+    // `error` splits three ways, because the card states what the library now
+    // holds and the three cases disagree about that. An action the backend
+    // marked unconfirmed reached Zotero but never reported back, so whether it
+    // landed is unknown (see `isUnconfirmedAction`) — it leads the trail
+    // because it is the only state that asks the user to go and look. Of the
+    // rest, one without a result never landed, so the change is not in the
+    // library; one with a result is in it, either because an undo failed or
+    // because an apply succeeded and only its acknowledgement failed (see
+    // `hasFailedUndo`). The copy must not name the failed operation, since the
+    // record cannot tell those two apart — only that the change is applied and
+    // something went wrong. Reporting them under one word would misstate what
+    // the library holds, and none is counted among the clean applies.
+    const errored = actions.filter((action) => action.status === 'error');
+    const settledErrors = errored.filter((action) => !isUnconfirmedAction(action));
     const groups = [
         {
+            key: 'unconfirmed',
+            actions: errored.filter(isUnconfirmedAction),
+            label: (count: number) => `${count} unconfirmed`,
+        },
+        {
             key: 'failed',
-            actions: actions.filter((action) => action.status === 'error' && action.result_data == null),
+            actions: settledErrors.filter((action) => action.result_data == null),
             label: (count: number) => `${count} failed`,
         },
         {
             key: 'applied-with-errors',
-            actions: actions.filter((action) => action.status === 'error' && action.result_data != null),
+            actions: settledErrors.filter((action) => action.result_data != null),
             label: (count: number) => `${count} applied with errors`,
         },
         {

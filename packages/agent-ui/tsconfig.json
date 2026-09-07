@@ -97,6 +97,7 @@
     "./src/icons/CircleIcon.tsx",
     "./src/icons/ClockIcon.tsx",
     "./src/icons/CopyIcon.tsx",
+    "./src/icons/BubbleChatQuestionIcon.tsx",
     "./src/icons/DatabaseIcon.tsx",
     "./src/icons/DeleteIcon.tsx",
     "./src/icons/DocumentValidationIcon.tsx",
@@ -180,6 +181,7 @@
     "./src/primitives/ContextMenu.tsx",
     "./src/primitives/DocsLink.tsx",
     "./src/primitives/IconButton.tsx",
+    "./src/primitives/InstructionsDisclosure.tsx",
     "./src/primitives/MenuButton.tsx",
     "./src/primitives/PermissionMenu.tsx",
     "./src/primitives/SearchMenu.tsx",
@@ -236,6 +238,7 @@
     "./src/utils/pageLabels.ts",
     "./src/utils/pageRanges.ts",
     "./src/utils/useIsomorphicLayoutEffect.ts",
+    "./src/utils/useOverflowCollapse.ts",
     "./src/utils/creditThreshold.ts",
 
     // The client-host registry: the seam a shared component reaches client

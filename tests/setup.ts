@@ -100,9 +100,13 @@ const TEST_FIELD_IDS: Record<string, number> = {
     DOI: 26,
     ISBN: 11,
     date: 14,
-    publicationTitle: 12,   // a title-mapped field on journalArticle
-    bookTitle: 90,          // a title-mapped field on bookSection
-    filingDate: 150,        // a date-mapped field for testing precedence
+    publicationTitle: 12,   // a base field of its own; bookTitle maps onto it
+    bookTitle: 90,          // a publicationTitle-mapped field on bookSection
+    caseName: 118,          // a title-mapped field on case
+    dateDecided: 150,       // a date-mapped field on case
+    abstractNote: 2,        // valid for every type but attachment/note/annotation
+    publisher: 21,          // a base field only some types hold
+    distributor: 116,       // a publisher-mapped field on film
 };
 
 const TEST_TYPE_IDS: Record<string, number> = {
@@ -112,7 +116,43 @@ const TEST_TYPE_IDS: Record<string, number> = {
     journalArticle: 4,
     book: 2,
     bookSection: 5,
+    film: 8,
+    blogPost: 37,
 };
+
+// Which fields each item type holds. A type-specific variant of a base field
+// is listed under the variant's own name (a film's `distributor` IS its
+// publisher), which is what getFieldIDFromTypeAndBase resolves. These follow
+// Zotero's real schema for the fields named: a test that asserts an item is
+// kept or dropped for holding a field is only worth anything if the schema it
+// asserts against is the real one.
+const TEST_TYPE_FIELDS: Record<string, string[]> = {
+    annotation: [],
+    note: [],
+    attachment: ['title'],
+    journalArticle: ['title', 'DOI', 'date', 'publicationTitle', 'abstractNote'],
+    book: ['title', 'DOI', 'ISBN', 'date', 'publisher', 'abstractNote'],
+    bookSection: ['title', 'DOI', 'ISBN', 'bookTitle', 'date', 'publisher', 'abstractNote'],
+    film: ['title', 'DOI', 'date', 'distributor', 'abstractNote'],
+    blogPost: ['title', 'DOI', 'date', 'abstractNote'],
+};
+
+// Zotero's base-field mapping: base field -> the type-specific fields that ARE
+// that field under another name. A subset of the real mapping — the entries
+// the seeded types need — but every entry is one Zotero really has, because
+// both mocked functions below answer from it and a made-up mapping would let a
+// test assert an item-type validity Zotero does not agree with.
+const TEST_BASE_FIELD_VARIANTS: Record<string, string[]> = {
+    title: ['caseName'],
+    date: ['dateDecided'],
+    publicationTitle: ['bookTitle'],
+    publisher: ['distributor'],
+};
+
+const testTypeNameFromID = (itemType: number | string): string | undefined =>
+    typeof itemType === 'number'
+        ? Object.keys(TEST_TYPE_IDS).find(name => TEST_TYPE_IDS[name] === itemType)
+        : itemType;
 
 // The {id, name} rows Zotero.ItemTypes.getAll returns, from the same map.
 const testItemTypes = () =>
@@ -189,10 +229,21 @@ function testRemoveDiacritics(s: string): string {
     },
     ItemFields: {
         getID: vi.fn((name: string) => TEST_FIELD_IDS[name] ?? 0),
-        getTypeFieldsFromBase: vi.fn((baseField: string) => {
-            if (baseField === 'title') return [TEST_FIELD_IDS.publicationTitle, TEST_FIELD_IDS.bookTitle];
-            if (baseField === 'date') return [TEST_FIELD_IDS.filingDate];
-            return [];
+        getTypeFieldsFromBase: vi.fn((baseField: string) =>
+            (TEST_BASE_FIELD_VARIANTS[baseField] ?? []).map(field => TEST_FIELD_IDS[field])),
+        // Zotero's own contract: the fieldID the type holds `baseField` under
+        // (the base field itself when the type holds it directly), false when
+        // the type has no such field, and a throw for an unknown type.
+        getFieldIDFromTypeAndBase: vi.fn((itemType: number | string, baseField: string) => {
+            const typeName = testTypeNameFromID(itemType);
+            if (!typeName || !(typeName in TEST_TYPE_FIELDS)) {
+                throw new Error(`Invalid item type '${itemType}'`);
+            }
+            const fields = TEST_TYPE_FIELDS[typeName];
+            if (fields.includes(baseField)) return TEST_FIELD_IDS[baseField];
+            const variant = (TEST_BASE_FIELD_VARIANTS[baseField] ?? [])
+                .find(field => fields.includes(field));
+            return variant ? TEST_FIELD_IDS[variant] : false;
         }),
     },
     ItemTypes: {

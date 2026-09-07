@@ -10,7 +10,7 @@ import { isMacPlatform } from '../utils/platform';
  * flash the whole transcript on each Cmd-C. A brief hold separates "I am holding
  * this to see what it does" from "I am typing a chord".
  */
-export const HOLD_DELAY_MS = 250;
+export const HOLD_DELAY_MS = 200;
 
 /** Keys that are themselves modifiers, and so don't make a keypress a chord. */
 const MODIFIER_KEYS = new Set(['Meta', 'Control', 'Shift', 'Alt', 'AltGraph', 'OS', 'CapsLock']);

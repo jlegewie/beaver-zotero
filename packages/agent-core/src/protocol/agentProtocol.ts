@@ -31,16 +31,40 @@ export interface WSReadyEvent extends WSBaseEvent {
     processing_mode: ProcessingMode;
     indexing_complete: boolean;
     supports_request_acks?: boolean;
+    /** Backend accepts `request_keepalive` messages for in-flight requests */
+    supports_request_keepalive?: boolean;
 }
 
 /**
- * Per-request ack sent to the backend synchronously when a backend→frontend
- * request is dispatched.
+ * Per-request ack sent to the backend as soon as a backend→frontend request
+ * arrives on the socket, before it enters the message queue.
  */
 export interface WSRequestReceivedAck {
     type: 'request_received';
     request_id: string;
-    /** Busy-context snapshot plus dispatch lag, all numeric (booleans as 0/1) */
+    /**
+     * Busy-context snapshot plus transport state, all numeric (booleans as
+     * 0/1): `dispatch_lag_ms` (time between socket receipt and the ack),
+     * `queue_depth` (inbound messages ahead of this one, including the one
+     * being handled) and `queue_oldest_ms` (age of the oldest of those).
+     */
+    busy: Record<string, number>;
+}
+
+/**
+ * Periodic keepalive for a backend→frontend request that is still queued or
+ * running. The backend keeps waiting while these arrive and treats silence
+ * after the first one as a frozen client. Gated on
+ * `WSReadyEvent.supports_request_keepalive`.
+ */
+export interface WSRequestKeepalive {
+    type: 'request_keepalive';
+    request_id: string;
+    /** `queued` while waiting behind other work, `running` once the handler started, or a handler-reported phase */
+    phase: string;
+    /** Milliseconds since the request arrived on the socket */
+    elapsed_ms: number;
+    /** Same snapshot as the ack, so a keepalive can stand in for a lost ack */
     busy: Record<string, number>;
 }
 
@@ -95,6 +119,34 @@ export interface WSToolCallArgsStreamEvent extends WSBaseEvent {
  * soon as the run is durable rather than holding it through a Zotero lookup.
  * The field stays on the type for historical runs and for the un-split path.
  */
+/**
+ * An offer to carry on from a run that ended without being finished.
+ *
+ * Composed entirely by the backend and rendered verbatim; the client owns only
+ * its own chrome (the instructions heading and the disclosure label). That is
+ * what lets a new `kind` ship without a client release, so nothing here may be
+ * switched on `kind` to compose different prose.
+ *
+ * Also stored on the run, which is where a client that reopens the thread
+ * reads it. `payload` is opaque and is echoed back untouched on the request
+ * that continues the run.
+ */
+export interface ContinuationOffer {
+    /** Missing mode means resume for persisted offers from older builds. */
+    mode?: string;
+    /** Visible user message submitted through the normal send flow. */
+    prompt?: string | null;
+    /** Which case this covers, e.g. 'interrupted' or 'batch_approval'. */
+    kind: string;
+    title: string;
+    message: string;
+    continue_label: string;
+    /** Whether the card offers to attach instructions to the continuation. */
+    allow_message?: boolean;
+    instructions_placeholder?: string;
+    payload?: Record<string, unknown>;
+}
+
 export interface WSRunCompleteEvent extends WSBaseEvent {
     event: 'run_complete';
     run_id: string;
@@ -104,6 +156,11 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
     agent_actions: import('../agents/agentActionTypes').AgentAction[] | null;
     /** Whether the run had high input token usage (backend-assessed). */
     high_token_usage?: boolean;
+    /**
+     * Offer to carry on from this run. Absent from a backend that predates the
+     * field, and null on the ordinary run that finished what it set out to do.
+     */
+    continuation?: ContinuationOffer | null;
     /**
      * @deprecated Always false. Runs are no longer paused at a turn threshold;
      * a long run is metered and confirmed through the credit limit. Still on
@@ -862,6 +919,19 @@ export interface WSWorkerDiagnostics {
     oldest_in_flight_age_ms?: number | null;
 }
 
+/**
+ * Facts about the served Zotero attachment that a successful read cannot
+ * derive from the file itself. Gathered from the Zotero database within a
+ * short budget and omitted when that budget runs out, so the backend only
+ * refreshes its metadata cache from a complete picture.
+ */
+export interface ServedAttachmentDiagnostics {
+    /** Whether the served file is its parent item's primary attachment. */
+    is_primary: boolean;
+    /** Number of annotations on the served attachment. */
+    annotations_count: number;
+}
+
 /** Response to whole-document extraction request */
 export interface WSZoteroDocumentResponse {
     type: 'zotero_document';
@@ -882,6 +952,8 @@ export interface WSZoteroDocumentResponse {
      * `ext-<key>` for external files).
      */
     served_attachment?: AttachmentStub | null;
+    /** Primary flag and annotation count of the served Zotero attachment (success only, best effort). */
+    attachment_diagnostics?: ServedAttachmentDiagnostics | null;
     /** Page count on error responses when available. */
     total_pages?: number | null;
     error?: string | null;
@@ -1385,6 +1457,7 @@ export interface WSListItemsResponse {
  * round trip, so a batch job never has to page through `list_items`.
  * Every filter is ANDed with every other one; `conditions_join_mode` sets how
  * the `conditions` list is joined among itself, and joins nothing else.
+ * `any_conditions` is one more OR-group, ANDed with all of them.
  * Filters left unset do not constrain the result, so an otherwise empty
  * request selects the whole library.
  */
@@ -1426,6 +1499,24 @@ export interface WSResolvePopulationRequest extends WSBaseEvent {
      * narrower than described.
      */
     conditions_join_mode?: 'all' | 'any' | null;
+    /**
+     * A second condition list, ORed among itself and ANDed with `conditions`
+     * and with every other filter.
+     *
+     * This is what expresses a filter that mixes the two joins — one condition
+     * that must always hold AND several alternatives of which one must — which
+     * `conditions_join_mode` cannot: it joins the whole `conditions` list one
+     * way or the other.
+     *
+     * Subject to the same search-wide-flag restriction as an ORed `conditions`
+     * list: a `unfiled`, `retracted`, `publications` or `feed` entry is
+     * rejected with `invalid_request` rather than resolved as an ANDed one.
+     *
+     * A handler that applies this MUST set `any_conditions_applied` on the
+     * response. Ignoring the field drops the group and resolves a population
+     * WIDER than described, which the caller has to be able to detect.
+     */
+    any_conditions?: ZoteroSearchCondition[] | null;
     /** 'regular' = bibliographic items, 'attachment' = child attachments. */
     item_category: 'regular' | 'attachment';
     /** Filter regular items by attachment presence; null = no filter. */
@@ -1517,6 +1608,16 @@ export interface WSResolvePopulationResponse {
      * from a correct answer.
      */
     conditions_join_mode?: 'all' | 'any' | null;
+    /**
+     * True when the request's `any_conditions` group was applied.
+     *
+     * Set on every successful resolution by a build that knows the field —
+     * true even for an empty group — and absent from a failure and from a
+     * build that predates it. A caller that sent a non-empty group must check
+     * it: a build that does not know `any_conditions` drops the group and
+     * resolves a WIDER population, which its ids alone cannot reveal.
+     */
+    any_conditions_applied?: boolean | null;
     error?: string | null;
     error_code?: string | null;
     /** Available libraries (only included when error_code is 'library_not_found') */
@@ -2522,8 +2623,22 @@ export const CLIENT_FEATURES = {
     CREDIT_CONFIRMATION: 'credit_confirmation',
     /** `batch_jobs` capability (batch_start / batch_resolve). */
     BATCH_JOBS: 'batch_jobs',
+    /**
+     * A `ContinuationOffer` may carry `mode: 'new_run'` with a `prompt`: the
+     * continue card submits that visible user message through the normal send
+     * flow instead of resuming the previous run. A client without this feature
+     * ignores both fields, so the backend composes only resume offers for it.
+     */
+    CONTINUATION_NEW_RUN: 'continuation_new_run',
     /** `citation_graph` capability (`find_related_works`). */
     CITATION_GRAPH: 'citation_graph',
+    /**
+     * `resolve_population` honors `any_conditions`: a second condition list,
+     * ORed among itself and ANDed with `conditions`. Without it the backend
+     * must not send the group — a handler that predates it drops the field and
+     * resolves a population WIDER than the one the batch described.
+     */
+    POPULATION_ANY_CONDITIONS: 'population_any_conditions',
     /**
      * `create_item` actions carry `pdf_candidates`: a ranked list of places the
      * PDF might be downloaded from.

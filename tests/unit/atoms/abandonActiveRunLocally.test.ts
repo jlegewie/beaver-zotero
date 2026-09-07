@@ -106,7 +106,7 @@ function stagePendingCards() {
     store.set(approvalResponseIntentsAtom, new Map([['action-1', true]]));
     store.set(runApprovalPolicyAtom, {
         runId: 'run-1',
-        approvedGroups: new Set(['note_edit']),
+        fullAccess: true,
         approvedResources: new Set(['item-1']),
     });
 }
@@ -119,7 +119,7 @@ function pendingCardState() {
         creditConfirmations: store.get(pendingCreditConfirmationsAtom).size,
         responseIntents: store.get(approvalResponseIntentsAtom).size,
         approvalPolicyRunId: policy.runId,
-        approvedGroups: policy.approvedGroups.size,
+        fullAccess: policy.fullAccess,
         approvedResources: policy.approvedResources.size,
     };
 }
@@ -142,7 +142,7 @@ const NO_PENDING_CARDS = {
     creditConfirmations: 0,
     responseIntents: 0,
     approvalPolicyRunId: null,
-    approvedGroups: 0,
+    fullAccess: false,
     approvedResources: 0,
 };
 

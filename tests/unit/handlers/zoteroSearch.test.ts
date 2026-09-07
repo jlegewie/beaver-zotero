@@ -763,4 +763,100 @@ describe('handleZoteroSearchRequest', () => {
             expect(titleChecks).toHaveLength(1);
         });
     });
+    // A negated prose phrase that matches nothing narrows nothing, so the
+    // results are the whole library rather than a filtered set. The read path
+    // returns them and says so; `handleResolvePopulationRequest` refuses the
+    // same condition outright.
+    describe('negations that exclude nothing', () => {
+        /** Makes the positive-form probe — and only the probe — find nothing. */
+        function probeFindsNothing() {
+            const RealSearch = (globalThis as any).Zotero.Search;
+            (globalThis as any).Zotero.Search = class ProbingSearch extends RealSearch {
+                private positiveProse = false;
+                constructor() {
+                    super();
+                    this.addCondition = vi.fn((field: string, operator: string) => {
+                        if (field === 'abstractNote' && operator === 'contains') {
+                            this.positiveProse = true;
+                        }
+                        return 1;
+                    });
+                    this.search = vi.fn(async () => (this.positiveProse ? [] : searchResultIds));
+                }
+            };
+        }
+
+        function requestWith(conditions: any[]) {
+            return {
+                event: 'zotero_search_request' as const,
+                request_id: 'req-vacuous',
+                conditions,
+                join_mode: 'all' as const,
+                item_category: 'regular' as const,
+                include_children: false,
+                recursive: false,
+                limit: 10,
+                offset: 0,
+            };
+        }
+
+        it('returns the results with a warning naming the condition and the correction', async () => {
+            searchResultIds = [1];
+            itemsById.set(1, makeItem({
+                id: 1,
+                key: 'FIRST',
+                getField: vi.fn((field: string) => field === 'title' ? 'First' : ''),
+                getDisplayTitle: vi.fn(() => 'First'),
+            }));
+            probeFindsNothing();
+
+            const response = await handleZoteroSearchRequest(requestWith([
+                { field: 'abstractNote', operator: 'doesNotContain', value: 'flow and team cohesion' },
+            ]));
+
+            // A read changes nothing, so it answers rather than refusing.
+            expect(response.error).toBeUndefined();
+            expect(itemIds(response)).toEqual(['1-FIRST']);
+            expect(response.warnings).toHaveLength(1);
+            expect(response.warnings![0]).toContain("field='abstractNote'");
+            expect(response.warnings![0]).toContain('flow and team cohesion');
+            expect(response.warnings![0]).toContain('excluded nothing');
+            expect(response.warnings![0]).toContain('literal substring');
+        });
+
+        it('stays silent when the negated phrase does exclude something', async () => {
+            searchResultIds = [1];
+            itemsById.set(1, makeItem({
+                id: 1,
+                key: 'FIRST',
+                getField: vi.fn((field: string) => field === 'title' ? 'First' : ''),
+                getDisplayTitle: vi.fn(() => 'First'),
+            }));
+
+            const response = await handleZoteroSearchRequest(requestWith([
+                { field: 'abstractNote', operator: 'doesNotContain', value: 'randomized controlled trial' },
+            ]));
+
+            expect(response.error).toBeUndefined();
+            expect(response.warnings).toBeUndefined();
+        });
+
+        it('leaves a single-word negation alone', async () => {
+            searchResultIds = [1];
+            itemsById.set(1, makeItem({
+                id: 1,
+                key: 'FIRST',
+                getField: vi.fn((field: string) => field === 'title' ? 'First' : ''),
+                getDisplayTitle: vi.fn(() => 'First'),
+            }));
+            probeFindsNothing();
+
+            const response = await handleZoteroSearchRequest(requestWith([
+                { field: 'abstractNote', operator: 'doesNotContain', value: 'cohesion' },
+            ]));
+
+            expect(response.error).toBeUndefined();
+            expect(response.warnings).toBeUndefined();
+        });
+    });
 });

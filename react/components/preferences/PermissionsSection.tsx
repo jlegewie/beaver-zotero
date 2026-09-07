@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import {SettingsGroup, SettingsRow, SectionLabel, DocLink, SectionHeader, SectionDescription} from "./components/SettingsElements";
+import {SettingsGroup, SettingsRow, SectionLabel, DocLink, SectionDescription} from "./components/SettingsElements";
 import DeferredToolPreferenceSetting from "./DeferredToolPreferenceSetting";
 import { getPref, setPref } from "../../../src/utils/prefs";
 
@@ -50,7 +50,7 @@ const PermissionsSection: React.FC = () => {
 
     return (
         <>
-            <SectionHeader>Library Modifications</SectionHeader>
+            <SectionLabel>Library Modifications</SectionLabel>
             <SectionDescription>
                 When Beaver modifies your library, all changes require your approval by default (the only exception is when Beaver creates a new note).
                 You can change this behavior here. Be careful, Beaver might make changes you didn't expect.

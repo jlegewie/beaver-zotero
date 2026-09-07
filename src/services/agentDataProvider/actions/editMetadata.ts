@@ -594,7 +594,14 @@ async function executeEditMetadataAction(
             error_code: 'library_not_searchable',
         };
     }
+    // Per-phase timing: the save is where slow executes spend their time
+    // (Zotero awaits every notifier observer inside the transaction), and
+    // separating it from item resolution is what makes that visible.
+    const timing: Record<string, number> = {};
+    ctx.reportPhase?.('resolving');
+    const resolveStartedAt = Date.now();
     const resolved = await resolveItemReference({ library_id, library_ref, zotero_key });
+    timing.resolve_ms = Date.now() - resolveStartedAt;
     if (resolved.status !== 'found') {
         return {
             type: 'agent_action_execute_response',
@@ -604,6 +611,7 @@ async function executeEditMetadataAction(
                 ? `Library not available for item: ${library_ref || library_id}-${zotero_key}`
                 : `Item not found: ${modelObjectIdFromReference({ library_id, library_ref, zotero_key })}`,
             error_code: resolved.status === 'library_unavailable' ? 'library_unavailable' : 'item_not_found',
+            timing,
         };
     }
     const item = resolved.item;
@@ -683,10 +691,14 @@ async function executeEditMetadataAction(
         if (appliedEdits.length > 0 || creatorsApplied) {
             // Checkpoint: abort before persisting if timeout has fired
             checkAborted(ctx, 'edit_metadata:before_save');
+            ctx.reportPhase?.('saving');
+            const saveStartedAt = Date.now();
             try {
                 await item.saveTx();
-                logger(`executeEditMetadataAction: Saved ${appliedEdits.length} edits${creatorsApplied ? ' + creators' : ''} to ${library_id}-${zotero_key}`, 1);
+                timing.save_ms = Date.now() - saveStartedAt;
+                logger(`executeEditMetadataAction: Saved ${appliedEdits.length} edits${creatorsApplied ? ' + creators' : ''} to ${library_id}-${zotero_key} (${timing.save_ms}ms)`, 1);
             } catch (error) {
+                timing.save_ms = Date.now() - saveStartedAt;
                 if (error instanceof TimeoutError) throw error;
                 // Save failed — restore in-memory state so dirty fields don't leak
                 restoreFieldSnapshots(item, fieldSnapshots);
@@ -697,6 +709,7 @@ async function executeEditMetadataAction(
                     success: false,
                     error: `Failed to save item: ${error}`,
                     error_code: 'save_failed',
+                    timing,
                 };
             }
         }
@@ -724,6 +737,7 @@ async function executeEditMetadataAction(
             success: allSucceeded,
             error: allSucceeded ? undefined : `Some edits failed: ${failedEdits.map(e => e.field).join(', ')}`,
             result_data: resultData,
+            timing,
         };
     } catch (error) {
         // Restore in-memory state on any unhandled error (including TimeoutError)

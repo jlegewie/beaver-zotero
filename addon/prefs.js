@@ -59,6 +59,9 @@ pref("enableSystemNotifications", true);
 // Show an OS-native system notification when a response is complete and Beaver is not visible
 pref("enableResponseCompleteNotifications", true);
 
+// Show the run status popup in the corner of the main window while the sidebar is closed
+pref("enableRunStatusPopup", true);
+
 // Deferred tool preferences: maps tool group to preference (always_ask, always_apply, continue_without_applying)
 // Defaults are defined in react/atoms/deferredToolPreferences.ts and merged at load time.
 // This pref only stores user overrides.
@@ -110,6 +113,10 @@ pref("onboardingWelcomeShown", false);
 pref("onboardingReaderTipShown", false);
 pref("onboardingReaderTipShownV2", false);
 pref("onboardingNoteTipShown", false);
+
+// One-time feature tips: JSON { shown: { [tipId]: isoDate }, lastShownAt: isoDate }
+// (see react/utils/featureTipPrefs.ts)
+pref("featureTips", "{}");
 pref("onboardingCitationTipShown", false);
 pref("onboardingWelcomeShownAt", "");
 pref("versionUpdatePopupShownAt", "");

@@ -12,64 +12,74 @@ import ChangesCard from './reviewChanges/ChangesCard';
 import { useArtifactRows, useChangesRows } from './reviewChanges/useRunActionRows';
 
 interface AgentActionsReviewProps {
-    run: AgentRun;
+    /** The one or more runs that make up a single answer. */
+    runs: AgentRun[];
 }
 
 /**
- * Displays agent actions for a terminal run: what it produced, then the imports
- * it suggests, then the card of every library change it proposed, pending or
- * settled.
+ * Displays agent actions for one terminal answer: what it produced, then the
+ * imports it suggests, then one card containing every library change it
+ * proposed, pending or settled. A continued answer spans several runs, but is
+ * still one answer and therefore gets one review block.
  *
- * The three are disjoint by construction, so a run's work is never reported
- * twice. Most runs show exactly one of them.
+ * The three are disjoint by construction, so an answer's work is never
+ * reported twice. Most answers show exactly one of them.
  */
-export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) => {
+export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ runs }) => {
     const getAgentActionsByRun = useAtomValue(getAgentActionsByRunAtom);
-    const changesRows = useChangesRows(run.id);
-    const artifactRows = useArtifactRows(run.id);
+    const runIds = React.useMemo(() => runs.map((run) => run.id), [runs]);
+    const changesRows = useChangesRows(runIds);
+    const artifactRows = useArtifactRows(runIds);
+    const lastRun = runs[runs.length - 1];
 
-    // Get create item actions with toolcall_id 'citations' (from citation extraction)
-    // Sort by citation count (descending) for consistent ordering
-    const createItemActions = (getAgentActionsByRun(
-        run.id,
-        (action) => isCreateItemAgentAction(action) && action.toolcall_id === 'citations'
-    ) as CreateItemAgentAction[]).sort((a, b) => {
-        const countA = a.proposed_data.item.citation_count ?? 0;
-        const countB = b.proposed_data.item.citation_count ?? 0;
-        return countB - countA;
-    });
+    // Citation imports retain their per-run control because that component's
+    // mutations are scoped to a run. The library changes below are aggregated.
+    const createItemActionsByRun = React.useMemo(() => runs.map((run) => ({
+        runId: run.id,
+        actions: (getAgentActionsByRun(
+            run.id,
+            (action) => isCreateItemAgentAction(action) && action.toolcall_id === 'citations'
+        ) as CreateItemAgentAction[]).sort((a, b) => {
+            const countA = a.proposed_data.item.citation_count ?? 0;
+            const countB = b.proposed_data.item.citation_count ?? 0;
+            return countB - countA;
+        }),
+    })).filter(({ actions }) =>
+        actions.length > 0 &&
+        !actions.every((action) => action.status === 'rejected' || action.status === 'undone')
+    ), [getAgentActionsByRun, runs]);
 
     // Don't show during streaming
-    if (run.status === 'in_progress') {
+    if (!lastRun || lastRun.status === 'in_progress') {
         return null;
     }
 
-    const hasCreateItems = createItemActions.length > 0 &&
-        !createItemActions.every(a => a.status === 'rejected' || a.status === 'undone');
+    const hasCreateItems = createItemActionsByRun.length > 0;
 
-    // Every change the run touched gets the card, whatever their number and
+    // Every change the answer touched gets the card, whatever their number and
     // whatever became of them: one place, one label, so "what did this do to my
     // library" is answered the same way for every run.
     const showChangesCard = changesRows.length > 0;
 
-    // The three displays are independent: each renders whenever the run has
-    // something for it, and a run commonly has something for only one.
+    // The three displays are independent: each renders whenever the answer has
+    // something for it, and an answer commonly has something for only one.
     if (!hasCreateItems && !showChangesCard && artifactRows.length === 0) {
         return null;
     }
 
     return (
         <div className="px-4 display-flex flex-col gap-2">
-            {/* What the run made comes first: it is the most likely thing to be
+            {/* What the answer made comes first: it is the most likely thing to be
                 opened, and the answer above it has just finished describing it. */}
-            <ArtifactsList runId={run.id} rows={artifactRows} />
-            {hasCreateItems && (
+            <ArtifactsList rows={artifactRows} />
+            {createItemActionsByRun.map(({ runId, actions }) => (
                 <CreateItemAgentActionDisplay
-                    runId={run.id}
-                    actions={createItemActions}
+                    key={runId}
+                    runId={runId}
+                    actions={actions}
                 />
-            )}
-            {showChangesCard && <ChangesCard run={run} rows={changesRows} />}
+            ))}
+            {showChangesCard && <ChangesCard runId={lastRun.id} rows={changesRows} />}
         </div>
     );
 };

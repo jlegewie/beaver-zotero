@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
     agentActionItemTitlesAtom,
+    getAgentActionItemTitleKey,
     toolExpandedAtom,
     setToolExpandedAtom,
 } from '../../../../atoms/messageUIState';
@@ -44,7 +45,6 @@ import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 
 interface ReviewActionRowProps {
-    runId: string;
     row: ReviewRow;
     /** True while any card-level bulk operation runs — row buttons are disabled. */
     isBulkRunning?: boolean;
@@ -61,11 +61,11 @@ const GHOST_BUTTON_STYLE: React.CSSProperties = { padding: '3px 6px' };
  * props: the card owns which rows exist and the bulk operations.
  */
 export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
-    runId,
     row,
     isBulkRunning = false,
     inGroup = false,
 }) => {
+    const runId = row.runId;
     const [isProcessing, setIsProcessing] = useState(false);
     const [isUndoError, setIsUndoError] = useState(false);
     const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | null>(null);
@@ -85,8 +85,10 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     const isExpanded = expansionState[expansionKey] ?? false;
 
     // Read-only: the in-stream card resolves and caches the title under the same
-    // key, so this surface shares that one fetch instead of repeating it.
-    const itemTitle = useAtomValue(agentActionItemTitlesAtom)[row.toolcallId] ?? null;
+    // run-scoped key, so this surface shares that one fetch without colliding
+    // with an identically named tool call from a continuation run.
+    const itemTitleKey = getAgentActionItemTitleKey(runId, row.toolcallId);
+    const itemTitle = useAtomValue(agentActionItemTitlesAtom)[itemTitleKey] ?? null;
 
     // Read the executor's claim rather than a card-local flag: it is the only
     // signal that sees a write started from another surface (the in-stream card),

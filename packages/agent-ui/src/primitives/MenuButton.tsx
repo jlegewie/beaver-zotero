@@ -1,5 +1,5 @@
 import React, { useState, useRef, ReactNode, useEffect } from 'react';
-import ContextMenu, { MenuItem, MenuPosition } from './ContextMenu';
+import ContextMenu, { MenuFooter, MenuItem, MenuPosition } from './ContextMenu';
 import Icon from '../icons/Icon';
 import Tooltip from './Tooltip';
 import { getDocumentFromElement } from '../utils/windowContext';
@@ -29,8 +29,8 @@ interface MenuButtonProps {
     showArrow?: boolean;
     /** Optional custom header content to render at the top of the menu */
     header?: ReactNode;
-    /** Optional custom footer content to render at the bottom of the menu */
-    footer?: ReactNode;
+    /** Optional custom footer content; see `MenuFooter` for the close-aware form. */
+    footer?: MenuFooter;
     /** Optional callback to toggle the menu */
     toggleCallback?: (isOpen: boolean) => void;
     /** Optional callback to execute after the menu closes */

@@ -19,6 +19,7 @@ vi.mock("../../../src/utils/libraryIdentity", () => ({
 
 let deferredPreference = "always_apply";
 let deletionGrantedForRun = false;
+let fullAccessForRun = false;
 let excludedLibraryId: number | null = null;
 const preferenceLookups: string[] = [];
 vi.mock("../../../src/services/agentDataProvider/utils", () => ({
@@ -35,6 +36,7 @@ vi.mock("../../../src/services/agentDataProvider/utils", () => ({
             return deletionGrantedForRun ? "always_apply" : "always_ask";
         return deferredPreference;
     },
+    hasFullAccessForCurrentRun: () => fullAccessForRun,
 }));
 
 /** The placement a successfully prepared move writes onto the annotation. */
@@ -212,6 +214,7 @@ beforeEach(() => {
     refreshMovedAnnotationsInOpenReaders.mockClear();
     deferredPreference = "always_apply";
     deletionGrantedForRun = false;
+    fullAccessForRun = false;
     excludedLibraryId = null;
     items.clear();
     items.set("AAA", annotation("AAA"));
@@ -709,6 +712,22 @@ describe("edit_annotations approval policy", () => {
             ],
         });
         expect(preferenceLookups).toEqual(["edit_annotations"]);
+    });
+
+    it("applies everything once the run has full access", async () => {
+        // The user granted it on a card in front of them, for this run only, so
+        // neither a delete nor a comment overwrite is escalated back to a card.
+        fullAccessForRun = true;
+
+        expect(
+            (await validate({ operation: "delete", annotation_refs: refs("AAA") }))
+                .preference,
+        ).toBe("always_apply");
+        expect(
+            (await validate({
+                edits: [{ annotation_refs: refs("AAA"), changes: { comment: "new" } }],
+            })).preference,
+        ).toBe("always_apply");
     });
 
     it("lets a per-run deletion grant apply without a card", async () => {

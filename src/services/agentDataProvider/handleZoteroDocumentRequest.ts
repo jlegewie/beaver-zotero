@@ -12,7 +12,7 @@ import {
     WSZoteroDocumentRequest,
     WSZoteroDocumentResponse,
 } from '@beaver/agent-core/protocol/agentProtocol';
-import type { ZoteroDocumentErrorCode } from '@beaver/agent-core/protocol/agentProtocol';
+import type { ServedAttachmentDiagnostics, ZoteroDocumentErrorCode } from '@beaver/agent-core/protocol/agentProtocol';
 import type { AttachmentStub, ItemStub } from '@beaver/agent-core/types/zotero';
 import {
     extractAndCacheEpubDocument,
@@ -48,6 +48,7 @@ import { effectiveMaxFileSizeMB } from '@beaver/agent-core/transport/attachmentL
 import { withWorkerDiagnostics } from './workerDiagnostics';
 import type { ExternalFileRecord } from '../database';
 import { serializeAttachmentStub, serializeItemStub } from '../../utils/zoteroSerializers';
+import { getBestAttachmentBatch } from '../documentExtraction/attachmentInfoBatch';
 import { libraryRefForLibraryID, modelObjectIdFromReference } from '../../utils/libraryIdentity';
 import {
     createPreparedJsonMessage,
@@ -207,6 +208,56 @@ export function buildServedAttachmentStub(
     return serializeAttachmentStub(attachment, contentKind);
 }
 
+/**
+ * Budget for the database reads behind `attachment_diagnostics` once the
+ * document itself is ready. The reads start when the attachment resolves and
+ * normally finish while extraction runs; this bounds the wait when Zotero's
+ * DB queue is busy. A read that outlives the budget keeps running in that
+ * queue but no longer delays the response.
+ */
+const SERVED_ATTACHMENT_DIAGNOSTICS_BUDGET_MS = 1500;
+
+/**
+ * Primary flag and annotation count for the served attachment. Never throws:
+ * any failure resolves to `null`, and the response simply omits the field.
+ */
+export async function resolveServedAttachmentDiagnostics(
+    attachment: Zotero.Item,
+): Promise<ServedAttachmentDiagnostics | null> {
+    try {
+        const parentID = attachment.parentItemID || null;
+        // Both reads become promises before either is awaited, so a failure in
+        // one never leaves the other's rejection unobserved.
+        const bestAttachments = parentID
+            ? getBestAttachmentBatch([parentID])
+            : Promise.resolve(new Map<number, number>());
+        const childItems = Promise.resolve().then(() => attachment.loadDataType('childItems'));
+        const [bestAttachmentByParent] = await Promise.all([bestAttachments, childItems]);
+        return {
+            is_primary: parentID !== null && bestAttachmentByParent.get(parentID) === attachment.id,
+            annotations_count: attachment.getAnnotations().length,
+        };
+    } catch (error) {
+        logger(`handleZoteroDocumentRequest: attachment diagnostics failed for ${attachment.libraryID}-${attachment.key}: ${error}`, 1);
+        return null;
+    }
+}
+
+/**
+ * Wait for `pending` at most `budgetMs`; `null` when it has not settled by then.
+ */
+async function settleWithinBudget<T>(pending: Promise<T | null>, budgetMs: number): Promise<T | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), budgetMs);
+    });
+    try {
+        return await Promise.race([pending, deadline]);
+    } finally {
+        if (timer !== undefined) clearTimeout(timer);
+    }
+}
+
 function buildPreparedPdfDocumentResponse(
     envelope: Omit<WSZoteroDocumentResponse, 'result'>,
     jsonBytes: Uint8Array,
@@ -240,6 +291,14 @@ export async function handleZoteroDocumentRequest(
     // pre-resolution errors leave these null and omit them).
     let parentItem: ItemStub | null = null;
     let servedAttachment: AttachmentStub | null = null;
+    // Started once the attachment resolves so the DB reads overlap extraction;
+    // success responses collect it under a short budget.
+    let pendingDiagnostics: Promise<ServedAttachmentDiagnostics | null> | null = null;
+    const diagnosticsField = async (): Promise<{ attachment_diagnostics?: ServedAttachmentDiagnostics }> => {
+        if (!pendingDiagnostics) return {};
+        const diagnostics = await settleWithinBudget(pendingDiagnostics, SERVED_ATTACHMENT_DIAGNOSTICS_BUDGET_MS);
+        return diagnostics ? { attachment_diagnostics: diagnostics } : {};
+    };
 
     const errorResponse = (
         error: string,
@@ -331,6 +390,7 @@ export async function handleZoteroDocumentRequest(
         } catch (error) {
             logger(`handleZoteroDocumentRequest: served attachment stub failed for ${resolvedKey}: ${error}`, 1);
         }
+        pendingDiagnostics = resolveServedAttachmentDiagnostics(resolvedItem);
         try {
             parentItem = await getResolvedAttachmentParentStub(resolvedItem);
         } catch (error) {
@@ -414,6 +474,7 @@ export async function handleZoteroDocumentRequest(
                 result,
                 ...(parentItem ? { parent_item: parentItem } : {}),
                 ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
+                ...(await diagnosticsField()),
             }, null, 'text', errorResponse);
         }
 
@@ -448,6 +509,7 @@ export async function handleZoteroDocumentRequest(
                     result: result.document,
                     ...(parentItem ? { parent_item: parentItem } : {}),
                     ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
+                    ...(await diagnosticsField()),
                 }, null, 'epub', errorResponse);
             }
 
@@ -485,6 +547,7 @@ export async function handleZoteroDocumentRequest(
                     result: result.document,
                     ...(parentItem ? { parent_item: parentItem } : {}),
                     ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
+                    ...(await diagnosticsField()),
                 }, null, 'snapshot', errorResponse);
             }
 
@@ -541,6 +604,7 @@ export async function handleZoteroDocumentRequest(
                     content_kind: 'pdf',
                     ...(parentItem ? { parent_item: parentItem } : {}),
                     ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
+                    ...(await diagnosticsField()),
                 }, result.serializedResult.jsonBytes);
             }
             return guardPayloadSize(request, {
@@ -556,6 +620,7 @@ export async function handleZoteroDocumentRequest(
                 result: { ...result.result, content_kind: 'pdf' as const },
                 ...(parentItem ? { parent_item: parentItem } : {}),
                 ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
+                ...(await diagnosticsField()),
             }, result.totalPages ?? null, 'pdf', errorResponse);
         }
 

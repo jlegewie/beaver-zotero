@@ -1962,6 +1962,22 @@ const PinnedEndCaretPlugin: React.FC<{
  * The attribute is written straight to the DOM (not via React state) so that
  * typing never re-renders the composer subtree.
  */
+/**
+ * Keeps the editor's editability in step with the `disabled` prop.
+ *
+ * `initialConfig.editable` is read once, when LexicalComposer creates the
+ * editor, so a `disabled` that changes after mount would otherwise be silently
+ * ignored — and an editor that happened to mount while disabled would stay
+ * read-only for the rest of its life.
+ */
+const EditablePlugin: React.FC<{ disabled: boolean }> = ({ disabled }) => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => {
+        editor.setEditable(!disabled);
+    }, [editor, disabled]);
+    return null;
+};
+
 const PlaceholderVisibilityPlugin: React.FC = () => {
     const [editor] = useLexicalComposerContext();
     useEffect(() => {
@@ -2155,6 +2171,7 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                         />
                     </div>
                     <HistoryPlugin />
+                    <EditablePlugin disabled={disabled} />
                     <ImeCompositionTrackerPlugin ime={ime} />
                     <PlainTextSync value={value} onChange={onChange} pills={pills} onPillsChange={onPillsChange} blurSelectionRef={blurSelectionRef} ime={ime} pendingTextRef={pendingTextRef} />
                     <SlashCommandRevertPlugin ime={ime} />

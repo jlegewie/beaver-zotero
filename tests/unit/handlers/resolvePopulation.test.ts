@@ -19,6 +19,7 @@ interface ItemRow {
     key: string;
     libraryID: number;
     dateAdded: string;
+    itemTypeID: number;
 }
 
 type MockSearchInstance = {
@@ -118,12 +119,13 @@ describe('handleResolvePopulationRequest', () => {
     const callsMatching = (pattern: RegExp) => dbCalls().filter(([sql]) => pattern.test(sql));
 
     /** Seed an item row plus, optionally, the attachments hanging off it. */
-    function seedItem(itemID: number, options: { key?: string; libraryID?: number; dateAdded?: string; attachments?: number[] } = {}) {
+    function seedItem(itemID: number, options: { key?: string; libraryID?: number; dateAdded?: string; attachments?: number[]; itemType?: string } = {}) {
         itemRows.set(itemID, {
             itemID,
             key: options.key ?? `KEY${itemID}`,
             libraryID: options.libraryID ?? LIBRARY_ID,
             dateAdded: options.dateAdded ?? `2024-01-01 00:00:${String(itemID).padStart(2, '0')}`,
+            itemTypeID: (globalThis as any).Zotero.ItemTypes.getID(options.itemType ?? 'journalArticle'),
         });
         if (options.attachments) {
             attachmentsByParent.set(itemID, options.attachments);
@@ -133,6 +135,7 @@ describe('handleResolvePopulationRequest', () => {
                     key: `ATT${attachmentID}`,
                     libraryID: LIBRARY_ID,
                     dateAdded: `2024-02-01 00:00:${String(attachmentID % 100).padStart(2, '0')}`,
+                    itemTypeID: (globalThis as any).Zotero.ItemTypes.getID('attachment'),
                 });
             }
         }
@@ -233,6 +236,13 @@ describe('handleResolvePopulationRequest', () => {
                         for (const attachmentID of attachmentsByParent.get(parentID) ?? []) {
                             emit([attachmentID]);
                         }
+                    }
+                    return;
+                }
+                if (/SELECT itemID, itemTypeID FROM items WHERE itemID IN/.test(sql)) {
+                    for (const itemID of params as number[]) {
+                        const row = itemRows.get(itemID);
+                        if (row) emit([row.itemID, row.itemTypeID]);
                     }
                     return;
                 }
@@ -796,6 +806,165 @@ describe('handleResolvePopulationRequest', () => {
         });
     });
 
+    describe('any_conditions', () => {
+        it('ORs its own list while conditions stay ANDed on the main search', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'itemType', operator: 'is', value: 'journalArticle' }],
+                any_conditions: [
+                    { field: 'DOI', operator: 'is', value: '' },
+                    { field: 'publicationTitle', operator: 'is', value: '' },
+                ],
+            }));
+
+            expect(response.error).toBeUndefined();
+            // The always-true half stays on the main search. ORed with the
+            // alternatives it would admit every journal article in the library.
+            expect(addedConditions()).toContainEqual(['itemType', 'is', 'journalArticle']);
+            const group = groupWith('DOI');
+            expect(conditionsOn(group)).toContainEqual(['joinMode', 'any', '']);
+            expect(conditionsOn(group)).toContainEqual(['DOI', 'doesNotContain', '']);
+            expect(conditionsOn(group)).toContainEqual(['publicationTitle', 'doesNotContain', '']);
+        });
+
+        it('intersects its group with the main search, in both directions', async () => {
+            // The tag group takes the scope slot, so the any_conditions group
+            // is the one run on its own and intersected.
+            searchResultIds = [1, 2, 3];
+            groupResults = [[hasCondition('DOI'), [2, 3, 4]]];
+            seedItem(1);
+            seedItem(2);
+            seedItem(3);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                tags: ['to-read'],
+                any_conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+            }));
+
+            expect(response.item_ids).toEqual(['u-KEY2', 'u-KEY3']);
+            expect(response.total_count).toBe(2);
+        });
+
+        it('carries a group of its own alongside an ORed conditions list', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions_join_mode: 'any',
+                conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+                any_conditions: [{ field: 'publicationTitle', operator: 'is', value: '' }],
+            }));
+
+            expect(response.error).toBeUndefined();
+            // Two independent OR-groups, ANDed with each other.
+            expect(orGroupSearches()).toHaveLength(2);
+            expect(groupWith('DOI')).not.toBe(groupWith('publicationTitle'));
+        });
+
+        it('builds no group and never sets a join mode on the main search when empty', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                any_conditions: [],
+                conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+            }));
+
+            expect(orGroupSearches()).toHaveLength(0);
+            expect(addedConditions().some(([field]) => field === 'joinMode')).toBe(false);
+            // The echo is set even for an empty group: it reports the build,
+            // not the request.
+            expect(response.any_conditions_applied).toBe(true);
+        });
+
+        it('echoes that it applied the group, on every successful resolution', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                any_conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+            }));
+
+            expect(response.any_conditions_applied).toBe(true);
+        });
+
+        it('echoes the group on a count-only resolution too', async () => {
+            searchResultIds = [1, 2];
+            seedItem(1);
+            seedItem(2);
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                max_items: 0,
+                any_conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+            }));
+
+            expect(response.item_ids).toEqual([]);
+            expect(response.total_count).toBe(2);
+            expect(response.any_conditions_applied).toBe(true);
+        });
+
+        it.each(['unfiled', 'retracted', 'publications', 'feed'])(
+            'rejects a %s condition, which Zotero would AND instead of OR',
+            async (field) => {
+                const response = await handleResolvePopulationRequest(makeRequest({
+                    any_conditions: [
+                        { field, operator: 'true', value: '' },
+                        { field: 'DOI', operator: 'is', value: '' },
+                    ],
+                }));
+
+                expect(response.error_code).toBe('invalid_request');
+                expect(response.error).toContain(field);
+                expect(response.item_ids).toEqual([]);
+                // A failed resolution carries no echo.
+                expect(response.any_conditions_applied).toBeUndefined();
+                expect(searches).toHaveLength(0);
+            },
+        );
+
+        it('never nests one OR-group inside another when all four are built', async () => {
+            // A nested scope is silently dropped by Zotero 7, and a dropped
+            // group WIDENS the population to everything the outer one matched.
+            searchResultIds = [1];
+            seedItem(1);
+            collections.set(`${LIBRARY_ID}/ABCD2345`, { id: 77, name: 'Methods' });
+
+            await handleResolvePopulationRequest(makeRequest({
+                collection_keys: ['ABCD2345'],
+                tags: ['to-read'],
+                conditions_join_mode: 'any',
+                conditions: [{ field: 'DOI', operator: 'is', value: '' }],
+                any_conditions: [{ field: 'publicationTitle', operator: 'is', value: '' }],
+            }));
+
+            expect(orGroupSearches()).toHaveLength(4);
+            // One scope, three groups run on their own and intersected.
+            expect(scopeChain()).toHaveLength(1);
+            for (const group of orGroupSearches()) {
+                expect(group.setScope).not.toHaveBeenCalled();
+            }
+        });
+
+        it('refuses a negation in the group that excludes nothing', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+            // The probe for the positive form finds no item carrying the
+            // phrase, so the disjunct is always true and the group with it.
+            groupResults = [[hasCondition('abstractNote'), []]];
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                any_conditions: [
+                    { field: 'abstractNote', operator: 'doesNotContain', value: 'machine learning' },
+                ],
+            }));
+
+            expect(response.error_code).toBe('invalid_condition');
+            expect(response.item_ids).toEqual([]);
+        });
+    });
+
     describe('display names', () => {
         it('names the library and the collections the filters resolved against', async () => {
             searchResultIds = [1];
@@ -1175,6 +1344,133 @@ describe('handleResolvePopulationRequest', () => {
         });
     });
 
+    describe('negations that exclude nothing', () => {
+        /** Every search built after the main one, as [field, operator, value] triples. */
+        const probeConditions = () => orGroupSearches().flatMap(search => conditionsOn(search));
+
+        it('fails the resolution when a negated prose phrase matches no item', async () => {
+            searchResultIds = [1, 2];
+            seedItem(1);
+            seedItem(2);
+            // The probe — `abstractNote contains <phrase>` — finds nothing, so
+            // its negation holds for every item in the library.
+            groupResults = [[hasCondition('abstractNote'), []]];
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [
+                    { field: 'abstractNote', operator: 'doesNotContain', value: 'flow and team cohesion' },
+                ],
+            }));
+
+            expect(response.error_code).toBe('invalid_condition');
+            expect(response.item_ids).toEqual([]);
+            expect(response.total_count).toBe(0);
+            expect(response.error).toContain("field='abstractNote'");
+            expect(response.error).toContain('flow and team cohesion');
+            expect(response.error).toContain('literal substring');
+            expect(probeConditions()).toContainEqual([
+                'abstractNote', 'contains', 'flow and team cohesion',
+            ]);
+        });
+
+        it('fails an ORed disjunct that excludes nothing, which would make the group always true', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+            groupResults = [
+                [conditions => conditions.some(([, operator]) => operator === 'contains'), []],
+            ];
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [
+                    { field: 'title', operator: 'contains', value: 'climate' },
+                    { field: 'abstractNote', operator: 'doesNotContain', value: 'flow and team cohesion' },
+                ],
+                conditions_join_mode: 'any',
+            }));
+
+            expect(response.error_code).toBe('invalid_condition');
+            expect(response.error).toContain('flow and team cohesion');
+        });
+
+        it('keeps a negated prose phrase that does exclude something', async () => {
+            searchResultIds = [1, 2];
+            seedItem(1);
+            seedItem(2);
+            groupResults = [[hasCondition('abstractNote'), [3]]];
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [
+                    { field: 'abstractNote', operator: 'doesNotContain', value: 'randomized controlled trial' },
+                ],
+            }));
+
+            expect(response.error).toBeUndefined();
+            expect(response.total_count).toBe(2);
+            expect(addedConditions()).toContainEqual([
+                'abstractNote', 'doesNotContain', 'randomized controlled trial',
+            ]);
+        });
+
+        it('leaves a single-word negation alone, matching or not', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+            // Would resolve to "excludes nothing" if it were probed at all.
+            groupResults = [[hasCondition('abstractNote'), []]];
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'abstractNote', operator: 'doesNotContain', value: 'cohesion' }],
+            }));
+
+            expect(response.error).toBeUndefined();
+            expect(response.total_count).toBe(1);
+            expect(probeConditions()).not.toContainEqual(['abstractNote', 'contains', 'cohesion']);
+        });
+
+        it('leaves a negation on a non-prose field alone', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+            groupResults = [[hasCondition('tag'), []]];
+
+            // No item carries the tag yet, so "the ones without it" really is
+            // the whole library and the caller meant it.
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'tag', operator: 'doesNotContain', value: 'not yet reviewed' }],
+            }));
+
+            expect(response.error).toBeUndefined();
+            expect(response.total_count).toBe(1);
+            expect(probeConditions()).not.toContainEqual(['tag', 'contains', 'not yet reviewed']);
+        });
+
+        it('resolves the population when the probe itself throws', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+            groupResults = [[hasCondition('abstractNote'), []]];
+            const RealSearch = (globalThis as any).Zotero.Search;
+            (globalThis as any).Zotero.Search = class ProbeThrowingSearch extends RealSearch {
+                constructor() {
+                    super();
+                    // Only the probe carries a positive prose condition.
+                    this.addCondition = vi.fn((field: string, operator: string) => {
+                        if (field === 'abstractNote' && operator === 'contains') {
+                            throw new Error('Invalid operator');
+                        }
+                        return 1;
+                    });
+                }
+            };
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [
+                    { field: 'abstractNote', operator: 'doesNotContain', value: 'flow and team cohesion' },
+                ],
+            }));
+
+            expect(response.error).toBeUndefined();
+            expect(response.total_count).toBe(1);
+        });
+    });
+
     describe('library access', () => {
         it('returns the library error with available libraries and runs no search when the library is excluded', async () => {
             vi.mocked(validateLibraryAccess).mockReturnValue({
@@ -1426,6 +1722,249 @@ describe('handleResolvePopulationRequest', () => {
 
             expect(response.error_code).toBe('collection_not_found');
             expect(response.matched_item_count).toBeUndefined();
+        });
+    });
+
+    describe('item-type validity of empty-value conditions', () => {
+        /** The SQL reads that ask for an item's type, if the handler ran any. */
+        const typeReads = () => callsMatching(/SELECT itemID, itemTypeID FROM items/);
+
+        it('drops items of a type that cannot hold the checked field', async () => {
+            // A blog post has no publisher field at all, so it satisfies
+            // "publisher is empty" for free — and an operation that fills
+            // publishers in can do nothing with it.
+            searchResultIds = [1, 2];
+            seedItem(1, { itemType: 'book' });
+            seedItem(2, { itemType: 'blogPost' });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'publisher', operator: 'is', value: '' }],
+            }));
+
+            expect(response.error).toBeUndefined();
+            expect(response.item_ids).toEqual(['u-KEY1']);
+            expect(response.total_count).toBe(1);
+        });
+
+        it('keeps an item whose type holds the field under another name', async () => {
+            // A film's `distributor` IS its publisher. Restricting on the base
+            // field alone would drop it, which is the opposite of correct.
+            searchResultIds = [1, 2];
+            seedItem(1, { itemType: 'film' });
+            seedItem(2, { itemType: 'blogPost' });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'publisher', operator: 'is', value: '' }],
+            }));
+
+            expect(response.item_ids).toEqual(['u-KEY1']);
+        });
+
+        it("applies to the doesNotContain '' spelling of the same check", async () => {
+            searchResultIds = [1, 2];
+            seedItem(1, { itemType: 'book' });
+            seedItem(2, { itemType: 'blogPost' });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'publisher', operator: 'doesNotContain', value: '' }],
+            }));
+
+            expect(response.item_ids).toEqual(['u-KEY1']);
+        });
+
+        it('intersects the types across several empty-value conditions', async () => {
+            // A book holds both fields; a film holds the publisher (as its
+            // `distributor`) but no ISBN, so ORing the two type sets instead
+            // of intersecting them would keep it.
+            searchResultIds = [1, 2, 3];
+            seedItem(1, { itemType: 'book' });
+            seedItem(2, { itemType: 'film' });
+            seedItem(3, { itemType: 'blogPost' });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [
+                    { field: 'publisher', operator: 'is', value: '' },
+                    { field: 'ISBN', operator: 'is', value: '' },
+                ],
+            }));
+
+            expect(response.item_ids).toEqual(['u-KEY1']);
+        });
+
+        it('refuses empty-value conditions no item type can satisfy', async () => {
+            // No type holds both an ISBN and a distributor, so nothing can be
+            // missing both. Answering "0 items" would read as a filter to
+            // loosen rather than as one no library can satisfy.
+            searchResultIds = [1, 2];
+            seedItem(1, { itemType: 'book' });
+            seedItem(2, { itemType: 'film' });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [
+                    { field: 'ISBN', operator: 'is', value: '' },
+                    { field: 'distributor', operator: 'is', value: '' },
+                ],
+            }));
+
+            expect(response.error_code).toBe('invalid_condition');
+            expect(response.error).toContain('ISBN, distributor');
+            // The refusal must not claim no item is missing both fields —
+            // every blog post in the library is.
+            expect(response.error).toContain('cannot hold them');
+            expect(response.item_ids).toEqual([]);
+            expect(response.total_count).toBe(0);
+        });
+
+        it('resolves an empty population when the library holds no eligible item', async () => {
+            // Distinct from the refusal above: the filter IS satisfiable, this
+            // library just has nothing of a type that could carry a publisher.
+            searchResultIds = [1];
+            seedItem(1, { itemType: 'blogPost' });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'publisher', operator: 'is', value: '' }],
+            }));
+
+            expect(response.error).toBeUndefined();
+            expect(response.item_ids).toEqual([]);
+            expect(response.total_count).toBe(0);
+        });
+
+        it('runs no extra query for a field every searched type holds', async () => {
+            // abstractNote is valid for every item type but the three the
+            // search already excludes, so there is nothing to restrict.
+            searchResultIds = [1, 2];
+            seedItem(1, { itemType: 'book' });
+            seedItem(2, { itemType: 'blogPost' });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'abstractNote', operator: 'is', value: '' }],
+            }));
+
+            expect(response.item_ids).toEqual(['u-KEY1', 'u-KEY2']);
+            expect(typeReads()).toHaveLength(0);
+        });
+
+        it('leaves a condition with a value alone', async () => {
+            // "publisher is Springer" cannot match a type without the field in
+            // the first place, so there is nothing to narrow.
+            searchResultIds = [1, 2];
+            seedItem(1, { itemType: 'book' });
+            seedItem(2, { itemType: 'blogPost' });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'publisher', operator: 'is', value: 'Springer' }],
+            }));
+
+            expect(response.item_ids).toEqual(['u-KEY1', 'u-KEY2']);
+            expect(typeReads()).toHaveLength(0);
+        });
+
+        it('leaves a condition field that is not an item field alone', async () => {
+            searchResultIds = [1, 2];
+            seedItem(1, { itemType: 'book' });
+            seedItem(2, { itemType: 'blogPost' });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'tag', operator: 'doesNotContain', value: '' }],
+            }));
+
+            expect(response.item_ids).toEqual(['u-KEY1', 'u-KEY2']);
+            expect(typeReads()).toHaveLength(0);
+        });
+
+        it('does not restrict when the conditions are ORed', async () => {
+            // Under 'any' an item may have matched through a different
+            // disjunct, so the restriction is not true of it.
+            searchResultIds = [1, 2];
+            seedItem(1, { itemType: 'book' });
+            seedItem(2, { itemType: 'blogPost' });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [
+                    { field: 'publisher', operator: 'is', value: '' },
+                    { field: 'DOI', operator: 'is', value: '' },
+                ],
+                conditions_join_mode: 'any',
+            }));
+
+            expect(response.item_ids).toEqual(['u-KEY1', 'u-KEY2']);
+            expect(typeReads()).toHaveLength(0);
+        });
+
+        it('does not restrict on any_conditions', async () => {
+            searchResultIds = [1, 2];
+            seedItem(1, { itemType: 'book' });
+            seedItem(2, { itemType: 'blogPost' });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                any_conditions: [{ field: 'publisher', operator: 'is', value: '' }],
+            }));
+
+            expect(response.item_ids).toEqual(['u-KEY1', 'u-KEY2']);
+            expect(typeReads()).toHaveLength(0);
+        });
+
+        it('leaves the population alone when no type comes back for a field', async () => {
+            // Zotero answers "not valid for this type" without throwing when a
+            // field's item-type map is missing, so a partial load looks like a
+            // field no type has. Restricting on that would refuse an ordinary
+            // single-field filter outright.
+            const itemFields = (globalThis as any).Zotero.ItemFields;
+            const original = itemFields.getFieldIDFromTypeAndBase;
+            itemFields.getFieldIDFromTypeAndBase = vi.fn(() => false);
+            try {
+                searchResultIds = [1, 2];
+                seedItem(1, { itemType: 'book' });
+                seedItem(2, { itemType: 'blogPost' });
+
+                const response = await handleResolvePopulationRequest(makeRequest({
+                    conditions: [{ field: 'abstractNote', operator: 'is', value: '' }],
+                }));
+
+                expect(response.error).toBeUndefined();
+                expect(response.item_ids).toEqual(['u-KEY1', 'u-KEY2']);
+            } finally {
+                itemFields.getFieldIDFromTypeAndBase = original;
+            }
+        });
+
+        it('leaves the population alone when the field data cannot be read', async () => {
+            // Item-field data is loaded lazily; a cold cache must never narrow
+            // a population.
+            const itemFields = (globalThis as any).Zotero.ItemFields;
+            const original = itemFields.getFieldIDFromTypeAndBase;
+            itemFields.getFieldIDFromTypeAndBase = vi.fn(() => {
+                throw new Error('Item field data not yet loaded');
+            });
+            try {
+                searchResultIds = [1, 2];
+                seedItem(1, { itemType: 'book' });
+                seedItem(2, { itemType: 'blogPost' });
+
+                const response = await handleResolvePopulationRequest(makeRequest({
+                    conditions: [{ field: 'publisher', operator: 'is', value: '' }],
+                }));
+
+                expect(response.error).toBeUndefined();
+                expect(response.item_ids).toEqual(['u-KEY1', 'u-KEY2']);
+            } finally {
+                itemFields.getFieldIDFromTypeAndBase = original;
+            }
+        });
+
+        it('restricts the matched items before deriving an attachment population', async () => {
+            searchResultIds = [1, 2];
+            seedItem(1, { itemType: 'book', attachments: [11] });
+            seedItem(2, { itemType: 'blogPost', attachments: [12] });
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'publisher', operator: 'is', value: '' }],
+                item_category: 'attachment',
+            }));
+
+            expect(response.item_ids).toEqual(['u-ATT11']);
+            expect(response.matched_item_count).toBe(1);
         });
     });
 

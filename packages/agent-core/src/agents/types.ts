@@ -1,4 +1,4 @@
-import { ApplicationStateInput } from "../protocol/agentProtocol";
+import { ApplicationStateInput, ContinuationOffer } from "../protocol/agentProtocol";
 import { Citation } from "../types/citations";
 import { MessageAttachment } from "../types/attachments/apiTypes";
 import { ZoteroLibrary, ZoteroCollection, ZoteroTag } from "../types/zotero";
@@ -166,6 +166,12 @@ export interface BeaverAgentPrompt {
     resumes_run_id?: string;
     /** Who started the resume; only 'auto' reorders the backend model chain */
     resume_trigger?: ResumeTrigger;
+    /**
+     * The continuation offer this request acts on, echoed back from the run it
+     * continues. Decides which preamble the backend leads the run with. Absent
+     * on a plain resume, which is read as the interrupted-response case.
+     */
+    continuation?: ContinuationRef;
     /** Custom system instructions for this request */
     custom_instructions?: string;
     /** Where this prompt came from */
@@ -299,6 +305,12 @@ interface AgentRunMetadata {
  * Complete agent run from request to final output.
  * Stored in DB and used for rendering conversation history.
  */
+/** A continuation offer echoed back by the request that acts on it. */
+export interface ContinuationRef {
+    kind: string;
+    payload?: Record<string, unknown>;
+}
+
 export interface AgentRun {
     /** Client-generated agent run ID */
     id: string;
@@ -336,6 +348,14 @@ export interface AgentRun {
         is_resumable?: boolean;
         has_beaver_fallback?: boolean;
     };
+
+    /**
+     * Offer to carry on from this run, when it ended without being finished —
+     * cut off mid-response, or stopped waiting on a decision that never came.
+     * Composed by the backend and rendered verbatim. Absent on runs written
+     * before the field existed; `continuationOfferFor` covers those.
+     */
+    continuation?: ContinuationOffer | null;
 
     /** The model messages (built incrementally during streaming) */
     model_messages: ModelMessage[];

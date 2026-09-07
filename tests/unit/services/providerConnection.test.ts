@@ -247,3 +247,92 @@ describe('ProviderConnection', () => {
         });
     });
 });
+
+describe('ProviderConnection request keepalives', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        vi.clearAllMocks();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it('sends keepalives for a running request when the backend advertises support', async () => {
+        let resolveHandler: (value: Record<string, any>) => void = () => {};
+        const provider = {
+            zotero_data_request: {
+                handle: vi.fn(() => new Promise<Record<string, any>>((resolve) => { resolveHandler = resolve; })),
+                errorResponse: () => ({ type: 'zotero_data', request_id: 'req-1', error: 'x' }),
+            },
+        };
+        const conn = new ProviderConnection('https://api.example.com', provider);
+        const sent = installFakeSocket(conn);
+        (conn as any).serverSupportsRequestKeepalive = true;
+
+        // Mirror onmessage: keepalives start on receipt, before dispatch.
+        const request = { event: 'zotero_data_request', request_id: 'req-1' };
+        (conn as any).maybeStartKeepalive(request, Date.now());
+        await (conn as any).handleMessage(JSON.stringify(request), Date.now(), vi.fn());
+        const [, context] = provider.zotero_data_request.handle.mock.calls[0] as any[];
+        expect(typeof context.receivedAt).toBe('number');
+
+        await vi.advanceTimersByTimeAsync(5_000);
+        const parsed = () => sent.map((raw) => JSON.parse(raw));
+        expect(parsed().filter((m) => m.type === 'request_keepalive')).toEqual([
+            expect.objectContaining({ request_id: 'req-1', phase: 'running' }),
+        ]);
+
+        resolveHandler({ type: 'zotero_data', request_id: 'req-1', items: [] });
+        await Promise.resolve();
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(parsed().filter((m) => m.type === 'request_keepalive')).toHaveLength(1);
+        expect(parsed().find((m) => m.type === 'zotero_data')).toBeTruthy();
+    });
+
+    it('stops keepalives when the connection state is reset', async () => {
+        const provider = {
+            zotero_data_request: {
+                handle: vi.fn(() => new Promise<Record<string, any>>(() => {})),
+                errorResponse: () => ({ type: 'zotero_data', request_id: 'req-1', error: 'x' }),
+            },
+        };
+        const conn = new ProviderConnection('https://api.example.com', provider);
+        const sent = installFakeSocket(conn);
+        (conn as any).serverSupportsRequestKeepalive = true;
+
+        // Mirror onmessage: keepalives start on receipt, before dispatch.
+        const request = { event: 'zotero_data_request', request_id: 'req-1' };
+        (conn as any).maybeStartKeepalive(request, Date.now());
+        await (conn as any).handleMessage(JSON.stringify(request), Date.now(), vi.fn());
+        await vi.advanceTimersByTimeAsync(5_000);
+        const keepalives = () => sent.map((raw) => JSON.parse(raw)).filter((m) => m.type === 'request_keepalive');
+        expect(keepalives()).toHaveLength(1);
+
+        (conn as any).resetConnectionState();
+        // Re-arm a fake socket so a leaked timer would have somewhere to send to
+        const after = installFakeSocket(conn);
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(keepalives()).toHaveLength(1);
+        expect(after).toHaveLength(0);
+    });
+
+    it('stays silent when the backend does not advertise keepalives', async () => {
+        const provider = {
+            zotero_data_request: {
+                handle: vi.fn(() => new Promise<Record<string, any>>(() => {})),
+                errorResponse: () => ({ type: 'zotero_data', request_id: 'req-1', error: 'x' }),
+            },
+        };
+        const conn = new ProviderConnection('https://api.example.com', provider);
+        const sent = installFakeSocket(conn);
+
+        // Mirror onmessage: keepalives start on receipt, before dispatch.
+        const request = { event: 'zotero_data_request', request_id: 'req-1' };
+        (conn as any).maybeStartKeepalive(request, Date.now());
+        await (conn as any).handleMessage(JSON.stringify(request), Date.now(), vi.fn());
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(sent.map((raw) => JSON.parse(raw)).filter((m) => m.type === 'request_keepalive')).toHaveLength(0);
+    });
+});

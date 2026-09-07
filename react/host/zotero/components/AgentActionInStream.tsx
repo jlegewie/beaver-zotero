@@ -36,6 +36,7 @@ export const AgentActionInStream: React.FC<AgentActionInStreamProps> = (props) =
                 <AgentActionView
                     toolcallId={props.part.tool_call_id}
                     toolName={props.toolName}
+                    progress={props.part.progress}
                     runId={props.runId}
                     responseIndex={props.responseIndex}
                     pendingApproval={props.pendingApproval}

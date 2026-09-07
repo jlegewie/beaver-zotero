@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from "react";
 import Button from "@beaver/agent-ui/primitives/Button";
-import {SettingsGroup, SettingsRow, SectionLabel, DocLink, ExternalLink, SectionHeader, SectionDescription, INTELLIGENCE_INDEX_URL} from "./components/SettingsElements";
+import {SettingsGroup, SettingsRow, SectionLabel, DocLink, ExternalLink, SectionDescription, INTELLIGENCE_INDEX_URL} from "./components/SettingsElements";
 import ApiKeyInput from "./ApiKeyInput";
 import CustomProviderCard from "./CustomProviderCard";
 import PlusSignIcon from "@beaver/agent-ui/icons/PlusSignIcon";
@@ -125,7 +125,6 @@ const ApiKeysSection: React.FC = () => {
 
     return (
         <>
-            <SectionHeader>API Keys and Model Providers</SectionHeader>
             <SectionDescription>
                 Connect your own API keys (see our <DocLink path="api-key">guide</DocLink>),
                 or add a <DocLink path="custom-models">custom endpoint</DocLink>. Free and new paid keys (Tier 1) keys often hit rate limits. A key with higher rate limits works best (Tier 2+).

@@ -574,9 +574,10 @@ export interface ComponentsHost {
     /**
      * Render the post-run review block for the client's library changes
      * (create-item / note / annotation mutation summaries), pending or settled.
-     * Return null when the client has nothing to show for the run.
+     * A continued answer arrives as its complete run chain so the host can
+     * present one coherent review. Return null when there is nothing to show.
      */
-    pendingActionsReview(props: { run: AgentRun }): ReactNode;
+    pendingActionsReview(props: { runs: AgentRun[] }): ReactNode;
     /**
      * Render the icon that stands for a bibliographic item of the given type.
      *

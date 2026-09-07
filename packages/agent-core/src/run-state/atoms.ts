@@ -18,6 +18,7 @@ import {
     isUnsuccessfulToolReturn,
 } from "../agents/types";
 import {
+    ContinuationOffer,
     WSPartEvent,
     WSToolReturnEvent,
     WSRunCompleteEvent,
@@ -25,7 +26,7 @@ import {
     WSToolCallArgsStreamEvent,
 } from "../protocol/agentProtocol";
 import { MessageAttachment, messageAttachmentKey, messageAttachmentsHaveSameIdentity } from "../types/attachments/apiTypes";
-import { collectResumeChain } from "./runResumeHelpers";
+import { collectResumeChain, continuationOfferFor, shouldOfferResume } from "./runResumeHelpers";
 
 // =============================================================================
 // Core Atoms
@@ -170,6 +171,63 @@ export const lastRunSummaryAtom = atom((get) => {
     }
     lastRunSummary = summary;
     return summary;
+});
+
+/**
+ * The standing offer to carry on from the newest run, or null when there is
+ * none. Only the newest run can carry one (see `shouldOfferResume`), and a run
+ * that a later run already continued no longer does.
+ *
+ * Derived here rather than read off the run by the composer, which must not
+ * subscribe to the runs themselves: this recomputes on every streamed frame,
+ * but a run that is still streaming carries no offer, so the value it hands
+ * back is unchanged for the whole of a response and nothing re-renders.
+ */
+export interface RunContinuationOffer {
+    runId: string;
+    offer: ContinuationOffer;
+}
+
+/**
+ * Offers of the same run compare equal by their fields, not by identity: the
+ * legacy fallback in `continuationOfferFor` composes a fresh object per call,
+ * which would otherwise hand out a new value on every recomputation.
+ */
+function offersAreEqual(a: ContinuationOffer, b: ContinuationOffer): boolean {
+    return a === b || (
+        a.kind === b.kind
+        && a.mode === b.mode
+        && a.title === b.title
+        && a.message === b.message
+        && a.continue_label === b.continue_label
+        && a.allow_message === b.allow_message
+        && a.instructions_placeholder === b.instructions_placeholder
+        && a.prompt === b.prompt
+    );
+}
+
+let lastContinuationOffer: RunContinuationOffer | null = null;
+export const continuationOfferAtom = atom<RunContinuationOffer | null>((get) => {
+    const runs = get(allRunsAtom);
+    const run = runs.length > 0 ? runs[runs.length - 1] : null;
+    const offer = run && shouldOfferResume(run, {
+        isLastRun: true,
+        resumedRunIds: get(resumedRunIdsAtom),
+    })
+        ? continuationOfferFor(run)
+        : null;
+
+    if (!run || !offer) {
+        lastContinuationOffer = null;
+        return null;
+    }
+
+    const previous = lastContinuationOffer;
+    if (previous && previous.runId === run.id && offersAreEqual(previous.offer, offer)) {
+        return previous;
+    }
+    lastContinuationOffer = { runId: run.id, offer };
+    return lastContinuationOffer;
 });
 
 /**
@@ -700,6 +758,12 @@ export function updateRunComplete(run: AgentRun, event: WSRunCompleteEvent): Age
         total_usage: event.usage ?? undefined,
         total_cost: event.cost ?? undefined,
         completed_at: new Date().toISOString(),
+        // What this run left undone, when it left anything. The same offer is
+        // on the row, so reopening the thread shows the same card; this is
+        // only what saves the live client a refetch. Taken verbatim, an
+        // explicit null included, so the run carries what the wire said rather
+        // than this function's reading of it.
+        continuation: event.continuation,
     };
 }
 

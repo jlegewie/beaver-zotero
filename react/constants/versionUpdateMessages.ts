@@ -548,23 +548,23 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         footer: `<a href="https://www.beaverapp.ai/docs/credits">Learn more</a>. These changes do not impact BYOK users.`,
     },
     {
-        version: "0.24.0-beta.1",
-        title: "Batch jobs: Sort, tag, extract, and annotate across hundreds of papers",
+        version: "0.24.0",
+        title: "Batch jobs: Sort, tag, extract, and annotate hundreds of papers",
         steps: [
             {
                 title: "Batch jobs",
-                description: "Sort or tag a thousand items in a single request. Annotate, summarize or extract findings across hundreds of papers. Beaver now supports batch jobs that efficiently process large numbers of items.",
+                description: "Beaver now supports batch jobs to efficiently sort, tag, edit, annotate, summarize or extract findings from hundreds or even a thousand items. <a href='https://www.beaverapp.ai/batch-jobs'>Learn more</a>",
             },
             {
                 title: "Review library changes",
-                description: "Beaver now shows a summary of all library changes at the bottom of every response.",
+                description: "Easily review, approve, reject or undo library changes from the bottom of any Beaver response.",
             },
             {
                 title: "Pinned chats, search in chats and more",
-                description: "You can now pin chats to the top of the chat list and search an open chat for keywords.",
+                description: "Pin chats, search an open chat for keywords, redesigned chat input, and more.",
             },
         ],
-        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.24.0-beta.2" target='_blank'>Full changelog</a>`,
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.24.0" target='_blank'>Full changelog</a>`,
     },
 
 ];

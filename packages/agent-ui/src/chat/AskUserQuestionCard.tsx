@@ -33,8 +33,11 @@ export interface AskUserQuestionCardProps {
     pendingQuestion: PendingQuestion;
     /** The user's answers for every question of the request. */
     onSubmit: (answers: AskUserQuestionAnswer[]) => void;
-    /** Abandon the run rather than answer it. */
-    onStop: () => void;
+    /**
+     * Abandon the run rather than answer it. Omitted by a surface that has no
+     * business stopping the run — the corner popup — and the button with it.
+     */
+    onStop?: () => void;
 }
 
 /**
@@ -295,17 +298,19 @@ export const AskUserQuestionCard: React.FC<AskUserQuestionCardProps> = ({
 
                 {/* Footer: Stop ... Skip Next/Submit */}
                 <div className="display-flex flex-row items-center pt-2 gap-2">
-                    <Tooltip content="Stop the agent run" showArrow singleLine>
-                        <Button
-                            variant="outline"
-                            rightIcon={StopStrokeIcon}
-                            ariaLabel="Stop generating"
-                            style={{ padding: '2px 5px' }}
-                            onClick={onStop}
-                        >
-                            Stop
-                        </Button>
-                    </Tooltip>
+                    {onStop && (
+                        <Tooltip content="Stop the agent run" showArrow singleLine>
+                            <Button
+                                variant="outline"
+                                rightIcon={StopStrokeIcon}
+                                ariaLabel="Stop generating"
+                                style={{ padding: '2px 5px' }}
+                                onClick={onStop}
+                            >
+                                Stop
+                            </Button>
+                        </Tooltip>
+                    )}
                     <div className="flex-1" />
                     <Button
                         variant="ghost"
