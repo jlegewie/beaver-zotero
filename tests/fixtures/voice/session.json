@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "sessionId": "fixture-session",
+  "format": { "encoding": "pcm_s16le", "sampleRate": 16000, "channels": 1 },
+  "frames": [
+    { "sequence": 0, "sampleCount": 1600, "byteLength": 3200 },
+    { "sequence": 1, "sampleCount": 640, "byteLength": 1280 }
+  ],
+  "transcript": [
+    { "type": "interim", "sequence": 0, "segmentId": 0, "text": "A short" },
+    { "type": "interim", "sequence": 1, "segmentId": 0, "text": "A short voice" },
+    { "type": "segment_final", "sequence": 2, "segmentId": 0, "text": "A short voice test." },
+    { "type": "complete", "sequence": 3 }
+  ],
+  "endAudio": { "type": "end_audio", "frameCount": 2, "sampleCount": 2240 },
+  "committedText": "A short voice test."
+}
