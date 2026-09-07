@@ -883,6 +883,7 @@ export type ZoteroDocumentErrorCode =
     | 'library_excluded'    // Attachment is in a library the user excluded from Beaver
     | 'library_unavailable' // Attachment is in a library unavailable on this computer
     | 'document_too_large'  // Serialized extraction result exceeds the WebSocket transfer budget
+    | 'beaver_table'        // The item is a Beaver table; `error` names its portable id so the backend can redirect to read_table
     | 'schema_version_mismatch'
     | 'mode_mismatch';
 
