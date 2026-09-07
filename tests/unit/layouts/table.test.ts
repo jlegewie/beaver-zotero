@@ -19,6 +19,7 @@ import {
     isCellEmpty,
     isColumnSortable,
     isRowInLibrary,
+    normalizeSelectLabel,
     readSpec,
     stripCitationTags,
     summarizeCoverage,
@@ -254,6 +255,36 @@ describe("column vocabulary", () => {
         expect(
             hasFixedVocabulary({ id: "t", header: "T", type: "select" }),
         ).toBe(false);
+    });
+
+    it("reads case, spacing and trailing punctuation as one option", () => {
+        const key = normalizeSelectLabel("Quasi-experiment");
+        expect(key).toBe("quasi experiment");
+        for (const spelling of [
+            "quasi-experiment",
+            "Quasi_Experiment",
+            "  QUASI   EXPERIMENT  ",
+            "Quasi experiment.",
+        ]) {
+            expect(normalizeSelectLabel(spelling)).toBe(key);
+        }
+        expect(normalizeSelectLabel("RCT.")).toBe(normalizeSelectLabel("rct"));
+        expect(normalizeSelectLabel("Include?")).toBe("include");
+    });
+
+    it("keeps genuinely different labels apart", () => {
+        expect(normalizeSelectLabel("include")).not.toBe(
+            normalizeSelectLabel("included"),
+        );
+        expect(normalizeSelectLabel("n/a")).not.toBe(
+            normalizeSelectLabel("na"),
+        );
+        // A label made only of punctuation or separators would otherwise
+        // normalize to the empty string, making every such label one option.
+        expect(normalizeSelectLabel("?")).toBe("?");
+        expect(normalizeSelectLabel("...")).not.toBe(normalizeSelectLabel("!"));
+        expect(normalizeSelectLabel("-")).toBe("-");
+        expect(normalizeSelectLabel("-")).not.toBe(normalizeSelectLabel("_"));
     });
 });
 

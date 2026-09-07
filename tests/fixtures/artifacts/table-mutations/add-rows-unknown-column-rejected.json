@@ -1,0 +1,84 @@
+{
+    "name": "a row carrying a cell for a column the table does not have is refused",
+    "before": {
+        "id": "t2",
+        "spec_version": 1,
+        "anchor_column_id": "paper",
+        "columns": [
+            {
+                "id": "paper",
+                "header": "Paper",
+                "type": "reference"
+            },
+            {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What design does the study use?",
+                "options": [
+                    {
+                        "label": "RCT",
+                        "color": "blue"
+                    },
+                    {
+                        "label": "Quasi-experiment",
+                        "color": "green"
+                    }
+                ]
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "AAA"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Alpha"
+                        },
+                        "provenance": "imported"
+                    }
+                }
+            }
+        ]
+    },
+    "mutations": [
+        {
+            "op": "add_rows",
+            "rows": [
+                {
+                    "id": "r2",
+                    "ref": {
+                        "kind": "item",
+                        "library_id": 1,
+                        "zotero_key": "BBB"
+                    },
+                    "cells": {
+                        "paper": {
+                            "value": {
+                                "kind": "reference",
+                                "display_name": "Beta"
+                            },
+                            "provenance": "imported"
+                        },
+                        "sample_size": {
+                            "value": {
+                                "kind": "text",
+                                "text": "1,204"
+                            },
+                            "provenance": "asserted"
+                        }
+                    }
+                }
+            ]
+        }
+    ],
+    "error": {
+        "code": "unknown_column"
+    }
+}

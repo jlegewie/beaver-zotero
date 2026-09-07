@@ -54,6 +54,26 @@ function loadFixtures<T>(directory: string): { file: string; fixture: T }[] {
         }));
 }
 
+/**
+ * Cells whose select label is not one of their column's options — the state
+ * add-only options (D27) exist to make unreachable. Named so a failure says
+ * which cell and which label broke it.
+ */
+function unknownSelectLabels(spec: TableSpec): string[] {
+    const columns = new Map(spec.columns.map((column) => [column.id, column]));
+    const unknown: string[] = [];
+    for (const row of spec.rows) {
+        for (const [columnId, cell] of Object.entries(row.cells)) {
+            const value = cell.value;
+            if (value?.kind !== "select") continue;
+            const options = columns.get(columnId)?.options ?? [];
+            if (!options.some((option) => option.label === value.label))
+                unknown.push(`${row.id}/${columnId}: "${value.label}"`);
+        }
+    }
+    return unknown;
+}
+
 /** Freezes an object graph, so any write into it throws under ES module strict mode. */
 function deepFreeze<T>(value: T): T {
     if (value === null || typeof value !== "object") return value;
@@ -79,6 +99,13 @@ describe("the table-mutation fixture corpus", () => {
                 `${file} declares neither an "after" spec nor an expected "error"`,
             ).toBe(true);
 
+            // A corpus that started from a broken spec could not prove the
+            // invariant below survives a mutation.
+            expect(
+                unknownSelectLabels(fixture.before),
+                `${file} starts from cells whose select label is not among their column's options`,
+            ).toEqual([]);
+
             const before = structuredClone(fixture.before);
             const result = applyMutations(fixture.before, fixture.mutations);
 
@@ -97,6 +124,11 @@ describe("the table-mutation fixture corpus", () => {
                     throw new Error(`${file} failed: ${result.error.message}`);
                 }
                 expect(result.spec).toEqual(fixture.after);
+                // The invariant add-only options buy: no mutation can leave a
+                // cell holding a label its column does not offer, so a renderer
+                // never has to decide what a colourless, unfilterable category
+                // looks like.
+                expect(unknownSelectLabels(result.spec)).toEqual([]);
             }
 
             // Every case doubles as a purity check: a rejected list must leave
@@ -229,6 +261,44 @@ describe("applyMutations", () => {
             throw new Error("expected the unknown row to be refused");
         expect(result.error.code).toBe("unknown_row");
         expect(result.error.message).toContain("ghost");
+    });
+
+    it("re-spells a label written earlier in the same mutation list", () => {
+        const result = applyMutations(spec, [
+            {
+                op: "add_columns",
+                columns: [{ id: "design", header: "Design", type: "select" }],
+            },
+            {
+                op: "set_cells",
+                cells: [
+                    {
+                        row: "r1",
+                        column: "design",
+                        cell: {
+                            value: { kind: "select", label: "RCT" },
+                            provenance: "asserted",
+                        },
+                    },
+                ],
+            },
+            {
+                op: "update_column",
+                column: "design",
+                options: [{ label: "rct" }],
+            },
+        ]);
+
+        if (!result.ok) throw new Error(result.error.message);
+        // The options update sees the cell the earlier write appended an option
+        // for, so the two rules compose instead of leaving an orphan.
+        expect(result.spec.rows[0].cells.design.value).toEqual({
+            kind: "select",
+            label: "rct",
+        });
+        expect(result.spec.columns[2].options).toEqual([
+            { label: "rct", color: "blue" },
+        ]);
     });
 
     it("applies an empty mutation list as a no-op", () => {

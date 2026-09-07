@@ -1,0 +1,105 @@
+{
+    "name": "an options update that drops a label the cells still hold is refused",
+    "before": {
+        "id": "t2",
+        "spec_version": 1,
+        "anchor_column_id": "paper",
+        "columns": [
+            {
+                "id": "paper",
+                "header": "Paper",
+                "type": "reference"
+            },
+            {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What design does the study use?",
+                "options": [
+                    {
+                        "label": "RCT",
+                        "color": "blue"
+                    },
+                    {
+                        "label": "Quasi-experiment",
+                        "color": "green"
+                    }
+                ]
+            },
+            {
+                "id": "decision",
+                "header": "Include?",
+                "type": "select",
+                "role": "screening_decision",
+                "description": "Does the paper meet the inclusion criteria?",
+                "options": [
+                    {
+                        "label": "include",
+                        "color": "green"
+                    },
+                    {
+                        "label": "exclude",
+                        "color": "red"
+                    }
+                ]
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "AAA"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Alpha"
+                        },
+                        "provenance": "imported"
+                    },
+                    "design": {
+                        "value": {
+                            "kind": "select",
+                            "label": "RCT"
+                        },
+                        "provenance": "asserted"
+                    }
+                }
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "BBB"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Beta"
+                        },
+                        "provenance": "imported"
+                    }
+                }
+            }
+        ]
+    },
+    "mutations": [
+        {
+            "op": "update_column",
+            "column": "design",
+            "options": [
+                {
+                    "label": "Quasi-experiment"
+                }
+            ]
+        }
+    ],
+    "error": {
+        "code": "invalid_mutation"
+    }
+}

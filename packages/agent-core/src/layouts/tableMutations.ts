@@ -23,15 +23,14 @@
  * object reachable from it is modified either — the draft copies a column, a
  * row or the cells map on first write and shares everything untouched.
  *
- * The vocabulary is also a contract across implementations: the fixtures under
- * `tests/fixtures/artifacts/table-mutations/` are `before` + `mutations` +
- * `after` triples that any second implementation of these semantics can be
- * held to.
+ * The mutation vocabulary is a stable contract: every implementation must
+ * produce the same result for the same starting table and ordered mutations.
  */
 
 import type { Citation } from "../types/citations";
 import {
     hasFixedVocabulary,
+    normalizeSelectLabel,
     SELECT_COLORS,
     type Cell,
     type Column,
@@ -67,6 +66,7 @@ export interface UpdateColumnMutation {
     column: string;
     header?: string;
     description?: string;
+    /** Add-only: the list may re-spell and append, never drop a label in use. */
     options?: SelectOption[];
     unit?: string;
     priority?: "primary" | "secondary";
@@ -246,11 +246,14 @@ function writableRow(draft: Draft, id: string): Row | undefined {
  *   are written over the existing ones and untouched cells survive — rather
  *   than duplicating the row or replacing it wholesale. A row that is new is
  *   appended in the order given.
- * - **`set_cells` on an open `select`** whose label is not among
- *   `Column.options` appends the label, taking the next colour from
+ * - **`set_cells` on a `select` matches by {@link normalizeSelectLabel}** and
+ *   stores the column's spelling, so `rct` written against an `RCT` option is
+ *   that option rather than a second one. A label the column does not have is
+ *   appended on an open select, taking the next colour from
  *   {@link SELECT_COLORS} so the new category is visually distinct from its
  *   neighbours. On a column with a fixed vocabulary the same label is a
  *   `fixed_vocabulary` error: a closed set that quietly grows is not a set.
+ * - **`update_column.options` is add-only** — see {@link planOptions}.
  * - **An empty cell clears.** `{ row, column, cell: {} }` removes the entry
  *   from `row.cells` instead of storing an empty object, so `isCellEmpty` and
  *   the coverage counts stay true.
@@ -314,6 +317,13 @@ function addColumns(
                 `add_columns: column "${column.id}" already exists`,
             );
         }
+        const clash = duplicateOptionLabels(column.options);
+        if (clash) {
+            return fail(
+                "invalid_mutation",
+                `add_columns: column "${column.id}" lists "${clash[0]}" and "${clash[1]}" as two options, which are one label`,
+            );
+        }
         const columns = columnsOf(draft);
         draft.columnIndex.set(column.id, columns.length);
         // Copied so a caller that keeps editing its own object cannot reach
@@ -322,6 +332,223 @@ function addColumns(
         columns.push({ ...column });
     }
     return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// The select vocabulary
+// ---------------------------------------------------------------------------
+
+/**
+ * The colour a newly met category gets: the next one round the palette, by how
+ * many options the column already declares, skipping any colour the column (or
+ * `reserved`, for colours the rest of an `options` update will keep) already
+ * uses, so two categories do not come out the same until the palette runs out.
+ * `gray` is skipped too — it is what an option with no colour renders as, so
+ * handing it out would make the new category look like an unlabelled one.
+ */
+function nextSelectColor(
+    options: SelectOption[],
+    reserved?: Iterable<SelectColor>,
+): SelectColor {
+    const rotation = SELECT_COLORS.filter((color) => color !== "gray");
+    const taken = new Set<SelectColor | undefined>(options.map((o) => o.color));
+    for (const color of reserved ?? []) taken.add(color);
+    for (let step = 0; step < rotation.length; step += 1) {
+        const color = rotation[(options.length + step) % rotation.length];
+        if (!taken.has(color)) return color;
+    }
+    return rotation[options.length % rotation.length];
+}
+
+/**
+ * `cell` as `column` stores it: a `select` label is matched against the
+ * column's options by {@link normalizeSelectLabel} and re-spelled to the
+ * column's own wording, so `rct` written against an `RCT` option is that
+ * option. A label the column does not have is appended on an open select and
+ * refused on a fixed vocabulary.
+ *
+ * Every path that writes a cell goes through this — `set_cells` and the cells
+ * carried by `add_rows` alike — so every cell's label remains one of its
+ * column's options. `at` names the cell or row, so a refusal points at it.
+ */
+function canonicalSelectCell(
+    draft: Draft,
+    column: Column,
+    cell: Cell,
+    op: string,
+    at: string,
+): Cell | ApplyResult {
+    const value = cell.value;
+    if (column.type !== "select" || value?.kind !== "select") return cell;
+
+    const known = optionFor(column.options, value.label);
+    if (known) {
+        return known.label === value.label
+            ? cell
+            : { ...cell, value: { ...value, label: known.label } };
+    }
+    if (hasFixedVocabulary(column)) {
+        return fail(
+            "fixed_vocabulary",
+            `${op}: label "${value.label}" is not in the fixed vocabulary of column "${column.id}" (${at})`,
+        );
+    }
+    const writable = writableColumn(draft, column.id) as Column;
+    const options = writable.options ?? [];
+    writable.options = [
+        ...options,
+        { label: value.label, color: nextSelectColor(options) },
+    ];
+    return cell;
+}
+
+/** The declared option `label` means, matched by {@link normalizeSelectLabel}. */
+function optionFor(
+    options: SelectOption[] | undefined,
+    label: string,
+): SelectOption | undefined {
+    const key = normalizeSelectLabel(label);
+    return options?.find(
+        (option) => normalizeSelectLabel(option.label) === key,
+    );
+}
+
+/**
+ * Two of a column's options that are one label under the shared key, if it has
+ * any — `["Yes", "yes"]` declares one category twice, and only the first of
+ * them is ever matched, so the second is a filter entry nothing can land in.
+ */
+function duplicateOptionLabels(
+    options: SelectOption[] | undefined,
+): [string, string] | undefined {
+    const seen = new Map<string, string>();
+    for (const option of options ?? []) {
+        const key = normalizeSelectLabel(option.label);
+        const first = seen.get(key);
+        if (first !== undefined) return [first, option.label];
+        seen.set(key, option.label);
+    }
+    return undefined;
+}
+
+/** Every select label the cells of `columnId` hold, in row order, with repeats. */
+function* selectLabels(draft: Draft, columnId: string): Generator<string> {
+    for (const row of draft.spec.rows) {
+        const value = row.cells[columnId]?.value;
+        if (value?.kind === "select") yield value.label;
+    }
+}
+
+/** An accepted `update_column.options`: the new list, and the cells it re-spells. */
+interface OptionsPlan {
+    options: SelectOption[];
+    /** Old spelling → new spelling, for the labels whose wording moved. */
+    respell: Map<string, string>;
+}
+
+/**
+ * What an `options` update would do, or why it is refused.
+ *
+ * Options are **add-only**: the two lists are paired by
+ * {@link normalizeSelectLabel}, so the update may re-spell a label it already
+ * has and append ones it does not, but a label the cells still hold has to
+ * survive it. Dropping one would leave those cells outside their own column's
+ * vocabulary — colourless in the rendering, absent from the filter menu, still
+ * counted in the distribution — so it is refused and the answer is a new
+ * column. What survives is the invariant every renderer leans on: after any
+ * mutation, every cell's label is one of its column's options.
+ *
+ * A column whose role already fixes its vocabulary refuses `options` outright.
+ * The role the same mutation *sets* is not consulted: declaring the role and
+ * the vocabulary together is how a column becomes a screening column, and
+ * add-only still guards the labels on the way.
+ */
+function planOptions(
+    draft: Draft,
+    column: Column,
+    incoming: SelectOption[],
+): OptionsPlan | ApplyResult {
+    if (hasFixedVocabulary(column)) {
+        return fail(
+            "fixed_vocabulary",
+            `update_column: the options of column "${column.id}" are fixed by its role "${column.role}"`,
+        );
+    }
+
+    // The colours the update keeps, known before the first new label is given
+    // one: a label further down the list that holds on to blue must not have
+    // blue handed to a new category above it.
+    const reserved = new Set<SelectColor>();
+    for (const option of incoming) {
+        const color =
+            option.color ?? optionFor(column.options, option.label)?.color;
+        if (color) reserved.add(color);
+    }
+
+    const clash = duplicateOptionLabels(incoming);
+    if (clash) {
+        return fail(
+            "invalid_mutation",
+            `update_column: column "${column.id}" lists "${clash[0]}" and "${clash[1]}" as two options, which are one label`,
+        );
+    }
+
+    const options: SelectOption[] = [];
+    const byKey = new Map<string, SelectOption>();
+    for (const option of incoming) {
+        // A label the column already has keeps the colour it had, so
+        // re-spelling one does not repaint the table. Everything else — a new
+        // label, and one the column declared without a colour — takes the next
+        // colour round the palette, exactly as an open-select append would.
+        const previous = optionFor(column.options, option.label);
+        const color =
+            option.color ??
+            previous?.color ??
+            nextSelectColor(options, reserved);
+        const next: SelectOption = color
+            ? { label: option.label, color }
+            : { label: option.label };
+        options.push(next);
+        byKey.set(normalizeSelectLabel(option.label), next);
+    }
+
+    const dropped = new Set<string>();
+    const respell = new Map<string, string>();
+    for (const label of selectLabels(draft, column.id)) {
+        const option = byKey.get(normalizeSelectLabel(label));
+        if (!option) dropped.add(label);
+        else if (option.label !== label) respell.set(label, option.label);
+    }
+    if (dropped.size > 0) {
+        const labels = [...dropped].map((label) => `"${label}"`).join(", ");
+        return fail(
+            "invalid_mutation",
+            `update_column: options for column "${column.id}" would drop ${labels}, which its cells still use; a narrower vocabulary is a new column`,
+        );
+    }
+    return { options, respell };
+}
+
+/**
+ * Writes an accepted plan: the new option list, and the cells whose label was
+ * only re-worded. Re-spelling does **not** set `stale` — the question did not
+ * change, only how its answer is written down.
+ */
+function applyOptions(draft: Draft, column: Column, plan: OptionsPlan): void {
+    column.options = plan.options;
+    if (plan.respell.size === 0) return;
+    for (const row of draft.spec.rows) {
+        const value = row.cells[column.id]?.value;
+        if (value?.kind !== "select") continue;
+        const label = plan.respell.get(value.label);
+        if (label === undefined) continue;
+        const writable = writableRow(draft, row.id);
+        if (!writable) continue;
+        writable.cells[column.id] = {
+            ...writable.cells[column.id],
+            value: { ...value, label },
+        };
+    }
 }
 
 function updateColumn(
@@ -336,6 +563,15 @@ function updateColumn(
         );
     }
 
+    // Planned before anything is written, so a refused options update leaves
+    // the column and its cells exactly as they were.
+    let options: OptionsPlan | undefined;
+    if (mutation.options !== undefined) {
+        const planned = planOptions(draft, column, mutation.options);
+        if ("ok" in planned) return planned;
+        options = planned;
+    }
+
     const questionChanged =
         mutation.description !== undefined &&
         mutation.description !== column.description;
@@ -343,8 +579,7 @@ function updateColumn(
     if (mutation.header !== undefined) column.header = mutation.header;
     if (mutation.description !== undefined)
         column.description = mutation.description;
-    if (mutation.options !== undefined)
-        column.options = mutation.options.map((option) => ({ ...option }));
+    if (options) applyOptions(draft, column, options);
     if (mutation.unit !== undefined) column.unit = mutation.unit;
     if (mutation.priority !== undefined) column.priority = mutation.priority;
     if (mutation.role !== undefined) column.role = mutation.role;
@@ -409,12 +644,44 @@ function addRows(
         if (!incoming?.id) {
             return fail("invalid_mutation", "add_rows: a row has no id");
         }
+        // The cells a row carries are cell writes like any other: they name a
+        // column that exists, they meet the select vocabulary, and writing one
+        // answers it against the current question, so it cannot arrive stale.
+        // A cell filed under a column the table does not have would be
+        // invisible until something later added that id — and would then
+        // surface as an answer nobody vetted.
+        const cells: Row["cells"] = {};
+        for (const [columnId, cell] of Object.entries(incoming.cells ?? {})) {
+            const columnAt = draft.columnIndex.get(columnId);
+            const column =
+                columnAt === undefined
+                    ? undefined
+                    : draft.spec.columns[columnAt];
+            if (!column) {
+                return fail(
+                    "unknown_column",
+                    `add_rows: column "${columnId}" does not exist (row "${incoming.id}")`,
+                );
+            }
+            const canonical = canonicalSelectCell(
+                draft,
+                column,
+                cell,
+                "add_rows",
+                `row "${incoming.id}"`,
+            );
+            if ("ok" in canonical) return canonical;
+            const stored: Cell = { ...canonical };
+            delete stored.stale;
+            cells[columnId] = stored;
+        }
+
         const existing = writableRow(draft, incoming.id);
         if (existing) {
             // Upsert: the incoming cells win, everything the incoming row does
             // not mention survives. A re-run that reports two columns must not
             // erase the rest of the row.
-            existing.cells = { ...existing.cells, ...incoming.cells };
+            existing.cells = { ...existing.cells, ...cells };
             if (incoming.ref !== undefined) existing.ref = incoming.ref;
             if (incoming.in_library !== undefined)
                 existing.in_library = incoming.in_library;
@@ -428,7 +695,7 @@ function addRows(
         const rows = rowsOf(draft);
         draft.rowIndex.set(incoming.id, rows.length);
         draft.ownRows.add(incoming.id);
-        rows.push({ ...incoming, cells: { ...incoming.cells } });
+        rows.push({ ...incoming, cells });
     }
     return undefined;
 }
@@ -454,18 +721,6 @@ function removeRows(
     return undefined;
 }
 
-/**
- * The colour a newly met category gets: the next one round the palette, by how
- * many options the column already declares, so consecutive new categories do
- * not come out the same. `gray` is skipped — it is what an option with no
- * colour renders as, so handing it out would make the new category look like an
- * unlabelled one.
- */
-function nextSelectColor(options: SelectOption[]): SelectColor {
-    const rotation = SELECT_COLORS.filter((color) => color !== "gray");
-    return rotation[options.length % rotation.length];
-}
-
 function setCells(
     draft: Draft,
     mutation: SetCellsMutation,
@@ -488,39 +743,25 @@ function setCells(
             );
         }
 
-        const value = write.cell?.value;
-        if (column.type === "select" && value?.kind === "select") {
-            const known = (column.options ?? []).some(
-                (option) => option.label === value.label,
-            );
-            if (!known) {
-                if (hasFixedVocabulary(column)) {
-                    return fail(
-                        "fixed_vocabulary",
-                        `set_cells: label "${value.label}" is not in the fixed vocabulary of column "${column.id}" (cell "${write.row}/${write.column}")`,
-                    );
-                }
-                const writable = writableColumn(draft, column.id) as Column;
-                const options = writable.options ?? [];
-                writable.options = [
-                    ...options,
-                    {
-                        label: value.label,
-                        color: nextSelectColor(options),
-                    },
-                ];
-            }
-        }
-
         // An empty cell is a clear, not a stored empty object: a `{}` left in
         // the map would count as a cell everywhere the spec is walked.
         if (!write.cell || Object.keys(write.cell).length === 0) {
             delete row.cells[write.column];
             continue;
         }
+
+        const canonical = canonicalSelectCell(
+            draft,
+            column,
+            write.cell,
+            "set_cells",
+            `cell "${write.row}/${write.column}"`,
+        );
+        if ("ok" in canonical) return canonical;
+
         // The cell has just been answered against the current question, so it
         // cannot be stale — not even if the writer says it is.
-        const cell: Cell = { ...write.cell };
+        const cell: Cell = { ...canonical };
         delete cell.stale;
         row.cells[write.column] = cell;
     }
