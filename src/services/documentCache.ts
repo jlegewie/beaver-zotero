@@ -17,6 +17,7 @@ import {
     gunzipToString,
 } from '../utils/gzip';
 import { createAbortController } from '../utils/abortController';
+import { sha256Hex } from '../utils/hash';
 import type {
     BeaverExtractResult,
     SerializedBeaverExtractResult,
@@ -220,7 +221,7 @@ export class DocumentCache {
 
             const bytes = await IOUtils.read(payload.payloadPath);
             if (payload.payloadSha256) {
-                const sha256 = await this.sha256Hex(bytes);
+                const sha256 = await sha256Hex(bytes);
                 if (sha256 !== payload.payloadSha256) {
                     await this.deletePayload(payload);
                     return null;
@@ -300,7 +301,7 @@ export class DocumentCache {
 
             const compressedBytes = await IOUtils.read(payload.payloadPath);
             if (payload.payloadSha256) {
-                const sha256 = await this.sha256Hex(compressedBytes);
+                const sha256 = await sha256Hex(compressedBytes);
                 if (sha256 !== payload.payloadSha256) {
                     await this.deletePayload(payload);
                     return null;
@@ -383,7 +384,7 @@ export class DocumentCache {
 
             const bytes = await IOUtils.read(payload.payloadPath);
             if (payload.payloadSha256) {
-                const sha256 = await this.sha256Hex(bytes);
+                const sha256 = await sha256Hex(bytes);
                 if (sha256 !== payload.payloadSha256) {
                     await this.deletePayload(payload);
                     return null;
@@ -1338,7 +1339,7 @@ export class DocumentCache {
                 2,
             );
         }
-        const sha256 = await this.sha256Hex(bytes);
+        const sha256 = await sha256Hex(bytes);
         const dir = this.libraryDir(libraryId);
         await (IOUtils as any).makeDirectory(dir, { createAncestors: true }).catch(() => undefined);
 
@@ -1364,7 +1365,7 @@ export class DocumentCache {
         try {
             const existing = await IOUtils.read(path);
             if (existing.byteLength !== expectedBytes.byteLength) return false;
-            const existingSha256 = await this.sha256Hex(existing);
+            const existingSha256 = await sha256Hex(existing);
             return existingSha256 === expectedSha256;
         } catch {
             return false;
@@ -1411,24 +1412,5 @@ export class DocumentCache {
 
     private libraryDir(libraryId: number): string {
         return PathUtils.join(this.payloadCacheDir, String(libraryId));
-    }
-
-    private async sha256Hex(bytes: Uint8Array): Promise<string> {
-        const subtle = globalThis.crypto?.subtle;
-        if (subtle) {
-            const buffer = new ArrayBuffer(bytes.byteLength);
-            new Uint8Array(buffer).set(bytes);
-            const digest = await subtle.digest('SHA-256', buffer);
-            return Array.from(new Uint8Array(digest))
-                .map((byte) => byte.toString(16).padStart(2, '0'))
-                .join('');
-        }
-
-        let hash = 2166136261;
-        for (const byte of bytes) {
-            hash ^= byte;
-            hash = Math.imul(hash, 16777619);
-        }
-        return `${bytes.byteLength.toString(16)}-${(hash >>> 0).toString(16)}`;
     }
 }

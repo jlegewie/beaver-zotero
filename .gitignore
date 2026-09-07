@@ -26,6 +26,7 @@ archive
 !/scripts/worktree/
 !/scripts/worktree/**
 !/scripts/copy-agent-ui-css.mjs
+!/scripts/check-esbuild-graph.mjs
 
 # Worktree local artifacts (also added to .git/info/exclude by setup-worktree)
 .worktree-zotero.log

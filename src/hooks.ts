@@ -19,6 +19,20 @@ import { cancelAllActiveTasks } from "./utils/backgroundTasks";
 import { initContextMenus, cleanupContextMenus } from "./modules/zoteroContextMenu";
 import { initReaderIntegration, cleanupReaderIntegration } from "./modules/readerIntegration";
 import { initReaderToolbarMenu, cleanupReaderToolbarMenu } from "./modules/readerToolbarMenu";
+import {
+    initReaderTableViews,
+    cleanupReaderTableViews,
+    cleanupReaderTableViewsForWindow,
+} from "./services/artifacts/view/readerTableView";
+import {
+    initTableItemPane,
+    cleanupTableItemPane,
+} from "./ui/tableItemPane";
+import {
+    registerTablesApi,
+    unregisterTableShadowRestore,
+    unregisterTablesApi,
+} from "./services/artifacts/tablesApiHost";
 import { setActionClient } from "@beaver/agent-core/types/actions";
 import { ZOTERO_PLUGIN_CLIENT_TYPE } from "@beaver/agent-core/protocol/agentProtocol";
 
@@ -296,6 +310,24 @@ async function onStartup() {
         // -------- Register reader toolbar dropdown menu --------
         await initReaderToolbarMenu();
 
+        // -------- Enhance stored tables opened in the reader --------
+        // The reader is the only surface a stored table has, so every way of
+        // opening one — double-click, `zotero://open`, the item pane — arrives
+        // here and needs no interception anywhere.
+        initReaderTableViews();
+
+        // -------- Describe a stored table in the item pane --------
+        // Registered once, globally: Zotero re-creates the section in every
+        // window's item pane from the same registration.
+        initTableItemPane();
+
+        // -------- Publish the table surfaces to the other bundle --------
+        // The reader views and the item-pane registration keep module state, so
+        // they live in this bundle only. Anything on the webpack side reaches
+        // them through `Zotero.__beaverTables` rather than importing them,
+        // which would give it a second, permanently empty copy.
+        registerTablesApi();
+
         // -------- Register Zotero preferences pane --------
         await Zotero.PreferencePanes.register({
             pluginID: addon.data.config.addonID,
@@ -535,6 +567,13 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // next popup translation, breaking Zotero's right-click menu.
         unregisterMainWindowFtl(win);
 
+        // Release this window's table views. Window-specific, so it runs on
+        // every unload and not only during global cleanup: a reader-hosted
+        // table left behind holds the closed window's iframe and its rendered
+        // document — a dead realm kept alive, which on macOS (close the last
+        // window, app keeps running) survives indefinitely.
+        cleanupReaderTableViewsForWindow(win);
+
         if (!isLastWindow) {
             ztoolkit.log("onMainWindowUnload: Other windows remain, skipping global cleanup");
             return;
@@ -546,6 +585,12 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // app-lifetime Zotero.Reader singleton, pinning the closed window's
         // compartment. It is re-installed on the next sidebar open.
         restoreReaderSidebarWidthHandler();
+
+        // Same reason: the React bundle published the table restore hook from
+        // this window and has no teardown of its own, so the closure over its
+        // `tableStore` module would outlive the window on an app-lifetime
+        // global. The next window's bundle re-publishes it on load.
+        unregisterTableShadowRestore();
 
         if (!shouldRunGlobalCleanup) {
             ztoolkit.log("onMainWindowUnload: Last window closed but app still running, skipping global cleanup");
@@ -627,8 +672,13 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // 11. Unregister context menus
         cleanupContextMenus();
 
-        // 12. Unregister reader integration listeners
+        // 12. Unregister reader integration listeners, and release the table
+        //     views: one left behind holds its reader, that reader's document
+        //     and the window both live in.
         cleanupReaderIntegration();
+        unregisterTablesApi();
+        cleanupReaderTableViews();
+        cleanupTableItemPane();
 
         // 13. Unregister reader toolbar menu
         cleanupReaderToolbarMenu();
@@ -676,6 +726,7 @@ const GLOBAL_STYLESHEETS = [
     "agent-ui-tokens.css",
     "agent-ui-utilities.css",
     "agent-ui-components.css",
+    "agent-ui-table.css",
     "beaver.css",
 ];
 
@@ -851,6 +902,9 @@ async function onShutdown(): Promise<void> {
         unregisterQuitObserver();
         cleanupContextMenus();
         cleanupReaderIntegration();
+        unregisterTablesApi();
+        cleanupReaderTableViews();
+        cleanupTableItemPane();
         cleanupReaderToolbarMenu();
         unregisterBeaverProtocolHandler();
 

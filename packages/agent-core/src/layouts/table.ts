@@ -1,0 +1,1255 @@
+/**
+ * Table layout spec.
+ *
+ * A `TableSpec` is the client-agnostic data model behind every table Beaver
+ * renders: the compact sidebar table, the full-width window table and the
+ * static snapshot HTML all consume the same object. The rule that makes that
+ * possible is that the spec is **self-contained**: every cell carries what it
+ * needs to render (display strings, item refs, citation metadata), so no
+ * renderer looks anything up at render time.
+ *
+ * Shape conventions:
+ * - Columns declare the contract (`type`, the extraction `description`, sort /
+ *   filter affordances); cells carry a discriminated `value` so a renderer can
+ *   switch on `value.kind` without consulting the column. `validateTableSpec`
+ *   flags the two disagreeing.
+ * - Default-valued fields are omitted on the wire: `status` absent means
+ *   filled, a missing `value` means "not reported" and renders as an em dash.
+ * - The spec is also the stored file. A snapshot embeds it verbatim and is then
+ *   the only copy of the table's state, so it carries its own format version
+ *   (`spec_version`), identity (`key`) and revision (`version`), and
+ *   {@link readSpec} is the guarded way back in: a spec written by a newer
+ *   format is refused rather than misread.
+ * - Rows are discriminated by what they are about (`Row.ref`, a `RowRef`), and
+ *   everything that depends on that — id, in-library state, which verbs apply
+ *   and where they point — is answered by `./rowKinds`, never by branching on
+ *   `ref.kind` in a renderer. Actions are declarative: `capabilities.row_actions`
+ *   names the verbs the table offers, `rowActions()` keeps the ones a row can
+ *   perform, `Row.actions` may narrow them, and a rendering without a host
+ *   omits them entirely.
+ * - One column is the **anchor** (`anchor_column_id`): it owns row identity, is
+ *   the sticky column under horizontal scroll and is the target of reveal.
+ * - A column is a question, not just a label. `Column.description` is the line
+ *   rendered under the header — for an extraction column it is the extraction
+ *   prompt — and `Column.details` carries the long form behind it.
+ * - Citations: text cells may contain inline `<citation …/>` tags exactly like
+ *   run text, and `TableSpec.citations` carries the matching `Citation`
+ *   metadata so a stored or exported table resolves them offline.
+ */
+
+import type { Citation } from "../types/citations";
+import type { ZoteroItemReference } from "../types/zotero";
+import type { ExternalReference } from "../types/externalReferences";
+import {
+    normalizeCitationTag,
+    parseRawCitationAttributes,
+    requestedCitationKey,
+} from "../citations/citationGrammar";
+import { collectCitationKeys } from "../citations/atoms";
+import { anchorValueKindsFor, rowKindsIn, type RowAction } from "./rowKinds";
+
+export {
+    ROW_ACTIONS,
+    ROW_KINDS,
+    anchorValueKindsFor,
+    annotationComment,
+    annotationTitle,
+    annotationTypeLabel,
+    isRowInLibrary,
+    rowActionTarget,
+    rowActions,
+    rowIdFor,
+    rowKindOf,
+    rowKindsIn,
+    rowPrimaryAction,
+    rowTypeColor,
+    rowTypeLabel,
+} from "./rowKinds";
+export type {
+    RowAction,
+    RowActionTarget,
+    RowKind,
+    RowKindDef,
+} from "./rowKinds";
+
+// ---------------------------------------------------------------------------
+// Spec
+// ---------------------------------------------------------------------------
+
+/**
+ * Format version of a `TableSpec`. Bumped when the **shape** changes in a way
+ * an older reader would misread; see {@link readSpec}, which refuses anything
+ * higher. Unrelated to `TableSpec.version`, which counts edits to one table.
+ */
+export const TABLE_SPEC_VERSION = 1;
+
+export type ColumnType =
+    | "text"
+    | "number"
+    | "date"
+    | "boolean"
+    | "select"
+    | "reference"
+    | "link";
+
+/**
+ * Notion-style palette for `select` categories, in the order a writer hands
+ * colours out to new categories. `gray` is first because it is also the
+ * renderer's fallback for an option that declares no colour.
+ */
+export const SELECT_COLORS = [
+    "gray",
+    "blue",
+    "green",
+    "yellow",
+    "orange",
+    "red",
+    "purple",
+] as const;
+
+export type SelectColor = (typeof SELECT_COLORS)[number];
+
+export interface SelectOption {
+    label: string;
+    color?: SelectColor;
+}
+
+/**
+ * What a column *means*, so a client can find it without guessing from its
+ * header ("Include?" and "Screening decision" are the same column).
+ *
+ * The vocabulary is **add-only**: these values are persisted inside stored
+ * tables, so a name may be added but never renamed or repurposed — a rename
+ * silently changes the meaning of every table already on disk. A reader that
+ * does not know a role must ignore it, not reject the column.
+ */
+export type ColumnRole =
+    | "screening_decision"
+    | "exclusion_reason"
+    | "relevance"
+    | "quality"
+    | "quote"
+    /**
+     * The row's type: the item type of a library item ("Journal Article"), or
+     * the kind of a row that is not one ("Highlight", "Search result"). A
+     * `system` column the producer writes; see {@link defaultHiddenColumnIds}
+     * for when it shows.
+     */
+    | "row_type";
+
+export interface Column {
+    /** snake_case identifier, unique within the table. */
+    id: string;
+    header: string;
+    type: ColumnType;
+    /**
+     * The column's question, rendered as a second line under the header — not a
+     * tooltip. For an extraction column this is the extraction prompt, which is
+     * why the header is where it belongs: the column *is* the contract.
+     */
+    description?: string;
+    /**
+     * The long form behind `description`: the full prompt when the header line
+     * is clamped, coding rules, unit conventions. Revealed from the header, the
+     * same way `Cell.details` is revealed from a cell.
+     */
+    details?: Details;
+    /**
+     * What this column is for, when it plays a known part in a workflow — see
+     * {@link ColumnRole}. Absent ⇒ an ordinary column, handled as any other.
+     */
+    role?: ColumnRole;
+    /**
+     * A column the producer owns: the model neither sees nor writes it, and it
+     * is enrichment rather than an answer (publication year, DOI). Hidden by
+     * default in renderings, which show it only on request.
+     */
+    system?: true;
+    /**
+     * `select` only: the category set, so filters can enumerate it without
+     * scanning rows. Absent ⇒ an **open** select — the writer appends a new
+     * label as it meets it — except on a role whose vocabulary is fixed,
+     * where a label outside the set is an error, not a new option (see
+     * {@link hasFixedVocabulary}).
+     */
+    options?: SelectOption[];
+    /** `number` only: unit shown with the values ("%", "USD"). */
+    unit?: string;
+    /** Default true for every type; set false to opt a column out. */
+    sortable?: boolean;
+    /** Default true. */
+    filterable?: boolean;
+    /** Reserved for cell editing; default false. */
+    editable?: boolean;
+    /**
+     * Rendered width in CSS px, or `"fill"` to take the remaining space. Absent
+     * ⇒ the renderer's default for this `type`, which is what most producers
+     * should emit: widths are a rendering concern and differ per surface.
+     */
+    width?: number | "fill";
+    /**
+     * How a value longer than the row handles the overflow. Default `"clamp"`:
+     * clamped to the row height and revealed on expand, so rows stay a uniform
+     * height. `"nowrap"` keeps a value on one line and ellipsises it.
+     */
+    wrap?: "clamp" | "nowrap";
+    /** Compact renderings show only `primary` columns; the rest appear on row expand. */
+    priority?: "primary" | "secondary";
+    /** Overrides {@link columnAlign}, which centres a boolean and ends a number or date. */
+    align?: "start" | "end";
+    /**
+     * Absent ⇒ ready. `"filling"` means a producer is populating this column
+     * right now; its unfilled cells carry `status: "pending"`.
+     */
+    status?: "filling";
+    /**
+     * Progress of a `filling` column, so a header can show "6 of 9" without
+     * counting cells on every render.
+     */
+    progress?: ColumnProgress;
+}
+
+export interface ColumnProgress {
+    done: number;
+    total: number;
+}
+
+export type ExternalReferenceSource = "semantic_scholar" | "openalex";
+
+/**
+ * What a row is about — its identity, and nothing about how it looks. The
+ * anchor cell carries the display (title, authors, highlighted text); the ref
+ * carries what the row's verbs need: a library key to reveal, a file to open,
+ * a bibliographic payload to import. `./rowKinds` reads it; renderers do not
+ * branch on `kind` themselves.
+ *
+ * The three Zotero kinds share {@link ZoteroItemReference}: a regular item, an
+ * attachment, and an annotation, each with the relatives its verbs point at.
+ * Everything a row needs to act on must be here, because the spec is the only
+ * copy and nothing is looked up at render time.
+ */
+export type RowRef =
+    | ItemRowRef
+    | AttachmentRowRef
+    | AnnotationRowRef
+    | ExternalRowRef
+    | FileRowRef;
+
+/** A regular (bibliographic) library item. */
+export interface ItemRowRef extends ZoteroItemReference {
+    kind: "item";
+    /**
+     * The file attachment `open` targets. Absent ⇒ the host picks the item's
+     * best attachment when clicked, and a static rendering offers no open link.
+     */
+    attachment?: ZoteroItemReference;
+}
+
+/** A file attachment in its own right, not folded onto its parent. */
+export interface AttachmentRowRef extends ZoteroItemReference {
+    kind: "attachment";
+    /** The bibliographic item it belongs to; absent for a standalone attachment. */
+    parent_item?: ZoteroItemReference;
+}
+
+/** An annotation. `open` lands in the reader on it; `reveal` selects its item. */
+export interface AnnotationRowRef extends ZoteroItemReference {
+    kind: "annotation";
+    /** The attachment the annotation is on. */
+    attachment: ZoteroItemReference;
+    /** The bibliographic item above the attachment, when there is one. */
+    parent_item?: ZoteroItemReference;
+}
+
+/** A Zotero object of any kind — what the three library kinds have in common. */
+export type ZoteroRowRef = ItemRowRef | AttachmentRowRef | AnnotationRowRef;
+
+/**
+ * A work found outside the library. Carries the full `reference` when the
+ * producer has it: importing needs the bibliographic payload, and its
+ * `library_items` say whether a copy is already in the library.
+ */
+export interface ExternalRowRef {
+    kind: "external";
+    source: ExternalReferenceSource;
+    source_id: string;
+    reference?: ExternalReference;
+}
+
+/**
+ * A context file the user supplied — not a library item and not a work with an
+ * external identity. `ext_key` is the key its `<citation ext_key=…/>` tags use.
+ */
+export interface FileRowRef {
+    kind: "file";
+    ext_key: string;
+    label?: string;
+}
+
+export function isZoteroRowRef(ref: RowRef): ref is ZoteroRowRef {
+    return (
+        ref.kind === "item" ||
+        ref.kind === "attachment" ||
+        ref.kind === "annotation"
+    );
+}
+
+export interface Row {
+    /** Stable id — see {@link rowIdFor}. Becomes a DOM id in the snapshot rendering. */
+    id: string;
+    ref?: RowRef;
+    /** Column id → cell. A missing entry is an empty cell. */
+    cells: Record<string, Cell>;
+    /**
+     * Whether this row's subject is in the user's library — it decides whether
+     * the row offers reveal or import. Absent ⇒ derived from the ref's kind by
+     * `isRowInLibrary`: a Zotero object always is, an external reference once it
+     * lists a library copy, a context file never. Producers set it when they
+     * know better; a client that imports a row updates it locally.
+     */
+    in_library?: boolean;
+    /** Verbs for this row only. Absent ⇒ the table's `capabilities.row_actions`. */
+    actions?: RowAction[];
+    /** Row-level outcome, e.g. extraction failed for this paper. */
+    status?: "error";
+    error?: string;
+}
+
+export type CellValue =
+    /** Inline markdown; may contain `<citation …/>` tags. */
+    | { kind: "text"; text: string }
+    | { kind: "number"; value: number; display?: string }
+    /** ISO `YYYY`, `YYYY-MM` or `YYYY-MM-DD`; sorts lexically. */
+    | { kind: "date"; value: string; display?: string }
+    | { kind: "boolean"; value: boolean }
+    /** One category; must be in `Column.options` when those are declared. */
+    | { kind: "select"; label: string }
+    /**
+     * A bibliographic item, library or external, or a file. Display only —
+     * identity lives on `Row.ref`.
+     */
+    | {
+          kind: "reference";
+          display_name: string;
+          /** Who it is by. Rendered under the title. */
+          subtitle?: string;
+          /**
+           * Where it appeared — journal, publisher, repository. Separate from
+           * `subtitle` because a renderer sets it apart: it is emphasised
+           * differently, and a taller row gives it its own line.
+           */
+          venue?: string;
+          /** Zotero item type (`journalArticle`, `attachment`, …), for the icon. */
+          item_type?: string;
+          /** Attachments only: `pdf`, `epub`, `snapshot`, … refines the icon. */
+          content_kind?: string;
+      }
+    /**
+     * An annotation, described for display. The highlighted passage is the
+     * row's title; the comment and the page are its context. Only meaningful
+     * in a `reference` column, next to an `annotation` ref.
+     */
+    | {
+          kind: "annotation";
+          /** `highlight`, `underline`, `note`, `text` or `image`. */
+          annotation_type?: string;
+          /** The highlighted or underlined passage. */
+          text?: string;
+          comment?: string;
+          /** Hex or CSS colour; tints the icon. */
+          color?: string;
+          page_label?: string;
+          /** The bibliographic item it belongs to, short form ("Smith 2020"). */
+          source_display_name?: string;
+      }
+    | { kind: "link"; url: string; label?: string };
+
+export type CellValueKind = CellValue["kind"];
+
+/**
+ * Secondary content revealed on expand — of a cell, or of a column header.
+ * Never participates in sorting, filtering or export.
+ */
+export type Details =
+    | { kind: "text"; text: string; label?: string }
+    | { kind: "list"; items: string[]; label?: string };
+
+/** The cell-side name for {@link Details}. */
+export type CellDetails = Details;
+
+export interface Cell {
+    /** Absent ⇒ the producer reports nothing for this cell ("—"). */
+    value?: CellValue;
+    details?: CellDetails;
+    /** Absent ⇒ filled. */
+    status?: "pending" | "error";
+    error?: string;
+    /**
+     * Where the value came from. `extracted`: an extraction pass read a
+     * document for it. `asserted`: the model wrote it from what it already
+     * knew, without reading anything. `user`: a local edit. `imported`:
+     * carried in from elsewhere. Optional because a cleared or pending cell
+     * has nothing to attribute — but a cell **with** a value and no provenance
+     * is a spec error, since an unattributed value is not evidence.
+     */
+    provenance?: "extracted" | "asserted" | "user" | "imported";
+    /**
+     * A caveat about a value that is present. `unsure`: a best guess.
+     * `unsourced`: a real value that no citation could be attached to. Both are
+     * distinct from an absent value, which means the source reports nothing.
+     */
+    flag?: "unsure" | "unsourced";
+    /**
+     * The cell was filled for an earlier version of the column's question and
+     * has not been re-answered since. Set on a column's existing cells when its
+     * question changes, cleared by the next write to the cell.
+     */
+    stale?: true;
+}
+
+export interface TableCapabilities {
+    /** Default true. */
+    sortable?: boolean;
+    /** Default true. */
+    filterable?: boolean;
+    /** Compact renderings may expand a row to show secondary columns. */
+    expandable_rows?: boolean;
+    /** Verbs the host may offer per row — see {@link rowActions}. */
+    row_actions?: RowAction[];
+    /**
+     * The table may gain a column the user defines (name, type, question). The
+     * affordance must show `TableSpec.cost_estimate` before anything runs; in a
+     * rendering that cannot run one, it is absent rather than dead.
+     */
+    allow_add_column?: boolean;
+    /** The table may gain rows (more papers) after it was first produced. */
+    allow_add_row?: boolean;
+}
+
+/**
+ * What a run over this table costs, so an add-column / re-extract affordance can
+ * state it before spending anything.
+ */
+export interface TableCostEstimate {
+    /** Credits per row for one column-wide run. */
+    per_row_credits: number;
+    /** Rough wall clock for the whole run, in seconds. */
+    estimated_seconds?: number;
+}
+
+export interface TableSort {
+    column_id: string;
+    direction: "asc" | "desc";
+}
+
+export interface TableSpec {
+    /**
+     * Render-scoped id: it becomes the DOM id prefix of every row and cell, so
+     * two tables on one page do not collide. Not the table's identity — that
+     * is {@link TableSpec.key}.
+     */
+    id: string;
+    /**
+     * Format version of this spec — absent ⇒ 1. See
+     * {@link TABLE_SPEC_VERSION}. This says nothing about the table's content;
+     * `version` does that.
+     */
+    spec_version?: number;
+    /**
+     * Identity of the stored table: the Zotero item key of the snapshot
+     * attachment that holds it. Absent on a spec that has never been stored.
+     * Distinct from `id`, which is only about rendering.
+     */
+    key?: string;
+    /**
+     * The table's revision number, monotone, stamped by the store on every
+     * write. Absent ⇒ not yet persisted.
+     */
+    version?: number;
+    title?: string;
+    caption?: string;
+    columns: Column[];
+    rows: Row[];
+    /**
+     * The column that owns row identity: sticky under horizontal scroll and the
+     * target of reveal. Absent ⇒ {@link anchorColumn} picks the first
+     * `reference` column, else the first column.
+     */
+    anchor_column_id?: string;
+    /** Initial sort. Static renderings (snapshot) bake it in. */
+    sort?: TableSort;
+    capabilities?: TableCapabilities;
+    /** Cost of one column-wide run; required wherever `allow_add_column` is set. */
+    cost_estimate?: TableCostEstimate;
+    /** Metadata for every `<citation …/>` tag in any cell, same model as run citations. */
+    citations?: Citation[];
+}
+
+// ---------------------------------------------------------------------------
+// Reading a stored spec
+// ---------------------------------------------------------------------------
+
+export type ReadSpecResult =
+    | { ok: true; spec: TableSpec }
+    | { ok: false; reason: "unsupported_version"; specVersion: number }
+    | { ok: false; reason: "invalid"; detail: string };
+
+function invalidSpec(detail: string): ReadSpecResult {
+    return { ok: false, reason: "invalid", detail };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+    return typeof value === "string" && value.length > 0;
+}
+
+/**
+ * The guarded way into a stored spec: takes parsed JSON and answers whether
+ * this build can open it.
+ *
+ * A stored table is the only copy of its state, so the two failures it
+ * distinguishes matter. `unsupported_version` means the file was written by a
+ * newer format — the caller should open it read-only (or refuse) rather than
+ * parse it with today's assumptions and write back something lossy.
+ * `invalid` means it is not a table at all.
+ *
+ * The check is deliberately shallow and forward-compatible: it never rejects an
+ * unknown enum value, because a future `Column.role` or `Cell.flag` must round
+ * trip through an older client untouched. Deep agreement between columns and
+ * cells is {@link validateTableSpec}'s job: a quality report about a spec we
+ * could read, not a reason to refuse one.
+ */
+export function readSpec(raw: unknown): ReadSpecResult {
+    if (!isPlainObject(raw)) return invalidSpec("spec is not an object");
+
+    const specVersion = raw.spec_version;
+    if (specVersion !== undefined) {
+        if (typeof specVersion !== "number" || !Number.isFinite(specVersion))
+            return invalidSpec("spec_version is not a number");
+        if (specVersion > TABLE_SPEC_VERSION)
+            return { ok: false, reason: "unsupported_version", specVersion };
+    }
+
+    if (!isNonEmptyString(raw.id)) return invalidSpec("id is missing or empty");
+    if (!Array.isArray(raw.columns))
+        return invalidSpec("columns is not an array");
+    if (!Array.isArray(raw.rows)) return invalidSpec("rows is not an array");
+
+    for (const column of raw.columns) {
+        if (!isPlainObject(column) || !isNonEmptyString(column.id))
+            return invalidSpec("a column has no id");
+    }
+    for (const row of raw.rows) {
+        if (!isPlainObject(row) || !isNonEmptyString(row.id))
+            return invalidSpec("a row has no id");
+        // `cells` is what every walker of a row indexes into, so a row without
+        // one is unreadable rather than merely questionable — better said
+        // here than thrown inside a renderer.
+        if (!isPlainObject(row.cells))
+            return invalidSpec(`row "${row.id}" has no cells map`);
+    }
+
+    return { ok: true, spec: raw as unknown as TableSpec };
+}
+
+// ---------------------------------------------------------------------------
+// Ids
+// ---------------------------------------------------------------------------
+
+export function cellIdFor(rowId: string, columnId: string): string {
+    return `${rowId}/${columnId}`;
+}
+
+// ---------------------------------------------------------------------------
+// Defaults
+// ---------------------------------------------------------------------------
+
+/**
+ * Value kinds a column of each type holds. One each, except `reference`: the
+ * anchor column describes the row's subject, and a table may mix papers and
+ * annotations, so it accepts both display shapes.
+ */
+const VALUE_KINDS_BY_COLUMN_TYPE: Record<ColumnType, readonly CellValueKind[]> =
+    {
+        text: ["text"],
+        number: ["number"],
+        date: ["date"],
+        boolean: ["boolean"],
+        select: ["select"],
+        reference: ["reference", "annotation"],
+        link: ["link"],
+    };
+
+export function isColumnSortable(column: Column): boolean {
+    return column.sortable ?? true;
+}
+
+export function columnWrap(column: Column): "clamp" | "nowrap" {
+    return column.wrap ?? "clamp";
+}
+
+/**
+ * The column that owns row identity. Explicit when the producer says so,
+ * otherwise the first `reference` column and finally the first column, so a
+ * table without a bibliographic column still has an anchor.
+ */
+export function anchorColumn(spec: TableSpec): Column | undefined {
+    if (spec.anchor_column_id) {
+        const named = spec.columns.find((c) => c.id === spec.anchor_column_id);
+        if (named) return named;
+    }
+    return spec.columns.find((c) => c.type === "reference") ?? spec.columns[0];
+}
+
+export function isColumnFilterable(column: Column): boolean {
+    return column.filterable ?? true;
+}
+
+/**
+ * Columns a rendering hides until asked: the `system` ones, because they are
+ * enrichment rather than answers — with one exception. A `row_type` column
+ * shows by default when the table mixes kinds of row (papers beside
+ * annotations, a search result beside a library item), since that is when the
+ * type is the first thing a reader needs; in a table of one kind the anchor
+ * icon already says it.
+ */
+export function defaultHiddenColumnIds(spec: TableSpec): string[] {
+    const mixed = rowKindsIn(spec).size > 1;
+    return spec.columns
+        .filter((c) => c.system && !(c.role === "row_type" && mixed))
+        .map((c) => c.id);
+}
+
+/**
+ * The fields a row reveals only when expanded, beyond its cells: a labelled
+ * `Cell.details` is its own field ("Abstract"), and an annotation's passage
+ * and comment are listed under their names. Unlabelled details stay with
+ * their cell.
+ */
+export function cellExpandedFields(
+    cell: Cell | undefined,
+): { label: string; details: Details }[] {
+    const fields: { label: string; details: Details }[] = [];
+    const value = cell?.value;
+    if (value?.kind === "annotation") {
+        if (value.text)
+            fields.push({
+                label:
+                    value.annotation_type === "text"
+                        ? "Text"
+                        : "Highlighted text",
+                details: { kind: "text", text: value.text },
+            });
+        if (value.comment)
+            fields.push({
+                label: "Comment",
+                details: { kind: "text", text: value.comment },
+            });
+    }
+    if (cell?.details?.label) {
+        // The label becomes the field's name, so the details carry none of
+        // their own — a renderer would otherwise print it twice.
+        const { label, ...details } = cell.details;
+        fields.push({ label, details });
+    }
+    return fields;
+}
+
+/**
+ * Roles whose option set is fixed: a label outside `options` is an error, not a
+ * new option. A screening decision is the one vocabulary a reviewer must be
+ * able to count on — "include" / "exclude" and nothing invented beside them.
+ */
+export function hasFixedVocabulary(column: Column): boolean {
+    return column.role === "screening_decision";
+}
+
+/**
+ * Alignment of a column's values and its header.
+ *
+ * Boolean centres (a single glyph); number and date end; everything else
+ * starts. Header and cell, in both the React grid and the HTML snapshot, must
+ * call this — a local copy is how they start to disagree.
+ */
+export function columnAlign(column: Column): "start" | "end" | "center" {
+    if (column.align) return column.align;
+    if (column.type === "boolean") return "center";
+    return column.type === "number" || column.type === "date" ? "end" : "start";
+}
+
+export function isCellEmpty(cell: Cell | undefined): boolean {
+    return cell?.value == null;
+}
+
+/**
+ * Plain-text form of a value, for CSV export and text filters. Citation tags
+ * are stripped: they are markup, so leaving them in would put `<citation …/>`
+ * into a spreadsheet cell and let a search for "cit" match every sourced value.
+ */
+export function cellValueText(value: CellValue | undefined): string {
+    if (!value) return "";
+    switch (value.kind) {
+        case "text":
+            return stripCitationTags(value.text);
+        case "number":
+            return value.display ?? String(value.value);
+        case "date":
+            return value.display ?? value.value;
+        case "boolean":
+            return value.value ? "true" : "false";
+        case "select":
+            return value.label;
+        case "reference":
+            return [value.display_name, value.subtitle, value.venue]
+                .filter(Boolean)
+                .join(" — ");
+        case "annotation":
+            return [value.text, value.comment].filter(Boolean).join(" — ");
+        case "link":
+            return value.label ?? value.url;
+    }
+}
+
+/**
+ * How much of the table is actually filled. A review table's honesty is the
+ * point of it, so the counts a footer reports are computed once, here, rather
+ * than by each renderer walking the rows its own way.
+ *
+ * `empty` counts cells the producer reports nothing for — in an extraction
+ * table that is "the paper does not report this", a finding rather than a gap.
+ */
+export interface TableCoverage {
+    rows: number;
+    cells: number;
+    filled: number;
+    /** Cells with no value, in any column. */
+    empty: number;
+    /**
+     * Empty cells in question columns (those with a `description`) — the ones
+     * that mean "the source does not report this". An empty year in a system
+     * column is not a finding and is not counted here.
+     */
+    notReported: number;
+    pending: number;
+    error: number;
+    errorRows: number;
+}
+
+export function summarizeCoverage(
+    spec: TableSpec,
+    rows: Row[] = spec.rows,
+): TableCoverage {
+    const coverage: TableCoverage = {
+        rows: rows.length,
+        cells: rows.length * spec.columns.length,
+        filled: 0,
+        empty: 0,
+        notReported: 0,
+        pending: 0,
+        error: 0,
+        errorRows: 0,
+    };
+    for (const row of rows) {
+        if (row.status === "error") coverage.errorRows += 1;
+        for (const column of spec.columns) {
+            const cell = row.cells[column.id];
+            if (cell?.status === "pending") coverage.pending += 1;
+            else if (cell?.status === "error") coverage.error += 1;
+            else if (cell?.value) coverage.filled += 1;
+            else {
+                coverage.empty += 1;
+                if (column.description) coverage.notReported += 1;
+            }
+        }
+    }
+    return coverage;
+}
+
+// ---------------------------------------------------------------------------
+// Sorting
+// ---------------------------------------------------------------------------
+
+type SortKey = number | string | null;
+
+/**
+ * The locale sorting is pinned to.
+ *
+ * A sorted table is baked into the stored snapshot in the order it was written,
+ * so the order has to be a function of the data and nothing else. Left to the
+ * host, `toLocaleLowerCase` and `localeCompare` would collate the same titles
+ * differently on two installs — which would show up as a spurious reordering
+ * when a second device writes the table, and would move the text offsets its
+ * annotations are anchored to. Filtering is not pinned: that is a live response
+ * to what someone is typing, not something stored.
+ */
+export const SORT_LOCALE = "en";
+
+/** Sort key of a cell; `null` means empty and sorts last in either direction. */
+export function cellSortKey(cell: Cell | undefined): SortKey {
+    const value = cell?.value;
+    if (!value) return null;
+    switch (value.kind) {
+        case "number":
+            return Number.isFinite(value.value) ? value.value : null;
+        case "boolean":
+            return value.value ? 1 : 0;
+        case "date":
+            return value.value;
+        case "text":
+            // Sorted on the prose, not on the markup wrapped around it.
+            return stripCitationTags(value.text).toLocaleLowerCase(SORT_LOCALE);
+        case "select":
+            return value.label.toLocaleLowerCase(SORT_LOCALE);
+        case "reference":
+            return value.display_name.toLocaleLowerCase(SORT_LOCALE);
+        case "annotation": {
+            const text = value.text ?? value.comment;
+            return text ? text.toLocaleLowerCase(SORT_LOCALE) : null;
+        }
+        case "link":
+            return (value.label ?? value.url).toLocaleLowerCase(SORT_LOCALE);
+    }
+}
+
+/**
+ * Orders two sort keys, with `null` (an empty cell) last in **either**
+ * direction.
+ *
+ * Exported because a stored table is sorted twice: row order is baked into the
+ * document, and the HTML renderer emits CSS ranks beside it. Those ranks have
+ * to come from this comparator — a different one shows up as a table that
+ * reorders itself the moment someone clicks the column it was already sorted
+ * by. Empty-last in both directions is also why a descending rank cannot be
+ * `n - asc`: reversing an ascending order would lead with the empty rows.
+ */
+export function compareSortKeys(
+    a: SortKey,
+    b: SortKey,
+    direction: TableSort["direction"] = "asc",
+): number {
+    if (a === null && b === null) return 0;
+    if (a === null) return 1;
+    if (b === null) return -1;
+    const cmp =
+        typeof a === "number" && typeof b === "number"
+            ? a - b
+            : String(a).localeCompare(String(b), SORT_LOCALE);
+    return direction === "desc" ? -cmp : cmp;
+}
+
+/**
+ * Rows ordered by `sort`. Empty cells always sort last; the original order is
+ * kept among equal keys. Returns the input array when the column is unknown.
+ */
+export function sortRows(spec: TableSpec, sort: TableSort | undefined): Row[] {
+    if (!sort) return spec.rows;
+    const column = spec.columns.find((c) => c.id === sort.column_id);
+    if (!column) return spec.rows;
+    return spec.rows
+        .map((row, index) => ({
+            row,
+            index,
+            key: cellSortKey(row.cells[column.id]),
+        }))
+        .sort((a, b) => {
+            const cmp = compareSortKeys(a.key, b.key, sort.direction);
+            return cmp !== 0 ? cmp : a.index - b.index;
+        })
+        .map((entry) => entry.row);
+}
+
+// ---------------------------------------------------------------------------
+// Filtering
+// ---------------------------------------------------------------------------
+
+export type Filter =
+    /** Case-insensitive substring match on the value's text form. */
+    | { column_id: string; kind: "contains"; text: string }
+    /** Inclusive range on number or date values; either bound may be open. */
+    | {
+          column_id: string;
+          kind: "range";
+          min?: number | string;
+          max?: number | string;
+      }
+    /** Value's select label is one of `labels`. */
+    | { column_id: string; kind: "in"; labels: string[] }
+    | { column_id: string; kind: "equals"; value: boolean }
+    /** Keep only rows with (or without) a value in the column. */
+    | { column_id: string; kind: "empty"; empty: boolean };
+
+function matchesFilter(cell: Cell | undefined, filter: Filter): boolean {
+    const value = cell?.value;
+    if (filter.kind === "empty") return (value == null) === filter.empty;
+    if (!value) return false;
+    switch (filter.kind) {
+        case "contains":
+            return cellValueText(value)
+                .toLocaleLowerCase()
+                .includes(filter.text.toLocaleLowerCase());
+        case "range": {
+            const key =
+                value.kind === "number" || value.kind === "date"
+                    ? value.value
+                    : null;
+            if (key == null) return false;
+            if (filter.min != null && compareSortKeys(key, filter.min) < 0)
+                return false;
+            if (filter.max != null && compareSortKeys(key, filter.max) > 0)
+                return false;
+            return true;
+        }
+        case "in":
+            return (
+                value.kind === "select" && filter.labels.includes(value.label)
+            );
+        case "equals":
+            return value.kind === "boolean" && value.value === filter.value;
+    }
+}
+
+/** Rows matching every filter (AND). Filters on unknown columns are ignored. */
+export function filterRows(spec: TableSpec, filters: Filter[]): Row[] {
+    const known = new Set(spec.columns.map((c) => c.id));
+    const active = filters.filter((f) => known.has(f.column_id));
+    if (active.length === 0) return spec.rows;
+    return spec.rows.filter((row) =>
+        active.every((f) => matchesFilter(row.cells[f.column_id], f)),
+    );
+}
+
+/** Distinct select labels present in a column, in first-seen order. */
+export function selectLabelsInColumn(
+    spec: TableSpec,
+    columnId: string,
+): string[] {
+    const seen = new Set<string>();
+    for (const row of spec.rows) {
+        const value = row.cells[columnId]?.value;
+        if (value?.kind === "select") seen.add(value.label);
+    }
+    return [...seen];
+}
+
+// ---------------------------------------------------------------------------
+// Citations
+// ---------------------------------------------------------------------------
+
+/**
+ * Every `<citation …/>` tag, with its raw attributes in group 1.
+ *
+ * Shared so a renderer cannot match citations differently from the code that
+ * strips them for sorting and CSV — that shows as a cell whose text and sort
+ * key disagree.
+ *
+ * **Global, so use it only with `matchAll` or `replace`.** Neither mutates the
+ * source pattern's `lastIndex` (`matchAll` clones). A bare `.exec` loop would
+ * leave `lastIndex` parked mid-string for the next caller in any module.
+ */
+export const CITATION_TAG_RE = /<citation\b([^>]*?)\/?>/gi;
+
+/** Lookup keys of every `<citation …/>` tag in a text, in document order (unparseable tags are skipped). */
+export function citationKeysInText(text: string): string[] {
+    const keys: string[] = [];
+    for (const match of text.matchAll(CITATION_TAG_RE)) {
+        const normalized = normalizeCitationTag(
+            parseRawCitationAttributes(match[1] || ""),
+        );
+        if (normalized.ok) keys.push(requestedCitationKey(normalized.ref));
+        else if (normalized.rawIdentity)
+            keys.push(`invalid:${normalized.rawIdentity}`);
+    }
+    return keys;
+}
+
+/**
+ * The text without its `<citation …/>` tags, for the plain-text forms of a
+ * value (CSV, filters, sort keys). Whitespace left behind by a removed tag is
+ * collapsed so a stripped sentence reads normally.
+ */
+export function stripCitationTags(text: string): string {
+    return text
+        .replace(CITATION_TAG_RE, "")
+        .replace(/[^\S\r\n]{2,}/g, " ")
+        .trim();
+}
+
+function cellTexts(cell: Cell): string[] {
+    const texts: string[] = [];
+    if (cell.value?.kind === "text") texts.push(cell.value.text);
+    if (cell.details?.kind === "text") texts.push(cell.details.text);
+    if (cell.details?.kind === "list") texts.push(...cell.details.items);
+    return texts;
+}
+
+/**
+ * Every citation key one cell references, de-duplicated, in document order.
+ * A non-text column keeps its evidence in `Cell.details`, so both sides of a
+ * cell are read.
+ */
+function citationKeysInCell(cell: Cell): string[] {
+    const seen = new Set<string>();
+    for (const text of cellTexts(cell)) {
+        for (const key of citationKeysInText(text)) seen.add(key);
+    }
+    return [...seen];
+}
+
+/** Every citation key referenced by any cell of the table, de-duplicated, in document order. */
+export function citationKeysInTable(spec: TableSpec): string[] {
+    const seen = new Set<string>();
+    for (const row of spec.rows) {
+        for (const column of spec.columns) {
+            const cell = row.cells[column.id];
+            if (!cell) continue;
+            for (const key of citationKeysInCell(cell)) seen.add(key);
+        }
+    }
+    return [...seen];
+}
+
+/** Citation metadata keyed by every lookup key it answers to (requested, resolved, raw tag). */
+export function citationsByKey(
+    citations: Citation[] | undefined,
+): Record<string, Citation> {
+    const byKey: Record<string, Citation> = {};
+    for (const citation of citations ?? []) {
+        for (const key of collectCitationKeys(citation)) byKey[key] = citation;
+    }
+    return byKey;
+}
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+export interface TableSpecIssue {
+    code:
+        | "duplicate_column_id"
+        | "duplicate_row_id"
+        | "unknown_column"
+        | "value_kind_mismatch"
+        | "anchor_kind_mismatch"
+        | "unknown_select_label"
+        | "fixed_vocabulary_violation"
+        | "unknown_sort_column"
+        | "unknown_anchor_column"
+        | "invalid_column_progress"
+        | "missing_cost_estimate"
+        | "missing_decision_details"
+        | "missing_provenance"
+        | "unresolved_citation";
+    message: string;
+    row_id?: string;
+    column_id?: string;
+}
+
+/**
+ * Structural problems that would make a rendering wrong or misleading, plus the
+ * claims a stored table has to be able to keep on its own: every citation tag
+ * resolves from the spec's own metadata, every value says where it came from,
+ * and a screening decision carries its reason. Producers should treat any issue
+ * as an error; renderers may still draw a spec with issues but must not assume
+ * the invariants below.
+ *
+ * This is a report about a spec we could already read — {@link readSpec} is
+ * the gate that decides whether we can read it at all.
+ */
+export function validateTableSpec(spec: TableSpec): TableSpecIssue[] {
+    const issues: TableSpecIssue[] = [];
+    const columns = new Map<string, Column>();
+
+    for (const column of spec.columns) {
+        if (columns.has(column.id)) {
+            issues.push({
+                code: "duplicate_column_id",
+                column_id: column.id,
+                message: `Duplicate column id "${column.id}"`,
+            });
+        }
+        columns.set(column.id, column);
+    }
+
+    for (const column of spec.columns) {
+        const progress = column.progress;
+        if (!progress) continue;
+        if (
+            !Number.isFinite(progress.done) ||
+            !Number.isFinite(progress.total) ||
+            progress.total < 0 ||
+            progress.done < 0 ||
+            progress.done > progress.total
+        ) {
+            issues.push({
+                code: "invalid_column_progress",
+                column_id: column.id,
+                message: `Column "${column.id}" has progress ${progress.done}/${progress.total}`,
+            });
+        }
+    }
+
+    // An add-column affordance bills per row, so a table that offers one and
+    // cannot state the price is a spec error, not a rendering choice.
+    if (spec.capabilities?.allow_add_column && !spec.cost_estimate) {
+        issues.push({
+            code: "missing_cost_estimate",
+            message: "Table allows adding columns but carries no cost_estimate",
+        });
+    }
+
+    if (spec.anchor_column_id && !columns.has(spec.anchor_column_id)) {
+        issues.push({
+            code: "unknown_anchor_column",
+            column_id: spec.anchor_column_id,
+            message: `Anchor column "${spec.anchor_column_id}" does not exist`,
+        });
+    }
+
+    if (spec.sort && !columns.has(spec.sort.column_id)) {
+        issues.push({
+            code: "unknown_sort_column",
+            column_id: spec.sort.column_id,
+            message: `Sort column "${spec.sort.column_id}" does not exist`,
+        });
+    }
+
+    const citationIndex = citationsByKey(spec.citations);
+    const anchor = anchorColumn(spec);
+
+    const rowIds = new Set<string>();
+    for (const row of spec.rows) {
+        if (rowIds.has(row.id)) {
+            issues.push({
+                code: "duplicate_row_id",
+                row_id: row.id,
+                message: `Duplicate row id "${row.id}"`,
+            });
+        }
+        rowIds.add(row.id);
+
+        // The anchor cell describes the row's subject, so it has to describe
+        // the kind of subject the ref says it is: an annotation ref under a
+        // bibliographic title is a row that lies about itself.
+        const anchorValue = anchor ? row.cells[anchor.id]?.value : undefined;
+        if (row.ref && anchorValue && anchor) {
+            const allowed = anchorValueKindsFor(row.ref);
+            if (!allowed.includes(anchorValue.kind)) {
+                issues.push({
+                    code: "anchor_kind_mismatch",
+                    row_id: row.id,
+                    column_id: anchor.id,
+                    message: `Anchor cell "${cellIdFor(row.id, anchor.id)}" has kind "${anchorValue.kind}", which does not describe a "${row.ref.kind}" row`,
+                });
+            }
+        }
+
+        for (const [columnId, cell] of Object.entries(row.cells)) {
+            const column = columns.get(columnId);
+            if (!column) {
+                issues.push({
+                    code: "unknown_column",
+                    row_id: row.id,
+                    column_id: columnId,
+                    message: `Row "${row.id}" has a cell for unknown column "${columnId}"`,
+                });
+                continue;
+            }
+
+            // A stored table outlives the run that produced it, so every
+            // citation tag it carries has to resolve from the table's own
+            // metadata — otherwise the evidence is gone and only the claim is
+            // left. Details count too: a non-text column keeps its citations
+            // there.
+            for (const key of citationKeysInCell(cell)) {
+                if (citationIndex[key]) continue;
+                issues.push({
+                    code: "unresolved_citation",
+                    row_id: row.id,
+                    column_id: columnId,
+                    message: `Citation "${key}" in cell "${cellIdFor(row.id, columnId)}" has no entry in the table's citations`,
+                });
+            }
+
+            const value = cell.value;
+            if (!value) continue;
+
+            if (!cell.provenance) {
+                issues.push({
+                    code: "missing_provenance",
+                    row_id: row.id,
+                    column_id: columnId,
+                    message: `Cell "${cellIdFor(row.id, columnId)}" has a value but no provenance`,
+                });
+            }
+
+            // A screening decision without its reason cannot be reviewed, only
+            // trusted — so an undocumented one is a spec error, not a style
+            // choice.
+            if (column.role === "screening_decision" && !cell.details) {
+                issues.push({
+                    code: "missing_decision_details",
+                    row_id: row.id,
+                    column_id: columnId,
+                    message: `Cell "${cellIdFor(row.id, columnId)}" records a screening decision with no details explaining it`,
+                });
+            }
+
+            if (!VALUE_KINDS_BY_COLUMN_TYPE[column.type].includes(value.kind)) {
+                issues.push({
+                    code: "value_kind_mismatch",
+                    row_id: row.id,
+                    column_id: columnId,
+                    message: `Cell "${cellIdFor(row.id, columnId)}" has kind "${value.kind}" in a "${column.type}" column`,
+                });
+            }
+            // On an open select an unknown label is one the options list has
+            // not caught up with; on a fixed vocabulary it is a value nobody
+            // agreed to, which is a different (and worse) kind of wrong.
+            if (
+                value.kind === "select" &&
+                column.options &&
+                !column.options.some((o) => o.label === value.label)
+            ) {
+                const fixed = hasFixedVocabulary(column);
+                issues.push({
+                    code: fixed
+                        ? "fixed_vocabulary_violation"
+                        : "unknown_select_label",
+                    row_id: row.id,
+                    column_id: columnId,
+                    message: fixed
+                        ? `Select label "${value.label}" is not in the fixed vocabulary of column "${columnId}"`
+                        : `Select label "${value.label}" is not among the options of column "${columnId}"`,
+                });
+            }
+        }
+    }
+
+    return issues;
+}
+
+// ---------------------------------------------------------------------------
+// Export
+// ---------------------------------------------------------------------------
+
+function csvEscape(field: string): string {
+    return /[",\r\n]/.test(field) ? `"${field.replace(/"/g, '""')}"` : field;
+}
+
+/**
+ * RFC 4180 CSV of the table: one header row of column headers, then one row per
+ * table row in the given order (pass `sortRows(...)` / `filterRows(...)` output
+ * to export a view). Details are not exported; citation tags stay inline.
+ */
+export function toCsv(spec: TableSpec, rows: Row[] = spec.rows): string {
+    const header = spec.columns.map((c) => csvEscape(c.header)).join(",");
+    const lines = rows.map((row) =>
+        spec.columns
+            .map((c) => csvEscape(cellValueText(row.cells[c.id]?.value)))
+            .join(","),
+    );
+    return [header, ...lines].join("\r\n");
+}

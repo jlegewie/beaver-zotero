@@ -22,3 +22,8 @@ beaver-context-menu-action =
 
 beaver-context-menu-add-action =
     .label = Add custom action…
+
+beaver-table-section-header =
+    .label = Beaver Table
+beaver-table-section-sidenav =
+    .tooltiptext = Beaver Table

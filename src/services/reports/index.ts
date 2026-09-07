@@ -1,8 +1,5 @@
 export {
     buildReportHtml,
-    countTopLevelCssRules,
-    escapeHtml,
-    CSS_RULE_BUDGET,
     type BuiltReport,
     type ReportBlock,
     type ReportCitation,

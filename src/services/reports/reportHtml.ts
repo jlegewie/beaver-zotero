@@ -20,13 +20,7 @@
  * This module is deliberately free of Zotero APIs: callers pass prebuilt link URIs.
  */
 
-/**
- * The reader counts top-level rules per author stylesheet and switches to a static
- * theme above 500. The static theme forces `background-color: transparent !important`
- * and a single text color onto every element, which flattens a designed palette.
- * Reports stay well under the threshold so the nicer dynamic path is always used.
- */
-export const CSS_RULE_BUDGET = 500;
+import { countTopLevelCssRules, escapeHtml } from '../../utils/html';
 
 export interface ReportCitation {
     /** Display label, e.g. "Anderson & Lee (2019)". */
@@ -67,19 +61,6 @@ export interface BuiltReport {
     html: string;
     /** Top-level rule count of the emitted stylesheet, for budget assertions. */
     cssRuleCount: number;
-}
-
-const ESCAPE_MAP: Record<string, string> = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-};
-
-/** Escapes text for HTML body/attribute context. All model-authored text goes through this. */
-export function escapeHtml(value: string): string {
-    return String(value).replace(/[&<>"']/g, (ch) => ESCAPE_MAP[ch]);
 }
 
 /**
@@ -152,21 +133,6 @@ body { margin: 0; padding: 40px 24px 72px; background: #fff; color: var(--rp-fg)
 .rp-callout.rp-callout--warn .rp-callout-title { color: var(--rp-warn); }
 .rp-callout.rp-callout--note .rp-callout-title { color: var(--rp-accent); }
 `.trim();
-
-/** Counts top-level rules the way the reader does (nested at-rule bodies are not counted). */
-export function countTopLevelCssRules(css: string): number {
-    let depth = 0;
-    let count = 0;
-    for (const ch of css) {
-        if (ch === '{') {
-            if (depth === 0) count++;
-            depth++;
-        } else if (ch === '}') {
-            depth = Math.max(0, depth - 1);
-        }
-    }
-    return count;
-}
 
 const CHART_FILLS = ['#2f5bd7', '#6d4bc4', '#0e7c86', '#a04a00', '#3f6212', '#9d174d'];
 

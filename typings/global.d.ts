@@ -67,6 +67,30 @@ declare namespace Zotero {
     let __beaverWrittenAnnotationItems: WeakSet<Zotero.Item> | undefined;
     /** As above, keyed `libraryID:key` with the write timestamp, for reader writes. */
     let __beaverWrittenAnnotationKeys: Map<string, number> | undefined;
+    /**
+     * The stored-table surfaces, published by the esbuild bundle at startup.
+     * The reader-view registry and the item-pane registration keep module
+     * state, so they must exist in one bundle only; the webpack side reaches
+     * them through here. See src/services/artifacts/tablesApi.ts.
+     */
+    let __beaverTables:
+        | import("../src/services/artifacts/tablesApi").TablesApi
+        | undefined;
+    /**
+     * The write half of the stored-table recovery shadow, published by the
+     * *webpack* bundle. Restoring goes through `tableStore.ts`, which is
+     * webpack-only (it imports the library-exclusion check), so the
+     * esbuild-side item pane reaches it through here.
+     */
+    let __beaverTableShadowRestore:
+        | import("../src/services/artifacts/tablesApi").TableShadowRestore
+        | undefined;
+    /**
+     * Stored-table write locks, one promise chain per table. On the shared
+     * global so the lock is one per process however the store is bundled.
+     * See `src/services/artifacts/tablesApi.ts`.
+     */
+    let __beaverTableWriteLocks: Map<string, Promise<unknown>> | undefined;
 
     namespace Beaver {
         const pluginVersion: string;
@@ -332,6 +356,27 @@ declare namespace Zotero {
             getExternalFileStats(): Promise<{ count: number; totalBytes: number }>;
 
             deleteAllExternalFiles(): Promise<void>;
+
+            // --- Stored-table recovery shadow ---
+            upsertTableShadow(
+                input: import("../src/services/database").TableShadowRecord,
+            ): Promise<void>;
+
+            getTableShadows(
+                libraryId: number,
+                zoteroKey: string,
+            ): Promise<import("../src/services/database").TableShadowRecord[]>;
+
+            deleteTableShadowVersions(
+                libraryId: number,
+                zoteroKey: string,
+                versions: number[],
+            ): Promise<import("../src/services/database").TableShadowRecord[]>;
+
+            deleteTableShadows(
+                libraryId: number,
+                zoteroKey: string,
+            ): Promise<import("../src/services/database").TableShadowRecord[]>;
 
             // --- Background job queue ---
             enqueueBackgroundJob(
