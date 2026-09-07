@@ -323,6 +323,9 @@ async function validateCreateNoteAction(
         const libraryResult = getLibraryByIdOrName(libraryNameOrId);
         if (libraryResult.wasExplicitlyRequested && !libraryResult.library) {
             ta.record('library_resolution_ms', Date.now() - tLib);
+            // A portable token that doesn't resolve means this computer is not
+            // a member of that library, not that no such library exists.
+            const { portableRef } = libraryResult;
             return {
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
@@ -330,8 +333,10 @@ async function validateCreateNoteAction(
                 // Do not list library names: getAll() includes libraries the
                 // user excluded from Beaver, so echoing them would leak
                 // excluded (private) libraries to the model.
-                error: `Library not found: "${libraryNameOrId}". Omit the library parameter to use the default library.`,
-                error_code: 'library_not_found',
+                error: portableRef
+                    ? `The library "${portableRef}" is not available on this computer.`
+                    : `Library not found: "${libraryNameOrId}". Omit the library parameter to use the default library.`,
+                error_code: portableRef ? 'library_unavailable' : 'library_not_found',
                 preference: 'always_ask',
                 timing: buildTiming(),
             };

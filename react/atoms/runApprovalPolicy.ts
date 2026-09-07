@@ -1,5 +1,6 @@
 import { atom } from 'jotai';
 import type { AgentActionType } from '@beaver/agent-core/protocol/agentProtocol';
+import { resolveLibraryRef } from '../../src/utils/libraryIdentity';
 
 /**
  * Stable groups for actual deferred tool names. These seed persistent
@@ -177,11 +178,17 @@ function getNoteEditTarget(actionData?: Record<string, any>): {
     libraryId: number;
     zoteroKey: string;
 } | null {
-    const libraryId = actionData?.library_id;
     const zoteroKey = actionData?.zotero_key;
-    return typeof libraryId === 'number' && Number.isFinite(libraryId) && typeof zoteroKey === 'string' && zoteroKey
-        ? { libraryId, zoteroKey }
-        : null;
+    if (typeof zoteroKey !== 'string' || !zoteroKey) return null;
+    // The grant is recorded against the created note's device-local library, so
+    // resolve the request's identity to the same form. `library_ref` is the
+    // portable identity and wins; the numeric `library_id` may be absent or the
+    // unresolved sentinel, which must not silently key a different resource.
+    const libraryId = resolveLibraryRef({
+        library_ref: actionData?.library_ref,
+        library_id: actionData?.library_id,
+    });
+    return libraryId && libraryId > 0 ? { libraryId, zoteroKey } : null;
 }
 
 /** Transient approval grants for the active run. Never persisted to prefs. */

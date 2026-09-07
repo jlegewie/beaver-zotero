@@ -1,4 +1,5 @@
 import { ZoteroItemReference } from '../types/zotero';
+import { hasLibraryIdentity } from '../identity/libraryRef';
 import {
     ActionStatus,
     ActionType,
@@ -224,12 +225,21 @@ export type EditAnnotationsAgentAction = AgentAction & {
 };
 
 /**
- * Check if an agent action has been applied and has a Zotero item reference
+ * Check if an agent action has been applied and has a Zotero item reference.
+ *
+ * The library is tested through `hasLibraryIdentity`, not for a truthy rowid:
+ * `toAgentAction` normalizes an absent `library_id` to `UNRESOLVED_LIBRARY_ID`
+ * (`0`), so an applied action the backend named portably would otherwise read
+ * as having no item at all — its title would never load, and
+ * `validateAppliedAction` would report it valid without checking anything.
  */
 export const hasAppliedZoteroItem = (action: AgentAction): boolean => {
     return action.status === 'applied' &&
            !!action.result_data?.zotero_key &&
-           !!action.result_data?.library_id;
+           hasLibraryIdentity({
+               library_id: action.result_data?.library_id,
+               library_ref: action.result_data?.library_ref,
+           });
 };
 
 export const hasAppliedBulkAnnotations = (action: AgentAction): boolean => {

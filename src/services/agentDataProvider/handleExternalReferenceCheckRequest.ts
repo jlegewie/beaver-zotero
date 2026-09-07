@@ -16,7 +16,7 @@ import {
     ExternalReferenceCheckResult,
 
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { getSearchableLibraryIds } from './utils';
+import { getSearchableLibraryIds, resolveLibrariesFilterToSearchableIds } from './utils';
 import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 
 
@@ -36,13 +36,14 @@ import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 export async function handleExternalReferenceCheckRequest(request: WSExternalReferenceCheckRequest): Promise<WSExternalReferenceCheckResponse> {
     const startTime = Date.now();
 
-    // Determine which libraries to search. Never search libraries the user
+    // Determine which libraries to search. `library_ids` entries are resolved
+    // through the shared filter resolver, so a portable library token
+    // ("u" / "g<groupID>") is a complete identity here — the backend never has
+    // to map one onto a device-local rowid. Never search libraries the user
     // excluded from Beaver.
-    const searchableLibraryIds = getSearchableLibraryIds();
-    const requestedLibraryIds = request.library_ids && request.library_ids.length > 0
-        ? request.library_ids
-        : searchableLibraryIds;
-    const libraryIds: number[] = requestedLibraryIds.filter(id => searchableLibraryIds.includes(id));
+    const libraryIds: number[] = request.library_ids && request.library_ids.length > 0
+        ? resolveLibrariesFilterToSearchableIds(request.library_ids)
+        : getSearchableLibraryIds();
 
     // Convert request items to batch format
     const batchItems: BatchReferenceCheckItem[] = request.items.map(item => ({

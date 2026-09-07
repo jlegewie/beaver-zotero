@@ -27,6 +27,8 @@ export {
     LIBRARY_REF_PATTERN,
     parseLibraryRef,
     UNRESOLVED_LIBRARY_ID,
+    hasLibraryIdentity,
+    libraryKeyToken,
     parseItemReference,
     modelObjectIdFromReference,
     resolveObjectIdReference,

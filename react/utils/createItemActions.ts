@@ -11,7 +11,7 @@ import { applyCreateItemData } from './addItemActions';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { ensureItemSynced } from '../../src/utils/sync';
 import { scheduleBackgroundTask, generateTaskId, cancelTasksForItem, deduplicatedSync } from '../../src/utils/backgroundTasks';
-import { resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
+import { hasLibraryIdentity, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
 
 /** Maximum concurrent item creations in batch jobs */
 const BATCH_CONCURRENCY_LIMIT = 3;
@@ -92,14 +92,20 @@ function scheduleSyncTask(libraryId: number, itemKey: string): void {
 export async function undoCreateItemAction(action: AgentAction): Promise<void> {
     const resultData = action.result_data as CreateItemResultData | undefined;
 
-    if (!resultData?.library_id || !resultData?.zotero_key) {
+    // A portable `library_ref` is a complete reference; the numeric id may be
+    // the unresolved sentinel. `resolveItemReference` below prefers the ref
+    // anyway, so rejecting on the rowid alone fails an undo that would work.
+    if (!resultData?.zotero_key || !hasLibraryIdentity(resultData)) {
         throw new Error('Cannot undo: no result data available (item was not created)');
     }
 
-    logger(`undoCreateItemAction: Deleting item ${resultData.library_id}-${resultData.zotero_key}`, 1);
+    logger(`undoCreateItemAction: Deleting item ${modelObjectIdFromReference(resultData)}`, 1);
 
-    // Cancel any background tasks (PDF fetch, sync) for this item before deletion
-    cancelTasksForItem(resultData.library_id, resultData.zotero_key);
+    // Cancel any background tasks (PDF fetch, sync) for this item before
+    // deletion. Task keys are device-local, so resolve the ref to this
+    // device's rowid rather than passing the wire value through.
+    const taskLibraryId = resolveLibraryRef(resultData);
+    if (taskLibraryId) cancelTasksForItem(taskLibraryId, resultData.zotero_key);
 
     const resolved = await resolveItemReference(resultData);
 

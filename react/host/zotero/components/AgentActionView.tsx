@@ -30,7 +30,7 @@ import {
     undoAgentActionsAtom,
 } from '../agentActionExecution';
 import { shortItemTitle } from '../../../../src/utils/zoteroUtils';
-import { resolveItemReference, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
+import { hasLibraryIdentity, resolveItemReference, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import { notifyReferenceUnavailable } from '../sourceActions';
 import {
     TickIcon,
@@ -215,7 +215,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 action?.proposed_data?.zotero_key ??
                 pendingApproval?.actionData?.zotero_key;
 
-            if (!libraryId || !zoteroKey) return;
+            // A portable `library_ref` is a complete identity: the numeric id may
+            // be absent or the unresolved sentinel, and `resolveItemReference`
+            // prefers the ref anyway.
+            if (!hasLibraryIdentity({ library_ref: libraryRef, library_id: libraryId }) || !zoteroKey) return;
 
             const resolved = await resolveItemReference({ library_ref: libraryRef, library_id: libraryId, zotero_key: zoteroKey });
             if (resolved.status === 'found') {
@@ -437,10 +440,15 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         const libraryId = action?.result_data?.library_id;
         const zoteroKey = action?.result_data?.zotero_key;
         const libraryRef = action?.result_data?.library_ref;
-        if (!libraryId || !zoteroKey) return;
+        if (!zoteroKey || !hasLibraryIdentity({ library_id: libraryId, library_ref: libraryRef })) return;
+        // The collection lookup is a local query, so it needs this device's
+        // rowid; `revealSource` resolves the reference itself.
+        const resolvedLibraryId = resolveLibraryRef({ library_ref: libraryRef, library_id: libraryId });
         // Reveal within the current collection when the note belongs to it,
         // instead of switching to the library root.
-        const collectionKey = await getCurrentCollectionKeyForItem(libraryId, zoteroKey);
+        const collectionKey = resolvedLibraryId
+            ? await getCurrentCollectionKeyForItem(resolvedLibraryId, zoteroKey)
+            : undefined;
         revealSource({ library_id: libraryId, zotero_key: zoteroKey, library_ref: libraryRef }, collectionKey);
     }, [action]);
 
@@ -475,7 +483,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             matches: () => (
                 toolName === 'create_note' &&
                 action?.status === 'applied' &&
-                !!action?.result_data?.library_id &&
+                // The click handler resolves through `library_ref`, so gate on
+                // library identity rather than a rowid the result may not carry.
+                hasLibraryIdentity({
+                    library_id: action?.result_data?.library_id,
+                    library_ref: action?.result_data?.library_ref,
+                }) &&
                 !!action?.result_data?.zotero_key
             ),
             tooltip: 'Open note',
@@ -519,7 +532,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             zotero_key: action?.proposed_data?.zotero_key,
             library_ref: action?.proposed_data?.library_ref,
         };
-        if (!revealRef.library_id || !revealRef.zotero_key) return null;
+        if (!hasLibraryIdentity(revealRef) || !revealRef.zotero_key) return null;
 
         return {
             tooltip: 'Reveal in Zotero',
@@ -738,7 +751,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             </Button>
                         )}
 
-                        {toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key && (
+                        {toolName === 'create_note' && action?.status === 'applied' && hasLibraryIdentity({ library_id: action?.result_data?.library_id, library_ref: action?.result_data?.library_ref }) && action?.result_data?.zotero_key && (
                             <Button
                                 variant="outline"
                                 onClick={handleRevealNote}

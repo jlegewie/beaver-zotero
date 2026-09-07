@@ -77,6 +77,7 @@ import {
     getEditNoteGroupExpansionKey,
     getOverallEditNoteDisplayStatus,
     isEditNoteStreamingPlaceholder,
+    isOpenableEditNoteTarget,
     parseEditNoteToolCallArgs,
     resolveEditNoteTargetFromData,
 } from '../../../components/agentRuns/editNoteShared';
@@ -642,8 +643,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             logger(`EditNoteGroupView: handlePreviewInEditor — aborting, diff preview not live (kill switch off or Zotero 7)`, 1);
             return;
         }
-        if (!resolvedTarget) {
-            logger(`EditNoteGroupView: handlePreviewInEditor — aborting, no resolvedTarget for ${noteKeyLabel}`, 1);
+        if (!isOpenableEditNoteTarget(resolvedTarget)) {
+            logger(`EditNoteGroupView: handlePreviewInEditor — aborting, no openable resolvedTarget for ${noteKeyLabel}`, 1);
             return;
         }
         const edits = hasPendingApprovals
@@ -751,7 +752,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         !isProcessing
         && isDiffPreviewLive()
         && (
-        resolvedTarget !== null
+        // Openable, not merely identified: the preview opens the note in the
+        // editor, which a library this computer doesn't have cannot do.
+        isOpenableEditNoteTarget(resolvedTarget)
         && (hasPendingApprovals || reapplicableActions.length > 0)
         );
 
@@ -793,7 +796,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                 <>
                                     <span className="font-color-secondary ml-15">{noteTitle}</span>
                                     {'\u00A0'}
-                                    {resolvedTarget && (
+                                    {isOpenableEditNoteTarget(resolvedTarget) && (
                                         <Tooltip content="Open note" singleLine>
                                             <span
                                                 className="font-color-secondary scale-10"
