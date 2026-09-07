@@ -667,6 +667,37 @@ export function hasFixedVocabulary(column: Column): boolean {
     return column.role === "screening_decision";
 }
 
+/** Trailing punctuation {@link normalizeSelectLabel} ignores. */
+const TRAILING_PUNCTUATION = /[.,;:!?…]+$/;
+
+/**
+ * The key two `select` labels are the same option under: lower-cased, runs of
+ * whitespace / `-` / `_` collapsed to one space, trailing punctuation dropped.
+ * So `RCT`, `rct` and `RCT.` are one category, and so are `Quasi-experiment`,
+ * `Quasi_Experiment` and `quasi experiment`.
+ *
+ * The **one** key in the system: cell writes match against `Column.options`
+ * with it, an open select appends only what it does not already have under it,
+ * and `update_column.options` pairs old and new lists by it. Without a single
+ * key the same category arrives twice under two spellings, the filter menu
+ * offers both and the distribution splits the count between them.
+ *
+ * Exported because the backend keys the same matching and has to reproduce it
+ * step for step — lower-case, `[\s\-_]+` → one space, trim, drop trailing
+ * `[.,;:!?…]`, trim — with the mutation fixtures holding the two to each other.
+ * The steps are deliberately plain so a Python `re.sub` says the same thing.
+ *
+ * A label that survives none of that (`"-"`, `"?"`) falls back to the last form
+ * that was not empty, so labels made only of punctuation stay distinct instead
+ * of all becoming one option under the empty key.
+ */
+export function normalizeSelectLabel(label: string): string {
+    const lowered = label.toLowerCase().trim();
+    const collapsed = lowered.replace(/[\s\-_]+/g, " ").trim();
+    const key = collapsed.replace(TRAILING_PUNCTUATION, "").trim();
+    return key || collapsed || lowered;
+}
+
 /**
  * Alignment of a column's values and its header.
  *
