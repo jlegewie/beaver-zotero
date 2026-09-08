@@ -8,6 +8,7 @@ import { BeaverDB } from "./services/database";
 import { DocumentCache } from "./services/documentCache";
 import { BackgroundExtractor } from "./services/backgroundExtractor";
 import { createVoiceService } from "./services/voice/voiceService";
+import { NativeVoice } from "./services/voice/nativeVoice";
 import { DevelopmentVoiceHarness } from "./services/voice/developmentHarness";
 import { uiManager, restoreReaderSidebarWidthHandler } from "../react/ui/UIManager";
 import { getPref, setPref } from "./utils/prefs";
@@ -294,14 +295,14 @@ async function onStartup() {
         // Voice is optional: its initialization must not prevent the rest of Beaver loading.
         try {
             if (__env__ === 'development') {
-                addon.voiceHarness = new DevelopmentVoiceHarness();
+                if (Zotero.isMac) addon.voiceNative = new NativeVoice();
+                addon.voiceHarness = new DevelopmentVoiceHarness(undefined, addon.voiceNative);
                 addon.voice = addon.voiceHarness.service;
             } else {
                 addon.voice = createVoiceService();
             }
         } catch {
-            addon.voice = undefined;
-            addon.voiceHarness = undefined;
+            disposeVoice();
             ztoolkit.log('Voice initialization failed; continuing without voice');
         }
 
@@ -849,6 +850,14 @@ function unregisterMainWindowFtl(win: Window): void {
     if (link) link.remove();
 }
 
+function disposeVoice(): void {
+    try { addon.voice?.dispose(); } catch { ztoolkit.log('Voice disposal failed'); }
+    try { addon.voiceNative?.dispose(); } catch { ztoolkit.log('Native voice disposal failed'); }
+    addon.voiceNative = undefined;
+    addon.voice = undefined;
+    addon.voiceHarness = undefined;
+}
+
 /**
  * Plugin shutdown handler.
  * 
@@ -862,14 +871,7 @@ async function onShutdown(): Promise<void> {
     ztoolkit.log("onShutdown: Running fallback cleanup");
     
     try {
-        try {
-            addon.voice?.dispose();
-        } catch {
-            ztoolkit.log('Voice disposal failed; continuing shutdown');
-        } finally {
-            addon.voice = undefined;
-            addon.voiceHarness = undefined;
-        }
+        disposeVoice();
         const isAppShuttingDown = Services?.startup?.shuttingDown ?? false;
         if (!isAppShuttingDown) {
             const openWindows = Zotero.getMainWindows?.().filter(w => w && !w.closed) ?? [];

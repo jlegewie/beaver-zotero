@@ -80,6 +80,11 @@ const PRODUCTION_VOICE_INPUTS = [
     'src/services/voice/voiceService.ts',
 ];
 const DEVELOPMENT_VOICE_INPUTS = [
+    'src/services/voice/nativeVoice.ts',
+    'src/services/voice/macCapture.ts',
+    'src/services/voice/voiceHttp.ts',
+    'src/services/voice/voiceSocket.ts',
+    'src/services/voice/nativeCaptureHarness.ts',
     'packages/agent-core/src/voice/fakes.ts',
     'src/services/voice/developmentHarness.ts',
 ];

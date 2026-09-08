@@ -1,5 +1,6 @@
 import { FakeVoiceCapture, FakeVoiceTranscription } from '@beaver/agent-core/voice/fakes';
 import { VOICE_LIMITS, type VoiceAuth, type VoiceClock } from '@beaver/agent-core/voice/contracts';
+import { NativeCaptureHarness, type NativeCaptureHost } from './nativeCaptureHarness';
 import { createVoiceService, type VoiceService, type VoiceWindow } from './voiceService';
 
 export interface VoiceHarnessRequest {
@@ -12,6 +13,7 @@ export interface VoiceHarnessRequest {
 /** Synthetic adapters owned by the plugin realm; constructed only in development builds. */
 export class DevelopmentVoiceHarness {
     readonly service: VoiceService;
+    private readonly nativeHarness?: NativeCaptureHarness;
     // Synthetic ownership keeps HTTP-driven tests independent of desktop focus.
     private readonly owner: VoiceWindow = {
         closed: false,
@@ -23,16 +25,33 @@ export class DevelopmentVoiceHarness {
     private capture?: FakeVoiceCapture;
     private transcription?: FakeVoiceTranscription;
 
-    constructor(clock?: VoiceClock) {
+    constructor(clock?: VoiceClock, native?: NativeCaptureHost) {
         this.service = createVoiceService({
-            capability: () => ({ enabled: this.enabled, available: true }),
-            createCapture: (session, emit) => this.capture = new FakeVoiceCapture(session, emit),
+            capability: () => ({ enabled: this.enabled || this.nativeHarness?.activating === true, available: true }),
+            createCapture: (session, emit) => this.nativeHarness?.ownsSession(session.sessionId)
+                ? this.nativeHarness.createCapture(session, emit)
+                : this.capture = new FakeVoiceCapture(session, emit),
             createTranscription: (session, emit) => this.transcription = new FakeVoiceTranscription(session, emit),
         }, clock);
+        if (native) this.nativeHarness = new NativeCaptureHarness(this.service, native);
     }
 
     start(expectedUserId: string, getAuth: () => Promise<VoiceAuth | null>) {
+        if (this.nativeHarness?.preparingPermission) return { error: { code: 'busy' as const } };
         return this.service.start(this.owner, { kind: 'draft', id: 'fake-voice-draft' }, getAuth, expectedUserId);
+    }
+
+    /** Explicit local invocation; no HTTP command can activate the microphone. */
+    async startNative(win: Window, retainAudio = false) {
+        if (!this.nativeHarness) throw new Error('Configure the development helper first');
+        return this.nativeHarness.start(win, retainAudio);
+    }
+
+    nativeState() { return this.nativeHarness?.getState(); }
+
+    async saveRecording(path: string) {
+        if (!this.nativeHarness) throw new Error('No completed opt-in recording');
+        await this.nativeHarness.saveRecording(path);
     }
 
     /** Never accepts PCM, credentials, or a provider URL. */
