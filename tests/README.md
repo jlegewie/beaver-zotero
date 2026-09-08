@@ -71,6 +71,20 @@ suites use `DRAIN_PRIORITY = 10`, which is also what production uses for
 hot-path timeout retries). Tests that only assert queue bookkeeping — ordering,
 dedup, stats, the `priority` default itself — can use any priority.
 
+### Suites that rewrite local processing state
+
+`backgroundProcessing.live.test.ts` clears the `attachment_processing_state`
+ledger, the per-library scan cursors and the job queue for **every** library,
+and flips `backgroundProcessingEnabled`, `backgroundProcessingContinuous`,
+`backgroundExtractorEnabled` and `accessRemoteFiles`. All of it is derived data
+that the next reconcile rebuilds, and `afterAll` restores the prefs — but an
+interrupted run leaves the instance with an empty ledger and the prefs it was
+last given. Re-run the suite, or turn background processing off in Preferences.
+
+It also keeps `backgroundExtractorEnabled` off while asserting producer output:
+a whole-library reconcile queues hundreds of jobs, and on an idle machine the
+dispatcher would start extracting real PDFs mid-assertion.
+
 ## Directory structure
 
 ```
@@ -83,7 +97,8 @@ tests/
 │   ├── fixtures.ts                 # Attachment fixture definitions + Zotero port config
 │   ├── zoteroHttpClient.ts         # HTTP client for Beaver endpoints
 │   ├── zoteroAvailability.ts       # isZoteroAvailable() + skipIfNoZotero()
-│   └── cacheInspector.ts           # Cache inspection/cleanup via /beaver/test/* endpoints
+│   ├── cacheInspector.ts           # Cache inspection/cleanup via /beaver/test/* endpoints
+│   └── processingInspector.ts      # Ledger/reconciler driving via /beaver/test/processing-*
 ├── unit/
 │   ├── services/                   # Service layer tests (cache, DB, API)
 │   ├── notes/                      # Note editing, HTML processing, read handlers

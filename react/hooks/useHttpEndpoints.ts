@@ -156,6 +156,12 @@ import {
     handleTestBackgroundClearHttpRequest,
 } from './httpHandlers/testBackgroundHandlers';
 import {
+    handleTestProcessingReconcileNowHttpRequest,
+    handleTestProcessingStatusHttpRequest,
+    handleTestProcessingLedgerHttpRequest,
+    handleTestProcessingResetHttpRequest,
+} from './httpHandlers/testProcessingHandlers';
+import {
     handleTestExcludedLibrariesHttpRequest,
     handleTestGetAnnotationsHttpRequest,
     handleTestViewImagesHttpRequest,
@@ -361,6 +367,11 @@ const ENDPOINT_PATHS = [
     '/beaver/test/background-peek',
     '/beaver/test/background-process-once',
     '/beaver/test/background-clear',
+    // Whole-library processing: reconciler + ledger inspection (dev-only)
+    '/beaver/test/processing-reconcile-now',
+    '/beaver/test/processing-status',
+    '/beaver/test/processing-ledger',
+    '/beaver/test/processing-reset',
     // Pref control (dev-only)
     '/beaver/test/set-pref',
     // Sync-suppression control/inspection (dev-only)
@@ -1316,6 +1327,20 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/background-clear'] =
             createEndpoint(handleTestBackgroundClearHttpRequest);
+
+        // Whole-library processing (dev-only): drives ReconcilerService and
+        // exposes the ledger the prefs section aggregates.
+        Zotero.Server.Endpoints['/beaver/test/processing-reconcile-now'] =
+            createEndpoint(handleTestProcessingReconcileNowHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/processing-status'] =
+            createEndpoint(handleTestProcessingStatusHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/processing-ledger'] =
+            createEndpoint(handleTestProcessingLedgerHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/processing-reset'] =
+            createEndpoint(handleTestProcessingResetHttpRequest);
 
         // Pref control (dev-only)
         Zotero.Server.Endpoints['/beaver/test/set-pref'] =

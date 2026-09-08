@@ -460,7 +460,10 @@ export class DocumentExtractExecutor implements JobExecutor {
         if (ctx.externalAbortSignal.aborted || result.code === 'timeout') {
             return { kind: 'release', reason: 'external_abort' };
         }
-        if (isTransientResponseError(result.code)) {
+        // `permanent` overrides the code-based guess: `extraction_failed` is the
+        // catch-all for both "the extractor hiccuped" and "this file is not a
+        // usable EPUB", and only the extractor can tell those apart.
+        if (result.permanent !== true && isTransientResponseError(result.code)) {
             return { kind: 'retry', error: `${result.code}: ${result.message}` };
         }
         await this.persistTerminalExtractError(
@@ -487,6 +490,12 @@ export class DocumentExtractExecutor implements JobExecutor {
     }
 }
 
+/**
+ * Codes worth another attempt. Deliberately a coarse guess: `extraction_failed`
+ * covers both a transient extractor fault and a permanently unreadable file, so
+ * an extractor that knows the difference says so via `permanent` on the result
+ * and that answer wins over this table.
+ */
 function isTransientResponseError(code: string): boolean {
     return code === 'download_failed'
         || code === 'extraction_failed'
