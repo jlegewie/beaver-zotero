@@ -9,6 +9,9 @@ pref("showIndexingCompleteMessage", false);
 pref("showHighTokenUsageWarningMessage", true);
 pref("authMethod", "otp");
 
+// Microphone helper explanation
+pref("voice.helperExplained", false);
+
 // App settings
 pref("keyboardShortcut", "j");
 pref("statefulChat", true);

@@ -1,8 +1,10 @@
 # Voice protocol v1
 
 Voice support currently provides contracts, a session controller and a development-only
-synthetic harness. Production activation is feature-disabled (`disabled`); no production adapters are available. There is no microphone capture,
-transcription provider, editor insertion, shortcut, billing, or chat submission in this layer.
+synthetic harness, plus a macOS native capture adapter and a local capture harness.
+Production activation remains feature-disabled (`disabled`); transcription, editor insertion,
+shortcuts, billing, and submission are not enabled. Native source, IPC, and development
+verification are documented in [native voice capture](../native/voice/README.md).
 
 ## Ownership and lifecycle
 
@@ -58,7 +60,7 @@ must be associated with the supplied session. Capture `start()` emits `ready` wi
 format and resolves; it may then emit frames. Transcription `start(credential)` must authenticate
 and establish bounded transport capacity before resolving. Only then is capture created.
 Capture/transcription factories and capability checks are constructor dependencies of the
-service. Production leaves the feature disabled with unavailable adapters; a compile-time development branch
+service. Production leaves the feature disabled while transcription and installation are unavailable; a compile-time development branch
 constructs the separate plugin-owned `DevelopmentVoiceHarness` with fake adapters. Voice has
 its own package closure roots, independent of the agent-run protocol barrel.
 

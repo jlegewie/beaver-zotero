@@ -12,6 +12,7 @@ import type { VoiceService } from './services/voice/voiceService';
 import type { DevelopmentVoiceHarness } from './services/voice/developmentHarness';
 
 class Addon {
+    public voiceNative?: import("./services/voice/nativeVoice").NativeVoice;
     public voice?: VoiceService;
     public voiceHarness?: DevelopmentVoiceHarness;
     public data: {

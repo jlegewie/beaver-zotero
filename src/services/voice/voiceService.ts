@@ -87,7 +87,7 @@ export class VoiceService {
     dispose(): void { this.controller.dispose(); }
 }
 
-function systemClock(): VoiceClock {
+export function systemClock(): VoiceClock {
     const timers = ChromeUtils.importESModule('resource://gre/modules/Timer.sys.mjs');
     return {
         setTimeout: (callback, ms) => timers.setTimeout(callback, ms),
