@@ -203,8 +203,10 @@ export class ApiService {
         method: HttpMethod,
         body?: unknown,
         deadline?: RequestDeadline,
+        options?: { rawBody?: Uint8Array; headers?: Record<string, string> },
     ): Promise<Response> {
         const bodyText = body === undefined ? undefined : JSON.stringify(body);
+        const requestBody = options?.rawBody ?? bodyText;
         const logMessage = method === 'PATCH' && bodyText
             ? `${method}: ${endpoint} ${bodyText}`
             : `${method}: ${endpoint}`;
@@ -222,8 +224,11 @@ export class ApiService {
                 throwIfDeadlineExpired();
                 return await fetch(`${this.baseUrl}${endpoint}`, {
                     method,
-                    headers,
-                    body: bodyText,
+                    headers: { ...headers, ...options?.headers },
+                    // `ArrayBufferLike`-backed views do not satisfy the DOM's
+                    // `BodyInit`; the bytes a caller hands `postRaw` are always
+                    // ArrayBuffer-backed, so narrow rather than widen.
+                    body: requestBody as string | Uint8Array<ArrayBuffer> | undefined,
                     ...(deadline ? { signal: deadline.controller.signal } : {}),
                 });
             } catch (e) {
@@ -336,35 +341,33 @@ export class ApiService {
     * Handles API response errors and throws appropriate custom errors
     */
     private async handleApiError(response: Response): Promise<never> {
-        if (response.status >= 500) {
-            throw new ServerError(`Server error: ${response.status} - ${response.statusText}`);
-        } else {
-            let errorBody = '';
-            try {
-                errorBody = await response.text();
-                logger(`API error ${response.status} ${response.statusText}: ${errorBody}`, 2);
-                const errorJson = JSON.parse(errorBody);
-                // Handle FastAPI HTTPException detail format (can be string or object)
-                const detail = errorJson.detail;
-                if (typeof detail === 'object' && detail !== null && !Array.isArray(detail)) {
-                    throw new ApiError(
-                        response.status,
-                        response.statusText,
-                        detail.message || response.statusText,
-                        detail.code
-                    );
-                } else {
-                    throw new ApiError(
-                        response.status,
-                        response.statusText,
-                        detail || errorJson.message || response.statusText
-                    );
-                }
-            } catch (e) {
-                if (e instanceof ApiError) throw e;
-                logger(`API error ${response.status} ${response.statusText} (non-JSON body: ${errorBody})`, 2);
-                throw new ApiError(response.status, response.statusText);
+        let errorBody = '';
+        try {
+            errorBody = await response.text();
+            logger(`API error ${response.status} ${response.statusText}: ${errorBody}`, 2);
+            const errorJson = JSON.parse(errorBody);
+            const detail = errorJson.detail;
+            if (typeof detail === 'object' && detail !== null && !Array.isArray(detail)) {
+                throw new ApiError(
+                    response.status,
+                    response.statusText,
+                    detail.message || response.statusText,
+                    detail.code,
+                    detail,
+                );
             }
+            throw new ApiError(
+                response.status,
+                response.statusText,
+                detail || errorJson.message || response.statusText,
+            );
+        } catch (e) {
+            if (e instanceof ApiError) throw e;
+            logger(`API error ${response.status} ${response.statusText} (non-JSON body: ${errorBody})`, 2);
+            if (response.status >= 500) {
+                throw new ServerError(`Server error: ${response.status} - ${response.statusText}`);
+            }
+            throw new ApiError(response.status, response.statusText);
         }
     }
     
@@ -386,6 +389,23 @@ export class ApiService {
             const response = await this.request(endpoint, 'POST', body, deadline);
             return await this.parseJsonResponse<T>(response, 'POST');
         });
+    }
+
+    /**
+     * POST an already-encoded body (e.g. gzip-compressed JSON) through the
+     * normal auth/retry path. `headers` must carry the encoding the bytes are
+     * in — nothing here inspects or re-encodes them.
+     */
+    protected async postRaw<T>(
+        endpoint: string,
+        rawBody: Uint8Array,
+        headers: Record<string, string>,
+    ): Promise<T> {
+        const response = await this.request(endpoint, 'POST', undefined, undefined, {
+            rawBody,
+            headers,
+        });
+        return await this.parseJsonResponse<T>(response, 'POST');
     }
     
     /**

@@ -24,6 +24,7 @@ import AdvancedSection from "./AdvancedSection";
 import PermissionsSection from "./PermissionsSection";
 import EmbeddingIndexProgress from "../pages/onboarding/EmbeddingIndexProgress";
 import ExcludedLibrariesList from "./ExcludedLibrariesList";
+import BackgroundProcessingSection from "./BackgroundProcessingSection";
 
 
 const PreferencePage: React.FC = () => {
@@ -221,7 +222,7 @@ const PreferencePage: React.FC = () => {
     }
     const tabs = useMemo<PreferenceTabDefinition[]>(() => [
         { id: 'general', label: 'General', icon: SettingsIcon },
-        { id: 'sync', label: 'Search', icon: SearchIcon },
+        { id: 'sync', label: 'Search & Processing', icon: SearchIcon },
         { id: 'permissions', label: 'Permissions', icon: LockIcon },
         { id: 'billing', label: 'Plan & Usage', icon: DollarCircleIcon },
         { id: 'models', label: 'API Keys', icon: KeyIcon },
@@ -581,6 +582,8 @@ const PreferencePage: React.FC = () => {
                 {/* ===== SEARCH TAB ===== */}
                 {effectiveActiveTab === 'sync' && (
                     <>
+                        <BackgroundProcessingSection />
+
                         <SectionLabel>Libraries</SectionLabel>
                         <ExcludedLibrariesList />
 

@@ -173,6 +173,15 @@ export interface SafeProfileModel {
     // Data migration version
     data_version: number;
     data_migrated_at: string | null;
+
+    // OCR entitlement
+    has_ocr_access: boolean;
+
+    // Cloud search-index entitlement
+    has_search_index_access: boolean;
+
+    // Copy-only label for the background-processing welcome popup
+    indexing_plan_label: 'pro' | 'search' | null;
 }
 
 export interface SafeProfileWithPlan extends SafeProfileModel {

@@ -74,8 +74,7 @@ describe('firstRunFollowups', () => {
         it('uses the topic-anchored variant when a topic is present', () => {
             const { title, prompt } = renderFollowup(discoverMore(), 'social capital');
             expect(title).toBe('Find more recent research on social capital');
-            // Only titleWithTopic is set; the prompt stays on the base copy.
-            expect(prompt).toBe(discoverMore().prompt);
+            expect(prompt).toContain('social capital');
             expect(title).not.toContain('{topic}');
             expect(prompt).not.toContain('{topic}');
         });

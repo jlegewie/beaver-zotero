@@ -79,6 +79,7 @@ import {
     handleTestExternalFileDeleteHttpRequest,
     handleTestExternalFileViewImagesHttpRequest,
     handleTestDocumentSerializedHttpRequest,
+    handleTestCacheStatsHttpRequest,
 } from './httpHandlers/testCacheHandlers';
 import {
     handleTestNoteCreateHttpRequest,
@@ -279,6 +280,7 @@ const ENDPOINT_PATHS = [
     '/beaver/test/cache-invalidate',
     '/beaver/test/cache-seed-page-labels',
     '/beaver/test/cache-clear-all',
+    '/beaver/test/cache-stats',
     '/beaver/test/read-attachment',
     '/beaver/test/mcp-read-note',
     '/beaver/test/mcp-create-note',
@@ -1104,6 +1106,9 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/cache-clear-all'] =
             createEndpoint(handleTestCacheClearAllHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/cache-stats'] =
+            createEndpoint(handleTestCacheStatsHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/read-attachment'] =
             createEndpoint(handleTestReadAttachmentHttpRequest);

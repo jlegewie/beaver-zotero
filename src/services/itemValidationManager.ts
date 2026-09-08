@@ -121,6 +121,42 @@ function reasonFromAttachmentInfo(info: AttachmentInfo): string | undefined {
     return info.status === 'unreadable' ? 'Attachment is not readable by Beaver' : undefined;
 }
 
+/**
+ * Compact OCR annotation for validation debug logs. Covers scan detection
+ * (`pdf_needs_ocr`) and the vision/plus-tools admission path. Post-OCR cache
+ * hits present as normal readable PDFs and are not distinguished here.
+ */
+export function formatValidationOcrLogSuffix(
+    result: Pick<ItemValidationResult, 'state' | 'statusCode'>,
+    options: Pick<ItemValidationOptions, 'supportsVision' | 'canHandleOCRLocally'>,
+): string {
+    if (result.statusCode !== 'pdf_needs_ocr') {
+        return '';
+    }
+    if (result.state === 'readable' && options.canHandleOCRLocally) {
+        const via = options.supportsVision ? 'vision' : 'plus-tools';
+        return `, ocr=required, admitted via ${via}`;
+    }
+    return ', ocr=required, blocked';
+}
+
+/**
+ * Summarize OCR-relevant attachment results for regular-item validation logs.
+ */
+export function formatRegularItemOcrLogSuffix(
+    attachmentResults: Map<string, AttachmentValidationResult>,
+    options: Pick<ItemValidationOptions, 'supportsVision' | 'canHandleOCRLocally'>,
+): string {
+    const notes: string[] = [];
+    for (const [key, attResult] of attachmentResults) {
+        const suffix = formatValidationOcrLogSuffix(attResult, options);
+        if (suffix) {
+            notes.push(`${key}(${suffix.slice(2)})`);
+        }
+    }
+    return notes.length > 0 ? `, ocr=[${notes.join(', ')}]` : '';
+}
+
 export function resultFromAttachmentInfo(
     info: AttachmentInfo,
     options: ItemValidationOptions = {},
@@ -298,6 +334,7 @@ class ItemValidationManager {
 
             const info = await getAttachmentInfo(item, {
                 nonPdfReadableEnabled: true,
+                enqueueOcrIfNeeded: true,
             });
             return resultFromAttachmentInfo(info, options);
         } catch (error: any) {
@@ -337,6 +374,7 @@ class ItemValidationManager {
         const batchData = await prepareAttachmentInfoBatchData([item]);
         const attachmentInfos = await processAttachmentInfoBatch(item, batchData, {
             nonPdfReadableEnabled: true,
+            enqueueOcrIfNeeded: true,
         });
 
         const attachmentResults = new Map<string, AttachmentValidationResult>();

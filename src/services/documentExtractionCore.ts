@@ -55,6 +55,7 @@ import {
     type AttachmentFileSource,
 } from './documentExtraction';
 import { readableToExtractKind, type ExtractContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
+import { maybeEnqueueOcrJob } from './ocr/enqueueOcr';
 import {
     extractEpubDocumentFromFile,
     preflightEpubFile,
@@ -182,6 +183,8 @@ export interface ExtractAndCacheArgs {
      * internally)
      */
     onRemoteDownloadFailure?: (error: unknown) => void;
+    /** Queue priority forwarded to the existing no-text-layer OCR producer. */
+    ocrPriority?: number;
 }
 
 export interface ExtractAndCacheResolvedPdfArgs
@@ -208,6 +211,13 @@ export interface ExtractAndCacheEpubArgs {
     maxPages: number | null;
     externalAbortSignal?: AbortSignal;
     onFileNotSyncedLocally?: () => void;
+    /** Pre-resolved remote source: extract from a temporary local copy while
+     * keying cache freshness to the synthetic remote identity. */
+    resolvedFile?: {
+        cacheFilePath: string;
+        extractionFilePath: string;
+        sourceSizeBytes: number;
+    };
 }
 
 export interface ExtractAndCacheSnapshotArgs {
@@ -222,6 +232,11 @@ export interface ExtractAndCacheSnapshotArgs {
     maxPages: number | null;
     externalAbortSignal?: AbortSignal;
     onFileNotSyncedLocally?: () => void;
+    resolvedFile?: {
+        cacheFilePath: string;
+        extractionFilePath: string;
+        sourceSizeBytes: number;
+    };
 }
 
 export type ExtractAndCacheSnapshotResult =
@@ -509,7 +524,13 @@ export async function extractAndCacheEpubDocument(
     const requestKey = args.resolvedKey;
 
     let filePath: string;
-    if (args.source.kind === 'zotero') {
+    let extractionFilePath: string;
+    let sourceSizeBytes = 0;
+    if (args.resolvedFile) {
+        filePath = args.resolvedFile.cacheFilePath;
+        extractionFilePath = args.resolvedFile.extractionFilePath;
+        sourceSizeBytes = args.resolvedFile.sourceSizeBytes;
+    } else if (args.source.kind === 'zotero') {
         const preflight = await preflightEpubFile(args.source.item, {
             onFileNotSyncedLocally: args.onFileNotSyncedLocally,
         });
@@ -523,6 +544,7 @@ export async function extractAndCacheEpubDocument(
             };
         }
         filePath = preflight.filePath;
+        extractionFilePath = filePath;
     } else {
         // External files skip the Zotero preflight (kind already validated at
         // attach time; the managed copy is local-only).
@@ -539,6 +561,7 @@ export async function extractAndCacheEpubDocument(
             };
         }
         filePath = externalSource.filePath;
+        extractionFilePath = filePath;
     }
 
     const maxFileSizeMB = effectiveMaxFileSizeMB();
@@ -585,7 +608,7 @@ export async function extractAndCacheEpubDocument(
         if (!cache) {
             logger(`extractAndCacheEpubDocument: document cache not available for ${requestKey}`, 1);
             return okOrNoText(
-                await extractEpubDocumentFromFile(filePath, { abortSignal: args.externalAbortSignal }),
+                await extractEpubDocumentFromFile(extractionFilePath, { abortSignal: args.externalAbortSignal }),
                 false,
             );
         }
@@ -605,14 +628,14 @@ export async function extractAndCacheEpubDocument(
             filePath,
             contentKind: 'epub',
             mode: 'structured',
-            sourceSizeBytes: 0,
+            sourceSizeBytes,
             contentType: args.contentType,
             maxSourceSizeBytes,
             abortSignal: args.externalAbortSignal,
             readCached: (cacheRef) => cache.getEpubResult(cacheRef, filePath, { maxSourceSizeBytes }),
             create: async (signal) => {
                 created = true;
-                return extractEpubDocumentFromFile(filePath, { abortSignal: signal });
+                return extractEpubDocumentFromFile(extractionFilePath, { abortSignal: signal });
             },
             metadata: (doc) => ({
                 contentKind: 'epub',
@@ -685,7 +708,13 @@ export async function extractAndCacheSnapshotDocument(
     const requestKey = args.resolvedKey;
 
     let filePath: string;
-    if (args.source.kind === 'zotero') {
+    let extractionFilePath: string;
+    let sourceSizeBytes = 0;
+    if (args.resolvedFile) {
+        filePath = args.resolvedFile.cacheFilePath;
+        extractionFilePath = args.resolvedFile.extractionFilePath;
+        sourceSizeBytes = args.resolvedFile.sourceSizeBytes;
+    } else if (args.source.kind === 'zotero') {
         const preflight = await preflightSnapshotFile(args.source.item, {
             onFileNotSyncedLocally: args.onFileNotSyncedLocally,
         });
@@ -699,6 +728,7 @@ export async function extractAndCacheSnapshotDocument(
             };
         }
         filePath = preflight.filePath;
+        extractionFilePath = filePath;
     } else {
         // Match the tighter Zotero snapshot preflight limit for external files.
         const externalSource = await resolveExternalFileSource(
@@ -717,6 +747,7 @@ export async function extractAndCacheSnapshotDocument(
             };
         }
         filePath = externalSource.filePath;
+        extractionFilePath = filePath;
     }
 
     // Section metadata (URL / title) for the single snapshot section. Only Zotero
@@ -768,7 +799,7 @@ export async function extractAndCacheSnapshotDocument(
         if (!cache) {
             logger(`extractAndCacheSnapshotDocument: document cache not available for ${requestKey}`, 1);
             return okOrNoText(
-                await extractSnapshotDocumentFromFile(filePath, {
+                await extractSnapshotDocumentFromFile(extractionFilePath, {
                     ...sectionMeta,
                     abortSignal: args.externalAbortSignal,
                 }),
@@ -791,14 +822,14 @@ export async function extractAndCacheSnapshotDocument(
             filePath,
             contentKind: 'snapshot',
             mode: 'structured',
-            sourceSizeBytes: 0,
+            sourceSizeBytes,
             contentType: args.contentType,
             maxSourceSizeBytes,
             abortSignal: args.externalAbortSignal,
             readCached: (cacheRef) => cache.getSnapshotResult(cacheRef, filePath, { maxSourceSizeBytes }),
             create: async (signal) => {
                 created = true;
-                return extractSnapshotDocumentFromFile(filePath, { ...sectionMeta, abortSignal: signal });
+                return extractSnapshotDocumentFromFile(extractionFilePath, { ...sectionMeta, abortSignal: signal });
             },
             metadata: (doc) => ({
                 contentKind: 'snapshot',
@@ -1373,6 +1404,19 @@ export async function extractAndCacheResolvedPdfDocument(
                     pageLabels,
                     pages: null,
                 });
+
+                // Queue OCR for Zotero attachments that lack a text layer.
+                // External files have no attachment hash, so they are skipped.
+                if (extractionError.code === ExtractionErrorCode.NO_TEXT_LAYER && zoteroItem) {
+                    maybeEnqueueOcrJob({
+                        item: zoteroItem,
+                        libraryId: zoteroItem.libraryID,
+                        zoteroKey: zoteroItem.key,
+                        itemId: zoteroItem.id,
+                        pageCount: extractionError.pageCount ?? totalPages,
+                        priority: args.ocrPriority,
+                    });
+                }
 
                 const cachedCode = extractionError.code === ExtractionErrorCode.ENCRYPTED
                     ? 'encrypted'

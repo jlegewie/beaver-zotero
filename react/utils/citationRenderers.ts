@@ -287,7 +287,7 @@ export function computeStaticCitationMarkers(
  * @returns HTML string representation of the markdown
  */
 export function renderToHTML(
-    content: string, 
+    content: string,
     className: string = "markdown",
     contextData?: RenderContextData
 ): string {

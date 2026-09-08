@@ -144,6 +144,13 @@ pref("mcpCreateNoteToolEnabled", false);
 
 // Background extractor kill-switch (drains the background_jobs queue)
 pref("backgroundExtractorEnabled", true);
+// Whole-library producers are an explicit opt-in. The dispatcher above remains
+// enabled so user-initiated extraction jobs still work when this is off.
+pref("backgroundProcessingEnabled", false);
+pref("backgroundProcessingContinuous", false);
+pref("backgroundProcessingLibrariesToSkip", "[]");
+pref("backgroundProcessingWelcomeAck", false);
+pref("backgroundProcessingWelcomeDeferred", false);
 
 // Flags to show notifications, run consistency check and collection sync on upgrade
 pref("runConsistencyCheck", false);
@@ -158,6 +165,14 @@ pref("librarySuggestionsGeneratedAt", "");
 
 // Account-scoped first-run assignment map, keyed by Beaver user id.
 pref("firstRunAssignments", "{}");
+
+// Size budget for the local document-extraction cache
+// (profile/beaver/document-cache). When the total compressed payload size
+// exceeds this, the least-recently-used payloads are evicted down to 90% of
+// it. Cached metadata (page counts, labels, OCR verdicts) is never evicted,
+// and an evicted payload is simply re-extracted on demand. 0 disables the
+// budget.
+pref("documentCacheMaxBytes", 1073741824);
 
 // Largest attachment file, in MB, that Beaver will read
 // for document extraction, page and image rendering, in-file search, and
