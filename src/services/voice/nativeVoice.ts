@@ -6,6 +6,11 @@ import type {
 import { getPref, setPref } from "../../utils/prefs";
 import { MacCaptureService } from "./macCapture";
 import { VoiceSocket } from "./voiceSocket";
+import {
+    createPackagedHelperInstaller,
+    type HelperInstaller,
+} from "./helperInstaller";
+import { runVoiceProcess } from "./voiceProcess";
 import { systemClock } from "./voiceService";
 
 /** Native resources live in the plugin realm, independently of React and login state. */
@@ -14,6 +19,39 @@ export class NativeVoice {
     private socket?: VoiceSocket;
     private helperPath?: string;
     private disposed = false;
+    private installer?: HelperInstaller;
+    private packaged = false;
+    private preparing?: Promise<void>;
+
+    /** No extraction or listener until an explicitly gated native activation. */
+    ensurePackagedHelper(): Promise<void> {
+        if (this.available && !this.packaged) return Promise.resolve();
+        if (this.capture?.busy)
+            return Promise.reject(new Error("Native helper busy"));
+        if (this.disposed || !Zotero.isMac || !getPref("voice.nativeEnabled"))
+            return Promise.reject(new Error("Packaged voice capture disabled"));
+        if (this.preparing) return this.preparing;
+        this.installer ??= createPackagedHelperInstaller();
+        this.preparing = this.installer
+            .ensure()
+            .then((path) => {
+                if (
+                    this.disposed ||
+                    this.capture?.busy ||
+                    !getPref("voice.nativeEnabled")
+                )
+                    throw new Error("Native helper unavailable");
+                this.initialize();
+                if (this.helperPath !== path)
+                    this.capture!.permission = "unknown";
+                this.helperPath = path;
+                this.packaged = true;
+            })
+            .finally(() => {
+                this.preparing = undefined;
+            });
+        return this.preparing;
+    }
 
     private initialize(): void {
         if (this.capture) return;
@@ -43,31 +81,41 @@ export class NativeVoice {
                         const path = this.helperPath;
                         if (!path || this.disposed)
                             throw new Error("Native helper unavailable");
-                        const { Subprocess } = ChromeUtils.importESModule(
-                            "resource://gre/modules/Subprocess.sys.mjs",
-                        );
-                        const child = await Subprocess.call({
-                            command: "/usr/bin/open",
-                            arguments: [
-                                "-n",
-                                "-g",
-                                path,
-                                "--args",
-                                "--port",
-                                String(port),
-                                "--token",
-                                token,
-                                "--session",
-                                sessionId,
-                                ...(permissionOnly
-                                    ? ["--permission-only"]
-                                    : []),
-                            ],
-                            stderr: "pipe",
-                        });
-                        const result = await child.wait();
-                        if (result.exitCode !== 0)
-                            throw new Error("Helper launch failed");
+                        if (this.packaged) {
+                            // Fail fast when disabled; recheck after verification in case it changed.
+                            if (!getPref("voice.nativeEnabled"))
+                                throw new Error(
+                                    "Packaged voice helper unavailable",
+                                );
+                            const verified = await this.installer!.ensure();
+                            if (
+                                this.disposed ||
+                                !getPref("voice.nativeEnabled")
+                            )
+                                throw new Error(
+                                    "Packaged voice helper unavailable",
+                                );
+                            if (verified !== path) {
+                                this.helperPath = verified;
+                                this.capture!.permission = "unknown";
+                                throw new Error(
+                                    "Voice helper changed; start again",
+                                );
+                            }
+                        }
+                        await runVoiceProcess("/usr/bin/open", [
+                            "-n",
+                            "-g",
+                            path,
+                            "--args",
+                            "--port",
+                            String(port),
+                            "--token",
+                            token,
+                            "--session",
+                            sessionId,
+                            ...(permissionOnly ? ["--permission-only"] : []),
+                        ]);
                     },
                 },
                 socket.port,
@@ -84,25 +132,25 @@ export class NativeVoice {
         if (
             __env__ !== "development" ||
             this.disposed ||
+            this.capture?.busy ||
+            this.preparing ||
             !path.startsWith("/") ||
             !path.endsWith(".app")
         ) {
             throw new Error("Development helper unavailable");
         }
-        const { Subprocess } = ChromeUtils.importESModule(
-            "resource://gre/modules/Subprocess.sys.mjs",
-        );
-        const child = await Subprocess.call({
-            command: "/usr/bin/codesign",
-            arguments: ["--verify", "--strict", path],
-            stderr: "pipe",
-        });
-        if ((await child.wait()).exitCode !== 0 || this.disposed)
+        await runVoiceProcess("/usr/bin/codesign", [
+            "--verify",
+            "--strict",
+            path,
+        ]);
+        if (this.disposed || this.capture?.busy || this.preparing)
             throw new Error("Helper verification failed");
         this.initialize();
         // A verified path may contain a rebuilt/re-signed app with different OS permission state.
         this.capture!.permission = "unknown";
         this.helperPath = path;
+        this.packaged = false;
     }
     get available(): boolean {
         return (
@@ -150,6 +198,7 @@ export class NativeVoice {
     dispose(): void {
         if (this.disposed) return;
         this.disposed = true;
+        this.installer?.dispose();
         try {
             this.capture?.dispose();
         } finally {

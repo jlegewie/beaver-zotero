@@ -7,16 +7,18 @@ fixtures, but have independent launch mechanisms, transports, and build tools.
 
 The helper does not contain backend credentials, transcription, billing, or editor code.
 The plugin owns those responsibilities and the active-session lock. Production voice
-activation remains disabled. Native adapters exist only in development builds. The loopback listener opens after
-a helper is verified and registered; production opens no voice port.
+activation remains disabled. Packaged native capture is available behind a disabled-by-default feature gate. The loopback
+listener opens only after an explicit activation verifies and installs a helper. See
+[packaging and release setup](../../docs/native-voice-packaging.md) for the compatibility
+matrix, generated-XPI installation, upgrades, and pending Apple release requirements.
 
 ## macOS development
 
 Requirements: macOS, Xcode command-line tools (Swift and the macOS SDK), and a development
 Zotero instance. The build uses system frameworks only, targets the build machine's
-architecture with a macOS 14.0 deployment target, and creates an ad-hoc-signed local app. This is not a distribution artifact.
-Developer ID signing, notarization, universal builds, verified extraction and upgrades are
-separate release work.
+architecture and Intel as a universal binary with a macOS 14.0 deployment target, and creates an ad-hoc-signed local app. This is not a distribution artifact.
+Universal packaging and verified extraction are implemented; Developer ID signing and
+notarization require the Apple release environment described above.
 
 ```sh
 native/voice/macos/build.sh

@@ -24,14 +24,14 @@ if (Zotero.Beaver.voiceNative.permission === 'unknown') {
 const reports=[];
 for (let i=0;i<3;i++) {
     const started=await h.startNative(owner);
-    await wait(1600);
+    await wait(i === 0 && LONG_CAPTURE ? 18000 : 1600);
     const active=h.nativeState();
     h.service.controller.finish(started.sessionId);
     await wait(1200);
     reports.push({active,done:h.nativeState()});
 }
 return JSON.stringify(reports);
-'''.replace('APP_PATH',json.dumps(app)))
+'''.replace('APP_PATH',json.dumps(app)).replace('LONG_CAPTURE', 'true' if '--long' in sys.argv else 'false'))
 for i,report in enumerate(result):
     assert report['active']['state']['phase']=='listening',report
     assert report['active']['state']['frameCount']>5,report

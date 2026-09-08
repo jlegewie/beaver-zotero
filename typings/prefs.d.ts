@@ -15,6 +15,7 @@ declare namespace _ZoteroTypes {
       "showHighTokenUsageWarningMessage": boolean;
       "authMethod": string;
       "voice.helperExplained": boolean;
+      "voice.nativeEnabled": boolean;
       "keyboardShortcut": string;
       "statefulChat": boolean;
       "addSelectedItemsOnOpen": boolean;

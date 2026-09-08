@@ -11,6 +11,7 @@ pref("authMethod", "otp");
 
 // Microphone helper explanation
 pref("voice.helperExplained", false);
+pref("voice.nativeEnabled", false);
 
 // App settings
 pref("keyboardShortcut", "j");

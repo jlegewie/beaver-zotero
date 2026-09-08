@@ -17,11 +17,13 @@ const settle = async () => {
     for (let i = 0; i < 12; i++) await Promise.resolve();
 };
 beforeEach(() => {
+    vi.stubGlobal("Zotero", { ...Zotero, logError: vi.fn() });
     vi.stubGlobal("Cu", { now: Date.now });
     let id = 0;
     Zotero.Utilities.randomString = () => `native-test-${++id}`;
     native = {
         available: true,
+        ensurePackagedHelper: vi.fn(async () => {}),
         permission: "granted",
         explain: vi.fn(() => true),
         prepareMicrophone: vi.fn(async () => "granted" as const),
@@ -239,4 +241,55 @@ it("reports canceled permission setup as unavailable without a second explanatio
     expect(native.explain).not.toHaveBeenCalled();
     expect(native.createCapture).not.toHaveBeenCalled();
     expect(h.start("fake-user", auth)).toEqual({ error: { code: "disabled" } });
+});
+
+it.each(["rejects", "resolves unavailable"])(
+    "returns the same actionable result when helper setup %s",
+    async (mode) => {
+        Object.assign(native, { available: false });
+        if (mode === "rejects")
+            vi.mocked(native.ensurePackagedHelper).mockRejectedValue(
+                new Error("missing"),
+            );
+        await expect(h.startNative(win)).resolves.toMatchObject({
+            error: { code: "unavailable" },
+            help: expect.stringContaining("helper is installed"),
+        });
+        expect(native.prepareMicrophone).not.toHaveBeenCalled();
+        expect(native.createCapture).not.toHaveBeenCalled();
+    },
+);
+
+it("reserves setup admission while installation is pending", async () => {
+    native.available = false;
+    let ready!: () => void;
+    vi.mocked(native.ensurePackagedHelper).mockImplementation(
+        () =>
+            new Promise<void>((resolve) => {
+                ready = resolve;
+            }),
+    );
+    const first = h.startNative(win);
+    await expect(h.startNative(win)).resolves.toHaveProperty(
+        "error.code",
+        "busy",
+    );
+    native.available = true;
+    ready();
+    await first;
+    expect(native.ensurePackagedHelper).toHaveBeenCalledOnce();
+    expect(native.createCapture).toHaveBeenCalledOnce();
+});
+it("preserves unsupported-platform help and logs installation failures", async () => {
+    native.available = false;
+    const error = new Error("Voice capture is unsupported on this system");
+    vi.mocked(native.ensurePackagedHelper).mockRejectedValueOnce(error);
+    await expect(h.startNative(win)).resolves.toEqual({
+        error: { code: "unavailable" },
+        help: error.message,
+    });
+    expect(Zotero.logError).toHaveBeenCalledWith(error);
+    native.available = true;
+    await h.startNative(win);
+    expect(native.createCapture).toHaveBeenCalledOnce();
 });

@@ -1,0 +1,11 @@
+{
+    "schema": 1,
+    "protocolVersion": 1,
+    "helperVersion": 2,
+    "bundleId": "ai.beaverapp.voice",
+    "minMacOS": 14,
+    "architectures": ["arm64", "x86_64"],
+    "zoteroMajors": [7, 8, 9, 10],
+    "identityRequirement": "=identifier \"ai.beaverapp.voice\"",
+    "developerIdRequirement": " and anchor apple generic and certificate leaf[subject.OU] = \"{teamId}\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
+}

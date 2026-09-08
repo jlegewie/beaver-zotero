@@ -11,9 +11,36 @@ permissions:
   pull-requests: write
 
 jobs:
+  voice:
+    if: vars.VOICE_RELEASE_ENABLED == 'true'
+    runs-on: macos-15
+    environment: voice-release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: native/voice/macos/build.sh
+      - name: Sign, notarize, staple and package
+        env:
+          VOICE_CERTIFICATE_BASE64: ${{ secrets.VOICE_CERTIFICATE_BASE64 }}
+          VOICE_CERTIFICATE_PASSWORD: ${{ secrets.VOICE_CERTIFICATE_PASSWORD }}
+          VOICE_SIGNING_IDENTITY: ${{ secrets.VOICE_SIGNING_IDENTITY }}
+          VOICE_TEAM_ID: ${{ secrets.VOICE_TEAM_ID }}
+          VOICE_APPLE_ID: ${{ secrets.VOICE_APPLE_ID }}
+          VOICE_APP_PASSWORD: ${{ secrets.VOICE_APP_PASSWORD }}
+        run: bash native/voice/macos/ci-sign.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voice-macos
+          path: addon/content/voice/
+          if-no-files-found: error
   release:
+    needs: voice
+    if: always() && (needs.voice.result == 'success' || needs.voice.result == 'skipped')
     runs-on: ubuntu-latest
     env:
+      VOICE_PACKAGE_REQUIRED: ${{ needs.voice.result == 'success' && '1' || '0' }}
       GITHUB_TOKEN: ${{ secrets.GitHub_TOKEN }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
@@ -30,12 +57,17 @@ jobs:
         with:
           node-version: 20
 
+      - uses: actions/download-artifact@v4
+        if: needs.voice.result == 'success'
+        with:
+          name: voice-macos
+          path: addon/content/voice/
+
       - name: Install deps
         run: npm install
 
-      # - name: Build
-      #   run: |
-      #     npm run build
+      - name: Build and verify XPI
+        run: npm run build
 
       - name: Release to GitHub
         run: |
