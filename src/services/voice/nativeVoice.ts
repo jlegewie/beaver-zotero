@@ -159,6 +159,8 @@ export class NativeVoice {
 }
 
 export function microphoneHelp(code: VoiceErrorCode): string {
+    if (code === "no_speech")
+        return "No speech detected. Check that your microphone is unmuted and try again.";
     if (code === "permission_denied")
         return "Allow Beaver Voice Input in System Settings → Privacy & Security → Microphone, then start again.";
     if (code === "device_unavailable")

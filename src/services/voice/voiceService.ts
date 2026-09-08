@@ -1,18 +1,35 @@
-import { VoiceController } from '@beaver/agent-core/voice/controller';
-import { isBusyPhase, type VoiceAuth, type VoiceClock, type VoiceDependencies, type VoiceOwner } from '@beaver/agent-core/voice/contracts';
+import { VoiceController } from "@beaver/agent-core/voice/controller";
+import {
+    isBusyPhase,
+    type VoiceAuth,
+    type VoiceClock,
+    type VoiceDependencies,
+    type VoiceOwner,
+    type VoiceOptions,
+} from "@beaver/agent-core/voice/contracts";
 
-export type VoiceWindow = Pick<Window, 'closed' | 'addEventListener' | 'removeEventListener'> & {
-    document: Pick<Document, 'hasFocus'>;
+export type VoiceWindow = Pick<
+    Window,
+    "closed" | "addEventListener" | "removeEventListener"
+> & {
+    document: Pick<Document, "hasFocus">;
 };
 
-export type VoiceAdapters = Pick<VoiceDependencies, 'capability' | 'createCapture' | 'createTranscription'>;
+export type VoiceAdapters = Pick<
+    VoiceDependencies,
+    "capability" | "createCapture" | "createTranscription"
+>;
 
 // The capability gate prevents activation; these factories also fail closed if
 // capability is enabled without supplying capture and transcription adapters.
 const unavailableAdapters: VoiceAdapters = {
     capability: () => ({ enabled: false, available: false }),
-    createCapture: () => { throw new Error('Voice capture unavailable'); },
-    createTranscription: () => { throw new Error('Voice transcription unavailable'); },
+    createCapture: () => {
+        throw new Error("Voice capture unavailable");
+    },
+    createTranscription: () => {
+        throw new Error("Voice transcription unavailable");
+    },
 };
 
 /** Plugin-realm owner. Production stays unavailable until capture and transport adapters ship. */
@@ -23,7 +40,10 @@ export class VoiceService {
     private windows = new WeakMap<VoiceWindow, string>();
     private nextWindowId = 0;
 
-    constructor(clock: VoiceClock, adapters: VoiceAdapters = unavailableAdapters) {
+    constructor(
+        clock: VoiceClock,
+        adapters: VoiceAdapters = unavailableAdapters,
+    ) {
         this.controller = new VoiceController({
             ...adapters,
             clock,
@@ -42,36 +62,52 @@ export class VoiceService {
 
     windowId(win: VoiceWindow): string {
         let id = this.windows.get(win);
-        if (!id) { id = `voice-window-${++this.nextWindowId}`; this.windows.set(win, id); }
+        if (!id) {
+            id = `voice-window-${++this.nextWindowId}`;
+            this.windows.set(win, id);
+        }
         return id;
     }
 
-    start(win: VoiceWindow | null | undefined, output: VoiceOwner['output'], getAuth: () => Promise<VoiceAuth | null>, expectedUserId: string) {
+    start(
+        win: VoiceWindow | null | undefined,
+        output: VoiceOwner["output"],
+        getAuth: () => Promise<VoiceAuth | null>,
+        expectedUserId: string,
+        options?: VoiceOptions,
+    ) {
         if (isBusyPhase(this.controller.getSnapshot().phase)) {
-            return { error: { code: 'busy' as const } };
+            return { error: { code: "busy" as const } };
         }
-        if (!win || win.closed || !win.document.hasFocus()) return { error: { code: 'unavailable' as const } };
+        if (!win || win.closed || !win.document.hasFocus())
+            return { error: { code: "unavailable" as const } };
         this.auth = getAuth;
         const windowId = this.windowId(win);
         const cancel = () => this.controller.windowUnloaded(windowId);
-        win.addEventListener('unload', cancel);
+        win.addEventListener("unload", cancel);
         // Ignore focus moving among controls/reader frames in this top-level window.
-        const blur = (event: Event) => { if (Object.is(event.target, win)) cancel(); };
-        win.addEventListener('blur', blur);
+        const blur = (event: Event) => {
+            if (Object.is(event.target, win)) cancel();
+        };
+        win.addEventListener("blur", blur);
         this.releaseWindow = () => {
-            win.removeEventListener('unload', cancel);
-            win.removeEventListener('blur', blur);
+            win.removeEventListener("unload", cancel);
+            win.removeEventListener("blur", blur);
         };
         let result;
         try {
-            result = this.controller.start({ windowId, output }, expectedUserId);
+            result = this.controller.start(
+                { windowId, output },
+                expectedUserId,
+                options,
+            );
         } catch (error) {
             this.releaseWindow?.();
             this.releaseWindow = undefined;
             this.auth = undefined;
             throw error;
         }
-        if ('error' in result) {
+        if ("error" in result) {
             this.releaseWindow?.();
             this.releaseWindow = undefined;
             this.auth = undefined;
@@ -83,18 +119,27 @@ export class VoiceService {
         const id = this.windows.get(win);
         if (id) this.controller.windowUnloaded(id);
     }
-    authChanged(userId: string | null): void { this.controller.authChanged(userId); }
-    dispose(): void { this.controller.dispose(); }
+    authChanged(userId: string | null): void {
+        this.controller.authChanged(userId);
+    }
+    dispose(): void {
+        this.controller.dispose();
+    }
 }
 
 export function systemClock(): VoiceClock {
-    const timers = ChromeUtils.importESModule('resource://gre/modules/Timer.sys.mjs');
+    const timers = ChromeUtils.importESModule(
+        "resource://gre/modules/Timer.sys.mjs",
+    );
     return {
         setTimeout: (callback, ms) => timers.setTimeout(callback, ms),
-        clearTimeout: handle => timers.clearTimeout(handle),
+        clearTimeout: (handle) => timers.clearTimeout(handle),
     };
 }
 
-export function createVoiceService(adapters?: VoiceAdapters, clock: VoiceClock = systemClock()): VoiceService {
+export function createVoiceService(
+    adapters?: VoiceAdapters,
+    clock: VoiceClock = systemClock(),
+): VoiceService {
     return new VoiceService(clock, adapters);
 }

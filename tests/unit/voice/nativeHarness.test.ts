@@ -224,7 +224,10 @@ it("bounds opted-in retention to the capture duration even with extra frames", a
         await settle();
     }
     expect(h.nativeState()?.retainedBytes).toBe(3840000);
-    expect(h.service.controller.getSnapshot().phase).toBe("listening");
+    expect(h.service.controller.getSnapshot()).toMatchObject({
+        phase: "error",
+        error: { code: "duration_limit" },
+    });
 });
 
 it("reports canceled permission setup as unavailable without a second explanation", async () => {

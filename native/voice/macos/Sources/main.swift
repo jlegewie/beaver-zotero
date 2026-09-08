@@ -125,7 +125,7 @@ final class Helper {
         }
         self.watchdog = watchdog; watchdog.resume()
         eventQueue.async { [self] in
-            guard event(["type": "hello", "helperVersion": 1, "pid": getpid()]) == "continue" else { act("cancel"); return }
+            guard event(["type": "hello", "helperVersion": 2, "pid": getpid()]) == "continue" else { act("cancel"); return }
             state.touchControl()
             startControl()
             DispatchQueue.main.async { self.permission() }
@@ -186,9 +186,10 @@ final class Helper {
     func makeConverter(_ format: AVAudioFormat) throws -> PCMConverter {
         try PCMConverter(format: format) { [self] bytes, sequence in
             guard state.reserve(bytes.count, input: false) else { throw VoiceFailure("overflow") }
+            let quality = converter?.quality ?? ["inputPeak": 0, "clippedSamples": 0, "discontinuityCount": 0]
             eventQueue.async { [self] in
                 defer { state.release(bytes.count, input: false) }
-                act(event(["type": "frame", "sequence": sequence, "sampleCount": bytes.count / 2, "pcm": bytes.base64EncodedString()]))
+                act(event(["type": "frame", "sequence": sequence, "sampleCount": bytes.count / 2, "pcm": bytes.base64EncodedString(), "quality": quality]))
             }
         }
     }
@@ -265,7 +266,7 @@ final class Helper {
         guard AVCaptureDevice.default(for: .audio) != nil else { fail("device_unavailable"); return }
         let current = engine.inputNode.outputFormat(forBus: 0)
         guard current.isEqual(format) else { fail("discontinuity"); return }
-        engine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [self] buffer, _ in
+        engine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [self] buffer, time in
             let size = Int(buffer.frameLength) * Int(format.channelCount) * 4
             guard buffer.frameLength > 0, buffer.frameLength <= 32768, state.reserve(size, input: true) else {
                 DispatchQueue.main.async { self.fail("overflow") }; return
@@ -276,10 +277,11 @@ final class Helper {
             }
             copy.frameLength = buffer.frameLength
             for channel in 0..<Int(format.channelCount) { target[channel].update(from: source[channel], count: Int(buffer.frameLength)) }
+            let sampleTime = time.isSampleTimeValid ? time.sampleTime : nil
             state.touchAudio()
             audioQueue.async { [self] in
                 defer { state.release(size, input: true) }
-                do { try converter?.append(copy) }
+                do { try converter?.append(copy, sampleTime: sampleTime) }
                 catch { DispatchQueue.main.async { self.fail((error as? VoiceFailure)?.code ?? "capture_failed") } }
             }
         }
@@ -319,7 +321,11 @@ final class Helper {
     func fail(_ code: String) {
         guard !terminal else { return }
         terminal = true; stopEngine()
-        eventQueue.async { [self] in _ = event(["type": "error", "code": code]); _exit(1) }
+        audioQueue.async { [self] in
+            if code == "discontinuity", converter?.discontinuityCount == 0 { converter?.markDiscontinuity() }
+            let quality = converter?.quality ?? ["inputPeak": 0, "clippedSamples": 0, "discontinuityCount": code == "discontinuity" ? 1 : 0]
+            eventQueue.async { [self] in _ = event(["type": "error", "code": code, "quality": quality]); _exit(1) }
+        }
     }
 }
 let helper = Helper(port: port, token: token, sessionID: sessionID)

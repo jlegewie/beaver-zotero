@@ -70,8 +70,8 @@ await Zotero.Beaver.voiceHarness.saveRecording("/absolute/path/voice-test.wav");
 ```
 
 The retention bound is 120 seconds. Saving clears the retained buffers. A fresh activation
-also replaces them. No backend connection or transcription occurs: this harness uses the
-scripted transcription adapter to acknowledge completion. Native recording/metrics/export
+also replaces them. No backend connection or transcription occurs: this harness uses a fake batch adapter after the controller’s energy gate.
+Short or silent captures finish with `no_speech`. Native recording/metrics/export
 live in `NativeCaptureHarness`, composed with the synthetic harness around one shared
 `VoiceService`. Session IDs select the capture adapter; a native activation does not enable
 subsequent synthetic sessions. Do not log or publish recordings.
@@ -100,15 +100,15 @@ Authenticated malformed messages fail that lease. No request content reaches hos
 Each body carries `version: 1` and `sessionId`. Helper event messages have contiguous
 `eventSequence` starting at zero:
 
-| Type              | Additional fields                                               |
-| ----------------- | --------------------------------------------------------------- |
-| `hello`           | `helperVersion: 1`, diagnostic process `pid`                    |
-| `permission`      | `status: not_determined / granted / denied / restricted`        |
-| `permission_done` | setup-only terminal permission status; no capture               |
-| `ready`           | `format: {encoding: pcm_s16le, sampleRate: 16000, channels: 1}` |
-| `frame`           | contiguous audio `sequence`, `sampleCount`, base64 `pcm`        |
-| `error`           | a named capture error `code`                                    |
-| `done`            | total `frameCount`, `sampleCount` after all frames              |
+| Type              | Additional fields                                                              |
+| ----------------- | ------------------------------------------------------------------------------ |
+| `hello`           | `helperVersion: 2`, diagnostic process `pid`                                   |
+| `permission`      | `status: not_determined / granted / denied / restricted`                       |
+| `permission_done` | setup-only terminal permission status; no capture                              |
+| `ready`           | `format: {encoding: pcm_s16le, sampleRate: 16000, channels: 1}`                |
+| `frame`           | contiguous audio `sequence`, `sampleCount`, base64 `pcm`, cumulative `quality` |
+| `error`           | a named capture error `code`, cumulative `quality`                             |
+| `done`            | total `frameCount`, `sampleCount` after all frames                             |
 
 Control requests have `type: control` and their own contiguous `sequence`. They do not
 share the event upload queue. Every successful response contains the session envelope
@@ -127,11 +127,20 @@ finalization to 10 seconds. App/window/identity/plugin lifecycle invalidates the
 lease; the helper receives cancellation at its next contact or expires independently.
 
 The audio tap copies into a bounded input queue (2 MiB), then performs arithmetic channel
-averaging and stateful AVAudioConverter conversion on a serial queue. The event queue
+averaging, bounded gain control/peak limiting, and stateful AVAudioConverter conversion on a serial queue.
+Gain leaves ordinary speech unchanged, boosts quiet speech by at most 4×, and avoids amplifying
+near-silence. A fast attenuation/slow recovery limiter targets 0.85 peak before resampling.
+Clipping diagnostics measure the input before gain control; software cannot repair already
+clipped microphone audio. Frames and errors carry cumulative `quality` fields: `inputPeak`,
+`clippedSamples`, and `discontinuityCount`. The adapter validates these and emits portable quality
+events. `nativeState()` exposes the counters and a clipping warning with recovery guidance.
+Helper version 2 is required; rebuild older development helpers before using this adapter. The event queue
 retains at most 160,000 PCM bytes. Overflow fails instead of dropping speech. Finish stops
 the engine, drains admitted input, signals end-of-stream to the converter, flushes the last
 short frame, uploads it, and only then sends `done`. A device configuration change fails
-with `discontinuity`, requiring a fresh activation.
+with `discontinuity`, requiring a fresh activation. Noncontiguous audio sample timestamps also
+increment that counter and fail capture. The controller accumulates the received PCM into a
+bounded 120-second batch buffer; the local event queue remains a separate transport bound.
 
 ## Verification
 

@@ -139,7 +139,7 @@ it("invalidates granted permission on same-path registration without opening ano
     const token = launch[launch.indexOf("--token") + 1];
     expect(launch).toContain("--permission-only");
     for (const [eventSequence, event] of [
-        { type: "hello", helperVersion: 1 },
+        { type: "hello", helperVersion: 2 },
         { type: "permission", status: "granted" },
         { type: "permission_done", status: "granted" },
     ].entries()) {

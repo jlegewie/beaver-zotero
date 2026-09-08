@@ -128,7 +128,11 @@ export class NativeCaptureHarness {
             state,
             permission: this.native.permission,
             metrics: { ...this.metrics },
-            help: state.error ? microphoneHelp(state.error.code) : null,
+            help: state.error
+                ? microphoneHelp(state.error.code)
+                : state.clipping
+                  ? "Your microphone is clipping. Lower the microphone input level or move farther away."
+                  : null,
             retainedBytes: this.retainedBytes,
         };
     }

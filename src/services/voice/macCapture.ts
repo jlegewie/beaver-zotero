@@ -2,6 +2,8 @@ import {
     VOICE_FORMAT,
     VOICE_LIMITS,
     VOICE_VERSION,
+    emptyVoiceQuality,
+    validVoiceQuality,
     type CaptureEvent,
     type VoiceCapture,
     type VoiceClock,
@@ -136,6 +138,7 @@ class MacCapture implements VoiceCapture {
     private stopping = false;
     private tail = false;
     private sequence = 0;
+    private quality = emptyVoiceQuality();
     private sampleCount = 0;
     private controlSequence = 0;
     private eventSequence = 0;
@@ -231,6 +234,21 @@ class MacCapture implements VoiceCapture {
             if (!this.dead) this.watch();
         }, MAC_VOICE_LIMITS.heartbeatMs);
     }
+    private receiveQuality(value: unknown): void {
+        const quality = value as ReturnType<typeof emptyVoiceQuality>;
+        if (!validVoiceQuality(quality, this.quality))
+            throw new Error("quality");
+        this.quality = {
+            inputPeak: quality.inputPeak,
+            clippedSamples: quality.clippedSamples,
+            discontinuityCount: quality.discontinuityCount,
+        };
+        this.emit({
+            ...this.session,
+            type: "quality",
+            quality: { ...this.quality },
+        });
+    }
     receive(m: any): VoiceHttpResponse {
         if (this.dead || !this.started)
             return { status: 403, body: { command: "cancel" } };
@@ -249,7 +267,7 @@ class MacCapture implements VoiceCapture {
                 throw new Error("event_order");
             switch (m.type) {
                 case "hello":
-                    if (this.hello || m.helperVersion !== 1)
+                    if (this.hello || m.helperVersion !== 2)
                         throw new Error("hello");
                     this.hello = true;
                     this.lastControl = this.host.now();
@@ -320,6 +338,15 @@ class MacCapture implements VoiceCapture {
                         )
                     )
                         throw new Error("frame");
+                    if (
+                        this.sampleCount + m.sampleCount >
+                        VOICE_LIMITS.bufferBytes / 2
+                    ) {
+                        this.fail("duration_limit");
+                        break;
+                    }
+                    this.receiveQuality(m.quality);
+                    if (this.dead) break;
                     const pcm = this.host.decode(m.pcm);
                     if (pcm.length !== m.sampleCount * 2)
                         throw new Error("pcm");
@@ -355,6 +382,7 @@ class MacCapture implements VoiceCapture {
                     };
                 case "error":
                     if (!nativeErrors.has(m.code)) throw new Error("error");
+                    this.receiveQuality(m.quality);
                     this.fail(m.code);
                     break;
                 default:

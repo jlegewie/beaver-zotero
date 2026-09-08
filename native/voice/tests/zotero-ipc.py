@@ -27,15 +27,16 @@ try:
     # Authorization copied directly into this local test process, never printed.
     token=rdp('return JSON.stringify({token:Zotero.Beaver.voiceNative.capture.active.token});')['token']
     envelope={'version':1,'sessionId':'ipc-test'}
-    assert b' 403 ' in req({**envelope,'type':'hello','helperVersion':1,'eventSequence':0})
+    assert b' 403 ' in req({**envelope,'type':'hello','helperVersion':2,'eventSequence':0})
     assert b' 400 ' in req({},'Origin: https://example.com\r\n')
     assert b' 400 ' in req({},raw=f'POST /voice HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: 9999\r\n\r\n'.encode())
     auth=f'Authorization: Bearer {token}\r\n'
     def event(kind,seq,**fields):
-        response=req({**envelope,'type':kind,'eventSequence':seq,**fields},auth)
+        quality={'quality': {'inputPeak':0,'clippedSamples':0,'discontinuityCount':0}} if kind in ['frame','error'] else {}
+        response=req({**envelope,'type':kind,'eventSequence':seq,**quality,**fields},auth)
         assert b' 200 ' in response,response[:100]
         return response
-    event('hello',0,helperVersion=1)
+    event('hello',0,helperVersion=2)
     event('permission',1,status='granted')
     event('ready',2,format={'encoding':'pcm_s16le','sampleRate':16000,'channels':1})
     import base64
@@ -43,7 +44,7 @@ try:
     rdp('Zotero.__voiceCapture.finish(); return JSON.stringify({ok:true});')
     event('frame',4,sequence=1,sampleCount=37,pcm=base64.b64encode(bytes(74)).decode())
     event('done',5,frameCount=2,sampleCount=1637)
-    assert rdp('return JSON.stringify(Zotero.__voiceEvents);')==['ready','frame','frame']
+    assert rdp('return JSON.stringify(Zotero.__voiceEvents);')==['ready','quality','frame','quality','frame']
     print('PASS real Zotero socket: fragmented requests, denied token/origin/oversize, handshake, PCM, tail, done')
 finally:
     rdp('Zotero.__voiceCapture.dispose(); Zotero.Beaver.voiceNative.capture.host.launch=Zotero.__voiceSavedLaunch; delete Zotero.__voiceCapture; delete Zotero.__voiceSavedLaunch; delete Zotero.__voiceEvents; return JSON.stringify({ok:true});')
