@@ -202,9 +202,9 @@ const ApiKeysSection: React.FC = () => {
                         <span className="font-medium">Choose a capable model.</span>
                         {' '}Beaver plans, calls tools, and reads long documents. Small or older
                         models often produce poor results. Pick a model scoring at
-                        least <span className="font-medium">30</span> on the{' '}
+                        least <span className="font-medium">26</span> on the{' '}
                         <ExternalLink href={INTELLIGENCE_INDEX_URL}>Artificial Analysis Intelligence Index</ExternalLink>.
-                        {' '}We recommend a score of <span className="font-medium">38</span> or higher for the best experience.
+                        {' '}We recommend a score of <span className="font-medium">35</span> or higher for the best experience.
                     </span>
                 </div>
 

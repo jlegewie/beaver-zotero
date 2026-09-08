@@ -239,8 +239,8 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                         className="chat-input text-base font-color-primary"
                     />
                     <span className="text-sm font-color-tertiary">
-                        Small or older models struggle with Beaver's tools. Aim for 30+ on the{' '}
-                        <ExternalLink href={INTELLIGENCE_INDEX_URL}>Intelligence Index</ExternalLink>, 38+ for a good experience.
+                        Small or older models struggle with Beaver's tools. Aim for 26+ on the{' '}
+                        <ExternalLink href={INTELLIGENCE_INDEX_URL}>Intelligence Index</ExternalLink>, 35+ for a good experience.
                     </span>
                 </label>
 
