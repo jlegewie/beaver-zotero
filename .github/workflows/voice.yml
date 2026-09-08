@@ -1,0 +1,33 @@
+name: Native voice
+on:
+    pull_request:
+        paths:
+            - "native/voice/**"
+            - "src/services/voice/**"
+            - "tests/unit/voice/**"
+            - "scripts/pack-xpi.mjs"
+            - "zotero-plugin.config.ts"
+            - ".github/workflows/voice.yml"
+    workflow_dispatch:
+permissions:
+    contents: read
+jobs:
+    macos:
+        strategy:
+            matrix:
+                runner: [macos-15, macos-15-intel]
+        runs-on: ${{ matrix.runner }}
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+            - run: native/voice/macos/build.sh
+            - run: native/voice/macos/test.sh
+            - run: node native/voice/macos/package.mjs --development
+            - run: python3 native/voice/macos/Tests/packaging.py
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: voice-development-${{ matrix.runner }}
+                  path: addon/content/voice/
+                  if-no-files-found: error

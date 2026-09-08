@@ -294,8 +294,8 @@ async function onStartup() {
 
         // Voice is optional: its initialization must not prevent the rest of Beaver loading.
         try {
+            if (Zotero.isMac) addon.voiceNative = new NativeVoice();
             if (__env__ === 'development') {
-                if (Zotero.isMac) addon.voiceNative = new NativeVoice();
                 addon.voiceHarness = new DevelopmentVoiceHarness(undefined, addon.voiceNative);
                 addon.voice = addon.voiceHarness.service;
             } else {

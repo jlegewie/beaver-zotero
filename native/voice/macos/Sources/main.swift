@@ -3,9 +3,21 @@ import AVFoundation
 
 private var now: Double { ProcessInfo.processInfo.systemUptime }
 
+let args = CommandLine.arguments
+
+// Metadata inspection never initializes AppKit or requests microphone access.
+if args.count == 2 && args[1] == "--voice-info" {
+    #if VOICE_TESTING
+    let testing = true
+    #else
+    let testing = false
+    #endif
+    print(#"{"protocolVersion":\#(voiceProtocolVersion),"helperVersion":\#(voiceHelperVersion),"testing":\#(testing)}"#)
+    exit(0)
+}
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
-let args = CommandLine.arguments
 func argument(_ name: String) -> String? {
     guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
     return args[i + 1]
@@ -87,7 +99,7 @@ final class Helper {
 
     func post(_ fields: [String: Any]) -> String? {
         var envelope = fields
-        envelope["version"] = 1; envelope["sessionId"] = sessionID
+        envelope["version"] = voiceProtocolVersion; envelope["sessionId"] = sessionID
         guard let data = try? JSONSerialization.data(withJSONObject: envelope), data.count <= 6144 else { return nil }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"; request.httpBody = data
@@ -97,7 +109,7 @@ final class Helper {
         guard let (data, response) = http.execute(request) else { return nil }
         if response.statusCode != 200 { return "cancel" }
         guard let reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              reply["version"] as? Int == 1, reply["sessionId"] as? String == sessionID,
+              reply["version"] as? Int == voiceProtocolVersion, reply["sessionId"] as? String == sessionID,
               let command = reply["command"] as? String,
               ["continue", "finish", "cancel", "exit"].contains(command) else { return nil }
         return command
@@ -125,7 +137,7 @@ final class Helper {
         }
         self.watchdog = watchdog; watchdog.resume()
         eventQueue.async { [self] in
-            guard event(["type": "hello", "helperVersion": 2, "pid": getpid()]) == "continue" else { act("cancel"); return }
+            guard event(["type": "hello", "helperVersion": voiceHelperVersion, "pid": getpid()]) == "continue" else { act("cancel"); return }
             state.touchControl()
             startControl()
             DispatchQueue.main.async { self.permission() }

@@ -1,3 +1,4 @@
+import nativeContract from "../../../native/voice/macos/contract.json";
 import {
     VOICE_FORMAT,
     VOICE_LIMITS,
@@ -69,6 +70,10 @@ export class MacCaptureService {
         private readonly host: MacCaptureHost,
         readonly port: number,
     ) {}
+
+    get busy(): boolean {
+        return !!this.active;
+    }
 
     createCapture(
         session: VoiceEnvelope,
@@ -267,7 +272,7 @@ class MacCapture implements VoiceCapture {
                 throw new Error("event_order");
             switch (m.type) {
                 case "hello":
-                    if (this.hello || m.helperVersion !== 2)
+                    if (this.hello || m.helperVersion !== nativeContract.helperVersion)
                         throw new Error("hello");
                     this.hello = true;
                     this.lastControl = this.host.now();

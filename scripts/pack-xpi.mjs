@@ -2,6 +2,7 @@ import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
+import { checkVoicePackage } from "../native/voice/macos/check-package.mjs";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const pkg = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8"));
@@ -109,6 +110,7 @@ async function collectFiles(dir) {
 }
 
 async function pack() {
+    checkVoicePackage(addonDir, process.env.NODE_ENV === "development", process.env.VOICE_PACKAGE_REQUIRED === "1");
     const addonStats = await stat(addonDir).catch(() => null);
     if (!addonStats?.isDirectory()) {
         throw new Error(`Cannot find scaffold addon directory: ${addonDir}`);

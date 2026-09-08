@@ -22,6 +22,7 @@ function recordingFormat() {
 
 export type NativeCaptureHost = Pick<
     NativeVoice,
+    | "ensurePackagedHelper"
     | "available"
     | "permission"
     | "prepareMicrophone"
@@ -62,8 +63,34 @@ export class NativeCaptureHarness {
     }
 
     async start(win: Window, retainAudio = false) {
-        if (!this.native.available)
-            throw new Error("Configure the development helper first");
+        if (
+            this.settingUp ||
+            isBusyPhase(this.service.controller.getSnapshot().phase)
+        )
+            return { error: { code: "busy" as const } };
+        if (!this.native.available) {
+            this.settingUp = true;
+            try {
+                await this.native.ensurePackagedHelper();
+                if (!this.native.available)
+                    throw new Error("Native helper unavailable");
+            } catch (error) {
+                Zotero.logError(
+                    error instanceof Error ? error : new Error(String(error)),
+                );
+                return {
+                    error: { code: "unavailable" as const },
+                    help:
+                        error instanceof Error &&
+                        error.message ===
+                            "Voice capture is unsupported on this system"
+                            ? error.message
+                            : microphoneHelp("unavailable"),
+                };
+            } finally {
+                this.settingUp = false;
+            }
+        }
         // Guard before setup or changing the recording buffers of an existing session.
         if (
             this.settingUp ||

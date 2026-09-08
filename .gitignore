@@ -66,3 +66,6 @@ docs-zotero
 # BeaverExtract benchmarks
 /tests/live/.bench-results/
 /.bench-corpus/
+
+# Opaque native helper release assets
+/addon/content/voice/
