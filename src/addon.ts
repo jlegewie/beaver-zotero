@@ -10,7 +10,13 @@ import { BackgroundExtractor } from "./services/backgroundExtractor";
 import type { ReconcilerService } from "./services/backgroundProcessing/reconciler";
 import type { NewItemWatcher } from "./services/backgroundProcessing/newItemWatcher";
 
+import type { VoiceService } from './services/voice/voiceService';
+import type { DevelopmentVoiceHarness } from './services/voice/developmentHarness';
+
 class Addon {
+    public voiceNative?: import("./services/voice/nativeVoice").NativeVoice;
+    public voice?: VoiceService;
+    public voiceHarness?: DevelopmentVoiceHarness;
     public data: {
         alive: boolean;
         config: typeof config;

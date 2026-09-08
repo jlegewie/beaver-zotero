@@ -93,6 +93,9 @@ declare namespace Zotero {
     let __beaverTableWriteLocks: Map<string, Promise<unknown>> | undefined;
 
     namespace Beaver {
+        const voiceNative: import("../src/services/voice/nativeVoice").NativeVoice | undefined;
+        const voice: import("../src/services/voice/voiceService").VoiceService | undefined;
+        const voiceHarness: import("../src/services/voice/developmentHarness").DevelopmentVoiceHarness | undefined;
         const pluginVersion: string;
 
         const data: {

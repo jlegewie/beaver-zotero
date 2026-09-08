@@ -96,7 +96,7 @@ webpack-side caller via a callback or wrapper.
 ## `packages/agent-core` — the client-agnostic core
 
 The wire protocol and its type closure (`protocol/`, `transport/`, `run-state/`, `types/`,
-`agents/`, `citations/`, `identity/`, `platform/`, `extract/`) live here and are imported as
+`agents/`, `citations/`, `identity/`, `platform/`, `extract/`, `voice/`) live here and are imported as
 `@beaver/agent-core/<subpath>` from `src/`, `react/`, and `tests/`.
 
 - **Import by package specifier, never by relative path**, and never re-add a copy of a
@@ -111,13 +111,16 @@ The wire protocol and its type closure (`protocol/`, `transport/`, `run-state/`,
   standalone and runs `verify-program.mjs`, which fails if the closure drifts from the
   tsconfig `files` list, reaches outside the package, or leaves an orphan file. **Adding a
   file means adding it to `files` in `packages/agent-core/tsconfig.json`**, reachable from
-  `agentProtocol.ts`.
+  an entry point in `packages/agent-core/verify-program.mjs`.
 - `packages/agent-core/package.json` must keep `"type": "module"` — without it, Node-native
   loaders treat the package as CommonJS.
 - New protocol / run-state / transport code belongs in this package, not in `src/`/`react/`.
 - MuPDF worker code (`src/beaver-extract/worker/**`) may import **only**
   `@beaver/agent-core/extract/*`, and may not otherwise leave `src/beaver-extract`
   (lint-enforced).
+
+Voice contracts, ownership rules, and the fake-session verification recipe are documented in
+[`docs/voice-protocol.md`](docs/voice-protocol.md).
 
 ## `packages/agent-ui` — the shared React layer
 

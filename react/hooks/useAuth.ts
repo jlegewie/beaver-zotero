@@ -74,6 +74,11 @@ export function useAuth() {
         const newUserId = newSession?.user?.id ?? null;
         const currentUserId = currentSession?.user?.id ?? null;
 
+        // Revoke voice before deduplication: a sign-out must also cancel pending setup.
+        if (event === 'SIGNED_OUT' || currentUserId !== newUserId) {
+            Zotero.Beaver?.voice?.authChanged(newUserId);
+        }
+
         // --- Deduplicate SIGNED_OUT events ---
         // userAtom derives from sessionAtom, so a null session already means no user.
         if (event === 'SIGNED_OUT' && currentSession === null) {
@@ -196,6 +201,7 @@ export function useAuth() {
     
     const signOut = async () => {
         setLoading(true);
+        Zotero.Beaver?.voice?.authChanged(null);
         const { error } = await supabase.auth.signOut();
         setProfileWithPlan(null);
         setIsProfileLoaded(false);

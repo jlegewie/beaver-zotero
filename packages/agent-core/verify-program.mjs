@@ -169,7 +169,11 @@ if (!parsed.options.lib || nonEsLibs.length > 0) {
 // it edits: the mutation vocabulary is what a client (and the test corpus that
 // pins it) calls to change a stored table, and nothing inside the package
 // applies a mutation.
+// Voice is a standalone session API, independent of the agent-run protocol.
+// Its controller and injectable fakes are separate roots consumed by hosts/tests.
 const entryPaths = [
+  "src/voice/controller.ts",
+  "src/voice/fakes.ts",
   "src/globals.d.ts",
   "src/protocol/agentProtocol.ts",
   "src/protocol/wordProtocol.ts",

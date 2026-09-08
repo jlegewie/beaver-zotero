@@ -9,6 +9,9 @@ import { DocumentCache } from "./services/documentCache";
 import { BackgroundExtractor } from "./services/backgroundExtractor";
 import { ReconcilerService } from "./services/backgroundProcessing/reconciler";
 import { NewItemWatcher } from "./services/backgroundProcessing/newItemWatcher";
+import { createVoiceService } from "./services/voice/voiceService";
+import { NativeVoice } from "./services/voice/nativeVoice";
+import { DevelopmentVoiceHarness } from "./services/voice/developmentHarness";
 import { uiManager, restoreReaderSidebarWidthHandler } from "../react/ui/UIManager";
 import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
@@ -301,6 +304,20 @@ async function onStartup() {
         addon.citationService = citationService;
         ztoolkit.log("CitationService initialized successfully");
 
+        // Voice is optional: its initialization must not prevent the rest of Beaver loading.
+        try {
+            if (__env__ === 'development') {
+                if (Zotero.isMac) addon.voiceNative = new NativeVoice();
+                addon.voiceHarness = new DevelopmentVoiceHarness(undefined, addon.voiceNative);
+                addon.voice = addon.voiceHarness.service;
+            } else {
+                addon.voice = createVoiceService();
+            }
+        } catch {
+            disposeVoice();
+            ztoolkit.log('Voice initialization failed; continuing without voice');
+        }
+
         // -------- Register keyboard shortcuts --------
         BeaverUIFactory.registerShortcuts();
 
@@ -448,6 +465,11 @@ async function onMainWindowUnload(win: Window): Promise<void> {
     ztoolkit.log("onMainWindowUnload: Starting cleanup");
 
     try {
+        try {
+            addon.voice?.windowUnloaded(win);
+        } catch {
+            ztoolkit.log('Voice window cleanup failed; continuing cleanup');
+        }
         // Close first: later steps can await, and the window may be gone when
         // this handler returns. Read quitting and the window count here — the
         // later scope check runs after those awaits.
@@ -849,6 +871,14 @@ function unregisterMainWindowFtl(win: Window): void {
     if (link) link.remove();
 }
 
+function disposeVoice(): void {
+    try { addon.voice?.dispose(); } catch { ztoolkit.log('Voice disposal failed'); }
+    try { addon.voiceNative?.dispose(); } catch { ztoolkit.log('Native voice disposal failed'); }
+    addon.voiceNative = undefined;
+    addon.voice = undefined;
+    addon.voiceHarness = undefined;
+}
+
 /**
  * Plugin shutdown handler.
  * 
@@ -862,6 +892,7 @@ async function onShutdown(): Promise<void> {
     ztoolkit.log("onShutdown: Running fallback cleanup");
     
     try {
+        disposeVoice();
         const isAppShuttingDown = Services?.startup?.shuttingDown ?? false;
         if (!isAppShuttingDown) {
             const openWindows = Zotero.getMainWindows?.().filter(w => w && !w.closed) ?? [];
