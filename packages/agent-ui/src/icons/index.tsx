@@ -108,3 +108,4 @@ export { default as ImportIcon } from './ImportIcon';
 export { default as HelpCircleIcon } from './HelpCircleIcon';
 export { default as HandIcon } from './HandIcon';
 export { default as SecurityWarningIcon } from './SecurityWarningIcon';
+export { default as MicIcon } from "./MicIcon";

@@ -155,6 +155,7 @@
     "./src/icons/StarIcon.tsx",
     "./src/icons/StarSolidIcon.tsx",
     "./src/icons/StopIcon.tsx",
+    "./src/icons/MicIcon.tsx",
     "./src/icons/StopStrokeIcon.tsx",
     "./src/icons/SyncIcon.tsx",
     "./src/icons/TagIcon.tsx",

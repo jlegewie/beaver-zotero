@@ -423,7 +423,7 @@
 /* Icon-only controls are square. `Icon` defaults to 1em, so an icon that is
  * not given an explicit size follows the button's font-size. */
 .beaver-root .composer-controls button.composer-add-sources,
-.beaver-root .composer-controls button.composer-web-search {
+.beaver-root .composer-controls button.composer-icons {
     width: 22px;
     height: 22px;
     padding: 0;
@@ -431,7 +431,7 @@
 }
 
 /* Web search takes its icon size from the button, per the rule above. */
-.beaver-root button.composer-web-search {
+.beaver-root button.composer-icons {
     font-size: 15px;
 }
 
@@ -624,3 +624,9 @@
 .beaver-root .tooltip-fade-in-top {
     animation: tooltipFadeInTop 0.2s ease-in-out forwards;
 }
+
+.composer-voice-meter { display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; }
+.composer-voice-bars { display: flex; flex: 1; min-width: 0; height: 26px; overflow: hidden; justify-content: flex-end; align-items: center; gap: 2px; }
+.composer-voice-bars > span { flex: 0 0 2px; background: currentColor; border-radius: 1px; }
+.composer-voice-time { font-variant-numeric: tabular-nums; font-size: 11px; }
+.composer-voice-feedback { font-size: 11px; color: var(--font-color-secondary); padding: 0 8px; }

@@ -20,6 +20,7 @@ import { clearPref } from '../../src/utils/prefs';
 export function clearUserScopedPrefs(): void {
     // Identity (callers may immediately re-set userId/userEmail to the new
     // authenticated user — see useProfileSync.ts)
+    clearPref('voice.language');
     clearPref('userId');
     clearPref('userEmail');
     clearPref('currentPlanId');

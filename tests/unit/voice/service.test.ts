@@ -1,3 +1,8 @@
+import { v4 as uuidv4 } from "uuid";
+vi.mock("uuid", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("uuid")>();
+    return { ...actual, v4: vi.fn(actual.v4) };
+});
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { VoiceService } from "../../../src/services/voice/voiceService";
 import {
@@ -316,12 +321,99 @@ it("releases owner listeners if allocating a session fails synchronously", () =>
     const harness = createHarness(),
         win = hostWindow();
     harness.run({ command: "enable", enabled: true });
-    (Zotero.Utilities as any).randomString = () => {
+    vi.mocked(uuidv4).mockImplementationOnce(() => {
         throw new Error("Allocation failed");
-    };
+    });
     expect(() =>
         harness.service.start(win as unknown as Window, output, auth, "user"),
     ).toThrow("Allocation failed");
     expect(win.listenerCount()).toBe(0);
     expect(harness.service.controller.getSnapshot().phase).toBe("idle");
+});
+
+it("exports bounded content-free diagnostics and unique output identities", async () => {
+    const h = createHarness();
+    h.run({ command: "enable", enabled: true });
+    expect(h.service.createOutputId()).not.toBe(h.service.createOutputId());
+    h.start("user", auth);
+    await settle();
+    h.run({ command: "frame" });
+    h.run({ command: "frame" });
+    h.run({ command: "frame" });
+    h.run({ command: "transcript", text: "Private dictation" });
+    h.run({ command: "finish" });
+    await settle();
+    const diagnostics = h.service.diagnostics();
+    expect(diagnostics.phase).toBe("completed");
+    expect(diagnostics.capturedMs).toBe(340);
+    expect(JSON.stringify(diagnostics)).not.toMatch(
+        /Private|credential|pcm|vocabulary|user/,
+    );
+    expect(Object.keys(diagnostics)).toHaveLength(7);
+});
+
+it.each(["rejected", "throws"])(
+    "clears upload callbacks when start %s",
+    (failure) => {
+        const win = hostWindow();
+        const service = new VoiceService(clock);
+        const context = {
+            baseUrl: "http://localhost",
+            validate: () => !win.closed,
+        };
+        if (failure === "throws") {
+            vi.spyOn(service.controller, "start").mockImplementationOnce(() => {
+                throw new Error("Start failed");
+            });
+            expect(() =>
+                service.start(
+                    win as unknown as Window,
+                    output,
+                    auth,
+                    "user",
+                    undefined,
+                    context,
+                ),
+            ).toThrow("Start failed");
+        } else {
+            expect(
+                service.start(
+                    win as unknown as Window,
+                    output,
+                    auth,
+                    "user",
+                    undefined,
+                    context,
+                ),
+            ).toEqual({ error: { code: "disabled" } });
+        }
+        expect(service.uploadContext).toBeUndefined();
+        expect((service as any).auth).toBeUndefined();
+        expect(win.listenerCount()).toBe(0);
+    },
+);
+
+it("preserves the active upload callback when another start is busy", () => {
+    const h = createHarness();
+    h.run({ command: "enable", enabled: true });
+    const context = { baseUrl: "http://localhost", validate: () => true };
+    h.service.start(
+        hostWindow() as unknown as Window,
+        output,
+        () => new Promise(() => {}),
+        "user",
+        undefined,
+        context,
+    );
+    expect(
+        h.service.start(
+            hostWindow() as unknown as Window,
+            output,
+            auth,
+            "user",
+        ),
+    ).toEqual({ error: { code: "busy" } });
+    expect(h.service.uploadContext).toBe(context);
+    h.service.dispose();
+    expect(h.service.uploadContext).toBeUndefined();
 });

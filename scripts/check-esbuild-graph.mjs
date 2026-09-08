@@ -78,6 +78,8 @@ const PRODUCTION_VOICE_INPUTS = [
     'packages/agent-core/src/voice/contracts.ts',
     'packages/agent-core/src/voice/controller.ts',
     'src/services/voice/voiceService.ts',
+    'src/services/voice/batchTranscription.ts',
+    'src/services/voice/productVoice.ts',
     'src/services/voice/helperInstaller.ts',
     'src/services/voice/voiceProcess.ts',
     'src/services/voice/nativeVoice.ts',

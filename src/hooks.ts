@@ -1,3 +1,4 @@
+import { productVoiceAdapters } from "./services/voice/productVoice";
 import { version } from "../package.json";
 import { initLocale } from "./utils/locale";
 import { createZToolkit } from "./utils/ztoolkit";
@@ -296,10 +297,10 @@ async function onStartup() {
         try {
             if (Zotero.isMac) addon.voiceNative = new NativeVoice();
             if (__env__ === 'development') {
-                addon.voiceHarness = new DevelopmentVoiceHarness(undefined, addon.voiceNative);
+                addon.voiceHarness = new DevelopmentVoiceHarness(undefined, addon.voiceNative, productVoiceAdapters(addon.voiceNative, () => addon.voice?.uploadContext));
                 addon.voice = addon.voiceHarness.service;
             } else {
-                addon.voice = createVoiceService();
+                addon.voice = createVoiceService(productVoiceAdapters(addon.voiceNative, () => addon.voice?.uploadContext));
             }
         } catch {
             disposeVoice();
