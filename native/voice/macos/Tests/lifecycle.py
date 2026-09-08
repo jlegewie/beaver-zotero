@@ -40,7 +40,9 @@ class Scenario:
                     else:
                         assert data['eventSequence'] == len(scenario.events)
                         scenario.events.append(data)
-                        if data['type'] == 'hello': scenario.pid = data['pid']
+                        if data['type'] == 'hello':
+                            assert data['helperVersion'] == 2
+                            scenario.pid = data['pid']
                     if scenario.behavior == 'audio-stall' and data['type'] == 'frame': time.sleep(2.5)
                     if scenario.behavior == 'control-stall' and data['type'] == 'control': time.sleep(4)
                     command = scenario.command
@@ -102,6 +104,8 @@ for mode, behavior, error in [
     if mode in ['startup-discontinuity', 'unrequested']:
         assert not any(e['type']=='frame' for e in s.events), 'Capture started after invalid setup'
     if error: assert any(e.get('code')==error for e in s.events), (mode,s.events)
+    if error == 'discontinuity':
+        assert next(e for e in s.events if e.get('code') == error)['quality']['discontinuityCount'] >= 1
     if behavior == 'finish' and mode == 'fixture':
         frames=[e for e in s.events if e['type']=='frame']; done=s.events[-1]
         assert done['type']=='done'
@@ -109,6 +113,9 @@ for mode, behavior, error in [
         assert done['sampleCount']==sum(e['sampleCount'] for e in frames)
         for i,frame in enumerate(frames):
             assert frame['sequence']==i
+            assert frame['quality']['inputPeak'] > 0
+            assert frame['quality']['clippedSamples'] == 0
+            assert frame['quality']['discontinuityCount'] == 0
             assert len(base64.b64decode(frame['pcm'],validate=True))==frame['sampleCount']*2
             if i<len(frames)-1: assert frame['sampleCount']==1600
         assert any(base64.b64decode(e['pcm']).strip(b'\x00') for e in frames)

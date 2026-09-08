@@ -1,154 +1,157 @@
 # Voice protocol v1
 
-Voice support currently provides contracts, a session controller and a development-only
-synthetic harness, plus a macOS native capture adapter and a local capture harness.
-Production activation remains feature-disabled (`disabled`); transcription, editor insertion,
-shortcuts, billing, and submission are not enabled. Native source, IPC, and development
-verification are documented in [native voice capture](../native/voice/README.md).
+Voice support provides a portable batch session controller, a synthetic development harness,
+and a macOS capture adapter with a local capture harness. Production activation remains
+feature-disabled. Backend transcription, compression/upload, vocabulary collection, preferences,
+editor insertion, shortcuts, billing, and submission are not enabled. See
+[native capture](../native/voice/README.md) for build and IPC verification.
 
 ## Ownership and lifecycle
 
-`VoiceController` is portable (`@beaver/agent-core/voice/controller`). Create exactly one
-per application instance. In Zotero, `Zotero.Beaver.voice` owns it in the plugin realm.
-Views can subscribe to the controller and use `projectVoice` to identify the one originating
-window/output. React hooks and composer-specific locking/recording fields are deferred until
-they have a UI consumer. Outputs are immutable `{kind: "composer" | "draft", id}` identities. Only
-`ownsOutput` may apply transcript changes; other mounted views observe the busy state.
-The controller does not write any editor or chat store.
+Create exactly one `VoiceController` (`@beaver/agent-core/voice/controller`) per application
+instance. In Zotero, `Zotero.Beaver.voice` owns it in the plugin realm. Views subscribe and use
+`projectVoice` to identify the originating window/output. Only `ownsOutput` may insert a result;
+other mounted views observe the busy state. Outputs are immutable `{kind: "composer" | "draft",
+id}` identities. The controller never writes editor or chat state.
 
 ```mermaid
 stateDiagram-v2
     [*] --> idle
     idle --> starting: enabled + available + lock acquired
-    starting --> listening: auth + transport + capture ready
+    starting --> listening: auth + capture ready
     starting --> canceled: finish / cancel / owner lost
     starting --> error: setup failure / startup deadline
     listening --> finalizing: finish
     listening --> canceled: cancel / owner lost
-    listening --> error: capture / network / bounds / duration
-    finalizing --> completed: capture flushed + queue drained + end_audio + complete
+    listening --> error: capture failure / duration bound
+    finalizing --> completed: capture flushed + energy gate + batch result
     finalizing --> canceled: cancel / owner lost
-    finalizing --> error: failure / finalization deadline
+    finalizing --> error: no speech / failure / deadline
     completed --> starting: fresh activation
     canceled --> starting: fresh activation
     error --> starting: fresh activation
 ```
 
-Ready means setup succeeded, not that audio has flowed. `audioStarted` becomes true on the
-first valid frame, including silence. Silence never implies denied permission. Finishing while
-starting cancels: late permission/setup completion must require a new activation.
-`start()` returns the allocated session ID, not a readiness guarantee. The snapshot is
-authoritative even if a synchronous observer cancels that session before `start()` returns. Repeated
-finish/cancel and old-session commands are harmless. Session IDs must be unique per activation.
+Ready means setup succeeded, not that audio flowed. `audioStarted` becomes true on the first
+valid frame, including silence. Silence never implies denied permission. Finishing while starting
+cancels; late permission/setup results require fresh activation. `start()` returns the allocated
+session ID, not a readiness guarantee. The snapshot remains authoritative if a synchronous
+observer cancels before `start()` returns. Repeated finish/cancel and old-session commands are
+harmless. Session IDs must be unique per activation.
 
-The Zotero service accepts activation only from a focused window, canceling on its unload or top-level
-blur, and removes those listeners on termination. Main-window cleanup also cancels explicitly.
-Logout/account replacement revokes the session, including while authentication is unresolved;
-a new account must not inherit an earlier activation. Hosts pass the known user ID to `start()`
-so another window reporting the same account during setup does not revoke that activation.
-The expected ID is required, and the resolved credentials must still match it.
-Same-user token refresh does not notify
-the controller of an identity change. Plugin shutdown disposes the service. Timers
-use Gecko's system timer module so closing a window cannot disable a watchdog.
-Permission setup that steals focus cancels activation; granting permission must not silently
-start audio afterward. The user activates again once setup is complete.
+The service accepts activation only from a focused window and cancels on that window's unload
+or top-level blur. Internal focus movement is ignored. Logout/account replacement cancels,
+including while authentication is unresolved. The expected user ID is required at activation;
+resolved credentials must match. Same-user token refresh does not cancel. Credentials are
+reacquired before upload, checked again against the same user, and never stored in public state
+or passed to the native helper. Plugin shutdown disposes the service. System timers remain
+active independently of window realms. Closing the last macOS window cancels its session
+without destroying app-lifetime services.
 
-## Adapter contract
+## Capture and batch adapters
 
-Factories synchronously return an owned handle **before** asynchronous setup. Factory callbacks
-must be associated with the supplied session. Capture `start()` emits `ready` with the negotiated
-format and resolves; it may then emit frames. Transcription `start(credential)` must authenticate
-and establish bounded transport capacity before resolving. Only then is capture created.
-Capture/transcription factories and capability checks are constructor dependencies of the
-service. Production leaves the feature disabled while transcription and installation are unavailable; a compile-time development branch
-constructs the separate plugin-owned `DevelopmentVoiceHarness` with fake adapters. Voice has
-its own package closure roots, independent of the agent-run protocol barrel.
+Factories synchronously return owned handles before asynchronous setup. They must not start
+network work in their constructors. Capture `start()` emits `ready` with the format and resolves;
+frames may follow readiness. `finish()` stops capture, flushes a possible short final frame, and
+resolves only after all callbacks. No frame or quality event may follow its resolution.
 
-Credentials are provided through an injected function, never imported from React into the plugin
-bundle, included in a snapshot, or sent to a native helper.
+The controller copies incoming PCM into a bounded private buffer. No audio leaves the plugin
+while listening. On finish it releases capture, applies the duration/energy gate, refreshes auth,
+and calls `VoiceTranscription.transcribe(recording, credential)` exactly once. `VoiceRecording`
+contains the session envelope, format, total sample count, borrowed PCM, and immutable options.
+The future backend adapter must compress before its authenticated POST and return the corrected
+transcript. Codec, provider, and network details belong in that adapter, not native capture or
+portable state. There is no transcription WebSocket, frame-send method, segment stream, or
+separate completion acknowledgement.
 
-`dispose()` is idempotent, including during setup. It synchronously revokes setup/callbacks,
-stops capture, and initiates closing owned resources. Native adapters must ensure permission
-results cannot restart audio after disposal, and must enforce bounded process termination,
-independent control watchdogs, and parent-death cleanup. Their local IPC and kill/close details
-belong in the adapter. The controller invalidates callbacks before invoking either disposal and
-still disposes the other resource if one throws. Adapters must not silently reconnect or replay.
+`VoiceTranscript` returns `{version, sessionId, text}` or `{version, sessionId, error: {code}}`.
+A valid result atomically sets `committedText` and completes the session. Empty text is valid and
+must not trigger insertion/countdown/submission in consumers. While listening/finalizing there
+is no provisional text. Wrong-session/version or malformed results fail; canceled sessions
+ignore late promise settlements. Failed sessions have no partial transcript. Existing composer
+text remains owned by the editor and must be preserved by the future insertion integration.
 
-Capture `finish()` stops and flushes, resolving only after the final frame callback. No frames
-may follow its resolution. Transcription `send(frame)` must resolve when bounded transport
-capacity is available, not immediately after appending to an unbounded WebSocket buffer.
-The controller drains frames serially; `finish(end_audio)` follows all sends. A separate
-`complete` event acknowledges that all transcript finals were emitted. Resolving `finish()`
-alone does not complete a session. Transport EOF before `complete` is `disconnected`.
+`dispose()` is idempotent, even during setup. Capture revokes callbacks and stops its resources;
+transcription aborts encoding/upload and releases all borrowed bytes. The controller revokes the
+session first, clears timers, zeroes/releases its audio buffer, and disposes both handles even
+if one throws. Adapters must release any derived encoded buffers on disposal and must not retain,
+log, or persist audio by default. No transparent replay/reconnect is permitted.
 
-## Envelopes, frames and ordering
+## Activation options
 
-Every event/control has `{version: 1, sessionId}`. IPC adapters validate unknown input, negotiate
-versions, enforce payload bounds before decoding/allocating, and convert to these typed contracts.
-A mismatched version fails the active session; callbacks belonging to another session are ignored.
-The interfaces specify semantics, not a required HTTP/pipe/WebSocket serialization.
+`VoiceOptions` contains an explicit language (default `en`), provider bias terms, and a larger
+correction vocabulary. The controller copies/freezes both arrays at activation; later selection
+or preference changes cannot alter the utterance's context. Hosts must filter excluded libraries
+before constructing these lists. Each list is bounded to 1,000 nonempty terms and 32,000 UTF-16
+code units; adapters must apply their provider's smaller token/term budget. Library discovery,
+term selection, language preference UI, and backend correction are integration responsibilities.
+Options, credentials, vocabulary, and PCM are absent from snapshots and telemetry.
 
-Audio is **16,000 Hz, mono, signed PCM16 little-endian**, `encoding: "pcm_s16le"`.
-`VoiceFrame` carries `sequence` (zero-based contiguous), `sampleCount`, `format`, and `pcm`
-(`Uint8Array`, exactly two bytes per sample). Frames normally contain 1,600 samples (100 ms).
-Finish permits one shorter, nonempty last frame. Empty tails emit no frame. Gaps, duplicate
-frames, wrong lengths/formats, and frames after a short tail are protocol errors. The controller
-copies bytes synchronously so capture can reuse its buffer, and exposes normalized RMS levels.
-`end_audio` includes the total `frameCount` and `sampleCount` for server-side validation.
+## Frames and quality
 
-Transcript events use a separate zero-based contiguous `sequence`. Duplicate/older sequence
-numbers are ignored; gaps fail. Segments use contiguous zero-based numeric `segmentId`s.
-Only one segment is provisional at a time. Each interim replaces its text. `segment_final`
-commits once and advances the segment; subsequent updates to a committed segment are ignored.
-Text concatenates exactly as delivered, so adapters supply punctuation and inter-segment spacing.
-A segment final never ends recording. `complete` is valid only after end-of-audio, with no
-unfinalized provisional text. Failed/canceled sessions discard provisional text and retain
-committed text for explicit review, never successful submission.
+Every event has `{version: 1, sessionId}`. Capture frame sequences are zero-based and contiguous;
+transcription has no segment identities or sequence counters. IPC adapters validate unknown
+input, negotiate versions, and enforce bounds before decoding/allocating. Wrong-session capture
+callbacks are ignored; a mismatched version fails the active session.
 
-`VoiceControl` defines `finish`, `cancel`, and `end_audio`. Native readiness, permission,
-heartbeat, token/host validation and transport shutdown envelopes are adapter-specific.
-A Windows pipe adapter can map readiness into `ready`, accumulate partial pipe reads into
-bounded frames, flush the last samples before resolving `finish()`, and map device discontinuity
-into the distinct `discontinuity` error. Control-pipe EOF must release its microphone even if
-no audio callback arrives. A macOS adapter can express the same lifecycle over authenticated
-loopback IPC without sharing Windows launch mechanics.
+Audio is **16,000 Hz, mono, signed PCM16 little-endian** (`pcm_s16le`). `VoiceFrame` carries
+`sequence`, `sampleCount`, `format`, and `pcm` (`Uint8Array`, two bytes/sample). Frames normally
+contain 1,600 samples (100 ms). Finish permits one shorter, nonempty tail. Empty tails emit no
+frame. Gaps, duplicates, wrong lengths/formats, early short frames, and frames after a short tail
+are protocol errors. Native IPC keeps its own ordering, backpressure, and watchdogs.
 
-## Limits and errors
+`quality` capture events carry cumulative `inputPeak`, `clippedSamples` (input sample positions
+where any channel approaches full scale), and `discontinuityCount`. Values must be finite,
+nonnegative, and nondecreasing; counts must be safe integers. Snapshots expose immutable quality
+and a session-latched `clipping` flag for warning UI. Counts remain available after termination
+for content-free telemetry. A discontinuity can still fail capture; counting it does not authorize
+silently dropping speech. Silence remains valid audio during capture.
 
-`VOICE_LIMITS` names the v1 client bounds. Backend/native adapters must also enforce their
-corresponding bounds independently; client checks are not an authorization boundary.
+The macOS converter downmixes and applies bounded gain before conversion. It preserves ordinary
+speech levels, avoids boosting near-silence, caps quiet-speech amplification at 4×, and limits
+peaks with headroom for resampling. Input clipping is measured before processing; already-clipped
+microphone audio cannot be repaired. Audio sample timestamps detect missing/repeated input.
+The development native harness exposes clipping recovery text and quality through `nativeState()`.
 
-| Limit | Value |
-|---|---:|
-| Frame samples / bytes | 1,600 / 3,200 |
-| Queued bytes, including in-flight send | 160,000 (5 seconds) |
-| Authentication + transport + capture startup | 30 seconds |
-| Finish + flush + drain + completion | 10 seconds |
-| Listening duration | 120 seconds |
-| Retained transcript characters (UTF-16 code units) | 64,000 |
-| Final segments | 1,000 |
+## Limits and energy gate
 
-Error payloads contain a named `code`, without provider messages, credentials, audio or text:
-`disabled`, `unavailable`, `busy`, `unauthenticated`, `permission_denied`, `device_unavailable`,
-`capture_failed`, `discontinuity`, `transcription_failed`, `disconnected`, `protocol_error`,
-`overflow`, `startup_timeout`, `finalization_timeout`, `duration_limit`.
-Activation rejection returns an error without replacing another session's state. Active-session
-failure disposes resources and preserves committed text. Overflow is an error, never silent loss.
-No audio or transcript is logged or persisted by this layer.
+| Limit                                                  |                                             Value |
+| ------------------------------------------------------ | ------------------------------------------------: |
+| Frame samples / bytes                                  |                                     1,600 / 3,200 |
+| Full recording buffer                                  |                       3,840,000 bytes (120 s PCM) |
+| Authentication + capture startup                       |                                              30 s |
+| Native finish + tail flush                             |                                              10 s |
+| Auth refresh + compression + upload + corrected result |                                              30 s |
+| Listening duration                                     |              120 s, also enforced by sample count |
+| Minimum recording                                      |                            4,800 samples (300 ms) |
+| Energy window                                          |                               320 samples (20 ms) |
+| Required energy                                        | 3,200 samples (200 ms) in windows with RMS ≥ 0.01 |
+| Final transcript                                       |                          64,000 UTF-16 code units |
+
+Energy windows span frame boundaries and include complete windows in the final tail. The gate
+rejects short, muted, near-silent, and isolated-click captures with `no_speech`, without invoking
+transcription. RMS 0.01 is −40 dBFS. This is a conservative energy gate, not a speech classifier;
+thresholds require real-microphone validation and cannot distinguish sustained noise from speech.
+The 300 ms check is independent of the future keyboard hold threshold.
+
+`VOICE_LIMITS` defines client bounds. Native and backend adapters independently enforce their
+applicable bounds; client limits are not an authorization boundary. Recording past either duration
+bound fails with `duration_limit`, without silently truncating or uploading a partial recording.
+
+Errors contain named codes only: `disabled`, `unavailable`, `busy`, `unauthenticated`,
+`permission_denied`, `device_unavailable`, `capture_failed`, `discontinuity`,
+`transcription_failed`, `disconnected`, `protocol_error`, `overflow`, `startup_timeout`,
+`finalization_timeout`, `transcription_timeout`, `duration_limit`, `no_speech`.
 
 ## Reproducible synthetic harness
 
-The development harness uses a synthetic window owner; real-window focus and unload behavior are
-covered separately by service tests. Start callers must supply the expected account ID before
-credentials resolve.
-
-Use a development build in a logged-in Zotero instance (desktop focus is not required). The endpoint is absent in production;
-the handler also checks development mode. The harness starts disabled and can never open a microphone
-or provider connection. Determine the instance's HTTP port from its worktree metadata or
-`Zotero.Server.port`; do not assume the default port.
+Use a development build in a logged-in Zotero instance. The endpoint is absent in production
+and rejects production invocation. The harness starts disabled and cannot open a microphone
+or provider connection. Its synthetic owner makes HTTP tests independent of desktop focus;
+service tests separately cover real-window lifecycle. Determine the actual port from worktree
+metadata or `Zotero.Server.port`.
 
 ```sh
-# Set VOICE_HTTP_PORT to the intended instance's actual port.
 voice() {
   curl --fail -sS -X POST "http://127.0.0.1:$VOICE_HTTP_PORT/beaver/test/voice" \
     -H 'Content-Type: application/json' -d "$1"
@@ -157,22 +160,23 @@ voice '{"command":"enable","enabled":true}'
 voice '{"command":"start"}'
 voice '{"command":"state"}' # wait for listening
 voice '{"command":"frame"}'
-voice '{"command":"interim","segmentId":0,"text":"A short"}'
-voice '{"command":"segment_final","segmentId":0,"text":"A short voice test."}'
+voice '{"command":"frame"}'
+voice '{"command":"frame"}'
+voice '{"command":"transcript","text":"A short voice test."}' # stages the fake response only
 voice '{"command":"finish"}'
-voice '{"command":"state"}' # completed, 2 frames, 2240 samples, resources disposed
+voice '{"command":"state"}' # completed: 4 frames, 5440 samples, 1 request, handles disposed
 voice '{"command":"enable","enabled":false}'
 ```
 
-`tests/fixtures/voice/session.json` is the versioned handoff fixture. Its frame descriptors
-represent zero-filled PCM, including a 640-sample tail. Unit tests replay it through the
-controller; live tests reproduce it through both Zotero bundles, assert disposal counts, and verify
-that current thread/run IDs are unchanged. `FakeVoiceCapture` and `FakeVoiceTranscription`
-permit explicit scripted callbacks without timers, native helpers, or a provider.
+`tests/fixtures/voice/session.json` is the handoff fixture. Fake frames contain a deterministic
+440 Hz tone at amplitude 0.2, followed by a 640-sample tail. Fakes record request/sample counts
+without retaining audio. Unit tests replay the fixture; live tests replay it through both Zotero
+bundles and check that thread/run IDs remain unchanged. Nothing is submitted as chat.
 
 ```sh
 npx vitest run tests/unit/voice
 ZOTERO_HTTP_PORT="$VOICE_HTTP_PORT" npx vitest run --config vitest.live.config.ts tests/live/voice.live.test.ts
+native/voice/macos/test.sh
 npm run typecheck:core
 npm run typecheck:ui
 npm run check:bundle

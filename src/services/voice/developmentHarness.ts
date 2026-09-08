@@ -1,12 +1,25 @@
-import { FakeVoiceCapture, FakeVoiceTranscription } from '@beaver/agent-core/voice/fakes';
-import { VOICE_LIMITS, type VoiceAuth, type VoiceClock } from '@beaver/agent-core/voice/contracts';
-import { NativeCaptureHarness, type NativeCaptureHost } from './nativeCaptureHarness';
-import { createVoiceService, type VoiceService, type VoiceWindow } from './voiceService';
+import {
+    FakeVoiceCapture,
+    FakeVoiceTranscription,
+} from "@beaver/agent-core/voice/fakes";
+import {
+    VOICE_LIMITS,
+    type VoiceAuth,
+    type VoiceClock,
+} from "@beaver/agent-core/voice/contracts";
+import {
+    NativeCaptureHarness,
+    type NativeCaptureHost,
+} from "./nativeCaptureHarness";
+import {
+    createVoiceService,
+    type VoiceService,
+    type VoiceWindow,
+} from "./voiceService";
 
 export interface VoiceHarnessRequest {
     command: string;
     text?: string;
-    segmentId?: number;
     enabled?: boolean;
 }
 
@@ -26,63 +39,102 @@ export class DevelopmentVoiceHarness {
     private transcription?: FakeVoiceTranscription;
 
     constructor(clock?: VoiceClock, native?: NativeCaptureHost) {
-        this.service = createVoiceService({
-            capability: () => ({ enabled: this.enabled || this.nativeHarness?.activating === true, available: true }),
-            createCapture: (session, emit) => this.nativeHarness?.ownsSession(session.sessionId)
-                ? this.nativeHarness.createCapture(session, emit)
-                : this.capture = new FakeVoiceCapture(session, emit),
-            createTranscription: (session, emit) => this.transcription = new FakeVoiceTranscription(session, emit),
-        }, clock);
-        if (native) this.nativeHarness = new NativeCaptureHarness(this.service, native);
+        this.service = createVoiceService(
+            {
+                capability: () => ({
+                    enabled:
+                        this.enabled || this.nativeHarness?.activating === true,
+                    available: true,
+                }),
+                createCapture: (session, emit) =>
+                    this.nativeHarness?.ownsSession(session.sessionId)
+                        ? this.nativeHarness.createCapture(session, emit)
+                        : (this.capture = new FakeVoiceCapture(session, emit)),
+                createTranscription: (session) =>
+                    (this.transcription = new FakeVoiceTranscription(session)),
+            },
+            clock,
+        );
+        if (native)
+            this.nativeHarness = new NativeCaptureHarness(this.service, native);
     }
 
     start(expectedUserId: string, getAuth: () => Promise<VoiceAuth | null>) {
-        if (this.nativeHarness?.preparingPermission) return { error: { code: 'busy' as const } };
-        return this.service.start(this.owner, { kind: 'draft', id: 'fake-voice-draft' }, getAuth, expectedUserId);
+        if (this.nativeHarness?.preparingPermission)
+            return { error: { code: "busy" as const } };
+        return this.service.start(
+            this.owner,
+            { kind: "draft", id: "fake-voice-draft" },
+            getAuth,
+            expectedUserId,
+        );
     }
 
     /** Explicit local invocation; no HTTP command can activate the microphone. */
     async startNative(win: Window, retainAudio = false) {
-        if (!this.nativeHarness) throw new Error('Configure the development helper first');
+        if (!this.nativeHarness)
+            throw new Error("Configure the development helper first");
         return this.nativeHarness.start(win, retainAudio);
     }
 
-    nativeState() { return this.nativeHarness?.getState(); }
+    nativeState() {
+        return this.nativeHarness?.getState();
+    }
 
     async saveRecording(path: string) {
-        if (!this.nativeHarness) throw new Error('No completed opt-in recording');
+        if (!this.nativeHarness)
+            throw new Error("No completed opt-in recording");
         await this.nativeHarness.saveRecording(path);
     }
 
     /** Never accepts PCM, credentials, or a provider URL. */
     run(request: VoiceHarnessRequest) {
         const { sessionId } = this.service.controller.getSnapshot();
-        const capture = this.capture?.session.sessionId === sessionId ? this.capture : undefined;
-        const transcription = this.transcription?.session.sessionId === sessionId ? this.transcription : undefined;
+        const capture =
+            this.capture?.session.sessionId === sessionId
+                ? this.capture
+                : undefined;
+        const transcription =
+            this.transcription?.session.sessionId === sessionId
+                ? this.transcription
+                : undefined;
         switch (request.command) {
-            case 'enable':
+            case "enable":
                 this.enabled = request.enabled === true;
-                if (!this.enabled && sessionId) this.service.controller.cancel(sessionId);
+                if (!this.enabled && sessionId)
+                    this.service.controller.cancel(sessionId);
                 break;
-            case 'frame': capture?.frame(); break;
-            case 'interim':
-            case 'segment_final':
-                if (typeof request.text !== 'string' || request.text.length > VOICE_LIMITS.transcriptCharacters
-                    || !Number.isSafeInteger(request.segmentId) || request.segmentId! < 0) {
-                    throw new Error('Invalid synthetic transcript');
+            case "frame":
+                capture?.frame();
+                break;
+            case "transcript":
+                if (
+                    typeof request.text !== "string" ||
+                    request.text.length > VOICE_LIMITS.transcriptCharacters
+                ) {
+                    throw new Error("Invalid synthetic transcript");
                 }
-                transcription?.text(request.command, request.segmentId!, request.text);
+                if (transcription) transcription.resultText = request.text;
                 break;
-            case 'finish': if (sessionId) this.service.controller.finish(sessionId); break;
-            case 'cancel': if (sessionId) this.service.controller.cancel(sessionId); break;
-            case 'state': break;
-            default: throw new Error('Unknown voice harness command');
+            case "finish":
+                if (sessionId) this.service.controller.finish(sessionId);
+                break;
+            case "cancel":
+                if (sessionId) this.service.controller.cancel(sessionId);
+                break;
+            case "state":
+                break;
+            default:
+                throw new Error("Unknown voice harness command");
         }
-        return { state: this.service.controller.getSnapshot(), resources: {
-            captureDisposeCount: capture?.disposeCount ?? 0,
-            transcriptionDisposeCount: transcription?.disposeCount ?? 0,
-            sentFrames: transcription?.sendCount ?? 0,
-            endAudio: transcription?.endAudio ?? null,
-        } };
+        return {
+            state: this.service.controller.getSnapshot(),
+            resources: {
+                captureDisposeCount: capture?.disposeCount ?? 0,
+                transcriptionDisposeCount: transcription?.disposeCount ?? 0,
+                requestCount: transcription?.requestCount ?? 0,
+                transcribedSamples: transcription?.sampleCount ?? 0,
+            },
+        };
     }
 }

@@ -22,13 +22,22 @@ function send(type: string, fields = {}, token = "secret") {
             ...(type === "control"
                 ? { sequence: controlSequence++ }
                 : { eventSequence: eventSequence++ }),
+            ...(["frame", "error"].includes(type)
+                ? {
+                      quality: {
+                          inputPeak: 0,
+                          clippedSamples: 0,
+                          discontinuityCount: 0,
+                      },
+                  }
+                : {}),
             ...fields,
         }),
     });
 }
 async function ready() {
     const started = capture.start();
-    send("hello", { helperVersion: 1 });
+    send("hello", { helperVersion: 2 });
     send("permission", { status: "granted" });
     send("ready", { format: VOICE_FORMAT });
     await started;
@@ -71,23 +80,25 @@ describe("macOS capture IPC lease", () => {
         await finished;
         expect(emit.mock.calls.map(([e]) => e.type)).toEqual([
             "ready",
+            "quality",
             "frame",
+            "quality",
             "frame",
         ]);
         expect(send("control").status).toBe(403);
     });
     it("rejects wrong authorization without consuming ordering or failing the legitimate session", async () => {
         capture.start();
-        expect(send("hello", { helperVersion: 1 }, "wrong").status).toBe(403);
+        expect(send("hello", { helperVersion: 2 }, "wrong").status).toBe(403);
         eventSequence = 0;
-        expect(send("hello", { helperVersion: 1 }).status).toBe(200);
+        expect(send("hello", { helperVersion: 2 }).status).toBe(200);
         expect(emit).not.toHaveBeenCalled();
     });
-    it.each([{ version: 2 }, { sessionId: "other" }, { helperVersion: 2 }])(
+    it.each([{ version: 2 }, { sessionId: "other" }, { helperVersion: 99 }])(
         "fails authenticated incompatible handshakes: %j",
         (fields) => {
             capture.start();
-            send("hello", { helperVersion: 1, ...fields });
+            send("hello", { helperVersion: 2, ...fields });
             expect(emit).toHaveBeenCalledWith(
                 expect.objectContaining({ error: { code: "protocol_error" } }),
             );
@@ -97,7 +108,7 @@ describe("macOS capture IPC lease", () => {
         "reports explicit %s permission without inferring it from silence",
         (status) => {
             capture.start();
-            send("hello", { helperVersion: 1 });
+            send("hello", { helperVersion: 2 });
             send("permission", { status });
             send("error", { code: "permission_denied" });
             expect(service.permission).toBe(status);
@@ -110,7 +121,7 @@ describe("macOS capture IPC lease", () => {
     );
     it("revokes canceled permission setup and allows a fresh session", async () => {
         const started = capture.start();
-        send("hello", { helperVersion: 1 });
+        send("hello", { helperVersion: 2 });
         send("permission", { status: "not_determined" });
         capture.dispose();
         capture.dispose();
@@ -125,7 +136,7 @@ describe("macOS capture IPC lease", () => {
         capture.dispose();
         capture = service.preparePermission(session) as any;
         const setup = capture.start();
-        send("hello", { helperVersion: 1 });
+        send("hello", { helperVersion: 2 });
         send("permission", { status: "not_determined" });
         expect(
             send("permission_done", { status: "granted" }).body,
@@ -138,7 +149,7 @@ describe("macOS capture IPC lease", () => {
         capture.dispose();
         capture = service.preparePermission(session) as any;
         const setup = capture.start();
-        send("hello", { helperVersion: 1 });
+        send("hello", { helperVersion: 2 });
         expect(send("ready", { format: VOICE_FORMAT }).status).toBe(400);
         await expect(setup).rejects.toThrow();
     });
@@ -262,5 +273,85 @@ describe("bounded native HTTP framing", () => {
         ]) {
             expect(() => new VoiceHttpParser(12345).push(wire)).toThrow();
         }
+    });
+});
+
+it("forwards cumulative clipping diagnostics and discontinuities before terminal errors", async () => {
+    await ready();
+    const quality = {
+        inputPeak: 1.2,
+        clippedSamples: 20,
+        discontinuityCount: 0,
+    };
+    send("frame", {
+        sequence: 0,
+        sampleCount: 1600,
+        pcm: Buffer.alloc(3200).toString("base64"),
+        quality,
+    });
+    send("error", {
+        code: "discontinuity",
+        quality: { ...quality, discontinuityCount: 1 },
+    });
+    expect(emit.mock.calls.slice(-2).map(([event]) => event)).toEqual([
+        {
+            ...session,
+            type: "quality",
+            quality: { ...quality, discontinuityCount: 1 },
+        },
+        { ...session, type: "error", error: { code: "discontinuity" } },
+    ]);
+});
+
+it.each([
+    undefined,
+    null,
+    { inputPeak: -1, clippedSamples: 0, discontinuityCount: 0 },
+    { inputPeak: 1, clippedSamples: 0.5, discontinuityCount: 0 },
+])("rejects missing or malformed capture quality %#", async (quality) => {
+    await ready();
+    send("frame", {
+        sequence: 0,
+        sampleCount: 1600,
+        pcm: Buffer.alloc(3200).toString("base64"),
+        quality,
+    });
+    expect(emit).toHaveBeenLastCalledWith({
+        ...session,
+        type: "error",
+        error: { code: "protocol_error" },
+    });
+    expect(emit.mock.calls.some(([event]) => event.type === "frame")).toBe(
+        false,
+    );
+});
+
+it("rejects decreasing quality counters", async () => {
+    await ready();
+    send("frame", {
+        sequence: 0,
+        sampleCount: 1600,
+        pcm: Buffer.alloc(3200).toString("base64"),
+        quality: { inputPeak: 1, clippedSamples: 20, discontinuityCount: 0 },
+    });
+    frame(1600, 1);
+    expect(emit).toHaveBeenLastCalledWith({
+        ...session,
+        type: "error",
+        error: { code: "protocol_error" },
+    });
+});
+
+it("enforces the complete utterance sample bound independently of controller and wall time", async () => {
+    await ready();
+    for (let i = 0; i < 1200; i++) frame(1600, i);
+    expect(emit).not.toHaveBeenLastCalledWith(
+        expect.objectContaining({ type: "error" }),
+    );
+    frame(1600, 1200);
+    expect(emit).toHaveBeenLastCalledWith({
+        ...session,
+        type: "error",
+        error: { code: "duration_limit" },
     });
 });

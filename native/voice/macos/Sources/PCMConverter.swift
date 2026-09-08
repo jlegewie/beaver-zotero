@@ -8,6 +8,15 @@ final class PCMConverter {
     private var pending = Data()
     private(set) var frames = 0
     private(set) var samples = 0
+    private(set) var inputPeak: Float = 0
+    private(set) var clippedSamples = 0
+    private(set) var discontinuityCount = 0
+    private var expectedSampleTime: Int64?
+    private var gain: Float = 1
+    var quality: [String: Any] {
+        ["inputPeak": inputPeak, "clippedSamples": clippedSamples, "discontinuityCount": discontinuityCount]
+    }
+    func markDiscontinuity() { discontinuityCount += 1 }
     var emit: (Data, Int) throws -> Void
 
     init(format: AVAudioFormat, emit: @escaping (Data, Int) throws -> Void) throws {
@@ -22,17 +31,46 @@ final class PCMConverter {
         self.emit = emit
     }
 
-    func append(_ input: AVAudioPCMBuffer) throws {
+    func append(_ input: AVAudioPCMBuffer, sampleTime: Int64? = nil) throws {
+        if let time = sampleTime {
+            if let expected = expectedSampleTime, time != expected {
+                markDiscontinuity(); throw VoiceFailure("discontinuity")
+            }
+            let (next, overflow) = time.addingReportingOverflow(Int64(input.frameLength))
+            guard !overflow else { throw VoiceFailure("capture_failed") }
+            expectedSampleTime = next
+        } else { expectedSampleTime = nil }
         guard input.format == inputFormat, input.frameLength <= 32768,
               let source = input.floatChannelData,
               let mixed = AVAudioPCMBuffer(pcmFormat: mono, frameCapacity: input.frameLength),
               let destination = mixed.floatChannelData else { throw VoiceFailure("discontinuity") }
         mixed.frameLength = input.frameLength
+        var squares: Double = 0
         for i in 0..<Int(input.frameLength) {
             var value: Float = 0
-            for channel in 0..<Int(inputFormat.channelCount) { value += source[channel][i] / Float(inputFormat.channelCount) }
-            guard value.isFinite else { throw VoiceFailure("capture_failed") }
-            destination[0][i] = max(-1, min(1, value))
+            var clipped = false
+            for channel in 0..<Int(inputFormat.channelCount) {
+                let sample = source[channel][i]
+                guard sample.isFinite else { throw VoiceFailure("capture_failed") }
+                inputPeak = max(inputPeak, abs(sample))
+                clipped = clipped || abs(sample) >= 0.99
+                value += sample / Float(inputFormat.channelCount)
+            }
+            if clipped { clippedSamples += 1 }
+            destination[0][i] = value
+            squares += Double(value) * Double(value)
+        }
+        let rms = Float(sqrt(squares / Double(max(1, input.frameLength))))
+        // Preserve ordinary speech levels. Never amplify near-silence; cap quiet-speech gain.
+        let desired: Float = rms >= 0.01 && (rms < 0.1 || rms > 0.35) ? min(4, 0.2 / rms) : 1
+        let attack = Float(1 - exp(-1 / (0.005 * inputFormat.sampleRate)))
+        let release = Float(1 - exp(-1 / (0.5 * inputFormat.sampleRate)))
+        for i in 0..<Int(input.frameLength) {
+            let value = destination[0][i]
+            gain += (desired - gain) * (desired < gain ? attack : release)
+            // Immediate peak limiting with slow gain recovery leaves resampling headroom.
+            if abs(value) * gain > 0.85 { gain = 0.85 / abs(value) }
+            destination[0][i] = value * gain
         }
         try convert(mixed, ending: false)
     }

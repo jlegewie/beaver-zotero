@@ -53,3 +53,52 @@ for i in 0..<4800 { buffer.floatChannelData![0][i] = 0.75; buffer.floatChannelDa
 try converter.append(buffer); try converter.finish()
 check(silence.allSatisfy { $0 == 0 }, "Downmix did not cancel")
 print("PASS opposite-channel downmix")
+
+// Gain control must preserve sample counts, bound peaks, report pre-gain clipping,
+// and avoid boosting a muted/noisy microphone into plausible speech.
+func controlledSignal(_ amplitude: Float, seconds: Double = 2) throws -> (PCMConverter, [Double]) {
+    let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false)!
+    var data = Data()
+    let converter = try PCMConverter(format: format) { bytes, _ in data.append(bytes) }
+    for offset in stride(from: 0, to: Int(48000 * seconds), by: 960) {
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 960)!
+        buffer.frameLength = 960
+        for i in 0..<960 { buffer.floatChannelData![0][i] = amplitude * Float(sin(2 * Double.pi * 440 * Double(offset + i) / 48000)) }
+        try converter.append(buffer, sampleTime: Int64(offset))
+    }
+    try converter.finish()
+    return (converter, stride(from: 0, to: data.count, by: 2).map {
+        Double(Int16(bitPattern: UInt16(data[$0]) | UInt16(data[$0 + 1]) << 8)) / 32768
+    })
+}
+let (loud, limited) = try controlledSignal(2)
+check(limited.count == 32000, "Limiter lost samples")
+check(limited.map { abs($0) }.max()! < 0.95, "Limiter failed to leave headroom")
+check(loud.inputPeak > 1.9 && loud.clippedSamples > 0, "Input clipping hidden by limiter")
+let (quiet, normalized) = try controlledSignal(0.04)
+let settled = normalized.suffix(8000)
+let normalizedRMS = sqrt(settled.reduce(0) { $0 + $1 * $1 } / Double(settled.count))
+check(normalizedRMS > 0.08 && normalizedRMS < 0.12, "Quiet speech gain out of bounds")
+check(quiet.clippedSamples == 0, "Quiet input misreported as clipping")
+let (_, noise) = try controlledSignal(0.002)
+check(noise.map { abs($0) }.max()! < 0.003, "Near-silence amplified")
+let (_, muted) = try controlledSignal(0)
+check(muted.allSatisfy { $0 == 0 }, "Muted microphone produced samples")
+print("PASS gain normalization, peak limiter, clipping diagnostics, silence floor")
+
+let timelineFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false)!
+let timeline = try PCMConverter(format: timelineFormat) { _, _ in }
+let timelineBuffer = AVAudioPCMBuffer(pcmFormat: timelineFormat, frameCapacity: 960)!
+timelineBuffer.frameLength = 960
+timelineBuffer.floatChannelData![0].initialize(repeating: 0, count: 960)
+try timeline.append(timelineBuffer, sampleTime: 0)
+try timeline.append(timelineBuffer, sampleTime: 960)
+check(timeline.discontinuityCount == 0, "Contiguous audio misclassified")
+do {
+    try timeline.append(timelineBuffer, sampleTime: 2880)
+    fatalError("Missing samples not detected")
+} catch {
+    check((error as? VoiceFailure)?.code == "discontinuity", "Wrong timeline error")
+    check(timeline.discontinuityCount == 1, "Missing discontinuity count")
+}
+print("PASS audio timestamp discontinuity detection")
