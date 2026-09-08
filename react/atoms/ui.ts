@@ -39,8 +39,29 @@ export const isBeaverWindowOpenAtom = atom(false);
  * alone leaves those atoms empty for window-only users.
  */
 export const isBeaverUIVisibleAtom = atom(
-    (get) => get(isSidebarVisibleAtom) || get(isBeaverWindowOpenAtom),
+    (get) => get(isSidebarVisibleAtom) || get(isBeaverWindowOpenAtom) || get(isQuickPromptOpenAtom),
 );
+
+/**
+ * The quick prompt: a composer in the corner of the main window while the
+ * sidebar is closed (react/components/quickPrompt). `compose` shows the
+ * composer on a fresh thread; `busy` shows a notice because the open thread's
+ * run is still live. Fixed at open time so a send from the composer does not
+ * flip it into the notice before the popup closes.
+ *
+ * Defined here, beside the other surface flags, because it is one of the
+ * surfaces `isBeaverUIVisibleAtom` counts: reader tracking (the open file,
+ * its text selection) runs for it the way it runs for the sidebar.
+ */
+export type QuickPromptMode = 'compose' | 'busy';
+
+export interface QuickPromptState {
+    mode: QuickPromptMode;
+}
+
+export const quickPromptStateAtom = atom<QuickPromptState | null>(null);
+
+export const isQuickPromptOpenAtom = atom((get) => get(quickPromptStateAtom) !== null);
 
 export const isLibraryTabAtom = atom(false);
 export const selectedZoteroTabIdAtom = atom<string | null>(null);
