@@ -1,0 +1,144 @@
+{
+    "name": "a cell an added row carries has just been answered, so it lands fresh however it arrived",
+    "before": {
+        "id": "t2",
+        "spec_version": 1,
+        "anchor_column_id": "paper",
+        "columns": [
+            {
+                "id": "paper",
+                "header": "Paper",
+                "type": "reference"
+            },
+            {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What design does the study use?",
+                "options": [
+                    {
+                        "label": "RCT",
+                        "color": "blue"
+                    },
+                    {
+                        "label": "Quasi-experiment",
+                        "color": "green"
+                    }
+                ]
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "AAA"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Alpha"
+                        },
+                        "provenance": "imported"
+                    },
+                    "design": {
+                        "value": {
+                            "kind": "select",
+                            "label": "RCT"
+                        },
+                        "provenance": "asserted",
+                        "stale": true
+                    }
+                }
+            }
+        ]
+    },
+    "mutations": [
+        {
+            "op": "add_rows",
+            "rows": [
+                {
+                    "id": "r1",
+                    "ref": {
+                        "kind": "item",
+                        "library_id": 1,
+                        "zotero_key": "AAA"
+                    },
+                    "cells": {
+                        "paper": {
+                            "value": {
+                                "kind": "reference",
+                                "display_name": "Alpha"
+                            },
+                            "provenance": "imported"
+                        },
+                        "design": {
+                            "value": {
+                                "kind": "select",
+                                "label": "rct"
+                            },
+                            "provenance": "extracted",
+                            "stale": true
+                        }
+                    }
+                }
+            ]
+        }
+    ],
+    "after": {
+        "id": "t2",
+        "spec_version": 1,
+        "anchor_column_id": "paper",
+        "columns": [
+            {
+                "id": "paper",
+                "header": "Paper",
+                "type": "reference"
+            },
+            {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What design does the study use?",
+                "options": [
+                    {
+                        "label": "RCT",
+                        "color": "blue"
+                    },
+                    {
+                        "label": "Quasi-experiment",
+                        "color": "green"
+                    }
+                ]
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "AAA"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Alpha"
+                        },
+                        "provenance": "imported"
+                    },
+                    "design": {
+                        "value": {
+                            "kind": "select",
+                            "label": "RCT"
+                        },
+                        "provenance": "extracted"
+                    }
+                }
+            }
+        ]
+    }
+}

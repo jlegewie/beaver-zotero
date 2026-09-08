@@ -174,8 +174,25 @@ describe('getLibraryByIdOrName / validateLibraryAccess', () => {
         const result = getLibraryByIdOrName('g999999');
         expect(result.library).toBeNull();
         expect(result.wasExplicitlyRequested).toBe(true);
+        expect(result.portableRef).toBe('g999999');
 
+        // A portable token this device can't map is "not available here", not
+        // "no such library" — only the plugin can tell the two apart.
         const validation = validateLibraryAccess('g999999');
+        expect(validation.valid).toBe(false);
+        expect(validation.error_code).toBe('library_unavailable');
+    });
+
+    it('does not let a blank library filter substring-match every library', () => {
+        // `''.includes()` is true for every name, so a blank needle would widen
+        // a filter that named nothing into "search everything".
+        expect(resolveLibrariesFilter(['']).libraryIds).toEqual([]);
+        expect(resolveLibrariesFilter(['   ']).libraryIds).toEqual([]);
+        expect(resolveLibrariesFilter(['']).unresolved).toEqual(['']);
+    });
+
+    it('reports an unknown library name as not found rather than unavailable', () => {
+        const validation = validateLibraryAccess('No Such Library');
         expect(validation.valid).toBe(false);
         expect(validation.error_code).toBe('library_not_found');
     });

@@ -26,7 +26,7 @@ import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { normalizeNotePosition } from '@beaver/agent-core/types/agentActions/annotations';
 import { normalizeAnnotationTags } from '@beaver/agent-core/types/agentActions/createAnnotations';
 import { shortItemTitle } from '../../../utils/zoteroUtils';
-import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
+import { hasLibraryIdentity, libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 
 function mapAnnotationErrorCode(error: unknown): string {
@@ -102,7 +102,9 @@ function normalizeItem(raw: any): NoteAnnotationItem {
 }
 
 async function resolveAttachment(ref: ZoteroItemReference): Promise<Zotero.Item | null> {
-    if (!ref.library_id || !ref.zotero_key) return null;
+    // A portable `library_ref` is a complete target on its own, so the numeric
+    // `library_id` may legitimately be the unresolved sentinel.
+    if (!hasLibraryIdentity(ref) || !ref.zotero_key) return null;
     const resolved = await resolveItemReference(ref);
     return resolved.status === 'found' ? resolved.item : null;
 }
@@ -131,7 +133,7 @@ export async function validateCreateNoteAnnotationsAction(
     const data = getActionData(request);
     const { requested_ref, resolved_ref, items } = data;
 
-    if (!resolved_ref.library_id || !resolved_ref.zotero_key) {
+    if (!hasLibraryIdentity(resolved_ref) || !resolved_ref.zotero_key) {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -163,6 +165,19 @@ export async function validateCreateNoteAnnotationsAction(
             valid: false,
             error: excluded.message,
             error_code: 'library_not_searchable',
+            preference: 'always_ask',
+        };
+    }
+    // A portable ref this device cannot map is a missing library, not a bad
+    // attachment: say so instead of letting the lookup below fail as
+    // "not a local PDF or EPUB attachment".
+    if (targetLibraryId === null) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `The library (${resolved_ref.library_ref}) holding this attachment is not available on this computer.`,
+            error_code: 'library_unavailable',
             preference: 'always_ask',
         };
     }
@@ -268,6 +283,15 @@ export async function executeCreateNoteAnnotationsAction(
             success: false,
             error: targetExcluded.message,
             error_code: 'library_not_searchable',
+        };
+    }
+    if (targetLibraryId === null) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: `The library (${resolved_ref.library_ref}) holding this attachment is not available on this computer.`,
+            error_code: 'library_unavailable',
         };
     }
     const attachment = await resolveAttachment(resolved_ref);

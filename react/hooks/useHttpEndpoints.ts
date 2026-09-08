@@ -179,6 +179,26 @@ import {
     handleTestBeaverWindowHttpRequest,
     handleTestSelectTabHttpRequest,
 } from './httpHandlers/testApplicationStateHandlers';
+import {
+    handleTestOpenTableHttpRequest,
+    handleTestCloseTableHttpRequest,
+    handleTestOpenStoredTableHttpRequest,
+    handleTestTableCreateHttpRequest,
+    handleTestTableReadHttpRequest,
+    handleTestTableListHttpRequest,
+    handleTestTableWriteHttpRequest,
+    handleTestTableEditHttpRequest,
+    handleTestTableVersionsHttpRequest,
+    handleTestTableRevertHttpRequest,
+    handleTestTableDeleteHttpRequest,
+    handleTestTableOpenHttpRequest,
+    handleTestTableCorruptHttpRequest,
+    handleTestTableShadowHttpRequest,
+    handleTestTableRestoreShadowHttpRequest,
+    handleTestTableOpenReaderHttpRequest,
+    handleTestTableItemPaneHttpRequest,
+    handleTestTableViewStateHttpRequest,
+} from './httpHandlers/testTableHandlers';
 import { handleTestRunStatusPopupHttpRequest } from './httpHandlers/testRunStatusPopupHandlers';
 import type {
     WSZoteroDataRequest,
@@ -369,6 +389,29 @@ const ENDPOINT_PATHS = [
     '/beaver/test/beaver-window',
     '/beaver/test/beaver-sidebar',
     '/beaver/test/select-tab',
+    // Table renderer, driven until a producer routes to it (dev-only)
+    '/beaver/test/open-table',
+    '/beaver/test/close-table',
+    '/beaver/test/open-stored-table',
+    // Stored tables: the snapshot attachment behind a table (dev-only)
+    '/beaver/test/table-create',
+    '/beaver/test/table-read',
+    '/beaver/test/table-list',
+    // The versioned store on top of it (dev-only)
+    '/beaver/test/table-write',
+    '/beaver/test/table-edit',
+    '/beaver/test/table-versions',
+    '/beaver/test/table-revert',
+    '/beaver/test/table-delete',
+    '/beaver/test/table-open',
+    '/beaver/test/table-corrupt',
+    '/beaver/test/table-shadow',
+    '/beaver/test/table-restore-shadow',
+    // The reader host for a stored table (dev-only)
+    '/beaver/test/table-open-reader',
+    '/beaver/test/table-view-state',
+    // The item-pane section for a stored table (dev-only)
+    '/beaver/test/table-item-pane',
     '/beaver/test/run-status-popup',
 ] as const;
 
@@ -1342,6 +1385,75 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/beaver-window'] =
             createEndpoint(handleTestBeaverWindowHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/open-table'] =
+            createEndpoint(handleTestOpenTableHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/close-table'] =
+            createEndpoint(handleTestCloseTableHttpRequest);
+
+        // `openTable` itself — the product path the item-pane button takes.
+        Zotero.Server.Endpoints['/beaver/test/open-stored-table'] =
+            createEndpoint(handleTestOpenStoredTableHttpRequest);
+
+        // Stored tables (dev-only): create the real snapshot attachment, read
+        // the spec back out of the file, and list what is in the library.
+        Zotero.Server.Endpoints['/beaver/test/table-create'] =
+            createEndpoint(handleTestTableCreateHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-read'] =
+            createEndpoint(handleTestTableReadHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-list'] =
+            createEndpoint(handleTestTableListHttpRequest);
+
+        // The versioned store (dev-only): the write protocol, the version log,
+        // revert, trash/restore, and the crash recovery `open` performs.
+        // `table-corrupt` damages the storage directory on purpose so that
+        // recovery can be exercised without staging a real crash.
+        Zotero.Server.Endpoints['/beaver/test/table-write'] =
+            createEndpoint(handleTestTableWriteHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-edit'] =
+            createEndpoint(handleTestTableEditHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-versions'] =
+            createEndpoint(handleTestTableVersionsHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-revert'] =
+            createEndpoint(handleTestTableRevertHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-delete'] =
+            createEndpoint(handleTestTableDeleteHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-open'] =
+            createEndpoint(handleTestTableOpenHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-corrupt'] =
+            createEndpoint(handleTestTableCorruptHttpRequest);
+
+        // The recovery shadow (dev-only): what this device last wrote to a
+        // table, whether the table has gone backwards under it, and putting
+        // this device's version back.
+        Zotero.Server.Endpoints['/beaver/test/table-shadow'] =
+            createEndpoint(handleTestTableShadowHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-restore-shadow'] =
+            createEndpoint(handleTestTableRestoreShadowHttpRequest);
+
+        // The reader host (dev-only): open a stored table in the reader and
+        // report which of the enhancer's seams attached, and list every table
+        // document currently enhanced in either host.
+        Zotero.Server.Endpoints['/beaver/test/table-open-reader'] =
+            createEndpoint(handleTestTableOpenReaderHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-view-state'] =
+            createEndpoint(handleTestTableViewStateHttpRequest);
+
+        // The item-pane section (dev-only): whether it is registered, and the
+        // fields it would render for one table.
+        Zotero.Server.Endpoints['/beaver/test/table-item-pane'] =
+            createEndpoint(handleTestTableItemPaneHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/beaver-sidebar'] =
             createEndpoint(handleTestBeaverSidebarHttpRequest);

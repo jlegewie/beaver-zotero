@@ -53,6 +53,42 @@ export function parseLibraryRef(ref: string): ParsedLibraryRef | null {
  */
 export const UNRESOLVED_LIBRARY_ID = 0;
 
+/**
+ * Whether a reference names a library at all — a valid portable `library_ref`,
+ * or a positive device-local `library_id`.
+ *
+ * A portable-only reference is a complete identity on the wire: the rowid is
+ * this device's business alone, so it may arrive absent or as
+ * {@link UNRESOLVED_LIBRARY_ID}. Guards that only test `library_id` reject
+ * such a reference — use this instead.
+ */
+export function hasLibraryIdentity(ref: {
+    library_ref?: string | null;
+    library_id?: number | null;
+}): boolean {
+    if (ref.library_ref && parseLibraryRef(ref.library_ref)) return true;
+    return typeof ref.library_id === 'number'
+        && Number.isInteger(ref.library_id)
+        && ref.library_id > 0;
+}
+
+/**
+ * The library half of a dedup/map key for a reference.
+ *
+ * Mirrors how `resolveLibraryRef` decides identity: only a grammar-valid
+ * `library_ref` names the library portably, and anything else — absent, empty,
+ * or malformed — falls back to the device-local rowid. Keying on a `library_ref`
+ * the resolver would ignore is what collapses two references that load
+ * *different* items onto one entry, where the later one silently wins.
+ */
+export function libraryKeyToken(ref: {
+    library_ref?: string | null;
+    library_id?: number | null;
+}): string {
+    if (ref.library_ref && parseLibraryRef(ref.library_ref)) return ref.library_ref;
+    return String(ref.library_id ?? UNRESOLVED_LIBRARY_ID);
+}
+
 /** A model-facing item id parsed into its portable-or-legacy library reference + key. */
 export type ParsedItemReference = { library_ref?: string; library_id?: number; zotero_key: string };
 

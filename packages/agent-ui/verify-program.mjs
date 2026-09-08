@@ -287,6 +287,7 @@ const entryPaths = [
   "src/chat/index.ts",
   "src/auth/index.ts",
   "src/composer/index.ts",
+  "src/layouts/index.ts",
   "src/utils/creditThreshold.ts",
 ].map((p) => path.join(pkgDir, p));
 

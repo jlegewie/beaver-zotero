@@ -22,9 +22,10 @@
     "license": "AGPL-3.0-or-later",
     "scripts": {
         "start": "npm run copy:agent-ui-css && concurrently \"zotero-plugin serve\" \"npm run watch-react\"",
-        "build": "npm run copy:agent-ui-css && NODE_ENV=production npm run build-react:prod && NODE_ENV=production zotero-plugin build && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui",
-        "build:dev": "npm run copy:agent-ui-css && NODE_ENV=development npm run build-react:dev && NODE_ENV=development zotero-plugin build --dev && npm run pack:xpi && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui",
-        "build:staging": "npm run copy:agent-ui-css && BUILD_ENV=staging npm run build-react:staging && BUILD_ENV=staging zotero-plugin build && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui",
+        "build": "npm run copy:agent-ui-css && NODE_ENV=production npm run build-react:prod && NODE_ENV=production zotero-plugin build && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui && npm run check:bundle",
+        "build:dev": "npm run copy:agent-ui-css && NODE_ENV=development npm run build-react:dev && NODE_ENV=development zotero-plugin build --dev && npm run pack:xpi && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui && npm run check:bundle",
+        "build:staging": "npm run copy:agent-ui-css && BUILD_ENV=staging npm run build-react:staging && BUILD_ENV=staging zotero-plugin build && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui && npm run check:bundle",
+        "check:bundle": "node scripts/check-esbuild-graph.mjs",
         "lint:check": "prettier --check . && eslint .",
         "lint:fix": "prettier --write . && eslint . --fix",
         "release": "zotero-plugin release",

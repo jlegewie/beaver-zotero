@@ -14,7 +14,7 @@ import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from './noteActions';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveCreateNoteParent } from '../../src/services/agentDataProvider/actions/resolveCreateNoteParent';
 import { getCollectionByIdOrName } from '../../src/services/agentDataProvider/utils';
-import { libraryRefForLibraryID, resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
+import { hasLibraryIdentity, libraryRefForLibraryID, resolveItemReference, resolveWriteTargetLibrary } from '../../src/utils/libraryIdentity';
 
 
 export interface CreateNoteResultData {
@@ -254,7 +254,10 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
  */
 export async function undoCreateNoteAction(action: AgentAction): Promise<void> {
     const resultData = action.result_data as CreateNoteResultData | undefined;
-    if (!resultData?.library_id || !resultData?.zotero_key) {
+    // A portable `library_ref` is a complete reference; the numeric id may be
+    // the unresolved sentinel. `resolveItemReference` below prefers the ref
+    // anyway, so rejecting on the rowid alone fails an undo that would work.
+    if (!resultData?.zotero_key || !hasLibraryIdentity(resultData)) {
         throw new Error('Cannot undo: no result data with note reference');
     }
 

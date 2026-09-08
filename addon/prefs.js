@@ -175,3 +175,8 @@ pref("documentCacheMaxBytes", 1073741824);
 // attaching an external file. It also decides which attachments count as
 // readable at all, so raising it un-blocks oversized ones in the sidebar.
 pref("maxAttachmentFileSizeMB", 100);
+
+// Library new comparison tables are filed in. 0 = no preference, which means
+// the user library. Never overrides a library the user excluded in Beaver
+// preferences — see resolveTableLibrary().
+pref("tables.defaultLibraryID", 0);

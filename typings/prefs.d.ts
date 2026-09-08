@@ -89,6 +89,7 @@ declare namespace _ZoteroTypes {
       "firstRunAssignments": string;
       "documentCacheMaxBytes": number;
       "maxAttachmentFileSizeMB": number;
+      "tables.defaultLibraryID": number;
     };
   }
 }

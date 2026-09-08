@@ -1,0 +1,281 @@
+{
+    "name": "a part-filled review table: distributions, flags, stale cells, a failed row and user edits",
+    "spec": {
+        "id": "t3",
+        "spec_version": 1,
+        "title": "Extraction",
+        "anchor_column_id": "paper",
+        "columns": [
+            {
+                "id": "paper",
+                "header": "Paper",
+                "type": "reference"
+            },
+            {
+                "id": "year",
+                "header": "Year",
+                "type": "number",
+                "system": true
+            },
+            {
+                "id": "decision",
+                "header": "Include?",
+                "type": "select",
+                "role": "screening_decision",
+                "options": [
+                    {
+                        "label": "include",
+                        "color": "green"
+                    },
+                    {
+                        "label": "exclude",
+                        "color": "red"
+                    }
+                ]
+            },
+            {
+                "id": "open_access",
+                "header": "Open access",
+                "type": "boolean"
+            },
+            {
+                "id": "notes",
+                "header": "Notes",
+                "type": "text"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "AAA"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Alpha"
+                        },
+                        "provenance": "imported"
+                    },
+                    "year": {
+                        "value": {
+                            "kind": "number",
+                            "value": 2020
+                        },
+                        "provenance": "imported"
+                    },
+                    "decision": {
+                        "value": {
+                            "kind": "select",
+                            "label": "include"
+                        },
+                        "details": {
+                            "kind": "text",
+                            "text": "Randomised, adult sample."
+                        },
+                        "provenance": "asserted"
+                    },
+                    "open_access": {
+                        "value": {
+                            "kind": "boolean",
+                            "value": true
+                        },
+                        "provenance": "extracted"
+                    },
+                    "notes": {
+                        "value": {
+                            "kind": "text",
+                            "text": "Large sample"
+                        },
+                        "provenance": "extracted",
+                        "flag": "unsourced"
+                    }
+                }
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "BBB"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Beta"
+                        },
+                        "provenance": "imported"
+                    },
+                    "year": {
+                        "value": {
+                            "kind": "number",
+                            "value": 2019
+                        },
+                        "provenance": "imported"
+                    },
+                    "decision": {
+                        "value": {
+                            "kind": "select",
+                            "label": "exclude"
+                        },
+                        "details": {
+                            "kind": "text",
+                            "text": "Not a trial."
+                        },
+                        "provenance": "user"
+                    },
+                    "open_access": {
+                        "value": {
+                            "kind": "boolean",
+                            "value": false
+                        },
+                        "provenance": "extracted"
+                    },
+                    "notes": {
+                        "value": {
+                            "kind": "text",
+                            "text": "Unclear reporting"
+                        },
+                        "provenance": "extracted",
+                        "flag": "unsure",
+                        "stale": true
+                    }
+                }
+            },
+            {
+                "id": "r3",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "CCC"
+                },
+                "status": "error",
+                "error": "Extraction failed: no text layer",
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Gamma"
+                        },
+                        "provenance": "imported"
+                    },
+                    "year": {
+                        "value": {
+                            "kind": "number",
+                            "value": 2021
+                        },
+                        "provenance": "imported"
+                    },
+                    "decision": {
+                        "status": "error",
+                        "error": "No decision could be made"
+                    },
+                    "notes": {
+                        "status": "pending"
+                    }
+                }
+            },
+            {
+                "id": "r4",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "DDD"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Delta"
+                        },
+                        "provenance": "imported"
+                    },
+                    "decision": {
+                        "value": {
+                            "kind": "select",
+                            "label": "include"
+                        },
+                        "details": {
+                            "kind": "text",
+                            "text": "Borderline, kept for full text."
+                        },
+                        "provenance": "user"
+                    },
+                    "open_access": {
+                        "value": {
+                            "kind": "boolean",
+                            "value": true
+                        },
+                        "provenance": "user",
+                        "flag": "unsure"
+                    },
+                    "notes": {
+                        "value": {
+                            "kind": "text",
+                            "text": "Edited by hand"
+                        },
+                        "provenance": "user",
+                        "stale": true
+                    }
+                }
+            }
+        ]
+    },
+    "summary": {
+        "rows": 4,
+        "columns": 5,
+        "failed_rows": 1,
+        "user_edits": 4,
+        "columns_detail": {
+            "paper": {
+                "type": "reference",
+                "filled": 4,
+                "unsure": 0,
+                "unsourced": 0,
+                "stale": 0
+            },
+            "year": {
+                "type": "number",
+                "system": true,
+                "filled": 3,
+                "unsure": 0,
+                "unsourced": 0,
+                "stale": 0
+            },
+            "decision": {
+                "type": "select",
+                "role": "screening_decision",
+                "filled": 3,
+                "unsure": 0,
+                "unsourced": 0,
+                "stale": 0,
+                "distribution": {
+                    "include": 2,
+                    "exclude": 1
+                }
+            },
+            "open_access": {
+                "type": "boolean",
+                "filled": 3,
+                "unsure": 1,
+                "unsourced": 0,
+                "stale": 0,
+                "distribution": {
+                    "true": 2,
+                    "false": 1
+                }
+            },
+            "notes": {
+                "type": "text",
+                "filled": 3,
+                "unsure": 1,
+                "unsourced": 1,
+                "stale": 2
+            }
+        }
+    }
+}

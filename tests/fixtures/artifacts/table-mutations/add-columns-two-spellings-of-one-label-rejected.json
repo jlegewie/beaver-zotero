@@ -1,0 +1,76 @@
+{
+    "name": "a new column declaring one label twice under two spellings is refused",
+    "before": {
+        "id": "t2",
+        "spec_version": 1,
+        "anchor_column_id": "paper",
+        "columns": [
+            {
+                "id": "paper",
+                "header": "Paper",
+                "type": "reference"
+            },
+            {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What design does the study use?",
+                "options": [
+                    {
+                        "label": "RCT",
+                        "color": "blue"
+                    },
+                    {
+                        "label": "Quasi-experiment",
+                        "color": "green"
+                    }
+                ]
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "AAA"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Alpha"
+                        },
+                        "provenance": "imported"
+                    }
+                }
+            }
+        ]
+    },
+    "mutations": [
+        {
+            "op": "add_columns",
+            "columns": [
+                {
+                    "id": "blinded",
+                    "header": "Blinded",
+                    "type": "select",
+                    "options": [
+                        {
+                            "label": "Yes"
+                        },
+                        {
+                            "label": "No"
+                        },
+                        {
+                            "label": "yes"
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    "error": {
+        "code": "invalid_mutation"
+    }
+}

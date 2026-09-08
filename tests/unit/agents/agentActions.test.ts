@@ -88,6 +88,33 @@ describe('validateAppliedAgentAction', () => {
         expect(await validateAppliedAgentAction(appliedAction(5))).toBe('valid');
     });
 
+    // `toAgentAction` normalizes an absent `library_id` to the unresolved
+    // sentinel, so a portably-named applied action arrives as `library_id: 0`.
+    // A truthiness check on the rowid reads that as "no applied item" and
+    // reports the action valid without looking at anything.
+    it('still checks an applied item the backend named only by library_ref', async () => {
+        getByLibraryAndKeyAsync.mockResolvedValue(null);
+        expect(await validateAppliedAgentAction(appliedAction(0, {
+            result_data: { library_id: 0, library_ref: 'g50', zotero_key: 'AAAAAAA1' },
+        }))).toBe('invalid');
+        expect(getByLibraryAndKeyAsync).toHaveBeenCalledWith(5, 'AAAAAAA1');
+    });
+
+    it('still checks one that carries no library_id field at all', async () => {
+        getByLibraryAndKeyAsync.mockResolvedValue({ isAnnotation: () => false });
+        expect(await validateAppliedAgentAction(appliedAction(0, {
+            result_data: { library_ref: 'g50', zotero_key: 'AAAAAAA1' },
+        }))).toBe('valid');
+        expect(getByLibraryAndKeyAsync).toHaveBeenCalledWith(5, 'AAAAAAA1');
+    });
+
+    it('still treats a reference that names no library as having no applied item', async () => {
+        expect(await validateAppliedAgentAction(appliedAction(0, {
+            result_data: { library_id: 0, zotero_key: 'AAAAAAA1' },
+        }))).toBe('valid');
+        expect(getByLibraryAndKeyAsync).not.toHaveBeenCalled();
+    });
+
     it('returns unverifiable when a legacy group-library item (no library_ref) is not found', async () => {
         // A device-local group library_id is not a portable identity: a miss
         // may just mean that id maps to a different group here, so it must not

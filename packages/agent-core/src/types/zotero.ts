@@ -28,6 +28,18 @@ export interface ZoteroLibrary {
  */
 export interface ZoteroItemReference {
     zotero_key: string;
+    /**
+     * Device-local Zotero library rowid, or `UNRESOLVED_LIBRARY_ID` (`0`) when
+     * the sender has no rowid to give — which is every reference a backend
+     * sends once it stops mapping portable refs onto this device's ids.
+     *
+     * `0` is the wire form for "unresolved", not an omitted field: keeping this
+     * required means a reference always carries both names of its library, and
+     * a consumer that reads only the rowid fails loudly rather than silently
+     * targeting `undefined`. `library_ref` is the identity and wins wherever
+     * the two disagree — resolve with `resolveLibraryRef`, and guard with
+     * `hasLibraryIdentity` rather than testing `library_id` for truthiness.
+     */
     library_id: number;
     /** Device-portable library identity ("u" | "g<groupID>") */
     library_ref?: string;

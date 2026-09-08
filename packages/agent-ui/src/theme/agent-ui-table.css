@@ -1,0 +1,1363 @@
+/*
+ * Shared table layout (`@beaver/agent-ui/layouts`).
+ *
+ * Scoped `.beaver-root .bt-*` like the other sheets and loaded after
+ * agent-ui-components.css. Two halves, matching the component split:
+ * `.bt-surface` and its bars are the chrome a window puts around a table;
+ * `.bt` and everything under it is the grid.
+ *
+ * Three rules carry the layout.
+ *
+ * 1. **Row height is a lever, not an accident.** `data-density` sets
+ *    `--bt-row-h` and, with it, how many lines every cell clamps to. A table
+ *    whose rows grow to their tallest cell stops reading as a table, and these
+ *    tables carry abstracts.
+ * 2. **Sticky is composited, not translucent.** The fill scale is a stack of
+ *    translucent overlays, so a sticky header or a hovered row paints the fill
+ *    as a gradient *over* `--material-background`. A bare `var(--fill-senary)`
+ *    would let the scrolling body show through.
+ * 3. **Sizes are rem.** The package is measured against a 13px root, so a host
+ *    that scales its font scales the row heights and the clamps with it.
+ *
+ * Colours come from the host's platform tokens; nothing here is hard-coded.
+ */
+
+@keyframes bt-shimmer {
+    0% {
+        background-position: -12rem 0;
+    }
+    100% {
+        background-position: 12rem 0;
+    }
+}
+
+/* ==========================================================================
+ * Surface — the chrome around a table
+ * ========================================================================== */
+
+.beaver-root .bt-surface {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+    height: 100%;
+    background: var(--material-background);
+    color: var(--fill-primary);
+    font-size: 1rem;
+    line-height: 1.45;
+}
+
+.beaver-root .bt-surface .bt-spacer {
+    flex: 1 1 auto;
+}
+
+/* Title bar ---------------------------------------------------------------- */
+
+.beaver-root .bt-titlebar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.7rem 1.25rem;
+    border-bottom: 1px solid var(--color-border50);
+}
+
+.beaver-root .bt-titleblock {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-width: 0;
+}
+
+.beaver-root .bt-titlemark {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 1.9rem;
+    height: 1.9rem;
+    border-radius: 0.5rem;
+    background: var(--fill-quinary);
+    color: var(--fill-secondary);
+}
+
+.beaver-root .bt-titletext {
+    min-width: 0;
+}
+
+.beaver-root .bt-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.beaver-root .bt-subtitle {
+    margin-top: 0.05rem;
+    font-size: 0.88rem;
+    color: var(--fill-tertiary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.beaver-root .bt-titleactions {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Toolbar ------------------------------------------------------------------ */
+
+.beaver-root .bt-toolbar,
+.beaver-root .bt-selectionbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 2.9rem;
+    padding: 0.35rem 1.25rem;
+    border-bottom: 1px solid var(--color-border50);
+}
+
+.beaver-root .bt-selectionbar {
+    background:
+        linear-gradient(var(--fill-quinary), var(--fill-quinary)),
+        var(--material-background);
+    box-shadow: inset 2px 0 0 var(--accent-blue);
+}
+
+.beaver-root .bt-selectioncount {
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.beaver-root .bt-toolbar-button.bt-active {
+    color: var(--fill-primary);
+}
+
+.beaver-root .bt-search {
+    flex: 0 1 16rem;
+    min-width: 8rem;
+    height: 2.1rem;
+    padding: 0 0.6rem;
+    border: 1px solid var(--color-border50);
+    border-radius: 0.45rem;
+    background: var(--fill-senary);
+    color: var(--fill-primary);
+    font: inherit;
+    font-size: 0.95rem;
+    outline: none;
+}
+
+.beaver-root .bt-search::placeholder {
+    color: var(--fill-tertiary);
+}
+
+.beaver-root .bt-search:focus {
+    border-color: var(--fill-tertiary);
+}
+
+.beaver-root .bt-rowcount {
+    font-size: 0.85rem;
+    color: var(--fill-tertiary);
+    white-space: nowrap;
+}
+
+/* Filter chips: a narrowed table has to say so. The menu closes; these do not. */
+
+.beaver-root .bt-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    height: 1.8rem;
+    padding: 0 0.45rem 0 0.65rem;
+    border: 1px solid var(--color-border50);
+    border-radius: 999px;
+    background: var(--fill-quinary);
+    color: var(--fill-primary);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+    white-space: nowrap;
+    max-width: 16rem;
+}
+
+.beaver-root .bt-chip:hover {
+    background: var(--fill-quarternary);
+}
+
+.beaver-root .bt-chip-column {
+    color: var(--fill-tertiary);
+}
+
+.beaver-root .bt-chip-value {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Density control ---------------------------------------------------------- */
+
+.beaver-root .bt-density {
+    display: inline-flex;
+    flex: 0 0 auto;
+    height: 2.1rem;
+    border: 1px solid var(--color-border50);
+    border-radius: 0.45rem;
+    overflow: hidden;
+}
+
+.beaver-root .bt-density-option {
+    display: grid;
+    place-items: center;
+    width: 2.2rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--fill-tertiary);
+    cursor: pointer;
+}
+
+.beaver-root .bt-density-option + .bt-density-option {
+    border-left: 1px solid var(--color-border50);
+}
+
+.beaver-root .bt-density-option:hover {
+    background: var(--fill-senary);
+    color: var(--fill-secondary);
+}
+
+.beaver-root .bt-density-option.bt-active {
+    background: var(--fill-quinary);
+    color: var(--fill-primary);
+}
+
+/* The three glyphs differ only in line spacing — the thing they actually set. */
+.beaver-root .bt-density-glyph {
+    display: block;
+    width: 0.95rem;
+    height: 0.85rem;
+    background-image: repeating-linear-gradient(
+        to bottom,
+        currentColor 0 1px,
+        transparent 1px var(--bt-glyph-step)
+    );
+}
+
+.beaver-root .bt-density-compact {
+    --bt-glyph-step: 3px;
+}
+.beaver-root .bt-density-cozy {
+    --bt-glyph-step: 4px;
+}
+.beaver-root .bt-density-tall {
+    --bt-glyph-step: 6px;
+}
+
+/* Menu content ------------------------------------------------------------- */
+
+.beaver-root .bt-menu-section {
+    padding: 0.35rem 0 0.15rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fill-tertiary);
+}
+
+.beaver-root .bt-menu-check {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+}
+
+.beaver-root .bt-menu-tick {
+    flex: 0 0 auto;
+    display: inline-flex;
+    color: var(--accent-blue);
+    opacity: 0;
+}
+
+.beaver-root .bt-menu-check.bt-checked .bt-menu-tick {
+    opacity: 1;
+}
+
+/* Footer ------------------------------------------------------------------- */
+
+.beaver-root .bt-footer {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-height: 2.2rem;
+    padding: 0.2rem 1.25rem;
+    border-top: 1px solid var(--color-border50);
+    color: var(--fill-tertiary);
+    font-size: 0.85rem;
+    flex-wrap: wrap;
+}
+
+.beaver-root .bt-footer .bt-dot {
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: var(--fill-tertiary);
+}
+
+/* Overlay + dialog --------------------------------------------------------- */
+
+.beaver-root .bt-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+    padding: 6.5rem 1.25rem 1.25rem;
+    pointer-events: none;
+}
+
+.beaver-root .bt-dialog {
+    pointer-events: auto;
+    width: 24rem;
+    max-width: 100%;
+    max-height: 100%;
+    overflow: auto;
+    padding: 1rem;
+    border: 1px solid var(--color-border50);
+    border-radius: 0.7rem;
+    background: var(--material-background);
+    box-shadow: 0 0.6rem 2rem rgba(0, 0, 0, 0.18);
+}
+
+.beaver-root .bt-dialog-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.85rem;
+}
+
+.beaver-root .bt-field {
+    display: block;
+    margin-bottom: 0.85rem;
+}
+
+.beaver-root .bt-field-label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.82rem;
+    color: var(--fill-tertiary);
+}
+
+.beaver-root .bt-field-hint {
+    display: block;
+    margin-top: 0.3rem;
+    font-size: 0.82rem;
+    color: var(--fill-tertiary);
+}
+
+.beaver-root .bt-input,
+.beaver-root .bt-textarea {
+    width: 100%;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--color-border50);
+    border-radius: 0.45rem;
+    background: var(--fill-senary);
+    color: var(--fill-primary);
+    font: inherit;
+    font-size: 0.95rem;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.beaver-root .bt-textarea {
+    height: 5.2rem;
+    resize: none;
+    line-height: 1.45;
+}
+
+.beaver-root .bt-input:focus,
+.beaver-root .bt-textarea:focus {
+    border-color: var(--fill-tertiary);
+}
+
+.beaver-root .bt-typerow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+}
+
+.beaver-root .bt-typebtn {
+    height: 1.9rem;
+    padding: 0 0.6rem;
+    border: 1px solid var(--color-border50);
+    border-radius: 0.45rem;
+    background: transparent;
+    color: var(--fill-secondary);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.beaver-root .bt-typebtn:hover {
+    background: var(--fill-senary);
+}
+
+.beaver-root .bt-typebtn.bt-active {
+    background: var(--fill-primary);
+    color: var(--material-background);
+    border-color: transparent;
+}
+
+/* Cost is visible before the run, never after: this is an approval, not a note. */
+.beaver-root .bt-costbox {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.55rem 0.65rem;
+    margin-bottom: 0.85rem;
+    border: 1px solid var(--color-border50);
+    border-radius: 0.5rem;
+    background: var(--fill-senary);
+}
+
+.beaver-root .bt-costicon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    color: var(--fill-tertiary);
+    margin-top: 0.1rem;
+}
+
+.beaver-root .bt-costmain {
+    display: block;
+    font-size: 0.9rem;
+    color: var(--fill-primary);
+}
+
+.beaver-root .bt-costsub {
+    display: block;
+    margin-top: 0.1rem;
+    font-size: 0.82rem;
+    color: var(--fill-tertiary);
+}
+
+.beaver-root .bt-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+/* ==========================================================================
+ * Grid
+ * ========================================================================== */
+
+.beaver-root .bt-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+}
+
+.beaver-root .bt {
+    --bt-rail-w: 3.2rem;
+    /* The clamp is in lines, so the row height has to be derived from the same
+       line box the clamp counts — otherwise the tallest cell wins and the rows
+       stop being uniform, which is the whole point of clamping. Height on a
+       `<tr>` is a minimum, so these must be >= the tallest cell at that
+       density: `lines * line-height + 2 * pad`, and for the anchor cell
+       `title-lines * line-height + subtitle + 2 * pad`. */
+    --bt-line-h: 1.45rem;
+    --bt-subtitle-h: 1.3rem;
+    /* The item-type icon in a reference cell; the header indents past it. */
+    --bt-ref-icon-w: 15px;
+    /* The gutter the sort control occupies in a header, and which the values of
+       a sortable column leave beside them so the two line up. */
+    --bt-sort-w: 1.05rem;
+    min-width: 0;
+    font-size: 1rem;
+    line-height: 1.45;
+    color: var(--fill-primary);
+}
+
+.beaver-root .bt[data-density="compact"] {
+    --bt-lines: 2;
+    --bt-title-lines: 1;
+    --bt-pad-y: 0.35rem;
+    /* Two lines everywhere: the anchor is a title over its authors, because a
+       row you cannot attribute is not much use however short it is. Prose gets
+       the same two lines, so the row height stays one number.
+       anchor = 1.45 + 1.3 + 0.7 = 3.45; prose = 2 x 1.45 + 0.7 = 3.6. */
+    --bt-row-h: 3.7rem;
+}
+
+.beaver-root .bt[data-density="cozy"] {
+    --bt-lines: 3;
+    --bt-title-lines: 2;
+    --bt-pad-y: 0.55rem;
+    /* The anchor is what these tables are about, so the default density buys
+       the title a second line rather than truncating it at ~30 characters:
+       anchor = 2.9 + 1.3 + 1.1 = 5.3, prose = 3 x 1.45 + 1.1 = 5.45. */
+    --bt-row-h: 5.5rem;
+}
+
+.beaver-root .bt[data-density="tall"] {
+    --bt-lines: 5;
+    --bt-title-lines: 2;
+    --bt-pad-y: 0.7rem;
+    /* 5 lines of prose = 7.25 + 1.4; anchor = 2.9 + 1.3 + 1.4 = 5.6. */
+    --bt-row-h: 8.7rem;
+}
+
+.beaver-root .bt-table {
+    width: 100%;
+    /* `min-width` is set inline from the column widths — see `tableMinWidth`.
+       A fixed value here would let `table-layout: fixed` starve the flexible
+       columns once enough neighbours declare a width. */
+    table-layout: fixed;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+.beaver-root .bt-col-rail {
+    width: 3.2rem;
+}
+
+/* Header ------------------------------------------------------------------- */
+
+.beaver-root .bt-th {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    padding: 0.4rem 0.85rem;
+    text-align: left;
+    vertical-align: bottom;
+    border-bottom: 1px solid var(--color-border50);
+    /* Opaque: a translucent fill would let the scrolling body show through. */
+    background:
+        linear-gradient(var(--fill-senary), var(--fill-senary)),
+        var(--material-background);
+}
+
+.beaver-root .bt-th-rail {
+    left: 0;
+    z-index: 6;
+    width: var(--bt-rail-w);
+    padding-left: 0.6rem;
+    padding-right: 0;
+}
+
+.beaver-root .bt-th-anchor {
+    left: var(--bt-rail-w);
+    z-index: 6;
+}
+
+.beaver-root .bt-th-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+}
+
+/* Full width, so the label lines up on the same edge the values do, and
+   ellipsises inside the column instead of overflowing it. */
+.beaver-root .bt-th-top {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+    width: 100%;
+    min-width: 0;
+}
+
+.beaver-root .bt-th-button {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    width: 100%;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--fill-secondary);
+    font: inherit;
+    /* Level with the row titles in size and heavier in weight: a header that
+       reads as a caption lets the titles run away with the table. */
+    font-size: 1rem;
+    font-weight: 650;
+    text-align: inherit;
+    cursor: pointer;
+}
+
+.beaver-root .bt-th-static {
+    cursor: default;
+}
+
+.beaver-root .bt-th-sortable:hover .bt-th-button {
+    color: var(--fill-primary);
+}
+
+.beaver-root .bt-th-glyph {
+    flex: 0 0 auto;
+    display: inline-flex;
+    color: var(--fill-tertiary);
+}
+
+.beaver-root .bt-th-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/*
+ * The sort affordance appears on hover, so a resting header row stays quiet, and
+ * it sits immediately after its own label — pinned to the cell's edge instead it
+ * drifted far from short headers and landed on top of narrow ones.
+ *
+ * Keeping it in flow would push a right-aligned label a control's width in from
+ * the edge its values line up on, so the values leave the same gutter
+ * (`bt-sortable-col` below). At rest that gutter is simply empty.
+ */
+.beaver-root .bt-th-sort {
+    flex: 0 0 var(--bt-sort-w);
+    display: inline-flex;
+    justify-content: center;
+    color: var(--fill-tertiary);
+    opacity: 0;
+    transition: opacity 100ms ease;
+}
+
+.beaver-root .bt-td.bt-sortable-col.bt-align-end {
+    padding-right: calc(0.85rem + var(--bt-sort-w));
+}
+
+.beaver-root .bt-td.bt-sortable-col.bt-align-center {
+    padding-right: calc(0.85rem + var(--bt-sort-w));
+    padding-left: 0.85rem;
+}
+
+.beaver-root .bt-th-sortable:hover .bt-th-sort {
+    opacity: 0.55;
+}
+
+.beaver-root .bt-th-sort-asc,
+.beaver-root .bt-th-sort-desc {
+    opacity: 1;
+    color: var(--fill-primary);
+}
+
+.beaver-root .bt-th-info {
+    flex: 0 0 auto;
+    display: inline-flex;
+    color: var(--fill-tertiary);
+    cursor: help;
+}
+
+.beaver-root .bt-th-info:hover {
+    color: var(--fill-secondary);
+}
+
+.beaver-root .bt-th-menu {
+    flex: 0 0 auto;
+    margin-left: auto;
+    opacity: 0;
+}
+
+.beaver-root .bt-th:hover .bt-th-menu,
+.beaver-root .bt-th:focus-within .bt-th-menu {
+    opacity: 1;
+}
+
+.beaver-root .bt-align-end {
+    text-align: right;
+}
+
+.beaver-root .bt-align-end .bt-th-top,
+.beaver-root .bt-align-end .bt-th-button {
+    justify-content: flex-end;
+}
+
+.beaver-root .bt-align-center {
+    text-align: center;
+}
+
+.beaver-root .bt-align-center .bt-th-top,
+.beaver-root .bt-align-center .bt-th-button {
+    justify-content: center;
+}
+
+/*
+ * `Column.description` is the column's question, and for an extraction column it
+ * is the extraction prompt — the header is where the contract belongs, so it
+ * gets its own lines rather than a tooltip nobody opens.
+ *
+ * A fixed two-line box, rendered even when a column has no question: with each
+ * header sized to its own description the titles sat at five different heights.
+ * The full text is on the header's `title`.
+ */
+.beaver-root .bt-th-description {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    height: calc(2 * 1.3em);
+    max-width: 22rem;
+    color: var(--fill-tertiary);
+    font-size: 0.8rem;
+    font-weight: 400;
+    line-height: 1.3;
+    white-space: normal;
+}
+
+/* A column being filled reports its own progress; nobody counts pending cells. */
+.beaver-root .bt-th-progress {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    height: 1rem;
+}
+
+/* An empty track in a column that is not filling: the row is reserved so every
+   header title keeps its baseline, but only the filling one is drawn. */
+.beaver-root .bt-th:not(.bt-th-filling) .bt-progress-track {
+    visibility: hidden;
+}
+
+.beaver-root .bt-progress-track {
+    flex: 1 1 auto;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--fill-quinary);
+    overflow: hidden;
+}
+
+.beaver-root .bt-progress-fill {
+    display: block;
+    height: 100%;
+    border-radius: 2px;
+    background: var(--accent-blue);
+}
+
+.beaver-root .bt-progress-label {
+    flex: 0 0 auto;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--accent-blue);
+    white-space: nowrap;
+}
+
+/* Rows --------------------------------------------------------------------- */
+
+.beaver-root .bt-row {
+    height: var(--bt-row-h);
+}
+
+.beaver-root .bt-td {
+    /* Positioned so an absolutely placed control inside a cell — the reveal
+       arrow — is contained by that cell rather than escaping to the surface. */
+    position: relative;
+    padding: var(--bt-pad-y) 0.85rem;
+    vertical-align: top;
+    border-bottom: 1px solid var(--fill-quinary);
+    background: var(--material-background);
+}
+
+.beaver-root .bt-td-rail {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    width: var(--bt-rail-w);
+    padding-left: 0.6rem;
+    padding-right: 0;
+}
+
+.beaver-root .bt-td-anchor {
+    position: sticky;
+    left: var(--bt-rail-w);
+    z-index: 2;
+    box-shadow: 1px 0 0 var(--fill-quinary);
+}
+
+/* The anchor cell is value plus verbs, side by side in normal flow: the value
+   takes what is left, the verbs take what they need, and neither overlaps the
+   other however many controls a row has. */
+.beaver-root .bt-anchor-cell {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.3rem;
+    min-width: 0;
+}
+
+.beaver-root .bt-anchor-cell > :first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.beaver-root .bt-row:hover > .bt-td {
+    background:
+        linear-gradient(var(--fill-senary), var(--fill-senary)),
+        var(--material-background);
+}
+
+.beaver-root .bt-row-open > .bt-td,
+.beaver-root .bt-row-selected > .bt-td {
+    background:
+        linear-gradient(var(--fill-quinary), var(--fill-quinary)),
+        var(--material-background);
+}
+
+/* A failed row keeps its place and its data — coverage honesty. Marked, not dimmed. */
+.beaver-root .bt-row-error > .bt-td-rail {
+    box-shadow: inset 2px 0 0 var(--tag-red-secondary);
+}
+
+.beaver-root .bt-empty-table {
+    padding: 2.5rem 1rem;
+    text-align: center;
+    color: var(--fill-tertiary);
+}
+
+/* Rail: expand, and a row number that becomes a checkbox on hover ----------- */
+
+/* Aligned to the first line of the row, not to the middle of the cell: the
+   chevron and the title start at the same padding, so giving both boxes the
+   same line height is what puts the glyph level with the words beside it. */
+.beaver-root .bt-rail {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: 0.1rem;
+}
+
+.beaver-root .bt-rail-chevron {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 1.35rem;
+    height: var(--bt-line-h);
+    padding: 0;
+    border: 0;
+    border-radius: 0.3rem;
+    background: transparent;
+    color: var(--fill-tertiary);
+    cursor: pointer;
+    transition: transform 120ms ease;
+}
+
+/* Holds the chevron's place where rows cannot expand — no cursor, no hover. */
+.beaver-root .bt-rail-spacer {
+    flex: 0 0 auto;
+    width: 1.35rem;
+    height: 1.35rem;
+}
+
+.beaver-root .bt-rail-chevron:hover {
+    background: var(--fill-quarternary);
+    color: var(--fill-primary);
+}
+
+.beaver-root .bt-rail-chevron.bt-open {
+    transform: rotate(90deg);
+    color: var(--fill-secondary);
+}
+
+/* At rest the rail is the expander and nothing else. The checkbox fades in
+   beside it on hover, so selection stays reachable without a row number
+   competing with the chevron for a 3rem column. */
+.beaver-root .bt-rail-mark {
+    flex: 0 0 auto;
+    display: inline-grid;
+    place-items: center;
+    width: 1.3rem;
+    height: var(--bt-line-h);
+}
+
+.beaver-root .bt-rail-mark .bt-checkbox {
+    opacity: 0;
+    transition: opacity 100ms ease;
+}
+
+.beaver-root .bt-row:hover .bt-rail-mark .bt-checkbox,
+.beaver-root .bt-rail-mark:focus-within .bt-checkbox,
+.beaver-root .bt-rail-mark.bt-selected .bt-checkbox {
+    opacity: 1;
+}
+
+.beaver-root .bt-checkbox {
+    display: grid;
+    place-items: center;
+    width: 0.95rem;
+    height: 0.95rem;
+    padding: 0;
+    border: 1.5px solid var(--fill-tertiary);
+    border-radius: 0.25rem;
+    background: transparent;
+    color: transparent;
+    cursor: pointer;
+}
+
+.beaver-root .bt-checkbox:hover {
+    border-color: var(--fill-secondary);
+}
+
+.beaver-root .bt-checkbox.bt-checked {
+    background: var(--accent-blue);
+    border-color: var(--accent-blue);
+    color: var(--accent-white);
+}
+
+/* ==========================================================================
+ * Cells
+ * ========================================================================== */
+
+.beaver-root .bt-value {
+    min-width: 0;
+}
+
+.beaver-root .bt-nowrap {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/*
+ * The clamp is what makes a uniform row height possible, and the row detail is
+ * what makes it safe: nothing is unreachable, it is one click away.
+ */
+.beaver-root .bt-clamp {
+    display: -webkit-box;
+    -webkit-line-clamp: var(--bt-lines);
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    color: var(--fill-secondary);
+    text-wrap: pretty;
+}
+
+.beaver-root .bt-number {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.beaver-root .bt-unit {
+    margin-left: 0.15rem;
+    color: var(--fill-tertiary);
+    font-size: 0.8em;
+}
+
+/* Cell text is rendered by the client's markdown component, which wraps its
+   output in blocks. Inside a clamped cell those must not add their own spacing,
+   or the row height stops matching the line count it was measured against. */
+.beaver-root .bt-md,
+.beaver-root .bt-md > * {
+    display: inline;
+}
+
+.beaver-root .bt-md p {
+    margin: 0;
+}
+
+/* An em dash: in an extraction table "not reported" is a finding, not a gap. */
+.beaver-root .bt-empty {
+    color: var(--fill-tertiary);
+}
+
+/* A check or a short dash — never a checkbox, which reads as editable. */
+.beaver-root .bt-bool-yes {
+    display: inline-flex;
+    color: var(--tag-green-primary);
+}
+
+.beaver-root .bt-bool-no {
+    color: var(--fill-tertiary);
+}
+
+/* A hand-edited cell says so: a repopulate must not silently overwrite one. */
+.beaver-root .bt-edited {
+    border-bottom: 1px dotted var(--fill-tertiary);
+}
+
+.beaver-root .bt-edit-mark {
+    display: inline-flex;
+    margin-left: 0.25rem;
+    color: var(--fill-tertiary);
+    vertical-align: -1px;
+}
+
+/* Pending: a shimmer sized like the text that is coming. A column of spinners
+   strobes; this reads as "being written". */
+.beaver-root .bt-pending {
+    display: block;
+}
+
+/* Sized against the row rather than the text: a shimmer is not a line box, so
+   without this a filling column is visibly taller than a filled one — the very
+   non-uniformity the clamp exists to prevent. */
+.beaver-root .bt-skeleton {
+    display: block;
+    height: 0.7rem;
+    margin-bottom: 0.4rem;
+    border-radius: 0.2rem;
+    background-image: linear-gradient(
+        90deg,
+        var(--fill-quinary) 25%,
+        var(--fill-quarternary) 50%,
+        var(--fill-quinary) 75%
+    );
+    background-size: 24rem 100%;
+    animation: bt-shimmer 1.4s linear infinite;
+}
+
+.beaver-root .bt-skeleton:last-child {
+    margin-bottom: 0;
+}
+
+/* One line, one bar — and no trailing margin, since the bar that carries
+   `:last-child` is the hidden one. */
+.beaver-root .bt[data-density="compact"] .bt-skeleton {
+    margin-bottom: 0;
+}
+
+.beaver-root .bt[data-density="compact"] .bt-skeleton + .bt-skeleton {
+    display: none;
+}
+
+/* The reason in words plus a retry — never a red wash over the row. */
+.beaver-root .bt-cell-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.35rem;
+    color: var(--fill-tertiary);
+}
+
+.beaver-root .bt-cell-error-mark {
+    flex: 0 0 auto;
+    display: inline-flex;
+    margin-top: 0.1rem;
+    color: var(--tag-red-primary);
+}
+
+.beaver-root .bt-cell-error-text {
+    min-width: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: var(--bt-lines);
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.beaver-root .bt-inline-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: var(--accent-blue);
+    cursor: pointer;
+}
+
+.beaver-root .bt-inline-link:hover {
+    text-decoration: underline;
+}
+
+/* Select pills: one coloured category, from the tag ramps. */
+
+.beaver-root .bt-pill {
+    /* Inline-block, not inline-flex: `text-overflow` has nothing to trim in a
+       flex container, so a long category clipped mid-word instead of
+       ellipsising. The line height does the vertical centring a pill needs. */
+    display: inline-block;
+    max-width: 100%;
+    height: 1.5rem;
+    line-height: 1.5rem;
+    padding: 0 0.65rem;
+    border: 0;
+    border-radius: 999px;
+    background: var(--fill-quinary);
+    color: var(--fill-secondary);
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+}
+
+.beaver-root .bt-pill-button {
+    cursor: pointer;
+}
+
+.beaver-root .bt-pill-button:hover {
+    filter: brightness(0.94);
+}
+
+.beaver-root .bt-pill-gray {
+    background: var(--fill-quinary);
+    color: var(--fill-secondary);
+}
+.beaver-root .bt-pill-blue {
+    background: var(--tag-blue-quarternary);
+    color: var(--tag-blue-primary);
+}
+.beaver-root .bt-pill-green {
+    background: var(--tag-green-quarternary);
+    color: var(--tag-green-primary);
+}
+.beaver-root .bt-pill-yellow {
+    background: var(--tag-yellow-quarternary);
+    color: var(--tag-orange-primary);
+}
+.beaver-root .bt-pill-orange {
+    background: var(--tag-orange-quarternary);
+    color: var(--tag-orange-primary);
+}
+.beaver-root .bt-pill-red {
+    background: var(--tag-red-quarternary);
+    color: var(--tag-red-primary);
+}
+.beaver-root .bt-pill-purple {
+    background: var(--tag-purple-quarternary);
+    color: var(--tag-purple-primary);
+}
+
+/* Reference cell: the anchor, and the one column fed from two sources. */
+
+.beaver-root .bt-reference {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    min-width: 0;
+}
+
+.beaver-root .bt-ref-icon-slot {
+    flex: 0 0 auto;
+    display: inline-flex;
+    width: var(--bt-ref-icon-w);
+    margin-top: 0.1rem;
+    color: var(--fill-tertiary);
+}
+
+/* The header of a reference column starts where its titles do, not where their
+   item icons do — the icon belongs to the value, and a header that lines up
+   with it lines up with nothing anyone reads. */
+.beaver-root .bt-th-kind-reference .bt-th-top {
+    padding-left: calc(var(--bt-ref-icon-w) + 0.4rem);
+}
+
+.beaver-root .bt-ref-body {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.beaver-root .bt-ref-title {
+    display: -webkit-box;
+    -webkit-line-clamp: var(--bt-title-lines);
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    color: var(--fill-primary);
+    font-weight: 500;
+    text-wrap: pretty;
+}
+
+/* The title is the reveal target: the row's commonest verb should not need a
+   hunt. The button is only the hit area — the clamp is on the span inside it,
+   because a button's computed display is a flow root and the clamp would not
+   reach the anonymous block it lays its text out in. */
+.beaver-root .bt-ref-title-button {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.beaver-root .bt-ref-title-button:hover .bt-ref-title {
+    text-decoration: underline;
+}
+
+/* Closer to the title than it was: at 0.88rem the second line read as a
+   footnote rather than as the row's attribution. */
+.beaver-root .bt-ref-meta {
+    display: block;
+    color: var(--fill-tertiary);
+    font-size: 0.92rem;
+    line-height: var(--bt-subtitle-h);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Italic, because it is a publication name and not another author. */
+.beaver-root .bt-ref-venue {
+    font-style: italic;
+}
+
+/* Authors and venue share a line while the row is short, and the separator
+   comes with the venue so it disappears when the venue takes its own line. */
+.beaver-root .bt-ref-authors + .bt-ref-venue::before {
+    content: " · ";
+    font-style: normal;
+}
+
+.beaver-root .bt[data-density="tall"] .bt-ref-venue,
+.beaver-root .bt-detail .bt-ref-venue {
+    display: block;
+}
+
+.beaver-root .bt[data-density="tall"] .bt-ref-authors + .bt-ref-venue::before,
+.beaver-root .bt-detail .bt-ref-authors + .bt-ref-venue::before {
+    content: none;
+}
+
+/* An annotation's comment follows the passage in plain type. A one-line row
+   has no room for a second thought, so it goes there and nowhere else. */
+.beaver-root .bt-ann-comment {
+    display: block;
+    color: var(--fill-secondary);
+    font-size: 0.92rem;
+    line-height: var(--bt-subtitle-h);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.beaver-root .bt[data-density="compact"] .bt-ann-comment {
+    display: none;
+}
+
+/* Row actions ------------------------------------------------------------- */
+
+/* The row's verbs sit at the edge of the sticky anchor cell, so they are
+   always within reach: visible at rest, so nobody has to know to hover, and
+   full strength once the row is under the pointer. */
+.beaver-root .bt-ref-actions {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.1rem;
+    margin-top: -0.15rem;
+    opacity: 0.55;
+    transition: opacity 100ms ease;
+}
+
+.beaver-root .bt-row:hover .bt-ref-actions,
+.beaver-root .bt-row-open .bt-ref-actions,
+.beaver-root .bt-td:focus-within .bt-ref-actions {
+    opacity: 1;
+}
+
+/* An annotation's passage is a quotation, marked by a bar in the colour the
+   annotation has in the reader. */
+.beaver-root .bt-ann-quote {
+    padding-left: 0.5rem;
+    border-left: 3px solid var(--fill-quaternary);
+    font-weight: 400;
+}
+
+.beaver-root .bt-link {
+    color: var(--accent-blue);
+    cursor: pointer;
+}
+
+.beaver-root .bt-link:hover {
+    text-decoration: underline;
+}
+
+.beaver-root .bt-link-label {
+    overflow-wrap: anywhere;
+}
+
+/* ==========================================================================
+ * Row detail — every field in full, which is what makes clamping safe
+ * ========================================================================== */
+
+.beaver-root .bt-detail-row > td {
+    padding: 0.7rem 1.25rem 0.9rem calc(var(--bt-rail-w) + 0.85rem);
+    border-bottom: 1px solid var(--fill-quinary);
+    background:
+        linear-gradient(var(--fill-senary), var(--fill-senary)),
+        var(--material-background);
+}
+
+.beaver-root .bt-detail-error {
+    margin-bottom: 0.5rem;
+    color: var(--tag-red-primary);
+    font-size: 0.92rem;
+}
+
+.beaver-root .bt-detail-fields {
+    display: grid;
+    grid-template-columns: 8rem minmax(0, 1fr);
+    gap: 0.4rem 1rem;
+    margin: 0;
+}
+
+.beaver-root .bt-detail-fields dt {
+    color: var(--fill-tertiary);
+    font-size: 0.85rem;
+    padding-top: 0.05rem;
+}
+
+.beaver-root .bt-detail-fields dd {
+    margin: 0;
+    min-width: 0;
+}
+
+/* Nothing is clamped in here — that is the point of expanding a row. */
+.beaver-root .bt-detail .bt-clamp,
+.beaver-root .bt-detail .bt-ref-title,
+.beaver-root .bt-detail .bt-cell-error-text {
+    display: block;
+    -webkit-line-clamp: unset;
+    color: var(--fill-primary);
+}
+
+.beaver-root .bt-detail .bt-ref-meta {
+    display: block;
+    white-space: normal;
+}
+
+.beaver-root .bt-detail .bt-nowrap {
+    white-space: normal;
+}
+
+.beaver-root .bt-details {
+    margin-top: 0.35rem;
+}
+
+.beaver-root .bt-details-label {
+    margin-bottom: 0.1rem;
+    color: var(--fill-tertiary);
+    font-size: 0.82rem;
+}
+
+.beaver-root .bt-details-text {
+    overflow-wrap: anywhere;
+}
+
+.beaver-root .bt-details-list {
+    margin: 0;
+    padding-left: 1.1rem;
+}
+
+.beaver-root .bt-detail-extra {
+    margin-top: 0.7rem;
+}
+
+.beaver-root .bt-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+}

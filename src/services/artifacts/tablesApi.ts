@@ -1,0 +1,204 @@
+/**
+ * The one instance of the stored-table surfaces, shared across both bundles.
+ *
+ * ## Why this exists
+ *
+ * `view/readerTableView.ts` and `src/ui/tableItemPane.ts` keep **module-level
+ * state**: the enhanced-reader registry and the registered pane id.
+ * `src/hooks.ts` imports them, so esbuild compiles them into `beaver.js`. If
+ * anything under `react/` imports them too, webpack compiles a *second* copy
+ * into `reactBundle.js` — and the two copies never see each other. CLAUDE.md
+ * states the rule this violates: "The two bundles cannot import from each
+ * other … cross-bundle communication goes through `__beaver*` properties".
+ *
+ * The failure is quiet and specific. The webpack copy's registries stay empty
+ * while the esbuild copy does the real work, so a dev endpoint reports an empty
+ * view list for readers that are demonstrably enhanced — and a view registered
+ * through the webpack copy is invisible to `cleanupReaderTableViews()`, which
+ * runs from `hooks.ts` against the esbuild copy, leaking the reader's document
+ * and its window.
+ *
+ * ## The seam
+ *
+ * The **esbuild bundle owns these surfaces**, because that is where `hooks.ts`
+ * runs and where the reader integration and the item-pane section actually
+ * live. It publishes them here at startup; the webpack side reaches them
+ * through {@link getTablesApi} instead of importing the modules.
+ *
+ * **This module must never gain a value import.** Types are erased, so the
+ * interface below can name anything; a real import would put the very modules
+ * this protects back into whichever bundle loads it. `eslint.config.mjs`
+ * enforces the other half of the rule — that `react/` does not import them
+ * directly.
+ *
+ * Absent means absent: a caller that finds no API must say the esbuild half is
+ * not up, rather than fall back to a private copy that will always look idle.
+ */
+
+import type { TableRef } from './tableItemIdentity';
+import type { TableShadowReport, TableShadowObservation } from './recoveryShadow';
+import type { TableShadowRestoreResult } from './tableStore';
+import type { TableViewSummary } from './view/enhanceTableDocument';
+import type { ReaderTableDiagnostics } from './view/readerTableView';
+import type { OpenTableOutcome } from '../../ui/openTable';
+import type { TableItemPaneReport } from '../../ui/tableItemPane';
+
+/** The item-pane section, as the dev endpoint needs to see it. */
+export interface TablesItemPaneApi {
+    /** Whether the section is registered with Zotero right now. */
+    isRegistered(): boolean;
+    /** The namespaced pane id Zotero assigned, or null. */
+    paneID(): string | null;
+    /** What the section would render for one table. */
+    describe(ref: TableRef): Promise<TableItemPaneReport>;
+}
+
+/**
+ * The recovery shadow, as the item-pane section and the dev endpoints need it.
+ *
+ * Split across the bundles for a reason neither half can avoid. Detection is
+ * esbuild-side (`recoveryShadow.ts` is compiled into `beaver.js` so the section
+ * can read it), but the restore is a *write*, and every write goes through
+ * `tableStore.ts`, which is webpack-only so that its single-flight lock stays
+ * single. So {@link TablesShadowApi.restore} forwards to a function the webpack
+ * bundle publishes ({@link setTableShadowRestore}) and answers
+ * `store_unavailable` when it has not — which is the honest report, not a
+ * fallback that would write around the lock.
+ */
+export interface TablesShadowApi {
+    /**
+     * What this device last wrote to a table, and whether the table has gone
+     * backwards under it. `observed` is the table as the caller sees it now;
+     * pass null to read the shadow without judging it.
+     */
+    inspect(
+        ref: TableRef,
+        observed?: TableShadowObservation | null
+    ): Promise<TableShadowReport>;
+    /** Writes the retained spec back as a new version. */
+    restore(ref: TableRef): Promise<TableShadowRestoreResult | TableShadowUnavailable>;
+}
+
+/** What {@link TablesShadowApi.restore} answers with no webpack half up. */
+export interface TableShadowUnavailable {
+    ok: false;
+    code: 'store_unavailable';
+    error: string;
+}
+
+export interface TablesApi {
+    /** The single entry point for showing a stored table: the reader. */
+    openTable(ref: TableRef): Promise<OpenTableOutcome>;
+
+    /** Every table document currently enhanced. */
+    listViews(): TableViewSummary[];
+
+    /**
+     * Opens a stored table in the reader and reports what the enhancer
+     * attached. {@link openTable} is the product path; this one waits for the
+     * enhancement and describes it, which is what a dev endpoint needs.
+     */
+    openInReader(
+        item: Zotero.Item,
+        options?: { timeoutMs?: number }
+    ): Promise<ReaderTableDiagnostics>;
+
+    itemPane: TablesItemPaneApi;
+    shadow: TablesShadowApi;
+}
+
+/** The write half of the shadow, as the webpack bundle publishes it. */
+export type TableShadowRestore = (
+    ref: TableRef
+) => Promise<TableShadowRestoreResult>;
+
+/**
+ * The webpack bundle's restore function, or null before it is up.
+ *
+ * Its own slot rather than a field on {@link TablesApi}, because the two halves
+ * are published by different bundles at different times: the esbuild half
+ * registers at plugin startup and re-registers on every reload, and a field it
+ * rebuilt would silently drop whatever the React bundle had put there.
+ */
+export function getTableShadowRestore(): TableShadowRestore | null {
+    return Zotero.__beaverTableShadowRestore ?? null;
+}
+
+/** Publishes (or, with null, withdraws) it. */
+export function setTableShadowRestore(restore: TableShadowRestore | null): void {
+    Zotero.__beaverTableShadowRestore = restore ?? undefined;
+}
+
+/** What a caller reports when the webpack half has not registered. */
+export const TABLE_SHADOW_RESTORE_UNAVAILABLE =
+    'Restoring a table version needs Beaver\'s React bundle, which has not registered ' +
+    '(Zotero.__beaverTableShadowRestore is unset).';
+
+/**
+ * The shared slot. `__beaver`-prefixed on `Zotero` to match
+ * `__beaverJotaiStore` and the other cross-bundle globals, and because a `let`
+ * in the ambient `Zotero` namespace is assignable where `Zotero.Beaver`'s
+ * `const` members are not.
+ */
+export function getTablesApi(): TablesApi | null {
+    return Zotero.__beaverTables ?? null;
+}
+
+/** Publishes (or, with null, withdraws) the esbuild bundle's implementation. */
+export function setTablesApi(api: TablesApi | null): void {
+    Zotero.__beaverTables = api ?? undefined;
+}
+
+/**
+ * Single-flight write locks for stored tables: one promise chain per table,
+ * keyed `<libraryID>/<key>`. Only `tableStore.ts` takes one.
+ *
+ * Lives on the shared global rather than in `tableStore.ts` because module
+ * state is per *bundle* and the lock has to be per *process*. A map in the
+ * store would split the moment that module also reached the esbuild bundle:
+ * two chains, no serialisation between a user edit and an agent write, and
+ * every test still green.
+ *
+ * The map belongs to the **plugin realm**: `registerTablesApi()` seeds it at
+ * startup, and {@link clearTableWriteLocks} drops it at teardown, so a reload
+ * never inherits the previous realm's map. This function self-initialises if
+ * called first, which is why the seed exists — otherwise the first window
+ * bundle to take a lock would own the map.
+ *
+ * Its *entries* are promises created by a window's webpack realm (`tableStore`
+ * is compiled there). That is a bounded exception to not parking realm-bound
+ * values on a `Zotero.__beaver*` slot:
+ *
+ * - An entry deletes itself once it settles, so it is not a lasting reference.
+ * - Everything a write awaits (`IOUtils`, `Zotero.DB`, `Zotero.Items`) belongs
+ *   to the plugin or system realm. Closing a chrome window makes its *timers*
+ *   inert but does not nuke its objects, so a write whose window closes
+ *   mid-flight still settles and still releases its entry.
+ *
+ * An entry still pins its creating realm for as long as the write runs, and a
+ * future change that made the write await something window-bound would wedge
+ * that one table until reload. Clearing a closing window's entries is **not**
+ * the fix — a write still in flight would then run concurrently with the next
+ * window's, against the same staging path.
+ */
+export function tableWriteLocks(): Map<string, Promise<unknown>> {
+    const existing = Zotero.__beaverTableWriteLocks;
+    if (existing) return existing;
+    const created = new Map<string, Promise<unknown>>();
+    Zotero.__beaverTableWriteLocks = created;
+    return created;
+}
+
+/** Drops the registry. Plugin teardown only — no write may be in flight. */
+export function clearTableWriteLocks(): void {
+    Zotero.__beaverTableWriteLocks = undefined;
+}
+
+/**
+ * The message a caller shows when the esbuild half is not up. Named here so
+ * every dev endpoint reports the same thing, and reports it rather than
+ * quietly substituting a copy of its own.
+ */
+export const TABLES_API_UNAVAILABLE =
+    "Beaver's table surfaces are not registered (Zotero.__beaverTables is unset). " +
+    'The esbuild bundle either failed to load or has already been torn down.';

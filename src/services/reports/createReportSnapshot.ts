@@ -8,10 +8,11 @@
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
-import { getZoteroSelectURI } from '../../utils/zoteroUtils';
+import { getZoteroOpenURI, getZoteroSelectURI } from '../../utils/zoteroUtils';
 import { safeAttachmentFilename } from '../../utils/attachmentFiles';
 import { checkLibraryExcluded } from '../agentDataProvider/utils';
-import { buildReportHtml, CSS_RULE_BUDGET, type ReportSpec } from './reportHtml';
+import { CSS_RULE_BUDGET } from '../../utils/html';
+import { buildReportHtml, type ReportSpec } from './reportHtml';
 
 export interface CreateReportOptions {
     spec: ReportSpec;
@@ -48,15 +49,6 @@ export class ReportCreationError extends Error {
         this.name = 'ReportCreationError';
         this.code = code;
     }
-}
-
-/** Builds the `zotero://open` URI for a file attachment. */
-function getZoteroOpenURI(libraryID: number, key: string): string | null {
-    const library = Zotero.Libraries.get(libraryID);
-    if (!library) return null;
-    // @ts-ignore groupID is defined for group libraries
-    const segment = library.libraryType === 'group' ? `groups/${library.groupID}` : 'library';
-    return `zotero://open/${segment}/items/${key}`;
 }
 
 /**

@@ -1,0 +1,100 @@
+{
+    "name": "set_cells refuses a column that is not in the table",
+    "before": {
+        "id": "t2",
+        "spec_version": 1,
+        "anchor_column_id": "paper",
+        "columns": [
+            {
+                "id": "paper",
+                "header": "Paper",
+                "type": "reference"
+            },
+            {
+                "id": "topic",
+                "header": "Topic",
+                "type": "select",
+                "options": [
+                    {
+                        "label": "Methods",
+                        "color": "blue"
+                    }
+                ]
+            },
+            {
+                "id": "decision",
+                "header": "Include?",
+                "type": "select",
+                "role": "screening_decision",
+                "description": "Does the paper meet the inclusion criteria?",
+                "options": [
+                    {
+                        "label": "include",
+                        "color": "green"
+                    },
+                    {
+                        "label": "exclude",
+                        "color": "red"
+                    }
+                ]
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "AAA"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Alpha"
+                        },
+                        "provenance": "imported"
+                    }
+                }
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_id": 1,
+                    "zotero_key": "BBB"
+                },
+                "cells": {
+                    "paper": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Beta"
+                        },
+                        "provenance": "imported"
+                    }
+                }
+            }
+        ]
+    },
+    "mutations": [
+        {
+            "op": "set_cells",
+            "cells": [
+                {
+                    "row": "r1",
+                    "column": "ghost",
+                    "cell": {
+                        "value": {
+                            "kind": "text",
+                            "text": "x"
+                        },
+                        "provenance": "user"
+                    }
+                }
+            ]
+        }
+    ],
+    "error": {
+        "code": "unknown_column"
+    }
+}

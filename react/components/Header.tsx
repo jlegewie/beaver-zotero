@@ -171,7 +171,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                         <Tooltip content="Open in separate window" secondaryContent={openWindowShortcut} showArrow singleLine>
                             <IconButton
                                 icon={PictureInPictureIcon}
-                                onClick={openBeaverWindow}
+                                onClick={() => openBeaverWindow()}
                                 className="scale-14"
                                 ariaLabel="Open in separate window"
                             />

@@ -1,4 +1,5 @@
 import type { AgentAction } from './agentActions';
+import { hasLibraryIdentity } from '@beaver/agent-core/identity/libraryRef';
 
 /**
  * Count user-visible PDF annotations represented by an applied action.
@@ -27,10 +28,16 @@ export function getAppliedPdfAnnotationCount(action: AgentAction): number {
         return proposedItems.length;
     }
 
+    // Mirrors `hasAppliedZoteroItem` in agentActionTypes.ts, including its
+    // library test: a truthy rowid would miss an applied item the backend
+    // named portably, and the count would then disagree with the undo list.
     const hasAppliedZoteroItem =
         action.status === 'applied' &&
         Boolean(action.result_data?.zotero_key) &&
-        Boolean(action.result_data?.library_id);
+        hasLibraryIdentity({
+            library_id: action.result_data?.library_id,
+            library_ref: action.result_data?.library_ref,
+        });
 
     if (
         hasAppliedZoteroItem &&

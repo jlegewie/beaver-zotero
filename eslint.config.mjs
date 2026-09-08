@@ -435,6 +435,141 @@ export default tseslint.config(
             ],
         },
     },
+    // The stored-table subsystem is compiled into BOTH bundles, so it obeys the
+    // esbuild bundle's rules: no React, no Jotai store, no `process`. Reaching
+    // any of those from here does not fail a build or a typecheck — the plugin
+    // simply throws `process is not defined` while loading `beaver.js` and does
+    // not start at all, with `Zotero.Beaver` undefined and no endpoints
+    // registered. See CLAUDE.md, "Shared code across bundles".
+    //
+    // This is not a blanket rule for `src/`: `hooks.ts` imports `react/eventBus`
+    // and `react/ui/UIManager` deliberately, and those are esbuild-safe.
+    {
+        files: [
+            "src/services/artifacts/**/*.ts",
+            "src/ui/openTable.ts",
+            "src/ui/tableItemPane.ts",
+            "src/ui/tableItemPaneModel.ts",
+        ],
+        rules: {
+            "no-restricted-imports": [
+                "error",
+                {
+                    patterns: [
+                        {
+                            group: ["**/react/*", "**/react/**"],
+                            message:
+                                "The stored-table subsystem is reachable from the esbuild bundle, where React, the Jotai store and `process` do not exist. A direct react/ import makes beaver.js throw on load and the plugin never starts.",
+                        },
+                        {
+                            group: ["**/store", "**/react/store"],
+                            message:
+                                "The stored-table subsystem is reachable from the esbuild bundle, which has no Jotai store — that global lives on the webpack side (Zotero.__beaverJotaiStore).",
+                        },
+                    ],
+                },
+            ],
+        },
+    },
+    // The half of that subsystem `src/hooks.ts` actually pulls in has a second
+    // constraint the pattern above cannot express: an import that *reaches*
+    // `react/` transitively is just as fatal as a direct one, and it is how this
+    // broke the first time — `tableItem.ts` imports `checkLibraryExcluded`, and
+    // `agentDataProvider/utils` imports the Jotai store, the profile atoms and
+    // the popup helpers, i.e. effectively the whole app graph.
+    //
+    // `tableItem.ts` is deliberately absent from this list: it owns creation and
+    // may keep that import, because only the webpack side and the store call it.
+    // Anything esbuild-side wanting identification or reading imports
+    // `tableItemIdentity.ts` instead.
+    {
+        files: [
+            "src/services/artifacts/tableItemIdentity.ts",
+            "src/services/artifacts/tableDocument.ts",
+            // The recovery shadow: the item-pane section reads it to say a
+            // table went backwards, so it has to be esbuild-safe too.
+            "src/services/artifacts/recoveryShadow.ts",
+            "src/services/artifacts/view/**/*.ts",
+            "src/ui/openTable.ts",
+            "src/ui/tableItemPane.ts",
+            "src/ui/tableItemPaneModel.ts",
+        ],
+        rules: {
+            "no-restricted-imports": [
+                "error",
+                {
+                    patterns: [
+                        {
+                            group: ["**/react/*", "**/react/**"],
+                            message:
+                                "This module is compiled into the esbuild bundle, where React, the Jotai store and `process` do not exist.",
+                        },
+                        {
+                            group: [
+                                "**/agentDataProvider",
+                                "**/agentDataProvider/**",
+                            ],
+                            message:
+                                "agentDataProvider reaches react/store and react/atoms/profile, so importing it here drags the whole React graph into the esbuild bundle and the plugin fails to load. Library exclusion gates writes and indexing — identification and reading are not gated, so this module does not need it.",
+                        },
+                        {
+                            group: ["**/tableItem", "**/tableStore"],
+                            message:
+                                "tableItem.ts and tableStore.ts import the library-exclusion check and through it the React graph. Import ./tableItemIdentity for identification, paths, addressing and reading — it owns readTable(), which tableStore re-exports.",
+                        },
+                    ],
+                },
+            ],
+        },
+    },
+    // The stored-table surfaces are compiled into the esbuild bundle by
+    // `src/hooks.ts`. Importing one from the webpack bundle does not fail
+    // anything; it silently creates a SECOND copy of whatever state it keeps.
+    // The esbuild copy does the real work while the webpack copy stays empty,
+    // so `/beaver/test/table-view-state` reports no views for readers that are
+    // demonstrably enhanced, and a view registered through the webpack copy is
+    // invisible to `cleanupReaderTableViews()` — leaking the reader's document
+    // and the window it lives in.
+    //
+    // `openTable.ts` keeps no state of its own and is listed for the other half
+    // of the rule: `Zotero.__beaverTables` is the single seam every caller of a
+    // table surface goes through, so a torn-down bundle reports "not up"
+    // instead of running a dead realm's closure.
+    //
+    // Reach them through `Zotero.__beaverTables` instead: see
+    // `src/services/artifacts/tablesApi.ts`. Stateless helpers are fine and stay
+    // importable (`tableLinks.ts`, `tableDocument.ts`, `tableItemIdentity.ts`).
+    {
+        files: [
+            "react/**/*.ts",
+            "react/**/*.tsx",
+            // The webpack-only half of the subsystem, which reaches the React
+            // graph through the library-exclusion check and so can never be in
+            // the esbuild bundle either.
+            "src/services/artifacts/tableItem.ts",
+            "src/services/artifacts/tableStore.ts",
+        ],
+        rules: {
+            "no-restricted-imports": [
+                "error",
+                {
+                    patterns: [
+                        {
+                            group: [
+                                "**/ui/openTable",
+                                "**/ui/tableItemPane",
+                                "**/artifacts/view/readerTableView",
+                                "**/artifacts/tablesApiHost",
+                            ],
+                            allowTypeImports: true,
+                            message:
+                                "This module owns stored-table runtime state and is compiled into the esbuild bundle. Importing it here creates a second, permanently empty copy of that state (empty registries, leaked reader views). Use `getTablesApi()` from src/services/artifacts/tablesApi.ts; import stateless helpers from artifacts/view/tableLinks.ts instead.",
+                        },
+                    ],
+                },
+            ],
+        },
+    },
     // The L1 core (wire protocol, transport, backend clients) stays free of the
     // Zotero global and the React/Jotai app graph, so it can be consumed by a
     // non-Zotero client. Zotero behavior reaches it through the injectable
