@@ -182,7 +182,9 @@ const AdvancedSection: React.FC = () => {
             {/* ===== CUSTOM INSTRUCTIONS ===== */}
             <CustomInstructionsSection />
 
-            <BackgroundProcessingSection placement="advanced" />
+            {process.env.NODE_ENV === 'development' && (
+                <BackgroundProcessingSection placement="advanced" />
+            )}
 
             {/* ===== STORAGE ===== */}
             <div className="display-flex flex-row items-center gap-2" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>
