@@ -1,3 +1,4 @@
+import { getContextWindow } from '../runtime/windowRuntime';
 import { useEffect, useRef, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { readerTextSelectionAtom } from '../atoms/messageComposition';
@@ -37,7 +38,7 @@ let moduleReaderTabNotifierId: string | null = null;
  * and stop as soon as the tab is no longer the selected one.
  */
 async function waitForReaderByTabID(tabID: string, timeoutMs = 2000): Promise<any | undefined> {
-    const mainWindow = Zotero.getMainWindow();
+    const mainWindow = getContextWindow();
     const deadline = Date.now() + timeoutMs;
     for (;;) {
         const reader = Zotero.Reader.getByTabID(tabID);
@@ -93,7 +94,7 @@ export function useReaderTabSelection() {
     const setupGenerationRef = useRef(0);
 
     // Define main window
-    const mainWindow = Zotero.getMainWindow();
+    const mainWindow = getContextWindow();
 
     // Function to poll for reader._internalReader readiness
     const waitForInternalReader = useCallback((reader: any, callback: () => void, maxTime = 2000) => {

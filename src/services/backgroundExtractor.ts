@@ -787,14 +787,5 @@ export class BackgroundExtractor {
 }
 
 function dispatchBackgroundEvent(name: string, detail: unknown): void {
-    const win = Zotero.getMainWindow?.() ?? null;
-    if (!win) return;
-    const bus = win.__beaverEventBus;
-    if (!bus) return;
-    try {
-        const Ctor = (win as any).CustomEvent ?? CustomEvent;
-        bus.dispatchEvent(new Ctor(name, { detail }));
-    } catch (e) {
-        logger(`background event dispatch failed for ${name}: ${e}`, 2);
-    }
+    Zotero.Beaver?.runtime?.publish(name, detail);
 }

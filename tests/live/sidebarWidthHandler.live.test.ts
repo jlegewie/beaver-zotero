@@ -1,7 +1,7 @@
 /**
  * Reader sidebar-width wrapper lifecycle live suite.
  *
- * Exercises the real `react/ui/UIManager.ts` install/unwrap/restore logic for
+ * Exercises the real `src/runtime/readerWidth.ts` install/unwrap/restore logic for
  * the `Zotero.Reader.onChangeSidebarWidth` wrapper via the dev-only
  * `/beaver/test/sidebar-width-handler` endpoint. The unit tests
  * (`tests/unit/utils/readerSidebarWidthHandler.test.ts`) cover the same logic
@@ -46,7 +46,7 @@ describe('running instance health', () => {
     });
 });
 
-describe('install path (real initSidebarWidthTracking)', () => {
+describe('install path (real ReaderWidthDispatcher)', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, available));
 
     it('installs a tagged wrapper over a plain original and propagates width calls to it', async () => {

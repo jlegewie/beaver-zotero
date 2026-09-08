@@ -1,3 +1,4 @@
+import { getContextWindow } from '../runtime/windowRuntime';
 import { useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -173,7 +174,7 @@ export function useZoteroContext() {
     // whenever the searchable set changes in Preferences.
     useEffect(() => {
         if (!isLibraryAccessReady) return;
-        const mainWindow = Zotero.getMainWindow();
+        const mainWindow = getContextWindow();
         const selectedTab = mainWindow?.Zotero_Tabs?._tabs?.find(
             (tab: any) => tab.id === mainWindow.Zotero_Tabs.selectedID,
         );
@@ -196,7 +197,7 @@ export function useZoteroContext() {
     }, [isLibraryAccessReady, searchableLibraryIdsKey, setNoteItem]);
 
     useEffect(() => {
-        const mainWindow = Zotero.getMainWindow();
+        const mainWindow = getContextWindow();
         const zp = mainWindow?.ZoteroPane;
         if (!zp) {
             logger('useZoteroContext: ZoteroPane not available', 2);

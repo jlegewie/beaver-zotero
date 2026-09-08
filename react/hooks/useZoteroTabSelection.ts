@@ -1,3 +1,4 @@
+import { getContextWindow } from '../runtime/windowRuntime';
 import { useEffect } from "react";
 import { useSetAtom } from "jotai";
 import { logger } from "@beaver/agent-core/platform/logger";
@@ -21,7 +22,7 @@ export function useZoteroTabSelection() {
     const setSelectedTabId = useSetAtom(selectedZoteroTabIdAtom);
 
     // define main window
-    const window = Zotero.getMainWindow();
+    const window = getContextWindow();
 
     useEffect(() => {
         logger("useZoteroTabSelection: initializing tab selection hook");

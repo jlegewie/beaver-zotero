@@ -334,3 +334,19 @@ The reader's dev menu has a "Copy Fixture Capture Command" item that builds the 
 - **Cleanup**: Close DB connections in `afterEach`. Call `vi.clearAllMocks()` in `beforeEach`.
 - **Fixture updates**: Fixtures in `helpers/fixtures.ts` reference real items by `library_id + zotero_key`. Update keys to match your library.
 - **Don't pipe a live run through `tail`/`head`**: the pipe buffers everything until vitest exits, so a multi-minute run shows no progress and an interrupted one shows nothing at all. Redirect to a file (`npm run test:live > run.log 2>&1`) and read that instead.
+
+### Window runtime checks
+
+`tests/unit/runtime/` evaluates independent renderer module graphs and verifies store/atom
+isolation, targeted buses, window-specific UI cleanup, late loads and root teardown order.
+For the live draft-isolation check, open two main Zotero windows in an isolated profile:
+
+```bash
+BEAVER_MULTI_WINDOW_TEST=1 ZOTERO_HTTP_PORT=<port> npm run test:live -- windowRuntime sidebarWidthHandler
+```
+
+The `/beaver/test/window-runtime` endpoint accepts `{command: "list"}` to enumerate runtime
+ids. Other requests take `windowId` and inspect that renderer, or use
+`{command: "draft", windowId, draft}` to stage text without sending it. Missing or closing
+ids return `window_unavailable`. These diagnostics share the existing development/auth gates;
+endpoint ownership is still window-managed.

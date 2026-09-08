@@ -1,3 +1,4 @@
+import { tryGetWindowRuntime } from '../runtime/windowRuntime';
 /**
  * Hook to register HTTP endpoints for local FrontendCapability.
  *
@@ -105,6 +106,7 @@ import {
 } from './httpHandlers/testSyncHandlers';
 import {
     handleTestSidebarWidthHandlerHttpRequest,
+    handleTestWindowRuntimeHttpRequest,
 } from './httpHandlers/testUiHandlers';
 import {
     handleBatchProgressPreview,
@@ -1327,7 +1329,7 @@ function registerEndpoints(): boolean {
             createEndpoint(handleTestSyncPauseHttpRequest);
 
         // Reader sidebar-width wrapper lifecycle (dev-only): drives the real
-        // UIManager install/unwrap/restore path against Zotero.Reader.
+        // dispatcher install/unwrap/restore path against Zotero.Reader.
         Zotero.Server.Endpoints['/beaver/test/sidebar-width-handler'] =
             createEndpoint(handleTestSidebarWidthHandlerHttpRequest);
 
@@ -1513,9 +1515,16 @@ export function useHttpEndpoints() {
 
         logger('useHttpEndpoints: Registering endpoints (authenticated)', 3);
         const registered = registerEndpoints();
+        const runtime = tryGetWindowRuntime();
+        const releaseRuntimeEndpoint = registered && runtime && process.env.NODE_ENV === 'development'
+            ? Zotero.Beaver.runtime.registerWindowEndpoint(
+                runtime, '/beaver/test/window-runtime', createEndpoint(handleTestWindowRuntimeHttpRequest),
+            )
+            : undefined;
 
         // Cleanup on unmount or when auth state changes
         return () => {
+            releaseRuntimeEndpoint?.();
             if (registered) {
                 logger('useHttpEndpoints: Cleaning up endpoints', 3);
                 unregisterEndpoints();

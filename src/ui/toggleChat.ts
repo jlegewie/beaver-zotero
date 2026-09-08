@@ -1,16 +1,8 @@
-import { eventManager } from '../../react/events/eventManager';
-
-/**
-* Toggle the chat panel on and off.
-* 
-* @param win - The window to toggle the chat in.
-* @param turnOn - Whether to turn the chat on or off.
-*/
+/** Toggle the sidebar in the originating main window. */
 export function triggerToggleChat(win: Window) {
-    win = Zotero.getMainWindow();
-    const selectedType = win.Zotero_Tabs.selectedType;
-    const location = selectedType === 'library' ? 'library' : 'reader';
-    eventManager.dispatch('toggleChat', { 
-        location: location
-    });
+    if (win.closed || win.__beaverRuntime?.status === 'closing') return;
+    const location = win.Zotero_Tabs.selectedType === 'library' ? 'library' : 'reader';
+    win.__beaverEventBus?.dispatchEvent(new win.CustomEvent('toggleChat', {
+        detail: { location },
+    }));
 }

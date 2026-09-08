@@ -59,8 +59,6 @@ interface ZoteroSearchWritable extends Zotero.Search {
 }
 
 declare namespace Zotero {
-    /** Shared Jotai store for Beaver plugin across all windows */
-    let __beaverJotaiStore: any;
     /** Set to true at the start of shutdown to signal all in-flight operations to bail out */
     let __beaverShuttingDown: boolean | undefined;
     /** Items Beaver has just written; see beaverAnnotationRegistry.ts. Shared across bundles. */
@@ -93,6 +91,7 @@ declare namespace Zotero {
     let __beaverTableWriteLocks: Map<string, Promise<unknown>> | undefined;
 
     namespace Beaver {
+        const runtime: import("../src/runtime/instance").BeaverInstance;
         const voiceNative: import("../src/services/voice/nativeVoice").NativeVoice | undefined;
         const voice: import("../src/services/voice/voiceService").VoiceService | undefined;
         const voiceHarness: import("../src/services/voice/developmentHarness").DevelopmentVoiceHarness | undefined;
@@ -722,7 +721,7 @@ declare namespace _ZoteroTypes {
     }
 
     interface Zotero {
-        /** Shared Jotai store for Beaver plugin across all windows */
+            __beaverRuntime?: import("../src/runtime/instance").WindowRuntime;
         __beaverJotaiStore?: import('jotai').createStore extends () => infer R ? R : never;
         /** Set to true at the start of shutdown to signal all in-flight operations to bail out */
         __beaverShuttingDown?: boolean;
