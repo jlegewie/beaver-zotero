@@ -56,6 +56,16 @@ export const isDeviceAuthorizedAtom = selectAtom(
 // This is used for Free users who don't store libraries in the backend per privacy policy
 export const localZoteroLibrariesAtom = atom<ZoteroLibrary[]>([]);
 
+// Distinguishes a successfully loaded (possibly empty) Zotero library list
+// from the atom's initial empty value. Both the local library list and the
+// profile exclusions must be known before background jobs can enforce the
+// searchable-library boundary.
+export const localZoteroLibrariesInitializedAtom = atom<boolean>(false);
+
+export const libraryScopeInitializedAtom = atom<boolean>((get) => {
+    return get(isProfileLoadedAtom) && get(localZoteroLibrariesInitializedAtom);
+});
+
 export const excludedLibrariesAtom = selectAtom(
     profileWithPlanAtom,
     (profile: SafeProfileWithPlan | null) => profile?.excluded_libraries ?? [],
@@ -165,6 +175,27 @@ export const isBackendIndexingCompleteAtom = atom<boolean>((get) => {
     // Fallback to profile data (refreshed every 15 min via useProfileSync)
     return profile?.indexing_complete || false;
 });
+
+/** Backend-computed OCR entitlement */
+export const hasOcrAccessAtom = selectAtom(
+    profileWithPlanAtom,
+    (profile: SafeProfileWithPlan | null) => profile?.has_ocr_access ?? false,
+);
+
+/** Backend-computed cloud search-index entitlement. */
+export const hasSearchIndexAccessAtom = selectAtom(
+    profileWithPlanAtom,
+    (profile: SafeProfileWithPlan | null) => profile?.has_search_index_access ?? false,
+);
+
+/**
+ * Copy-only label for the background-processing welcome popup (plan §3, §8.3).
+ * Decoupled from gating: 'pro' / 'search' / null (generic copy).
+ */
+export const indexingPlanLabelAtom = selectAtom(
+    profileWithPlanAtom,
+    (profile: SafeProfileWithPlan | null) => profile?.indexing_plan_label ?? null,
+);
 
 export const processingModeAtom = atom<ProcessingMode>(() => ProcessingMode.FRONTEND);
 

@@ -43,6 +43,21 @@ const FRAGMENTED_TEXT_MIN_LINES = 50;
 const FRAGMENTED_TEXT_MAX_MEAN_LEN = 1.5;
 
 /**
+ * Per-page issues that mean a page carries no *usable* text — either none at
+ * all (`no_text_blocks` / `no_body_text`) or characters that never resolve
+ * into readable words (`invalid_characters`, `low_alphanumeric_ratio`,
+ * `fragmented_text_lines`). The document-level sufficient-text rescue treats
+ * these as hard evidence of a missing or broken text layer.
+ */
+const HARD_OCR_ISSUES: ReadonlySet<OCRIssueReason> = new Set([
+    "no_text_blocks",
+    "no_body_text",
+    "invalid_characters",
+    "low_alphanumeric_ratio",
+    "fragmented_text_lines",
+]);
+
+/**
  * Minimal interface that DocumentAnalyzer needs — implemented by a
  * worker-side adapter that wraps an open `Document`. Decouples the analyzer
  * from the MuPDF lifecycle so the same code can be reused outside the
@@ -688,15 +703,13 @@ export class DocumentAnalyzer {
             meanTextPerPage < opts.minMeanTextPerPage;
 
         // Document-level sufficient-text rescue
-        const cleanPages = pageAnalyses.filter((p) => !p.hasIssues);
-        const cleanMeanText =
-            cleanPages.length > 0
-                ? cleanPages.reduce((sum, p) => sum + p.textLength, 0) /
-                  cleanPages.length
-                : 0;
+        const hardPageCount = pageAnalyses.filter((p) =>
+            p.issues.some((issue) => HARD_OCR_ISSUES.has(issue)),
+        ).length;
+        const hardPageRatio = hardPageCount / pageAnalyses.length;
         const documentHasUsableText =
-            cleanPages.length >= pageAnalyses.length / 2 &&
-            cleanMeanText >= opts.minTextPerPage;
+            meanTextPerPage >= opts.minTextPerPage &&
+            hardPageRatio < opts.confirmationThreshold;
 
         // Determine if OCR is needed. The near-empty guard always forces a
         // verdict; the per-page issue ratio is overridden by the

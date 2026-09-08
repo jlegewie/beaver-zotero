@@ -33,7 +33,9 @@ import {
     allLibrariesExcludedAtom,
     isLibraryAccessReadyAtom,
     isProfileLoadedAtom,
+    libraryScopeInitializedAtom,
     localZoteroLibrariesAtom,
+    localZoteroLibrariesInitializedAtom,
     profileWithPlanAtom,
     searchableLibraryIdsAtom,
 } from '../../../react/atoms/profile';
@@ -110,6 +112,21 @@ function profile(overrides: Partial<SafeProfileWithPlan> = {}): SafeProfileWithP
 }
 
 describe('searchableLibraryIdsAtom', () => {
+    it('initializes library scope only after both profile and local libraries load', () => {
+        const store = createStore();
+
+        expect(store.get(libraryScopeInitializedAtom)).toBe(false);
+
+        store.set(localZoteroLibrariesInitializedAtom, true);
+        expect(store.get(libraryScopeInitializedAtom)).toBe(false);
+
+        store.set(isProfileLoadedAtom, true);
+        expect(store.get(libraryScopeInitializedAtom)).toBe(true);
+
+        store.set(isProfileLoadedAtom, false);
+        expect(store.get(libraryScopeInitializedAtom)).toBe(false);
+    });
+
     it('keeps access decisions pending until profile and local libraries are loaded', () => {
         const store = createStore();
 

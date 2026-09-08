@@ -477,13 +477,25 @@ describe('MuPDFWorkerClient', () => {
             }
         });
 
-        it('applies the heap guard to the background slot without an operation-count limit', async () => {
+        it('gives each slot its own default operation-count limit', () => {
+            const hot = new MuPDFWorkerClient({ slotName: 'hot' });
+            const background = new MuPDFWorkerClient({ slotName: 'background' });
+            try {
+                expect(hot.getStats().recycleDataOperationThreshold).toBe(32);
+                expect(background.getStats().recycleDataOperationThreshold).toBe(8);
+            } finally {
+                hot.dispose();
+                background.dispose();
+            }
+        });
+
+        it('applies the heap guard to the background slot', async () => {
             vi.useFakeTimers();
             const client = new MuPDFWorkerClient({ slotName: 'background' });
             try {
                 expect(client.getStats()).toMatchObject({
                     recycleHeapThresholdBytes: 512 * 1024 * 1024,
-                    recycleDataOperationThreshold: null,
+                    recycleDataOperationThreshold: 8,
                 });
 
                 const op = client.getPageCount(new Uint8Array([1]));
@@ -1999,7 +2011,7 @@ describe('MuPDFWorkerClient', () => {
             });
             expect(bg.getStats()).toMatchObject({
                 recycleHeapThresholdBytes: 512 * 1024 * 1024,
-                recycleDataOperationThreshold: null,
+                recycleDataOperationThreshold: 8,
             });
         });
 

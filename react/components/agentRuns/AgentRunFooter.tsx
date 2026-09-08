@@ -326,7 +326,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                         toggleCallback={handleMenuToggle}
                         tooltipContent="More options"
                     />
-                    
+
                     {/* Usage display */}
                     {(getHost().config?.isDevelopment() ?? false) && run.status === 'completed' && chainUsage != null && chainCost != null && (
                         <TokenUsageDisplay usage={chainUsage} cost={chainCost} />

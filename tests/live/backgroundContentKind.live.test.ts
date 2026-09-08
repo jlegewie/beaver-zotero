@@ -17,8 +17,7 @@
  *   - `BackgroundExtractor.processOnce()` content-kind dispatch:
  *       * a job whose recorded content kind no longer matches the live
  *         attachment is dropped without extracting;
- *       * a job whose content kind is a non-PDF kind the background worker
- *         does not handle is dropped without extracting;
+ *       * a structured EPUB job extracts and caches the document;
  *       * a PDF job whose payload is missing or non-PDF is dropped without
  *         extracting;
  *       * a PDF job recorded against a regular parent item still resolves to
@@ -54,6 +53,9 @@ import {
     type BackgroundJobPayload,
 } from '../helpers/cacheInspector';
 
+// Keep dispatch tests claimable with background processing disabled or the OS active.
+const DRAIN_PRIORITY = 10;
+
 let available: boolean;
 beforeAll(async () => {
     available = await isZoteroAvailable();
@@ -81,7 +83,7 @@ describe('background queue — payload parsing on read', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: pdfPayload(7),
         });
         const peek = await backgroundPeek();
@@ -102,7 +104,7 @@ describe('background queue — payload parsing on read', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: pdfPayload(null),
         });
         const peek = await backgroundPeek();
@@ -119,7 +121,7 @@ describe('background queue — payload parsing on read', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             // Column says pdf, JSON discriminator says epub → rejected on read.
             payload: { content_kind: 'epub' } as unknown as BackgroundJobPayload,
         });
@@ -135,7 +137,7 @@ describe('background queue — payload parsing on read', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             // Missing timeoutSeconds.
             payload: { content_kind: 'pdf', maxPages: null } as unknown as BackgroundJobPayload,
         });
@@ -149,7 +151,7 @@ describe('background queue — payload parsing on read', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: {
                 content_kind: 'pdf',
                 maxPages: 'all',
@@ -166,7 +168,7 @@ describe('background queue — payload parsing on read', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'epub',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'epub' },
         });
         const peek = await backgroundPeek();
@@ -180,7 +182,7 @@ describe('background queue — payload parsing on read', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: null,
         });
         const peek = await backgroundPeek();
@@ -201,7 +203,7 @@ describe('background queue — enqueue merge across content_kind change', () => 
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 100,
             payload: pdfPayload(5),
         });
@@ -215,7 +217,7 @@ describe('background queue — enqueue merge across content_kind change', () => 
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'epub',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 100,
             payload: { content_kind: 'epub' },
         });
@@ -237,7 +239,7 @@ describe('background queue — enqueue merge across content_kind change', () => 
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 100,
             payload: pdfPayload(5),
         });
@@ -246,7 +248,7 @@ describe('background queue — enqueue merge across content_kind change', () => 
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 200, // numerically lower priority
             payload: pdfPayload(99),
         });
@@ -263,7 +265,7 @@ describe('background queue — enqueue merge across content_kind change', () => 
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 100,
             payload: pdfPayload(5),
         });
@@ -272,7 +274,7 @@ describe('background queue — enqueue merge across content_kind change', () => 
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 10, // numerically higher priority
             payload: pdfPayload(99),
         });
@@ -298,8 +300,8 @@ describe('background queue — content_kind dispatch in processOnce', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'epub',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
-            priority: 10,
+            job_type: 'document_extract',
+            priority: DRAIN_PRIORITY,
             payload: { content_kind: 'epub' },
         });
 
@@ -326,8 +328,8 @@ describe('background queue — content_kind dispatch in processOnce', () => {
             zotero_key: IMAGE.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
-            priority: 10,
+            job_type: 'document_extract',
+            priority: DRAIN_PRIORITY,
             payload: pdfPayload(null),
         });
 
@@ -341,18 +343,15 @@ describe('background queue — content_kind dispatch in processOnce', () => {
         expect(stats.queue!.dead).toBe(0);
     }, 60_000);
 
-    it('drops a job whose content kind is a non-PDF kind the worker does not handle', async () => {
-        // Live attachment is an EPUB and the job correctly records 'epub', so it
-        // passes the staleness guard — but the background worker only extracts
-        // PDFs, so the job is dropped as unsupported.
+    it('extracts and caches a structured EPUB job', async () => {
         await invalidateCache(NON_PDF.library_id, NON_PDF.zotero_key);
         await backgroundEnqueue({
             library_id: NON_PDF.library_id,
             zotero_key: NON_PDF.zotero_key,
             content_kind: 'epub',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
-            priority: 10,
+            job_type: 'document_extract',
+            priority: DRAIN_PRIORITY,
             payload: { content_kind: 'epub' },
         });
 
@@ -366,7 +365,10 @@ describe('background queue — content_kind dispatch in processOnce', () => {
         expect(stats.queue!.dead).toBe(0);
 
         const payload = await getCachePayload(NON_PDF.library_id, NON_PDF.zotero_key, 'structured');
-        expect(payload).toBeNull();
+        expect(payload).not.toBeNull();
+        expect(payload?.contentKind).toBe('epub');
+        expect(payload?.payloadKind).toBe('structured');
+        expect(payload?.payloadSizeBytes).toBeGreaterThan(0);
     }, 60_000);
 
     it('drops a PDF job with a missing payload without extracting', async () => {
@@ -376,8 +378,8 @@ describe('background queue — content_kind dispatch in processOnce', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
-            priority: 10,
+            job_type: 'document_extract',
+            priority: DRAIN_PRIORITY,
             payload: null,
         });
 
@@ -401,8 +403,8 @@ describe('background queue — content_kind dispatch in processOnce', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
-            priority: 10,
+            job_type: 'document_extract',
+            priority: DRAIN_PRIORITY,
             payload: { content_kind: 'epub' } as unknown as BackgroundJobPayload,
         });
 
@@ -432,8 +434,8 @@ describe('background queue — content_kind dispatch in processOnce', () => {
             zotero_key: PARENT_ITEM.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
-            priority: 10,
+            job_type: 'document_extract',
+            priority: DRAIN_PRIORITY,
             payload: pdfPayload(null),
         });
 

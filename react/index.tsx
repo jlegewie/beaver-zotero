@@ -33,6 +33,13 @@ import { useOnboardingPopups } from './hooks/useOnboardingPopups';
 import { useInterruptedThreadPopup } from './hooks/useInterruptedThreadPopup';
 import { useRunStatusTip } from './hooks/useRunStatusTip';
 import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
+import { useLibraryScopeMirror } from './hooks/useLibraryScopeMirror';
+import { useOcrLane } from './hooks/useOcrLane';
+import { useSearchIndexAccess } from './hooks/useSearchIndexAccess';
+import { useFulltextUpsertLane } from './hooks/useFulltextUpsertLane';
+import { useBackgroundProcessingStatus } from './hooks/useBackgroundProcessingStatus';
+import { useBackgroundProcessingWelcome } from './hooks/useBackgroundProcessingWelcome';
+import { useBackgroundProcessingScopeCleanup } from './hooks/useBackgroundProcessingScopeCleanup';
 import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { setTransportConfig } from '@beaver/agent-core/transport/config';
@@ -211,6 +218,29 @@ const GlobalContextInitializer = () => {
 
     // Mirror background extraction activity into the shared Jotai store
     useBackgroundWorkerStatus();
+
+    // Publish the searchable-library scope for esbuild background code. Runs
+    // before the lane hooks so the mirror is set when a lane first dispatches.
+    useLibraryScopeMirror();
+
+    // Register the OCR background lane + mirror the OCR entitlement flag
+    useOcrLane();
+
+    // Mirror the cloud search-index entitlement flag (background-processing plan)
+    useSearchIndexAccess();
+
+    // Register the authenticated cloud-index lane and reconcile tag coverage.
+    useFulltextUpsertLane();
+
+    // Poll queue, ledger, and remote coverage for status UI.
+    useBackgroundProcessingStatus({
+        onlyWhenEnabled: true,
+        pollIntervalMs: 15_000,
+    });
+
+    useBackgroundProcessingWelcome();
+
+    useBackgroundProcessingScopeCleanup();
 
     return null; // This component does not render any UI
 };

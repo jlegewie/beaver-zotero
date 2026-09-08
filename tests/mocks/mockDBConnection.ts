@@ -12,6 +12,7 @@
  */
 
 import Database from 'better-sqlite3';
+import { parseQueryAndParams } from './zoteroQueryParams';
 
 export class MockDBConnection {
     private db: Database.Database;
@@ -30,10 +31,15 @@ export class MockDBConnection {
      * and the onRow callback pattern used in some BeaverDB methods.
      */
     async queryAsync(
-        sql: string,
-        params: any[] = [],
+        sqlIn: string,
+        paramsIn: any[] = [],
         options?: { onRow?: (row: any) => void }
     ): Promise<any[]> {
+        // Zotero splices NULL parameters into the SQL rather than binding them,
+        // and gets the placeholder position wrong for anything but `= ?`/`, ?`/
+        // `( ?`. Reproduce that here so tests exercise the statement production
+        // actually runs. See zoteroQueryParams.ts.
+        const [sql, params] = parseQueryAndParams(sqlIn, paramsIn);
         const trimmed = sql.trim().toUpperCase();
 
         // Reader PRAGMAs like table_info return rows in Zotero's queryAsync, so

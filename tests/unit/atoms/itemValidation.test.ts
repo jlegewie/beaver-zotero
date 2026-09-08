@@ -24,6 +24,8 @@ vi.mock('../../../src/services/itemValidationManager', () => ({
         validateItem: mocks.validateItem,
         validateRegularItem: mocks.validateRegularItem,
     },
+    formatValidationOcrLogSuffix: () => '',
+    formatRegularItemOcrLogSuffix: () => '',
 }));
 
 import {

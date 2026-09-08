@@ -49,6 +49,7 @@ export { default as ArrowRightIcon } from './ArrowRightIcon';
 export { default as RepeatIcon } from './RepeatIcon';
 export { default as GlobalSearchIcon } from './GlobalSearchIcon';
 export { default as CopyIcon } from './CopyIcon';
+export { default as MicIcon } from './MicIcon';
 export { default as BubbleChatQuestionIcon } from './BubbleChatQuestionIcon';
 export { default as TickIcon } from './TickIcon';
 export { default as ShareIcon } from './ShareIcon';

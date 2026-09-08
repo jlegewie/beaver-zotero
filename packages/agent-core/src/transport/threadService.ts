@@ -1,5 +1,5 @@
 import { ApiService } from './apiService';
-import { ServerError, SessionRefreshError } from '../types/apiErrors';
+import { ApiError, ServerError, SessionRefreshError } from '../types/apiErrors';
 
 
 /**
@@ -144,7 +144,12 @@ export interface ThreadTruncationReport {
  * is a definitive answer already and must not be retried.
  */
 function isRetryableTruncateFailure(error: unknown): boolean {
-    return error instanceof ServerError || error instanceof SessionRefreshError;
+    // A 5xx reaches callers as an `ApiError` whenever the body parses as JSON
+    // — FastAPI's default `{"detail": ...}` does — and only as a bare
+    // `ServerError` when it does not, so both shapes must be retried.
+    return error instanceof ServerError
+        || error instanceof SessionRefreshError
+        || (error instanceof ApiError && error.status >= 500);
 }
 
 /** Per-attempt deadline: the retry UI blocks on this call. */

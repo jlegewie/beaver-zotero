@@ -302,4 +302,3 @@ export function registerZoteroLibraryIdentity(): void {
     setObjectIdResolver(resolveObjectId);
     setLibraryRefResolver(libraryRefForLibraryID);
 }
-

@@ -21,6 +21,7 @@ vi.mock('../../../src/services/agentDataProvider', () => ({
     handleZoteroAttachmentSearchRequest: vi.fn(),
     handleItemSearchByMetadataRequest: vi.fn(),
     handleItemSearchByTopicRequest: vi.fn(),
+    handleResolveSearchFiltersRequest: vi.fn(),
     handleZoteroSearchRequest: vi.fn(),
     handleListItemsRequest: vi.fn(),
     handleListCollectionsRequest: vi.fn(),

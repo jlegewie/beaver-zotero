@@ -4,6 +4,8 @@ import {
     ItemValidationResult,
     ItemValidationOptions,
     type ItemValidationSeverity,
+    formatValidationOcrLogSuffix,
+    formatRegularItemOcrLogSuffix,
 } from '../../src/services/itemValidationManager';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryAccessReadyAtom, searchableLibraryIdsAtom } from './profile';
@@ -135,7 +137,10 @@ export const validateItemAtom = atom(
             });
             set(itemValidationResultsAtom, updatedResults);
             
-            logger(`Validated item ${itemKey}: ${result.state}`, 4);
+            logger(
+                `Validated item ${itemKey}: ${result.state}${formatValidationOcrLogSuffix(result, options)}`,
+                4,
+            );
             
             return result;
         } catch (error: any) {
@@ -229,11 +234,12 @@ export const validateRegularItemAtom = atom(
         set(itemValidationResultsAtom, newResults);
         
         try {
-            const result = await itemValidationManager.validateRegularItem(item, {
+            const regularItemOptions: ItemValidationOptions = {
                 searchableLibraryIds: get(searchableLibraryIdsAtom),
                 supportsVision: supportsVision(get),
                 canHandleOCRLocally: canHandleOCRLocally(get),
-            });
+            };
+            const result = await itemValidationManager.validateRegularItem(item, regularItemOptions);
             
             // Update validation results for item and all attachments
             const updatedResults = new Map(get(itemValidationResultsAtom));
@@ -272,7 +278,10 @@ export const validateRegularItemAtom = atom(
             
             set(itemValidationResultsAtom, updatedResults);
             
-            logger(`Validated regular item ${itemKey} with ${result.attachmentResults.size} attachments: ${result.state}`, 4);
+            logger(
+                `Validated regular item ${itemKey} with ${result.attachmentResults.size} attachments: ${result.state}${formatRegularItemOcrLogSuffix(result.attachmentResults, regularItemOptions)}`,
+                4,
+            );
             
             return result;
         } catch (error: any) {

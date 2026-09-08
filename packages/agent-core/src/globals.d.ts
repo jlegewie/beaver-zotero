@@ -86,7 +86,8 @@ declare interface Response {
 declare interface RequestInit {
   method?: string;
   headers?: Record<string, string>;
-  body?: string;
+  /** `Uint8Array` for a pre-encoded body — see `ApiService.postRaw`. */
+  body?: string | Uint8Array;
   signal?: AbortSignal;
 }
 

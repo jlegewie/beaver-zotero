@@ -148,6 +148,19 @@ export async function handleTestCacheClearAllHttpRequest(_request: any) {
 }
 
 /**
+ * Dev-only: report document-cache counts, total payload bytes and the
+ * configured size budget, optionally running an eviction pass first.
+ */
+export async function handleTestCacheStatsHttpRequest(request: any) {
+    const cache = Zotero.Beaver?.documentCache;
+    if (!cache) return { error: 'cache not available' };
+    const enforced = request?.enforce_budget === true
+        ? await cache.enforceSizeBudget()
+        : null;
+    return { ok: true, enforced, stats: await cache.getStats() };
+}
+
+/**
  * Dev-only: invoke the MCP `read_attachment` tool handler directly.
  *
  * Exercises the exact tool code path — `start_page` / `end_page` integer

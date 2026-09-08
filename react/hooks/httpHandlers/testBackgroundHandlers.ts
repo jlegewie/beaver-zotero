@@ -90,9 +90,16 @@ export async function handleTestBackgroundStatsHttpRequest(_request: unknown) {
     return {
         ok: true,
         queue,
+        lanes: Zotero.Beaver?.backgroundExtractor?.getLaneStatus() ?? {},
         workers: {
             hot: hot?.getStats() ?? null,
             background: background?.getStats() ?? null,
+        },
+        // Searchable-library mirror the dispatcher gates on. Exposed so tests
+        // can tell "scope not published" apart from "library excluded".
+        library_scope: {
+            initialized: Zotero.Beaver?.libraryScopeInitialized ?? null,
+            searchable_library_ids: Zotero.Beaver?.searchableLibraryIds ?? null,
         },
     };
 }

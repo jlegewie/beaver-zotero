@@ -8,7 +8,7 @@ import { MockDBConnection } from '../../mocks/mockDBConnection';
 
 function makeInput(overrides: Partial<BackgroundJobInput> = {}): BackgroundJobInput {
     const base: BackgroundJobInput = {
-        jobType: 'document_timeout_retry',
+        jobType: 'document_extract',
         libraryId: 1,
         zoteroKey: 'ABCD1234',
         contentKind: 'pdf',
@@ -130,7 +130,25 @@ describe('BeaverDB background queue', () => {
         expect(rows[0].lastError).toBeNull();
     });
 
-    it('rebuilds columns-correct background tables when the unique key is stale', async () => {
+    it('preserves current background queue tables on upgrade from an unversioned install', async () => {
+        const first = await db.enqueueBackgroundJob(makeInput({ now: 10_000 }));
+        const raw = conn.getRawDB();
+        raw.exec(`DELETE FROM schema_versions WHERE component = 'background_jobs'`);
+
+        const rebuilt = new BeaverDB(conn);
+        await rebuilt.initDatabase('0.99.0');
+
+        const rows = await rebuilt.peekBackgroundJobs();
+        expect(rows).toHaveLength(1);
+        expect(rows[0].id).toBe(first.id);
+        expect(rows[0].zoteroKey).toBe('ABCD1234');
+        const version = raw
+            .prepare(`SELECT version FROM schema_versions WHERE component = 'background_jobs'`)
+            .get() as { version: number };
+        expect(version.version).toBe(2);
+    });
+
+    it('rebuilds the background queue with the current unique key on upgrade from an unversioned install', async () => {
         await conn.closeDatabase();
         conn = new MockDBConnection();
         const raw = conn.getRawDB();
@@ -183,6 +201,7 @@ describe('BeaverDB background queue', () => {
             'library_id',
             'zotero_key',
             'payload_kind',
+            'dedupe_key',
         ]);
     });
 
@@ -255,6 +274,43 @@ describe('BeaverDB background queue', () => {
         // No remaining visible jobs (all bumped to now + visibility).
         const claimed4 = await db.claimNextBackgroundJob(now, visibility);
         expect(claimed4).toBeNull();
+    });
+
+    it('claimNextBackgroundJob can filter by job type without starving other lanes', async () => {
+        await db.enqueueBackgroundJob(
+            makeInput({ jobType: 'document_extract', zoteroKey: 'AAAAAAAA', priority: 100 }),
+        );
+        await db.enqueueBackgroundJob(
+            makeInput({ jobType: 'document_ocr', zoteroKey: 'BBBBBBBB', priority: 10 }),
+        );
+
+        const now = 1_000_000;
+        const visibility = 60_000;
+        const extract = await db.claimNextBackgroundJob(
+            now,
+            visibility,
+            undefined,
+            ['document_extract'],
+        );
+        expect(extract?.jobType).toBe('document_extract');
+        expect(extract?.zoteroKey).toBe('AAAAAAAA');
+
+        const noExtract = await db.claimNextBackgroundJob(
+            now,
+            visibility,
+            undefined,
+            ['document_extract'],
+        );
+        expect(noExtract).toBeNull();
+
+        const ocr = await db.claimNextBackgroundJob(
+            now,
+            visibility,
+            undefined,
+            ['document_ocr'],
+        );
+        expect(ocr?.jobType).toBe('document_ocr');
+        expect(ocr?.zoteroKey).toBe('BBBBBBBB');
     });
 
     describe('maxPriority gate', () => {
@@ -439,7 +495,7 @@ describe('BeaverDB background queue', () => {
         const stats = await db.getBackgroundQueueStats(500);
         expect(stats.pending).toBe(2);
         expect(stats.available + stats.deferred).toBe(stats.pending);
-        expect(stats.byJobType['document_timeout_retry']).toBe(2);
+        expect(stats.byJobType['document_extract']).toBe(2);
         expect(stats.dead).toBe(0);
     });
 
@@ -463,5 +519,124 @@ describe('BeaverDB background queue', () => {
         expect(typeof rows[0].availableAt).toBe('number');
         expect(rows[0].enqueuedAt).toBe(12345);
         expect(rows[0].availableAt).toBe(12345);
+    });
+
+    it('records, increments, gates, and clears document processing failures by content hash', async () => {
+        await db.recordDocumentProcessingFailure({
+            fileHash: 'hash-a',
+            task: 'ocr',
+            engineVersion: 'engine-1',
+            sourceType: 'zotero',
+            sourceKey: '1-AAAAAAAA',
+            error: 'first',
+        });
+
+        let record = await db.getDocumentProcessingFailure('hash-a', 'ocr', 'engine-1');
+        expect(record).toMatchObject({
+            fileHash: 'hash-a',
+            task: 'ocr',
+            engineVersion: 'engine-1',
+            sourceType: 'zotero',
+            sourceKey: '1-AAAAAAAA',
+            failureCount: 1,
+            terminalCode: null,
+            lastError: 'first',
+        });
+        expect(
+            await db.isDocumentProcessingReadyForRetry(
+                'hash-a',
+                'ocr',
+                'engine-1',
+                '0000-01-01 00:00:00',
+            ),
+        ).toBe(false);
+        expect(
+            await db.isDocumentProcessingReadyForRetry(
+                'hash-a',
+                'ocr',
+                'engine-1',
+                '9999-01-01 00:00:00',
+            ),
+        ).toBe(true);
+
+        await db.recordDocumentProcessingFailure({
+            fileHash: 'hash-a',
+            task: 'ocr',
+            engineVersion: 'engine-1',
+            sourceType: 'zotero',
+            sourceKey: '1-BBBBBBBB',
+            error: 'second',
+        });
+
+        record = await db.getDocumentProcessingFailure('hash-a', 'ocr', 'engine-1');
+        expect(record?.failureCount).toBe(2);
+        expect(record?.lastError).toBe('second');
+        expect(record?.sourceKey).toBe('1-BBBBBBBB');
+        expect(await db.isDocumentProcessingPermanentlyFailed('hash-a', 'ocr', 'engine-1')).toBe(false);
+
+        await db.recordDocumentProcessingFailure({
+            fileHash: 'hash-a',
+            task: 'ocr',
+            engineVersion: 'engine-1',
+            error: 'terminal',
+            terminalCode: 'OCR_NO_TEXT',
+        });
+
+        record = await db.getDocumentProcessingFailure('hash-a', 'ocr', 'engine-1');
+        expect(record?.terminalCode).toBe('OCR_NO_TEXT');
+        expect(await db.isDocumentProcessingPermanentlyFailed('hash-a', 'ocr', 'engine-1')).toBe(true);
+        expect(
+            await db.isDocumentProcessingReadyForRetry(
+                'hash-a',
+                'ocr',
+                'engine-1',
+                '9999-01-01 00:00:00',
+            ),
+        ).toBe(false);
+
+        await expect(
+            db.getDocumentProcessingFailure('hash-a', 'ocr', 'engine-2'),
+        ).resolves.toBeNull();
+
+        await db.clearDocumentProcessingFailure('hash-a', 'ocr', 'engine-1');
+        await expect(
+            db.getDocumentProcessingFailure('hash-a', 'ocr', 'engine-1'),
+        ).resolves.toBeNull();
+    });
+
+    it('atomically upserts concurrent document processing failures for the same content hash', async () => {
+        await Promise.all([
+            db.recordDocumentProcessingFailure({
+                fileHash: 'hash-concurrent',
+                task: 'ocr',
+                engineVersion: 'engine-1',
+                error: 'first',
+            }),
+            db.recordDocumentProcessingFailure({
+                fileHash: 'hash-concurrent',
+                task: 'ocr',
+                engineVersion: 'engine-1',
+                error: 'second',
+            }),
+        ]);
+
+        const record = await db.getDocumentProcessingFailure(
+            'hash-concurrent',
+            'ocr',
+            'engine-1',
+        );
+        expect(record?.failureCount).toBe(2);
+        expect(record?.lastError).toBe('second');
+    });
+
+    it('does not create the unused document processing retry index', async () => {
+        const indexes = conn
+            .getRawDB()
+            .prepare(`SELECT name FROM pragma_index_list('document_processing_failures')`)
+            .all() as Array<{ name: string }>;
+
+        expect(indexes.map((index) => index.name)).not.toContain(
+            'idx_doc_proc_failures_retry',
+        );
     });
 });

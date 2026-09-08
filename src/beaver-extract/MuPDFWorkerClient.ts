@@ -64,6 +64,7 @@ export const DEFAULT_BUSY_LEASE_MS_BACKGROUND = 240_000;
 const BUSY_LEASE_WATCHDOG_SLACK_MS = 1_000;
 const DEFAULT_RECYCLE_HEAP_BYTES = 512 * 1024 * 1024;
 const DEFAULT_RECYCLE_AFTER_DATA_OPERATIONS_HOT = 32;
+const DEFAULT_RECYCLE_AFTER_DATA_OPERATIONS_BACKGROUND = 8;
 const PROACTIVE_RECYCLE_FOLLOWUP_DATA_OPERATIONS = 1;
 
 export type ProactiveRecycleReason = "heap_limit" | "data_operation_limit";
@@ -86,10 +87,18 @@ function defaultRecycleHeapBytesForSlot(
     return DEFAULT_RECYCLE_HEAP_BYTES;
 }
 
+/**
+ * Both slots retire the worker after a fixed number of completed data
+ * operations. The background threshold is lower because background jobs are
+ * whole-document extractions, so each operation accumulates far more WASM
+ * heap than a single interactive page read.
+ */
 function defaultRecycleDataOperationsForSlot(
     name: PDFWorkerSlotName,
 ): number | null {
-    return name === "hot" ? DEFAULT_RECYCLE_AFTER_DATA_OPERATIONS_HOT : null;
+    return name === "background"
+        ? DEFAULT_RECYCLE_AFTER_DATA_OPERATIONS_BACKGROUND
+        : DEFAULT_RECYCLE_AFTER_DATA_OPERATIONS_HOT;
 }
 
 function normalizePositiveThreshold(value: number | null): number | null {

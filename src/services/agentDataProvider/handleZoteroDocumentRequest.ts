@@ -4,7 +4,7 @@
  * Resolves the request to a readable attachment, then dispatches by content
  * kind. Plain text is read directly (no document cache). PDFs and EPUBs use
  * shared extraction helpers. On a hot-path PDF timeout it enqueues a
- * `document_timeout_retry` background job; EPUB timeouts are returned directly.
+ * `document_extract` background job; EPUB timeouts are returned directly.
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -654,7 +654,7 @@ export async function handleZoteroDocumentRequest(
                 // work so an excluded library never reaches the queue.
                 if (isLibrarySearchable(target.libraryId)) {
                     await Zotero.Beaver?.db?.enqueueBackgroundJob({
-                        jobType: 'document_timeout_retry',
+                        jobType: 'document_extract',
                         libraryId: target.libraryId,
                         zoteroKey: target.zoteroKey,
                         contentKind: 'pdf',

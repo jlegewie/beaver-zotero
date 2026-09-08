@@ -1,4 +1,5 @@
 import React from "react";
+
 const MicIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
     <svg
         viewBox="0 0 24 24"

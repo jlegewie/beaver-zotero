@@ -78,6 +78,11 @@ declare namespace _ZoteroTypes {
       "mcpServerEnabled": boolean;
       "mcpCreateNoteToolEnabled": boolean;
       "backgroundExtractorEnabled": boolean;
+      "backgroundProcessingEnabled": boolean;
+      "backgroundProcessingContinuous": boolean;
+      "backgroundProcessingLibrariesToSkip": string;
+      "backgroundProcessingWelcomeAck": boolean;
+      "backgroundProcessingWelcomeDeferred": boolean;
       "runConsistencyCheck": boolean;
       "runCollectionSync": boolean;
       "runWebDAVSync": boolean;
@@ -86,6 +91,7 @@ declare namespace _ZoteroTypes {
       "librarySuggestions": string;
       "librarySuggestionsGeneratedAt": string;
       "firstRunAssignments": string;
+      "documentCacheMaxBytes": number;
       "maxAttachmentFileSizeMB": number;
       "tables.defaultLibraryID": number;
     };

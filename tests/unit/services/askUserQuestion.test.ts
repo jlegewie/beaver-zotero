@@ -40,6 +40,7 @@ vi.mock('../../../src/services/agentDataProvider', () => ({
     handleGetMetadataRequest: vi.fn(),
     handleGetAnnotationsRequest: vi.fn(),
     handleFindAnnotationsRequest: vi.fn(),
+    handleResolveSearchFiltersRequest: vi.fn(),
     handleAgentActionValidateRequest: vi.fn(),
     handleAgentActionExecuteRequest: vi.fn(),
     handleReadNoteRequest: vi.fn(),
