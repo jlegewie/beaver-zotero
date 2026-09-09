@@ -2242,17 +2242,17 @@ describe('external-file citations through React apply and undo', () => {
             '<a href="zotero://open/library/items/ATTACH12?page=6" rel="noopener noreferrer nofollow">Report.pdf</a>, p. 6)');
         expect(item._getHtml()).not.toContain('data-citation=');
         const { simplified } = simplifyNoteHtml(item._getHtml(), 1);
-        expect(simplified).toContain('ref="c_ATTACH12_0"');
-        const nextAction = makeAction(1, 'TESTKEY', simplified, simplified.replace(', p. 6)', ', p. 7)'));
+        // The saved locator reaches the agent inside the citation tag.
+        expect(simplified).toContain('<citation id="u-ATTACH12" loc="page6" ref="c_ATTACH12_0"/>');
+        const nextAction = makeAction(1, 'TESTKEY', simplified, simplified.replace('loc="page6"', 'loc="page7"'));
         const result = await executeEditNoteAction(nextAction);
         nextAction.result_data = result as any;
-        // Known limitation: the locator suffix is plain text outside the link, so
-        // editing it moves the visible page but leaves the link on the page the
-        // citation originally named.
+        // Editing it moves the link with the visible page.
         expect(item._getHtml()).toContain(
-            '<a href="zotero://open/library/items/ATTACH12?page=6" rel="noopener noreferrer nofollow">Report.pdf</a>, p. 7)');
+            '<a href="zotero://open/library/items/ATTACH12?page=7" rel="noopener noreferrer nofollow">Report.pdf</a>, p. 7)');
         await undoEdit(item, nextAction);
-        expect(item._getHtml()).toContain('Report.pdf</a>, p. 6)');
+        expect(item._getHtml()).toContain(
+            '<a href="zotero://open/library/items/ATTACH12?page=6" rel="noopener noreferrer nofollow">Report.pdf</a>, p. 6)');
         const restored = await undoEdit(item, action);
         expect(restored).toContain('<p>Anchor</p>');
         expect(restored).not.toContain('Report.pdf');

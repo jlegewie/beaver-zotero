@@ -390,27 +390,57 @@ export function simplifyNoteHtml(
                 return `__BEAVER_LINK_SHIELD_${idx}__`;
             }
         );
+        // Link citations (notes, annotations, standalone attachments) are written
+        // as `(<a …>label</a>, p. 6)`. The parenthesized form collapses into one
+        // token, carrying the locator as `loc` rather than leaving `, p. 6` as
+        // loose text: the link navigates to the page it was built with, so a
+        // locator the agent can edit outside the token would move the visible
+        // page while the link stayed behind. Only Beaver's own shape is
+        // absorbed; any other text around the anchor is left where it was.
         simplified = simplified.replace(
-            /<a\s+[^>]*href="(zotero:\/\/[^"]*)"[^>]*>([\s\S]*?)<\/a>/g,
-            (match, rawHref, innerHtml) => {
+            /(\()?(<a\s+[^>]*href="(zotero:\/\/[^"]*)"[^>]*>[\s\S]*?<\/a>)(,[^<()]*)?(\))?/g,
+            (match, openParen, anchor, rawHref, rawSuffix, closeParen) => {
                 const parsed = parseZoteroCitationLinkHref(rawHref);
                 if (!parsed) return match;
+
+                const suffix: string = rawSuffix ?? '';
+                const locatorMatch = suffix ? /^,\s*p\.\s*(\S[^<]*?)\s*$/.exec(suffix) : null;
+                const wrapped = !!openParen && !!closeParen && (!suffix || !!locatorMatch);
 
                 const itemId = modelObjectId(parsed.libraryId, parsed.itemKey);
                 const occurrence = citationKeyCounts.get(parsed.itemKey) || 0;
                 citationKeyCounts.set(parsed.itemKey, occurrence + 1);
                 const ref = `c_${parsed.itemKey}_${occurrence}`;
-                const label = innerHtml.replace(/<[^>]+>/g, '').trim();
+
+                // The stored locator is a display label. Show the agent physical
+                // page numbers where labels are known, as native citations do.
+                const rawPage = wrapped && locatorMatch ? unescapeAttr(locatorMatch[1]) : '';
+                let page = rawPage;
+                let pageConvention: 'number' | 'label' | undefined = page ? 'label' : undefined;
+                const pageLabels = pageLabelsByItemId?.[itemId];
+                if (page && pageLabels) {
+                    const translated = translatePageLabelToNumber(pageLabels, page);
+                    if (translated !== rawPage) {
+                        page = translated;
+                        pageConvention = 'number';
+                    }
+                }
 
                 metadata.elements.set(ref, {
-                    rawHtml: match,
+                    rawHtml: wrapped ? match : anchor,
                     type: 'citation',
                     // Link citation labels are derived from the target item and
                     // preserved from rawHtml while the target id is unchanged.
-                    originalAttrs: { item_id: itemId },
+                    originalAttrs: {
+                        item_id: itemId,
+                        ...(page ? { page, pageConvention } : {}),
+                    },
                 });
 
-                return `<citation id="${itemId}" ref="${ref}"/>`;
+                const tag = `<citation id="${itemId}"`
+                    + (page ? ` loc="${escapeAttr(`page${page}`)}"` : '')
+                    + ` ref="${ref}"/>`;
+                return wrapped ? tag : `${openParen ?? ''}${tag}${suffix}${closeParen ?? ''}`;
             }
         );
         simplified = simplified.replace(
