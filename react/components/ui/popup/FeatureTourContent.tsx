@@ -3,6 +3,7 @@ import { FeatureStep, ExamplePrompt } from '../../../constants/versionUpdateMess
 import Button from '@beaver/agent-ui/primitives/Button';
 import { ArrowRightIcon } from '../../icons/icons';
 import { parseTextWithLinksAndNewlines } from '../../../utils/parseTextWithLinksAndNewlines';
+import { getVersionShowcase } from '../../../constants/versionShowcases';
 
 interface FeatureTourContentProps {
     steps: FeatureStep[];
@@ -103,7 +104,9 @@ const FeatureTourContent: React.FC<FeatureTourContentProps> = ({ steps, onComple
     }, []);
     
     if (!step) return null;
-    
+
+    const Showcase = getVersionShowcase(step.showcase);
+
     return (
         <div className="feature-tour-content display-flex flex-col gap-3 w-full">
             {/* Step content - scrollable area */}
@@ -119,7 +122,9 @@ const FeatureTourContent: React.FC<FeatureTourContentProps> = ({ steps, onComple
                         {parseTextWithLinksAndNewlines(step.description)}
                     </div>
                 )}
-                
+
+                {Showcase && <Showcase />}
+
                 {/* Example prompts - compact */}
                 {step.examplePrompts && step.examplePrompts.length > 0 && (
                     <div className="display-flex flex-col gap-3 mt-2">

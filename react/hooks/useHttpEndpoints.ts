@@ -54,6 +54,7 @@ import {
     handleReadNoteRequest,
 } from '../../src/services/agentDataProvider';
 import { handleTestVoiceHttpRequest } from './httpHandlers/testVoiceHandlers';
+import { handleTestVersionPopupHttpRequest } from './httpHandlers/testVersionPopupHandlers';
 import {
     handleTestPingHttpRequest,
     handleTestCacheMetadataHttpRequest,
@@ -1334,6 +1335,9 @@ function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/quick-prompt'] =
             createEndpoint(handleTestQuickPromptHttpRequest);
+
+        endpoints['/beaver/test/version-popup'] =
+            createEndpoint(handleTestVersionPopupHttpRequest);
 
         endpoints['/beaver/test/saved-actions'] =
             createEndpoint(handleTestListSavedActionsHttpRequest);
