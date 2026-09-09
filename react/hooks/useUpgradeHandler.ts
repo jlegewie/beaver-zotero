@@ -8,6 +8,7 @@ import { getPendingVersionNotifications, clearPendingVersionNotifications } from
 import { compareVersions } from '../../src/utils/compareVersions';
 import { getVersionUpdateMessageConfig } from '../constants/versionUpdateMessages';
 import { versionUpdatePopupMessage } from '../utils/versionUpdatePopup';
+import { deferFeatureTips } from '../utils/featureTipPrefs';
 
 /**
  * Hook to handle tasks that need to run after a plugin upgrade.
@@ -50,6 +51,7 @@ export const useUpgradeHandler = () => {
             setPref('versionUpdatePopupShownAt', new Date().toISOString());
 
             addFloatingPopupMessage(versionUpdatePopupMessage(latestFloating));
+            if (latestFloating.deferFeatureTips) deferFeatureTips(latestFloating.deferFeatureTips, Date.now());
         }
 
         if (latestInPanel) {
@@ -57,6 +59,7 @@ export const useUpgradeHandler = () => {
             logger(`useUpgradeHandler: Displaying in-panel release notes for version ${latestInPanel.version}.`, 3);
 
             addPopupMessage(versionUpdatePopupMessage(latestInPanel));
+            if (latestInPanel.deferFeatureTips) deferFeatureTips(latestInPanel.deferFeatureTips, Date.now());
         }
 
         if (!latestFloating && !latestInPanel && sorted.length > 0) {

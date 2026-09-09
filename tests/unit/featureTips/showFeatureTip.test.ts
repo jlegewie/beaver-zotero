@@ -20,6 +20,8 @@ vi.mock('../../../react/constants/featureTips', () => ({
 import { dismissFeatureTipAtom, showFeatureTipAtom } from '../../../react/atoms/featureTips';
 import { popupMessagesAtom } from '../../../react/atoms/ui';
 import { floatingPopupMessagesAtom } from '../../../react/atoms/floatingPopup';
+import { getVersionUpdateMessageConfig } from '../../../react/constants/versionUpdateMessages';
+import { deferFeatureTips, isFeatureTipDeferred, markFeatureTipShown, readFeatureTipState, writeFeatureTipState } from '../../../react/utils/featureTipPrefs';
 
 let store = createStore();
 const inPanel = () => store.get(popupMessagesAtom).map((m) => m.id);
@@ -32,6 +34,37 @@ beforeEach(() => {
 });
 
 describe('showFeatureTipAtom', () => {
+    it('postpones the quick prompt release tip for seven days without marking it seen', () => {
+        vi.useFakeTimers();
+        const now = Date.UTC(2026, 8, 9);
+        vi.setSystemTime(now);
+        const delays = getVersionUpdateMessageConfig('0.25.0')!.deferFeatureTips!;
+        deferFeatureTips(delays, now);
+        expect(readFeatureTipState().shown).toEqual({});
+        expect(readFeatureTipState().lastShownAt).toBeUndefined();
+        expect(isFeatureTipDeferred(readFeatureTipState(), 'other', now)).toBe(false);
+
+        // Showing another tip must preserve the pending deferral.
+        writeFeatureTipState(markFeatureTipShown(readFeatureTipState(), 'other', now));
+        const until = now + 7 * 24 * 60 * 60 * 1000;
+        vi.setSystemTime(until - 1);
+        expect(store.set(showFeatureTipAtom, 'run-status-popup')).toBe(false);
+        expect(inPanel()).toEqual([]);
+        expect(readFeatureTipState().shown['run-status-popup']).toBeUndefined();
+
+        vi.setSystemTime(until);
+        expect(store.set(showFeatureTipAtom, 'run-status-popup')).toBe(true);
+    });
+
+    it('preserves longer deferrals and allows previews without consuming them', () => {
+        const now = Date.now();
+        deferFeatureTips({ 'run-status-popup': 100_000 }, now);
+        deferFeatureTips({ 'run-status-popup': 1_000 }, now);
+        expect(isFeatureTipDeferred(readFeatureTipState(), 'run-status-popup', now + 50_000)).toBe(true);
+        expect(store.set(showFeatureTipAtom, 'run-status-popup', { force: true })).toBe(true);
+        expect(readFeatureTipState().shown).toEqual({});
+    });
+
     it('shows the tip where its definition says, once, and records it', () => {
         expect(store.set(showFeatureTipAtom, 'run-status-popup')).toBe(true);
         expect(inPanel()).toEqual(['feature-tip:run-status-popup']);

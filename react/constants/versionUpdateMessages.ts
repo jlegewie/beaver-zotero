@@ -1,5 +1,6 @@
 import { PopupMessageFeature } from '../types/popupMessage';
 import { compareVersions } from '../../src/utils/compareVersions';
+import type { FeatureTipId } from './featureTips';
 
 /**
  * A visual a release note can carry — what `react/constants/versionShowcases.ts`
@@ -43,6 +44,8 @@ export interface FeatureStep {
  */
 export interface VersionUpdateMessageConfig {
     version: string;
+    /** Delay related tips from when this release notification is shown, in milliseconds. */
+    deferFeatureTips?: Partial<Record<FeatureTipId, number>>;
     title: string;
     /** Subtitle/intro text shown on the first screen */
     subtitle?: string;
@@ -584,6 +587,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.25.0",
+        deferFeatureTips: { 'run-status-popup': 7 * 24 * 60 * 60 * 1000 },
         title: "Introducing Quick Prompt",
         text: "Press {{quickPromptShortcut}} to open a composer in the corner. Beaver works while you stay in Zotero: the card shows progress, asks for approvals, and reports the result.",
         showcase: 'quick-prompt',

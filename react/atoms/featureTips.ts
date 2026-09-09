@@ -14,6 +14,7 @@ import {
 } from './floatingPopup';
 import {
     hasSeenFeatureTip,
+    isFeatureTipDeferred,
     isWithinFeatureTipGap,
     markFeatureTipShown,
     readFeatureTipState,
@@ -46,6 +47,7 @@ export const showFeatureTipAtom = atom(
         if (!options.force) {
             const state = readFeatureTipState();
             if (hasSeenFeatureTip(state, tipId)) return false;
+            if (isFeatureTipDeferred(state, tipId, Date.now())) return false;
             if (isWithinFeatureTipGap(state, Date.now(), [
                 getPref('versionUpdatePopupShownAt'),
                 getPref('onboardingWelcomeShownAt'),
