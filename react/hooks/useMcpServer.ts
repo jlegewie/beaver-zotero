@@ -1502,8 +1502,6 @@ export function useMcpServer() {
             logger(`useMcpServer: Failed to write MCP bridge script: ${err?.message}`, 1);
         });
 
-        const runtime = tryGetWindowRuntime();
-        if (!runtime) return;
         const service = new MCPService();
         service.setAuthCheck(() => store.get(isAuthenticatedAtom));
 
@@ -1525,7 +1523,7 @@ export function useMcpServer() {
             service.registerTool(def.name, def, handler);
         }
 
-        const registered = service.register(runtime);
+        const registered = service.register(tryGetWindowRuntime());
 
         return () => {
             if (registered) {
