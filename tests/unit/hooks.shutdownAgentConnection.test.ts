@@ -1,3 +1,4 @@
+import { BeaverInstance } from '../../src/runtime/instance';
 /**
  * Shutdown hooks close the agent connection through `BeaverReact`.
  */
@@ -11,7 +12,6 @@ const {
     mockCloseWindowsRenderedBy,
     mockDisposeMuPDFWorker,
     mockRemoveChatPanel,
-    mockUiManagerCleanup,
     mockUnregisterShortcuts,
 } = vi.hoisted(() => ({
     mockCloseBeaverWindow: vi.fn(),
@@ -21,7 +21,6 @@ const {
     mockCloseWindowsRenderedBy: vi.fn(),
     mockDisposeMuPDFWorker: vi.fn().mockResolvedValue(undefined),
     mockRemoveChatPanel: vi.fn(),
-    mockUiManagerCleanup: vi.fn(),
     mockUnregisterShortcuts: vi.fn(),
 }));
 
@@ -41,10 +40,6 @@ vi.mock('../../src/beaver-extract', () => ({
     disposeMuPDFWorker: mockDisposeMuPDFWorker,
 }));
 
-vi.mock('../../react/ui/UIManager', () => ({
-    uiManager: { cleanup: mockUiManagerCleanup },
-    restoreReaderSidebarWidthHandler: vi.fn(),
-}));
 
 vi.mock('../../src/services/protocolHandler', () => ({
     registerBeaverProtocolHandler: vi.fn(),
@@ -73,7 +68,6 @@ vi.mock('../../src/services/backgroundExtractor', () => ({
         processOnce = vi.fn().mockResolvedValue({ processed: false });
     },
 }));
-vi.mock('../../react/eventBus', () => ({ default: {} }));
 vi.mock('../../src/utils/prefs', () => ({ getPref: vi.fn(), setPref: vi.fn() }));
 vi.mock('../../src/utils/versionNotificationPrefs', () => ({
     addPendingVersionNotification: vi.fn(),
@@ -83,11 +77,14 @@ vi.mock('../../react/constants/versionUpdateMessages', () => ({
 }));
 
 function makeWindow(closeAgentConnection: unknown = vi.fn()) {
-    return {
+    const win = {
+        EventTarget,
         closed: false,
         document: { getElementById: vi.fn().mockReturnValue(null) },
         BeaverReact: { closeAgentConnection },
     } as unknown as Window & Record<string, any>;
+    (globalThis as any).addon.runtime.attachWindow(win);
+    return win;
 }
 
 function setupGlobals({ appShuttingDown }: { appShuttingDown: boolean }) {
@@ -117,6 +114,7 @@ function setupGlobals({ appShuttingDown }: { appShuttingDown: boolean }) {
     };
 
     (globalThis as any).addon = {
+        runtime: new BeaverInstance(),
         data: {
             alive: true,
             config: {
@@ -269,10 +267,8 @@ describe('closing the agent connection on window unload', () => {
     it('carries on when the window has no bundle to ask', async () => {
         setupGlobals({ appShuttingDown: false });
         const hooks = await loadHooks();
-        const win = {
-            closed: false,
-            document: { getElementById: vi.fn().mockReturnValue(null) },
-        } as unknown as Window;
+        const win = makeWindow();
+        delete win.BeaverReact;
         vi.mocked(Zotero.getMainWindows).mockReturnValue([win, makeWindow()]);
 
         await hooks.onMainWindowUnload(win);
@@ -282,6 +278,20 @@ describe('closing the agent connection on window unload', () => {
 });
 
 describe('closing the agent connection on plugin shutdown', () => {
+    it('shares one disposal when shutdown is requested concurrently', async () => {
+        setupGlobals({ appShuttingDown: false });
+        const hooks = await loadHooks();
+        const closeDatabase = vi.fn().mockResolvedValue(undefined);
+        (globalThis as any).addon.db = { closeDatabase };
+        const first = hooks.onShutdown();
+        const second = hooks.onShutdown();
+        expect(second).toBe(first);
+        await Promise.all([first, second]);
+        expect(closeDatabase).toHaveBeenCalledOnce();
+        await hooks.onShutdown();
+        expect(closeDatabase).toHaveBeenCalledOnce();
+    });
+
     beforeEach(() => {
         vi.resetModules();
         vi.clearAllMocks();
@@ -307,5 +317,63 @@ describe('closing the agent connection on plugin shutdown', () => {
         expect(secondClose).toHaveBeenCalledExactlyOnceWith('Beaver plugin shutting down', {
             rememberInterruptedThread: true,
         });
+    });
+});
+
+describe('late application shutdown', () => {
+    beforeEach(() => {
+        vi.resetModules();
+        vi.clearAllMocks();
+        mockDisposeMuPDFWorker.mockResolvedValue(undefined);
+        setupGlobals({ appShuttingDown: true });
+    });
+
+    it('disposes services once without accessing windows or UI registries', async () => {
+        const hooks = await loadHooks();
+        const instance = (globalThis as any).addon;
+        const stopWatcher = vi.fn();
+        const stopReconciler = vi.fn();
+        const stopExtractor = vi.fn().mockResolvedValue(undefined);
+        const closeDatabase = vi.fn().mockResolvedValue(undefined);
+        const disposeCitation = vi.fn();
+        instance.newItemWatcher = { stop: stopWatcher };
+        instance.processingReconciler = { stop: stopReconciler };
+        instance.backgroundExtractor = { stop: stopExtractor };
+        instance.db = { closeDatabase };
+        instance.citationService = { dispose: disposeCitation };
+        const disposeRuntime = vi.spyOn(instance.runtime, 'disposeInstance');
+        vi.mocked(Zotero.getMainWindows).mockImplementation(() => { throw new Error('Windows destroyed'); });
+        vi.mocked(Zotero.getMainWindow).mockImplementation(() => { throw new Error('Window destroyed'); });
+
+        const first = hooks.onAppShutdown();
+        expect(hooks.onAppShutdown()).toBe(first);
+        await first;
+        for (const cleanup of [stopWatcher, stopReconciler, stopExtractor, closeDatabase, disposeCitation, mockDisposeMuPDFWorker]) {
+            expect(cleanup).toHaveBeenCalledOnce();
+        }
+        expect(Zotero.getMainWindows).not.toHaveBeenCalled();
+        expect(Zotero.getMainWindow).not.toHaveBeenCalled();
+        for (const cleanup of [disposeRuntime, mockRemoveChatPanel, mockCloseWindowsRenderedBy, mockUnregisterShortcuts, mockCleanupContextMenus, mockCloseBeaverWindow]) {
+            expect(cleanup).not.toHaveBeenCalled();
+        }
+        expect(instance.db).toBeUndefined();
+        expect(instance.data.alive).toBe(false);
+        expect(Zotero.__beaverShuttingDown).toBe(true);
+    });
+
+    it('continues service cleanup after failures and preserves the DB fallback', async () => {
+        const hooks = await loadHooks();
+        const instance = (globalThis as any).addon;
+        instance.newItemWatcher = { stop: vi.fn(() => { throw new Error('watcher failed'); }) };
+        instance.backgroundExtractor = { stop: vi.fn().mockRejectedValue(new Error('extractor failed')) };
+        const closeDatabase = vi.fn().mockRejectedValue(new Error('database failed'));
+        instance.db = { closeDatabase };
+        const dispose = vi.fn();
+        instance.citationService = { dispose };
+        await hooks.onAppShutdown();
+        expect(mockDisposeMuPDFWorker).toHaveBeenCalledOnce();
+        expect(closeDatabase).toHaveBeenCalledOnce();
+        expect(instance.db.closeDatabase).toBe(closeDatabase);
+        expect(dispose).toHaveBeenCalledOnce();
     });
 });

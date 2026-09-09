@@ -782,6 +782,21 @@ describe('validateEditNoteAction — failures', () => {
         }]);
     });
 
+    it.each(['loc="page3"', ' ref="c_X_0"/>', 'loc="page1" ref="c_X_0"', 'items="u-AAAAAAAA; u-BBBBBBBB"'])(
+        'rejects citation attribute anchor %s before offering candidates', async (oldString) => {
+        vi.mocked(countOccurrences).mockReturnValueOnce(0);
+        const response = await handleAgentActionValidateRequest(makeValidateRequest({
+            action_data: {
+                library_id: 1, zotero_key: 'NOTE0001', operation: 'str_replace_all',
+                old_string: oldString, new_string: '<citation id="u-AAAAAAAA" loc="page4"/>',
+            },
+        }));
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe('partial_simplified_tag');
+        expect(response.error).toContain('WHOLE tag');
+        expect(findCandidateSnippets).not.toHaveBeenCalled();
+    });
+
     it('partial_simplified_tag (partial citation opener in old_string)', async () => {
         // expandToRawHtml leaves partial tags untransformed (its regex
         // requires a complete `/>` close), so the matcher misses and the
@@ -2349,4 +2364,49 @@ describe('insert_after multi-match normalization', () => {
         expect(response.normalized_action_data!.target_before_context).toBe('before');
         expect(response.normalized_action_data!.target_after_context).toBe('after');
     });
+});
+
+
+describe('citation anchor recovery', () => {
+    it.each(['insert_before', 'insert_after'] as const)(
+        'preserves the insertion payload for %s in validation and execution', async (operation) => {
+            const action_data = {
+                library_id: 1, zotero_key: 'NOTE0001', operation,
+                old_string: 'items="u-AAAAAAAA; u-BBBBBBBB"', new_string: 'Adjacent content',
+            };
+            const validation = await handleAgentActionValidateRequest(makeValidateRequest({ action_data }));
+            const execution = await handleAgentActionExecuteRequest(makeExecuteRequest({ action_data }));
+            expect(validation.valid).toBe(false);
+            expect(execution.success).toBe(false);
+            expect(validation.error_code).toBe('partial_simplified_tag');
+            expect(execution.error_code).toBe('partial_simplified_tag');
+            for (const message of [validation.error, execution.error]) {
+                expect(message).toContain('WHOLE tag');
+                expect(message).toContain('Keep new_string as the content to insert');
+                expect(message).not.toContain('replacement tag');
+                expect(message).not.toContain("operation='rewrite'");
+            }
+            expect(findCandidateSnippets).not.toHaveBeenCalled();
+        },
+    );
+
+    it.each(['id="section"', 'label="Example"', 'items="example"'])(
+        'matches literal attribute text before diagnosing a citation fragment: %s', async (oldString) => {
+            const html = `<p>${oldString}</p>`;
+            const item = makeMockItem({ getNote: vi.fn(() => html) });
+            (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync.mockResolvedValue(item);
+            vi.mocked(getOrSimplify).mockReturnValue({
+                simplified: html, metadata: { elements: new Map() } as any, isStale: false,
+            });
+            const action_data = {
+                library_id: 1, zotero_key: 'NOTE0001', operation: 'str_replace' as const,
+                old_string: oldString, new_string: 'Updated',
+            };
+            const validation = await handleAgentActionValidateRequest(makeValidateRequest({ action_data }));
+            expect(validation.valid).toBe(true);
+            const execution = await handleAgentActionExecuteRequest(makeExecuteRequest({ action_data }));
+            expect(execution.success).toBe(true);
+            expect(item.setNote.mock.calls[0][0]).toContain('<p>Updated</p>');
+        },
+    );
 });

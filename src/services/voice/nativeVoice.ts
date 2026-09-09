@@ -172,14 +172,20 @@ export class NativeVoice {
         const accepted = Services.prompt.confirm(
             win as Window & nsISupports,
             "Beaver Voice Input",
-            "Beaver uses a companion app named Beaver Voice Input to access your microphone. macOS will show that name in its permission prompt and microphone indicator. Permission setup does not record audio; start again afterward.",
+            "Beaver uses a companion app named Beaver Voice Input to access your microphone. To use voice input, you must first grant permission to the app. When you press Stop, audio is sent to Beaver for transcription. Recordings are never stored.",
         );
         if (accepted) setPref("voice.helperExplained", true);
         return accepted;
     }
     /** Permission setup tolerates focus transfer but is canceled on owner unload or shutdown. */
-    async prepareMicrophone(win: Window) {
-        if (!this.available || !win || win.closed || !this.explain(win))
+    async prepareMicrophone(win: Window, signal?: AbortSignal) {
+        if (
+            !this.available ||
+            !win ||
+            win.closed ||
+            signal?.aborted ||
+            !this.explain(win)
+        )
             return "unknown" as const;
         const capture = this.capture!.preparePermission({
             version: 1,
@@ -187,11 +193,14 @@ export class NativeVoice {
         });
         const cancel = () => capture.dispose();
         win.addEventListener("unload", cancel);
+        signal?.addEventListener("abort", cancel, { once: true });
         try {
+            if (signal?.aborted) return "unknown" as const;
             await capture.start();
             return this.capture?.permission ?? "unknown";
         } finally {
             win.removeEventListener("unload", cancel);
+            signal?.removeEventListener("abort", cancel);
             capture.dispose();
         }
     }

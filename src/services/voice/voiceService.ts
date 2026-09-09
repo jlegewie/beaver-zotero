@@ -1,3 +1,5 @@
+import { v4 as uuidv4 } from "uuid";
+import type { VoiceUploadContext } from "./batchTranscription";
 import { VoiceController } from "@beaver/agent-core/voice/controller";
 import {
     isBusyPhase,
@@ -14,6 +16,14 @@ export type VoiceWindow = Pick<
 > & {
     document: Pick<Document, "hasFocus">;
 };
+
+/** Window proxies can differ by realm; a top-level window still owns the same document. */
+export function isVoiceWindowBlur(event: Event, win: VoiceWindow): boolean {
+    return (
+        Object.is(event.target, win) ||
+        (event.target as Window | null)?.document === win.document
+    );
+}
 
 export type VoiceAdapters = Pick<
     VoiceDependencies,
@@ -32,13 +42,67 @@ const unavailableAdapters: VoiceAdapters = {
     },
 };
 
-/** Plugin-realm owner. Production stays unavailable until capture and transport adapters ship. */
+/** Plugin-realm session owner, shared by all mounted views. Activation remains feature-gated. */
 export class VoiceService {
     readonly controller: VoiceController;
+    uploadContext?: VoiceUploadContext;
     private auth?: () => Promise<VoiceAuth | null>;
     private releaseWindow?: () => void;
     private windows = new WeakMap<VoiceWindow, string>();
+    private timing = {
+        sessionId: "",
+        started: 0,
+        ready: 0,
+        finishing: 0,
+        ended: 0,
+    };
+    /** Fixed-size, content-free diagnostics for the most recent session; never persisted. */
+    diagnostics() {
+        const state = this.controller.getSnapshot();
+        const t = this.timing;
+        return {
+            phase: state.phase,
+            error: state.error?.code ?? null,
+            capturedMs: state.sampleCount / 16,
+            frameCount: state.frameCount,
+            startupMs: t.ready ? t.ready - t.started : null,
+            finishToResultMs:
+                t.ended && t.finishing ? t.ended - t.finishing : null,
+            quality: { ...state.quality },
+        };
+    }
     private nextWindowId = 0;
+    private nextOutputId = 0;
+    createOutputId(): string {
+        return `voice-output-${++this.nextOutputId}`;
+    }
+    private preparation?: symbol;
+    private preparationListeners = new Set<() => void>();
+    subscribePreparation(listener: () => void): () => void {
+        this.preparationListeners.add(listener);
+        return () => {
+            this.preparationListeners.delete(listener);
+        };
+    }
+    private publishPreparation() {
+        for (const listener of this.preparationListeners) listener();
+    }
+    get preparing(): boolean {
+        return !!this.preparation;
+    }
+    claimPreparation(): (() => void) | null {
+        if (this.preparing || isBusyPhase(this.controller.getSnapshot().phase))
+            return null;
+        const claim = Symbol();
+        this.preparation = claim;
+        this.publishPreparation();
+        return () => {
+            if (this.preparation === claim) {
+                this.preparation = undefined;
+                this.publishPreparation();
+            }
+        };
+    }
 
     constructor(
         clock: VoiceClock,
@@ -47,15 +111,35 @@ export class VoiceService {
         this.controller = new VoiceController({
             ...adapters,
             clock,
-            createId: () => Zotero.Utilities.randomString(32),
+            createId: () => uuidv4(),
             getAuth: () => this.auth?.() ?? Promise.resolve(null),
         });
         this.controller.subscribe(() => {
             const snapshot = this.controller.getSnapshot();
+            const now = Date.now();
+            if (
+                snapshot.sessionId &&
+                snapshot.sessionId !== this.timing.sessionId
+            ) {
+                this.timing = {
+                    sessionId: snapshot.sessionId,
+                    started: now,
+                    ready: 0,
+                    finishing: 0,
+                    ended: 0,
+                };
+            }
+            if (snapshot.captureReady && !this.timing.ready)
+                this.timing.ready = now;
+            if (snapshot.phase === "finalizing" && !this.timing.finishing)
+                this.timing.finishing = now;
+            if (!isBusyPhase(snapshot.phase) && !this.timing.ended)
+                this.timing.ended = now;
             if (!isBusyPhase(snapshot.phase)) {
                 this.releaseWindow?.();
                 this.releaseWindow = undefined;
                 this.auth = undefined;
+                this.uploadContext = undefined;
             }
         });
     }
@@ -75,19 +159,24 @@ export class VoiceService {
         getAuth: () => Promise<VoiceAuth | null>,
         expectedUserId: string,
         options?: VoiceOptions,
+        uploadContext?: VoiceUploadContext,
     ) {
-        if (isBusyPhase(this.controller.getSnapshot().phase)) {
+        if (
+            this.preparing ||
+            isBusyPhase(this.controller.getSnapshot().phase)
+        ) {
             return { error: { code: "busy" as const } };
         }
         if (!win || win.closed || !win.document.hasFocus())
             return { error: { code: "unavailable" as const } };
+        this.uploadContext = uploadContext;
         this.auth = getAuth;
         const windowId = this.windowId(win);
         const cancel = () => this.controller.windowUnloaded(windowId);
         win.addEventListener("unload", cancel);
         // Ignore focus moving among controls/reader frames in this top-level window.
         const blur = (event: Event) => {
-            if (Object.is(event.target, win)) cancel();
+            if (isVoiceWindowBlur(event, win)) cancel();
         };
         win.addEventListener("blur", blur);
         this.releaseWindow = () => {
@@ -105,12 +194,14 @@ export class VoiceService {
             this.releaseWindow?.();
             this.releaseWindow = undefined;
             this.auth = undefined;
+            this.uploadContext = undefined;
             throw error;
         }
         if ("error" in result) {
             this.releaseWindow?.();
             this.releaseWindow = undefined;
             this.auth = undefined;
+            this.uploadContext = undefined;
         }
         return result;
     }
@@ -123,6 +214,9 @@ export class VoiceService {
         this.controller.authChanged(userId);
     }
     dispose(): void {
+        this.preparation = undefined;
+        this.publishPreparation();
+        this.preparationListeners.clear();
         this.controller.dispose();
     }
 }

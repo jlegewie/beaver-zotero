@@ -22,6 +22,9 @@ export const VOICE_LIMITS = {
 } as const;
 
 export type VoiceErrorCode =
+    | "insufficient_credits"
+    | "source_ineligible"
+    | "outcome_unknown"
     | "disabled"
     | "unavailable"
     | "busy"

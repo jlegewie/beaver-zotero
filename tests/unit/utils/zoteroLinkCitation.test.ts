@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     buildZoteroCitationLinkHTML,
+    isLinkCitationItem,
+    preloadStandaloneAttachmentLinks,
     buildZoteroCitationLinkLabel,
     buildZoteroCitationLinkURI,
     parseZoteroCitationLinkHref,
@@ -36,7 +38,7 @@ describe('zoteroLinkCitation', () => {
         expect(buildZoteroCitationLinkURI(note)).toBe('zotero://select/library/items/NOTE1234');
         expect(buildZoteroCitationLinkLabel(note)).toBe('Note: Project note');
         expect(buildZoteroCitationLinkHTML(note)).toBe(
-            '(<a href="zotero://select/library/items/NOTE1234" rel="noopener noreferrer">Note: Project note</a>)'
+            '(<a href="zotero://select/library/items/NOTE1234" rel="noopener noreferrer nofollow">Note: Project note</a>)'
         );
     });
 
@@ -67,7 +69,7 @@ describe('zoteroLinkCitation', () => {
 
         expect(buildZoteroCitationLinkLabel(note)).toBe('Note: Note');
         expect(buildZoteroCitationLinkHTML(note)).toBe(
-            '(<a href="zotero://select/library/items/NOTE1234" rel="noopener noreferrer">Note: Note</a>)'
+            '(<a href="zotero://select/library/items/NOTE1234" rel="noopener noreferrer nofollow">Note: Note</a>)'
         );
     });
 
@@ -94,7 +96,7 @@ describe('zoteroLinkCitation', () => {
         );
         expect(buildZoteroCitationLinkLabel(annotation)).toBe('Annotation in Smith 2019, page 12');
         expect(buildZoteroCitationLinkHTML(annotation)).toBe(
-            '(<a href="zotero://open-pdf/groups/42/items/ATTACH12?annotation=ANNOT123" rel="noopener noreferrer">Annotation in Smith 2019, page 12</a>)'
+            '(<a href="zotero://open-pdf/groups/42/items/ATTACH12?annotation=ANNOT123" rel="noopener noreferrer nofollow">Annotation in Smith 2019, page 12</a>)'
         );
     });
 
@@ -139,7 +141,7 @@ describe('zoteroLinkCitation', () => {
 
         expect(buildZoteroCitationLinkLabel(annotation)).toBe('Annotation in Smith 2019');
         expect(buildZoteroCitationLinkHTML(annotation)).toBe(
-            '(<a href="zotero://open-pdf/library/items/ATTACH12?annotation=ANNOT123" rel="noopener noreferrer">Annotation in Smith 2019</a>)'
+            '(<a href="zotero://open-pdf/library/items/ATTACH12?annotation=ANNOT123" rel="noopener noreferrer nofollow">Annotation in Smith 2019</a>)'
         );
     });
 
@@ -156,6 +158,133 @@ describe('zoteroLinkCitation', () => {
             libraryId: 1,
             itemKey: 'ANNOT123',
         });
+        // Without an annotation the link names the attachment itself.
+        expect(parseZoteroCitationLinkHref('zotero://open/groups/42/items/ATTACH12?page=6')).toEqual({
+            libraryId: 7,
+            itemKey: 'ATTACH12',
+        });
+        expect(parseZoteroCitationLinkHref('zotero://open-pdf/library/items/ATTACH12')).toEqual({
+            libraryId: 1,
+            itemKey: 'ATTACH12',
+        });
+    });
+
+    it.each([1, 7])('opens standalone PDFs in library %s at the cited page, without accessing their files', (libraryID) => {
+        const item = { libraryID, key: 'ATTACH12', parentID: false,
+            isAttachment: () => true, isFileAttachment: () => true, isPDFAttachment: () => true,
+            getField: () => 'Report <draft>',
+            getFilePathAsync: vi.fn(() => { throw new Error('Missing file'); }),
+        };
+        const scope = libraryID === 7 ? 'groups/42' : 'library';
+        expect(isLinkCitationItem(item)).toBe(true);
+        const uri = buildZoteroCitationLinkURI(item, 6)!;
+        expect(uri).toBe(`zotero://open/${scope}/items/ATTACH12?page=6`);
+        expect(parseZoteroCitationLinkHref(uri)).toEqual({ libraryId: libraryID, itemKey: 'ATTACH12' });
+        expect(buildZoteroCitationLinkHTML(item, { kind: 'page', value: '6-8', raw: 'page6-8' }, 6))
+            .toBe(`(<a href="zotero://open/${scope}/items/ATTACH12?page=6" rel="noopener noreferrer nofollow">`
+                + 'Report &lt;draft&gt;</a>, p. 6-8)');
+        expect(item.getFilePathAsync).not.toHaveBeenCalled();
+        expect(isLinkCitationItem({ ...item, parentID: 42 })).toBe(false);
+    });
+
+    it('opens a standalone PDF without a page when none was cited', () => {
+        const item = { libraryID: 1, key: 'ATTACH12', parentID: false,
+            isAttachment: () => true, isFileAttachment: () => true, isPDFAttachment: () => true,
+            getField: () => 'Report.pdf',
+        };
+        expect(buildZoteroCitationLinkURI(item)).toBe('zotero://open/library/items/ATTACH12');
+    });
+
+    it('omits the page for a non-PDF file attachment, whose reader pages it differently', () => {
+        // Zotero reads `?page=` as a physical page index; the EPUB view resolves
+        // it through its own page mapping, where a cited PDF-style page is wrong.
+        const item = { libraryID: 1, key: 'ATTACH12', parentID: false,
+            isAttachment: () => true, isFileAttachment: () => true, isPDFAttachment: () => false,
+            getField: () => 'Book.epub',
+        };
+        expect(buildZoteroCitationLinkURI(item, 6)).toBe('zotero://open/library/items/ATTACH12');
+    });
+
+    it('selects a PDF whose file this computer does not have', () => {
+        // A synced file that was never downloaded: Zotero's open handler cannot
+        // resolve a path and returns without doing anything.
+        const item = { libraryID: 1, key: 'ATTACH12', parentID: false,
+            isAttachment: () => true, isFileAttachment: () => true, isPDFAttachment: () => true,
+            fileExistsCached: () => false,
+            getField: () => 'Report.pdf',
+        };
+        expect(buildZoteroCitationLinkURI(item, 6)).toBe('zotero://select/library/items/ATTACH12');
+    });
+
+    it('opens a PDF whose file has been checked and is present', () => {
+        const item = { libraryID: 1, key: 'ATTACH12', parentID: false,
+            isAttachment: () => true, isFileAttachment: () => true, isPDFAttachment: () => true,
+            fileExistsCached: () => true,
+            getField: () => 'Report.pdf',
+        };
+        expect(buildZoteroCitationLinkURI(item, 6)).toBe('zotero://open/library/items/ATTACH12?page=6');
+    });
+
+    it('selects an attachment with no file, which zotero://open cannot open', () => {
+        const item = { libraryID: 1, key: 'ATTACH12', parentID: false,
+            isAttachment: () => true, isFileAttachment: () => false, isPDFAttachment: () => false,
+            getField: () => 'Linked page',
+        };
+        const uri = buildZoteroCitationLinkURI(item, 6)!;
+        expect(uri).toBe('zotero://select/library/items/ATTACH12');
+        expect(parseZoteroCitationLinkHref(uri)).toEqual({ libraryId: 1, itemKey: 'ATTACH12' });
+    });
+
+    it('uses a filename when attachment title data is unavailable', () => {
+        expect(buildZoteroCitationLinkLabel({ isAttachment: () => true, parentID: false,
+            getField: () => { throw new Error('Not loaded'); }, attachmentFilename: 'Report.pdf',
+        })).toBe('Report.pdf');
+    });
+
+    it('batch loads unique standalone attachments while skipping excluded and child items', async () => {
+        const item = { isAttachment: () => true, parentID: false, getFilePathAsync: vi.fn().mockResolvedValue('/a.pdf') };
+        const second = { ...item, getFilePathAsync: vi.fn().mockResolvedValue('/b.pdf') };
+        const child = { ...item, parentID: 42, getFilePathAsync: vi.fn().mockResolvedValue('/c.pdf') };
+        (Zotero as any).Items = {
+            getByLibraryAndKey: vi.fn((_libraryID, key) =>
+                key === 'ATTACH12' ? item : key === 'ATTACH34' ? second : child),
+            loadDataTypes: vi.fn().mockResolvedValue(undefined),
+        };
+        await preloadStandaloneAttachmentLinks(
+            '<citation id="u-ATTACH12"/><citation att_id="1-ATTACH12"/>'
+                + '<citation id="u-ATTACH34"/><citation id="u-CHILDPDF"/><citation id="g42-BLOCKED1"/>',
+            libraryID => libraryID === 1,
+        );
+        expect(Zotero.Items.getByLibraryAndKey).toHaveBeenCalledTimes(3);
+        expect(Zotero.Items.loadDataTypes).toHaveBeenCalledExactlyOnceWith([item, second], ['itemData']);
+        // Resolving each path is what populates the file state the link builder reads.
+        expect(item.getFilePathAsync).toHaveBeenCalledOnce();
+        expect(second.getFilePathAsync).toHaveBeenCalledOnce();
+        expect(child.getFilePathAsync).not.toHaveBeenCalled();
+    });
+
+    it('renders a link for an attachment whose file could not be checked', async () => {
+        const item = { libraryID: 1, key: 'ATTACH12', parentID: false,
+            isAttachment: () => true, isFileAttachment: () => true, isPDFAttachment: () => true,
+            fileExistsCached: () => null, getField: () => 'Report.pdf',
+            getFilePathAsync: vi.fn().mockRejectedValue(new Error('Volume unavailable')),
+        };
+        (Zotero as any).Items = {
+            getByLibraryAndKey: vi.fn(() => item),
+            loadDataTypes: vi.fn().mockResolvedValue(undefined),
+        };
+        await expect(preloadStandaloneAttachmentLinks('<citation id="u-ATTACH12"/>')).resolves.toBeUndefined();
+        expect(buildZoteroCitationLinkURI(item, 6)).toBe('zotero://open/library/items/ATTACH12?page=6');
+    });
+
+    it('keeps filename fallback available when batch title loading fails', async () => {
+        const item = { isAttachment: () => true, parentID: false, attachmentFilename: 'Report.pdf' };
+        (Zotero as any).Items = {
+            getByLibraryAndKey: vi.fn(() => item),
+            loadDataTypes: vi.fn().mockRejectedValue(new Error('Unavailable')),
+        };
+        await expect(preloadStandaloneAttachmentLinks('<citation id="u-ATTACH12"/>')).resolves.toBeUndefined();
+        expect(buildZoteroCitationLinkLabel(item)).toBe('Report.pdf');
     });
 
     it('rejects Beaver and unrelated Zotero links', () => {

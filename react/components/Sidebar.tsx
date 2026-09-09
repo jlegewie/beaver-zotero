@@ -21,7 +21,6 @@ import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import ProfileLoadingPage from './pages/ProfileLoadingPage';
 import OnboardingRouter from './pages/OnboardingRouter';
-import { isAuthenticatedAtom } from '../atoms/auth';
 import DragDropWrapper from './input/DragDropWrapper';
 import DialogContainer from './dialog/DialogContainer';
 import ThreadListView from './ThreadListView';
@@ -30,22 +29,13 @@ import EmbeddingIndexBar from './input/EmbeddingIndexBar';
 import UpgradeConsentPage from './pages/UpgradeConsentPage';
 import DowngradeAcknowledgmentPage from './pages/DowngradeAcknowledgmentPage';
 import { store } from '../store';
-import { isLoadingThreadAtom } from '../atoms/threads';
+import { chatAccessGateAtom } from '../atoms/chatAccess';
 import { Spinner } from './icons/icons';
 import { threadWarningsAtom } from '../atoms/warnings';
 import PopupOverlayContainer from './PopupOverlayContainer';
 import {
-    hasAuthorizedFreeAccessAtom,
-    hasAuthorizedProAccessAtom,
-    hasCompletedOnboardingAtom,
-    isProfileLoadedAtom,
     isMigratingDataAtom,
     profileWithPlanAtom,
-    syncedLibrariesAtom,
-    isDatabaseSyncSupportedAtom,
-    pendingUpgradeConsentAtom,
-    pendingDowngradeAckAtom,
-    updateRequiredAtom
 } from '../atoms/profile';
 import UpdateRequiredPage from './pages/UpdateRequiredPage';
 import FirstRunPage from './pages/FirstRunPage';
@@ -195,22 +185,12 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         messagesContainerRef.current = node;
         setMessagesContainer(node);
     }, []);
-    const isAuthenticated = useAtomValue(isAuthenticatedAtom);
+    const chatAccessGate = useAtomValue(chatAccessGateAtom);
     const setIsSkippedFilesDialogVisible = useSetAtom(isSkippedFilesDialogVisibleAtom);
-    const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
-    const hasAuthorizedFreeAccess = useAtomValue(hasAuthorizedFreeAccessAtom);
-    const hasAuthorizedProAccess = useAtomValue(hasAuthorizedProAccessAtom);
-    const syncedLibraries = useAtomValue(syncedLibrariesAtom);
-    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
-    const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
-    const isLoadingThread = useAtomValue(isLoadingThreadAtom);
     const isMigratingData = useAtomValue(isMigratingDataAtom);
     const isThreadListView = useAtomValue(isThreadListViewAtom);
     const setIsThreadListView = useSetAtom(isThreadListViewAtom);
 
-    const pendingUpgradeConsent = useAtomValue(pendingUpgradeConsentAtom);
-    const pendingDowngradeAck = useAtomValue(pendingDowngradeAckAtom);
-    const updateRequired = useAtomValue(updateRequiredAtom);
     const allWarnings = useAtomValue(threadWarningsAtom);
     const creditInfoWarning = allWarnings.findLast((w) => w.type === 'credit_info');
     const isFirstRunVisible = useAtomValue(isFirstRunVisibleAtom);
@@ -277,7 +257,10 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         }
     };
 
-    if (isLoadingThread || isMigratingData) {
+    // The screens that stand before a chat, in the order the shared gate
+    // resolves them. The quick prompt reads the same atom, so the two surfaces
+    // cannot disagree about whether a chat may start.
+    if (chatAccessGate === 'loading') {
         return (
             <SidebarShell
                 id="thread-loading"
@@ -298,7 +281,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     }
 
     {/* Login page — only when there is no session at all. */}
-    if (!isAuthenticated) {
+    if (chatAccessGate === 'signed-out') {
         return (
             <SidebarShell isWindow={isWindow}>
                 <Header isWindow={isWindow} />
@@ -311,7 +294,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     {/* Profile loading / connecting / offline / fatal-error page.
         Authenticated but profile not yet loaded — renders before LoginPage was the bug
         cause when a transient network failure cleared isProfileLoaded. */}
-    if (!isProfileLoaded) {
+    if (chatAccessGate === 'connecting') {
         return (
             <SidebarShell isWindow={isWindow}>
                 <Header isWindow={isWindow} />
@@ -322,7 +305,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     }
 
     {/* Update required page - blocks access until user updates */}
-    if (updateRequired) {
+    if (chatAccessGate === 'update-required') {
         return (
             <SidebarShell isWindow={isWindow}>
                 <Header isWindow={isWindow} />
@@ -333,7 +316,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     }
 
     {/* Plan transition: Downgrade acknowledgment page (Pro → Free) */}
-    if (pendingDowngradeAck) {
+    if (chatAccessGate === 'downgrade-ack') {
         return (
             <SidebarShell isWindow={isWindow}>
                 <Header isWindow={isWindow} />
@@ -344,7 +327,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     }
 
     {/* Plan transition: Upgrade consent page (Free → Pro) */}
-    if (pendingUpgradeConsent) {
+    if (chatAccessGate === 'upgrade-consent') {
         return (
             <SidebarShell isWindow={isWindow}>
                 <Header isWindow={isWindow} />
@@ -354,15 +337,9 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         );
     }
 
-    {/* Onboarding page */}
-    {/* Free users: need has_authorized_free_access only (no full onboarding required) */}
-    {/* Pro users: need has_authorized_access AND has_completed_onboarding AND at least one library */}
-    const isFreeUser = !isDatabaseSyncSupported;
-    const needsOnboarding = isFreeUser 
-        ? !hasAuthorizedFreeAccess 
-        : (!hasAuthorizedProAccess || !hasCompletedOnboarding || syncedLibraries.length === 0);
-    
-    if (needsOnboarding) {
+    {/* Onboarding page: free users need to have authorized free access;
+        Pro users need authorized access, completed onboarding, and a library. */}
+    if (chatAccessGate === 'onboarding') {
         return (
             <SidebarShell isWindow={isWindow}>
                 <Header isWindow={isWindow} />

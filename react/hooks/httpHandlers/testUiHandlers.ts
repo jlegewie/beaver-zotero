@@ -1,12 +1,12 @@
 /**
  * Dev-only HTTP handlers for UI lifecycle state — currently the
- * `Zotero.Reader.onChangeSidebarWidth` wrapper installed by UIManager.
+ * plugin-owned `Zotero.Reader.onChangeSidebarWidth` dispatcher.
  */
 import {
-    uiManager,
+    ReaderWidthDispatcher,
     restoreReaderSidebarWidthHandler,
     unwrapReaderWidthHandler,
-} from '../../ui/UIManager';
+} from '../../../src/runtime/readerWidth';
 
 const ORIGINAL_HANDLER_PROP = '__beaverOriginalSidebarWidthHandler';
 
@@ -68,14 +68,8 @@ function describeSlot(reader: any): Record<string, unknown> {
         taggedLayers,
         bottom: cur === null ? 'null' : typeof cur,
         ownWrapperCurrent:
-            !!(uiManager as any).installedReaderWidthWrapper
-            && slot === (uiManager as any).installedReaderWidthWrapper,
+            Zotero.Beaver.runtime.readerWidth.isCurrent,
     };
-}
-
-/** Run the real (private) install path on the production singleton. */
-function runInstall(): void {
-    (uiManager as any).initSidebarWidthTracking();
 }
 
 export async function handleTestSidebarWidthHandlerHttpRequest(request: any) {
@@ -91,13 +85,13 @@ export async function handleTestSidebarWidthHandlerHttpRequest(request: any) {
 
     // Mutating scenarios: snapshot slot + instance state, restore in finally.
     const savedSlot = reader.onChangeSidebarWidth;
-    const savedOwn = (uiManager as any).installedReaderWidthWrapper;
+    const dispatcher = new ReaderWidthDispatcher();
+    const runInstall = () => dispatcher.install();
     try {
         switch (scenario) {
             case 'install-over-plain-original': {
                 const base = makeCountingFn();
                 reader.onChangeSidebarWidth = base;
-                (uiManager as any).installedReaderWidthWrapper = null;
                 runInstall();
                 const installed = reader.onChangeSidebarWidth;
                 const tagged =
@@ -114,7 +108,6 @@ export async function handleTestSidebarWidthHandlerHttpRequest(request: any) {
                 const base = makeCountingFn();
                 const stale = makeTaggedWrapper(base);
                 reader.onChangeSidebarWidth = stale;
-                (uiManager as any).installedReaderWidthWrapper = null;
                 runInstall();
                 const installed = reader.onChangeSidebarWidth;
                 installed(272);
@@ -129,7 +122,6 @@ export async function handleTestSidebarWidthHandlerHttpRequest(request: any) {
             case 'replace-legacy': {
                 const legacy = makeLegacyWrapper();
                 reader.onChangeSidebarWidth = legacy;
-                (uiManager as any).installedReaderWidthWrapper = null;
                 runInstall();
                 const installed = reader.onChangeSidebarWidth;
                 let invokeError: string | null = null;
@@ -151,7 +143,6 @@ export async function handleTestSidebarWidthHandlerHttpRequest(request: any) {
             case 'restore-unwinds-own': {
                 const base = makeCountingFn();
                 reader.onChangeSidebarWidth = base;
-                (uiManager as any).installedReaderWidthWrapper = null;
                 runInstall();
                 restoreReaderSidebarWidthHandler();
                 return { ok: true, slotIsBase: reader.onChangeSidebarWidth === base };
@@ -170,7 +161,6 @@ export async function handleTestSidebarWidthHandlerHttpRequest(request: any) {
             case 'own-wrapper-skip': {
                 const base = makeCountingFn();
                 reader.onChangeSidebarWidth = base;
-                (uiManager as any).installedReaderWidthWrapper = null;
                 runInstall();
                 const first = reader.onChangeSidebarWidth;
                 runInstall();
@@ -179,7 +169,6 @@ export async function handleTestSidebarWidthHandlerHttpRequest(request: any) {
             case 'reinstall-after-displacement': {
                 const base = makeCountingFn();
                 reader.onChangeSidebarWidth = base;
-                (uiManager as any).installedReaderWidthWrapper = null;
                 runInstall();
                 const own = reader.onChangeSidebarWidth;
                 const displacer = makeTaggedWrapper(own);
@@ -209,7 +198,18 @@ export async function handleTestSidebarWidthHandlerHttpRequest(request: any) {
                 return { error: `unknown scenario: ${String(scenario)}` };
         }
     } finally {
+        dispatcher.dispose();
         reader.onChangeSidebarWidth = savedSlot;
-        (uiManager as any).installedReaderWidthWrapper = savedOwn;
     }
+}
+
+/** Resolve once at entry; commands never import another renderer's atoms. */
+export function handleTestWindowRuntimeHttpRequest(request: any) {
+    const instance = Zotero.Beaver.runtime;
+    if (request?.command === 'list') return { windows: instance.getSnapshot() };
+    const runtime = instance.resolveWindow(request?.windowId);
+    if (!runtime) return { error: 'window_unavailable' };
+    return (runtime.hostWindow as any).BeaverReact.inspectRuntime(
+        request?.command === 'draft' ? { draft: request.draft } : undefined,
+    );
 }

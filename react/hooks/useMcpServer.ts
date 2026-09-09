@@ -1,3 +1,4 @@
+import { tryGetWindowRuntime } from '../runtime/windowRuntime';
 /**
  * Hook to register an MCP (Model Context Protocol) server on Zotero's HTTP server.
  *
@@ -1522,7 +1523,7 @@ export function useMcpServer() {
             service.registerTool(def.name, def, handler);
         }
 
-        const registered = service.register();
+        const registered = service.register(tryGetWindowRuntime());
 
         return () => {
             if (registered) {

@@ -16,18 +16,18 @@ import { Metadata } from './metadata';
 import { preprocessHTML, schemaTransform } from './transformer';
 import { buildToHTML } from './serializer';
 
-const ZOTERO_HREF_SHIELD_PREFIX = 'https://zotero-cite.invalid/';
+const LOCAL_HREF_SHIELD_PREFIX = 'https://zotero-cite.invalid/';
 
-function shieldZoteroHrefAttributes(html: string): string {
+function shieldLocalHrefAttributes(html: string): string {
     return html.replace(
-        /href="(zotero:\/\/[^"]*)"/g,
-        (_match, href) => `href="${ZOTERO_HREF_SHIELD_PREFIX}${encodeURIComponent(href)}"`
+        /href="((?:zotero|file):\/\/[^"]*)"/g,
+        (_match, href) => `href="${LOCAL_HREF_SHIELD_PREFIX}${encodeURIComponent(href)}"`
     );
 }
 
-function restoreZoteroHrefAttributes(html: string): string {
+function restoreLocalHrefAttributes(html: string): string {
     return html.replace(
-        new RegExp(`href="${ZOTERO_HREF_SHIELD_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^"]*)"`, 'g'),
+        new RegExp(`href="${LOCAL_HREF_SHIELD_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^"]*)"`, 'g'),
         (match, encodedHref) => {
             try {
                 return `href="${decodeURIComponent(encodedHref)}"`;
@@ -48,8 +48,9 @@ function restoreZoteroHrefAttributes(html: string): string {
 export function normalizeNoteHtml(html: string): string {
     const doc = getDocument();
 
-    // 1. Shield Zotero protocol hrefs before any chrome-document innerHTML parse.
-    const shieldedInput = shieldZoteroHrefAttributes(html);
+    // 1. Chrome-document innerHTML strips local protocol hrefs. Preserve the
+    //    Zotero and file links that the note editor itself supports.
+    const shieldedInput = shieldLocalHrefAttributes(html);
 
     // 2. Preprocess HTML (extract metadata, transform legacy content)
     const { html: preprocessedHtml, metadataAttributes } = preprocessHTML(shieldedInput, doc);
@@ -83,5 +84,5 @@ export function normalizeNoteHtml(html: string): string {
 
     // 7. Serialize back to HTML
     const toHTML = buildToHTML(schema, doc);
-    return restoreZoteroHrefAttributes(toHTML(state.doc.content, metadata));
+    return restoreLocalHrefAttributes(toHTML(state.doc.content, metadata));
 }

@@ -284,7 +284,23 @@ export class KeyboardManager {
         }
     };
 
+    /**
+     * The last key event handed to the callbacks. A keystroke inside a reader
+     * tab propagates through the reader's window and then the main window,
+     * and listeners are installed on both, so the same event arrives here
+     * twice — and, with microtasks running between the two deliveries, the
+     * second one can observe state the first has already changed. One
+     * physical keystroke is dispatched once.
+     */
+    private _lastDispatched: { type: string; timeStamp: number; key: string; code: string } | null = null;
+
     private dispatchCallback(...args: [KeyboardEvent, { keyboard?: KeyModifier; type: "keydown" | "keyup" }]) {
+        const e = args[0];
+        const last = this._lastDispatched;
+        if (last && last.type === e.type && last.timeStamp === e.timeStamp && last.key === e.key && last.code === e.code) {
+            return;
+        }
+        this._lastDispatched = { type: e.type, timeStamp: e.timeStamp, key: e.key, code: e.code };
         for (const callback of this._keyboardCallbacks) {
             try {
                 callback(...args);

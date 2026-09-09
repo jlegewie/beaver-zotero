@@ -71,6 +71,20 @@ suites use `DRAIN_PRIORITY = 10`, which is also what production uses for
 hot-path timeout retries). Tests that only assert queue bookkeeping — ordering,
 dedup, stats, the `priority` default itself — can use any priority.
 
+### Suites that rewrite local processing state
+
+`backgroundProcessing.live.test.ts` clears the `attachment_processing_state`
+ledger, the per-library scan cursors and the job queue for **every** library,
+and flips `backgroundProcessingEnabled`, `backgroundProcessingContinuous`,
+`backgroundExtractorEnabled` and `accessRemoteFiles`. All of it is derived data
+that the next reconcile rebuilds, and `afterAll` restores the prefs — but an
+interrupted run leaves the instance with an empty ledger and the prefs it was
+last given. Re-run the suite, or turn background processing off in Preferences.
+
+It also keeps `backgroundExtractorEnabled` off while asserting producer output:
+a whole-library reconcile queues hundreds of jobs, and on an idle machine the
+dispatcher would start extracting real PDFs mid-assertion.
+
 ## Directory structure
 
 ```
@@ -83,7 +97,8 @@ tests/
 │   ├── fixtures.ts                 # Attachment fixture definitions + Zotero port config
 │   ├── zoteroHttpClient.ts         # HTTP client for Beaver endpoints
 │   ├── zoteroAvailability.ts       # isZoteroAvailable() + skipIfNoZotero()
-│   └── cacheInspector.ts           # Cache inspection/cleanup via /beaver/test/* endpoints
+│   ├── cacheInspector.ts           # Cache inspection/cleanup via /beaver/test/* endpoints
+│   └── processingInspector.ts      # Ledger/reconciler driving via /beaver/test/processing-*
 ├── unit/
 │   ├── services/                   # Service layer tests (cache, DB, API)
 │   ├── notes/                      # Note editing, HTML processing, read handlers
@@ -334,3 +349,29 @@ The reader's dev menu has a "Copy Fixture Capture Command" item that builds the 
 - **Cleanup**: Close DB connections in `afterEach`. Call `vi.clearAllMocks()` in `beforeEach`.
 - **Fixture updates**: Fixtures in `helpers/fixtures.ts` reference real items by `library_id + zotero_key`. Update keys to match your library.
 - **Don't pipe a live run through `tail`/`head`**: the pipe buffers everything until vitest exits, so a multi-minute run shows no progress and an interrupted one shows nothing at all. Redirect to a file (`npm run test:live > run.log 2>&1`) and read that instead.
+
+### Window runtime checks
+
+`tests/unit/runtime/` evaluates independent renderer module graphs and verifies store/atom
+isolation, targeted buses, window-specific UI cleanup, late loads and root teardown order.
+For the live draft-isolation check, open two main Zotero windows in an isolated profile:
+
+```bash
+BEAVER_MULTI_WINDOW_TEST=1 ZOTERO_HTTP_PORT=<port> npm run test:live -- windowRuntime sidebarWidthHandler
+```
+
+The `/beaver/test/window-runtime` endpoint accepts `{command: "list"}` to enumerate runtime
+ids. Other requests take `windowId` and inspect that renderer, or use
+`{command: "draft", windowId, draft}` to stage text without sending it. Missing or closing
+ids return `window_unavailable`. These diagnostics share the existing development/auth gates;
+endpoint ownership is still window-managed.
+
+**Every other live suite assumes exactly one main window.** Dev endpoints are owned by the
+window that registered last, while several handlers still resolve their window with
+`Zotero.getMainWindow()` — the two disagree as soon as a second window exists, so a handler
+can drive one window and read another window's atoms. That fails as a plausible wrong value
+(a stale attachment, an unchanged tab), not as an error, and it points at the code under test
+rather than at the window count. `globalSetup` therefore refuses to start a run when it sees
+more than one main window, unless `BEAVER_MULTI_WINDOW_TEST=1` is set. Close the extra window
+rather than working around the guard. The underlying call sites belong to a later PR; see
+`tasks/multiple-windows/getMainWindow-audit.md`.

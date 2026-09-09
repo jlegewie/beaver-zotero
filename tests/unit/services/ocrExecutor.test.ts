@@ -35,6 +35,7 @@ vi.mock('../../../src/services/documentExtraction/attachmentSource', () => ({
         source: { kind: 'local', filePath: '/scan.pdf', isRemoteOnly: false },
     })),
     loadAttachmentData: vi.fn(async () => ({ kind: 'ok', data: new Uint8Array([4, 5, 6]) })),
+    isRemoteAccessAvailable: vi.fn(() => true),
 }));
 
 vi.mock('../../../src/utils/zoteroItemUtils', () => ({
@@ -68,6 +69,7 @@ import {
 } from '../../../src/services/ocr/gcsTransfer';
 import { extractPdfBytesAndCacheAsOriginalAttachment } from '../../../src/services/documentExtraction/ocrReextract';
 import {
+    isRemoteAccessAvailable,
     loadAttachmentData,
     resolveAttachmentFileSource,
 } from '../../../src/services/documentExtraction/attachmentSource';
@@ -83,6 +85,7 @@ const api = ocrApiClient as unknown as {
 };
 const mockedReextract = vi.mocked(extractPdfBytesAndCacheAsOriginalAttachment);
 const mockedResolveSource = vi.mocked(resolveAttachmentFileSource);
+const mockedRemoteAccess = vi.mocked(isRemoteAccessAvailable);
 const mockedLoad = vi.mocked(loadAttachmentData);
 const mockedPut = vi.mocked(putBytesToSignedUrl);
 const mockedGet = vi.mocked(getBytesFromSignedUrl);
@@ -122,6 +125,7 @@ function makeCtx(overrides: Partial<JobExecutionContext> = {}): JobExecutionCont
 
 beforeEach(() => {
     vi.clearAllMocks();
+    mockedRemoteAccess.mockReturnValue(true);
     libraryScope.initialized = true;
     libraryScope.searchableIds.splice(0, libraryScope.searchableIds.length, 1);
 
@@ -466,15 +470,42 @@ describe('OcrExecutor', () => {
         );
     });
 
-    it('skips a remote-only scan for a backfill-priority job (no download)', async () => {
+    it('runs the full remote round trip for a backfill-priority job', async () => {
+        // `accessRemoteFiles` is the only download permission, and priority does
+        // not narrow it: a backfill ticket for a server-only scan gets the same
+        // treatment as an on-demand one.
+        mockRemoteItem('synced999');
         mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
+        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345 }));
+        api.requestOcr.mockResolvedValue({ status: 'pending', job_id: 'job-bf', put_url: 'https://gcs/put' });
+        api.markUploaded.mockResolvedValue({ status: 'queued', job_id: 'job-bf' });
+        fakePoller.poll.mockResolvedValue({ kind: 'completed', getUrl: 'https://gcs/get' });
         const backfillRecord = { ...record, priority: OCR_PRIORITY_BACKFILL };
 
         const outcome = await executor.execute(backfillRecord, makeCtx());
 
-        expect(outcome).toEqual({ kind: 'complete', reason: 'file_not_local_remote' });
+        expect(outcome).toEqual({ kind: 'defer', reason: 'ocr_polling' });
+        expect(api.requestOcr).toHaveBeenCalledWith('synced999', 5);
+        expect(mockedLoad).toHaveBeenCalledOnce();
+    });
+
+    it('releases without downloading when remote access is withdrawn mid-job', async () => {
+        // The bytes load lazily, only once `/ocr/request` has asked for an
+        // upload, so the permission can change across that round trip. The
+        // download must not go ahead on the strength of the earlier resolve.
+        mockRemoteItem('synced999');
+        mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
+        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345 }));
+        api.requestOcr.mockImplementation(async () => {
+            mockedRemoteAccess.mockReturnValue(false);
+            return { status: 'pending', job_id: 'job-rev', put_url: 'https://gcs/put' };
+        });
+
+        const outcome = await executor.execute(record, makeCtx());
+
+        expect(outcome).toEqual({ kind: 'release', reason: 'aborted' });
         expect(mockedLoad).not.toHaveBeenCalled();
-        expect(api.requestOcr).not.toHaveBeenCalled();
+        expect(mockedPut).not.toHaveBeenCalled();
     });
 
     it('completes no_file_hash when a remote scan has no synced hash', async () => {
@@ -499,6 +530,45 @@ describe('OcrExecutor', () => {
         expect(outcome.kind).toBe('retry');
         expect((outcome as any).reason).toBe('ocr_remote_download_failed');
         expect(mockedPut).not.toHaveBeenCalled();
+    });
+
+    it('retires a permanently-unavailable scan instead of burning the retry budget', async () => {
+        // A 404 on the OCR original: retrying costs three attempts on the
+        // largest files Beaver downloads, and the answer will not change.
+        mockRemoteItem('synced999');
+        mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
+        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345 }));
+        mockedLoad.mockResolvedValue({ kind: 'error', code: 'download_failed', permanent: true } as any);
+        api.requestOcr.mockResolvedValue({ status: 'pending', job_id: 'job-rem', put_url: 'https://gcs/put' });
+        const ctx = makeCtx();
+
+        const outcome = await executor.execute(record, ctx);
+
+        expect(outcome).toEqual({ kind: 'complete', reason: 'terminal:download_failed' });
+        expect(mockedPut).not.toHaveBeenCalled();
+    });
+
+    it('stamps the OCR ledger when retiring a permanently-unavailable scan', async () => {
+        // Without the stamp the row stays `ocr_status='needed'` and the
+        // reconciler re-enqueues it on every pass — a worse outcome than the
+        // retries this replaces.
+        mockRemoteItem('synced999');
+        mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
+        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345 }));
+        mockedLoad.mockResolvedValue({ kind: 'error', code: 'download_failed', permanent: true } as any);
+        api.requestOcr.mockResolvedValue({ status: 'pending', job_id: 'job-rem', put_url: 'https://gcs/put' });
+        const ctx = makeCtx();
+        ctx.db.getAttachmentProcessingState = vi.fn(async () => ({ fileHash: 'synced999' })) as any;
+        ctx.db.markAttachmentOcrFailed = vi.fn(async () => undefined) as any;
+
+        await executor.execute(record, ctx);
+
+        expect(ctx.db.markAttachmentOcrFailed).toHaveBeenCalledWith(
+            record.libraryId,
+            record.zoteroKey,
+            'synced999',
+            expect.stringContaining('download_failed'),
+        );
     });
 
     it('completes file_too_large when the remote download exceeds the cap', async () => {

@@ -4,6 +4,7 @@ import {
 } from "@beaver/agent-core/voice/fakes";
 import {
     VOICE_LIMITS,
+    isBusyPhase,
     type VoiceAuth,
     type VoiceClock,
 } from "@beaver/agent-core/voice/contracts";
@@ -14,6 +15,7 @@ import {
 import {
     createVoiceService,
     type VoiceService,
+    type VoiceAdapters,
     type VoiceWindow,
 } from "./voiceService";
 
@@ -38,20 +40,37 @@ export class DevelopmentVoiceHarness {
     private capture?: FakeVoiceCapture;
     private transcription?: FakeVoiceTranscription;
 
-    constructor(clock?: VoiceClock, native?: NativeCaptureHost) {
+    constructor(
+        clock?: VoiceClock,
+        native?: NativeCaptureHost,
+        product?: VoiceAdapters,
+    ) {
         this.service = createVoiceService(
             {
                 capability: () => ({
                     enabled:
-                        this.enabled || this.nativeHarness?.activating === true,
-                    available: true,
+                        this.enabled ||
+                        this.nativeHarness?.activating === true ||
+                        !!product?.capability().enabled,
+                    available:
+                        this.enabled ||
+                        this.nativeHarness?.activating === true ||
+                        !!product?.capability().available,
                 }),
                 createCapture: (session, emit) =>
                     this.nativeHarness?.ownsSession(session.sessionId)
                         ? this.nativeHarness.createCapture(session, emit)
-                        : (this.capture = new FakeVoiceCapture(session, emit)),
+                        : this.enabled || !product
+                          ? (this.capture = new FakeVoiceCapture(session, emit))
+                          : product.createCapture(session, emit),
                 createTranscription: (session) =>
-                    (this.transcription = new FakeVoiceTranscription(session)),
+                    this.enabled ||
+                    this.nativeHarness?.ownsSession(session.sessionId) ||
+                    !product
+                        ? (this.transcription = new FakeVoiceTranscription(
+                              session,
+                          ))
+                        : product.createTranscription(session),
             },
             clock,
         );
@@ -60,6 +79,12 @@ export class DevelopmentVoiceHarness {
     }
 
     start(expectedUserId: string, getAuth: () => Promise<VoiceAuth | null>) {
+        if (
+            this.service.preparing ||
+            isBusyPhase(this.service.controller.getSnapshot().phase)
+        )
+            return { error: { code: "busy" as const } };
+        if (!this.enabled) return { error: { code: "disabled" as const } };
         if (this.nativeHarness?.preparingPermission)
             return { error: { code: "busy" as const } };
         return this.service.start(

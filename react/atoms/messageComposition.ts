@@ -1,3 +1,5 @@
+import { getSelectedCollections } from '../../src/utils/zoteroSelection';
+import { collectionToReference } from '../utils/zoteroReferences';
 import { atom } from "jotai";
 import { truncateText } from "@beaver/agent-ui/utils/stringUtils";
 import { allUserAttachmentKeysAtom } from "@beaver/agent-core/run-state/atoms";
@@ -582,6 +584,19 @@ async function validateItemsInBackground(
         logger(`Background validation failed: ${error.message}`, 1);
     }
 }
+
+/** Attach the active pane's selected collections from searchable libraries. */
+export const updateMessageCollectionsFromZoteroSelectionAtom = atom(null, (get, set) => {
+    try {
+        const searchableLibraryIds = get(searchableLibraryIdsAtom);
+        const collections = getSelectedCollections(Zotero.getActiveZoteroPane());
+        set(currentMessageCollectionsAtom, collections
+            .filter(collection => !collection.deleted && searchableLibraryIds.includes(collection.libraryID))
+            .map(collectionToReference));
+    } catch (error) {
+        logger(`Could not attach selected collections: ${error}`, 1);
+    }
+});
 
 /**
 * Update sources based on Zotero selection

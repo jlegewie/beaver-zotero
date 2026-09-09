@@ -302,7 +302,7 @@ export class DocumentExtractExecutor implements JobExecutor {
             case 'cached_error': return { kind: 'complete', reason: `cached_error:${result.code}` };
             case 'timeout': return { kind: 'retry', error: `timeout:${result.phase}`, reason: `timeout:${result.phase}` };
             case 'response_error':
-                return isTransientResponseError(result.code)
+                return result.permanent !== true && isTransientResponseError(result.code)
                     ? { kind: 'retry', error: `${result.code}: ${result.message}`, reason: result.code }
                     : { kind: 'complete', reason: `terminal:${result.code}` };
         }
@@ -381,7 +381,7 @@ export class DocumentExtractExecutor implements JobExecutor {
             case 'timeout':
                 return { kind: 'retry', error: `timeout:${result.phase}` };
             case 'response_error':
-                if (isTransientResponseError(result.code)) {
+                if (result.permanent !== true && isTransientResponseError(result.code)) {
                     return { kind: 'retry', error: `${result.code}: ${result.message}` };
                 }
                 await this.persistTerminalExtractError(
@@ -414,9 +414,16 @@ export class DocumentExtractExecutor implements JobExecutor {
                 signal: ctx.externalAbortSignal,
             });
             if (loaded.kind === 'error') {
-                return loaded.code === 'download_failed' || loaded.code === 'read_failed'
-                    ? { kind: 'retry', error: loaded.code }
-                    : { kind: 'complete', reason: loaded.code };
+                const retryable = loaded.permanent !== true
+                    && (loaded.code === 'download_failed' || loaded.code === 'read_failed');
+                if (retryable) return { kind: 'retry', error: loaded.code };
+                await this.persistTerminalExtractError(
+                    record,
+                    ctx,
+                    loaded.code,
+                    isSkippedResponse(loaded.code) ? 'skipped' : 'failed',
+                );
+                return { kind: 'complete', reason: loaded.code };
             }
             const extension = kind === 'epub' ? 'epub' : 'html';
             temporaryPath = PathUtils.join(
@@ -460,7 +467,10 @@ export class DocumentExtractExecutor implements JobExecutor {
         if (ctx.externalAbortSignal.aborted || result.code === 'timeout') {
             return { kind: 'release', reason: 'external_abort' };
         }
-        if (isTransientResponseError(result.code)) {
+        // `permanent` overrides the code-based guess: `extraction_failed` is the
+        // catch-all for both "the extractor hiccuped" and "this file is not a
+        // usable EPUB", and only the extractor can tell those apart.
+        if (result.permanent !== true && isTransientResponseError(result.code)) {
             return { kind: 'retry', error: `${result.code}: ${result.message}` };
         }
         await this.persistTerminalExtractError(
@@ -487,6 +497,12 @@ export class DocumentExtractExecutor implements JobExecutor {
     }
 }
 
+/**
+ * Codes worth another attempt. Deliberately a coarse guess: `extraction_failed`
+ * covers both a transient extractor fault and a permanently unreadable file, so
+ * an extractor that knows the difference says so via `permanent` on the result
+ * and that answer wins over this table.
+ */
 function isTransientResponseError(code: string): boolean {
     return code === 'download_failed'
         || code === 'extraction_failed'

@@ -6,6 +6,7 @@ import { createStore } from 'jotai';
 // supabase-backed services; stub everything the thread atoms touch.
 // =============================================================================
 
+const attachCollectionsMock = vi.fn();
 const cancelMock = vi.fn();
 const getThreadRunsMock = vi.fn();
 const getThreadMock = vi.fn();
@@ -40,6 +41,7 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
         clearComposerAtom: atom(null, () => {}),
         currentMessageCollectionsAtom: atom<unknown[]>([]),
         currentMessageExternalFilesAtom: atom<unknown[]>([]),
+        updateMessageCollectionsFromZoteroSelectionAtom: atom(null, () => attachCollectionsMock()),
         updateMessageItemsFromZoteroSelectionAtom: atom(null, () => {}),
         updateReaderAttachmentAtom: atom(null, () => {}),
     };
@@ -177,6 +179,7 @@ import {
     currentThreadIdAtom,
     threadNavigationSeqAtom,
 } from '../../../react/atoms/threads';
+import { isLibraryTabAtom } from '../../../react/atoms/ui';
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { isWSChatPendingAtom } from '../../../react/atoms/agentRunAtoms';
 
@@ -206,6 +209,18 @@ describe('interrupt-active-run confirm', () => {
     });
 
     describe('newThreadAtom', () => {
+        it.each([
+            [true, true, false, true],
+            [false, true, false, false],
+            [true, false, false, false],
+            [true, true, true, false],
+        ])('auto-attaches collections only when enabled in library view (preference=%s, library=%s, skip=%s)', async (enabled, library, skip, expected) => {
+            getPrefMock.mockImplementation((name) => name === 'addSelectedItemsOnNewThread' ? enabled : 10);
+            store.set(isLibraryTabAtom, library);
+            await store.set(newThreadAtom, { skipAutoPopulate: skip });
+            expect(attachCollectionsMock).toHaveBeenCalledTimes(expected ? 1 : 0);
+        });
+
         it('does not prompt when the active run already failed', async () => {
             store.set(activeRunAtom, run('error'));
 

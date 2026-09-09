@@ -43,11 +43,20 @@ const SYNTHETIC_PAGE_CHAR_INTERVAL = 1800;
 // Reject sparse physical markers that would create very large pages.
 const MAX_PHYSICAL_PAGE_CHARS = 6000;
 
+declare const Components: any;
+
+interface EpubSectionDocument {
+    href: string;
+    doc: XMLDocument | Document;
+}
+
+interface ZoteroEpub {
+    getSectionDocuments(): AsyncIterable<EpubSectionDocument>;
+    close(): void;
+}
+
 interface ZoteroEpubModule {
-    EPUB: new (filePath: string) => {
-        getSectionDocuments(): AsyncIterable<{ href: string; doc: XMLDocument | Document }>;
-        close(): void;
-    };
+    EPUB: new (filePath: string) => ZoteroEpub;
 }
 
 export interface ExtractEpubDocumentOptions {
@@ -113,6 +122,142 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 }
 
 /**
+ * The EPUB's container or OPF is structurally invalid (unreadable archive, no
+ * `META-INF/container.xml`, no `<rootfile>`, no `<manifest>`/`<spine>`).
+ * Distinct from an ordinary extraction failure because it can never succeed on
+ * a retry — the bytes are simply not a usable EPUB.
+ *
+ * Raised only when {@link probeEpubStructure} has positively determined the
+ * container is broken, never inferred from when a failure happened: Zotero's
+ * `EPUB.mjs` resolves the OPF *and* reads the first spine section inside the
+ * same first `next()` call, so a transient read error and a malformed OPF are
+ * indistinguishable by timing alone.
+ */
+export class EpubStructureError extends Error {
+    override readonly name = "EpubStructureError";
+
+    constructor(cause: unknown) {
+        super(cause instanceof Error ? cause.message : String(cause));
+        this.cause = cause;
+    }
+}
+
+/**
+ * Whether an EPUB's container and OPF are readable.
+ *
+ * `unknown` is the fail-open answer — the probe could not reach a verdict, so
+ * the caller must assume the failure was transient.
+ */
+export type EpubStructureVerdict = "valid" | "broken" | "unknown";
+
+function openEpubZipReader(filePath: string): any {
+    const ZipReader = (Components as any).Constructor(
+        "@mozilla.org/libjar/zip-reader;1",
+        "nsIZipReader",
+        "open",
+    );
+    return new ZipReader((Zotero as any).File.pathToFile(filePath));
+}
+
+async function readZipEntryToDocument(
+    zip: any,
+    entry: string,
+    type: string,
+): Promise<Document> {
+    const stream = zip.getInputStream(entry);
+    let xml: string;
+    try {
+        xml = await (Zotero as any).File.getContentsAsync(stream);
+    } finally {
+        stream.close();
+    }
+    return new DOMParser().parseFromString(
+        xml,
+        type as DOMParserSupportedType,
+    ) as unknown as Document;
+}
+
+/** First direct child with this local name, ignoring namespaces. */
+function firstChildByLocalName(parent: Element | null, name: string): Element | null {
+    if (!parent) return null;
+    for (const child of Array.from(parent.children)) {
+        if (child.localName.toLowerCase() === name) return child;
+    }
+    return null;
+}
+
+/**
+ * Re-walk the container chain an extraction failure may have tripped over:
+ * `META-INF/container.xml` -> `<rootfile full-path>` -> OPF -> `<manifest>` and
+ * `<spine>`. These are exactly the checks `EPUB.mjs` performs, and the only
+ * failures in the EPUB path that cannot be fixed by trying again.
+ *
+ * Runs only after an extraction has already failed, so its cost never lands on
+ * the happy path. Anything it cannot decide — including its own failure to open
+ * the archive, which may simply mean the file moved — is `unknown`, so the
+ * caller keeps treating the original error as retryable.
+ */
+export async function probeEpubStructure(filePath: string): Promise<EpubStructureVerdict> {
+    let zip: any;
+    try {
+        zip = openEpubZipReader(filePath);
+    } catch {
+        // Could be a corrupt archive or a vanished/locked file; not decidable.
+        return "unknown";
+    }
+    try {
+        if (!zip.hasEntry("META-INF/container.xml")) return "broken";
+        let containerDoc: Document;
+        try {
+            containerDoc = await readZipEntryToDocument(zip, "META-INF/container.xml", "text/xml");
+        } catch {
+            return "unknown";
+        }
+        const rootfiles = firstChildByLocalName(containerDoc.documentElement, "rootfiles");
+        const rootfile = firstChildByLocalName(rootfiles ?? containerDoc.documentElement, "rootfile");
+        const opfPath = rootfile?.getAttribute("full-path");
+        if (!opfPath) return "broken";
+        if (!zip.hasEntry(opfPath)) return "broken";
+
+        let opfDoc: Document;
+        try {
+            opfDoc = await readZipEntryToDocument(zip, opfPath, "text/xml");
+        } catch {
+            return "unknown";
+        }
+        const pkg = opfDoc.documentElement;
+        if (!pkg) return "broken";
+        const hasManifest = firstChildByLocalName(pkg, "manifest") !== null;
+        const hasSpine = firstChildByLocalName(pkg, "spine") !== null;
+        return hasManifest && hasSpine ? "valid" : "broken";
+    } catch {
+        return "unknown";
+    } finally {
+        try {
+            zip.close();
+        } catch {
+            // Closing a reader that failed to open fully is not interesting.
+        }
+    }
+}
+
+/**
+ * Reclassify an extraction failure as {@link EpubStructureError} when the book's
+ * container is provably broken. Aborts pass through untouched — they are
+ * cancellation, not a defect in the file.
+ */
+async function classifyExtractionFailure(
+    filePath: string,
+    error: unknown,
+): Promise<unknown> {
+    if (error instanceof EpubStructureError) return error;
+    if (error instanceof Error && /abort/i.test(error.message)) return error;
+    return (await probeEpubStructure(filePath)) === "broken"
+        ? new EpubStructureError(error)
+        : error;
+}
+
+/**
  * Extract an EPUB into Beaver's section-based schema directly from a file path.
  *
  * Path-based core shared by the item-based extractor and dev tooling that runs
@@ -120,6 +265,20 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
  * that need request-safe error shapes use {@link extractEpubDocumentSafe}.
  */
 export async function extractEpubDocumentFromFile(
+    filePath: string,
+    options?: ExtractEpubFromFileOptions,
+): Promise<EpubDocument> {
+    try {
+        return await extractEpubDocumentFromOpenFile(filePath, options);
+    } catch (error) {
+        // Callers need to know whether trying again could ever help. Decided by
+        // re-reading the container, not by where in the pipeline the throw came
+        // from — see `classifyExtractionFailure`.
+        throw await classifyExtractionFailure(filePath, error);
+    }
+}
+
+async function extractEpubDocumentFromOpenFile(
     filePath: string,
     options?: ExtractEpubFromFileOptions,
 ): Promise<EpubDocument> {

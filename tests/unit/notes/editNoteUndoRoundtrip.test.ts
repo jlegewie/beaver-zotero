@@ -12,7 +12,7 @@
  * known limitations (e.g., replace_all with PM normalization).
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // =============================================================================
 // Module Mocks (must be before imports)
@@ -87,9 +87,12 @@ import {
 } from '../../../src/utils/noteWrapper';
 import {
     executeEditNoteAction,
+    executeEditNoteOrBatchAction,
     undoEditNoteAction,
 } from '../../../react/utils/editNoteActions';
 import type { AgentAction } from '../../../react/agents/agentActions';
+import { store } from '../../../react/store';
+import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 import type { EditNoteResultData } from '@beaver/agent-core/types/agentActions/editNote';
 
 // =============================================================================
@@ -2194,5 +2197,123 @@ describe('manual-Apply uses the full ranked matcher', () => {
 
         expect(caught).toBeDefined();
         expect(caught.code).toBe('old_string_not_found');
+    });
+});
+
+
+describe('external-file citations through React apply and undo', () => {
+    const tag = '<citation id="ext-MRDTFYHP" loc="page6"/>';
+    let previousBeaver: any;
+    let previousFile: any;
+    let previousLibraryGet: any;
+    beforeEach(() => {
+        previousBeaver = Zotero.Beaver;
+        previousFile = Zotero.File;
+        previousLibraryGet = Zotero.Libraries.get;
+        (Zotero.Libraries as any).get = vi.fn(() => ({ editable: true }));
+        vi.mocked(store.get).mockImplementation((atom: any) => atom === searchableLibraryIdsAtom ? [1] : null);
+        (Zotero as any).Beaver = { db: { getExternalFileByKey: vi.fn(async () => ({
+            filename: 'Report.pdf', storedPath: '/stored/Report.pdf',
+        })) } };
+        (Zotero as any).File = { pathToFileURI: vi.fn(() => 'file:///stored/Report.pdf') };
+        vi.mocked(IOUtils.exists).mockResolvedValue(true);
+    });
+    afterEach(() => {
+        (Zotero as any).Beaver = previousBeaver;
+        (Zotero as any).File = previousFile;
+        Zotero.Libraries.get = previousLibraryGet;
+        vi.mocked(store.get).mockImplementation(() => null);
+    });
+
+    it('applies a standalone attachment link, edits its saved locator, and undoes both edits', async () => {
+        (Zotero.Libraries as any).userLibraryID = 1;
+        (Zotero.Items as any).loadDataTypes = vi.fn().mockResolvedValue(undefined);
+        const attachment = { libraryID: 1, key: 'ATTACH12', parentID: false,
+            isAttachment: () => true, isFileAttachment: () => true, isPDFAttachment: () => true,
+            getField: () => 'Report.pdf',
+            loadDataType: vi.fn().mockResolvedValue(undefined),
+        };
+        vi.mocked(Zotero.Items.getByLibraryAndKey).mockReturnValue(attachment as any);
+        const original = wrap('<p>Anchor</p>');
+        const { item, action } = await applyEdit({ noteHtml: original, oldString: 'Anchor',
+            newString: '<citation id="u-ATTACH12" loc="page6"/>',
+        });
+        expect(item._getHtml()).toContain(
+            '<a href="zotero://open/library/items/ATTACH12?page=6" rel="noopener noreferrer nofollow">Report.pdf</a>, p. 6)');
+        expect(item._getHtml()).not.toContain('data-citation=');
+        const { simplified } = simplifyNoteHtml(item._getHtml(), 1);
+        // The saved locator reaches the agent inside the citation tag.
+        expect(simplified).toContain('<citation id="u-ATTACH12" loc="page6" ref="c_ATTACH12_0"/>');
+        const nextAction = makeAction(1, 'TESTKEY', simplified, simplified.replace('loc="page6"', 'loc="page7"'));
+        const result = await executeEditNoteAction(nextAction);
+        nextAction.result_data = result as any;
+        // Editing it moves the link with the visible page.
+        expect(item._getHtml()).toContain(
+            '<a href="zotero://open/library/items/ATTACH12?page=7" rel="noopener noreferrer nofollow">Report.pdf</a>, p. 7)');
+        await undoEdit(item, nextAction);
+        expect(item._getHtml()).toContain(
+            '<a href="zotero://open/library/items/ATTACH12?page=6" rel="noopener noreferrer nofollow">Report.pdf</a>, p. 6)');
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('<p>Anchor</p>');
+        expect(restored).not.toContain('Report.pdf');
+        expect(Zotero.Items.loadDataTypes).toHaveBeenCalledWith([attachment], ['itemData']);
+    });
+
+    it('selects instead of opening when the cited attachment has no local file', async () => {
+        (Zotero.Libraries as any).userLibraryID = 1;
+        (Zotero.Items as any).loadDataTypes = vi.fn().mockResolvedValue(undefined);
+        // Mirrors Zotero: resolving the path is what records the file state, and
+        // a file this computer does not have resolves to false.
+        let fileState: boolean | null = null;
+        const attachment = { libraryID: 1, key: 'ATTACH12', parentID: false,
+            isAttachment: () => true, isFileAttachment: () => true, isPDFAttachment: () => true,
+            getField: () => 'Report.pdf',
+            getFilePathAsync: vi.fn(async () => { fileState = false; return false; }),
+            fileExistsCached: () => fileState,
+            loadDataType: vi.fn().mockResolvedValue(undefined),
+        };
+        vi.mocked(Zotero.Items.getByLibraryAndKey).mockReturnValue(attachment as any);
+        const { item } = await applyEdit({ noteHtml: wrap('<p>Anchor</p>'), oldString: 'Anchor',
+            newString: '<citation id="u-ATTACH12" loc="page6"/>',
+        });
+        expect(attachment.getFilePathAsync).toHaveBeenCalled();
+        expect(item._getHtml()).toContain(
+            '<a href="zotero://select/library/items/ATTACH12" rel="noopener noreferrer nofollow">Report.pdf</a>, p. 6)');
+    });
+
+    it('applies a filename link and can undo without stored undo HTML', async () => {
+        const { item, action } = await applyEdit({ noteHtml: wrap('<p>Anchor</p>'), oldString: 'Anchor', newString: tag });
+        expect(item._getHtml()).toContain('href="file:///stored/Report.pdf"');
+        expect(item._getHtml()).toContain('Report.pdf</a>, p. 6');
+        delete (action.result_data as any).undo_new_html;
+        delete (action.result_data as any).undo_old_html;
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('<p>Anchor</p>');
+        expect(restored).not.toContain('Report.pdf');
+    });
+
+    it.each(['rewrite', 'append', 'str_replace'])('loads external files for React %s', async (operation) => {
+        const item = createMockNoteItem(wrap('<p>Anchor</p>'));
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+        const action = makeAction(1, 'TESTKEY', 'Anchor', tag);
+        (action.proposed_data as any).operation = operation;
+        const result = await executeEditNoteOrBatchAction(action);
+        expect(item._getHtml()).toContain('href="file:///stored/Report.pdf"');
+        expect(item._getHtml()).not.toContain('Attached file ext-');
+        expect(result.warnings).toBeUndefined();
+    });
+
+    it.each(['rewrite', 'str_replace'])('loads files and reports missing metadata for a React batch %s', async (operation) => {
+        vi.mocked(Zotero.Beaver.db.getExternalFileByKey).mockResolvedValue(null);
+        const item = createMockNoteItem(wrap('<p>Anchor</p>'));
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+        const action = makeAction(1, 'TESTKEY', 'Anchor', tag);
+        action.action_type = 'edit_note_batch';
+        action.proposed_data = { library_id: 1, zotero_key: 'TESTKEY', edits: [
+            { index: 0, operation, old_string: 'Anchor', new_string: tag },
+        ] } as any;
+        const result = await executeEditNoteOrBatchAction(action);
+        expect(item._getHtml()).toContain('(Attached file ext-MRDTFYHP, p. 6)');
+        expect(result.warnings?.[0]).toContain('no available filename metadata');
     });
 });

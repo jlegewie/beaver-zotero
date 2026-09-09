@@ -1,6 +1,64 @@
 import { logger } from "@beaver/agent-core/platform/logger";
 import { safeAttachmentFilename } from "./attachmentFiles";
 
+interface ZoteroApiConfig {
+    API_URL: string;
+    API_VERSION: string;
+}
+
+let zoteroConfig: ZoteroApiConfig | null = null;
+
+/**
+ * Zotero's API endpoint and version, from `resource://zotero/config.mjs`.
+ *
+ * `ZOTERO_CONFIG` is **not** a global — it is an ES module export, and every
+ * Zotero file that wants it imports it explicitly. Referencing the bare name
+ * only appears to work: Zotero's own chrome scripts (`zoteroPane.js` and
+ * friends) bind it with a top-level `const`, which lands in the main window's
+ * global *lexical* scope, and Beaver's webpack bundle — injected into that
+ * window as a classic `<script>` — picks it up by accident. The esbuild bundle
+ * runs in the plugin's `Cu.Sandbox` (`Zotero.Plugins._loadScope`), whose globals
+ * are an explicit allowlist that has never included it, so the same line threw
+ * `ReferenceError` for every background-queue download.
+ *
+ * Imported lazily and cached: module-scope evaluation would break unit tests,
+ * which import this file without a `ChromeUtils`.
+ */
+function getZoteroConfig(): ZoteroApiConfig {
+    if (!zoteroConfig) {
+        zoteroConfig = (globalThis as any).ChromeUtils.importESModule(
+            "resource://zotero/config.mjs",
+        ).ZOTERO_CONFIG as ZoteroApiConfig;
+    }
+    return zoteroConfig;
+}
+
+/**
+ * A download that cannot succeed by trying again: the server answered
+ * definitively that the file is not there.
+ *
+ * The background queue treats `download_failed` as retryable by default, which
+ * is right for a flaky network and wrong here: three attempts a minute apart
+ * just delay the inevitable and stretch a backlog's tail.
+ *
+ * Deliberately narrow — **404 only**. Auth failures look permanent but are not
+ * safe to treat that way: a WebDAV 401 is also what Nextcloud/ownCloud return
+ * for brute-force throttling and what an expired session or a brief auth-backend
+ * outage returns, so a single bad moment would retire every attachment in a
+ * sweep. Credentials are also user-fixable, so misjudging auth costs far more
+ * than the bounded retry it saves.
+ *
+ * "Permanent" here means *for this attempt*, not forever. A 404 can be a sync
+ * race — item metadata reaching this client before the upload that backs it —
+ * so the recovery is a slower loop rather than a faster one: `ReconcilerService`
+ * re-attempts availability failures on an explicit "Process now" and on the
+ * weekly safety diff. Skipping the three one-minute retries costs nothing that
+ * loop does not get back.
+ */
+export class PermanentDownloadError extends Error {
+    override readonly name = "PermanentDownloadError";
+}
+
 function redactUrlCredentials(message: string): string {
     if (!message) return message;
     // Redact user:pass@ in URLs (e.g. WebDAV URIs can embed credentials)
@@ -87,7 +145,7 @@ export async function getDownloadUrl(item: Zotero.Item): Promise<string | null> 
 	}
 
 	// 3. Construct the initial API URL
-	const baseApiUrl = ZOTERO_CONFIG.API_URL;
+	const baseApiUrl = getZoteroConfig().API_URL;
 	let apiUrl;
 	if (item.library.isGroup) {
 		apiUrl = `${baseApiUrl}groups/${item.library.id}/items/${item.key}/file`;
@@ -99,7 +157,7 @@ export async function getDownloadUrl(item: Zotero.Item): Promise<string | null> 
 		// 4. Make the first request to get the redirect URL
 		logger(`getDownloadUrl: Requesting download URL from: ${apiUrl}`);
 		const redirectResponse = await Zotero.HTTP.request('GET', apiUrl, {
-			headers: { 'Zotero-API-Key': apiKey, 'Zotero-API-Version': ZOTERO_CONFIG.API_VERSION }
+			headers: { 'Zotero-API-Key': apiKey, 'Zotero-API-Version': getZoteroConfig().API_VERSION }
 		});
 
 		const downloadUrl = redirectResponse.responseURL;
@@ -189,7 +247,7 @@ async function downloadFromZFS(item: Zotero.Item, options?: DownloadOptions): Pr
     }
 
     // Construct the API URL (this endpoint will 302 to a signed URL)
-    const baseApiUrl = ZOTERO_CONFIG.API_URL;
+    const baseApiUrl = getZoteroConfig().API_URL;
     const apiUrl = item.library.isGroup
         ? `${baseApiUrl}groups/${item.library.id}/items/${item.key}/file`
         : `${baseApiUrl}users/${userID}/items/${item.key}/file`;
@@ -202,7 +260,7 @@ async function downloadFromZFS(item: Zotero.Item, options?: DownloadOptions): Pr
     try {
         logger(`downloadFromZFS: Requesting download URL from: ${apiUrl}`);
         const resp = await Zotero.HTTP.request('GET', apiUrl, {
-            headers: { 'Zotero-API-Key': apiKey, 'Zotero-API-Version': ZOTERO_CONFIG.API_VERSION },
+            headers: { 'Zotero-API-Key': apiKey, 'Zotero-API-Version': getZoteroConfig().API_VERSION },
             responseType: 'arraybuffer',
             ...httpOptions
         });
@@ -374,12 +432,13 @@ function handleDownloadError(e: any, source: 'ZFS' | 'WebDAV'): never {
             const message = source === 'WebDAV' 
                 ? `Authentication failed for WebDAV (${status})`
                 : `Access forbidden (${status}): Check Zotero API key permissions`;
+            // Deliberately retryable — see PermanentDownloadError.
             throw new Error(message);
         } else if (status === 404) {
             const message = source === 'WebDAV'
                 ? `File not found on WebDAV server (404)`
                 : `File not found on server (404): File may not have been synced to Zotero cloud`;
-            throw new Error(message);
+            throw new PermanentDownloadError(message);
         } else if (status === 429) {
             throw new Error(`Rate limited by ${source} (429): Too many requests`);
         } else if (status >= 500) {
@@ -422,7 +481,7 @@ export async function getSignedDownloadInfo(item: Zotero.Item): Promise<SignedDo
 	const apiKey = await Zotero.Sync.Data.Local.getAPIKey();
 	if (!userID || !apiKey) return null;
 
-	const base = ZOTERO_CONFIG.API_URL;
+	const base = getZoteroConfig().API_URL;
 	const apiUrl = item.library.isGroup
 		? `${base}groups/${item.library.id}/items/${item.key}/file`
 		: `${base}users/${userID}/items/${item.key}/file`;

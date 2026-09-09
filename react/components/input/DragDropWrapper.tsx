@@ -16,6 +16,7 @@ import { SettingsIcon } from '../icons/icons';
 
 interface DragDropWrapperProps {
     children: React.ReactNode;
+    overlayBorderRadius?: number;
 }
 
 /** True when the drag carries OS files (not Zotero objects). */
@@ -43,7 +44,8 @@ const getDroppedFiles = (dataTransfer: DataTransfer): Array<{ path: string }> =>
 };
 
 const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
-    children
+    children,
+    overlayBorderRadius = 6
 }) => {
     // Drag and drop states
     const [objectIcon, setObjectIcon] = useState<string | null>(null);
@@ -510,7 +512,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                 className="absolute inset-0 display-flex items-center justify-center z-10 bg-overlay border-popup"
                 style={{ 
                     opacity: isDragging ? 0.8 : 0, 
-                    borderRadius: '6px', 
+                    borderRadius: overlayBorderRadius,
                     transition: 'opacity 0.3s ease',
                     pointerEvents: isDragging ? 'auto' : 'none',
                     visibility: isDragging ? 'visible' : 'hidden'
@@ -552,7 +554,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                 style={{ 
                     background: 'var(--color-background)', 
                     opacity: dragError ? 0.6 : 0, 
-                    borderRadius: '6px', 
+                    borderRadius: overlayBorderRadius,
                     transition: 'opacity 0.3s ease',
                     pointerEvents: dragError ? 'auto' : 'none',
                     visibility: dragError ? 'visible' : 'hidden'

@@ -1,12 +1,13 @@
+import { getHostWindow } from '../runtime/windowRuntime';
 import { BeaverEventName, BeaverEventDetail } from './types';
 
 class EventManager {
     private static instance: EventManager;
 
-    // Resolves the window that owns the shared event bus. Defaults to the Zotero
-    // main window; a non-Zotero host injects its own window
-    // via setWindowResolver so the bus and CustomEvent come from its global.
-    private resolveWindow: () => Window = () => Zotero.getMainWindow();
+    // The renderer owns this bus; non-Zotero hosts can inject their own resolver.
+    private disposed = false;
+    private subscriptions = new Set<() => void>();
+    private resolveWindow: () => Window = () => getHostWindow();
 
     private constructor() {}
 
@@ -23,16 +24,19 @@ class EventManager {
 
     getEventBus(win: Window): EventTarget {
         if (!win.__beaverEventBus) {
-            win.__beaverEventBus = new EventTarget();
+            win.__beaverEventBus = new win.EventTarget();
         }
         return win.__beaverEventBus;
     }
 
     dispatch<T extends BeaverEventName>(
         eventName: T,
-        detail: BeaverEventDetail<T>
+        detail: BeaverEventDetail<T>,
+        target?: Window,
     ) {
-        const win = this.resolveWindow();
+        if (this.disposed) return;
+        const win = target ?? this.resolveWindow();
+        if (win.__beaverRuntime?.status === 'closing') return;
         const event = new win.CustomEvent(eventName, { detail });
         this.getEventBus(win).dispatchEvent(event);
     }
@@ -41,15 +45,26 @@ class EventManager {
         eventName: T,
         callback: (detail: BeaverEventDetail<T>) => void
     ): () => void {
+        if (this.disposed) return () => {};
         const win = this.resolveWindow();
         const eventBus = this.getEventBus(win);
         
-        const handler = (e: CustomEvent) => callback(e.detail);
+        const handler = (e: CustomEvent) => {
+            if (win.__beaverRuntime?.status !== 'closing') callback(e.detail);
+        };
         eventBus.addEventListener(eventName, handler as EventListener);
         
-        return () => {
+        const unsubscribe = () => {
             eventBus.removeEventListener(eventName, handler as EventListener);
+            this.subscriptions.delete(unsubscribe);
         };
+        this.subscriptions.add(unsubscribe);
+        return unsubscribe;
+    }
+    dispose(): void {
+        this.disposed = true;
+        for (const unsubscribe of this.subscriptions) unsubscribe();
+        this.subscriptions.clear();
     }
 }
 

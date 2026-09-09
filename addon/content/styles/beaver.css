@@ -246,6 +246,13 @@
     flex-direction: column;
     padding: 10px 12px 10px 12px;
     gap: 8px;
+    /* Bound to the floating host's own limit, less the room the frame takes,
+     * and scrolled inside: the card is sized to this element's height, so a
+     * request longer than the window — the batch approval card with both
+     * warnings — reaches its controls instead of being cut at the frame. */
+    box-sizing: border-box;
+    max-height: calc(80vh - 24px);
+    overflow-y: auto;
 }
 
 .beaver-run-status-popup__header {
@@ -337,18 +344,41 @@
     overflow: hidden;
 }
 
-/* The shared question card, drawn inside the popup: the popup is the frame,
- * so the card gives up its own. */
-.beaver-run-status-popup__question {
+/* A shared card — the question card, the batch approval card — drawn inside
+ * the popup: the popup is the frame, so the card gives up its own. The
+ * padding is forced because the batch approval card sets its own inline.
+ * A card whose every click is its own (the question's options fill it) does
+ * not show the frame's pointer; one with plain copy between its controls
+ * keeps it, since that copy still opens Beaver. */
+.beaver-run-status-popup__embedded--own-clicks {
     cursor: default;
 }
 
-.beaver-run-status-popup__question > .user-message-display {
+.beaver-run-status-popup__embedded > .user-message-display {
     margin: 0;
-    padding: 0;
+    padding: 0 !important;
     border: 0;
     background: transparent;
     box-shadow: none;
+}
+
+/* Live batch progress under the header: the composer's bar, framed like the
+ * completed card's rows instead of docked to a composer edge. The panel
+ * renders nothing without a batch in flight, and the empty wrapper hides
+ * with it so the column's gap is not paid for a slot with nothing in it. */
+.beaver-run-status-popup__batch-progress {
+    cursor: default;
+}
+
+.beaver-run-status-popup__batch-progress:empty {
+    display: none;
+}
+
+.beaver-run-status-popup .beaver-run-status-popup__batch-progress .batch-progress-bar {
+    margin: 0;
+    border: 1px solid var(--beaver-border-subtle);
+    border-radius: 8px;
+    background: var(--beaver-fill-subtle);
 }
 
 .beaver-run-status-popup__footer {
@@ -387,7 +417,6 @@
 .beaver-run-status-popup__rows {
     display: flex;
     flex-direction: column;
-    margin-left: 30px;
     border: 1px solid var(--beaver-border-subtle);
     border-radius: 8px;
     background: var(--beaver-fill-subtle);
@@ -460,6 +489,122 @@
 
 .beaver-run-status-popup__row:hover .beaver-run-status-popup__row-arrow {
     opacity: 1;
+}
+
+/* Quick prompt: a composer for a new chat, in the corner of the main window
+ * while the sidebar is closed (react/components/quickPrompt). Sits inside
+ * #beaver-pane-floating-popup above the run status popup, in the same frame. */
+.beaver-quick-prompt {
+    position: relative;
+    align-self: flex-end;
+    width: 324px;
+    max-width: 100%;
+    margin: 0 4px 12px 0;
+    cursor: default;
+    text-align: left;
+}
+
+.beaver-quick-prompt__card {
+    position: relative;
+    box-sizing: border-box;
+    border: 1px solid var(--beaver-border-strong);
+    border-radius: 12px;
+    background: var(--beaver-surface-overlay);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14), 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.beaver-quick-prompt__dismiss {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    z-index: 1;
+    opacity: 0;
+    transition: opacity 120ms ease;
+}
+
+/* The close button only appears while the pointer is on the card, or when
+ * it has keyboard focus itself. */
+.beaver-quick-prompt__card:hover .beaver-quick-prompt__dismiss,
+.beaver-quick-prompt__dismiss:focus-within {
+    opacity: 1;
+}
+
+/* Room in the corner for the close button: the chips wrap before it, and
+ * the text does not run under it. A margin on the scroll host, not padding
+ * on the contenteditable: that one is `width: 100%` in the content box, so
+ * padding would push it past the host and raise a horizontal scrollbar. */
+.beaver-quick-prompt__composer .composer-attachments {
+    padding-right: 28px;
+}
+
+.beaver-quick-prompt__composer .beaver-lexical-scroll {
+    margin-right: 24px;
+}
+
+/* The composer's popup messages (an item removed, a summary of what was
+ * attached) anchor above the card, as they do above the sidebar's composer. */
+.beaver-quick-prompt__composer {
+    position: relative;
+}
+
+/* The popup is the frame, so the composer gives up its own. */
+.beaver-quick-prompt__composer > .user-message-display {
+    margin: 0;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    box-shadow: none;
+}
+
+.beaver-quick-prompt__notice {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 10px;
+    min-width: 0;
+    padding: 10px 36px 0 12px;
+}
+
+.beaver-quick-prompt__notice-mark {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+}
+
+.beaver-quick-prompt__notice-text {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 2px;
+    /* Lines up with the close button beside it. */
+    padding-top: 2px;
+}
+
+.beaver-quick-prompt__notice-title {
+    font-size: 0.95rem;
+    font-weight: 500;
+    line-height: 20px;
+}
+
+.beaver-quick-prompt__notice-detail {
+    font-size: 0.875rem;
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.beaver-quick-prompt__footer {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px 10px 12px;
 }
 
 /* The onboarding tip's visual: the real card's top-left corner, run off the

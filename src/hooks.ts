@@ -1,8 +1,8 @@
+import { productVoiceAdapters } from "./services/voice/productVoice";
 import { version } from "../package.json";
 import { initLocale } from "./utils/locale";
 import { createZToolkit } from "./utils/ztoolkit";
 import { BeaverUIFactory } from "./ui/ui";
-import eventBus from "../react/eventBus";
 import { CitationService } from "./services/CitationService";
 import { BeaverDB } from "./services/database";
 import { DocumentCache } from "./services/documentCache";
@@ -12,7 +12,6 @@ import { NewItemWatcher } from "./services/backgroundProcessing/newItemWatcher";
 import { createVoiceService } from "./services/voice/voiceService";
 import { NativeVoice } from "./services/voice/nativeVoice";
 import { DevelopmentVoiceHarness } from "./services/voice/developmentHarness";
-import { uiManager, restoreReaderSidebarWidthHandler } from "../react/ui/UIManager";
 import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
 import { compareVersions } from "./utils/compareVersions";
@@ -308,10 +307,10 @@ async function onStartup() {
         try {
             if (Zotero.isMac) addon.voiceNative = new NativeVoice();
             if (__env__ === 'development') {
-                addon.voiceHarness = new DevelopmentVoiceHarness(undefined, addon.voiceNative);
+                addon.voiceHarness = new DevelopmentVoiceHarness(undefined, addon.voiceNative, productVoiceAdapters(addon.voiceNative, () => addon.voice?.uploadContext));
                 addon.voice = addon.voiceHarness.service;
             } else {
-                addon.voice = createVoiceService();
+                addon.voice = createVoiceService(productVoiceAdapters(addon.voiceNative, () => addon.voice?.uploadContext));
             }
         } catch {
             disposeVoice();
@@ -320,12 +319,6 @@ async function onStartup() {
 
         // -------- Register keyboard shortcuts --------
         BeaverUIFactory.registerShortcuts();
-
-        // -------- Add event bus to window --------
-        const mainWindow = Zotero.getMainWindow();
-        if (mainWindow) {
-            mainWindow.__beaverEventBus = eventBus;
-        }
 
         // -------- Register protocol handler (zotero://beaver) --------
         registerBeaverProtocolHandler();
@@ -414,6 +407,9 @@ async function onStartup() {
 }
 
 async function onMainWindowLoad(win: Window): Promise<void> {
+    if (win.closed || addon.runtime.getWindow(win)) return;
+    const runtime = addon.runtime.attachWindow(win);
+
     // Create ztoolkit for every window
     addon.data.ztoolkit = createZToolkit();
 
@@ -433,8 +429,11 @@ async function onMainWindowLoad(win: Window): Promise<void> {
         Zotero.uiReadyPromise,
     ]);
 
-    // Assign the global eventBus instance to this window.
-    win.__beaverEventBus = eventBus;
+    if (runtime.status === 'closing' || addon.runtime.getWindow(win) !== runtime) return;
+    if (win.closed) {
+        addon.runtime.detachWindow(win);
+        return;
+    }
 
     BeaverUIFactory.registerChatPanel(win);
 
@@ -462,6 +461,8 @@ async function onMainWindowLoad(win: Window): Promise<void> {
  * 5. Unload stylesheets
  */
 async function onMainWindowUnload(win: Window): Promise<void> {
+    const runtime = addon.runtime.getWindow(win);
+    if (!addon.runtime.markClosing(win)) return;
     ztoolkit.log("onMainWindowUnload: Starting cleanup");
 
     try {
@@ -598,6 +599,8 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // React cleanup effects run here — they will see the shutdown
         // flag and skip any fire-and-forget DB/network operations.
         BeaverUIFactory.removeChatPanel(win);
+        addon.runtime.detachWindow(win);
+        await cleanupSupabaseWindowState(win);
 
         // Remove the <link rel="localization"> we added in onMainWindowLoad.
         // Leaving it behind after disable causes the locale bundle to log
@@ -617,14 +620,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             return;
         }
 
-        // Restore Zotero.Reader.onChangeSidebarWidth even when the app keeps
-        // running (macOS last-window close): the wrapper was installed by this
-        // window's React bundle and would otherwise outlive the window on the
-        // app-lifetime Zotero.Reader singleton, pinning the closed window's
-        // compartment. It is re-installed on the next sidebar open.
-        restoreReaderSidebarWidthHandler();
-
-        // Same reason: the React bundle published the table restore hook from
+        // The React bundle published the table restore hook from
         // this window and has no teardown of its own, so the closure over its
         // `tableStore` module would outlive the window on an app-lifetime
         // global. The next window's bundle re-publishes it on load.
@@ -638,17 +634,6 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         ztoolkit.log("onMainWindowUnload: Last window closing, running global cleanup");
 
         // Global cleanup - only run when last window closes
-
-        // 1. Stop Supabase auto-refresh timer to prevent stale timers
-        //    surviving plugin reload and causing token refresh races.
-        //    The cleanup function is published by zoteroSupabaseStorage.ts
-        //    (webpack bundle) on the window where the bundle was loaded.  Use
-        //    the `win` parameter (the window being unloaded) rather than
-        //    Zotero.getMainWindow(), which may be unreliable during unload of
-        //    the last window.
-        // Reset the shared auth lock even if disposing Supabase fails so a
-        // stale held-lock cannot block authentication on the next load.
-        await cleanupSupabaseWindowState(win);
 
         addon.newItemWatcher?.stop();
         addon.newItemWatcher = undefined;
@@ -691,10 +676,8 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // 5. Unregister keyboard shortcuts (clears interval, unregisters Zotero.Reader listeners)
         BeaverUIFactory.unregisterShortcuts();
 
-        // 6. Clean up UIManager (restores Zotero.Reader.onChangeSidebarWidth)
-        if (uiManager) {
-            uiManager.cleanup();
-        }
+        // Dispose the plugin-owned window registry and reader-width dispatcher.
+        addon.runtime.disposeInstance();
 
         // 7. Unload stylesheets
         unloadKatexStylesheet(win);
@@ -730,7 +713,6 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         unregisterBeaverProtocolHandler();
 
         // 15. Drop React-bundle cross-bundle globals attached to Zotero
-        Zotero.__beaverJotaiStore = undefined;
         Zotero.__beaverShuttingDown = undefined;
         Zotero.__beaverWrittenAnnotationItems = undefined;
         Zotero.__beaverWrittenAnnotationKeys = undefined;
@@ -738,6 +720,12 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         ztoolkit.log("onMainWindowUnload: Cleanup completed successfully");
     } catch (error: any) {
         ztoolkit.log(`onMainWindowUnload: Error during cleanup: ${error.message}`);
+    } finally {
+        if (addon.runtime.getWindow(win) === runtime) {
+            BeaverUIFactory.closeWindowsRenderedBy(win);
+            BeaverUIFactory.removeChatPanel(win);
+            addon.runtime.detachWindow(win);
+        }
     }
 }
 
@@ -879,33 +867,69 @@ function disposeVoice(): void {
     addon.voiceHarness = undefined;
 }
 
-/**
- * Plugin shutdown handler.
- * 
- * NOTE: Most cleanup should happen in onMainWindowUnload() instead.
- * This function runs AFTER Zotero's internal cleanup has begun,
- * which can cause SIGSEGV if we try to access destroyed objects.
- * 
- * This is kept as a fallback for any remaining cleanup.
- */
-async function onShutdown(): Promise<void> {
+let appShutdownDisposal: Promise<void> | undefined;
+
+/** APP_SHUTDOWN runs too late to access windows, React, or reader UI. */
+function onAppShutdown(): Promise<void> {
+    return appShutdownDisposal ??= disposeAppServices();
+}
+
+async function disposeAppServices(): Promise<void> {
+    Zotero.__beaverShuttingDown = true;
+    addon.data.alive = false;
+    const attempt = async (label: string, cleanup: () => void | Promise<unknown>) => {
+        try {
+            await withShutdownTimeout(Promise.resolve(cleanup()), label);
+        } catch (error) {
+            ztoolkit.log(`onAppShutdown: ${label} failed:`, error);
+        }
+    };
+    await attempt('cancelAllActiveTasks', () => cancelAllActiveTasks());
+    await attempt('newItemWatcher.stop', () => addon.newItemWatcher?.stop());
+    addon.newItemWatcher = undefined;
+    await attempt('processingReconciler.stop', () => addon.processingReconciler?.stop());
+    addon.processingReconciler = undefined;
+    await attempt('backgroundExtractor.stop', () => addon.backgroundExtractor?.stop());
+    addon.backgroundExtractor = undefined;
+    await attempt('disposeMuPDFWorker', () => disposeMuPDFWorker(undefined, { force: true }));
+    addon.documentCache = undefined;
+    // Keep a failed connection available to bootstrap's independent DB fallback.
+    await attempt('closeDatabase', async () => {
+        if (addon.db) {
+            await addon.db.closeDatabase();
+            addon.db = undefined;
+        }
+    });
+    await attempt('citationService.dispose', () => addon.citationService?.dispose());
+    addon.citationService = undefined;
+}
+
+let instanceDisposal: Promise<void> | undefined;
+
+/** Full cleanup for plugin disable/reload, while Zotero UI is still usable. */
+function onShutdown(): Promise<void> {
+    return instanceDisposal ??= disposePlugin();
+}
+
+async function disposePlugin(): Promise<void> {
+    Zotero.__beaverShuttingDown = true;
+    addon.data.alive = false;
+    cancelAllActiveTasks();
     ztoolkit.log("onShutdown: Running fallback cleanup");
     
     try {
         disposeVoice();
-        const isAppShuttingDown = Services?.startup?.shuttingDown ?? false;
-        if (!isAppShuttingDown) {
-            const openWindows = Zotero.getMainWindows?.().filter(w => w && !w.closed) ?? [];
-            for (const win of openWindows) {
-                // Plugin disable/uninstall/upgrade: windows are still alive.
-                // The bundle goes away with the plugin, so an interrupted run
-                // is worth recording however many windows are open.
-                closeAgentConnection(win as Window, "Beaver plugin shutting down", {
-                    rememberInterruptedThread: true,
-                });
-                await cleanupDevTemporaryAnnotations(win as Window);
-                BeaverUIFactory.removeChatPanel(win as Window);
-            }
+        const openWindows = Zotero.getMainWindows?.().filter(w => w && !w.closed) ?? [];
+        for (const win of openWindows) addon.runtime.markClosing(win);
+        for (const win of openWindows) {
+            closeAgentConnection(win as Window, "Beaver plugin shutting down", {
+                rememberInterruptedThread: true,
+            });
+            BeaverUIFactory.closeWindowsRenderedBy(win);
+            await cleanupDevTemporaryAnnotations(win as Window);
+            BeaverUIFactory.removeChatPanel(win as Window);
+            addon.runtime.detachWindow(win);
+            await cleanupSupabaseWindowState(win);
         }
 
         // These should already be done in onMainWindowUnload, but just in case
@@ -939,9 +963,7 @@ async function onShutdown(): Promise<void> {
 
         BeaverUIFactory.unregisterShortcuts();
 
-        if (uiManager) {
-            uiManager.cleanup();
-        }
+        addon.runtime.disposeInstance();
 
         BeaverUIFactory.closeBeaverWindow();
         BeaverUIFactory.closePreferencesWindow();
@@ -972,7 +994,6 @@ async function onShutdown(): Promise<void> {
         // Drop React-bundle cross-bundle globals so plugin disable doesn't
         // leak the Jotai store (dead atom-keyed entries) or leave a stale
         // shutdown flag that would short-circuit the next onStartup().
-        Zotero.__beaverJotaiStore = undefined;
         Zotero.__beaverShuttingDown = undefined;
         Zotero.__beaverWrittenAnnotationItems = undefined;
         Zotero.__beaverWrittenAnnotationKeys = undefined;
@@ -993,6 +1014,7 @@ async function onShutdown(): Promise<void> {
 export default {
     onStartup,
     onShutdown,
+    onAppShutdown,
     onMainWindowLoad,
     onMainWindowUnload
 };

@@ -95,6 +95,8 @@ vi.mock('../../../react/atoms/profile', () => ({
 }));
 
 const {
+    currentMessageCollectionsAtom,
+    updateMessageCollectionsFromZoteroSelectionAtom,
     currentReaderAttachmentAtom,
     updateReaderAttachmentAtom,
     clearReaderAttachmentAtom,
@@ -290,5 +292,30 @@ describe('updateReaderAttachmentAtom staleness', () => {
         await update;
 
         expect(store.get(currentReaderAttachmentAtom)).toBeNull();
+    });
+});
+
+
+describe('selected collection attachments', () => {
+    it('uses the active pane and filters excluded and deleted collections', () => {
+        const store = createStore();
+        vi.stubGlobal('Zotero', {
+            Libraries: { userLibraryID: 1 },
+            getActiveZoteroPane: () => ({ getSelectedCollections: () => [
+                { libraryID: 1, key: 'COLL0001', name: 'Selected', parentKey: 'PARENT01' },
+                { libraryID: 2, key: 'COLL0002', name: 'Excluded' },
+                { libraryID: 1, key: 'COLL0003', name: 'Deleted', deleted: true },
+            ] }),
+        });
+        store.set(updateMessageCollectionsFromZoteroSelectionAtom);
+        expect(store.get(currentMessageCollectionsAtom)).toEqual([{
+            library_id: 1, library_ref: 'u', zotero_key: 'COLL0001', name: 'Selected', parent_key: 'PARENT01',
+        }]);
+    });
+    it('does not fail when the active pane is unavailable', () => {
+        const store = createStore();
+        vi.stubGlobal('Zotero', { getActiveZoteroPane: () => { throw new Error('No pane'); } });
+        expect(() => store.set(updateMessageCollectionsFromZoteroSelectionAtom)).not.toThrow();
+        expect(store.get(currentMessageCollectionsAtom)).toEqual([]);
     });
 });

@@ -57,6 +57,7 @@ import {
 import { readableToExtractKind, type ExtractContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import { maybeEnqueueOcrJob } from './ocr/enqueueOcr';
 import {
+    EpubStructureError,
     extractEpubDocumentFromFile,
     preflightEpubFile,
     type EpubDocument,
@@ -253,6 +254,12 @@ export type ExtractAndCacheSnapshotResult =
           message: string;
           /** Document page count when known (e.g. the count that tripped `too_many_pages`). */
           pageCount?: number | null;
+          /**
+           * See the EPUB result's `permanent`. The snapshot extractor does not
+           * classify structural failures yet; the field is declared so the two
+           * DOM results stay one shape for the shared executor branch.
+           */
+          permanent?: boolean;
           resolvedAttachment: ResolvedAttachment;
           contentKind?: ExtractContentKind;
       };
@@ -334,6 +341,11 @@ export type ExtractAndCacheResult =
           kind: 'response_error';
           code: ZoteroDocumentErrorCode;
           message: string;
+          /**
+           * See the EPUB result's `permanent`. Local-only: the wire `code` is
+           * unchanged, so nothing the backend or the model sees is affected.
+           */
+          permanent?: boolean;
           pageCount: number | null;
           resolvedAttachment: ResolvedAttachment | null;
           contentKind?: ExtractContentKind;
@@ -378,6 +390,14 @@ export type ExtractAndCacheEpubResult =
           message: string;
           /** Document page count when known (e.g. the count that tripped `too_many_pages`). */
           pageCount?: number | null;
+          /**
+           * The failure can never succeed on a retry (e.g. the file is not a
+           * usable EPUB). Local-only: the wire `code` is unchanged, so the
+           * backend and the model see exactly what they saw before. Consumed by
+           * the background queue, which would otherwise retry and dead-letter
+           * every structurally broken book.
+           */
+          permanent?: boolean;
           resolvedAttachment: ResolvedAttachment;
           contentKind?: ExtractContentKind;
       };
@@ -684,6 +704,9 @@ export async function extractAndCacheEpubDocument(
             kind: 'response_error',
             code: 'extraction_failed',
             message: `Failed to extract EPUB content for ${requestKey}: ${error instanceof Error ? error.message : String(error)}`,
+            // A broken container/OPF is not a transient glitch; retrying it just
+            // burns attempts and dead-letters the job.
+            permanent: error instanceof EpubStructureError,
             resolvedAttachment,
             contentKind: 'epub',
         };
@@ -1147,6 +1170,7 @@ export async function extractAndCacheResolvedPdfDocument(
                     kind: 'response_error',
                     code: 'download_failed',
                     message: `Failed to download PDF for ${resolvedKeyStr} from remote storage: ${loaded.error instanceof Error ? loaded.error.message : String(loaded.error)}`,
+                    permanent: loaded.permanent === true,
                     pageCount: null,
                     resolvedAttachment,
                 };
@@ -1212,6 +1236,7 @@ export async function extractAndCacheResolvedPdfDocument(
                     kind: 'response_error',
                     code: 'download_failed',
                     message: `Failed to download PDF for ${resolvedKeyStr} from remote storage: ${loaded.error instanceof Error ? loaded.error.message : String(loaded.error)}`,
+                    permanent: loaded.permanent === true,
                     pageCount: totalPages,
                     resolvedAttachment,
                 };

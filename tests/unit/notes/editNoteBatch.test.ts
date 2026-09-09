@@ -262,6 +262,7 @@ import { getDeferredToolPreference, checkLibraryExcluded } from '../../../src/se
 import { store } from '../../../react/store';
 import { renderToHTML } from '../../../react/utils/citationRenderers';
 import {
+    executeEditNoteAction as executeLocalEditNoteAction,
     executeEditNoteBatchAction as executeLocalEditNoteBatchAction,
     undoEditNoteBatchAction as undoLocalEditNoteBatchAction,
 } from '../../../react/utils/editNoteActions';
@@ -652,6 +653,19 @@ describe('validateEditNoteBatchAction — success', () => {
 // =============================================================================
 
 describe('validateEditNoteBatchAction — per-edit failures', () => {
+    it.each(['loc="page3"', ' ref="c_X_0"/>', 'loc="page1" ref="c_X_0"', 'items="u-AAAAAAAA; u-BBBBBBBB"'])(
+        'rejects citation attribute anchor %s before offering candidates', async (oldString) => {
+        const item = useNote(NOTE_HTML);
+        const response = await handleAgentActionValidateRequest(makeValidateRequest([
+            { index: 0, operation: 'str_replace_all', old_string: oldString, new_string: '<citation id="u-AAAAAAAA" loc="page4"/>' },
+        ]));
+        expect(response.valid).toBe(false);
+        expect((response as any).edit_errors[0].error_code).toBe('partial_simplified_tag');
+        expect((response as any).edit_errors[0].error).toContain('WHOLE tag');
+        expect(findCandidateSnippets).not.toHaveBeenCalled();
+        expect(item.setNote).not.toHaveBeenCalled();
+    });
+
     it('fails closed when one old_string is missing: edit_errors names ONLY that index, top-level old_string_not_found', async () => {
         const item = useNote(NOTE_HTML);
         const response = await handleAgentActionValidateRequest(makeValidateRequest([
@@ -1120,4 +1134,77 @@ describe('executeEditNoteBatchAction — atomicity and failures', () => {
         expect(response.error_code).toBe('invalid_batch');
         expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
     });
+});
+
+
+describe('citation anchor recovery', () => {
+    it.each(['insert_before', 'insert_after'] as const)(
+        'preserves the insertion payload for %s in validation and execution', async (operation) => {
+            const item = useNote(NOTE_HTML);
+            const edits = [{ index: 0, operation, old_string: 'items="u-AAAAAAAA; u-BBBBBBBB"', new_string: 'Adjacent content' }];
+            const validation = await handleAgentActionValidateRequest(makeValidateRequest(edits));
+            const execution = await handleAgentActionExecuteRequest(makeExecuteRequest(edits));
+            expect(validation.valid).toBe(false);
+            expect(execution.success).toBe(false);
+            const validationError = (validation as any).edit_errors[0];
+            expect(validationError.error_code).toBe('partial_simplified_tag');
+            expect(execution.error_code).toBe('partial_simplified_tag');
+            for (const message of [validationError.error, execution.error]) {
+                expect(message).toContain('WHOLE tag');
+                expect(message).toContain('Keep new_string as the content to insert');
+                expect(message).not.toContain('replacement tag');
+                expect(message).not.toContain("operation='rewrite'");
+            }
+            expect(findCandidateSnippets).not.toHaveBeenCalled();
+            expect(item.setNote).not.toHaveBeenCalled();
+        },
+    );
+
+    it.each(['id="section"', 'label="Example"', 'items="example"'])(
+        'matches literal attribute text before diagnosing a citation fragment: %s', async (oldString) => {
+            const html = `<p>${oldString}</p>`;
+            const item = useNote(html);
+            const edits = [{ index: 0, operation: 'str_replace' as const, old_string: oldString, new_string: 'Updated' }];
+            const validation = await handleAgentActionValidateRequest(makeValidateRequest(edits));
+            expect(validation.valid).toBe(true);
+            const execution = await handleAgentActionExecuteRequest(makeExecuteRequest(edits));
+            expect(execution.success).toBe(true);
+            expect(item.setNote.mock.calls[0][0]).toContain('<p>Updated</p>');
+        },
+    );
+});
+
+
+describe('local single-edit citation recovery', () => {
+    it.each(['insert_before', 'insert_after'] as const)(
+        'preserves the insertion payload for an approved %s action', async (operation) => {
+            const item = useNote(NOTE_HTML);
+            const action = {
+                id: 'local-insertion',
+                action_type: 'edit_note',
+                proposed_data: {
+                    library_id: 1,
+                    zotero_key: 'NOTE0001',
+                    operation,
+                    old_string: 'items="u-AAAAAAAA; u-BBBBBBBB"',
+                    new_string: 'Adjacent content',
+                },
+            } as any;
+
+            const error = await executeLocalEditNoteAction(action).catch((err: unknown) => err);
+
+            expect(error).toBeInstanceOf(Error);
+            expect(error).toMatchObject({
+                code: 'partial_simplified_tag',
+                message: expect.stringContaining('Keep new_string as the content to insert'),
+            });
+            expect((error as Error).message).toContain('WHOLE tag');
+            expect((error as Error).message).not.toContain('replacement tag');
+            expect((error as Error).message).not.toContain("operation='rewrite'");
+            expect(action.proposed_data.new_string).toBe('Adjacent content');
+            expect(item.setNote).not.toHaveBeenCalled();
+            expect(item.saveTx).not.toHaveBeenCalled();
+            expect(findCandidateSnippets).not.toHaveBeenCalled();
+        },
+    );
 });

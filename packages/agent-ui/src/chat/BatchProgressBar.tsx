@@ -50,7 +50,8 @@ export interface BatchProgressBarProps {
  * goal, counts, and (when the operation has one) the outcome distribution.
  * Expansion is owned by the caller.
  *
- * Read-only — stopping is the composer's Stop button. Silent about review
+ * Stopping is the composer's Stop button, not the bar's. Rows that name a
+ * collection or tag go there on click, as the receipt's do. Silent about review
  * status: the ledger counts an item resolved once the agent has proposed the
  * edit, so "184 of 184" can sit next to 184 unreviewed changes. That belongs
  * on the run's changes card.
@@ -107,7 +108,9 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
             role="group"
             aria-label="Batch job progress"
         >
-            {/* Overlay so it does not stack on the composer's 1px top border. */}
+            {/* Overlay so it does not stack on the composer's 1px top border.
+                Hidden while expanded: the body draws the full track then, and
+                the hairline would only repeat it along the top edge. */}
             <div
                 className="display-flex flex-row batch-progress-hairline"
                 style={{
@@ -116,7 +119,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                     left: 0,
                     right: 0,
                     height: 2,
-                    opacity: isOver ? 0 : 1,
+                    opacity: isOver || expanded ? 0 : 1,
                     overflow: 'hidden',
                     pointerEvents: 'none',
                     transition: 'opacity 0.7s ease',
@@ -186,7 +189,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
             </div>
 
             {expanded && (
-                <BatchOutcomeBody batch={batch} maxRows={PANEL_MAX_TALLY_ROWS}>
+                <BatchOutcomeBody batch={batch} maxRows={PANEL_MAX_TALLY_ROWS} revealTargets>
                     {queuedBatches.length > 0 && (
                         <div className="display-flex flex-col gap-1 min-w-0">
                             <BatchBlockHeading>{WAITING_HEADING}</BatchBlockHeading>

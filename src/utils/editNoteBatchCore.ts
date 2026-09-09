@@ -335,7 +335,7 @@ function matchEdit(
     if (!match) {
         const partial = detectPartialSimplifiedTag(spec.oldString ?? '');
         if (partial) {
-            return failure(spec.index, buildPartialSimplifiedTagMessage(partial), 'partial_simplified_tag');
+            return failure(spec.index, buildPartialSimplifiedTagMessage(partial, spec.operation), 'partial_simplified_tag');
         }
         const hint = ctx.mode === 'validate'
             ? buildZeroMatchHint(ctx.simplified, spec.oldString ?? '')

@@ -1,3 +1,4 @@
+import { BeaverInstance } from './runtime/instance';
 import { config, version } from "../package.json";
 import { ColumnOptions, DialogHelper } from "zotero-plugin-toolkit";
 import hooks from "./hooks";
@@ -14,6 +15,7 @@ import type { VoiceService } from './services/voice/voiceService';
 import type { DevelopmentVoiceHarness } from './services/voice/developmentHarness';
 
 class Addon {
+    public runtime = new BeaverInstance();
     public voiceNative?: import("./services/voice/nativeVoice").NativeVoice;
     public voice?: VoiceService;
     public voiceHarness?: DevelopmentVoiceHarness;

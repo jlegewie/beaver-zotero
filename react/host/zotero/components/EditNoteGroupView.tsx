@@ -743,10 +743,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     // The footer's buttons never wrap (a two-line "Apply All" is unreadable).
     // When the row is too narrow for them, the permission trigger drops to
     // its icon first and the preview button second.
-    const footerRef = useRef<HTMLDivElement>(null);
-    const footerCollapseLevel = useOverflowCollapse(footerRef, 2);
-    const permissionIconOnly = footerCollapseLevel >= 1;
-    const previewIconOnly = footerCollapseLevel >= 2;
+    const footer = useOverflowCollapse(2);
+    const permissionIconOnly = footer.level >= 1;
+    const previewIconOnly = footer.level >= 2;
 
     const canShowPreview =
         !isProcessing
@@ -901,7 +900,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                     </div>
 
                     {(showFooterApply || showFooterReject || showFooterUndo || showFooterRetry || canShowPreview || hasPendingApprovals) && (
-                        <div ref={footerRef} className="display-flex flex-row items-center gap-2 px-2 py-2">
+                        <div ref={footer.ref} className="display-flex flex-row items-center gap-2 px-2 py-2">
                             {/* Only while the run is waiting on this card: once
                                 it is not, there is no run left to grant. */}
                             {hasPendingApprovals && (

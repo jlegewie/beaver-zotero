@@ -2009,9 +2009,6 @@ function emitTableUpdated(
     meta: TableWriteMeta
 ): void {
     try {
-        const win = Zotero.getMainWindow?.();
-        const bus = win?.__beaverEventBus;
-        if (!win || !bus) return;
         const detail: TableUpdatedDetail = {
             libraryID: ref.libraryID,
             key: ref.key,
@@ -2019,8 +2016,7 @@ function emitTableUpdated(
             actor: meta.actor,
             ...(meta.run_id ? { run_id: meta.run_id } : {}),
         };
-        const Ctor = (win as any).CustomEvent ?? CustomEvent;
-        bus.dispatchEvent(new Ctor(TABLE_UPDATED_EVENT, { detail }));
+        Zotero.Beaver?.runtime?.publish(TABLE_UPDATED_EVENT, detail);
     } catch (error) {
         logger(`tableStore: table-updated dispatch failed: ${String(error)}`, 2);
     }

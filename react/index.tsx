@@ -1,3 +1,13 @@
+import { currentNoteItemAtom } from './atoms/zoteroContext';
+import { eventManager } from './events/eventManager';
+import { isSidebarVisibleAtom, isLibraryTabAtom, selectedZoteroTabIdAtom } from './atoms/ui';
+import { currentMessageContentAtom, currentReaderAttachmentAtom } from './atoms/messageComposition';
+import { isBackgroundWorkerRunningAtom } from './atoms/backgroundExtraction';
+import { getWindowRuntime } from './runtime/windowRuntime';
+import { initializeWindowRuntime } from './runtime/windowRuntime';
+import type { WindowRuntime } from '../src/runtime/instance';
+import { uiManager } from './ui/UIManager';
+import { initializeReactUI } from './ui/initialization';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Provider } from 'jotai';
@@ -141,8 +151,7 @@ registerZoteroBusyContext();
 registerZoteroSyncPause();
 
 /**
- * Component to initialize global hooks that should only run once.
- * These hooks will populate the shared Jotai store.
+ * Initializes hooks once per main-window renderer and populates its local store.
  */
 const GlobalContextInitializer = () => {
     // Handle Supabase authentication
@@ -411,4 +420,38 @@ export function closeAgentConnection(
     options?: { rememberInterruptedThread?: boolean },
 ) {
     store.set(closeWSConnectionForShutdownAtom, reason, options);
+}
+
+/** Called by the plugin before mounting any surface. */
+export function initializeRuntime(runtime: WindowRuntime) {
+    initializeWindowRuntime(runtime);
+    runtime.hostWindow.__beaverJotaiStore = store;
+    initializeReactUI(runtime.hostWindow);
+}
+
+export function disposeRuntime() {
+    eventManager.dispose();
+    for (const root of rootsMap.values()) {
+        try { root.unmount(); } catch (error) { Zotero.logError(error as Error); }
+    }
+    rootsMap.clear();
+    uiManager.cleanup();
+}
+
+/** Development commands execute inside the target renderer's atom graph. */
+export function inspectRuntime(command?: { draft?: string }) {
+    if (process.env.NODE_ENV !== 'development') return undefined;
+    const runtime = getWindowRuntime();
+    if (command?.draft !== undefined) store.set(currentMessageContentAtom, command.draft);
+    return {
+        id: runtime.id,
+        draft: store.get(currentMessageContentAtom),
+        visible: store.get(isSidebarVisibleAtom),
+        isLibraryTab: store.get(isLibraryTabAtom),
+        selectedTabId: store.get(selectedZoteroTabIdAtom),
+        hasReaderAttachment: !!store.get(currentReaderAttachmentAtom),
+        noteItemId: store.get(currentNoteItemAtom)?.id ?? null,
+        backgroundRunning: store.get(isBackgroundWorkerRunningAtom),
+        roots: rootsMap.size,
+    };
 }

@@ -1,4 +1,5 @@
-import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 /**
  * The shimmering status line, cut with a visible ellipsis.
@@ -36,18 +37,20 @@ import { runStatusPopupForceVisibleAtom } from '../../atoms/runStatusPopup';
 import {
     AlertIcon,
     ArrowUpRightIcon,
+    ArrowRightIcon,
     CancelIcon,
     CheckmarkCircleIcon,
     DollarCircleIcon,
     HelpCircleIcon,
     Icon,
-    LayersIcon,
     LibraryIcon,
 } from '../icons/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import RunPermissionButton from '../ui/buttons/RunPermissionButton';
 import AskUserQuestionCard from '@beaver/agent-ui/chat/AskUserQuestionCard';
+import BatchApprovalCard from '@beaver/agent-ui/chat/BatchApprovalCard';
+import BatchProgressPanel from '../input/BatchProgressPanel';
 import { getAgentActionToolIcon } from '../../host/zotero/components/agentActionViewHelpers';
 import RunPulse from './RunPulse';
 import { useRunStatusPopupCard } from './useRunStatusPopupCard';
@@ -114,15 +117,23 @@ const Header: React.FC<{
     </div>
 );
 
-const RunningView: React.FC<{ card: RunningCard }> = ({ card }) => (
-    <Header
-        card={card}
-        leading={<RunPulse />}
-        detail={<StatusLine text={card.statusLine} />}
-    />
+/** Live batch progress, drawn under the header of the cards that keep the run's work visible. */
+interface WithBatchProgress {
+    batchProgress: React.ReactNode;
+}
+
+const RunningView: React.FC<{ card: RunningCard } & WithBatchProgress> = ({ card, batchProgress }) => (
+    <>
+        <Header
+            card={card}
+            leading={<RunPulse />}
+            detail={<StatusLine text={card.statusLine} />}
+        />
+        {batchProgress}
+    </>
 );
 
-const ApprovalView: React.FC<{ card: ApprovalCard }> = ({ card }) => (
+const ApprovalView: React.FC<{ card: ApprovalCard } & WithBatchProgress> = ({ card, batchProgress }) => (
     <>
         <Header
             card={card}
@@ -135,6 +146,7 @@ const ApprovalView: React.FC<{ card: ApprovalCard }> = ({ card }) => (
             detail={<span title={card.label}>{card.label}</span>}
             detailClassName="font-color-primary"
         />
+        {batchProgress}
         <div className="beaver-run-status-popup__footer">
             {card.permission && (
                 <div className="beaver-run-status-popup__permission">
@@ -156,6 +168,7 @@ const ApprovalView: React.FC<{ card: ApprovalCard }> = ({ card }) => (
                 {card.rejectLabel}
             </Button>
             <Button
+                data-run-status-approve
                 variant="solid"
                 style={FOOTER_BUTTON_STYLE}
                 onClick={() => card.onDecide(true)}
@@ -187,6 +200,7 @@ const CreditView: React.FC<{ card: CreditCard }> = ({ card }) => (
                 {card.declineLabel}
             </Button>
             <Button
+                data-run-status-approve
                 variant="solid"
                 style={FOOTER_BUTTON_STYLE}
                 onClick={() => card.onDecide(true)}
@@ -198,23 +212,26 @@ const CreditView: React.FC<{ card: CreditCard }> = ({ card }) => (
     </>
 );
 
+/**
+ * The batch is approved right here, with the same card the composer shows
+ * for it: the backend's title, scope, goal and warnings, the coverage choice,
+ * and a field for instructions. The card names the batch itself, so it
+ * stands without the popup's header — and without a close button: the run
+ * is blocked on this decision, and Cancel is the way out of it. Keyed on the
+ * request so a new one starts from a fresh draft.
+ *
+ * Its controls are all buttons, links and fields, which the card's click
+ * handler leaves alone on its own, so the copy around them still opens
+ * Beaver like any other card's background.
+ */
 const BatchView: React.FC<{ card: BatchCard }> = ({ card }) => (
-    <>
-        <Header
-            card={card}
-            leading={<Mark icon={LayersIcon} className="font-color-secondary" />}
-            detail={<span title={card.title}>{card.title}</span>}
-            detailClassName="font-color-primary"
+    <div className="beaver-run-status-popup__embedded">
+        <BatchApprovalCard
+            key={card.approval.approvalId}
+            approval={card.approval}
+            onSubmit={card.onSubmit}
         />
-        {card.scope && <div className="beaver-run-status-popup__body font-color-secondary">{card.scope}</div>}
-        <div className="beaver-run-status-popup__footer">
-            <span className="font-color-tertiary text-sm">Approve in Beaver</span>
-            <div className="flex-1" />
-            <Button variant="solid" style={FOOTER_BUTTON_STYLE} rightIcon={ArrowUpRightIcon} onClick={card.onOpen}>
-                Review
-            </Button>
-        </div>
-    </>
+    </div>
 );
 
 /**
@@ -228,7 +245,7 @@ const QuestionView: React.FC<{ card: QuestionCard }> = ({ card }) => (
             leading={<Mark icon={HelpCircleIcon} className="font-color-secondary" />}
             detail={null}
         />
-        <div className="beaver-run-status-popup__question" data-run-status-popup-interactive>
+        <div className="beaver-run-status-popup__embedded beaver-run-status-popup__embedded--own-clicks" data-run-status-popup-interactive>
             <AskUserQuestionCard
                 key={card.question.questionId}
                 pendingQuestion={card.question}
@@ -295,7 +312,7 @@ const CompletedView: React.FC<{ card: CompletedCard }> = ({ card }) => {
             )}
             <div className="beaver-run-status-popup__footer">
                 <div className="flex-1" />
-                <Button variant="outline" style={FOOTER_BUTTON_STYLE} rightIcon={ArrowUpRightIcon} onClick={card.onOpen}>
+                <Button variant="outline" style={FOOTER_BUTTON_STYLE} rightIcon={ArrowRightIcon} onClick={card.onOpen}>
                     Open Beaver
                 </Button>
             </div>
@@ -303,10 +320,15 @@ const CompletedView: React.FC<{ card: CompletedCard }> = ({ card }) => {
     );
 };
 
-const CardView: React.FC<{ card: RunStatusPopupCard }> = ({ card }) => {
+/** The cards that draw the run's batch progress: the run is working, or waiting on one of its changes. */
+function showsBatchProgress(card: RunStatusPopupCard): boolean {
+    return card.kind === 'running' || card.kind === 'approval';
+}
+
+const CardView: React.FC<{ card: RunStatusPopupCard } & WithBatchProgress> = ({ card, batchProgress }) => {
     switch (card.kind) {
-        case 'running': return <RunningView card={card} />;
-        case 'approval': return <ApprovalView card={card} />;
+        case 'running': return <RunningView card={card} batchProgress={batchProgress} />;
+        case 'approval': return <ApprovalView card={card} batchProgress={batchProgress} />;
         case 'credit': return <CreditView card={card} />;
         case 'batch': return <BatchView card={card} />;
         case 'question': return <QuestionView card={card} />;
@@ -320,41 +342,61 @@ const CardView: React.FC<{ card: RunStatusPopupCard }> = ({ card }) => {
  * first paint is not animated: a card appearing should not unfold from zero.
  */
 const AnimatedCard: React.FC<{ card: RunStatusPopupCard; children: React.ReactNode }> = ({ card, children }) => {
-    const innerRef = useRef<HTMLDivElement>(null);
+    const cardRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        const element = cardRef.current;
+        if (element?.ownerDocument.hasFocus() && element.ownerDocument.activeElement === element) {
+            element.querySelector<HTMLElement>('[data-run-status-approve]:not(:disabled)')?.focus();
+        }
+    }, [card.kind]);
     const [height, setHeight] = useState<number | null>(null);
+    // The height as last measured, so a measurement that finds it unchanged
+    // does not reach the setter: a setter called with the current value still
+    // schedules a re-render while the component has a store update pending.
+    const heightRef = useRef<number | null>(null);
     const [settled, setSettled] = useState(false);
+    const observed = useRef<{ element: HTMLElement; disconnect: () => void } | null>(null);
 
-    const measure = useCallback(() => {
-        const inner = innerRef.current;
-        if (inner) setHeight(inner.getBoundingClientRect().height);
-    }, []);
-
-    // Measured in the same frame the new state is laid out, so the transition
-    // starts at once; the observer below covers the content changing on its
-    // own afterwards (a tool label's item name arriving).
-    useLayoutEffect(measure, [card, measure]);
-
-    useLayoutEffect(() => {
-        const inner = innerRef.current;
-        const win = inner?.ownerDocument.defaultView;
-        if (!inner || !win) return;
+    // Measurement is subscribed to the content element: its size changes with
+    // every state the card moves through and with content arriving on its own
+    // (a tool label's item name), and the observer reports both from the
+    // browser's layout pass rather than after each render. The first
+    // measurement is taken as the element attaches, so the card is drawn at
+    // its height from the start.
+    const innerRef = useCallback((inner: HTMLDivElement | null) => {
+        if (observed.current?.element === inner) return;
+        observed.current?.disconnect();
+        observed.current = null;
+        if (!inner) return;
+        const win = inner.ownerDocument.defaultView;
+        if (!win) return;
+        const measure = () => {
+            const next = inner.getBoundingClientRect().height;
+            if (next === heightRef.current) return;
+            heightRef.current = next;
+            setHeight(next);
+        };
+        measure();
         // Second frame: the first measurement is drawn without a transition,
         // and every change after it is animated.
         const frame = win.requestAnimationFrame(() => setSettled(true));
         const observer = new win.ResizeObserver(measure);
         observer.observe(inner);
-        return () => {
-            win.cancelAnimationFrame(frame);
-            observer.disconnect();
+        observed.current = {
+            element: inner,
+            disconnect: () => {
+                win.cancelAnimationFrame(frame);
+                observer.disconnect();
+            },
         };
-    }, [measure]);
+    }, []);
 
     const handleClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
         if (isCardBackgroundClick(event)) card.onOpen();
     }, [card]);
 
     const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLElement>) => {
-        if (event.target !== event.currentTarget) return;
+        if (event.target !== event.currentTarget || event.defaultPrevented || isImeKeyEvent(event.nativeEvent) || event.repeat) return;
         if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             card.onOpen();
@@ -363,6 +405,7 @@ const AnimatedCard: React.FC<{ card: RunStatusPopupCard; children: React.ReactNo
 
     return (
         <div
+            ref={cardRef}
             className={`beaver-run-status-popup__card beaver-run-status-popup__card--${card.kind} ${settled ? 'beaver-run-status-popup__card--settled' : ''}`}
             style={{ height: height ?? undefined }}
             role="button"
@@ -391,7 +434,26 @@ const RunStatusPopup: React.FC = () => {
     const isSidebarVisible = useAtomValue(isSidebarVisibleAtom);
     const forceVisible = useAtomValue(runStatusPopupForceVisibleAtom);
 
+    // Expansion of the batch progress lives here rather than in the panel:
+    // the card that holds the panel is swapped as the run moves between
+    // working and waiting on a change, and the panel with it. It is kept
+    // for the run it was opened on, so the next run starts collapsed.
+    const [batchExpansion, setBatchExpansion] = useState<{ runId: string; expanded: boolean } | null>(null);
+
     if (!card || (isSidebarVisible && !forceVisible)) return null;
+
+    // The panel draws nothing without a batch in flight, and the wrapper is
+    // hidden with it (see the stylesheet), so a run without a batch does not
+    // pay for the slot.
+    const batchExpanded = batchExpansion?.runId === card.runId && batchExpansion.expanded;
+    const batchProgress = showsBatchProgress(card) ? (
+        <div className="beaver-run-status-popup__batch-progress" data-run-status-popup-interactive>
+            <BatchProgressPanel
+                expanded={batchExpanded}
+                onExpandedChange={(expanded) => setBatchExpansion({ runId: card.runId, expanded })}
+            />
+        </div>
+    ) : null;
 
     // Layers behind the front card stand for the other threads still
     // running. The count is capped by the model; each layer is a sliver.
@@ -408,7 +470,7 @@ const RunStatusPopup: React.FC = () => {
                 />
             ))}
             <AnimatedCard card={card}>
-                <CardView card={card} />
+                <CardView card={card} batchProgress={batchProgress} />
             </AnimatedCard>
         </div>
     );

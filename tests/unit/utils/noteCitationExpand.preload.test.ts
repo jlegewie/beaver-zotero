@@ -6,9 +6,10 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getAttachmentFileStatus: vi.fn().mockResolvedValue(undefined),
+    checkLibraryExcluded: vi.fn(() => null),
 }));
 
-import { getAttachmentFileStatus } from '../../../src/services/agentDataProvider/utils';
+import { checkLibraryExcluded, getAttachmentFileStatus } from '../../../src/services/agentDataProvider/utils';
 import { preloadNotePageLabels } from '../../../src/utils/noteCitationExpand';
 
 const mockGetAttachmentFileStatus = vi.mocked(getAttachmentFileStatus);
@@ -64,11 +65,58 @@ describe('preloadNotePageLabels', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         (globalThis as any).Zotero.Beaver = undefined;
+        // Left unresolvable so item ids keep their legacy numeric form; the
+        // link-citation tests opt in through `makeLinkCitation`.
+        delete (globalThis as any).Zotero.Libraries.userLibraryID;
         (globalThis as any).Zotero.Items = {
             getByLibraryAndKey: vi.fn(),
             getAsync: vi.fn(),
             loadDataTypes: vi.fn().mockResolvedValue(undefined),
         };
+    });
+
+    /**
+     * A saved standalone-attachment citation. Its library comes from the
+     * `zotero://` scope, so the user library has to be resolvable.
+     */
+    function makeLinkCitation(key: string, suffix = ', p. 3'): string {
+        (globalThis as any).Zotero.Libraries.userLibraryID = 1;
+        return `<p>Source (<a href="zotero://open/library/items/${key}?page=5"`
+            + ` rel="noopener noreferrer nofollow">Report.pdf</a>${suffix})</p>`;
+    }
+
+    it('seeds labels from a standalone attachment link, which carries no data-citation', async () => {
+        const attachment = makeAttachment(42, 'ABCD1234');
+        const cache = { getMetadata: vi.fn().mockResolvedValue({ pageLabels: { 4: '3' } }) };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => attachment);
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+
+        const labels = await preloadNotePageLabels(makeLinkCitation('ABCD1234'), 1);
+
+        expect(labels).toEqual({ 'u-ABCD1234': { 4: '3' } });
+    });
+
+    it.each([
+        ['a link with no locator', ''],
+        ['a locator that is not a page', ', section 2'],
+    ])('skips %s', async (_label, suffix) => {
+        const cache = { getMetadata: vi.fn() };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => makeAttachment(42, 'ABCD1234'));
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+
+        expect(await preloadNotePageLabels(makeLinkCitation('ABCD1234', suffix), 1)).toEqual({});
+        expect(cache.getMetadata).not.toHaveBeenCalled();
+    });
+
+    it('does not read an excluded library\'s cached extraction', async () => {
+        vi.mocked(checkLibraryExcluded).mockReturnValue({ message: 'Library excluded' } as any);
+        const cache = { getMetadata: vi.fn() };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => makeAttachment(42, 'ABCD1234'));
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+
+        expect(await preloadNotePageLabels(makeLinkCitation('ABCD1234'), 1)).toEqual({});
+        expect(cache.getMetadata).not.toHaveBeenCalled();
+        vi.mocked(checkLibraryExcluded).mockReturnValue(null);
     });
 
     it('returns cached labels without extracting on a cache hit', async () => {

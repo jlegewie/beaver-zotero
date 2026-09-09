@@ -30,9 +30,7 @@ function formatBytes(bytes: number): string {
     return `${unit === 0 ? value : value.toFixed(1)} ${units[unit]}`;
 }
 
-export default function BackgroundProcessingSection(props: {
-    placement?: 'search' | 'advanced';
-}): React.ReactElement | null {
+export default function BackgroundProcessingSection(): React.ReactElement | null {
     const hasOcrAccess = useAtomValue(hasOcrAccessAtom);
     const hasSearchAccess = useAtomValue(hasSearchIndexAccessAtom);
     const localLibraries = useAtomValue(localZoteroLibrariesAtom);
@@ -57,7 +55,6 @@ export default function BackgroundProcessingSection(props: {
     );
     const [showFailures, setShowFailures] = useState(false);
     const entitled = hasOcrAccess || hasSearchAccess;
-    const placement = props.placement ?? 'search';
 
     useEffect(() => {
         const observers: symbol[] = [];
@@ -115,10 +112,6 @@ export default function BackgroundProcessingSection(props: {
         await refresh();
     };
 
-    if ((placement === 'search' && !entitled) || (placement === 'advanced' && entitled)) {
-        return null;
-    }
-
     return (
         <>
             <SectionLabel>Background File Processing</SectionLabel>
@@ -127,7 +120,7 @@ export default function BackgroundProcessingSection(props: {
                     title="Process library files in the background"
                     description={entitled
                         ? 'Extracts readable attachments and keeps entitled OCR and cloud search coverage current.'
-                        : 'Advanced: warms Beaver’s local extraction cache. OCR and cloud indexing require an eligible plan.'}
+                        : 'Reads your attachments once so Beaver can answer without opening them again. OCR and cloud indexing require an eligible plan.'}
                     onClick={() => updateEnabled(!enabled)}
                     control={<input
                         type="checkbox"
@@ -161,15 +154,21 @@ export default function BackgroundProcessingSection(props: {
                     description={
                         <div className="display-flex flex-col gap-05">
                             <span>
-                                {status.ledger.extracted.toLocaleString()} extracted · {' '}
-                                {status.ledger.ocrDone.toLocaleString()} OCR complete · {' '}
-                                {status.ledger.upserted.toLocaleString()} indexed
+                                {status.ledger.extracted.toLocaleString()} extracted
+                                {hasOcrAccess && ` · ${status.ledger.ocrDone.toLocaleString()} OCR complete`}
+                                {hasSearchAccess && ` · ${status.ledger.upserted.toLocaleString()} indexed`}
                             </span>
                             <span>
                                 {status.queue.pending.toLocaleString()} queued · {' '}
                                 {status.ledger.skipped.toLocaleString()} skipped · {' '}
                                 {(status.ledger.failed + status.queue.dead).toLocaleString()} failed
                             </span>
+                            {!hasOcrAccess && status.ledger.ocrNeeded > 0 && (
+                                <span>
+                                    {status.ledger.ocrNeeded.toLocaleString()} scanned file(s) need OCR
+                                    to be readable. OCR requires an eligible plan.
+                                </span>
+                            )}
                             {status.ledger.oldestPendingAt && (
                                 <span>Oldest pending: {new Date(`${status.ledger.oldestPendingAt}Z`).toLocaleString()}</span>
                             )}
