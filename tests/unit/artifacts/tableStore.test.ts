@@ -1218,6 +1218,27 @@ describe('retriable creation', () => {
         expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
     });
 
+    it('keeps the title slug in operation URLs and describes replay from a single read', async () => {
+        const created = await createTable({ ...options, title: 'Readable Table Name' });
+        const imported = vi.mocked(Zotero.Attachments.importFromSnapshotContent).mock.calls[0][0];
+        expect(imported.url).toMatch(/^beaver:\/\/table\/operation-[a-f0-9]{64}\/readable-table-name$/);
+        let documentReads = 0;
+        (globalThis as any).IOUtils = { ...realIOUtils, readUTF8: async (path: string) => {
+            if (path === htmlPath) documentReads++;
+            return realIOUtils.readUTF8(path);
+        } };
+        vi.mocked(Zotero.File.getContentsAsync).mockClear();
+        const replay = await createTable({ ...options, title: 'Readable Table Name' });
+        expect(documentReads).toBe(1);
+        expect(Zotero.File.getContentsAsync).not.toHaveBeenCalled();
+        expect(replay).toMatchObject({
+            filename: created.filename, title: created.title, cssRuleCount: created.cssRuleCount,
+            byteLength: created.byteLength, selectUri: created.selectUri, openUri: created.openUri,
+        });
+        await expect(createTable({ ...options, title: 'Changed title' })).rejects.toMatchObject({ code: 'operation_mismatch' });
+        expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
+    });
+
     it.each(['lastTableShadow', 'recordTableShadow'] as const)(
         'acknowledges creation replay when %s rejects', async (helper) => {
             const created = await createTable(options);

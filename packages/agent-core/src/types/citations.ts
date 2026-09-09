@@ -227,8 +227,6 @@ export const isExternalFileCitation = (citation: Citation): boolean => {
 export interface CitationKeyParams {
     requested_ref?: CitationRef;
     resolved_ref?: CitationRef;
-    /** Owning bibliographic item, when known; not part of citation identity. */
-    parent_ref?: ZoteroCitationRef;
     raw_tag?: string;
 }
 

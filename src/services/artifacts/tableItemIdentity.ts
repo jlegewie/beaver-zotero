@@ -223,24 +223,35 @@ export type ReadTableItemResult =
  * user opens is theirs to look at, and exclusion governs what leaves the
  * machine, not what the user can see.
  */
-export async function readTableItemSpec(
+export async function readTableItemSpec(item: Zotero.Item): Promise<ReadTableItemResult> {
+    return (await readTableItemDocument(item)).parsed;
+}
+
+/** Read once so callers can parse bookkeeping from the same document as its spec. */
+export async function readTableItemDocument(
     item: Zotero.Item
-): Promise<ReadTableItemResult> {
+): Promise<{ html: string | null; parsed: ReadTableItemResult }> {
     await loadTableItemFields([item]);
     if (!isTableItem(item)) {
         return {
-            ok: false,
-            code: 'not_a_table',
-            message: `Item ${item.key} is not a Beaver table.`,
+            html: null,
+            parsed: {
+                ok: false,
+                code: 'not_a_table',
+                message: `Item ${item.key} is not a Beaver table.`,
+            },
         };
     }
 
     const path = await item.getFilePathAsync();
     if (!path) {
         return {
-            ok: false,
-            code: 'no_file',
-            message: `Table ${item.key} has no file on disk.`,
+            html: null,
+            parsed: {
+                ok: false,
+                code: 'no_file',
+                message: `Table ${item.key} has no file on disk.`,
+            },
         };
     }
 
@@ -249,12 +260,19 @@ export async function readTableItemSpec(
         html = (await Zotero.File.getContentsAsync(path)) as string;
     } catch (error) {
         return {
-            ok: false,
-            code: 'no_file',
-            message: `Table ${item.key} could not be read: ${String(error)}`,
+            html: null,
+            parsed: {
+                ok: false,
+                code: 'no_file',
+                message: `Table ${item.key} could not be read: ${String(error)}`,
+            },
         };
     }
 
+    return { html, parsed: parseTableItemSpec(item, html) };
+}
+
+function parseTableItemSpec(item: Zotero.Item, html: string): ReadTableItemResult {
     const parsed = parseTableDocument(html);
     if (parsed.ok) return { ok: true, spec: parsed.spec };
     if (parsed.reason === 'unsupported_version') {

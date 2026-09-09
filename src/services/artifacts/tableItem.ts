@@ -25,7 +25,7 @@
  * disagree about where they live.
  */
 
-import { sha256Hex } from '../../utils/hash';
+import { tableSpecHash } from './recoveryShadow';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     TABLE_SPEC_VERSION,
@@ -35,7 +35,7 @@ import { getZoteroOpenURI, getZoteroSelectURI } from '../../utils/zoteroUtils';
 import { safeAttachmentFilename } from '../../utils/attachmentFiles';
 import { getPref } from '../../utils/prefs';
 import { checkLibraryExcluded } from '../agentDataProvider/utils';
-import { CSS_RULE_BUDGET } from '../../utils/html';
+import { CSS_RULE_BUDGET, countTopLevelCssRules } from '../../utils/html';
 import {
     buildTableDocument,
     type TableHtmlOptions,
@@ -67,6 +67,7 @@ export {
     readTable,
     readTableHistory,
     readTableItemSpec,
+    readTableItemDocument,
     resolveTableItem,
     tableHistoryPath,
     tableReadError,
@@ -357,7 +358,7 @@ export async function createTableItem(
                           operation_id: creation.operation_id,
                           request_sha256: creation.request_sha256,
                           version: 1,
-                          sha256: await sha256Hex(JSON.stringify(stored)),
+                          sha256: await tableSpecHash(stored),
                       },
                   ],
               }
@@ -383,17 +384,28 @@ export async function createTableItem(
     // sits unsynced until some unrelated change triggers the next sync.
     await item.saveTx();
 
+    return describeTableItem(item, stored, second.html, second.cssRuleCount);
+}
+
+/** Describe the stored attachment consistently for imports and replays. */
+export function describeTableItem(
+    item: Zotero.Item,
+    spec: TableSpec,
+    html: string,
+    cssRuleCount = Array.from(html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi))
+        .reduce((total, match) => total + countTopLevelCssRules(match[1]), 0)
+): CreatedTableItem {
     return {
         item,
         itemID: item.id,
         key: item.key,
         libraryID: item.libraryID,
-        title,
+        title: spec.title ?? 'Table',
         filename: safeAttachmentFilename(item),
         storageDirectory: tableStorageDirectory(item),
-        byteLength: new TextEncoder().encode(second.html).length,
-        cssRuleCount: second.cssRuleCount,
-        spec: stored,
+        byteLength: new TextEncoder().encode(html).length,
+        cssRuleCount,
+        spec,
         selectUri: getZoteroSelectURI(item.libraryID, item.key),
         openUri: getZoteroOpenURI(item.libraryID, item.key),
     };

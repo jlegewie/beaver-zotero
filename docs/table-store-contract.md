@@ -66,6 +66,9 @@ It never means the caller should repeat the mutation under a new operation ID.
 `createTable({ spec, operation_id, ...options })` serializes imports by operation ID
 in the selected library. The attachment URL contains a SHA-256-derived operation
 identity, allowing a later process to locate the same item without a registry row.
+Its final path segment is the title slug, so Zotero keeps a readable filename.
+Lookup uses the operation identity independently of the slug and also recognizes
+the earlier URLs without a slug; a changed title still fails request validation.
 The import document carries the request fingerprint before Zotero assigns the key;
 the stamped document marks creation complete and records the acknowledgement.
 

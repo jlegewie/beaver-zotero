@@ -67,7 +67,6 @@ import {
     type TableMutation,
 } from '@beaver/agent-core/layouts/tableMutations';
 import { sha256Hex } from '../../utils/hash';
-import { getZoteroOpenURI, getZoteroSelectURI } from '../../utils/zoteroUris';
 import { checkLibraryExcluded } from '../agentDataProvider/utils';
 import {
     detectTableSyncConflict,
@@ -92,7 +91,10 @@ import {
     resolveTableLibrary,
     loadTableItemFields,
     isTableItem,
-    tableStorageDirectory,
+    describeTableItem,
+    readTableItemDocument,
+    buildTableUrl,
+    TABLE_URL_PREFIX,
     normalizeTableHistory,
     queueTableFullText,
     readTableHistory,
@@ -506,33 +508,21 @@ interface CurrentState {
  * What the table looks like right now, from both sources of truth, unreconciled
  * — {@link reconcileLog} is what makes them agree.
  */
-async function readCurrentState(item: Zotero.Item): Promise<CurrentState> {
-    await loadTableItemFields([item]);
-    if (!isTableItem(item))
-        throw tableReadError('not_a_table', `Item ${item.key} is not a Beaver table.`);
-    const path = await item.getFilePathAsync();
-    if (!path) throw tableReadError('no_file', `Table ${item.key} has no file on disk.`);
-    let html: string;
-    try {
-        html = (await Zotero.File.getContentsAsync(path)) as string;
-    } catch (error) {
-        throw tableReadError('no_file', `Table ${item.key} could not be read: ${String(error)}`);
-    }
+async function readCurrentState(
+    item: Zotero.Item,
+    document?: Awaited<ReturnType<typeof readTableItemDocument>>
+): Promise<CurrentState> {
+    const { html, parsed: read } = document ?? await readTableItemDocument(item);
     // Sync can replace the attachment independently of our write lock. The
     // document and its receipts must always describe the same file revision.
-    const read = parseTableDocument(html);
-    // `unsupported_version` is fatal on purpose: writing back today's format
-    // over a file a newer build wrote would silently drop whatever that build
-    // understood and we do not. A missing file has nothing to reconcile.
-    if (!read.ok && read.reason === 'unsupported_version') {
-        throw tableReadError(read.reason, `Table ${item.key} was written by a newer format (spec_version ${read.specVersion}).`);
+    if (!read.ok && (read.code === 'unsupported_version' || read.code === 'no_file' || read.code === 'not_a_table')) {
+        throw tableReadError(read.code, read.message);
     }
-
+    if (html === null) throw tableReadError('no_file', `Table ${item.key} has no readable document.`);
     const spec = read.ok ? read.spec : null;
     if (!read.ok) {
-        // A readable file with an unreadable spec is broken, not fatal: a write
-        // re-renders the document from the caller's spec and repairs it.
-        logger(`tableStore: ${read.reason} reading ${item.key}: ${read.detail ?? 'No readable spec'}`, 2);
+        // A readable file with an unreadable spec can be repaired by a write.
+        logger(`tableStore: ${read.code} reading ${item.key}: ${read.message}`, 2);
     }
 
     const history =
@@ -904,8 +894,9 @@ async function auditSidecar(
  */
 export async function createTable(options: CreateTableOptions): Promise<CreatedTable> {
     const { operation_id, ...ordinary } = options;
+    const spec = pruneTableCitations(options.spec);
     if (operation_id === undefined)
-        return createTableOnce({ ...ordinary, spec: pruneTableCitations(ordinary.spec) });
+        return createTableOnce({ ...ordinary, spec });
     if (typeof operation_id !== 'string' || !operation_id.trim())
         throw new TableItemError('operation_id must not be empty.', 'invalid_request');
     const resolved = resolveTableLibrary(options.libraryID);
@@ -918,15 +909,16 @@ export async function createTable(options: CreateTableOptions): Promise<CreatedT
         creationOperation: undefined,
         spec: unstampedSpec(options.spec),
     });
-    const url = `beaver://table/operation-${await sha256Hex(operation_id)}`;
+    const identityUrl = `${TABLE_URL_PREFIX}operation-${await sha256Hex(operation_id)}`;
+    const url = `${identityUrl}/${buildTableUrl(options.title || options.spec.title || 'Table').slice(TABLE_URL_PREFIX.length)}`;
     return withTableLock({ libraryID, key: `create:${operation_id}` }, async () => {
         requireWritable({ libraryID, key: '' });
         const ids: number[] = [];
         await Zotero.DB.queryAsync(
             `SELECT i.itemID FROM items i JOIN itemData d ON d.itemID=i.itemID
              JOIN itemDataValues v ON v.valueID=d.valueID
-             WHERE i.libraryID=? AND d.fieldID=? AND v.value=?`,
-            [libraryID, Zotero.ItemFields.getID('url'), url],
+             WHERE i.libraryID=? AND d.fieldID=? AND (v.value=? OR v.value LIKE ?)`,
+            [libraryID, Zotero.ItemFields.getID('url'), identityUrl, `${identityUrl}/%`],
             {
                 onRow: (row: any) => {
                     ids.push(row.getResultByIndex(0));
@@ -940,86 +932,12 @@ export async function createTable(options: CreateTableOptions): Promise<CreatedT
                     'operation_pending'
                 );
             const item = await Zotero.Items.getAsync(ids[0]);
-            await loadTableItemFields([item]);
-            const path = await item.getFilePathAsync();
-            if (!path || !(await IOUtils.exists(path)))
-                throw new TableItemError(
-                    'The earlier import has no readable file yet.',
-                    'operation_pending'
-                );
-            const html = await IOUtils.readUTF8(path);
-            const state = parseTableDocumentState(html);
-            if (state.creation?.request_sha256 !== requestHash)
-                throw new TableItemError(
-                    'Operation identity was reused with a different request.',
-                    'operation_mismatch'
-                );
-            if (!state.creation.complete || item.deleted)
-                throw new TableItemError(
-                    'The earlier import is incomplete or has been discarded.',
-                    'operation_pending'
-                );
-            const ref = { libraryID, key: item.key };
-            return withTableLock(ref, async () => {
-                requireWritable(ref);
-                if (item.deleted)
-                    throw new TableItemError(
-                        'The earlier creation has been discarded.',
-                        'operation_pending'
-                    );
-                // The stamped document proves which import we are finishing, even
-                // when its tags never reached the item database before interruption.
-                const read = parseTableDocument(await IOUtils.readUTF8(path));
-                if (!read.ok || read.spec.key !== item.key)
-                    throw new TableItemError('The earlier creation has no matching readable spec.', 'invalid_spec');
-                item.addTag(TABLE_TAG, 1);
-                item.addTag(TABLE_EMOJI_TAG, 1);
-                const opened = await readCurrentState(item);
-                const history = await reconcileLog(item, opened);
-                const audited = await auditSidecar(item, read.spec, opened.htmlVersion, history.versions);
-                if (history.repairs.length || audited.repairs.length)
-                    await commitHistory(item, audited.versions);
-                const entry = audited.versions[audited.versions.length - 1];
-                const operation = state.operations?.find((r) => r.operation_id === operation_id);
-                await queueTableFullText(item, true);
-                markForUpload(item);
-                await item.saveTx();
-                // Do not overwrite recovery evidence for an intervening edit or
-                // sync conflict merely because the original create was retried.
-                const sha256 = await tableSpecHash(read.spec);
-                try {
-                    if (read.spec.version === 1 && operation?.sha256 === sha256 && !(await lastTableShadow(ref))) {
-                        await recordTableShadow(ref, 1, JSON.stringify(read.spec), sha256);
-                    }
-                } catch (error) {
-                    logger(`tableStore: could not repair the creation recovery shadow for ${ref.key}: ${String(error)}`, 2);
-                }
-                emitTableUpdated(ref, entry.version, entry);
-                return {
-                    item,
-                    itemID: item.id,
-                    key: item.key,
-                    libraryID,
-                    title: read.spec.title ?? 'Table',
-                    filename: PathUtils.filename(path),
-                    storageDirectory: tableStorageDirectory(item),
-                    byteLength: new TextEncoder().encode(html).length,
-                    cssRuleCount: buildTableDocument(read.spec).cssRuleCount,
-                    spec: read.spec,
-                    selectUri: getZoteroSelectURI(libraryID, item.key),
-                    openUri: getZoteroOpenURI(libraryID, item.key),
-                    version: read.spec.version ?? 1,
-                    entry,
-                    replayed: true,
-                    operation,
-                    sha256,
-                };
-            });
+            return replayTableCreation(item, operation_id, requestHash);
         }
         const created = await createTableOnce({
             ...ordinary,
             libraryID,
-            spec: pruneTableCitations(options.spec),
+            spec,
             creationOperation: {
                 operation_id,
                 request_sha256: requestHash,
@@ -1042,6 +960,61 @@ export async function createTable(options: CreateTableOptions): Promise<CreatedT
                 version: created.version,
                 sha256: created.entry.sha256,
             },
+        };
+    });
+}
+
+
+async function replayTableCreation(item: Zotero.Item, operation_id: string, requestHash: string): Promise<CreatedTable> {
+    const ref = { libraryID: item.libraryID, key: item.key };
+    return withTableLock(ref, async () => {
+        requireWritable(ref);
+        await loadTableItemFields([item]);
+        const path = await item.getFilePathAsync();
+        if (!path || !(await IOUtils.exists(path)))
+            throw new TableItemError('The earlier import has no readable file yet.', 'operation_pending');
+        const html = await IOUtils.readUTF8(path);
+        const state = parseTableDocumentState(html);
+        if (state.creation?.request_sha256 !== requestHash)
+            throw new TableItemError('Operation identity was reused with a different request.', 'operation_mismatch');
+        if (!state.creation.complete || item.deleted)
+            throw new TableItemError('The earlier import is incomplete or has been discarded.', 'operation_pending');
+        // Validate the stamped import before repairing tags that may never have
+        // reached the item database. Use this same snapshot for all bookkeeping.
+        const read = parseTableDocument(html);
+        if (!read.ok || read.spec.key !== item.key)
+            throw new TableItemError('The earlier creation has no matching readable spec.', 'invalid_spec');
+        const spec = read.spec;
+        item.addTag(TABLE_TAG, 1);
+        item.addTag(TABLE_EMOJI_TAG, 1);
+        const opened = await readCurrentState(item, { html, parsed: read });
+        const history = await reconcileLog(item, opened);
+        const audited = await auditSidecar(item, spec, opened.htmlVersion, history.versions);
+        if (history.repairs.length || audited.repairs.length)
+            await commitHistory(item, audited.versions);
+        const entry = audited.versions[audited.versions.length - 1];
+        const operation = opened.storeState.operations?.find((r) => r.operation_id === operation_id);
+        await queueTableFullText(item, true);
+        markForUpload(item);
+        await item.saveTx();
+        // Do not overwrite recovery evidence for an intervening edit or
+        // sync conflict merely because the original create was retried.
+        const sha256 = await tableSpecHash(spec);
+        try {
+            if (spec.version === 1 && operation?.sha256 === sha256 && !(await lastTableShadow(ref))) {
+                await recordTableShadow(ref, 1, JSON.stringify(spec), sha256);
+            }
+        } catch (error) {
+            logger(`tableStore: could not repair the creation recovery shadow for ${ref.key}: ${String(error)}`, 2);
+        }
+        emitTableUpdated(ref, entry.version, entry);
+        return {
+            ...describeTableItem(item, spec, html),
+            version: spec.version ?? 1,
+            entry,
+            replayed: true,
+            operation,
+            sha256,
         };
     });
 }

@@ -411,6 +411,8 @@ describe('remote retry and conversation rewind', () => {
         tables.push(table);
         const replayedCreate = await post<any>('/beaver/test/table-create', createRequest);
         expect(replayedCreate).toMatchObject({ ok: true, key: table.key, replayed: true });
+        expect(created.filename).toBe('live-remote-contract.html');
+        expect(replayedCreate.filename).toBe(created.filename);
         expect(replayedCreate.operation).toEqual(created.operation);
         expect(
             await post<any>('/beaver/test/table-create', {
