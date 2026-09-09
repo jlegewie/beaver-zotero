@@ -28,11 +28,13 @@ vi.mock('../../../src/utils/prefs', () => ({
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 afterEach(() => vi.clearAllMocks());
 
-it('waits for recovered files to be reconciled before draining Process now', async () => {
+it.each(['queued', 'unavailable'] as const)('reconciles before draining Process now with %s files', async (state) => {
     const store = createStore();
     store.set(backgroundProcessingStatusAtom, {
         ...store.get(backgroundProcessingStatusAtom),
-        worker: { available: 1, deferred: 0, inFlight: 0, dispatchBlocker: null, drainNow: false, backlogGateOpen: false },
+        ledger: { ...store.get(backgroundProcessingStatusAtom).ledger, total: 1, unreadable: state === 'unavailable' ? 1 : 0 },
+        issues: state === 'unavailable' ? [{ reason: 'file_unavailable', count: 1 }] : [],
+        worker: { available: state === 'queued' ? 1 : 0, deferred: 0, inFlight: 0, dispatchBlocker: null, drainNow: false, backlogGateOpen: false },
     });
     let finishReconcile!: () => void;
     const reconcileNow = vi.fn(() => new Promise<void>((resolve) => { finishReconcile = resolve; }));
