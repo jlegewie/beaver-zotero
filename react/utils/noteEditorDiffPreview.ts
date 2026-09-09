@@ -21,7 +21,7 @@
  *   hard backstop.
  */
 
-import { preloadStandaloneAttachmentTitles } from '../../src/utils/zoteroLinkCitation';
+import { preloadStandaloneAttachmentLinks } from '../../src/utils/zoteroLinkCitation';
 import { preloadExternalFileCitations } from '../../src/utils/externalFileCitation';
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
@@ -61,7 +61,7 @@ import {
 async function getExternalRefContext(content: string): Promise<ExternalRefContext> {
     const [{ files, warnings }] = await Promise.all([
         preloadExternalFileCitations(content),
-        preloadStandaloneAttachmentTitles(content),
+        preloadStandaloneAttachmentLinks(content),
     ]);
     return {
         externalFiles: files,

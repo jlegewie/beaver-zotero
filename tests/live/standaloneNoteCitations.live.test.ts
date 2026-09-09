@@ -3,17 +3,19 @@ import { isZoteroAvailable, skipIfNoZotero } from '../helpers/zoteroAvailability
 import { post } from '../helpers/zoteroHttpClient';
 import { createNote, executeCreateNote, deleteNote, readNote, openNoteEditor, closeNoteEditor } from './helpers/noteTestClient';
 
-// Supply an existing standalone attachment in the isolated test library.
+// Supply an existing standalone *file* attachment in the isolated test library.
 const key = process.env.ZOTERO_TEST_STANDALONE_KEY;
 const libraryID = Number(process.env.ZOTERO_TEST_LIBRARY_ID ?? 1);
 const notes: string[] = [];
 let available = false;
 const tag = (loc = 'page6') => `<citation id="${libraryID}-${key}" loc="${loc}"/>`;
-const href = `zotero://select/library/items/${key}`;
+// A standalone attachment link opens the file. Matched as a prefix because a
+// PDF also carries the cited `?page=`, while other file types do not.
+const href = `zotero://open/library/items/${key}`;
 
 async function assertSavedLink(noteKey: string) {
     const html = (await readNote(libraryID, noteKey)).saved_html;
-    expect(html).toContain(`href="${href}"`);
+    expect(html).toContain(`href="${href}`);
     expect(html).not.toContain('data-citation=');
     expect(html).toContain('p. 6');
     return html.match(/<a\b[^>]*>[^<]*<\/a>/g)?.find(link => link.includes(href));
@@ -64,7 +66,7 @@ describe.skipIf(!key)('standalone attachment note links (live)', () => {
             } });
             expect(edit.success, JSON.stringify(edit)).toBe(true);
             const html = (await readNote(libraryID, noteKey)).saved_html;
-            expect(html).toContain(`href="${href}"`);
+            expect(html).toContain(`href="${href}`);
             expect(html).toContain('p. 7');
         }
     });
@@ -97,7 +99,7 @@ describe.skipIf(!key)('standalone attachment note links (live)', () => {
         expect(applied.success, JSON.stringify(applied)).toBe(true);
         for (const noteKey of notes) {
             const html = (await readNote(libraryID, noteKey)).saved_html;
-            expect(html).toContain(`href="${href}"`);
+            expect(html).toContain(`href="${href}`);
             expect(html).toContain(`, p. ${expectedPage}`);
             expect(html).not.toContain('sentence ');
         }
