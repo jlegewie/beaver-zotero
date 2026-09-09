@@ -192,6 +192,7 @@ import {
     handleTestTableVersionsHttpRequest,
     handleTestTableRevertHttpRequest,
     handleTestTableDeleteHttpRequest,
+    handleTestTableTrimHttpRequest,
     handleTestTableOpenHttpRequest,
     handleTestTableCorruptHttpRequest,
     handleTestTableShadowHttpRequest,
@@ -405,6 +406,7 @@ const ENDPOINT_PATHS = [
     '/beaver/test/table-versions',
     '/beaver/test/table-revert',
     '/beaver/test/table-delete',
+    '/beaver/test/table-trim',
     '/beaver/test/table-open',
     '/beaver/test/table-corrupt',
     '/beaver/test/table-shadow',
@@ -1425,6 +1427,10 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/table-revert'] =
             createEndpoint(handleTestTableRevertHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/table-trim'] = createEndpoint(
+            handleTestTableTrimHttpRequest
+        );
 
         Zotero.Server.Endpoints['/beaver/test/table-delete'] =
             createEndpoint(handleTestTableDeleteHttpRequest);

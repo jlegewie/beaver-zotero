@@ -30,11 +30,13 @@ import {
     readTable,
     revertTable,
     writeTable,
+    trimTable,
     TABLE_VERSION_RETENTION,
     type TableHistory,
     type TableWriteResult,
 } from '../../../src/services/artifacts/tableStore';
 import { tableWriteLocks } from '../../../src/services/artifacts/tablesApi';
+import * as recoveryShadow from '../../../src/services/artifacts/recoveryShadow';
 
 // ---------------------------------------------------------------------------
 // A temp directory standing in for the attachment's storage directory
@@ -794,4 +796,550 @@ describe('addressing', () => {
 
         await expect(readTable(ref)).rejects.toMatchObject({ code: 'not_a_table' });
     });
+});
+
+describe('remote writes', () => {
+    const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
+
+    it('refuses two same-run precomputed writes from the same collapsed base', async () => {
+        await writeTable(ref, demoSpec('base'), meta);
+        const base = await openTable(ref);
+        const results = await Promise.all(
+            ['first', 'second'].map((id) =>
+                writeTable(ref, demoSpec(id), meta, base.version, {
+                    operation_id: id,
+                    expected_sha256: base.sha256,
+                })
+            )
+        );
+        expect(results[0]).toMatchObject({ ok: true, collapsed: true, version: base.version });
+        expect(results[1]).toMatchObject({ ok: false, conflict: true, version: base.version });
+        expect((await openTable(ref)).spec.rows[0].cells.note.value).toMatchObject({
+            text: 'first',
+        });
+    });
+
+    it('replays the original acknowledgement after intervening writes and module state loss', async () => {
+        const base = await openTable(ref);
+        const remote = { operation_id: 'first', expected_sha256: base.sha256 };
+        const first = await writeTable(ref, demoSpec('first'), meta, base.version, remote);
+        await writeTable(ref, demoSpec('user'), { actor: 'user' });
+        tableWriteLocks().clear();
+        const replay = await writeTable(ref, demoSpec('first'), meta, base.version, remote);
+        expect(replay).toMatchObject({ ok: true, replayed: true, version: 3 });
+        if (!first.ok || !replay.ok) throw new Error('write failed');
+        expect(replay.operation).toEqual(first.operation);
+        expect(replay.spec.rows[0].cells.note.value).toMatchObject({ text: 'user' });
+        expect(await listVersions(ref)).toHaveLength(3);
+    });
+
+    it('reads replay receipts and the spec from one snapshot when sync replaces the file', async () => {
+        const base = await openTable(ref);
+        const beforeWrite = await readFile(htmlPath, 'utf8');
+        const remote = { operation_id: 'snapshot-replay', expected_sha256: base.sha256 };
+        const first = expectOk(await writeTable(ref, demoSpec('committed'), meta, base.version, remote));
+        vi.mocked(Zotero.File.getContentsAsync).mockImplementationOnce(async (path: any) => {
+            const snapshot = await readFile(path, 'utf8');
+            // A sync replacement after the read must not replace just the ledger
+            // in the CurrentState assembled from that snapshot.
+            await writeFile(htmlPath, beforeWrite);
+            return snapshot;
+        });
+        const replay = expectOk(await writeTable(ref, demoSpec('committed'), meta, base.version, remote));
+        expect(replay).toMatchObject({ replayed: true, version: first.version, operation: first.operation });
+        expect(replay.spec).toEqual(first.spec);
+        expect(await readFile(htmlPath, 'utf8')).toBe(beforeWrite);
+    });
+
+    it('refuses reuse of an operation identity with different content', async () => {
+        const base = await openTable(ref);
+        const remote = { operation_id: 'first', expected_sha256: base.sha256 };
+        await writeTable(ref, demoSpec('first'), meta, base.version, remote);
+        await expect(
+            writeTable(ref, demoSpec('different'), meta, base.version, remote)
+        ).rejects.toMatchObject({ code: 'operation_mismatch' });
+    });
+
+    it('ignores caller stamps and JSON object key order in retry identity', async () => {
+        const base = await openTable(ref);
+        const remote = { operation_id: 'first', expected_sha256: base.sha256 };
+        await writeTable(ref, demoSpec(), meta, base.version, remote);
+        const spec = demoSpec();
+        const reordered = {
+            rows: spec.rows,
+            columns: spec.columns,
+            title: spec.title,
+            id: spec.id,
+            key: 'OTHER',
+            version: 999,
+        };
+        expect(await writeTable(ref, reordered, meta, base.version, remote)).toMatchObject({
+            ok: true,
+            replayed: true,
+        });
+    });
+
+    it.each([false, true])('reports retention pruning during replay even if a later save fails: %s', async (failSave) => {
+        await createTable({ spec: demoSpec(), actor: 'user' });
+        for (let version = 2; version <= TABLE_VERSION_RETENTION; version++) {
+            await writeTable(ref, demoSpec(String(version)), { actor: 'user' });
+        }
+        const base = await openTable(ref);
+        const remote = { operation_id: 'retention-replay', expected_sha256: base.sha256 };
+        (globalThis as any).IOUtils = {
+            ...realIOUtils,
+            move: async (from: string, to: string) => {
+                if (to.endsWith('history.json')) throw new Error('disk full');
+                await realIOUtils.move(from, to);
+            },
+        };
+        expect(await writeTable(ref, demoSpec('new'), meta, base.version, remote))
+            .toMatchObject({ ok: true, saved: false, pruned: [] });
+        (globalThis as any).IOUtils = realIOUtils;
+        if (failSave) item.saveTx.mockRejectedValueOnce(new Error('item save failed'));
+        expect(await writeTable(ref, demoSpec('new'), meta, base.version, remote))
+            .toMatchObject({ ok: true, replayed: true, saved: !failSave, pruned: [1] });
+        expect(existsSync(sidecar('v1.json'))).toBe(false);
+        expect((await listVersions(ref)).map((entry) => entry.version))
+            .toEqual(Array.from({ length: TABLE_VERSION_RETENTION }, (_, i) => i + 2));
+        expect(await writeTable(ref, demoSpec('new'), meta, base.version, remote))
+            .toMatchObject({ ok: true, replayed: true, saved: true, pruned: [] });
+    });
+
+    it('acknowledges a retry even when the history write failed after commit', async () => {
+        const base = await openTable(ref);
+        const remote = { operation_id: 'first', expected_sha256: base.sha256 };
+        (globalThis as any).IOUtils = {
+            ...realIOUtils,
+            move: async (from: string, to: string) => {
+                if (to.endsWith('history.json')) throw new Error('disk full');
+                await realIOUtils.move(from, to);
+            },
+        };
+        expect(await writeTable(ref, demoSpec('first'), meta, base.version, remote)).toMatchObject({
+            ok: true,
+            saved: false,
+        });
+        (globalThis as any).IOUtils = realIOUtils;
+        expect(await writeTable(ref, demoSpec('first'), meta, base.version, remote)).toMatchObject({
+            ok: true,
+            replayed: true,
+        });
+    });
+});
+
+describe('conversation rewind', () => {
+    const owner = { actor: 'agent' as const, run_id: 'discard', thread_id: 'thread' };
+    const request = { thread_id: 'thread', run_ids: ['discard'] };
+
+    it('trashes a discarded creation despite its collapse seal, and retries harmlessly', async () => {
+        await createTable({ spec: demoSpec(), ...owner });
+        await writeTable(ref, demoSpec('filled'), owner);
+        expect(await trimTable(ref, request)).toMatchObject({
+            outcome: 'trashed',
+            trimmed_versions: [1, 2],
+            trimmed_to: null,
+        });
+        expect(item.deleted).toBe(true);
+        expect(await trimTable(ref, request)).toMatchObject({ outcome: 'unchanged' });
+    });
+
+    it.each([
+        { actor: 'user' as const, run_id: 'discard', thread_id: 'thread' },
+        { actor: 'system' as const, run_id: 'discard', thread_id: 'thread' },
+        { actor: 'agent' as const, run_id: 'discard', thread_id: 'other' },
+        { actor: 'agent' as const, run_id: 'keep', thread_id: 'thread' },
+    ])('stops at a protected boundary: %j', async (boundary) => {
+        await createTable({ spec: demoSpec(), ...owner });
+        await writeTable(ref, demoSpec('boundary'), boundary);
+        await writeTable(ref, demoSpec('discarded'), owner);
+        expect(await trimTable(ref, request)).toMatchObject({
+            outcome: 'trimmed',
+            trimmed_to: 2,
+            trimmed_versions: [3],
+        });
+        expect((await openTable(ref)).spec.rows[0].cells.note.value).toMatchObject({
+            text: 'boundary',
+        });
+        expect(existsSync(sidecar('v3.json'))).toBe(false);
+        expect(item.deleted).toBe(false);
+        expect(await trimTable(ref, request)).toMatchObject({ outcome: 'unchanged' });
+    });
+
+    it('preserves a reconstructed history boundary', async () => {
+        await openTable(ref);
+        await writeTable(ref, demoSpec('discarded'), owner);
+        expect(await trimTable(ref, request)).toMatchObject({ outcome: 'trimmed', trimmed_to: 1 });
+        expect(item.deleted).toBe(false);
+    });
+
+    it.each(['user', 'system'] as const)('recovers a missing %s boundary before trimming', async (actor) => {
+        await createTable({ spec: demoSpec(), ...owner });
+        await writeTable(ref, demoSpec('protected'), { actor });
+        await writeTable(ref, demoSpec('discarded'), owner);
+        const history = await readHistory();
+        history.versions = history.versions.filter((entry) => entry.version !== 2);
+        await writeFile(sidecar('history.json'), JSON.stringify(history));
+
+        expect(await trimTable(ref, request)).toMatchObject({
+            outcome: 'trimmed', trimmed_to: 2, trimmed_versions: [3], saved: true,
+        });
+        expect(item.deleted).toBe(false);
+        expect((await openTable(ref)).spec.rows[0].cells.note.value).toMatchObject({ text: 'protected' });
+        expect((await listVersions(ref)).find((entry) => entry.version === 2))
+            .toMatchObject({ actor: 'system', sealed: true });
+        expect(existsSync(sidecar('v2.json'))).toBe(true);
+        expect(existsSync(sidecar('v3.json'))).toBe(false);
+    });
+
+    it.each([2, 3])('persists history repaired by an unchanged trim when v%i is missing from the log', async (missingVersion) => {
+        await createTable({ spec: demoSpec(), actor: 'user' });
+        await writeTable(ref, demoSpec('Two'), { actor: 'user' });
+        await writeTable(ref, demoSpec('Three'), { actor: 'user' });
+        const document = await readFile(htmlPath, 'utf8');
+        const history = await readHistory();
+        history.versions = history.versions.filter((entry) => entry.version !== missingVersion);
+        history.tip = history.versions[history.versions.length - 1].version;
+        await writeFile(sidecar('history.json'), JSON.stringify(history));
+
+        expect(await trimTable(ref, request)).toMatchObject({ outcome: 'unchanged', saved: true, trimmed_to: 3 });
+        const repaired = await listVersions(ref);
+        expect(repaired.map((entry) => entry.version)).toEqual([1, 2, 3]);
+        expect(repaired.find((entry) => entry.version === missingVersion))
+            .toMatchObject({ actor: 'system', sealed: true });
+        expect((await readHistory()).tip).toBe(3);
+        expect(await readFile(htmlPath, 'utf8')).toBe(document);
+        expect(await trimTable(ref, request)).toMatchObject({ outcome: 'unchanged', saved: true });
+        expect(await listVersions(ref)).toEqual(repaired);
+        expect((await openTable(ref)).recovered).toEqual([]);
+    });
+
+    it('does not report an unchanged trim as saved when the repaired history cannot be committed', async () => {
+        await createTable({ spec: demoSpec(), actor: 'user' });
+        await writeTable(ref, demoSpec('Two'), { actor: 'user' });
+        const history = await readHistory();
+        history.versions.pop();
+        history.tip = 1;
+        await writeFile(sidecar('history.json'), JSON.stringify(history));
+        const document = await readFile(htmlPath, 'utf8');
+        (globalThis as any).IOUtils = {
+            ...realIOUtils,
+            move: async (from: string, to: string) => {
+                if (to.endsWith('history.json')) throw new Error('disk full');
+                await realIOUtils.move(from, to);
+            },
+        };
+        await expect(trimTable(ref, request)).rejects.toThrow('disk full');
+        expect(await readFile(htmlPath, 'utf8')).toBe(document);
+        expect((await listVersions(ref)).map((entry) => entry.version)).toEqual([1]);
+        (globalThis as any).IOUtils = realIOUtils;
+        expect(await trimTable(ref, request)).toMatchObject({ outcome: 'unchanged', saved: true });
+        expect((await listVersions(ref)).map((entry) => entry.version)).toEqual([1, 2]);
+    });
+
+    it('keeps the oldest retained state when the creation is no longer available', async () => {
+        await createTable({ spec: demoSpec(), ...owner });
+        const runs: string[] = ['discard'];
+        for (let i = 0; i < TABLE_VERSION_RETENTION + 2; i++) {
+            runs.push(`run-${i}`);
+            await writeTable(ref, demoSpec(String(i)), { ...owner, run_id: `run-${i}` });
+        }
+        const oldest = (await listVersions(ref))[0].version;
+        expect(await trimTable(ref, { thread_id: 'thread', run_ids: runs })).toMatchObject({
+            outcome: 'trimmed',
+            trimmed_to: oldest,
+            retention_exhausted: true,
+        });
+        expect(item.deleted).toBe(false);
+        expect(await trimTable(ref, { thread_id: 'thread', run_ids: runs })).toMatchObject({
+            outcome: 'unchanged',
+            trimmed_to: oldest,
+            retention_exhausted: true,
+        });
+    });
+
+    it('refuses corrupt surviving history without modifying the document', async () => {
+        await createTable({ spec: demoSpec(), actor: 'user' });
+        await writeTable(ref, demoSpec('discarded'), owner);
+        const before = await readFile(htmlPath, 'utf8');
+        await writeFile(sidecar('v1.json'), JSON.stringify(demoSpec('corrupt')));
+        await expect(trimTable(ref, request)).rejects.toMatchObject({ code: 'version_corrupt' });
+        expect(await readFile(htmlPath, 'utf8')).toBe(before);
+    });
+
+    it.each(['history', 'cleanup', 'index', 'save'])(
+        'retries item bookkeeping after a post-commit %s failure', async (stage) => {
+            await createTable({ spec: demoSpec(), actor: 'user' });
+            await writeTable(ref, demoSpec('discarded'), owner);
+            (globalThis as any).IOUtils = {
+                ...realIOUtils,
+                move: async (from: string, to: string) => {
+                    if (stage === 'history' && to.endsWith('history.json')) throw new Error('disk full');
+                    await realIOUtils.move(from, to);
+                },
+                remove: async (path: string, options: any) => {
+                    if (stage === 'cleanup' && path.endsWith('v2.json')) throw new Error('cleanup failed');
+                    await realIOUtils.remove(path, options);
+                },
+            };
+            if (stage === 'index') vi.mocked(Zotero.FullText.queueItem).mockRejectedValueOnce(new Error('index failed'));
+            if (stage === 'save') item.saveTx.mockRejectedValueOnce(new Error('save failed'));
+            expect(await trimTable(ref, request)).toMatchObject({ outcome: 'trimmed', saved: false });
+            const document = await readFile(htmlPath, 'utf8');
+
+            // Simulate reloading the item from its last successfully saved state.
+            (globalThis as any).IOUtils = realIOUtils;
+            item.attachmentSyncState = 1;
+            item.saveTx.mockClear();
+            vi.mocked(Zotero.FullText.queueItem).mockClear();
+            expect(await trimTable(ref, request)).toMatchObject({ outcome: 'unchanged', saved: true });
+            expect(Zotero.FullText.queueItem).toHaveBeenCalledWith(item);
+            expect(item.saveTx).toHaveBeenCalledOnce();
+            expect(item.attachmentSyncState).toBe(0);
+            expect(await readFile(htmlPath, 'utf8')).toBe(document);
+            expect((await listVersions(ref)).map((entry) => entry.version)).toEqual([1]);
+            expect(existsSync(sidecar('v2.json'))).toBe(false);
+        }
+    );
+
+    it('still indexes and saves a committed trim when shadow recording rejects', async () => {
+        await createTable({ spec: demoSpec(), actor: 'user' });
+        await writeTable(ref, demoSpec('discarded'), owner);
+        item.attachmentSyncState = 1;
+        item.saveTx.mockClear();
+        vi.mocked(Zotero.FullText.queueItem).mockClear();
+        const shadow = vi.spyOn(recoveryShadow, 'recordTableShadow').mockRejectedValueOnce(new Error('shadow unavailable'));
+        try {
+            expect(await trimTable(ref, request)).toMatchObject({ outcome: 'trimmed', saved: true, trimmed_to: 1 });
+            expect(shadow).toHaveBeenCalledOnce();
+            expect(Zotero.FullText.queueItem).toHaveBeenCalledWith(item);
+            expect(item.saveTx).toHaveBeenCalledOnce();
+            expect(item.attachmentSyncState).toBe(0);
+            expect(await storedVersion()).toBe(1);
+            expect((await listVersions(ref)).map((entry) => entry.version)).toEqual([1]);
+        } finally {
+            shadow.mockRestore();
+        }
+    });
+
+    it('does not acknowledge a trim retry while sidecar deletion still fails', async () => {
+        await createTable({ spec: demoSpec(), actor: 'user' });
+        await writeTable(ref, demoSpec('discarded'), owner);
+        (globalThis as any).IOUtils = {
+            ...realIOUtils,
+            remove: async (path: string, options: any) => {
+                if (path.endsWith('v2.json')) throw new Error('cleanup failed');
+                await realIOUtils.remove(path, options);
+            },
+        };
+        expect(await trimTable(ref, request)).toMatchObject({ outcome: 'trimmed', saved: false });
+        const document = await readFile(htmlPath, 'utf8');
+        for (let attempt = 0; attempt < 2; attempt++) {
+            await expect(trimTable(ref, request)).rejects.toThrow('cleanup failed');
+            expect(existsSync(sidecar('v2.json'))).toBe(true);
+            expect(await readFile(htmlPath, 'utf8')).toBe(document);
+        }
+        (globalThis as any).IOUtils = realIOUtils;
+        expect(await trimTable(ref, request)).toMatchObject({ outcome: 'unchanged', saved: true });
+        expect(existsSync(sidecar('v2.json'))).toBe(false);
+    });
+
+    it.each(['index', 'save'])('does not acknowledge an unchanged retry when %s fails again', async (stage) => {
+        await createTable({ spec: demoSpec(), actor: 'user' });
+        await writeTable(ref, demoSpec('discarded'), owner);
+        item.saveTx.mockRejectedValueOnce(new Error('save failed'));
+        expect(await trimTable(ref, request)).toMatchObject({ outcome: 'trimmed', saved: false });
+        if (stage === 'index') vi.mocked(Zotero.FullText.queueItem).mockRejectedValueOnce(new Error('index failed'));
+        else item.saveTx.mockRejectedValueOnce(new Error('save failed'));
+        expect(await trimTable(ref, request)).toMatchObject({ outcome: 'unchanged', saved: false });
+        expect(await trimTable(ref, request)).toMatchObject({ outcome: 'unchanged', saved: true });
+    });
+
+    it('repairs a trim interrupted after the document commit', async () => {
+        await createTable({ spec: demoSpec(), actor: 'user' });
+        await writeTable(ref, demoSpec('discarded'), owner);
+        (globalThis as any).IOUtils = {
+            ...realIOUtils,
+            move: async (from: string, to: string) => {
+                if (to.endsWith('history.json')) throw new Error('disk full');
+                await realIOUtils.move(from, to);
+            },
+        };
+        expect(await trimTable(ref, request)).toMatchObject({ outcome: 'trimmed', saved: false });
+        (globalThis as any).IOUtils = realIOUtils;
+        const opened = await openTable(ref);
+        expect(opened.version).toBe(1);
+        expect(opened.history.map((e) => e.version)).toEqual([1]);
+        expect(existsSync(sidecar('v2.json'))).toBe(false);
+    });
+
+    it('does not read or modify an excluded library', async () => {
+        checkLibraryExcluded.mockReturnValue({ message: 'Excluded' });
+        await expect(trimTable(ref, request)).rejects.toMatchObject({ code: 'library_excluded' });
+        expect(Zotero.Items.getByLibraryAndKey).not.toHaveBeenCalled();
+    });
+});
+
+describe('retriable creation', () => {
+    beforeEach(() => {
+        let imported = false;
+        (Zotero as any).DB = {
+            queryAsync: vi.fn(async (_sql: string, _params: unknown, options: any) => {
+                if (imported) options.onRow({ getResultByIndex: () => item.id });
+            }),
+        };
+        (Zotero as any).ItemFields = { getID: () => 13 };
+        (Zotero.Items as any).getAsync = vi.fn(async () => item);
+        (Zotero.Attachments.importFromSnapshotContent as any).mockImplementation(
+            async ({ snapshotContent }: any) => {
+                imported = true;
+                await writeFile(htmlPath, snapshotContent, 'utf8');
+                return item;
+            }
+        );
+    });
+
+    const options = {
+        spec: demoSpec(),
+        operation_id: 'create-one',
+        actor: 'agent' as const,
+        run_id: 'run',
+        thread_id: 'thread',
+    };
+
+    it('serializes concurrent creates and replays one item across process-state loss', async () => {
+        const [a, b] = await Promise.all([createTable(options), createTable(options)]);
+        expect(a.key).toBe(b.key);
+        expect([a.replayed, b.replayed].sort()).toEqual([false, true]);
+        expect(b.operation).toEqual(a.operation);
+        tableWriteLocks().clear();
+        const replay = await createTable(options);
+        expect(replay.replayed).toBe(true);
+        expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['lastTableShadow', 'recordTableShadow'] as const)(
+        'acknowledges creation replay when %s rejects', async (helper) => {
+            const created = await createTable(options);
+            item.attachmentSyncState = 1;
+            item.saveTx.mockClear();
+            vi.mocked(Zotero.FullText.queueItem).mockClear();
+            const shadow = vi.spyOn(recoveryShadow, helper).mockRejectedValueOnce(new Error('shadow unavailable'));
+            try {
+                expect(await createTable(options)).toMatchObject({
+                    key: created.key, replayed: true, operation: created.operation,
+                });
+                expect(shadow).toHaveBeenCalledOnce();
+                expect(Zotero.FullText.queueItem).toHaveBeenCalledWith(item);
+                expect(item.saveTx).toHaveBeenCalledOnce();
+                expect(item.attachmentSyncState).toBe(0);
+                expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
+            } finally {
+                shadow.mockRestore();
+            }
+        }
+    );
+
+    it('refuses reusing a create identity with different content', async () => {
+        await createTable(options);
+        await expect(
+            createTable({ ...options, spec: demoSpec('different') })
+        ).rejects.toMatchObject({ code: 'operation_mismatch' });
+        expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['v1.json', 'history.json'])('retries a failed %s seed without acknowledging incomplete creation', async (failedFile) => {
+        const dispatchEvent = vi.fn();
+        (Zotero.getMainWindow as any).mockReturnValue({
+            __beaverEventBus: { dispatchEvent },
+            CustomEvent: class { constructor(public type: string, public options: unknown) {} },
+        });
+        (globalThis as any).IOUtils = {
+            ...realIOUtils,
+            move: async (from: string, to: string) => {
+                if (to.endsWith(failedFile)) throw new Error('disk full');
+                await realIOUtils.move(from, to);
+            },
+        };
+        await expect(createTable(options)).rejects.toThrow('disk full');
+        expect(item.deleted).toBe(false);
+        expect(dispatchEvent).not.toHaveBeenCalled();
+        (globalThis as any).IOUtils = realIOUtils;
+        const replay = await createTable(options);
+        expect(replay).toMatchObject({ key: KEY, replayed: true });
+        expect(existsSync(sidecar('v1.json'))).toBe(true);
+        expect((await listVersions(ref))).toMatchObject([{ version: 1, creation: true, actor: 'agent', run_id: 'run' }]);
+        expect(dispatchEvent).toHaveBeenCalledTimes(1);
+        expect(await trimTable(ref, { thread_id: 'thread', run_ids: ['run'] })).toMatchObject({ outcome: 'trashed' });
+        expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['tag', 'index', 'save'])('finishes item bookkeeping after a failed %s step', async (step) => {
+        if (step === 'tag') item.addTag.mockImplementationOnce(() => { throw new Error('interrupted'); });
+        if (step === 'index') (Zotero.FullText.queueItem as any).mockRejectedValueOnce(new Error('interrupted'));
+        if (step === 'save') item.saveTx.mockRejectedValueOnce(new Error('interrupted'));
+        await expect(createTable(options)).rejects.toThrow('interrupted');
+        // Unsaved tags disappear on restart; the document must still identify the import.
+        const tags = new Set<string>();
+        item.hasTag = (tag: string) => tags.has(tag);
+        item.addTag.mockImplementation((tag: string) => tags.add(tag));
+        item.attachmentSyncState = 1;
+        expect(await createTable(options)).toMatchObject({ key: KEY, replayed: true });
+        expect(tags).toEqual(new Set(['beaver-table', '📊']));
+        expect(Zotero.FullText.queueItem).toHaveBeenCalled();
+        expect(item.attachmentSyncState).toBe(0);
+        expect(item.saveTx).toHaveBeenCalled();
+        expect(await listVersions(ref)).toMatchObject([{ version: 1, creation: true }]);
+        expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['index', 'save'])('keeps a replayed creation retriable when %s fails again', async (step) => {
+        item.saveTx.mockRejectedValueOnce(new Error('initial save failed'));
+        await expect(createTable(options)).rejects.toThrow('initial save failed');
+        const fail = step === 'index' ? Zotero.FullText.queueItem : item.saveTx;
+        (fail as any).mockRejectedValueOnce(new Error('retry failed'));
+        await expect(createTable(options)).rejects.toThrow('retry failed');
+        expect(await createTable(options)).toMatchObject({ key: KEY, replayed: true });
+        expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses an unfinished import instead of creating a duplicate', async () => {
+        (Zotero.File.putContentsAsync as any).mockRejectedValueOnce(new Error('disk full'));
+        await expect(createTable(options)).rejects.toThrow('disk full');
+        await expect(createTable(options)).rejects.toMatchObject({ code: 'operation_pending' });
+        expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not resurrect a discarded creation on retry', async () => {
+        await createTable(options);
+        await trimTable(ref, { thread_id: 'thread', run_ids: ['run'] });
+        await expect(createTable(options)).rejects.toMatchObject({ code: 'operation_pending' });
+        expect(item.deleted).toBe(true);
+    });
+});
+
+it('repairs a collapsed commit even when both its old sidecars still agree', async () => {
+    const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
+    await writeTable(ref, demoSpec('old'), meta);
+    const base = await openTable(ref);
+    (globalThis as any).IOUtils = {
+        ...realIOUtils,
+        move: async (from: string, to: string) => {
+            if (to.endsWith('.json')) throw new Error('disk full');
+            await realIOUtils.move(from, to);
+        },
+    };
+    expect(
+        await writeTable(ref, demoSpec('new'), meta, base.version, {
+            operation_id: 'collapse',
+            expected_sha256: base.sha256,
+        })
+    ).toMatchObject({ ok: true, saved: false });
+    (globalThis as any).IOUtils = realIOUtils;
+    const opened = await openTable(ref);
+    expect(opened.history.at(-1)?.sha256).toBe(opened.sha256);
+    expect(
+        JSON.parse(await readFile(sidecar(`v${base.version}.json`), 'utf8')).rows[0].cells.note
+            .value.text
+    ).toBe('new');
 });

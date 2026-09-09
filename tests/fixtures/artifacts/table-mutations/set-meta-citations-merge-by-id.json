@@ -53,7 +53,11 @@
                             "kind": "reference",
                             "display_name": "Alpha"
                         },
-                        "provenance": "imported"
+                        "provenance": "imported",
+                        "details": {
+                            "kind": "text",
+                            "text": "<citation id=\"1-AAAA0001\"/> <citation id=\"1-AAAA0002\"/>"
+                        }
                     }
                 }
             },
@@ -79,11 +83,13 @@
             {
                 "citation_id": "c1",
                 "display_name": "Alpha 2020",
-                "preview": "as first reported"
+                "preview": "as first reported",
+                "raw_tag": "<citation id=\"1-AAAA0001\"/>"
             },
             {
                 "citation_id": "c2",
-                "display_name": "Beta 2019"
+                "display_name": "Beta 2019",
+                "raw_tag": "<citation id=\"1-AAAA0002\"/>"
             }
         ]
     },
@@ -95,11 +101,35 @@
                     "citation_id": "c1",
                     "display_name": "Alpha 2020",
                     "preview": "as first reported",
-                    "pages": [12]
+                    "pages": [
+                        12
+                    ],
+                    "raw_tag": "<citation id=\"1-AAAA0001\"/>"
                 },
                 {
                     "citation_id": "c3",
-                    "display_name": "Gamma 2021"
+                    "display_name": "Gamma 2021",
+                    "raw_tag": "<citation id=\"1-AAAA0003\"/>"
+                }
+            ]
+        },
+        {
+            "op": "set_cells",
+            "cells": [
+                {
+                    "row": "r1",
+                    "column": "paper",
+                    "cell": {
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Alpha"
+                        },
+                        "provenance": "imported",
+                        "details": {
+                            "kind": "text",
+                            "text": "<citation id=\"1-AAAA0001\"/> <citation id=\"1-AAAA0002\"/> <citation id=\"1-AAAA0003\"/>"
+                        }
+                    }
                 }
             ]
         }
@@ -157,7 +187,11 @@
                             "kind": "reference",
                             "display_name": "Alpha"
                         },
-                        "provenance": "imported"
+                        "provenance": "imported",
+                        "details": {
+                            "kind": "text",
+                            "text": "<citation id=\"1-AAAA0001\"/> <citation id=\"1-AAAA0002\"/> <citation id=\"1-AAAA0003\"/>"
+                        }
                     }
                 }
             },
@@ -184,15 +218,20 @@
                 "citation_id": "c1",
                 "display_name": "Alpha 2020",
                 "preview": "as first reported",
-                "pages": [12]
+                "pages": [
+                    12
+                ],
+                "raw_tag": "<citation id=\"1-AAAA0001\"/>"
             },
             {
                 "citation_id": "c2",
-                "display_name": "Beta 2019"
+                "display_name": "Beta 2019",
+                "raw_tag": "<citation id=\"1-AAAA0002\"/>"
             },
             {
                 "citation_id": "c3",
-                "display_name": "Gamma 2021"
+                "display_name": "Gamma 2021",
+                "raw_tag": "<citation id=\"1-AAAA0003\"/>"
             }
         ]
     }

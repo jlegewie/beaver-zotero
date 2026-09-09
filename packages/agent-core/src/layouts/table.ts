@@ -1053,6 +1053,16 @@ export function citationsByKey(
     return byKey;
 }
 
+/** Retains every metadata entry answering a live cell citation, in its original order. */
+export function pruneTableCitations(spec: TableSpec): TableSpec {
+    if (!spec.citations) return spec;
+    const live = new Set(citationKeysInTable(spec));
+    const citations = spec.citations.filter((citation) =>
+        [...collectCitationKeys(citation)].some((key) => live.has(key)),
+    );
+    return citations.length === spec.citations.length ? spec : { ...spec, citations };
+}
+
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------

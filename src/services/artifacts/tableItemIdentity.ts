@@ -65,6 +65,9 @@ export const TABLE_SIDECAR_DIR = 'beaver';
  * switching on a code must not have to know which module refused it.
  */
 export type TableItemErrorCode =
+    | 'operation_mismatch'
+    | 'operation_pending'
+    | 'invalid_request'
     | 'library_excluded'
     | 'no_writable_library'
     /** The library is writable, but the import API cannot file a table there. */
@@ -313,6 +316,8 @@ export interface TableVersionEntry {
      * version reconstructed from the file rather than written by a known author.
      */
     sealed?: true;
+    /** Known creation, unlike a sealed entry reconstructed from lost history. */
+    creation?: true;
 }
 
 export interface TableHistory {

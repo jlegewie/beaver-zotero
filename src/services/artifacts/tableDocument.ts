@@ -97,7 +97,41 @@ import { countTopLevelCssRules, escapeHtml, CSS_RULE_BUDGET } from '../../utils/
  */
 export type TableHtmlLinks = Partial<Record<RowAction, string | null>>;
 
+/** Durable acknowledgements committed atomically with the table document. */
+export interface TableOperationReceipt {
+    operation_id: string;
+    request_sha256: string;
+    version: number;
+    sha256: string;
+}
+
+export interface TableDocumentState {
+    operations?: TableOperationReceipt[];
+    creation?: {
+        operation_id: string;
+        request_sha256: string;
+        complete: boolean;
+        meta?: { actor: 'agent' | 'user' | 'system'; run_id?: string; thread_id?: string; change?: string };
+    };
+}
+
+export function parseTableDocumentState(html: string): TableDocumentState {
+    const match = html.match(/<script type="application\/json" id="beaver-table-store">([\s\S]*?)<\/script>/);
+    if (!match) return {};
+    const state = JSON.parse(match[1]);
+    if (!state || typeof state !== 'object' ||
+        (state.operations !== undefined && (!Array.isArray(state.operations) ||
+            state.operations.some((r: TableOperationReceipt) => !r ||
+                typeof r.operation_id !== 'string' || typeof r.request_sha256 !== 'string' ||
+                typeof r.version !== 'number' || typeof r.sha256 !== 'string')))) {
+        throw new Error('Invalid table operation receipts');
+    }
+    return state;
+}
+
 export interface TableHtmlOptions {
+    /** Store bookkeeping; excluded from the portable table spec. */
+    storeState?: TableDocumentState;
     /**
      * Emits the sort, filter and row-height controls. Off gives a plain
      * document sorted as the producer intended — the tier for a renderer that
@@ -1357,6 +1391,11 @@ export function buildTableDocument(
         // above the table — would silently break every annotation on every
         // stored table.
         `<script type="application/json" id="${TABLE_SPEC_SCRIPT_ID}">${serializeSpec(stored)}</script>`,
+        ...(options.storeState
+            ? [
+                  `<script type="application/json" id="beaver-table-store">${JSON.stringify(options.storeState).replace(/</g, '\\u003c')}</script>`,
+              ]
+            : []),
         '</body>',
         '</html>',
         '',

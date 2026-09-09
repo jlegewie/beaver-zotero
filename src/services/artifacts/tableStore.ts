@@ -49,13 +49,14 @@
  * id, which is why the spec written to disk is always stamped with the key of
  * the item it lives in rather than with whatever the caller passed.
  *
- * This module lives in the esbuild bundle but is imported by the webpack one,
- * so it never touches the bare `addon` global.
+ * This module is owned by the webpack bundle and never touches the bare
+ * `addon` global. The read-only identity module is shared with esbuild.
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     readSpec,
+    pruneTableCitations,
     TABLE_SPEC_VERSION,
     type TableSpec,
 } from '@beaver/agent-core/layouts/table';
@@ -66,6 +67,7 @@ import {
     type TableMutation,
 } from '@beaver/agent-core/layouts/tableMutations';
 import { sha256Hex } from '../../utils/hash';
+import { getZoteroOpenURI, getZoteroSelectURI } from '../../utils/zoteroUris';
 import { checkLibraryExcluded } from '../agentDataProvider/utils';
 import {
     detectTableSyncConflict,
@@ -78,13 +80,22 @@ import {
 } from './recoveryShadow';
 import { setTableShadowRestore, tableWriteLocks } from './tablesApi';
 import { zoteroLinkScope, zoteroLinksFor } from './view/tableLinks';
-import { buildTableDocument } from './tableDocument';
+import {
+    buildTableDocument,
+    parseTableDocumentState,
+    parseTableDocument,
+    type TableDocumentState,
+    type TableOperationReceipt,
+} from './tableDocument';
 import {
     createTableItem,
+    resolveTableLibrary,
+    loadTableItemFields,
+    isTableItem,
+    tableStorageDirectory,
     normalizeTableHistory,
     queueTableFullText,
     readTableHistory,
-    readTableItemSpec,
     resolveTableItem,
     restoreTableItem,
     tableHistoryPath,
@@ -93,6 +104,8 @@ import {
     tableVersionPath,
     trashTableItem,
     EMPTY_TABLE_HISTORY,
+    TABLE_TAG,
+    TABLE_EMOJI_TAG,
     TableItemError,
     type CreatedTableItem,
     type CreateTableItemOptions,
@@ -161,7 +174,17 @@ export type TableRecovery =
     /** Versions the retention cap dropped while the log was being rewritten. */
     | { kind: 'pruned'; versions: number[] };
 
+export interface TableRemoteWrite {
+    /** Opaque digest returned by openTable; never compute it on another client. */
+    expected_sha256: string;
+    operation_id: string;
+}
+
 export interface TableWriteOk {
+    sha256: string;
+    /** Original acknowledgement; current spec/version may have advanced on replay. */
+    operation?: TableOperationReceipt;
+    replayed?: boolean;
     ok: true;
     version: number;
     /** True when this write replaced the version it found instead of adding one. */
@@ -189,6 +212,7 @@ export interface TableWriteOk {
  * stored file itself is unreadable.
  */
 export interface TableWriteConflict {
+    sha256: string | null;
     ok: false;
     conflict: true;
     version: number;
@@ -206,6 +230,7 @@ export interface TableEditRejected {
 export type TableEditResult = TableWriteResult | TableEditRejected;
 
 export interface CreateTableOptions extends CreateTableItemOptions {
+    operation_id?: string;
     /** Who is creating it. Defaults to `agent`. */
     actor?: TableActor;
     run_id?: string;
@@ -215,12 +240,16 @@ export interface CreateTableOptions extends CreateTableItemOptions {
 }
 
 export interface CreatedTable extends CreatedTableItem {
-    /** Always 1: a new table starts its own history. */
+    replayed?: boolean;
+    operation?: TableOperationReceipt;
+    sha256?: string;
+    /** Starts at 1; a replay reports the current version of the original item. */
     version: number;
     entry: TableVersionEntry;
 }
 
 export interface OpenTableResult {
+    sha256: string;
     ref: TableRef;
     spec: TableSpec;
     version: number;
@@ -299,8 +328,8 @@ function lockKey(ref: TableRef): string {
  * Every operation that changes a table takes it for the *whole* of its
  * read-modify-write, not just the write half — a read outside the lock is what
  * lets two callers derive their new spec from the same base and one of them
- * lose. Nothing here nests: the `*Locked` functions assume the lock is already
- * held and never take it again.
+ * lose. Creation takes its operation lock before the newly assigned item lock;
+ * no path takes them in the reverse order or acquires an item lock twice.
  *
  * One process, one lock: this is the whole concurrency story. Two Zotero
  * instances pointed at the same data directory are not something the file
@@ -470,6 +499,7 @@ interface CurrentState {
     /** The version the document claims. 0 when unknown. */
     htmlVersion: number;
     history: TableHistory;
+    storeState: TableDocumentState;
 }
 
 /**
@@ -477,31 +507,49 @@ interface CurrentState {
  * — {@link reconcileLog} is what makes them agree.
  */
 async function readCurrentState(item: Zotero.Item): Promise<CurrentState> {
-    const read = await readTableItemSpec(item);
+    await loadTableItemFields([item]);
+    if (!isTableItem(item))
+        throw tableReadError('not_a_table', `Item ${item.key} is not a Beaver table.`);
+    const path = await item.getFilePathAsync();
+    if (!path) throw tableReadError('no_file', `Table ${item.key} has no file on disk.`);
+    let html: string;
+    try {
+        html = (await Zotero.File.getContentsAsync(path)) as string;
+    } catch (error) {
+        throw tableReadError('no_file', `Table ${item.key} could not be read: ${String(error)}`);
+    }
+    // Sync can replace the attachment independently of our write lock. The
+    // document and its receipts must always describe the same file revision.
+    const read = parseTableDocument(html);
     // `unsupported_version` is fatal on purpose: writing back today's format
     // over a file a newer build wrote would silently drop whatever that build
     // understood and we do not. A missing file has nothing to reconcile.
-    if (
-        !read.ok &&
-        (read.code === 'unsupported_version' ||
-            read.code === 'no_file' ||
-            read.code === 'not_a_table')
-    ) {
-        throw tableReadError(read.code, read.message);
+    if (!read.ok && read.reason === 'unsupported_version') {
+        throw tableReadError(read.reason, `Table ${item.key} was written by a newer format (spec_version ${read.specVersion}).`);
     }
 
     const spec = read.ok ? read.spec : null;
     if (!read.ok) {
         // A readable file with an unreadable spec is broken, not fatal: a write
         // re-renders the document from the caller's spec and repairs it.
-        logger(`tableStore: ${read.code} reading ${item.key}: ${read.message}`, 2);
+        logger(`tableStore: ${read.reason} reading ${item.key}: ${read.detail ?? 'No readable spec'}`, 2);
     }
 
     const history =
         (await readJson<TableHistory>(historyPathOf(item))) ?? EMPTY_TABLE_HISTORY;
 
+    let storeState: TableDocumentState;
+    try {
+        storeState = parseTableDocumentState(html);
+    } catch (error) {
+        throw new TableItemError(
+            `Table operation receipts are unreadable: ${String(error)}`,
+            'invalid_spec'
+        );
+    }
     return {
         spec,
+        storeState,
         htmlVersion: typeof spec?.version === 'number' ? spec.version : 0,
         history: normalizeTableHistory(history),
     };
@@ -564,17 +612,24 @@ function seal(entry: TableVersionEntry): TableVersionEntry {
 async function reconstructEntry(
     item: Zotero.Item,
     spec: TableSpec,
-    version: number
+    version: number,
+    creationMeta?: TableWriteMeta
 ): Promise<TableVersionEntry> {
     const serialized = JSON.stringify(spec);
     await ensureSidecarDirectory(item);
     await writeAtomic(versionPathOf(item, version), serialized, tableTempPath(item));
-    return seal(
-        await versionEntry(version, spec, serialized, {
-            actor: 'system',
-            change: RECOVERED_CHANGE,
-        })
+    const entry = seal(
+        await versionEntry(
+            version,
+            spec,
+            serialized,
+            creationMeta ?? {
+                actor: 'system',
+                change: RECOVERED_CHANGE,
+            }
+        )
     );
+    return creationMeta ? { ...entry, creation: true } : entry;
 }
 
 /**
@@ -692,9 +747,24 @@ async function reconcileLog(
     // The document is ahead of the log: the commit landed and the log rewrite
     // did not.
     if (!versions.some((e) => e.version === htmlVersion)) {
+        const currentHash = await tableSpecHash(current.spec);
         versions = [
             ...versions,
-            await reconstructEntry(item, current.spec, htmlVersion),
+            await reconstructEntry(
+                item,
+                current.spec,
+                htmlVersion,
+                htmlVersion === 1 &&
+                    current.storeState.creation?.complete &&
+                    current.storeState.operations?.some(
+                        (r) =>
+                            r.operation_id === current.storeState.creation?.operation_id &&
+                            r.version === 1 &&
+                            r.sha256 === currentHash
+                    )
+                    ? current.storeState.creation.meta
+                    : undefined
+            ),
         ];
         repairs.push({ kind: 'history_appended', version: htmlVersion });
     }
@@ -728,7 +798,8 @@ async function auditSidecar(
     item: Zotero.Item,
     spec: TableSpec,
     htmlVersion: number,
-    entries: TableVersionEntry[]
+    entries: TableVersionEntry[],
+    strictCleanup = false
 ): Promise<Reconciled> {
     const repairs: TableRecovery[] = [];
     let versions = entries;
@@ -745,7 +816,12 @@ async function auditSidecar(
     const tipEntry = versions[versions.length - 1];
     const tipPath = versionPathOf(item, tip);
     const stored = htmlVersion === tip ? await readText(tipPath) : undefined;
-    if (stored !== undefined && (stored === null || (await sha256Hex(stored)) !== tipEntry.sha256)) {
+    if (
+        stored !== undefined &&
+        (stored === null ||
+            (await sha256Hex(stored)) !== tipEntry.sha256 ||
+            (await tableSpecHash(spec)) !== tipEntry.sha256)
+    ) {
         const serialized = JSON.stringify(spec);
         await ensureSidecarDirectory(item);
         await writeAtomic(tipPath, serialized, tableTempPath(item));
@@ -786,7 +862,11 @@ async function auditSidecar(
     }
     if (garbage.length) {
         for (const version of garbage) {
-            await removeQuietly(versionPathOf(item, version));
+            if (strictCleanup) {
+                await IOUtils.remove(versionPathOf(item, version), { ignoreAbsent: true });
+            } else {
+                await removeQuietly(versionPathOf(item, version));
+            }
         }
         repairs.push({ kind: 'orphan_removed', versions: garbage.sort((a, b) => a - b) });
     }
@@ -822,9 +902,151 @@ async function auditSidecar(
  * differ from what the store would have written, this file — not the store's
  * idea of it — is what a revert to version 1 restores.
  */
-export async function createTable(
-    options: CreateTableOptions
-): Promise<CreatedTable> {
+export async function createTable(options: CreateTableOptions): Promise<CreatedTable> {
+    const { operation_id, ...ordinary } = options;
+    if (operation_id === undefined)
+        return createTableOnce({ ...ordinary, spec: pruneTableCitations(ordinary.spec) });
+    if (typeof operation_id !== 'string' || !operation_id.trim())
+        throw new TableItemError('operation_id must not be empty.', 'invalid_request');
+    const resolved = resolveTableLibrary(options.libraryID);
+    if ('error' in resolved)
+        throw new TableItemError('No eligible library for this table.', resolved.error);
+    const libraryID = resolved.libraryID;
+    const requestHash = await tableOperationHash({
+        ...ordinary,
+        linksFor: undefined,
+        creationOperation: undefined,
+        spec: unstampedSpec(options.spec),
+    });
+    const url = `beaver://table/operation-${await sha256Hex(operation_id)}`;
+    return withTableLock({ libraryID, key: `create:${operation_id}` }, async () => {
+        requireWritable({ libraryID, key: '' });
+        const ids: number[] = [];
+        await Zotero.DB.queryAsync(
+            `SELECT i.itemID FROM items i JOIN itemData d ON d.itemID=i.itemID
+             JOIN itemDataValues v ON v.valueID=d.valueID
+             WHERE i.libraryID=? AND d.fieldID=? AND v.value=?`,
+            [libraryID, Zotero.ItemFields.getID('url'), url],
+            {
+                onRow: (row: any) => {
+                    ids.push(row.getResultByIndex(0));
+                },
+            }
+        );
+        if (ids.length) {
+            if (ids.length !== 1)
+                throw new TableItemError(
+                    'Multiple imports have this operation identity.',
+                    'operation_pending'
+                );
+            const item = await Zotero.Items.getAsync(ids[0]);
+            await loadTableItemFields([item]);
+            const path = await item.getFilePathAsync();
+            if (!path || !(await IOUtils.exists(path)))
+                throw new TableItemError(
+                    'The earlier import has no readable file yet.',
+                    'operation_pending'
+                );
+            const html = await IOUtils.readUTF8(path);
+            const state = parseTableDocumentState(html);
+            if (state.creation?.request_sha256 !== requestHash)
+                throw new TableItemError(
+                    'Operation identity was reused with a different request.',
+                    'operation_mismatch'
+                );
+            if (!state.creation.complete || item.deleted)
+                throw new TableItemError(
+                    'The earlier import is incomplete or has been discarded.',
+                    'operation_pending'
+                );
+            const ref = { libraryID, key: item.key };
+            return withTableLock(ref, async () => {
+                requireWritable(ref);
+                if (item.deleted)
+                    throw new TableItemError(
+                        'The earlier creation has been discarded.',
+                        'operation_pending'
+                    );
+                // The stamped document proves which import we are finishing, even
+                // when its tags never reached the item database before interruption.
+                const read = parseTableDocument(await IOUtils.readUTF8(path));
+                if (!read.ok || read.spec.key !== item.key)
+                    throw new TableItemError('The earlier creation has no matching readable spec.', 'invalid_spec');
+                item.addTag(TABLE_TAG, 1);
+                item.addTag(TABLE_EMOJI_TAG, 1);
+                const opened = await readCurrentState(item);
+                const history = await reconcileLog(item, opened);
+                const audited = await auditSidecar(item, read.spec, opened.htmlVersion, history.versions);
+                if (history.repairs.length || audited.repairs.length)
+                    await commitHistory(item, audited.versions);
+                const entry = audited.versions[audited.versions.length - 1];
+                const operation = state.operations?.find((r) => r.operation_id === operation_id);
+                await queueTableFullText(item, true);
+                markForUpload(item);
+                await item.saveTx();
+                // Do not overwrite recovery evidence for an intervening edit or
+                // sync conflict merely because the original create was retried.
+                const sha256 = await tableSpecHash(read.spec);
+                try {
+                    if (read.spec.version === 1 && operation?.sha256 === sha256 && !(await lastTableShadow(ref))) {
+                        await recordTableShadow(ref, 1, JSON.stringify(read.spec), sha256);
+                    }
+                } catch (error) {
+                    logger(`tableStore: could not repair the creation recovery shadow for ${ref.key}: ${String(error)}`, 2);
+                }
+                emitTableUpdated(ref, entry.version, entry);
+                return {
+                    item,
+                    itemID: item.id,
+                    key: item.key,
+                    libraryID,
+                    title: read.spec.title ?? 'Table',
+                    filename: PathUtils.filename(path),
+                    storageDirectory: tableStorageDirectory(item),
+                    byteLength: new TextEncoder().encode(html).length,
+                    cssRuleCount: buildTableDocument(read.spec).cssRuleCount,
+                    spec: read.spec,
+                    selectUri: getZoteroSelectURI(libraryID, item.key),
+                    openUri: getZoteroOpenURI(libraryID, item.key),
+                    version: read.spec.version ?? 1,
+                    entry,
+                    replayed: true,
+                    operation,
+                    sha256,
+                };
+            });
+        }
+        const created = await createTableOnce({
+            ...ordinary,
+            libraryID,
+            spec: pruneTableCitations(options.spec),
+            creationOperation: {
+                operation_id,
+                request_sha256: requestHash,
+                url,
+                meta: {
+                    actor: options.actor ?? 'agent',
+                    run_id: options.run_id,
+                    thread_id: options.thread_id,
+                    change: options.change ?? CREATED_CHANGE,
+                },
+            },
+        });
+        return {
+            ...created,
+            replayed: false,
+            sha256: created.entry.sha256,
+            operation: {
+                operation_id,
+                request_sha256: requestHash,
+                version: created.version,
+                sha256: created.entry.sha256,
+            },
+        };
+    });
+}
+
+async function createTableOnce(options: CreateTableOptions): Promise<CreatedTable> {
     const { actor = 'agent', run_id, thread_id, change, ...itemOptions } = options;
 
     // Library exclusion is enforced inside `createTableItem`, which resolves
@@ -843,9 +1065,10 @@ export async function createTable(
         entry = await withTableLock(ref, async () => {
             const version = created.spec.version ?? 1;
             const serialized = JSON.stringify(created.spec);
-            const seeded = seal(
-                await versionEntry(version, created.spec, serialized, meta)
-            );
+            const seeded = {
+                ...seal(await versionEntry(version, created.spec, serialized, meta)),
+                creation: true as const,
+            };
 
             await ensureSidecarDirectory(created.item);
             await writeAtomic(
@@ -856,16 +1079,18 @@ export async function createTable(
             await commitHistory(created.item, [seeded]);
             // Version 1 is a write like any other as far as the shadow is
             // concerned, and it is the state most likely to be wanted back.
-            await recordTableShadow(ref, version, serialized, seeded.sha256).catch(
-                (error) =>
-                    logger(
-                        `tableStore: could not record the recovery shadow for ${ref.key}: ${String(error)}`,
-                        2
-                    )
+            await recordTableShadow(ref, version, serialized, seeded.sha256).catch((error) =>
+                logger(
+                    `tableStore: could not record the recovery shadow for ${ref.key}: ${String(error)}`,
+                    2
+                )
             );
             return seeded;
         });
     } catch (error) {
+        // The operation identity lets a retry finish this same committed item.
+        // Keep it available and surface the unfinished seed instead of claiming success.
+        if (options.creationOperation) throw error;
         // The item is already in the library and already saved, so a failure
         // here would otherwise leave a table nothing tracks — and a caller that
         // retries would make a second one. Trashing is reversible, so this is
@@ -882,6 +1107,24 @@ export async function createTable(
 
     emitTableUpdated(ref, entry.version, meta);
     return { ...created, version: entry.version, entry };
+}
+
+/** JSON object key order is irrelevant to retry identity; array order is significant. */
+export async function tableOperationHash(value: unknown): Promise<string> {
+    const canonical = (input: any): any => {
+        if (Array.isArray(input)) return input.map(canonical);
+        if (input && typeof input === 'object') return Object.fromEntries(
+            Object.keys(input).sort().filter((key) => input[key] !== undefined)
+                .map((key) => [key, canonical(input[key])])
+        );
+        return input;
+    };
+    return sha256Hex(JSON.stringify(canonical(value)));
+}
+
+function unstampedSpec(spec: TableSpec): Omit<TableSpec, 'key' | 'version'> {
+    const { key: _key, version: _version, ...content } = spec;
+    return { ...content, spec_version: content.spec_version ?? TABLE_SPEC_VERSION };
 }
 
 // ---------------------------------------------------------------------------
@@ -926,15 +1169,14 @@ export async function createTable(
  * an already-mutated table. They report through `saved: false` instead, and the
  * call still succeeds.
  *
- * ## What `expectedVersion` does and does not guard
+ * ## Remote preconditions and retries
  *
- * It compares the tip against what the caller last saw, so it catches a *third
- * party* moving the table: another device through sync, or a hand-edited file.
- * It is **not** a general lost-update guard, because a collapsing write leaves
- * the tip where it was — two writes from the same run both see the version they
- * expect. What protects that case is the lock: read and write happen in one
- * acquisition, so a same-run pair is serialised and the second one builds on
- * the first.
+ * A remote caller passes both the history version and the opaque content hash
+ * returned by openTable, plus a stable operation identity. The hash detects a
+ * same-version collapsed write. Completed identities are checked before the
+ * precondition, so a retry acknowledges its original commit without writing
+ * again. Its response pairs that acknowledgement with the current state.
+ * Local editTable applies mutations under the lock and needs no precondition.
  *
  * ## A run's writes collapse
  *
@@ -955,24 +1197,22 @@ export async function createTable(
  * log already points at, so overwriting it before the commit lands would leave
  * a file describing neither the old state nor the new one; writing it after
  * means the worst a crash can leave is a file holding an earlier moment of the
- * same run's working version. (That residual case — file and entry consistent
- * with each other but behind the document — is the one thing
- * {@link auditSidecar} cannot see, since detecting it would mean re-serialising
- * the document's spec and comparing bytes, which is not stable enough to be a
- * signal.)
+ * same run's working version. The sidecar audit compares both the retained
+ * file and the current spec against the log digest and repairs either mismatch.
  */
 export async function writeTable(
     ref: TableRef,
     spec: TableSpec,
     meta: TableWriteMeta,
-    expectedVersion?: number
+    expectedVersion?: number,
+    remote?: TableRemoteWrite
 ): Promise<TableWriteResult> {
     requireWritable(ref);
     const result = await withTableLock(ref, async () => {
         const { item, current } = await prepareWrite(ref);
-        return commitWrite(ref, item, current, spec, meta, expectedVersion);
+        return commitWrite(ref, item, current, spec, meta, expectedVersion, remote);
     });
-    if (result.ok) emitTableUpdated(ref, result.version, meta);
+    if (result.ok && !result.replayed) emitTableUpdated(ref, result.version, meta);
     return result;
 }
 
@@ -997,7 +1237,8 @@ async function commitWrite(
     current: CurrentState,
     spec: TableSpec,
     meta: TableWriteMeta,
-    expectedVersion: number | undefined
+    expectedVersion: number | undefined,
+    remote?: TableRemoteWrite
 ): Promise<TableWriteResult> {
     const reconciled = await reconcileLog(item, current);
     if (reconciled.repairs.length) {
@@ -1013,27 +1254,101 @@ async function commitWrite(
     // After reconciliation the log's last entry is the committed version. With
     // an unreadable or unstamped document there is nothing to reconcile
     // against, so the log stands on its own.
-    const tip = versions.length
-        ? versions[versions.length - 1].version
-        : current.htmlVersion;
+    const tip = versions.length ? versions[versions.length - 1].version : current.htmlVersion;
 
-    if (expectedVersion !== undefined && expectedVersion !== tip) {
-        return { ok: false, conflict: true, version: tip, spec: current.spec };
+    const currentHash = current.spec ? await tableSpecHash(current.spec) : null;
+    let requestHash: string | undefined;
+    if (remote) {
+        if (
+            typeof remote.operation_id !== 'string' ||
+            !remote.operation_id.trim() ||
+            typeof remote.expected_sha256 !== 'string' ||
+            !/^[a-f0-9]{64}$/.test(remote.expected_sha256) ||
+            !Number.isInteger(expectedVersion) ||
+            (expectedVersion ?? 0) < 1
+        ) {
+            throw new TableItemError(
+                'Remote writes require operation_id, expected_version and expected_sha256.',
+                'invalid_request'
+            );
+        }
+        requestHash = await tableOperationHash({
+            spec: unstampedSpec(spec),
+            meta,
+            expected_version: expectedVersion,
+            expected_sha256: remote.expected_sha256,
+        });
+        const receipt = current.storeState.operations?.find(
+            (r) => r.operation_id === remote.operation_id
+        );
+        if (receipt) {
+            if (receipt.request_sha256 !== requestHash) {
+                throw new TableItemError(
+                    'Operation identity was reused with a different request.',
+                    'operation_mismatch'
+                );
+            }
+            if (!current.spec || !currentHash)
+                throw new TableItemError('The table is unreadable.', 'no_spec');
+            let saved = true;
+            let pruned: number[] = [];
+            let replayEntry = versions[versions.length - 1];
+            try {
+                const audited = await auditSidecar(
+                    item,
+                    current.spec,
+                    current.htmlVersion,
+                    versions
+                );
+                replayEntry = audited.versions[audited.versions.length - 1];
+                if (reconciled.repairs.length || audited.repairs.length)
+                    pruned = await commitHistory(item, audited.versions);
+                await queueTableFullText(item);
+                markForUpload(item);
+                await item.saveTx();
+            } catch (error) {
+                saved = false;
+                logger(
+                    `tableStore: replay acknowledged but bookkeeping failed: ${String(error)}`,
+                    1
+                );
+            }
+            return {
+                ok: true,
+                version: tip,
+                sha256: currentHash,
+                spec: current.spec,
+                entry: replayEntry,
+                collapsed: false,
+                saved,
+                pruned,
+                replayed: true,
+                operation: receipt,
+            };
+        }
+    }
+    if (
+        (expectedVersion !== undefined && expectedVersion !== tip) ||
+        (remote && remote.expected_sha256 !== currentHash)
+    ) {
+        return { ok: false, conflict: true, version: tip, sha256: currentHash, spec: current.spec };
     }
 
     const tipEntry = versions.find((e) => e.version === tip);
     const collapse =
-        meta.actor !== 'user' &&
+        meta.actor === 'agent' &&
         !!meta.run_id &&
         !!tipEntry &&
+        tipEntry.actor === 'agent' &&
         !tipEntry.sealed &&
-        tipEntry.run_id === meta.run_id;
+        tipEntry.run_id === meta.run_id &&
+        tipEntry.thread_id === meta.thread_id;
     const version = collapse ? tip : tip + 1;
 
     // Never the caller's word for either: the file says which table it is and
     // which revision of it, and only the store gets to decide that.
     const stored: TableSpec = {
-        ...spec,
+        ...pruneTableCitations(spec),
         spec_version: spec.spec_version ?? TABLE_SPEC_VERSION,
         key: item.key,
         version,
@@ -1045,16 +1360,26 @@ async function commitWrite(
     await ensureSidecarDirectory(item);
     const temp = tableTempPath(item);
     const versionPath = versionPathOf(item, version);
+    const operation: TableOperationReceipt | undefined = remote
+        ? {
+              operation_id: remote.operation_id,
+              request_sha256: requestHash!,
+              version,
+              sha256: entry.sha256,
+          }
+        : undefined;
+    const storeState: TableDocumentState = {
+        ...current.storeState,
+        ...(operation ? { operations: [...(current.storeState.operations ?? []), operation] } : {}),
+    };
     const document = buildTableDocument(stored, {
+        storeState,
         linksFor: zoteroLinksFor,
         citationScopeFor: zoteroLinkScope,
     });
     const htmlPath = await item.getFilePathAsync();
     if (!htmlPath) {
-        throw new TableItemError(
-            `Table ${item.key} has no file on disk.`,
-            'file_missing'
-        );
+        throw new TableItemError(`Table ${item.key} has no file on disk.`, 'file_missing');
     }
 
     if (!collapse) {
@@ -1119,6 +1444,8 @@ async function commitWrite(
 
     return {
         ok: true,
+        sha256: entry.sha256,
+        ...(operation ? { operation, replayed: false } : {}),
         version,
         collapsed: collapse,
         saved,
@@ -1251,6 +1578,7 @@ export async function openTable(ref: TableRef): Promise<OpenTableResult> {
         );
         return {
             ref,
+            sha256: await tableSpecHash(current.spec),
             spec: current.spec,
             version: Math.max(current.htmlVersion, history.tip),
             history: history.versions,
@@ -1452,6 +1780,190 @@ async function readStoredVersion(
         `Version ${version} of table ${ref.key} is not a readable table: ${read.detail}`,
         'version_corrupt'
     );
+}
+
+function isKnownCreation(entry: TableVersionEntry): boolean {
+    return (
+        entry.creation === true ||
+        (entry.version === 1 && entry.sealed === true && entry.actor !== 'system')
+    );
+}
+
+export interface TableTrimRequest {
+    thread_id: string;
+    run_ids: string[];
+}
+
+export interface TableTrimResult {
+    ok: true;
+    outcome: 'unchanged' | 'trimmed' | 'trashed';
+    trimmed_versions: number[];
+    trimmed_to: number | null;
+    retention_exhausted: boolean;
+    saved: boolean;
+}
+
+/** Trash is already committed; cleanup failure must remain visible and retriable. */
+async function retireTrashedTableShadow(ref: TableRef): Promise<boolean> {
+    try {
+        await pruneTableShadow(ref, true);
+        return true;
+    } catch (error) {
+        logger(`tableStore: table is trashed but shadow cleanup failed: ${String(error)}`, 1);
+        return false;
+    }
+}
+
+/** Drops only the contiguous suffix owned by discarded runs of this conversation. */
+export async function trimTable(
+    ref: TableRef,
+    request: TableTrimRequest
+): Promise<TableTrimResult> {
+    requireWritable(ref);
+    if (
+        typeof request.thread_id !== 'string' ||
+        !request.thread_id.trim() ||
+        !Array.isArray(request.run_ids) ||
+        request.run_ids.some((id) => typeof id !== 'string' || !id.trim())
+    ) {
+        throw new TableItemError('Trim requires thread_id and run_ids.', 'invalid_request');
+    }
+    const result = await withTableLock(ref, async (): Promise<TableTrimResult> => {
+        const existing = Zotero.Items.getByLibraryAndKey(ref.libraryID, ref.key) as
+            | Zotero.Item
+            | false;
+        requireWritable(ref);
+        if (existing && existing.deleted) {
+            await loadTableItemFields([existing]);
+            if (!isTableItem(existing))
+                throw new TableItemError('Item is not a stored table.', 'not_a_table');
+            return {
+                ok: true,
+                outcome: 'unchanged',
+                trimmed_versions: [],
+                trimmed_to: null,
+                retention_exhausted: false,
+                saved: await retireTrashedTableShadow(ref),
+            };
+        }
+        const { item, current } = await prepareWrite(ref);
+        if (!current.spec)
+            throw new TableItemError('The table has no readable state to trim.', 'no_spec');
+        const reconciled = await reconcileLog(item, current);
+        // A surviving file with a lost log entry has unknown ownership and must
+        // become a protected boundary before we choose the discardable suffix.
+        // Cleanup must also succeed before a retry can acknowledge the prior trim.
+        const audited = await auditSidecar(item, current.spec, current.htmlVersion, reconciled.versions, true);
+        const versions = audited.versions;
+        const runs = new Set(request.run_ids);
+        let keep = versions.length;
+        while (keep > 0) {
+            const entry = versions[keep - 1];
+            if (
+                entry.actor !== 'agent' ||
+                entry.thread_id !== request.thread_id ||
+                !entry.run_id ||
+                !runs.has(entry.run_id) ||
+                (entry.sealed && !isKnownCreation(entry))
+            )
+                break;
+            keep--;
+        }
+        // Losing the oldest retained state is not proof the discarded runs created the item.
+        const exhausted = keep === 0 && versions.length > 0 && !isKnownCreation(versions[0]);
+        if (exhausted) keep = 1;
+        const dropped = versions.slice(keep).map((entry) => entry.version);
+        const target = keep ? versions[keep - 1].version : null;
+        if (!dropped.length) {
+            if (reconciled.repairs.length || audited.repairs.length) {
+                await commitHistory(item, versions);
+            }
+            // A previous trim may have committed the document but failed before
+            // saving the attachment. Replay this bookkeeping even after a restart,
+            // when neither the history nor the item retains evidence of that failure.
+            let saved = true;
+            try {
+                await queueTableFullText(item, true);
+                markForUpload(item);
+                await item.saveTx();
+            } catch (error) {
+                saved = false;
+                logger(`tableStore: trim retry bookkeeping failed: ${String(error)}`, 1);
+            }
+            return {
+                ok: true,
+                outcome: 'unchanged',
+                trimmed_versions: [],
+                trimmed_to: target,
+                retention_exhausted: exhausted,
+                saved,
+            };
+        }
+        if (keep === 0) {
+            requireWritable(ref);
+            await trashTableItem(item);
+            const saved = await retireTrashedTableShadow(ref);
+            return {
+                ok: true,
+                outcome: 'trashed',
+                trimmed_versions: dropped,
+                trimmed_to: null,
+                retention_exhausted: false,
+                saved,
+            };
+        }
+        const spec = await readStoredVersion(
+            ref,
+            item,
+            { ...current, history: { tip: current.htmlVersion, versions } },
+            target!
+        );
+        const document = buildTableDocument(spec, {
+            linksFor: zoteroLinksFor,
+            citationScopeFor: zoteroLinkScope,
+            storeState: current.storeState,
+        });
+        await ensureSidecarDirectory(item);
+        // Intentionally retire the discarded shadow before the rollback commit. A failed
+        // commit may lose this insurance, but must not report an intentional rewind as sync loss.
+        await pruneTableShadow(ref, true);
+        requireWritable(ref);
+        const path = await item.getFilePathAsync();
+        if (!path) throw new TableItemError('Table file is missing.', 'file_missing');
+        await writeAtomic(path, document.html, tableTempPath(item));
+        let saved = true;
+        try {
+            await commitHistory(item, versions.slice(0, keep));
+            for (const version of dropped)
+                await IOUtils.remove(versionPathOf(item, version), { ignoreAbsent: true });
+            try {
+                await recordTableShadow(ref, target!, JSON.stringify(spec), await tableSpecHash(spec));
+            } catch (error) {
+                logger(`tableStore: could not record the trim recovery shadow for ${ref.key}: ${String(error)}`, 2);
+            }
+            await queueTableFullText(item, true);
+            markForUpload(item);
+            await item.saveTx();
+        } catch (error) {
+            saved = false;
+            logger(`tableStore: trim committed but bookkeeping failed: ${String(error)}`, 1);
+        }
+        return {
+            ok: true,
+            outcome: 'trimmed',
+            trimmed_versions: dropped,
+            trimmed_to: target,
+            retention_exhausted: exhausted,
+            saved,
+        };
+    });
+    if (result.outcome !== 'unchanged')
+        emitTableUpdated(ref, result.trimmed_to, {
+            actor: 'system',
+            thread_id: request.thread_id,
+            change: 'Trimmed discarded runs',
+        });
+    return result;
 }
 
 // ---------------------------------------------------------------------------
