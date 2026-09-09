@@ -356,6 +356,7 @@ export function useReaderTabSelection() {
 
                 // Tab change event
                 if (type === 'tab' && event === 'select') {
+                    if (ids[0] !== mainWindow.Zotero_Tabs.selectedID) return;
                     const selectedTab = mainWindow.Zotero_Tabs._tabs.find(tab => tab.id === ids[0]);
                     if (!selectedTab) return;
 

@@ -643,3 +643,27 @@ describe('MCPService', () => {
         });
     });
 });
+
+describe('MCP endpoint window ownership', () => {
+    it.each(['first', 'last'])('continues serving when the %s owner closes', async (closing) => {
+        const { BeaverInstance } = await import('../../../src/runtime/instance');
+        const runtime = new BeaverInstance();
+        (Zotero as any).Beaver = { runtime };
+        (Zotero as any).Server = { Endpoints: {} };
+        const a = runtime.attachWindow({ EventTarget } as Window);
+        const b = runtime.attachWindow({ EventTarget } as Window);
+        const serviceA = new MCPService(), serviceB = new MCPService();
+        serviceA.register(a);
+        const handlerA = Zotero.Server.Endpoints['/beaver/mcp'];
+        serviceB.register(b);
+        const handlerB = Zotero.Server.Endpoints['/beaver/mcp'];
+        runtime.detachWindow((closing === 'first' ? a : b).hostWindow);
+        (closing === 'first' ? serviceA : serviceB).unregister();
+        const handler = Zotero.Server.Endpoints['/beaver/mcp'];
+        expect(handler).toBe(closing === 'first' ? handlerB : handlerA);
+        const response = await new handler().init(makeRequest({ jsonrpc: '2.0', id: 1, method: 'ping' }));
+        expect(parseResponse(response).body.result).toEqual({});
+        (closing === 'first' ? serviceB : serviceA).unregister();
+        expect(Zotero.Server.Endpoints['/beaver/mcp']).toBeUndefined();
+    });
+});

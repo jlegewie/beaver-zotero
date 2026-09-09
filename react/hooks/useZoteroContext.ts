@@ -342,6 +342,7 @@ export function useZoteroContext() {
                 if (type !== 'tab') return;
 
                 if (event === 'select') {
+                    if (ids[0] !== mainWindow.Zotero_Tabs.selectedID) return;
                     const selectedTab = mainWindow.Zotero_Tabs._tabs.find(
                         (tab: any) => tab.id === ids[0],
                     );

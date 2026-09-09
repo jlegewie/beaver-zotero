@@ -115,3 +115,31 @@ describe('mount teardown', () => {
         expect(win.document.getElementById('beaver-global-initializer-root')).toBeNull();
     });
 });
+
+it('filters foreign native context-pane events and restores the native handler on cleanup', async () => {
+    vi.resetModules();
+    const { initializeWindowRuntime } = await import('../../../react/runtime/windowRuntime');
+    const { uiManager } = await import('../../../react/ui/UIManager');
+    const instance = new BeaverInstance();
+    (Zotero as any).Beaver = { runtime: instance };
+    const win = makeWindow();
+    (win as any).Zotero_Tabs.selectedID = 'reader-a';
+    const pane = win.document.createElement('div') as any;
+    pane.id = 'zotero-context-pane-inner';
+    win.document.body.appendChild(pane);
+    const original = vi.fn(function(this: any) { expect(this).toBe(pane); return 'handled'; });
+    pane._handleTabSelect = original;
+    initializeWindowRuntime(instance.attachWindow(win));
+    const state = { isVisible: false, isLibraryTab: false, collapseState: { library: null, reader: null } };
+    uiManager.updateUI(state);
+    const scoped = pane._handleTabSelect;
+    uiManager.updateUI(state);
+    expect(pane._handleTabSelect).toBe(scoped);
+    pane._handleTabSelect('select', 'tab', ['zotero-pane'], {});
+    pane._handleTabSelect('load', 'tab', ['reader-b'], {});
+    expect(original).not.toHaveBeenCalled();
+    expect(pane._handleTabSelect('select', 'tab', ['reader-a'], {})).toBe('handled');
+    uiManager.cleanup();
+    expect(pane._handleTabSelect).toBe(original);
+    instance.disposeInstance();
+});

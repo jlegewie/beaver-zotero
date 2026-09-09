@@ -9,6 +9,7 @@ class UIManager {
     private unsubscribeWidth?: () => void;
     private timers = new Set<number>();
     private hostWindow?: Window;
+    private restoreContextPaneTabHandler?: () => void;
 
     constructor() {
         this.collapseState = { library: null, reader: null };
@@ -26,6 +27,26 @@ class UIManager {
             if (win.__beaverRuntime?.status !== 'closing') this.enforceConsistentWidth();
         }, 50);
         this.timers.add(timer);
+    }
+
+    /** Native context panes also receive tab events from other main windows. */
+    private scopeContextPaneTabEvents(): void {
+        if (this.restoreContextPaneTabHandler) return;
+        const win = this.getWindow();
+        const pane = win.document.getElementById('zotero-context-pane-inner') as
+            (HTMLElement & { _handleTabSelect?: (...args: any[]) => unknown }) | null;
+        const original = pane?._handleTabSelect;
+        if (!pane || typeof original !== 'function') return;
+        const scoped = function(this: HTMLElement, ...args: any[]) {
+            const [event, type, ids] = args;
+            if (type === 'tab' && (event === 'select' || event === 'load')
+                && ids?.[0] !== win.Zotero_Tabs.selectedID) return;
+            return original.apply(this, args);
+        };
+        pane._handleTabSelect = scoped;
+        this.restoreContextPaneTabHandler = () => {
+            if (pane._handleTabSelect === scoped) pane._handleTabSelect = original;
+        };
     }
 
     private initSidebarWidthTracking(): void {
@@ -272,6 +293,7 @@ class UIManager {
 
     public updateUI(state: UIState): void {
         if (!tryGetWindowRuntime()) return;
+        this.scopeContextPaneTabEvents();
         this.elements = this.initializeElements();
         this.updateToolbarButton(state.isVisible);
         
@@ -301,6 +323,8 @@ class UIManager {
 
     /** Remove this renderer's subscription, timers and DOM references. */
     public cleanup(): void {
+        this.restoreContextPaneTabHandler?.();
+        this.restoreContextPaneTabHandler = undefined;
         this.unsubscribeWidth?.();
         this.unsubscribeWidth = undefined;
         for (const timer of this.timers) this.hostWindow?.clearTimeout(timer);

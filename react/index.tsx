@@ -1,6 +1,7 @@
+import { currentNoteItemAtom } from './atoms/zoteroContext';
 import { eventManager } from './events/eventManager';
-import { isSidebarVisibleAtom } from './atoms/ui';
-import { currentMessageContentAtom } from './atoms/messageComposition';
+import { isSidebarVisibleAtom, isLibraryTabAtom, selectedZoteroTabIdAtom } from './atoms/ui';
+import { currentMessageContentAtom, currentReaderAttachmentAtom } from './atoms/messageComposition';
 import { isBackgroundWorkerRunningAtom } from './atoms/backgroundExtraction';
 import { getWindowRuntime } from './runtime/windowRuntime';
 import { initializeWindowRuntime } from './runtime/windowRuntime';
@@ -446,6 +447,10 @@ export function inspectRuntime(command?: { draft?: string }) {
         id: runtime.id,
         draft: store.get(currentMessageContentAtom),
         visible: store.get(isSidebarVisibleAtom),
+        isLibraryTab: store.get(isLibraryTabAtom),
+        selectedTabId: store.get(selectedZoteroTabIdAtom),
+        hasReaderAttachment: !!store.get(currentReaderAttachmentAtom),
+        noteItemId: store.get(currentNoteItemAtom)?.id ?? null,
         backgroundRunning: store.get(isBackgroundWorkerRunningAtom),
         roots: rootsMap.size,
     };

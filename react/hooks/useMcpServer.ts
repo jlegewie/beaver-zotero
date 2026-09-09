@@ -1,3 +1,4 @@
+import { tryGetWindowRuntime } from '../runtime/windowRuntime';
 /**
  * Hook to register an MCP (Model Context Protocol) server on Zotero's HTTP server.
  *
@@ -1501,6 +1502,8 @@ export function useMcpServer() {
             logger(`useMcpServer: Failed to write MCP bridge script: ${err?.message}`, 1);
         });
 
+        const runtime = tryGetWindowRuntime();
+        if (!runtime) return;
         const service = new MCPService();
         service.setAuthCheck(() => store.get(isAuthenticatedAtom));
 
@@ -1522,7 +1525,7 @@ export function useMcpServer() {
             service.registerTool(def.name, def, handler);
         }
 
-        const registered = service.register();
+        const registered = service.register(runtime);
 
         return () => {
             if (registered) {

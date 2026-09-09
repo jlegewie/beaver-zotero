@@ -247,178 +247,6 @@ interface ZoteroRequestData {
 // Endpoint Helpers
 // =============================================================================
 
-/** List of registered endpoint paths for cleanup */
-const ENDPOINT_PATHS = [
-    '/beaver/zotero-data',
-    '/beaver/external-reference-check',
-    '/beaver/search/metadata',
-    '/beaver/search/topic',
-    '/beaver/search/quick',
-    '/beaver/attachment/document',
-    '/beaver/attachment/page-images',
-    '/beaver/attachment/search',
-    // Library management tools
-    '/beaver/library/search',
-    '/beaver/library/list',
-    '/beaver/library/resolve-population',
-    '/beaver/library/metadata',
-    '/beaver/library/find-annotations',
-    '/beaver/library/libraries',
-    '/beaver/library/collections',
-    '/beaver/library/tags',
-    // Deferred tools
-    '/beaver/agent-action/validate',
-    '/beaver/agent-action/execute',
-    // Utility
-    '/beaver/user-info',
-    '/beaver/delete-items',
-    // Notes
-    '/beaver/note/read',
-    // Test-only endpoints (cache inspection/manipulation)
-    '/beaver/test/ping',
-    '/beaver/test/voice',
-    '/beaver/test/cache-metadata',
-    '/beaver/test/cache-payload',
-    '/beaver/test/cache-invalidate',
-    '/beaver/test/cache-seed-page-labels',
-    '/beaver/test/cache-clear-all',
-    '/beaver/test/cache-stats',
-    '/beaver/test/read-attachment',
-    '/beaver/test/mcp-read-note',
-    '/beaver/test/mcp-create-note',
-    '/beaver/test/resolve-item',
-    '/beaver/test/resolve-readable',
-    '/beaver/test/best-epub-attachment',
-    '/beaver/test/validate-item',
-    '/beaver/test/validate-regular-item',
-    '/beaver/test/external-file-attach',
-    '/beaver/test/external-file-delete',
-    '/beaver/test/external-file-view-images',
-    // Serialized PDF document-request wire path (responseMode: 'websocket')
-    '/beaver/test/document-serialized',
-    // Test-only endpoints (note seeding/teardown/inspection)
-    '/beaver/test/note-create',
-    '/beaver/test/note-delete',
-    '/beaver/test/note-read',
-    '/beaver/test/note-open-editor',
-    '/beaver/test/note-close-editor',
-    '/beaver/test/note-undo',
-    // Test-only endpoints (collection seeding/teardown)
-    '/beaver/test/collection-create',
-    '/beaver/test/collection-delete',
-
-    '/beaver/test/pdf-retrieval',
-    '/beaver/test/pdf-captcha-eligibility',
-    // Test-only endpoints (headless PDF annotations)
-    '/beaver/test/annotation-create',
-    // Test-only endpoints (batch progress bar preview)
-    '/beaver/test/batch-progress-preview',
-    '/beaver/test/batch-progress-clear',
-    // Test-only endpoints (MuPDF worker singleton stats / lifecycle)
-    '/beaver/test/worker-stats',
-    '/beaver/test/worker-mark-stale',
-    '/beaver/test/worker-cache-clear',
-    '/beaver/test/worker-wedge-probe',
-    '/beaver/test/worker-idle-probe',
-    '/beaver/test/worker-realm-probe',
-    // Test-only endpoint (file-status side-effect trigger)
-    '/beaver/test/file-status',
-    // Test-only endpoints (MuPDF worker plumbing)
-    '/beaver/test/pdf-page-count',
-    '/beaver/test/pdf-page-labels',
-    '/beaver/test/pdf-render-pages',
-    '/beaver/test/pdf-render-pages-with-meta',
-    '/beaver/test/pdf-extract-raw-detailed',
-    // orchestration parity endpoints
-    '/beaver/test/pdf-extract',
-    '/beaver/test/pdf-extract-paragraph',
-    '/beaver/test/pdf-has-text-layer',
-    '/beaver/test/pdf-analyze-ocr',
-    '/beaver/test/pdf-search-scored',
-    '/beaver/test/pdf-sentence-bboxes',
-    // Bbox-overlay debugging (sentences/items/lines/paragraphs/columns/margins)
-    '/beaver/test/pdf-render-overlay',
-    // Per-page extract trace (every stage, JSON-only)
-    '/beaver/test/pdf-extract-trace',
-    // Document-wide style + margin analysis context (mirrors what
-    // `extract({ mode: "structured" })` builds before per-page processing)
-    '/beaver/test/pdf-analyze-layout',
-    // EPUB extraction over a raw file path or attachment (corpus triage)
-    '/beaver/test/epub-extract',
-    '/beaver/test/snapshot-extract',
-    // Generated HTML reports stored as snapshot attachments (dev-only)
-    '/beaver/test/create-report',
-    // EPUB annotation CFI/sortIndex parity (headless resolver vs reader)
-    '/beaver/test/epub-annotation-parity',
-    // Snapshot annotation selector/sortIndex parity (headless resolver vs reader)
-    '/beaver/test/snapshot-annotation-parity',
-    // Reader position / EPUB citation-navigation verification (dev-only)
-    '/beaver/test/reader-state',
-    '/beaver/test/epub-citation-navigate',
-    // Citation host: itemData.resolveItemDisplay (dev-only)
-    '/beaver/test/resolve-item-display',
-    // Background queue inspection / driving (dev-only)
-    '/beaver/test/background-enqueue',
-    '/beaver/test/background-stats',
-    '/beaver/test/background-peek',
-    '/beaver/test/background-process-once',
-    '/beaver/test/background-clear',
-    // Pref control (dev-only)
-    '/beaver/test/set-pref',
-    // Sync-suppression control/inspection (dev-only)
-    '/beaver/test/sync-pause',
-    // Reader sidebar-width wrapper lifecycle (install/unwrap/restore)
-    '/beaver/test/sidebar-width-handler',
-    // Provider-mode connection control (dev-only)
-    '/beaver/test/provider-connect',
-    '/beaver/test/provider-status',
-    '/beaver/test/provider-close',
-
-    '/beaver/test/excluded-libraries',
-    '/beaver/test/get-annotations',
-    '/beaver/test/view-images',
-    '/beaver/test/attachment-image',
-    // Device-portable library-identity resolvers (dev-only)
-    '/beaver/test/library-identity',
-    // Headless chat/run lifecycle driving (dev-only)
-    '/beaver/test/new-thread',
-    '/beaver/test/chat-send',
-    '/beaver/test/current-ids',
-    '/beaver/test/load-thread',
-    '/beaver/test/list-actions',
-    '/beaver/test/approve-action',
-    '/beaver/test/confirm-credits',
-    '/beaver/test/undo-action',
-    '/beaver/test/application-state',
-    '/beaver/test/beaver-window',
-    '/beaver/test/beaver-sidebar',
-    '/beaver/test/select-tab',
-    // Table renderer, driven until a producer routes to it (dev-only)
-    '/beaver/test/open-table',
-    '/beaver/test/close-table',
-    '/beaver/test/open-stored-table',
-    // Stored tables: the snapshot attachment behind a table (dev-only)
-    '/beaver/test/table-create',
-    '/beaver/test/table-read',
-    '/beaver/test/table-list',
-    // The versioned store on top of it (dev-only)
-    '/beaver/test/table-write',
-    '/beaver/test/table-edit',
-    '/beaver/test/table-versions',
-    '/beaver/test/table-revert',
-    '/beaver/test/table-delete',
-    '/beaver/test/table-open',
-    '/beaver/test/table-corrupt',
-    '/beaver/test/table-shadow',
-    '/beaver/test/table-restore-shadow',
-    // The reader host for a stored table (dev-only)
-    '/beaver/test/table-open-reader',
-    '/beaver/test/table-view-state',
-    // The item-pane section for a stored table (dev-only)
-    '/beaver/test/table-item-pane',
-    '/beaver/test/run-status-popup',
-] as const;
-
 /**
  * Generate a simple unique ID for requests.
  */
@@ -1015,250 +843,248 @@ async function handleTestProviderCloseHttpRequest(_request: any) {
  * `NODE_ENV === 'development'` check further restricts the test-only endpoints
  * to development, keeping them out of staging.
  */
-function registerEndpoints(): boolean {
-    if (!Zotero?.Server?.Endpoints) {
-        logger('useHttpEndpoints: Zotero.Server.Endpoints not available', 2);
-        return false;
-    }
-
-    Zotero.Server.Endpoints['/beaver/zotero-data'] =
+function registerEndpoints(): (() => void) | undefined {
+    const runtime = tryGetWindowRuntime();
+    if (!runtime || !Zotero?.Server?.Endpoints) return;
+    const endpoints: Record<string, any> = {};
+    endpoints['/beaver/zotero-data'] =
         createEndpoint(handleZoteroDataHttpRequest);
     
-    Zotero.Server.Endpoints['/beaver/external-reference-check'] = 
+    endpoints['/beaver/external-reference-check'] =
         createEndpoint(handleExternalReferenceCheckHttpRequest);
     
-    Zotero.Server.Endpoints['/beaver/search/metadata'] = 
+    endpoints['/beaver/search/metadata'] =
         createEndpoint(handleMetadataSearchHttpRequest);
     
-    Zotero.Server.Endpoints['/beaver/search/topic'] =
+    endpoints['/beaver/search/topic'] =
         createEndpoint(handleTopicSearchHttpRequest);
 
-    Zotero.Server.Endpoints['/beaver/search/quick'] =
+    endpoints['/beaver/search/quick'] =
         createEndpoint(handleQuickSearchHttpRequest);
 
-    Zotero.Server.Endpoints['/beaver/attachment/document'] =
+    endpoints['/beaver/attachment/document'] =
         createEndpoint(handleAttachmentDocumentHttpRequest);
     
-    Zotero.Server.Endpoints['/beaver/attachment/page-images'] = 
+    endpoints['/beaver/attachment/page-images'] =
         createEndpoint(handleAttachmentPageImagesHttpRequest);
     
-    Zotero.Server.Endpoints['/beaver/attachment/search'] = 
+    endpoints['/beaver/attachment/search'] =
         createEndpoint(handleAttachmentSearchHttpRequest);
     
     // Library management endpoints
-    Zotero.Server.Endpoints['/beaver/library/search'] = 
+    endpoints['/beaver/library/search'] =
         createEndpoint(handleLibrarySearchHttpRequest);
     
-    Zotero.Server.Endpoints['/beaver/library/list'] = 
+    endpoints['/beaver/library/list'] =
         createEndpoint(handleLibraryListHttpRequest);
     
-    Zotero.Server.Endpoints['/beaver/library/resolve-population'] =
+    endpoints['/beaver/library/resolve-population'] =
         createEndpoint(handleResolvePopulationHttpRequest);
 
-    Zotero.Server.Endpoints['/beaver/library/metadata'] =
+    endpoints['/beaver/library/metadata'] =
         createEndpoint(handleLibraryMetadataHttpRequest);
 
-    Zotero.Server.Endpoints['/beaver/library/find-annotations'] =
+    endpoints['/beaver/library/find-annotations'] =
         createEndpoint(handleFindAnnotationsHttpRequest);
 
-    Zotero.Server.Endpoints['/beaver/library/libraries'] =
+    endpoints['/beaver/library/libraries'] =
         createEndpoint(handleListLibrariesHttpRequest);
 
-    Zotero.Server.Endpoints['/beaver/library/collections'] =
+    endpoints['/beaver/library/collections'] =
         createEndpoint(handleListCollectionsHttpRequest);
 
-    Zotero.Server.Endpoints['/beaver/library/tags'] =
+    endpoints['/beaver/library/tags'] =
         createEndpoint(handleListTagsHttpRequest);
 
     // Deferred tool endpoints
-    Zotero.Server.Endpoints['/beaver/agent-action/validate'] =
+    endpoints['/beaver/agent-action/validate'] =
         createEndpoint(handleAgentActionValidateHttpRequest);
 
-    Zotero.Server.Endpoints['/beaver/agent-action/execute'] =
+    endpoints['/beaver/agent-action/execute'] =
         createEndpoint(handleAgentActionExecuteHttpRequest);
 
     // Utility endpoints
-    Zotero.Server.Endpoints['/beaver/user-info'] =
+    endpoints['/beaver/user-info'] =
         createEndpoint(handleUserInfoHttpRequest);
 
-    Zotero.Server.Endpoints['/beaver/delete-items'] =
+    endpoints['/beaver/delete-items'] =
         createEndpoint(handleDeleteItemsHttpRequest);
 
     // Note endpoints
-    Zotero.Server.Endpoints['/beaver/note/read'] =
+    endpoints['/beaver/note/read'] =
         createEndpoint(handleReadNoteHttpRequest);
 
     // Test-only endpoints (dev builds only)
     if (process.env.NODE_ENV === 'development') {
-        Zotero.Server.Endpoints['/beaver/test/voice'] = createEndpoint(handleTestVoiceHttpRequest);
-        Zotero.Server.Endpoints['/beaver/test/ping'] =
+        endpoints['/beaver/test/voice'] = createEndpoint(handleTestVoiceHttpRequest);
+        endpoints['/beaver/test/ping'] =
             createEndpoint(handleTestPingHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/cache-metadata'] =
+        endpoints['/beaver/test/cache-metadata'] =
             createEndpoint(handleTestCacheMetadataHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/cache-payload'] =
+        endpoints['/beaver/test/cache-payload'] =
             createEndpoint(handleTestCachePayloadHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/cache-invalidate'] =
+        endpoints['/beaver/test/cache-invalidate'] =
             createEndpoint(handleTestCacheInvalidateHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/cache-seed-page-labels'] =
+        endpoints['/beaver/test/cache-seed-page-labels'] =
             createEndpoint(handleTestCacheSeedPageLabelsHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/cache-clear-all'] =
+        endpoints['/beaver/test/cache-clear-all'] =
             createEndpoint(handleTestCacheClearAllHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/cache-stats'] =
+        endpoints['/beaver/test/cache-stats'] =
             createEndpoint(handleTestCacheStatsHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/read-attachment'] =
+        endpoints['/beaver/test/read-attachment'] =
             createEndpoint(handleTestReadAttachmentHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/mcp-read-note'] =
+        endpoints['/beaver/test/mcp-read-note'] =
             createEndpoint(handleTestMcpReadNoteHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/mcp-create-note'] =
+        endpoints['/beaver/test/mcp-create-note'] =
             createEndpoint(handleTestMcpCreateNoteHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/resolve-item'] =
+        endpoints['/beaver/test/resolve-item'] =
             createEndpoint(handleTestResolveItemHttpRequest);
-        Zotero.Server.Endpoints['/beaver/test/resolve-readable'] =
+        endpoints['/beaver/test/resolve-readable'] =
             createEndpoint(handleTestResolveReadableHttpRequest);
-        Zotero.Server.Endpoints['/beaver/test/best-epub-attachment'] =
+        endpoints['/beaver/test/best-epub-attachment'] =
             createEndpoint(handleTestBestEpubAttachmentHttpRequest);
-        Zotero.Server.Endpoints['/beaver/test/validate-item'] =
+        endpoints['/beaver/test/validate-item'] =
             createEndpoint(handleTestValidateItemHttpRequest);
-        Zotero.Server.Endpoints['/beaver/test/validate-regular-item'] =
+        endpoints['/beaver/test/validate-regular-item'] =
             createEndpoint(handleTestValidateRegularItemHttpRequest);
 
         // External-file attach/delete/view-images (dev-only; seeds the registry for live tests)
-        Zotero.Server.Endpoints['/beaver/test/external-file-attach'] =
+        endpoints['/beaver/test/external-file-attach'] =
             createEndpoint(handleTestExternalFileAttachHttpRequest);
-        Zotero.Server.Endpoints['/beaver/test/external-file-delete'] =
+        endpoints['/beaver/test/external-file-delete'] =
             createEndpoint(handleTestExternalFileDeleteHttpRequest);
-        Zotero.Server.Endpoints['/beaver/test/external-file-view-images'] =
+        endpoints['/beaver/test/external-file-view-images'] =
             createEndpoint(handleTestExternalFileViewImagesHttpRequest);
 
         // Serialized PDF document-request wire path (dev-only): exercises the
         // websocket response mode, PreparedJsonMessage splice, and
         // guardSerializedPayloadSize that the object-mode endpoint skips.
-        Zotero.Server.Endpoints['/beaver/test/document-serialized'] =
+        endpoints['/beaver/test/document-serialized'] =
             createEndpoint(handleTestDocumentSerializedHttpRequest);
 
         // Batch progress bar preview (dev-only): stage a synthetic stamp so the
         // bar can be inspected in every operation and ledger state without
         // paying for a real batch run of each.
-        Zotero.Server.Endpoints['/beaver/test/batch-progress-preview'] =
+        endpoints['/beaver/test/batch-progress-preview'] =
             createEndpoint(handleBatchProgressPreview);
 
-        Zotero.Server.Endpoints['/beaver/test/batch-progress-clear'] =
+        endpoints['/beaver/test/batch-progress-clear'] =
             createEndpoint(handleBatchProgressClear);
 
         // MuPDF worker singleton stats / lifecycle (dev-only)
-        Zotero.Server.Endpoints['/beaver/test/worker-stats'] =
+        endpoints['/beaver/test/worker-stats'] =
             createEndpoint(handleTestWorkerStatsHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/worker-mark-stale'] =
+        endpoints['/beaver/test/worker-mark-stale'] =
             createEndpoint(handleTestWorkerMarkStaleHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/worker-cache-clear'] =
+        endpoints['/beaver/test/worker-cache-clear'] =
             createEndpoint(handleTestWorkerCacheClearHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/worker-wedge-probe'] =
+        endpoints['/beaver/test/worker-wedge-probe'] =
             createEndpoint(handleTestWorkerWedgeProbeHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/worker-idle-probe'] =
+        endpoints['/beaver/test/worker-idle-probe'] =
             createEndpoint(handleTestWorkerIdleProbeHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/worker-realm-probe'] =
+        endpoints['/beaver/test/worker-realm-probe'] =
             createEndpoint(handleTestWorkerRealmProbeHttpRequest);
 
         // File-status side-effect trigger (dev-only)
-        Zotero.Server.Endpoints['/beaver/test/file-status'] =
+        endpoints['/beaver/test/file-status'] =
             createEndpoint(handleTestFileStatusHttpRequest);
 
         // Note-specific test endpoints (seeding/teardown/inspection/undo)
-        Zotero.Server.Endpoints['/beaver/test/note-create'] =
+        endpoints['/beaver/test/note-create'] =
             createEndpoint(handleTestNoteCreateHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/note-delete'] =
+        endpoints['/beaver/test/note-delete'] =
             createEndpoint(handleTestNoteDeleteHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/note-read'] =
+        endpoints['/beaver/test/note-read'] =
             createEndpoint(handleTestNoteReadHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/note-open-editor'] =
+        endpoints['/beaver/test/note-open-editor'] =
             createEndpoint(handleTestNoteOpenEditorHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/note-close-editor'] =
+        endpoints['/beaver/test/note-close-editor'] =
             createEndpoint(handleTestNoteCloseEditorHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/note-undo'] =
+        endpoints['/beaver/test/note-undo'] =
             createEndpoint(handleTestNoteUndoHttpRequest);
 
         // Collection seeding/teardown (dev-only)
-        Zotero.Server.Endpoints['/beaver/test/collection-create'] =
+        endpoints['/beaver/test/collection-create'] =
             createEndpoint(handleTestCollectionCreateHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/collection-delete'] =
+        endpoints['/beaver/test/collection-delete'] =
             createEndpoint(handleTestCollectionDeleteHttpRequest);
 
         // PDF-retrieval measurement (dev-only)
-        Zotero.Server.Endpoints['/beaver/test/pdf-retrieval'] =
+        endpoints['/beaver/test/pdf-retrieval'] =
             createEndpoint(handleTestPdfRetrievalHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/pdf-captcha-eligibility'] =
+        endpoints['/beaver/test/pdf-captcha-eligibility'] =
             createEndpoint(handleTestPdfCaptchaEligibilityHttpRequest);
 
         // Headless PDF annotation primitives (dev-only)
-        Zotero.Server.Endpoints['/beaver/test/annotation-create'] =
+        endpoints['/beaver/test/annotation-create'] =
             createEndpoint(handleTestAnnotationCreateHttpRequest);
 
         // MuPDF worker plumbing (dev-only)
-        Zotero.Server.Endpoints['/beaver/test/pdf-page-count'] =
+        endpoints['/beaver/test/pdf-page-count'] =
             createEndpoint(handleTestPdfPageCountHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/pdf-page-labels'] =
+        endpoints['/beaver/test/pdf-page-labels'] =
             createEndpoint(handleTestPdfPageLabelsHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/pdf-render-pages'] =
+        endpoints['/beaver/test/pdf-render-pages'] =
             createEndpoint(handleTestPdfRenderPagesHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/pdf-render-pages-with-meta'] =
+        endpoints['/beaver/test/pdf-render-pages-with-meta'] =
             createEndpoint(handleTestPdfRenderPagesWithMetaHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/pdf-extract-raw-detailed'] =
+        endpoints['/beaver/test/pdf-extract-raw-detailed'] =
             createEndpoint(handleTestPdfExtractRawDetailedHttpRequest);
 
         // orchestration parity endpoints
-        Zotero.Server.Endpoints['/beaver/test/pdf-extract'] =
+        endpoints['/beaver/test/pdf-extract'] =
             createEndpoint(handleTestPdfExtractHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/pdf-extract-paragraph'] =
+        endpoints['/beaver/test/pdf-extract-paragraph'] =
             createEndpoint(handleTestPdfExtractParagraphHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/pdf-has-text-layer'] =
+        endpoints['/beaver/test/pdf-has-text-layer'] =
             createEndpoint(handleTestPdfHasTextLayerHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/pdf-analyze-ocr'] =
+        endpoints['/beaver/test/pdf-analyze-ocr'] =
             createEndpoint(handleTestPdfAnalyzeOcrHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/pdf-search-scored'] =
+        endpoints['/beaver/test/pdf-search-scored'] =
             createEndpoint(handleTestPdfSearchScoredHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/pdf-sentence-bboxes'] =
+        endpoints['/beaver/test/pdf-sentence-bboxes'] =
             createEndpoint(handleTestPdfSentenceBBoxesHttpRequest);
 
         // Bbox overlay endpoint — paints columns/lines/items/paragraphs/sentences/
         // margins on a rendered page PNG for headless agent debugging.
-        Zotero.Server.Endpoints['/beaver/test/pdf-render-overlay'] =
+        endpoints['/beaver/test/pdf-render-overlay'] =
             createEndpoint(handleTestPdfRenderOverlayHttpRequest);
 
         // Per-page extract trace — emits every stage of the extraction
         // pipeline as JSON with cross-stage IDs, so an agent can trace
         // one piece of text from raw line through items to sentences.
-        Zotero.Server.Endpoints['/beaver/test/pdf-extract-trace'] =
+        endpoints['/beaver/test/pdf-extract-trace'] =
             createEndpoint(handleTestPdfExtractTraceHttpRequest);
 
         // Full analysis context (style profile + margin analysis + margin
@@ -1266,226 +1092,218 @@ function registerEndpoints(): boolean {
         // "structured" })` runs before per-page processing. Backs the
         // `level: "margins"` overlay and is also exposed standalone for
         // debugging.
-        Zotero.Server.Endpoints['/beaver/test/pdf-analyze-layout'] =
+        endpoints['/beaver/test/pdf-analyze-layout'] =
             createEndpoint(handleTestPdfAnalyzeLayoutHttpRequest);
 
         // EPUB extraction over a raw file path / attachment (corpus triage)
-        Zotero.Server.Endpoints['/beaver/test/epub-extract'] =
+        endpoints['/beaver/test/epub-extract'] =
             createEndpoint(handleTestEpubExtractHttpRequest);
 
         // Snapshot extraction over a raw HTML file path / attachment
-        Zotero.Server.Endpoints['/beaver/test/snapshot-extract'] =
+        endpoints['/beaver/test/snapshot-extract'] =
             createEndpoint(handleTestSnapshotExtractHttpRequest);
 
         // Generated HTML report stored as a snapshot attachment
-        Zotero.Server.Endpoints['/beaver/test/create-report'] =
+        endpoints['/beaver/test/create-report'] =
             createEndpoint(handleTestCreateReportHttpRequest);
 
         // EPUB annotation CFI/sortIndex parity: headless resolver vs the reader's
         // own getAnnotationFromRange for the same target.
-        Zotero.Server.Endpoints['/beaver/test/epub-annotation-parity'] =
+        endpoints['/beaver/test/epub-annotation-parity'] =
             createEndpoint(handleTestEpubAnnotationParityHttpRequest);
 
         // Snapshot annotation selector/sortIndex parity.
-        Zotero.Server.Endpoints['/beaver/test/snapshot-annotation-parity'] =
+        endpoints['/beaver/test/snapshot-annotation-parity'] =
             createEndpoint(handleTestSnapshotAnnotationParityHttpRequest);
 
         // Reader position (`getCurrentPage` / `content_kind`) and the EPUB
         // citation-navigation path against the live reader.
-        Zotero.Server.Endpoints['/beaver/test/reader-state'] =
+        endpoints['/beaver/test/reader-state'] =
             createEndpoint(handleTestReaderStateHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/epub-citation-navigate'] =
+        endpoints['/beaver/test/epub-citation-navigate'] =
             createEndpoint(handleTestEpubCitationNavigateHttpRequest);
 
         // Citation host: itemData.resolveItemDisplay (icon item type +
         // readable-attachment availability for cited-source rows).
-        Zotero.Server.Endpoints['/beaver/test/resolve-item-display'] =
+        endpoints['/beaver/test/resolve-item-display'] =
             createEndpoint(handleTestResolveItemDisplayHttpRequest);
 
         // Background queue (dev-only)
-        Zotero.Server.Endpoints['/beaver/test/background-enqueue'] =
+        endpoints['/beaver/test/background-enqueue'] =
             createEndpoint(handleTestBackgroundEnqueueHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/background-stats'] =
+        endpoints['/beaver/test/background-stats'] =
             createEndpoint(handleTestBackgroundStatsHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/background-peek'] =
+        endpoints['/beaver/test/background-peek'] =
             createEndpoint(handleTestBackgroundPeekHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/background-process-once'] =
+        endpoints['/beaver/test/background-process-once'] =
             createEndpoint(handleTestBackgroundProcessOnceHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/background-clear'] =
+        endpoints['/beaver/test/background-clear'] =
             createEndpoint(handleTestBackgroundClearHttpRequest);
 
         // Pref control (dev-only)
-        Zotero.Server.Endpoints['/beaver/test/set-pref'] =
+        endpoints['/beaver/test/set-pref'] =
             createEndpoint(handleTestSetPrefHttpRequest);
 
         // Sync-suppression control/inspection (dev-only): drives the real
         // syncPause module + raw Sync.Runner contract for live tests.
-        Zotero.Server.Endpoints['/beaver/test/sync-pause'] =
+        endpoints['/beaver/test/sync-pause'] =
             createEndpoint(handleTestSyncPauseHttpRequest);
 
         // Reader sidebar-width wrapper lifecycle (dev-only): drives the real
         // dispatcher install/unwrap/restore path against Zotero.Reader.
-        Zotero.Server.Endpoints['/beaver/test/sidebar-width-handler'] =
+        endpoints['/beaver/test/window-runtime'] =
+            createEndpoint(handleTestWindowRuntimeHttpRequest);
+
+        endpoints['/beaver/test/sidebar-width-handler'] =
             createEndpoint(handleTestSidebarWidthHandlerHttpRequest);
 
         // Provider-mode connection control (dev-only manual trigger/inspection)
-        Zotero.Server.Endpoints['/beaver/test/provider-connect'] =
+        endpoints['/beaver/test/provider-connect'] =
             createEndpoint(handleTestProviderConnectHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/provider-status'] =
+        endpoints['/beaver/test/provider-status'] =
             createEndpoint(handleTestProviderStatusHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/provider-close'] =
+        endpoints['/beaver/test/provider-close'] =
             createEndpoint(handleTestProviderCloseHttpRequest);
 
         // Library-exclusion control/inspection (dev-only): drives the in-memory
         // excluded-libraries set that gates every read/write path.
-        Zotero.Server.Endpoints['/beaver/test/excluded-libraries'] =
+        endpoints['/beaver/test/excluded-libraries'] =
             createEndpoint(handleTestExcludedLibrariesHttpRequest);
 
         // Exclusion-gated handlers that have no production HTTP route.
-        Zotero.Server.Endpoints['/beaver/test/get-annotations'] =
+        endpoints['/beaver/test/get-annotations'] =
             createEndpoint(handleTestGetAnnotationsHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/view-images'] =
+        endpoints['/beaver/test/view-images'] =
             createEndpoint(handleTestViewImagesHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/attachment-image'] =
+        endpoints['/beaver/test/attachment-image'] =
             createEndpoint(handleTestAttachmentImageHttpRequest);
 
         // Device-portable library-identity resolvers (dev-only): thin wrappers
         // over libraryRefForLibraryID / parseLibraryRef / resolveLibraryRef /
         // resolveItemReference so live tests can assert them against real
         // personal + group libraries.
-        Zotero.Server.Endpoints['/beaver/test/library-identity'] =
+        endpoints['/beaver/test/library-identity'] =
             createEndpoint(handleTestLibraryIdentityHttpRequest);
         // Headless chat/run lifecycle (dev-only): trigger the real send/approval/
         // undo path over HTTP by writing the same Jotai action atoms the UI writes,
         // so an automated agent can drive full agent runs without poking the
         // Lexical editor (which can't be reliably driven by synthetic events).
-        Zotero.Server.Endpoints['/beaver/test/new-thread'] =
+        endpoints['/beaver/test/new-thread'] =
             createEndpoint(handleTestNewThreadHttpRequest);
-        Zotero.Server.Endpoints['/beaver/test/chat-send'] =
+        endpoints['/beaver/test/chat-send'] =
             createEndpoint(handleTestChatSendHttpRequest);
-        Zotero.Server.Endpoints['/beaver/test/current-ids'] =
+        endpoints['/beaver/test/current-ids'] =
             createEndpoint(handleTestCurrentIdsHttpRequest);
-        Zotero.Server.Endpoints['/beaver/test/load-thread'] =
+        endpoints['/beaver/test/load-thread'] =
             createEndpoint(handleTestLoadThreadHttpRequest);
-        Zotero.Server.Endpoints['/beaver/test/list-actions'] =
+        endpoints['/beaver/test/list-actions'] =
             createEndpoint(handleTestListActionsHttpRequest);
-        Zotero.Server.Endpoints['/beaver/test/approve-action'] =
+        endpoints['/beaver/test/approve-action'] =
             createEndpoint(handleTestApproveActionHttpRequest);
-        Zotero.Server.Endpoints['/beaver/test/confirm-credits'] =
+        endpoints['/beaver/test/confirm-credits'] =
             createEndpoint(handleTestConfirmCreditsHttpRequest);
-        Zotero.Server.Endpoints['/beaver/test/undo-action'] =
+        endpoints['/beaver/test/undo-action'] =
             createEndpoint(handleTestUndoActionHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/application-state'] =
+        endpoints['/beaver/test/application-state'] =
             createEndpoint(handleTestApplicationStateHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/beaver-window'] =
+        endpoints['/beaver/test/beaver-window'] =
             createEndpoint(handleTestBeaverWindowHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/open-table'] =
+        endpoints['/beaver/test/open-table'] =
             createEndpoint(handleTestOpenTableHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/close-table'] =
+        endpoints['/beaver/test/close-table'] =
             createEndpoint(handleTestCloseTableHttpRequest);
 
         // `openTable` itself — the product path the item-pane button takes.
-        Zotero.Server.Endpoints['/beaver/test/open-stored-table'] =
+        endpoints['/beaver/test/open-stored-table'] =
             createEndpoint(handleTestOpenStoredTableHttpRequest);
 
         // Stored tables (dev-only): create the real snapshot attachment, read
         // the spec back out of the file, and list what is in the library.
-        Zotero.Server.Endpoints['/beaver/test/table-create'] =
+        endpoints['/beaver/test/table-create'] =
             createEndpoint(handleTestTableCreateHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/table-read'] =
+        endpoints['/beaver/test/table-read'] =
             createEndpoint(handleTestTableReadHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/table-list'] =
+        endpoints['/beaver/test/table-list'] =
             createEndpoint(handleTestTableListHttpRequest);
 
         // The versioned store (dev-only): the write protocol, the version log,
         // revert, trash/restore, and the crash recovery `open` performs.
         // `table-corrupt` damages the storage directory on purpose so that
         // recovery can be exercised without staging a real crash.
-        Zotero.Server.Endpoints['/beaver/test/table-write'] =
+        endpoints['/beaver/test/table-write'] =
             createEndpoint(handleTestTableWriteHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/table-edit'] =
+        endpoints['/beaver/test/table-edit'] =
             createEndpoint(handleTestTableEditHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/table-versions'] =
+        endpoints['/beaver/test/table-versions'] =
             createEndpoint(handleTestTableVersionsHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/table-revert'] =
+        endpoints['/beaver/test/table-revert'] =
             createEndpoint(handleTestTableRevertHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/table-delete'] =
+        endpoints['/beaver/test/table-delete'] =
             createEndpoint(handleTestTableDeleteHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/table-open'] =
+        endpoints['/beaver/test/table-open'] =
             createEndpoint(handleTestTableOpenHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/table-corrupt'] =
+        endpoints['/beaver/test/table-corrupt'] =
             createEndpoint(handleTestTableCorruptHttpRequest);
 
         // The recovery shadow (dev-only): what this device last wrote to a
         // table, whether the table has gone backwards under it, and putting
         // this device's version back.
-        Zotero.Server.Endpoints['/beaver/test/table-shadow'] =
+        endpoints['/beaver/test/table-shadow'] =
             createEndpoint(handleTestTableShadowHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/table-restore-shadow'] =
+        endpoints['/beaver/test/table-restore-shadow'] =
             createEndpoint(handleTestTableRestoreShadowHttpRequest);
 
         // The reader host (dev-only): open a stored table in the reader and
         // report which of the enhancer's seams attached, and list every table
         // document currently enhanced in either host.
-        Zotero.Server.Endpoints['/beaver/test/table-open-reader'] =
+        endpoints['/beaver/test/table-open-reader'] =
             createEndpoint(handleTestTableOpenReaderHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/table-view-state'] =
+        endpoints['/beaver/test/table-view-state'] =
             createEndpoint(handleTestTableViewStateHttpRequest);
 
         // The item-pane section (dev-only): whether it is registered, and the
         // fields it would render for one table.
-        Zotero.Server.Endpoints['/beaver/test/table-item-pane'] =
+        endpoints['/beaver/test/table-item-pane'] =
             createEndpoint(handleTestTableItemPaneHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/beaver-sidebar'] =
+        endpoints['/beaver/test/beaver-sidebar'] =
             createEndpoint(handleTestBeaverSidebarHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/select-tab'] =
+        endpoints['/beaver/test/select-tab'] =
             createEndpoint(handleTestSelectTabHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/run-status-popup'] =
+        endpoints['/beaver/test/run-status-popup'] =
             createEndpoint(handleTestRunStatusPopupHttpRequest);
     }
 
-    logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
-    return true;
-}
-
-function unregisterEndpoints(): void {
-    if (!Zotero?.Server?.Endpoints) {
-        return;
-    }
-    
-    for (const path of ENDPOINT_PATHS) {
-        if (Zotero.Server.Endpoints[path]) {
-            delete Zotero.Server.Endpoints[path];
-        }
-    }
-    
-    logger('useHttpEndpoints: Unregistered HTTP endpoints', 3);
+    const releases = Object.entries(endpoints).map(([path, handler]) =>
+        Zotero.Beaver.runtime.registerWindowEndpoint(runtime, path, handler),
+    );
+    logger(`useHttpEndpoints: Registered ${releases.length} HTTP endpoints`, 3);
+    return () => { for (const release of releases) release(); };
 }
 
 
@@ -1514,21 +1332,6 @@ export function useHttpEndpoints() {
         }
 
         logger('useHttpEndpoints: Registering endpoints (authenticated)', 3);
-        const registered = registerEndpoints();
-        const runtime = tryGetWindowRuntime();
-        const releaseRuntimeEndpoint = registered && runtime && process.env.NODE_ENV === 'development'
-            ? Zotero.Beaver.runtime.registerWindowEndpoint(
-                runtime, '/beaver/test/window-runtime', createEndpoint(handleTestWindowRuntimeHttpRequest),
-            )
-            : undefined;
-
-        // Cleanup on unmount or when auth state changes
-        return () => {
-            releaseRuntimeEndpoint?.();
-            if (registered) {
-                logger('useHttpEndpoints: Cleaning up endpoints', 3);
-                unregisterEndpoints();
-            }
-        };
+        return registerEndpoints();
     }, [isAuthenticated]);
 }

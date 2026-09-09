@@ -17,6 +17,8 @@
  *
  * Prerequisites (per tests/README.md):
  *   - Dev build of Beaver loaded in a running Zotero (NODE_ENV=development).
+ *   - Exactly one main window: the helpers use global reader lookup, which can
+ *     select a fixture in another window while inspecting this renderer’s store.
  *   - Logged in with the profile loaded (tracking is gated on library access).
  *   - The `SMALL_PDF` and `NORMAL_PDF` fixtures present and not excluded; the
  *     cross-library test additionally needs `GROUP_LIB_PDF` and skips without it.
