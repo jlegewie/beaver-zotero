@@ -2175,8 +2175,9 @@ describe('Page label translation during citation expansion', () => {
             libraryID: 1,
             getField: vi.fn(() => 'Test Paper'),
             isAttachment: vi.fn(() => true),
+            parentID: 999,
             isRegularItem: vi.fn(() => false),
-            parentItem: null,
+            parentItem: { id: 999, isRegularItem: () => true },
             getAttachments: vi.fn(() => []),
         };
         (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
@@ -2202,8 +2203,9 @@ describe('Page label translation during citation expansion', () => {
             libraryID: 1,
             getField: vi.fn(() => 'Test Paper'),
             isAttachment: vi.fn(() => true),
+            parentID: 999,
             isRegularItem: vi.fn(() => false),
-            parentItem: null,
+            parentItem: { id: 999, isRegularItem: () => true },
             getAttachments: vi.fn(() => []),
         };
         (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
@@ -2227,8 +2229,9 @@ describe('Page label translation during citation expansion', () => {
             libraryID: 1,
             getField: vi.fn(() => 'Test Paper'),
             isAttachment: vi.fn(() => true),
+            parentID: 999,
             isRegularItem: vi.fn(() => false),
-            parentItem: null,
+            parentItem: { id: 999, isRegularItem: () => true },
             getAttachments: vi.fn(() => []),
         };
         (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
@@ -2270,6 +2273,7 @@ describe('Page label translation during citation expansion', () => {
             libraryID: 1,
             getField: vi.fn(() => 'New Paper'),
             isAttachment: vi.fn(() => true),
+            parentID: 999,
             isRegularItem: vi.fn(() => false),
             getAttachments: vi.fn(() => []),
         };
@@ -2300,6 +2304,7 @@ describe('Page label translation during citation expansion', () => {
             libraryID: 1,
             getField: vi.fn(() => 'New Paper'),
             isAttachment: vi.fn(() => true),
+            parentID: 999,
             isRegularItem: vi.fn(() => false),
             getAttachments: vi.fn(() => []),
         };
@@ -2332,8 +2337,9 @@ describe('Page label translation during citation expansion', () => {
             libraryID: 1,
             getField: vi.fn(() => 'Paper'),
             isAttachment: vi.fn(() => true),
+            parentID: 999,
             isRegularItem: vi.fn(() => false),
-            parentItem: null,
+            parentItem: { id: 999, isRegularItem: () => true },
             getAttachments: vi.fn(() => []),
         };
         (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
@@ -2380,8 +2386,9 @@ describe('Page label translation during citation expansion', () => {
             libraryID: 1,
             getField: vi.fn(() => 'Paper'),
             isAttachment: vi.fn(() => true),
+            parentID: 999,
             isRegularItem: vi.fn(() => false),
-            parentItem: null,
+            parentItem: { id: 999, isRegularItem: () => true },
             getAttachments: vi.fn(() => []),
         };
         (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
