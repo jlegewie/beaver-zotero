@@ -143,11 +143,11 @@ describe('the batch progress bar, opened', () => {
         expect(body?.props.maxRows).toBe(5);
     });
 
-    it('does not offer its rows as places to go', () => {
+    it('offers its rows as places to go, like the receipt', () => {
         const body = outcomeBody(renderExpanded(batch));
         // Assert the body was found first: `undefined?.props` is falsy too, and
         // a walker that stopped matching would pass this test in silence.
         expect(body).not.toBeNull();
-        expect(body?.props.revealTargets).toBeFalsy();
+        expect(body?.props.revealTargets).toBe(true);
     });
 });

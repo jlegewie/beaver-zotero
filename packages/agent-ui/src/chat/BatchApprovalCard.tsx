@@ -63,6 +63,12 @@ export interface BatchApprovalCardProps {
     approval: PendingBatchApproval;
     /** The user's decision, ready for the wire. */
     onSubmit: (response: BatchApprovalDecision) => void;
+    /**
+     * A control of the host's own at the end of the title row — a popup's
+     * close button. The card is the whole of that surface, so the row that
+     * names the batch is where such a control belongs.
+     */
+    titleTrailing?: React.ReactNode;
 }
 
 /**
@@ -105,6 +111,7 @@ export interface BatchApprovalCardProps {
 export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
     approval,
     onSubmit,
+    titleTrailing,
 }) => {
     const [draft, setDraft] = useState<BatchApprovalDraft>(
         () => initialDraft(approval.defaultMode, approval.userInstructionsPrefill),
@@ -181,9 +188,9 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                         >
                             {approval.title}
                         </div>
+                        {(approval.creditChip || titleTrailing) && <div className="flex-1" />}
                         {approval.creditChip && (
                             <>
-                                <div className="flex-1" />
                                 {/* flex-none wrapper so the popup is not a
                                     sibling of this wrapping min-w-0 row — an
                                     in-flow tooltip is measured as a flex item,
@@ -213,6 +220,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                                 </div>
                             </>
                         )}
+                        {titleTrailing && <div className="flex-none">{titleTrailing}</div>}
                     </div>
                     <div className="font-color-secondary min-w-0">
                         <span className="font-color-primary font-medium">

@@ -8,6 +8,16 @@ import { batchProgressAtom } from '../../atoms/agentRunAtoms';
 /** How long a finished batch's bar stays up so the completion tick is visible. */
 const COMPLETION_DWELL_MS = 2500;
 
+interface BatchProgressPanelProps {
+    /**
+     * Expansion owned by the host, for a surface that remounts this panel
+     * while the batch it draws is the same — the status popup swaps its card
+     * as the run moves between working and waiting. Uncontrolled when absent.
+     */
+    expanded?: boolean;
+    onExpandedChange?: (expanded: boolean) => void;
+}
+
 /**
  * Live batch progress above the composer.
  *
@@ -24,14 +34,16 @@ const COMPLETION_DWELL_MS = 2500;
  * the stamp, expanded or not. A collapsed panel still disappears as soon as
  * the stamp does — the receipt has it then.
  */
-const BatchProgressPanel: React.FC = () => {
+const BatchProgressPanel: React.FC<BatchProgressPanelProps> = ({ expanded, onExpandedChange }) => {
     const stamp = useAtomValue(batchProgressAtom);
 
     const { tracked, queued } = useMemo(() => selectBatchPanelGroups(stamp), [stamp]);
     const trackedIsOpen = !!tracked && !hasBatchEnded(tracked);
 
     const [held, setHeld] = useState<BatchProgressEntry | null>(null);
-    const [isExpanded, setIsExpanded] = useState(false);
+    const [ownExpanded, setOwnExpanded] = useState(false);
+    const isExpanded = expanded ?? ownExpanded;
+    const setIsExpanded = onExpandedChange ?? setOwnExpanded;
     // True from the first open stamp we drew until that batch is parked in `held`.
     // The ending render still sees this, so the bar stays mounted (and expanded).
     const drewLiveRef = useRef(false);

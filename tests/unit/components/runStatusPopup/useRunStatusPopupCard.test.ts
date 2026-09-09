@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
     setRunPermissionMode: vi.fn(),
     sendCreditConfirmation: vi.fn(),
     sendQuestionResponse: vi.fn(),
+    sendBatchApproval: vi.fn(),
     dismissPreview: vi.fn(async () => {}),
     openNoteByKey: vi.fn(),
     artifactRows: [] as any[],
@@ -55,6 +56,7 @@ vi.mock('../../../../react/atoms/agentRunAtoms', async () => {
         setRunPermissionModeAtom: atom(null, (_get, _set, args: unknown) => mocks.setRunPermissionMode(args)),
         sendCreditConfirmationResponseAtom: atom(null, (_get, _set, args: unknown) => mocks.sendCreditConfirmation(args)),
         sendAskUserQuestionResponseAtom: atom(null, (_get, _set, args: unknown) => mocks.sendQuestionResponse(args)),
+        sendBatchApprovalResponseAtom: atom(null, (_get, _set, args: unknown) => mocks.sendBatchApproval(args)),
     };
 });
 vi.mock('../../../../react/host/zotero/editNotePreviewLifecycle', () => ({
@@ -191,6 +193,13 @@ describe('while a run waits on the user', () => {
     const approval = (actionId: string, actionType = 'edit_metadata') => ({
         actionId, toolcallId: `tc-${actionId}`, actionType, actionData: {},
     });
+    const batchApproval = (approvalId: string) => ({
+        approvalId, runId: 'run-1', toolcallId: `tc-${approvalId}`, batchId: 'batch', title: 'Summarize each paper',
+        scopePrimary: '184 items', scopeSecondary: 'in Methods', message: 'One note per item', destructiveWarning: '',
+        costWarning: '', creditChip: '', creditTooltip: '', defaultMode: 'ask_each_time' as const, approveLabel: 'Start',
+        declineLabel: 'Cancel', declineWithInstructionsLabel: 'Cancel', userInstructionsPrefill: '', readOnly: false,
+        timeoutSeconds: 300,
+    });
 
     it('offers the pending change with its controls', async () => {
         store.set(activeRunAtom, run({ status: 'awaiting_deferred' }));
@@ -254,16 +263,23 @@ describe('while a run waits on the user', () => {
         }]]));
         expect(latest).toMatchObject({ kind: 'credit', title: 'Continue past 50 credits?', approveLabel: 'Continue', declineLabel: 'Wrap up' });
 
-        set(pendingBatchApprovalsAtom, new Map([['b', {
-            approvalId: 'b', runId: 'run-1', toolcallId: 'tc-b', batchId: 'batch', title: 'Summarize each paper',
-            scopePrimary: '184 items', scopeSecondary: 'in Methods', message: '', destructiveWarning: '', costWarning: '',
-            creditChip: '', creditTooltip: '', defaultMode: 'ask', approveLabel: 'Start', declineLabel: 'Cancel',
-            declineWithInstructionsLabel: 'Cancel', userInstructionsPrefill: '', readOnly: false, timeoutSeconds: 300,
-        }]]));
-        expect(latest).toMatchObject({ kind: 'batch', title: 'Summarize each paper', scope: '184 items in Methods' });
+        set(pendingBatchApprovalsAtom, new Map([['b', batchApproval('b')]]));
+        expect(latest).toMatchObject({ kind: 'batch', approval: { approvalId: 'b', title: 'Summarize each paper' } });
 
         set(pendingApprovalsAtom as any, new Map([['a', approval('a')]]));
         expect(latest?.kind).toBe('approval');
+    });
+
+    it('hands the batch request to the card whole and sends its decision on the wire', () => {
+        store.set(activeRunAtom, run({ status: 'awaiting_deferred' }));
+        store.set(pendingBatchApprovalsAtom, new Map([['b', batchApproval('b')]]));
+        mount();
+
+        expect(latest?.kind).toBe('batch');
+        (latest as any).onSubmit({ approved: true, mode: 'full_access', user_instructions: 'Skip reviews' });
+        expect(mocks.sendBatchApproval).toHaveBeenCalledExactlyOnceWith({
+            approvalId: 'b', approved: true, mode: 'full_access', userInstructions: 'Skip reviews',
+        });
     });
 
     it('sends a credit decision once', () => {
