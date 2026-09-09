@@ -68,7 +68,7 @@ export async function collectProcessingStatus(
     const [queue, ledger, failures, issues, coverage, documentCache] = await Promise.all([
         db.getBackgroundQueueStats(Date.now()),
         db.getAttachmentProcessingAggregates(options.libraryId, {
-            ocr: hasOcrAccess || hasSearchIndexAccess,
+            ocr: hasOcrAccess,
             upsert: hasSearchIndexAccess,
         }),
         options.includeFailures
@@ -88,7 +88,7 @@ export async function collectProcessingStatus(
     const lanes = extractor?.getLaneStatus?.() ?? {};
     const activeTypes = Object.keys(lanes).filter((type) =>
         (type !== 'fulltext_upsert' || hasSearchIndexAccess)
-        && (type !== 'document_ocr' || hasOcrAccess || hasSearchIndexAccess));
+        && (type !== 'document_ocr' || hasOcrAccess));
     const activeQueue = await db.getBackgroundQueueStats(Date.now(), activeTypes);
     const worker: BackgroundWorkerSnapshot = {
         available: activeQueue.available,

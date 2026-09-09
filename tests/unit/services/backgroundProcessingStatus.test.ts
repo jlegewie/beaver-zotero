@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { collectProcessingStatus } from '../../../src/services/backgroundProcessing/statusSnapshot';
+import { BeaverDB } from '../../../src/services/database';
+import { MockDBConnection } from '../../mocks/mockDBConnection';
 
 vi.mock('../../../src/utils/zoteroUtils', () => ({ getZoteroUserIdentifier: vi.fn() }));
 vi.mock('../../../src/services/searchIndex/searchIndexApiClient', () => ({ searchIndexApiClient: {} }));
@@ -7,6 +9,38 @@ vi.mock('../../../src/services/searchIndex/searchIndexApiClient', () => ({ searc
 afterEach(() => vi.unstubAllGlobals());
 
 describe('processing status runnable lanes', () => {
+    it.each([
+        [false, false], [false, true], [true, false], [true, true],
+    ])('uses OCR entitlement independently of search access (%s, %s)', async (hasOcrAccess, hasSearchIndexAccess) => {
+        const connection = new MockDBConnection();
+        const db = new BeaverDB(connection);
+        try {
+            await db.initDatabase('0.99.0');
+            await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'SCANNED0', contentKind: 'pdf' });
+            await connection.queryAsync("UPDATE attachment_processing_state SET extract_status = 'done', ocr_status = 'needed'");
+            await db.enqueueBackgroundJob({
+                jobType: 'document_ocr', libraryId: 1, zoteroKey: 'SCANNED0',
+                contentKind: 'pdf', payloadKind: 'structured', now: 0,
+            });
+            vi.stubGlobal('Zotero', { Beaver: {
+                db,
+                backgroundExtractor: { getLaneStatus: () => ({ document_ocr: { inFlight: 0 } }) },
+            } });
+            const snapshot = await collectProcessingStatus(
+                { hasOcrAccess, hasSearchIndexAccess }, { includeFailures: true },
+            );
+            expect(snapshot.ledger).toMatchObject({
+                total: 1, readable: 0, unreadable: hasOcrAccess ? 0 : 1,
+                awaitingOcr: hasOcrAccess ? 1 : 0,
+            });
+            expect(snapshot.worker.available).toBe(hasOcrAccess ? 1 : 0);
+            expect(snapshot.issues).toEqual(hasOcrAccess ? [] : [{ reason: 'scanned', count: 1 }]);
+            if (!hasOcrAccess) expect(snapshot.ledger.oldestPendingAt).toBeNull();
+        } finally {
+            await connection.closeDatabase();
+        }
+    });
+
     it('polls only issue counts, never the complete inventory or attachment pages', async () => {
         const inventory = vi.fn(() => { throw new Error('unbounded inventory read'); });
         const page = vi.fn();
