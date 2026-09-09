@@ -2792,7 +2792,7 @@ export class BeaverDB {
         const rows: AttachmentProcessingIssueRow[] = [];
         await this.queryAsync(
             `SELECT library_id, zotero_key, extract_status, ocr_status,
-                    upsert_status, last_error, updated_at
+                    upsert_status, last_error, updated_at, content_kind
              FROM attachment_processing_state
              WHERE extract_status IN ('failed', 'skipped')
                 OR ocr_status IN ('failed', 'needed')
@@ -2807,6 +2807,7 @@ export class BeaverDB {
                 upsertStatus: row.getResultByIndex(4) ?? null,
                 lastError: row.getResultByIndex(5) ?? null,
                 updatedAt: row.getResultByIndex(6) ?? null,
+                contentKind: row.getResultByIndex(7) ?? null,
             }) },
         );
         return rows;

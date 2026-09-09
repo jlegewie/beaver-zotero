@@ -491,6 +491,41 @@ describe('BeaverDB background processing state', () => {
         expect(await db.getProcessingIssuePage(entitlements, 'ocr_failed')).toEqual([]);
     });
 
+    it.each(['file_missing', 'download_failed: 404', 'ocr_remote_download_failed: download_failed',
+        'ocr_remote_download_failed: read_failed'])('groups OCR file access failure %s as unavailable in counts and pages', async (lastError) => {
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'OCRFILE0', contentKind: 'pdf' });
+        await connection.queryAsync("UPDATE attachment_processing_state SET extract_status = 'done', ocr_status = 'failed', last_error = ?", [lastError]);
+        for (const hasOcrAccess of [true, false]) {
+            const entitlements = { hasOcrAccess, hasSearchIndexAccess: true };
+            expect(await db.getProcessingIssueCounts(entitlements)).toEqual([{ reason: 'file_unavailable', count: 1 }]);
+            expect((await db.getProcessingIssuePage(entitlements, 'file_unavailable')).map((item) => item.zoteroKey))
+                .toEqual(['OCRFILE0']);
+            expect(await db.getProcessingIssuePage(entitlements, 'ocr_failed')).toEqual([]);
+            expect(groupProcessingIssues(await db.getAttachmentProcessingIssueRows(), [], entitlements)
+                .map(({ reason, count }) => ({ reason, count })))
+                .toEqual(await db.getProcessingIssueCounts(entitlements));
+        }
+    });
+
+    it('keeps text-empty EPUBs and snapshots out of the PDF OCR group', async () => {
+        for (const contentKind of ['pdf', 'epub', 'snapshot'] as const) {
+            await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: contentKind, contentKind });
+            await db.markAttachmentExtractFailure({ libraryId: 1, zoteroKey: contentKind, status: 'failed', error: 'no_text_layer' });
+        }
+        for (const hasOcrAccess of [true, false]) {
+            const entitlements = { hasOcrAccess, hasSearchIndexAccess: true };
+            const expected = hasOcrAccess ? [{ reason: 'no_text', count: 3 }]
+                : [{ reason: 'scanned', count: 1 }, { reason: 'no_text', count: 2 }];
+            expect(await db.getProcessingIssueCounts(entitlements)).toEqual(expected);
+            expect(groupProcessingIssues(await db.getAttachmentProcessingIssueRows(), [], entitlements)
+                .map(({ reason, count }) => ({ reason, count }))).toEqual(expected);
+            expect((await db.getProcessingIssuePage(entitlements, 'scanned')).map((item) => item.zoteroKey))
+                .toEqual(hasOcrAccess ? [] : ['pdf']);
+            expect((await db.getProcessingIssuePage(entitlements, 'no_text')).map((item) => item.zoteroKey).sort())
+                .toEqual(hasOcrAccess ? ['epub', 'pdf', 'snapshot'] : ['epub', 'snapshot']);
+        }
+    });
+
     it('SQL grouping matches issue classification, with stable non-overlapping pages', async () => {
         const errors = ['file_missing', 'download_failed: 404', 'ocr load: read_failed', 'encrypted',
             'file_too_large: 120MB', 'too_many_pages', 'unsupported_type', 'wrapped: unsupported_type',

@@ -208,9 +208,10 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
         Zotero.Beaver?.backgroundExtractor?.notify();
     };
 
-    const processNow = () => {
+    const processNow = async () => {
+        await Zotero.Beaver?.processingReconciler?.reconcileNow();
         Zotero.Beaver?.backgroundExtractor?.requestImmediateDrain();
-        void refresh();
+        await refresh();
     };
 
     const cache = status.documentCache;

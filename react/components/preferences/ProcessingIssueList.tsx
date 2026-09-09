@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSetAtom } from 'jotai';
-import { isItemRow, type ItemListRow } from '@beaver/agent-core/run-state/toolResultViews';
+import { type ItemListRow } from '@beaver/agent-core/run-state/toolResultViews';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '@beaver/agent-core/transport/attachmentLimits';
 import Button from '@beaver/agent-ui/primitives/Button';
@@ -37,7 +37,7 @@ function reasonCopy(reason: ProcessingIssueReason, hasOcrAccess: boolean): Reaso
         case 'no_text':
             return {
                 title: 'No readable text',
-                description: 'Neither the file nor OCR produced any text Beaver can use.',
+                description: 'The file did not yield any readable text.',
             };
         case 'file_unavailable':
             return {
@@ -76,18 +76,6 @@ function reasonCopy(reason: ProcessingIssueReason, hasOcrAccess: boolean): Reaso
                 description: 'Beaver ran into an error while reading these files.',
             };
     }
-}
-
-/**
- * OCR is PDF-only today. EPUBs can still land in the scanned group (no text
- * layer), so reuse the item-row's right-aligned slot to say OCR will not help.
- */
-function withNoOcrLabel(rows: ItemListRow[]): ItemListRow[] {
-    return rows.map((row) => (
-        isItemRow(row) && row.content_kind === 'epub'
-            ? { ...row, location_label: 'No OCR' }
-            : row
-    ));
 }
 
 /**
@@ -136,7 +124,7 @@ const ProcessingIssuePage: React.FC<{
         void load()
             .then((hydrated) => {
                 if (!cancelled) {
-                    setRows(reason === 'scanned' ? withNoOcrLabel(hydrated) : hydrated);
+                    setRows(hydrated);
                 }
             })
             .catch((error) => {
