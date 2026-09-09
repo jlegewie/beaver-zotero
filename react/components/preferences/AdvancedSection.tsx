@@ -12,7 +12,6 @@ import { getPref, setPref } from "../../../src/utils/prefs";
 import { TickIcon, CopyIcon } from "../icons/icons";
 import { normalizeVoiceLanguage, voiceLanguages } from "../../voice/languages";
 import CustomInstructionsSection from "./CustomInstructionsSection";
-import BackgroundProcessingSection from "./BackgroundProcessingSection";
 import {
     deleteAllExternalFiles,
     getExternalFilesStats,
@@ -196,10 +195,6 @@ const AdvancedSection: React.FC = () => {
             </SettingsGroup>}
             {/* ===== CUSTOM INSTRUCTIONS ===== */}
             <CustomInstructionsSection />
-
-            {process.env.NODE_ENV === 'development' && (
-                <BackgroundProcessingSection placement="advanced" />
-            )}
 
             {/* ===== STORAGE ===== */}
             <div className="display-flex flex-row items-center gap-2" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>

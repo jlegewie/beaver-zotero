@@ -587,7 +587,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const webSearchDescription = isWebSearchAllowed
         ? (isWebSearchEnabled ? 'Web search is enabled.' : 'Web search is disabled.')
         : 'Web search is unavailable. It requires Beaver credits. Use a Beaver model, or enable Plus Tools in Settings, API Keys.';
-    const menuPortalContainer = inputRef.current?.closest('[id^="beaver-react-root-"], #beaver-pane-window') as HTMLElement | null;
+    const menuPortalContainer = inputRef.current?.closest('[id^="beaver-react-root-"], #beaver-pane-window, #beaver-pane-floating-popup') as HTMLElement | null;
 
     return (
         <div

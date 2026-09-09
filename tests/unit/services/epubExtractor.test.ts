@@ -11,6 +11,7 @@ vi.mock("../../../src/services/documentExtraction/attachmentSource", () => ({
 }));
 
 import {
+    EpubStructureError,
     extractEpubDocument,
     extractEpubDocumentFromFile,
     extractEpubDocumentSafe,
@@ -477,5 +478,195 @@ describe("extractEpubDocumentSafe", () => {
             kind: "response_error",
             code: "unsupported_type",
         });
+    });
+});
+
+/**
+ * A book whose container or OPF is unreadable can never extract, however many
+ * times it is retried, so the background queue needs to tell that apart from a
+ * transient extractor fault.
+ *
+ * The distinction cannot be drawn from *when* the failure happened: Zotero's
+ * `EPUB.mjs` resolves the OPF and reads the first spine section inside the same
+ * first `next()` call, so a transient read error and a malformed OPF both throw
+ * before anything is yielded. The extractor therefore re-reads the container
+ * after a failure and classifies on what it finds.
+ */
+describe("structural EPUB failures", () => {
+    const VALID_CONTAINER = `<?xml version="1.0"?>
+        <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+            <rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles>
+        </container>`;
+    const VALID_OPF = `<?xml version="1.0"?>
+        <package xmlns="http://www.idpf.org/2007/opf">
+            <manifest><item id="s1" href="s1.xhtml" media-type="application/xhtml+xml"/></manifest>
+            <spine><itemref idref="s1"/></spine>
+        </package>`;
+    /** An OPF that parses but has neither child EPUB.mjs requires. */
+    const OPF_WITHOUT_MANIFEST_AND_SPINE = `<?xml version="1.0"?>
+        <package xmlns="http://www.idpf.org/2007/opf"><metadata/></package>`;
+
+    const A_VALID_BOOK: Record<string, string> = {
+        "META-INF/container.xml": VALID_CONTAINER,
+        "OEBPS/content.opf": VALID_OPF,
+    };
+
+    let zipClosed = 0;
+
+    /**
+     * Back the structure probe with an in-memory archive. `null` makes opening
+     * the archive throw, standing in for a file that vanished or is unreadable.
+     */
+    function installZip(entries: Record<string, string> | null) {
+        zipClosed = 0;
+        (globalThis as any).Components = {
+            Constructor: () => class {
+                constructor() {
+                    if (entries === null) throw new Error("zip open failed");
+                }
+                hasEntry(path: string) {
+                    return Object.prototype.hasOwnProperty.call(entries ?? {}, path);
+                }
+                getInputStream(path: string) {
+                    if (!this.hasEntry(path)) throw new Error(`no entry ${path}`);
+                    return { _text: (entries ?? {})[path], close() {} };
+                }
+                close() {
+                    zipClosed += 1;
+                }
+            },
+        };
+        (globalThis as any).Zotero.File = {
+            pathToFile: (p: string) => p,
+            getContentsAsync: async (stream: any) => stream._text,
+        };
+    }
+
+    /** An EPUB module whose generator throws after `yieldCount` sections. */
+    function installFailingEpubModule(options: {
+        error: Error;
+        yieldCount?: number;
+        throwOnConstruct?: boolean;
+    }) {
+        const close = vi.fn();
+        const { error, yieldCount = 0, throwOnConstruct = false } = options;
+        (globalThis as any).ChromeUtils = {
+            importESModule: vi.fn(() => ({
+                EPUB: class {
+                    constructor() {
+                        if (throwOnConstruct) throw error;
+                    }
+                    async *getSectionDocuments() {
+                        for (let i = 0; i < yieldCount; i += 1) {
+                            yield { href: `s${i}.xhtml`, doc: parseXhtml("<p>Body text here.</p>") };
+                        }
+                        throw error;
+                    }
+                    close = close;
+                },
+            })),
+        };
+        return { close };
+    }
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        (globalThis as any).Zotero.Promise = { delay: vi.fn().mockResolvedValue(undefined) };
+    });
+
+    it("classifies a missing container.xml as structural", async () => {
+        installZip({ "OEBPS/content.opf": VALID_OPF });
+        installFailingEpubModule({ error: new Error("EPUB file does not contain container.xml") });
+
+        await expect(extractEpubDocumentFromFile("/tmp/book.epub"))
+            .rejects.toBeInstanceOf(EpubStructureError);
+    });
+
+    it("classifies a container.xml without a rootfile as structural", async () => {
+        installZip({
+            "META-INF/container.xml": `<?xml version="1.0"?><container><rootfiles/></container>`,
+        });
+        installFailingEpubModule({
+            error: new Error('container.xml does not contain <rootfile full-path="...">'),
+        });
+
+        await expect(extractEpubDocumentFromFile("/tmp/book.epub"))
+            .rejects.toBeInstanceOf(EpubStructureError);
+    });
+
+    it("classifies an OPF without manifest and spine as structural", async () => {
+        installZip({
+            "META-INF/container.xml": VALID_CONTAINER,
+            "OEBPS/content.opf": OPF_WITHOUT_MANIFEST_AND_SPINE,
+        });
+        installFailingEpubModule({
+            error: new Error("content.opf does not contain <manifest> and <spine>"),
+        });
+
+        await expect(extractEpubDocumentFromFile("/tmp/book.epub"))
+            .rejects.toBeInstanceOf(EpubStructureError);
+    });
+
+    it("preserves the original message when reclassifying", async () => {
+        installZip({ "OEBPS/content.opf": VALID_OPF });
+        installFailingEpubModule({ error: new Error("EPUB file does not contain container.xml") });
+
+        await expect(extractEpubDocumentFromFile("/tmp/book.epub"))
+            .rejects.toThrow("EPUB file does not contain container.xml");
+    });
+
+    it("keeps a read failure on a structurally sound book retryable", async () => {
+        // The regression this guards: `EPUB.mjs` reads the first spine section
+        // inside the same call that validates the OPF, so a transient I/O error
+        // also throws before the first yield. Classifying on timing would mark
+        // this permanent and the queue would never retry it.
+        installZip(A_VALID_BOOK);
+        installFailingEpubModule({ error: new Error("NS_ERROR_FILE_IO_ERROR reading s1.xhtml") });
+
+        await expect(extractEpubDocumentFromFile("/tmp/book.epub"))
+            .rejects.not.toBeInstanceOf(EpubStructureError);
+    });
+
+    it("classifies a broken container even when it fails after a section", async () => {
+        // The mirror image: the verdict comes from the container, not from how
+        // far extraction happened to get.
+        installZip({ "OEBPS/content.opf": VALID_OPF });
+        installFailingEpubModule({ error: new Error("blew up later"), yieldCount: 1 });
+
+        await expect(extractEpubDocumentFromFile("/tmp/book.epub"))
+            .rejects.toBeInstanceOf(EpubStructureError);
+    });
+
+    it("stays retryable when the probe cannot open the archive", async () => {
+        // Undecidable — the file may simply have moved. Fail open.
+        installZip(null);
+        installFailingEpubModule({ error: new Error("Something went wrong") });
+
+        await expect(extractEpubDocumentFromFile("/tmp/book.epub"))
+            .rejects.not.toBeInstanceOf(EpubStructureError);
+    });
+
+    it("never reclassifies an abort", async () => {
+        installZip({ "OEBPS/content.opf": VALID_OPF });
+        installFailingEpubModule({ error: new Error("Operation aborted") });
+
+        await expect(extractEpubDocumentFromFile("/tmp/book.epub"))
+            .rejects.not.toBeInstanceOf(EpubStructureError);
+    });
+
+    it("closes the probe's archive handle", async () => {
+        installZip(A_VALID_BOOK);
+        installFailingEpubModule({ error: new Error("transient") });
+
+        await expect(extractEpubDocumentFromFile("/tmp/book.epub")).rejects.toThrow();
+        expect(zipClosed).toBe(1);
+    });
+
+    it("closes the EPUB handle when extraction fails", async () => {
+        installZip(A_VALID_BOOK);
+        const { close } = installFailingEpubModule({ error: new Error("transient") });
+
+        await expect(extractEpubDocumentFromFile("/tmp/book.epub")).rejects.toThrow();
+        expect(close).toHaveBeenCalledTimes(1);
     });
 });

@@ -21,6 +21,7 @@
  *   hard backstop.
  */
 
+import { preloadExternalFileCitations } from '../../src/utils/externalFileCitation';
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import {
@@ -54,13 +55,12 @@ import {
     externalReferenceItemMappingAtom,
 } from '@beaver/agent-core/citations/externalReferences';
 
-/**
- * Snapshot the thread's external-reference state from the Jotai store so
- * `expandToRawHtml('new', ...)` can resolve `<citation external_id="..."/>`
- * to either an in-library Zotero item or an inline `<a>` link.
- */
-function getExternalRefContext(): ExternalRefContext {
+/** Preload external files and snapshot external-work mappings for note expansion. */
+async function getExternalRefContext(content: string): Promise<ExternalRefContext> {
+    const { files, warnings } = await preloadExternalFileCitations(content);
     return {
+        externalFiles: files,
+        externalFileWarnings: warnings,
         externalRefs: store.get(externalReferenceMappingAtom),
         externalItemMapping: store.get(externalReferenceItemMappingAtom),
     };
@@ -401,7 +401,7 @@ export async function showDiffPreview(
         const noteId = `${libraryId}-${zoteroKey}`;
         const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, libraryId);
         const { metadata } = getOrSimplify(noteId, rawHtml, libraryId, pageLabelsByItemId);
-        const externalRefContext = getExternalRefContext();
+        const externalRefContext = await getExternalRefContext(edits.map(edit => edit.newString ?? '').join('\n<!-- edit boundary -->\n'));
 
         // Resolve page labels for new-citation translation across every edit
         // up-front so the synchronous expansion below can translate 1-based

@@ -3,6 +3,7 @@
  * These functions are used by AgentActionView for post-run action handling.
  */
 
+import { preloadExternalFileCitations } from '../../src/utils/externalFileCitation';
 import { AgentAction } from '../agents/agentActions';
 import type { EditNoteResultData, EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import type {
@@ -90,13 +91,12 @@ import {
 } from '../../src/services/agentDataProvider/actions/editNoteBatch';
 import { checkLibraryExcluded, excludedLibraryUserMessage } from '../../src/services/agentDataProvider/utils';
 
-/**
- * Snapshot the thread's external-reference state from the Jotai store so
- * `expandToRawHtml('new', ...)` can resolve `<citation external_id="..."/>`
- * to either an in-library Zotero item or an inline `<a>` link.
- */
-function getExternalRefContext(): ExternalRefContext {
+/** Preload external files and snapshot external-work mappings for note expansion. */
+async function getExternalRefContext(content: string): Promise<ExternalRefContext> {
+    const { files, warnings } = await preloadExternalFileCitations(content);
     return {
+        externalFiles: files,
+        externalFileWarnings: warnings,
         externalRefs: store.get(externalReferenceMappingAtom),
         externalItemMapping: store.get(externalReferenceItemMappingAtom),
     };
@@ -622,6 +622,8 @@ export async function executeEditNoteAction(
         }
     }
 
+    const externalRefContext = await getExternalRefContext(new_string);
+
     // 3. Get current note HTML
     const oldHtml: string = item.getNote();
 
@@ -639,10 +641,6 @@ export async function executeEditNoteAction(
     const structuralLocators = await preloadStructuralLocatorPages(new_string);
     const resolvedLocatorPages = structuralLocators.pages;
     const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
-
-    // Snapshot external-reference state once so every expandToRawHtml('new', ...)
-    // below can resolve `<citation external_id="..."/>` consistently.
-    const externalRefContext = getExternalRefContext();
 
     // ── rewrite mode: replace entire note body ──
     if (operation === 'rewrite') {
@@ -700,7 +698,7 @@ export async function executeEditNoteAction(
         invalidateSimplificationCache(noteId);
 
         const duplicateWarning = checkDuplicateCitations(new_string, metadata);
-        const warnings = collectWarnings(duplicateWarning, locatorWarning);
+        const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
 
         return {
             library_id,
@@ -769,7 +767,7 @@ export async function executeEditNoteAction(
         invalidateSimplificationCache(noteId);
 
         const duplicateWarning = checkDuplicateCitations(new_string, metadata);
-        const warnings = collectWarnings(duplicateWarning, locatorWarning);
+        const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
 
         const result: EditNoteResultData = {
             library_id,
@@ -972,7 +970,7 @@ export async function executeEditNoteAction(
 
     // 15. Check for duplicate citation warnings
     const duplicateWarning = checkDuplicateCitations(new_string, metadata);
-    const warnings = collectWarnings(duplicateWarning, locatorWarning);
+    const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
 
     const result: EditNoteResultData = {
         library_id,
@@ -1078,6 +1076,11 @@ export async function undoEditNoteAction(
     await item.loadDataType('note');
     const noteId = `${library_id}-${zotero_key}`;
 
+    // Load file references before the undo snapshot, only when raw undo HTML is missing.
+    const externalRefContext = !isDeletion && resultData?.undo_new_html === undefined
+        ? await getExternalRefContext(new_string)
+        : undefined;
+
     // 3. Get current HTML
     const currentHtml = getLatestNoteHtml(item);
 
@@ -1094,7 +1097,6 @@ export async function undoEditNoteAction(
     if (expandedOld === undefined || (!isDeletion && expandedNew === undefined)) {
         const pageLabelsByItemId = await preloadNotePageLabels(currentHtml, library_id);
         const { metadata } = getOrSimplify(noteId, currentHtml, library_id, pageLabelsByItemId);
-        const externalRefContext = getExternalRefContext();
         // Resolve page labels for new_string citations so the fallback
         // expansion translates 1-based page numbers the same way the
         // original execute did.
@@ -1340,7 +1342,7 @@ async function executeBatchSingleRewrite(
     invalidateSimplificationCache(noteId);
 
     const duplicateWarning = checkDuplicateCitations(edit.new_string, metadata);
-    const warnings = collectWarnings(duplicateWarning, locatorWarning);
+    const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
 
     return {
         library_id,
@@ -1444,11 +1446,11 @@ export async function executeEditNoteBatchAction(
     }
 
     // 3. Snapshot the note once. Every edit resolves against this snapshot.
+    const externalRefContext = await getExternalRefContext(edits.map(edit => edit.new_string).join('\n<!-- edit boundary -->\n'));
     const oldHtml: string = item.getNote();
     const noteId = `${library_id}-${zotero_key}`;
     const pageLabelsByItemId = await preloadNotePageLabels(oldHtml, library_id);
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id, pageLabelsByItemId);
-    const externalRefContext = getExternalRefContext();
 
     const existingCitationCache = extractDataCitationItems(oldHtml);
     const strippedHtml = stripDataCitationItems(oldHtml);
@@ -1536,7 +1538,7 @@ export async function executeEditNoteBatchAction(
     captureUndoContexts(finalStripped, undoDrafts, newStrippedHtml);
 
     // 8. Warnings: per-edit duplicate-citation + batch locator warnings.
-    const warnings: string[] = [...labels.locatorWarnings];
+    const warnings: string[] = [...labels.locatorWarnings, ...(externalRefContext.externalFileWarnings ?? [])];
     for (const edit of edits) {
         const dup = checkDuplicateCitations(edit.new_string, metadata);
         if (dup) warnings.push(dup);

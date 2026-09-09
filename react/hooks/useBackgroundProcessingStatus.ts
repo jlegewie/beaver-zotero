@@ -2,8 +2,7 @@ import { useCallback, useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../atoms/profile';
 import { backgroundProcessingStatusAtom } from '../atoms/backgroundProcessing';
-import { searchIndexApiClient } from '../../src/services/searchIndex/searchIndexApiClient';
-import { getZoteroUserIdentifier } from '../../src/utils/zoteroUtils';
+import { collectProcessingStatus } from '../../src/services/backgroundProcessing/statusSnapshot';
 import { getPref } from '../../src/utils/prefs';
 
 export function useBackgroundProcessingStatus(options: {
@@ -21,25 +20,16 @@ export function useBackgroundProcessingStatus(options: {
             options.onlyWhenEnabled
             && getPref('backgroundProcessingEnabled') !== true
         ) return;
-        const db = Zotero.Beaver?.db;
-        if (!db) return;
+        if (!Zotero.Beaver?.db) return;
         try {
-            const [queue, ledger, failures, coverage, documentCache] = await Promise.all([
-                db.getBackgroundQueueStats(Date.now()),
-                db.getAttachmentProcessingAggregates(undefined, {
-                    ocr: hasOcrAccess || hasSearchAccess,
-                    upsert: hasSearchAccess,
-                }),
-                options.includeFailures
-                    ? db.getBackgroundProcessingFailures(50)
-                    : Promise.resolve(undefined),
-                options.includeCoverage && hasSearchAccess
-                    ? searchIndexApiClient.status(getZoteroUserIdentifier().localUserKey)
-                        .catch(() => null)
-                    : Promise.resolve(undefined),
-                Zotero.Beaver?.documentCache?.getStats().catch(() => null)
-                    ?? Promise.resolve(null),
-            ]);
+            const { queue, ledger, failures, coverage, documentCache } =
+                await collectProcessingStatus(
+                    { hasOcrAccess, hasSearchIndexAccess: hasSearchAccess },
+                    {
+                        includeCoverage: options.includeCoverage,
+                        includeFailures: options.includeFailures,
+                    },
+                );
             setStatus((previous) => ({
                 queue,
                 ledger,

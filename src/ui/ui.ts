@@ -1,6 +1,7 @@
 import { getLocaleID, getString } from "../utils/locale";
-import { triggerToggleChat } from "./toggleChat";
+import { triggerToggleChat, triggerToggleQuickPrompt } from "./toggleChat";
 import { KeyboardManager } from "../utils/keyboardManager";
+import { isQuickPromptShortcut } from "../utils/shortcuts";
 import { getPref } from "../utils/prefs";
 import { PreferencePageTab } from "../../react/atoms/ui";
 import { ActionCategoryFilter } from "@beaver/agent-core/types/actions";
@@ -551,6 +552,28 @@ export class BeaverUIFactory {
                 if (isMacShortcut || isWindowsShortcut) {
                     ev.preventDefault();
                     this.openBeaverWindow();
+                }
+            }
+        );
+
+        // Register keyboard shortcut for the quick prompt (composer in the
+        // corner while the sidebar is closed).
+        // Mac: Cmd+Option+J, Windows/Linux: Ctrl+Alt+J
+        manager.register(
+            (ev) => {
+                if (isQuickPromptShortcut(ev, keyboardShortcut, Zotero.isMac)) {
+                    ev.preventDefault();
+                    let win;
+                    if (ev.target && (ev.target as HTMLElement).ownerDocument) {
+                        const doc = (ev.target as HTMLElement).ownerDocument;
+                        if (doc.defaultView) {
+                            win = doc.defaultView;
+                        }
+                    }
+                    if (!win) {
+                        win = Zotero.getMainWindow();
+                    }
+                    triggerToggleQuickPrompt(win);
                 }
             }
         );

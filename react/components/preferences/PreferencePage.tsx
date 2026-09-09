@@ -212,6 +212,7 @@ const PreferencePage: React.FC = () => {
     const rebuildIndexButtonProps = getRebuildIndexButtonProps();
     const sidebarShortcutLabel = `${Zotero.isMac ? '⌘' : 'Ctrl'}+${keyboardShortcut}`;
     const windowShortcutLabel = `${Zotero.isMac ? '⌘⇧' : 'Ctrl+Shift'}+${keyboardShortcut}`;
+    const quickPromptShortcutLabel = `${Zotero.isMac ? '⌘⌥' : 'Ctrl+Alt'}+${keyboardShortcut}`;
     type VisiblePreferencePageTab = Exclude<PreferencePageTab, 'account'>;
     interface PreferenceTabDefinition {
         id: VisiblePreferencePageTab;
@@ -381,7 +382,7 @@ const PreferencePage: React.FC = () => {
                         <SettingsGroup>
                             <SettingsRow
                                 title="Keyboard Shortcut"
-                                description={<>Sidebar: {sidebarShortcutLabel} &middot; Window: {windowShortcutLabel} &middot; Changes require restart</>}
+                                description={<>Sidebar: {sidebarShortcutLabel} &middot; Window: {windowShortcutLabel} &middot; Quick prompt: {quickPromptShortcutLabel} &middot; Changes require restart</>}
                                 control={
                                     <select
                                         id="keyboard-shortcut"
@@ -398,11 +399,11 @@ const PreferencePage: React.FC = () => {
                                 }
                             />
                             <SettingsRow
-                                title="Add Selected Items to New Threads"
-                                description="Automatically attach selected items to new thread"
+                                title="Add Selected Items and Collections to New Threads"
+                                description="Automatically attach selected items and collections to new threads"
                                 onClick={handleAddSelectedOnNewThreadToggle}
                                 hasBorder
-                                tooltip="When enabled, any items you have selected in Zotero will be automatically added as sources when you start a new conversation thread."
+                                tooltip="When enabled, selected Zotero items and collections are attached when you start a new conversation, including from the quick prompt."
                                 control={
                                     <input
                                         type="checkbox"
@@ -582,12 +583,10 @@ const PreferencePage: React.FC = () => {
                 {/* ===== SEARCH TAB ===== */}
                 {effectiveActiveTab === 'sync' && (
                     <>
-                        <BackgroundProcessingSection />
-
                         <SectionLabel>Libraries</SectionLabel>
                         <ExcludedLibrariesList />
 
-                        <SectionLabel>Search Index</SectionLabel>
+                                                <SectionLabel>Search Index</SectionLabel>
                         <SettingsGroup>
                             <SettingsRow
                                 title="Search Index"
@@ -625,6 +624,8 @@ const PreferencePage: React.FC = () => {
                                 <EmbeddingIndexProgress />
                             )}
                         </SettingsGroup>
+
+                        <BackgroundProcessingSection />
                     </>
                 )}
 

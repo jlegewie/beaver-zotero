@@ -22,11 +22,6 @@ declare const addon: import("../src/addon").default;
 
 declare const __env__: "production" | "development";
 
-declare const ZOTERO_CONFIG: {
-    API_URL: string;
-    API_VERSION: string;
-};
-
 interface Window {
     __beaverRuntime?: import("../src/runtime/instance").WindowRuntime;
     __beaverJotaiStore?: ReturnType<typeof import('jotai').createStore>;

@@ -16,6 +16,7 @@ import type {
     ExtractContentKind,
 } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import { BACKGROUND_UNTAG_PRIORITY } from './backgroundProcessing/constants';
+import { logger } from '@beaver/agent-core/platform/logger';
 
 export type { DocumentCachePageLabels } from '@beaver/agent-core/extract/document/shared/contentKinds';
 
@@ -2990,8 +2991,15 @@ export class BeaverDB {
      * Decide whether a disposable table group must be rebuilt.
      *
      * Missing version rows come from installs that predate `schema_versions`.
-     * If those tables already match the current v1 shape, stamp the version
+     * If those tables already match the current shape, stamp the version
      * without dropping data. A recorded older version still forces a rebuild.
+     *
+     * The version number is a fast path, not the authority: the stamp and the
+     * drop/recreate around it are separate auto-committed statements, so a DB
+     * can end up stamped current while the tables are still the previous shape
+     * — a state nothing else recovers from, since every later startup trusts
+     * the stamp and every write against the stale table fails. Re-checking the
+     * shape costs a few `pragma_table_info` reads per component at startup.
      */
     private async disposableSchemaNeedsReset(
         component: string,
@@ -3001,7 +3009,16 @@ export class BeaverDB {
     ): Promise<boolean> {
         const recordedVersion = await this.getSchemaVersion(component);
         if (recordedVersion === currentVersion) {
-            return false;
+            // Absent tables are the normal "stamped, then dropped by a reset
+            // that is about to recreate them" case, not drift.
+            if (await this.allTablesAbsent(tableNames)) return false;
+            if (await schemaIsCurrent()) return false;
+            logger(
+                `BeaverDB: ${component} is stamped v${currentVersion} but does not match `
+                + `that shape; rebuilding the table group`,
+                2,
+            );
+            return true;
         }
 
         if (recordedVersion === null) {

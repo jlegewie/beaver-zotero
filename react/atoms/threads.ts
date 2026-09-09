@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
+import { currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateMessageCollectionsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import { isAtBottomAtom, isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowIsAtBottomAtom, windowUserScrolledAtom } from "./ui";
 
 import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "@beaver/agent-core/citations/atoms";
@@ -299,7 +299,16 @@ export const threadNavigationSeqAtom = atom(0);
  */
 export const newThreadAtom = atom(
     null,
-    async (get, set, options?: { skipAutoPopulate?: boolean; skipActiveRunConfirm?: boolean }) => {
+    async (
+        get,
+        set,
+        options?: {
+            skipAutoPopulate?: boolean;
+            skipActiveRunConfirm?: boolean;
+            /** Keep the composer's text and pills; attachments are still reset. */
+            preserveDraft?: boolean;
+        },
+    ) => {
         // Show loading state immediately if there's an active run to cancel.
         // Gated on run status, not presence: a run that failed keeps sitting in
         // activeRunAtom, and prompting over it claims Beaver is still working.
@@ -348,7 +357,7 @@ export const newThreadAtom = atom(
             set(citationsAtom, []);
             set(resetCitationMarkersAtom);
             resetRunSelectorCaches();
-            set(clearComposerAtom);
+            if (!options?.preserveDraft) set(clearComposerAtom);
             set(resetMessageUIStateAtom);
             set(clearExternalReferenceCacheAtom);
             // Update message items from Zotero selection or reader
@@ -357,6 +366,7 @@ export const newThreadAtom = atom(
                 if (isLibraryTab && addSelectedItemsOnNewThread) {
                     const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage');
                     set(updateMessageItemsFromZoteroSelectionAtom, maxAddAttachmentToMessage);
+                    set(updateMessageCollectionsFromZoteroSelectionAtom);
                 }
                 if (!isLibraryTab) {
                     await set(updateReaderAttachmentAtom);

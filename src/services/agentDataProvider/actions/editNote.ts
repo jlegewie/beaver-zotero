@@ -1,3 +1,4 @@
+import { preloadExternalFileCitations } from '../../../utils/externalFileCitation';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
@@ -176,14 +177,12 @@ async function findMarkdownRenderFallbackMatch(
     return findMarkdownRenderMatch({ ...matchInput, ...rendered });
 }
 
-/**
- * Snapshot the thread's external-reference state from the Jotai store so
- * `expandToRawHtml('new', ...)` can resolve `<citation external_id="..."/>`
- * to either an in-library Zotero item or an inline `<a>` link, instead of
- * throwing on attributes the simplifier doesn't natively know about.
- */
-export function getExternalRefContext(): ExternalRefContext {
+/** Load external-file labels/links and snapshot external-work mappings for note expansion. */
+export async function getExternalRefContext(content: string): Promise<ExternalRefContext> {
+    const { files, warnings } = await preloadExternalFileCitations(content);
     return {
+        externalFiles: files,
+        externalFileWarnings: warnings,
         externalRefs: store.get(externalReferenceMappingAtom),
         externalItemMapping: store.get(externalReferenceItemMappingAtom),
     };
@@ -461,7 +460,7 @@ async function validateEditNoteAction(
 
     // Snapshot external-reference state once so every expandToRawHtml('new', ...)
     // below can resolve `<citation external_id="..."/>` consistently.
-    const externalRefContext = getExternalRefContext();
+    const externalRefContext = await getExternalRefContext(new_string);
 
     // ── rewrite mode: skip old_string matching, validate new_string only ──
     if (operation === 'rewrite') {
@@ -485,6 +484,7 @@ async function validateEditNoteAction(
                 match_count: 1,
                 old_content: simplified,
             },
+            warnings: collectWarnings(...(externalRefContext.externalFileWarnings ?? [])),
             preference,
         };
     }
@@ -521,6 +521,7 @@ async function validateEditNoteAction(
                 total_lines: totalLines,
                 match_count: 1,
             },
+            warnings: collectWarnings(...(externalRefContext.externalFileWarnings ?? [])),
             preference,
         };
     }
@@ -708,7 +709,7 @@ async function validateEditNoteAction(
     // 15. Compose new_string: merge for insert operations, otherwise carry
     //     any matcher rewrite. mergeInsertNewString is a no-op for
     //     str_replace / str_replace_all.
-    const warnings: string[] = [];
+    const warnings: string[] = [...(externalRefContext.externalFileWarnings ?? [])];
     const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
     if (locatorWarning) warnings.push(locatorWarning);
     if (operation === 'insert_after' || operation === 'insert_before') {
@@ -846,6 +847,8 @@ async function executeEditNoteAction(
         }
     }
 
+    const externalRefContext = await getExternalRefContext(new_string);
+
     // 3. Pre-load page labels so new citations resolve page indices to labels.
     //    Done before reading the note to avoid async gaps between read and write.
     const newPageLabels = await preloadPageLabelsForNewCitations(new_string);
@@ -868,10 +871,6 @@ async function executeEditNoteAction(
     const noteId = `${resolvedLibraryId}-${zotero_key}`;
     const pageLabelsByItemId = await preloadNotePageLabels(oldHtml, resolvedLibraryId);
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, resolvedLibraryId, pageLabelsByItemId);
-
-    // Snapshot external-reference state once so every expandToRawHtml('new', ...)
-    // below can resolve `<citation external_id="..."/>` consistently.
-    const externalRefContext = getExternalRefContext();
 
     // ── rewrite mode: replace entire note body ──
     if (operation === 'rewrite') {
@@ -956,7 +955,7 @@ async function executeEditNoteAction(
 
         // Check for duplicate citation warnings
         const duplicateWarning = checkDuplicateCitations(new_string, metadata);
-        const warnings = collectWarnings(duplicateWarning, locatorWarning);
+        const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
 
         return {
             type: 'agent_action_execute_response',
@@ -1051,7 +1050,7 @@ async function executeEditNoteAction(
         invalidateSimplificationCache(noteId);
 
         const duplicateWarning = checkDuplicateCitations(new_string, metadata);
-        const warnings = collectWarnings(duplicateWarning, locatorWarning);
+        const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
         const undoData = {
             undo_new_html: expandedNew,
             undo_before_context: undoBeforeContext,
@@ -1339,7 +1338,7 @@ async function executeEditNoteAction(
 
     // 17. Check for duplicate citation warnings
     const duplicateWarning = checkDuplicateCitations(new_string, metadata);
-    const warnings = collectWarnings(duplicateWarning, locatorWarning);
+    const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
 
     // 18. Wait for ProseMirror to normalize the note and update undo data.
     // When the note is open in the editor, PM re-normalizes after saveTx(),

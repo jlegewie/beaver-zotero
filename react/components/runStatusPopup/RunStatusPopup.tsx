@@ -1,4 +1,5 @@
-import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 /**
  * The shimmering status line, cut with a visible ellipsis.
@@ -156,6 +157,7 @@ const ApprovalView: React.FC<{ card: ApprovalCard }> = ({ card }) => (
                 {card.rejectLabel}
             </Button>
             <Button
+                data-run-status-approve
                 variant="solid"
                 style={FOOTER_BUTTON_STYLE}
                 onClick={() => card.onDecide(true)}
@@ -187,6 +189,7 @@ const CreditView: React.FC<{ card: CreditCard }> = ({ card }) => (
                 {card.declineLabel}
             </Button>
             <Button
+                data-run-status-approve
                 variant="solid"
                 style={FOOTER_BUTTON_STYLE}
                 onClick={() => card.onDecide(true)}
@@ -320,41 +323,61 @@ const CardView: React.FC<{ card: RunStatusPopupCard }> = ({ card }) => {
  * first paint is not animated: a card appearing should not unfold from zero.
  */
 const AnimatedCard: React.FC<{ card: RunStatusPopupCard; children: React.ReactNode }> = ({ card, children }) => {
-    const innerRef = useRef<HTMLDivElement>(null);
+    const cardRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        const element = cardRef.current;
+        if (element?.ownerDocument.hasFocus() && element.ownerDocument.activeElement === element) {
+            element.querySelector<HTMLElement>('[data-run-status-approve]:not(:disabled)')?.focus();
+        }
+    }, [card.kind]);
     const [height, setHeight] = useState<number | null>(null);
+    // The height as last measured, so a measurement that finds it unchanged
+    // does not reach the setter: a setter called with the current value still
+    // schedules a re-render while the component has a store update pending.
+    const heightRef = useRef<number | null>(null);
     const [settled, setSettled] = useState(false);
+    const observed = useRef<{ element: HTMLElement; disconnect: () => void } | null>(null);
 
-    const measure = useCallback(() => {
-        const inner = innerRef.current;
-        if (inner) setHeight(inner.getBoundingClientRect().height);
-    }, []);
-
-    // Measured in the same frame the new state is laid out, so the transition
-    // starts at once; the observer below covers the content changing on its
-    // own afterwards (a tool label's item name arriving).
-    useLayoutEffect(measure, [card, measure]);
-
-    useLayoutEffect(() => {
-        const inner = innerRef.current;
-        const win = inner?.ownerDocument.defaultView;
-        if (!inner || !win) return;
+    // Measurement is subscribed to the content element: its size changes with
+    // every state the card moves through and with content arriving on its own
+    // (a tool label's item name), and the observer reports both from the
+    // browser's layout pass rather than after each render. The first
+    // measurement is taken as the element attaches, so the card is drawn at
+    // its height from the start.
+    const innerRef = useCallback((inner: HTMLDivElement | null) => {
+        if (observed.current?.element === inner) return;
+        observed.current?.disconnect();
+        observed.current = null;
+        if (!inner) return;
+        const win = inner.ownerDocument.defaultView;
+        if (!win) return;
+        const measure = () => {
+            const next = inner.getBoundingClientRect().height;
+            if (next === heightRef.current) return;
+            heightRef.current = next;
+            setHeight(next);
+        };
+        measure();
         // Second frame: the first measurement is drawn without a transition,
         // and every change after it is animated.
         const frame = win.requestAnimationFrame(() => setSettled(true));
         const observer = new win.ResizeObserver(measure);
         observer.observe(inner);
-        return () => {
-            win.cancelAnimationFrame(frame);
-            observer.disconnect();
+        observed.current = {
+            element: inner,
+            disconnect: () => {
+                win.cancelAnimationFrame(frame);
+                observer.disconnect();
+            },
         };
-    }, [measure]);
+    }, []);
 
     const handleClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
         if (isCardBackgroundClick(event)) card.onOpen();
     }, [card]);
 
     const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLElement>) => {
-        if (event.target !== event.currentTarget) return;
+        if (event.target !== event.currentTarget || event.defaultPrevented || isImeKeyEvent(event.nativeEvent) || event.repeat) return;
         if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             card.onOpen();
@@ -363,6 +386,7 @@ const AnimatedCard: React.FC<{ card: RunStatusPopupCard; children: React.ReactNo
 
     return (
         <div
+            ref={cardRef}
             className={`beaver-run-status-popup__card beaver-run-status-popup__card--${card.kind} ${settled ? 'beaver-run-status-popup__card--settled' : ''}`}
             style={{ height: height ?? undefined }}
             role="button"

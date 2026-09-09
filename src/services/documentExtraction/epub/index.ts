@@ -1,4 +1,5 @@
 export {
+    EpubStructureError,
     extractEpubDocument,
     extractEpubDocumentFromFile,
     extractEpubDocumentSafe,

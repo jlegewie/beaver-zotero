@@ -1,5 +1,4 @@
 /** @vitest-environment jsdom */
-/* eslint-disable no-restricted-globals -- jsdom test: `document` is the test DOM, not a Zotero window */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
     $createParagraphNode,

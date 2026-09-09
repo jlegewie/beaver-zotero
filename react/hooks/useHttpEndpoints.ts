@@ -89,6 +89,8 @@ import {
     handleTestNoteOpenEditorHttpRequest,
     handleTestNoteCloseEditorHttpRequest,
     handleTestNoteUndoHttpRequest,
+    handleTestNoteApplyHttpRequest,
+    handleTestNotePreviewHttpRequest,
 } from './httpHandlers/testNoteHandlers';
 import {
     handleTestCollectionCreateHttpRequest,
@@ -158,6 +160,12 @@ import {
     handleTestBackgroundClearHttpRequest,
 } from './httpHandlers/testBackgroundHandlers';
 import {
+    handleTestProcessingReconcileNowHttpRequest,
+    handleTestProcessingStatusHttpRequest,
+    handleTestProcessingLedgerHttpRequest,
+    handleTestProcessingResetHttpRequest,
+} from './httpHandlers/testProcessingHandlers';
+import {
     handleTestExcludedLibrariesHttpRequest,
     handleTestGetAnnotationsHttpRequest,
     handleTestViewImagesHttpRequest,
@@ -203,6 +211,8 @@ import {
     handleTestTableViewStateHttpRequest,
 } from './httpHandlers/testTableHandlers';
 import { handleTestRunStatusPopupHttpRequest } from './httpHandlers/testRunStatusPopupHandlers';
+import { handleTestQuickPromptHttpRequest } from './httpHandlers/testQuickPromptHandlers';
+import { handleTestListSavedActionsHttpRequest } from './httpHandlers/testSavedActionsHandlers';
 import type {
     WSZoteroDataRequest,
     WSExternalReferenceCheckRequest,
@@ -1023,6 +1033,12 @@ function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/note-undo'] =
             createEndpoint(handleTestNoteUndoHttpRequest);
 
+        endpoints['/beaver/test/note-apply'] =
+            createEndpoint(handleTestNoteApplyHttpRequest);
+
+        endpoints['/beaver/test/note-preview'] =
+            createEndpoint(handleTestNotePreviewHttpRequest);
+
         // Collection seeding/teardown (dev-only)
         endpoints['/beaver/test/collection-create'] =
             createEndpoint(handleTestCollectionCreateHttpRequest);
@@ -1144,6 +1160,20 @@ function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/background-clear'] =
             createEndpoint(handleTestBackgroundClearHttpRequest);
+
+        // Whole-library processing (dev-only): drives ReconcilerService and
+        // exposes the ledger the prefs section aggregates.
+        endpoints['/beaver/test/processing-reconcile-now'] =
+            createEndpoint(handleTestProcessingReconcileNowHttpRequest);
+
+        endpoints['/beaver/test/processing-status'] =
+            createEndpoint(handleTestProcessingStatusHttpRequest);
+
+        endpoints['/beaver/test/processing-ledger'] =
+            createEndpoint(handleTestProcessingLedgerHttpRequest);
+
+        endpoints['/beaver/test/processing-reset'] =
+            createEndpoint(handleTestProcessingResetHttpRequest);
 
         // Pref control (dev-only)
         endpoints['/beaver/test/set-pref'] =
@@ -1297,6 +1327,12 @@ function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/run-status-popup'] =
             createEndpoint(handleTestRunStatusPopupHttpRequest);
+
+        endpoints['/beaver/test/quick-prompt'] =
+            createEndpoint(handleTestQuickPromptHttpRequest);
+
+        endpoints['/beaver/test/saved-actions'] =
+            createEndpoint(handleTestListSavedActionsHttpRequest);
     }
 
     const releases = Object.entries(endpoints).map(([path, handler]) =>

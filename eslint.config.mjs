@@ -232,6 +232,7 @@ export default tseslint.config(
             // Generated third-party WASM glue, checked in as-is.
             "addon/content/lib/mupdf-wasm.mjs",
             "addon/content/lib/sentencex/sentencex_wasm.js",
+            "addon/content/lib/sentencex/sentencex_wasm.d.ts",
             // Generated webpack output (entry + chunks), present only after a build.
             "addon/content/*reactBundle.js",
             // Nested worktree checkouts (local dev only).
@@ -288,6 +289,27 @@ export default tseslint.config(
                 window: "readonly",
                 setTimeout: "readonly",
                 fetch: "readonly",
+            },
+        },
+        rules: {
+            "no-restricted-globals": "off",
+        },
+    },
+    // Voice harness fragments are concatenated with a generated prefix and
+    // executed inside Zotero's chrome context over RDP (see
+    // native/voice/tests/zotero-dictation.py), so the VOICE_* consts and the
+    // chrome globals below are always defined by the time the file runs.
+    {
+        files: ["native/voice/tests/**/*.js"],
+        languageOptions: {
+            globals: {
+                Zotero: "readonly",
+                ChromeUtils: "readonly",
+                IOUtils: "readonly",
+                VOICE_TEST_WINDOW: "readonly",
+                VOICE_TEST_ROOT: "readonly",
+                VOICE_TEST_URL: "readonly",
+                VOICE_SCREENSHOT: "readonly",
             },
         },
         rules: {
