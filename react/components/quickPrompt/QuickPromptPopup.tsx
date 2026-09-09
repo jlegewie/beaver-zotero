@@ -22,6 +22,7 @@ import { isSidebarVisibleAtom, selectedZoteroTabIdAtom } from '../../atoms/ui';
 import { eventManager } from '../../events/eventManager';
 import { useEventSubscription } from '../../hooks/useEventSubscription';
 import { uiManager } from '../../ui/UIManager';
+import { getHostWindow } from '../../runtime/windowRuntime';
 import InputArea from '../input/InputArea';
 import DragDropWrapper from '../input/DragDropWrapper';
 import PopupOverlayContainer from '../PopupOverlayContainer';
@@ -196,7 +197,15 @@ const QuickPromptPopup: React.FC = () => {
     }, [close]);
 
     useEventSubscription('toggleQuickPrompt', () => {
-        const doc = Zotero.getMainWindow()?.document;
+        const doc = getHostWindow().document;
+        const runCard = !isSidebarVisible && hasActiveWork
+            ? doc.querySelector<HTMLElement>('#beaver-pane-floating-popup .beaver-run-status-popup__card')
+            : null;
+        if (runCard) {
+            close();
+            (runCard.querySelector<HTMLElement>('[data-run-status-approve]:not(:disabled)') ?? runCard).focus();
+            return;
+        }
         const active = doc?.activeElement as HTMLElement | null;
         // The document itself is not a place to send focus back to.
         const focused = active && active !== doc?.body && active !== doc?.documentElement ? active : null;
@@ -213,7 +222,7 @@ const QuickPromptPopup: React.FC = () => {
                     break;
             }
         });
-    }, [toggle, dismiss]);
+    }, [toggle, dismiss, isSidebarVisible, hasActiveWork, close]);
 
     // The popup steps aside on its own: when the sidebar opens (it now shows
     // the same draft and thread), when the message it composed has been sent

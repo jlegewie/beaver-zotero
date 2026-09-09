@@ -27,6 +27,9 @@ vi.mock('../../../../react/events/eventManager', () => ({
 vi.mock('../../../../react/ui/UIManager', () => ({
     uiManager: { focusToggleButton: mocks.focusToggleButton },
 }));
+vi.mock('../../../../react/runtime/windowRuntime', () => ({
+    getHostWindow: () => window,
+}));
 vi.mock('../../../../react/atoms/threads', async () => {
     const { atom } = await import('jotai');
     return {
@@ -293,7 +296,26 @@ describe('QuickPromptPopup', () => {
         expect(store.get(quickPromptStateAtom)).toBeNull();
     });
 
-    it('shows the busy notice while a run is live, and closes when it ends', async () => {
+    it.each([false, true])('focuses the existing run popup without opening a notice (approval: %s)', async (approval) => {
+        store.set(activeRunAtom, run('in_progress'));
+        mount();
+        const card = document.createElement('div');
+        card.className = 'beaver-run-status-popup__card';
+        card.tabIndex = -1;
+        const button = document.createElement('button');
+        button.setAttribute('data-run-status-approve', '');
+        if (approval) card.appendChild(button);
+        floatingRoot.appendChild(card);
+
+        await fireShortcut();
+
+        expect(document.activeElement).toBe(approval ? button : card);
+        expect(store.get(quickPromptStateAtom)).toBeNull();
+        expect(container.querySelector('.beaver-quick-prompt')).toBeNull();
+        expect(mocks.newThread).not.toHaveBeenCalled();
+    });
+
+    it('shows the busy notice while a run is live without a status popup, and closes when it ends', async () => {
         store.set(activeRunAtom, run('in_progress'));
         mount();
         await fireShortcut();
