@@ -2,6 +2,7 @@ import type { ReadableContentKind } from "../extract/document/shared/contentKind
 import {
     baseCitationKey,
     type CitationRef,
+    type ZoteroCitationRef,
     type ExternalCitationSource,
     getRequestedRef,
     getResolvedRef,
@@ -167,6 +168,8 @@ export interface Citation {
     requested_ref?: CitationRef;
     /** Canonical resolved identity (absent only when invalid). */
     resolved_ref?: CitationRef;
+    /** Owning bibliographic item, when known; not part of citation identity. */
+    parent_ref?: ZoteroCitationRef;
     /** Kind of object the citation resolved to. */
     citation_type?: CitationType;
     content_kind?: ContentKind;

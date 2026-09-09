@@ -1394,3 +1394,15 @@ describe("coverage", () => {
         });
     });
 });
+
+it("keeps optional citation parentage without making it a citation lookup identity", () => {
+    const citation: Citation = {
+        citation_id: "with-parent",
+        resolved_ref: { kind: "zotero", library_id: 1, zotero_key: "CHILD001" },
+        parent_ref: { kind: "zotero", library_id: 1, zotero_key: "PARENT01" },
+    };
+    const index = citationsByKey([citation]);
+    expect(index[citationKeysInText('<citation id="1-CHILD001"/>')[0]]).toBe(citation);
+    expect(index[citationKeysInText('<citation id="1-PARENT01"/>')[0]]).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(citation)).parent_ref).toEqual(citation.parent_ref);
+});

@@ -97,7 +97,56 @@ import { countTopLevelCssRules, escapeHtml, CSS_RULE_BUDGET } from '../../utils/
  */
 export type TableHtmlLinks = Partial<Record<RowAction, string | null>>;
 
+/** Durable acknowledgements committed atomically with the table document. */
+export interface TableOperationReceipt {
+    operation_id: string;
+    request_sha256: string;
+    version: number;
+    sha256: string;
+}
+
+export interface TableDocumentState {
+    operations?: TableOperationReceipt[];
+    creation?: {
+        operation_id: string;
+        request_sha256: string;
+        complete: boolean;
+        meta?: { actor: 'agent' | 'user' | 'system'; run_id?: string; thread_id?: string; change?: string };
+    };
+}
+
+export const TABLE_STORE_SCRIPT_ID = 'beaver-table-store';
+const STORE_SCRIPT_RE = new RegExp(
+    `<script\\b[^>]*\\bid="${TABLE_STORE_SCRIPT_ID}"[^>]*>([\\s\\S]*?)</script\\s*>`,
+    'i'
+);
+
+function isReceipt(value: unknown): value is TableOperationReceipt {
+    if (!value || typeof value !== 'object') return false;
+    const receipt = value as Partial<TableOperationReceipt>;
+    return typeof receipt.operation_id === 'string' &&
+        typeof receipt.request_sha256 === 'string' &&
+        typeof receipt.version === 'number' &&
+        typeof receipt.sha256 === 'string';
+}
+
+export function parseTableDocumentState(html: string): TableDocumentState {
+    const match = html.match(STORE_SCRIPT_RE);
+    if (!match) return {};
+    const state = JSON.parse(match[1]);
+    if (!state || typeof state !== 'object' || Array.isArray(state)) {
+        throw new Error('Invalid table operation receipts');
+    }
+    if (state.operations !== undefined &&
+        (!Array.isArray(state.operations) || !state.operations.every(isReceipt))) {
+        throw new Error('Invalid table operation receipts');
+    }
+    return state;
+}
+
 export interface TableHtmlOptions {
+    /** Store bookkeeping; excluded from the portable table spec. */
+    storeState?: TableDocumentState;
     /**
      * Emits the sort, filter and row-height controls. Off gives a plain
      * document sorted as the producer intended — the tier for a renderer that
@@ -1357,6 +1406,11 @@ export function buildTableDocument(
         // above the table — would silently break every annotation on every
         // stored table.
         `<script type="application/json" id="${TABLE_SPEC_SCRIPT_ID}">${serializeSpec(stored)}</script>`,
+        ...(options.storeState
+            ? [
+                  `<script type="application/json" id="${TABLE_STORE_SCRIPT_ID}">${JSON.stringify(options.storeState).replace(/</g, '\\u003c')}</script>`,
+              ]
+            : []),
         '</body>',
         '</html>',
         '',

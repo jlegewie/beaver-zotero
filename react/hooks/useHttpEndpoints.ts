@@ -202,6 +202,7 @@ import {
     handleTestTableVersionsHttpRequest,
     handleTestTableRevertHttpRequest,
     handleTestTableDeleteHttpRequest,
+    handleTestTableTrimHttpRequest,
     handleTestTableOpenHttpRequest,
     handleTestTableCorruptHttpRequest,
     handleTestTableShadowHttpRequest,
@@ -1286,6 +1287,9 @@ function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/table-revert'] =
             createEndpoint(handleTestTableRevertHttpRequest);
+
+        endpoints['/beaver/test/table-trim'] =
+            createEndpoint(handleTestTableTrimHttpRequest);
 
         endpoints['/beaver/test/table-delete'] =
             createEndpoint(handleTestTableDeleteHttpRequest);
