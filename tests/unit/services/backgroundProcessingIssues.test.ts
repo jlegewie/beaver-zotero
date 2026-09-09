@@ -48,9 +48,17 @@ describe('classifyProcessingIssue', () => {
         expect(classifyProcessingIssue(needed, withOcr)).toBeNull();
     });
 
-    it('prefers the latest stage that failed', () => {
+    it('reports downstream failures after successful extraction', () => {
         expect(classifyProcessingIssue(row({ extractStatus: 'done', ocrStatus: 'failed' }), withOcr)).toBe('ocr_failed');
         expect(classifyProcessingIssue(row({ extractStatus: 'done', ocrStatus: 'done', upsertStatus: 'failed' }), withOcr)).toBe('index_failed');
+    });
+
+    it.each(['failed', 'skipped'])('prioritizes %s extraction over stale downstream failures', (extractStatus) => {
+        for (const entitlements of [noOcr, withOcr]) {
+            expect(classifyProcessingIssue(row({
+                extractStatus, ocrStatus: 'failed', upsertStatus: 'failed', lastError: 'file_missing',
+            }), entitlements)).toBe('file_unavailable');
+        }
     });
 
     it('falls back to a generic extraction error for unknown codes', () => {
@@ -81,7 +89,7 @@ describe('groupProcessingIssues', () => {
         ];
         const dead = [{ jobType: 'fulltext_upsert', libraryId: 1, zoteroKey: 'DEAD0000', lastError: 'timeout', diedAt: 1 }];
         expect(groupProcessingIssues(rows, dead, withOcr).map((group) => [group.reason, group.count]))
-            .toEqual([['index_failed', 3]]);
+            .toEqual([['extract_failed', 1], ['index_failed', 2]]);
         expect(groupProcessingIssues(rows, dead, noOcr).map((group) => [group.reason, group.count]))
             .toEqual([['extract_failed', 1]]);
     });

@@ -70,8 +70,6 @@ export function processingIssuesSql(entitlements: IssueEntitlements): string {
         SELECT library_id, zotero_key, extract_status, ocr_status, upsert_status, last_error,
             CAST(strftime('%s', updated_at) AS INTEGER) * 1000 AS timestamp,
             CASE
-                WHEN upsert_status = 'failed' AND ${entitlements.hasSearchIndexAccess ? 1 : 0} THEN 'index_failed'
-                WHEN ocr_status = 'failed' THEN 'ocr_failed'
                 WHEN extract_status IN ('failed', 'skipped') THEN CASE
                     WHEN ${anyCodeSql(FILE_UNAVAILABLE_CODES)} THEN 'file_unavailable'
                     WHEN ${hasCodeSql('encrypted')} THEN 'encrypted'
@@ -79,6 +77,8 @@ export function processingIssuesSql(entitlements: IssueEntitlements): string {
                     WHEN instr(last_error, 'unsupported_') = 1 OR instr(last_error, ': unsupported_') > 0 THEN 'unsupported'
                     WHEN ${anyCodeSql(NO_TEXT_CODES)} THEN '${entitlements.hasOcrAccess ? 'no_text' : 'scanned'}'
                     ELSE 'extract_failed' END
+                WHEN upsert_status = 'failed' AND ${entitlements.hasSearchIndexAccess ? 1 : 0} THEN 'index_failed'
+                WHEN ocr_status = 'failed' THEN 'ocr_failed'
                 WHEN ocr_status = 'needed' AND ${entitlements.hasOcrAccess ? 0 : 1} THEN 'scanned'
             END AS reason
         FROM attachment_processing_state
@@ -146,9 +146,7 @@ export function classifyProcessingIssue(
     row: AttachmentProcessingIssueRow,
     entitlements: IssueEntitlements,
 ): ProcessingIssueReason | null {
-    if (row.upsertStatus === 'failed' && entitlements.hasSearchIndexAccess) return 'index_failed';
-    if (row.ocrStatus === 'failed') return 'ocr_failed';
-
+    // Extraction retries can leave downstream statuses from the previous attempt.
     const extractTerminal = row.extractStatus === 'failed' || row.extractStatus === 'skipped';
     if (extractTerminal) {
         const error = row.lastError;
@@ -162,6 +160,8 @@ export function classifyProcessingIssue(
         return 'extract_failed';
     }
 
+    if (row.upsertStatus === 'failed' && entitlements.hasSearchIndexAccess) return 'index_failed';
+    if (row.ocrStatus === 'failed') return 'ocr_failed';
     if (row.ocrStatus === 'needed' && !entitlements.hasOcrAccess) return 'scanned';
     return null;
 }

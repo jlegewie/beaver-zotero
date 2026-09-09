@@ -478,6 +478,19 @@ describe('BeaverDB background processing state', () => {
         expect(await db.getBackgroundDeadLetters()).toHaveLength(1);
     });
 
+    it.each(['failed', 'skipped'] as const)('classifies a %s extraction retry before stale downstream failures', async (status) => {
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'RETRY000', contentKind: 'pdf' });
+        await connection.queryAsync("UPDATE attachment_processing_state SET extract_status = 'done', ocr_status = 'failed', upsert_status = 'failed'");
+        await db.resetAttachmentExtraction(1, 'RETRY000');
+        await db.markAttachmentExtractFailure({ libraryId: 1, zoteroKey: 'RETRY000', status, error: 'encrypted' });
+        const entitlements = { hasOcrAccess: true, hasSearchIndexAccess: true };
+        expect(await db.getProcessingIssueCounts(entitlements)).toEqual([{ reason: 'encrypted', count: 1 }]);
+        expect((await db.getProcessingIssuePage(entitlements, 'encrypted')).map((item) => item.zoteroKey))
+            .toEqual(['RETRY000']);
+        expect(await db.getProcessingIssuePage(entitlements, 'index_failed')).toEqual([]);
+        expect(await db.getProcessingIssuePage(entitlements, 'ocr_failed')).toEqual([]);
+    });
+
     it('SQL grouping matches issue classification, with stable non-overlapping pages', async () => {
         const errors = ['file_missing', 'download_failed: 404', 'ocr load: read_failed', 'encrypted',
             'file_too_large: 120MB', 'too_many_pages', 'unsupported_type', 'wrapped: unsupported_type',
