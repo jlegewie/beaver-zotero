@@ -365,3 +365,13 @@ ids. Other requests take `windowId` and inspect that renderer, or use
 `{command: "draft", windowId, draft}` to stage text without sending it. Missing or closing
 ids return `window_unavailable`. These diagnostics share the existing development/auth gates;
 endpoint ownership is still window-managed.
+
+**Every other live suite assumes exactly one main window.** Dev endpoints are owned by the
+window that registered last, while several handlers still resolve their window with
+`Zotero.getMainWindow()` — the two disagree as soon as a second window exists, so a handler
+can drive one window and read another window's atoms. That fails as a plausible wrong value
+(a stale attachment, an unchanged tab), not as an error, and it points at the code under test
+rather than at the window count. `globalSetup` therefore refuses to start a run when it sees
+more than one main window, unless `BEAVER_MULTI_WINDOW_TEST=1` is set. Close the extra window
+rather than working around the guard. The underlying call sites belong to a later PR; see
+`tasks/multiple-windows/getMainWindow-audit.md`.
