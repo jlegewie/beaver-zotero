@@ -24,7 +24,10 @@ export async function openReader(
             win.Zotero_Tabs.select(tab.id);
             if (location) {
                 await existing._initPromise;
-                if (win.closed) throw new WindowUnavailableError();
+                if (win.closed || !win.Zotero_Tabs._tabs.some(candidate => candidate.id === tab.id)
+                    || Zotero.Reader.getByTabID(tab.id) !== existing || existing._window !== win) {
+                    throw new WindowUnavailableError();
+                }
                 await existing.navigate(location);
             }
             return existing;
@@ -47,7 +50,10 @@ export async function openReader(
             // An already-loading tab needs it after initialization instead.
             if (location && !restoring) {
                 await restored._initPromise;
-                if (win.closed) throw new WindowUnavailableError();
+                if (win.closed || !win.Zotero_Tabs._tabs.some(candidate => candidate.id === tab.id)
+                    || Zotero.Reader.getByTabID(tab.id) !== restored || restored._window !== win) {
+                    throw new WindowUnavailableError();
+                }
                 await restored.navigate(location);
             }
             return restored;
@@ -71,14 +77,38 @@ export async function openNote(itemID: number, origin: Window = getContextWindow
     if (typeof (Zotero as any).Notes?.open === 'function') {
         const legacy = typeof (win.Zotero_Tabs as any).isOwnTabEvent !== 'function';
         if (legacy) {
+            const readyLocalEditor = async (editor: any) => {
+                await editor._initPromise;
+                if (win.closed || !win.Zotero_Tabs._tabs.some(tab => tab.id === editor.tabID)
+                    || !(Zotero as any).Notes._editorInstances.includes(editor)) {
+                    throw new WindowUnavailableError();
+                }
+                return editor;
+            };
             const existing = (Zotero as any).Notes._editorInstances?.find((editor: any) =>
                 editor.itemID === itemID && editor.tabID
                 && win.Zotero_Tabs._tabs?.some((tab: any) => tab.id === editor.tabID));
             if (existing) {
                 win.Zotero_Tabs.select(existing.tabID);
-                return existing;
+                return readyLocalEditor(existing);
             }
+            const tab = win.Zotero_Tabs._tabs?.find(candidate => candidate.data?.itemID === itemID);
             focusLegacyTarget(win);
+            if (tab) {
+                // Restore the destination's unloaded note through its native tab hook.
+                win.Zotero_Tabs.select(tab.id);
+                const deadline = Date.now() + 15000;
+                for (;;) {
+                    if (win.closed || !win.Zotero_Tabs._tabs.some(candidate => candidate.id === tab.id)) {
+                        throw new WindowUnavailableError();
+                    }
+                    const restored = (Zotero as any).Notes._editorInstances?.find((editor: any) =>
+                        editor.itemID === itemID && editor.tabID === tab.id);
+                    if (restored) return readyLocalEditor(restored);
+                    if (Date.now() >= deadline) throw new WindowUnavailableError();
+                    await Zotero.Promise.delay(50);
+                }
+            }
         }
         const editor = await (Zotero as any).Notes.open(itemID, undefined, { window: win, ...(legacy ? { allowDuplicate: true } : {}) });
         if (win.closed) throw new WindowUnavailableError();

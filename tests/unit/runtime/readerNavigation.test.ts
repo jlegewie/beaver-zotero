@@ -95,3 +95,80 @@ it('waits for an already-loading local reader before applying a new location', a
     expect(await pending).toBe(reader);
     expect(reader.navigate).toHaveBeenCalledWith({ pageIndex: 8 });
 });
+
+
+it.each(['note-unloaded', 'note-loading'])('restores the local %s tab despite a foreign editor for the same note', async (type) => {
+    delete a.Zotero_Tabs.isOwnTabEvent;
+    a.Zotero_Tabs._tabs = [{ id: 'local-note', type, data: { itemID: 17 } }];
+    const foreign = { itemID: 17, tabID: 'foreign-note' };
+    const restored = { itemID: 17, tabID: 'local-note' };
+    (Zotero as any).Notes._editorInstances = [foreign];
+    (Zotero as any).Promise = { delay: vi.fn(async () => {
+        (Zotero as any).Notes._editorInstances.push(restored);
+    }) };
+    expect(await openNote(17, a)).toBe(restored);
+    expect(a.Zotero_Tabs.select).toHaveBeenCalledWith('local-note');
+    expect((Zotero as any).Notes.open).not.toHaveBeenCalled();
+    expect(b.Zotero_Tabs.select).not.toHaveBeenCalled();
+});
+
+it('does not duplicate a local note whose tab closes during restoration', async () => {
+    delete a.Zotero_Tabs.isOwnTabEvent;
+    a.Zotero_Tabs._tabs = [{ id: 'local-note', type: 'note-unloaded', data: { itemID: 17 } }];
+    (Zotero as any).Promise = { delay: vi.fn(async () => { a.Zotero_Tabs._tabs = []; }) };
+    await expect(openNote(17, a)).rejects.toMatchObject({ code: 'window_unavailable' });
+    expect((Zotero as any).Notes.open).not.toHaveBeenCalled();
+});
+
+it('allows a local note duplicate only when there is no local tab', async () => {
+    delete a.Zotero_Tabs.isOwnTabEvent;
+    (Zotero as any).Notes._editorInstances = [{ itemID: 17, tabID: 'foreign-note' }];
+    await openNote(17, a);
+    expect((Zotero as any).Notes.open).toHaveBeenCalledWith(17, undefined, { window: a, allowDuplicate: true });
+});
+
+
+it.each([false, true])('waits for the local note editor initialization (restoring: %s)', async (restoring) => {
+    delete a.Zotero_Tabs.isOwnTabEvent;
+    a.Zotero_Tabs._tabs = [{ id: 'local-note', type: restoring ? 'note-unloaded' : 'note', data: { itemID: 17 } }];
+    let initialize!: () => void;
+    const editor = { itemID: 17, tabID: 'local-note', _initPromise: new Promise<void>(resolve => { initialize = resolve; }) };
+    (Zotero as any).Notes._editorInstances = restoring ? [] : [editor];
+    (Zotero as any).Promise = { delay: vi.fn(async () => { (Zotero as any).Notes._editorInstances.push(editor); }) };
+    let finished = false;
+    const pending = openNote(17, a).then(result => { finished = true; return result; });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(finished).toBe(false);
+    initialize();
+    expect(await pending).toBe(editor);
+});
+
+it('rejects a note tab closed while its editor initializes', async () => {
+    delete a.Zotero_Tabs.isOwnTabEvent;
+    a.Zotero_Tabs._tabs = [{ id: 'local-note', data: { itemID: 17 } }];
+    let initialize!: () => void;
+    const editor = { itemID: 17, tabID: 'local-note', _initPromise: new Promise<void>(resolve => { initialize = resolve; }) };
+    (Zotero as any).Notes._editorInstances = [editor];
+    const pending = openNote(17, a);
+    await Promise.resolve();
+    a.Zotero_Tabs._tabs = [];
+    initialize();
+    await expect(pending).rejects.toMatchObject({ code: 'window_unavailable' });
+});
+
+
+it.each([false, true])('rejects a reader closed during initialization (registration delayed: %s)', async (delayed) => {
+    delete a.Zotero_Tabs.isOwnTabEvent;
+    a.Zotero_Tabs._tabs = [{ id: 'local', type: 'reader-loading', data: { itemID: 42 } }];
+    let initialize!: () => void;
+    const reader = { itemID: 42, _window: a, navigate: vi.fn(), _initPromise: new Promise<void>(resolve => { initialize = resolve; }) };
+    vi.mocked(Zotero.Reader.getByTabID).mockReturnValue(delayed ? undefined as any : reader as any);
+    (Zotero as any).Promise = { delay: vi.fn(async () => { vi.mocked(Zotero.Reader.getByTabID).mockReturnValue(reader as any); }) };
+    const pending = openReader(42, { pageIndex: 8 }, {}, a);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    a.Zotero_Tabs._tabs = [];
+    vi.mocked(Zotero.Reader.getByTabID).mockReturnValue(undefined as any);
+    initialize();
+    await expect(pending).rejects.toMatchObject({ code: 'window_unavailable' });
+    expect(reader.navigate).not.toHaveBeenCalled();
+});
