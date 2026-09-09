@@ -2,6 +2,7 @@ import { getLocaleID, getString } from "../utils/locale";
 import { triggerToggleChat, triggerToggleQuickPrompt } from "./toggleChat";
 import { initializeReactUI } from "../../react/ui/initialization";
 import { KeyboardManager } from "../utils/keyboardManager";
+import { isQuickPromptShortcut } from "../utils/shortcuts";
 import { getPref } from "../utils/prefs";
 import { PreferencePageTab } from "../../react/atoms/ui";
 import { ActionCategoryFilter } from "@beaver/agent-core/types/actions";
@@ -540,14 +541,7 @@ export class BeaverUIFactory {
         // Mac: Cmd+Option+J, Windows/Linux: Ctrl+Alt+J
         manager.register(
             (ev) => {
-                // With Option held, macOS reports the key as the character it
-                // types (Option+J is "∆"), so the physical key is checked too.
-                const isShortcutKey = ev.key.toLowerCase() === keyboardShortcut
-                    || ev.code.toLowerCase() === `key${keyboardShortcut}`;
-                const isMacShortcut = Zotero.isMac && isShortcutKey && ev.metaKey && ev.altKey && !ev.ctrlKey && !ev.shiftKey;
-                const isWindowsShortcut = !Zotero.isMac && isShortcutKey && ev.ctrlKey && ev.altKey && !ev.shiftKey && !ev.metaKey;
-
-                if (isMacShortcut || isWindowsShortcut) {
+                if (isQuickPromptShortcut(ev, keyboardShortcut, Zotero.isMac)) {
                     ev.preventDefault();
                     triggerToggleQuickPrompt();
                 }

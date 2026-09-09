@@ -3,9 +3,10 @@
  *
  * `/beaver/test/quick-prompt` drives the closed-sidebar composer without the
  * keyboard: `{ toggle: true }` runs the shortcut's own action (and reports
- * what it did), `{ open: true }` / `{ open: false }` set the popup directly.
- * Every call returns the popup's state. Wired to its path in
- * `useHttpEndpoints.ts`.
+ * what it did), `{ open: true }` / `{ open: false }` set the popup directly,
+ * and `{ state: { mode: 'blocked', reason } }` draws a notice without the
+ * account being in that state. Every call returns the popup's state. Wired to
+ * its path in `useHttpEndpoints.ts`.
  */
 
 import { store } from '../../store';
@@ -29,6 +30,8 @@ export async function handleTestQuickPromptHttpRequest(request: any): Promise<an
         await store.set(openQuickPromptAtom);
     } else if (request?.open === false) {
         store.set(closeQuickPromptAtom);
+    } else if (request?.state && typeof request.state.mode === 'string') {
+        store.set(quickPromptStateAtom, request.state);
     }
     return {
         outcome,

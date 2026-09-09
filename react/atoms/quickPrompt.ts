@@ -11,9 +11,8 @@ import { isRunActive } from '@beaver/agent-core/agents/types';
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isWSChatPendingAtom } from './agentRunAtoms';
-import { isAuthenticatedAtom } from './auth';
+import { chatAccessGateAtom } from './chatAccess';
 import { addItemsToCurrentMessageItemsAtom, currentReaderAttachmentAtom } from './messageComposition';
-import { isProfileLoadedAtom } from './profile';
 import { newThreadAtom } from './threads';
 import {
     isQuickPromptOpenAtom,
@@ -60,15 +59,22 @@ async function selectedReaderAnnotations(attachment: Zotero.Item | null): Promis
 let openInFlight: Promise<void> | null = null;
 
 /**
- * Opens the quick prompt. With no run live, the open thread is left the way
- * "New chat" leaves it — cleared, with the current selection or open file
- * attached, plus the annotations selected in the reader — but the draft is
- * kept: Escape closes the popup without losing what was typed, and reopening
- * it goes through here again.
+ * Opens the quick prompt. When the account cannot start a chat, the popup says
+ * why and offers to open Beaver, which shows the screen that resolves it — the
+ * same gates the sidebar puts before its composer. With no run live, the open
+ * thread is left the way "New chat" leaves it — cleared, with the current
+ * selection or open file attached, plus the annotations selected in the
+ * reader — but the draft is kept: Escape closes the popup without losing what
+ * was typed, and reopening it goes through here again.
  */
 export const openQuickPromptAtom = atom(null, async (get, set) => {
     if (openInFlight) return openInFlight;
     openInFlight = (async () => {
+        const gate = get(chatAccessGateAtom);
+        if (gate) {
+            set(quickPromptStateAtom, { mode: 'blocked', reason: gate });
+            return;
+        }
         if (get(hasActiveWorkAtom)) {
             set(quickPromptStateAtom, { mode: 'busy' });
             return;
@@ -98,15 +104,13 @@ export const closeQuickPromptAtom = atom(null, (_get, set) => {
 export type QuickPromptToggleOutcome =
     /** The sidebar is open, so its composer is the place to type. */
     | 'focus-sidebar'
-    /** Beaver is not ready for a chat (signed out, profile not loaded); open it. */
-    | 'open-sidebar'
     | 'closed'
+    /** The popup is up: the composer, or a notice saying why not. */
     | 'opened';
 
 /**
  * The shortcut's action. The popup only stands in for a closed sidebar, so
- * with the sidebar open the shortcut focuses its composer instead, and when
- * Beaver cannot chat yet the sidebar is the surface that explains why.
+ * with the sidebar open the shortcut focuses its composer instead.
  */
 export const toggleQuickPromptAtom = atom(null, async (get, set): Promise<QuickPromptToggleOutcome> => {
     if (get(isSidebarVisibleAtom)) return 'focus-sidebar';
@@ -118,7 +122,6 @@ export const toggleQuickPromptAtom = atom(null, async (get, set): Promise<QuickP
         set(closeQuickPromptAtom);
         return 'closed';
     }
-    if (!get(isAuthenticatedAtom) || !get(isProfileLoadedAtom)) return 'open-sidebar';
     await set(openQuickPromptAtom);
     return 'opened';
 });

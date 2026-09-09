@@ -22,13 +22,9 @@ vi.mock('../../../react/atoms/agentRunAtoms', async () => {
     const { atom } = await import('jotai');
     return { isWSChatPendingAtom: atom(false) };
 });
-vi.mock('../../../react/atoms/auth', async () => {
+vi.mock('../../../react/atoms/chatAccess', async () => {
     const { atom } = await import('jotai');
-    return { isAuthenticatedAtom: atom(true) };
-});
-vi.mock('../../../react/atoms/profile', async () => {
-    const { atom } = await import('jotai');
-    return { isProfileLoadedAtom: atom(true) };
+    return { chatAccessGateAtom: atom<string | null>(null) };
 });
 vi.mock('../../../react/atoms/ui', async () => {
     const { atom } = await import('jotai');
@@ -53,8 +49,7 @@ vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { isWSChatPendingAtom } from '../../../react/atoms/agentRunAtoms';
-import { isAuthenticatedAtom } from '../../../react/atoms/auth';
-import { isProfileLoadedAtom } from '../../../react/atoms/profile';
+import { chatAccessGateAtom } from '../../../react/atoms/chatAccess';
 import { isSidebarVisibleAtom, isThreadListViewAtom } from '../../../react/atoms/ui';
 import { currentReaderAttachmentAtom } from '../../../react/atoms/messageComposition';
 import {
@@ -201,15 +196,18 @@ describe('toggleQuickPromptAtom', () => {
         expect(mocks.newThread).not.toHaveBeenCalled();
     });
 
-    it('opens the sidebar instead when Beaver is signed out', async () => {
-        store.set(isAuthenticatedAtom, false);
-        await expect(store.set(toggleQuickPromptAtom)).resolves.toBe('open-sidebar');
-        expect(store.get(quickPromptStateAtom)).toBeNull();
+    it('shows why a chat cannot start instead of the composer when the account is gated', async () => {
+        store.set(chatAccessGateAtom as any, 'update-required');
+        await expect(store.set(toggleQuickPromptAtom)).resolves.toBe('opened');
+        expect(store.get(quickPromptStateAtom)).toEqual({ mode: 'blocked', reason: 'update-required' });
+        expect(mocks.newThread).not.toHaveBeenCalled();
     });
 
-    it('opens the sidebar instead while the profile is still loading', async () => {
-        store.set(isProfileLoadedAtom, false);
-        await expect(store.set(toggleQuickPromptAtom)).resolves.toBe('open-sidebar');
+    it('puts the account gate before the busy notice', async () => {
+        store.set(chatAccessGateAtom as any, 'signed-out');
+        store.set(activeRunAtom, run('in_progress'));
+        await store.set(openQuickPromptAtom);
+        expect(store.get(quickPromptStateAtom)).toEqual({ mode: 'blocked', reason: 'signed-out' });
     });
 });
 

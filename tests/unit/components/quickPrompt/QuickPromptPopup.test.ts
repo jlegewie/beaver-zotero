@@ -37,13 +37,9 @@ vi.mock('../../../../react/atoms/agentRunAtoms', async () => {
     const { atom } = await import('jotai');
     return { isWSChatPendingAtom: atom(false) };
 });
-vi.mock('../../../../react/atoms/auth', async () => {
+vi.mock('../../../../react/atoms/chatAccess', async () => {
     const { atom } = await import('jotai');
-    return { isAuthenticatedAtom: atom(true) };
-});
-vi.mock('../../../../react/atoms/profile', async () => {
-    const { atom } = await import('jotai');
-    return { isProfileLoadedAtom: atom(true) };
+    return { chatAccessGateAtom: atom<string | null>(null) };
 });
 vi.mock('../../../../react/atoms/ui', async () => {
     const { atom } = await import('jotai');
@@ -78,6 +74,7 @@ import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { isWSChatPendingAtom } from '../../../../react/atoms/agentRunAtoms';
 import { isSidebarVisibleAtom, selectedZoteroTabIdAtom } from '../../../../react/atoms/ui';
+import { chatAccessGateAtom } from '../../../../react/atoms/chatAccess';
 import { quickPromptStateAtom } from '../../../../react/atoms/quickPrompt';
 import QuickPromptPopup from '../../../../react/components/quickPrompt/QuickPromptPopup';
 
@@ -276,6 +273,31 @@ describe('QuickPromptPopup', () => {
         const open = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('Open Beaver'))!;
         act(() => { open.click(); });
         expect(mocks.dispatch).toHaveBeenCalledWith('toggleChat', { forceOpen: true });
+    });
+
+    it('explains a gated account and offers Beaver instead of a composer', async () => {
+        store.set(chatAccessGateAtom as any, 'signed-out');
+        mount();
+        await fireShortcut();
+        expect(store.get(quickPromptStateAtom)).toEqual({ mode: 'blocked', reason: 'signed-out' });
+        expect(container.querySelector('.stub-composer')).toBeNull();
+        expect(container.textContent).toContain('Sign in to use Beaver');
+        const open = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('Open Beaver'))!;
+        act(() => { open.click(); });
+        expect(mocks.dispatch).toHaveBeenCalledWith('toggleChat', { forceOpen: true });
+    });
+
+    it('moves from a loading notice to the composer once Beaver is ready', async () => {
+        store.set(chatAccessGateAtom as any, 'connecting');
+        mount();
+        await fireShortcut();
+        expect(container.textContent).toContain('Beaver is still loading');
+        await act(async () => {
+            store.set(chatAccessGateAtom as any, null);
+            await Promise.resolve();
+        });
+        expect(store.get(quickPromptStateAtom)).toEqual({ mode: 'compose' });
+        expect(container.querySelector('.stub-composer')).not.toBeNull();
     });
 
     it('toggles closed on a second shortcut press', async () => {
