@@ -224,8 +224,10 @@ beforeEach(async () => {
             ...savedZotero.Sync,
             Storage: { Local: { SYNC_STATE_TO_UPLOAD: 0 } },
         },
-        // No event bus on the test window: the store must degrade silently.
+        // No runtime on the test global: the store must degrade silently when
+        // it has no one to publish table-updated notifications to.
         getMainWindow: vi.fn(() => null),
+        Beaver: undefined,
     };
 
     await seedTable();
@@ -1270,11 +1272,8 @@ describe('retriable creation', () => {
     });
 
     it.each(['v1.json', 'history.json'])('retries a failed %s seed without acknowledging incomplete creation', async (failedFile) => {
-        const dispatchEvent = vi.fn();
-        (Zotero.getMainWindow as any).mockReturnValue({
-            __beaverEventBus: { dispatchEvent },
-            CustomEvent: class { constructor(public type: string, public options: unknown) {} },
-        });
+        const publish = vi.fn();
+        (Zotero as any).Beaver = { runtime: { publish } };
         (globalThis as any).IOUtils = {
             ...realIOUtils,
             move: async (from: string, to: string) => {
@@ -1284,13 +1283,13 @@ describe('retriable creation', () => {
         };
         await expect(createTable(options)).rejects.toThrow('disk full');
         expect(item.deleted).toBe(false);
-        expect(dispatchEvent).not.toHaveBeenCalled();
+        expect(publish).not.toHaveBeenCalled();
         (globalThis as any).IOUtils = realIOUtils;
         const replay = await createTable(options);
         expect(replay).toMatchObject({ key: KEY, replayed: true });
         expect(existsSync(sidecar('v1.json'))).toBe(true);
         expect((await listVersions(ref))).toMatchObject([{ version: 1, creation: true, actor: 'agent', run_id: 'run' }]);
-        expect(dispatchEvent).toHaveBeenCalledTimes(1);
+        expect(publish).toHaveBeenCalledTimes(1);
         expect(await trimTable(ref, { thread_id: 'thread', run_ids: ['run'] })).toMatchObject({ outcome: 'trashed' });
         expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
     });
