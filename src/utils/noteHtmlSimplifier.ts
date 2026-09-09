@@ -14,7 +14,11 @@ import { stripBeaverEditFooter, stripBeaverCreatedFooter } from './noteEditFoote
 import { escapeAttr, unescapeAttr } from './noteHtmlEntities';
 import { stripDataCitationItems, stripNoteWrapperDiv } from './noteWrapper';
 import { normalizeNoteHtml } from '../prosemirror/normalize';
-import { parseZoteroCitationLinkHref } from './zoteroLinkCitation';
+import {
+    parseLinkCitationPageSuffix,
+    parseZoteroCitationLinkHref,
+    zoteroLinkCitationPattern,
+} from './zoteroLinkCitation';
 import { translatePageLabelToNumber } from './pageLabelTranslation';
 import { extractItemKeyFromUri } from './zoteroUri';
 import { modelObjectId } from './libraryIdentity';
@@ -398,14 +402,14 @@ export function simplifyNoteHtml(
         // page while the link stayed behind. Only Beaver's own shape is
         // absorbed; any other text around the anchor is left where it was.
         simplified = simplified.replace(
-            /(\()?(<a\s+[^>]*href="(zotero:\/\/[^"]*)"[^>]*>[\s\S]*?<\/a>)(,[^<()]*)?(\))?/g,
+            zoteroLinkCitationPattern(),
             (match, openParen, anchor, rawHref, rawSuffix, closeParen) => {
                 const parsed = parseZoteroCitationLinkHref(rawHref);
                 if (!parsed) return match;
 
                 const suffix: string = rawSuffix ?? '';
-                const locatorMatch = suffix ? /^,\s*p\.\s*(\S[^<]*?)\s*$/.exec(suffix) : null;
-                const wrapped = !!openParen && !!closeParen && (!suffix || !!locatorMatch);
+                const suffixPage = parseLinkCitationPageSuffix(suffix);
+                const wrapped = !!openParen && !!closeParen && (!suffix || suffixPage !== null);
 
                 const itemId = modelObjectId(parsed.libraryId, parsed.itemKey);
                 const occurrence = citationKeyCounts.get(parsed.itemKey) || 0;
@@ -414,7 +418,7 @@ export function simplifyNoteHtml(
 
                 // The stored locator is a display label. Show the agent physical
                 // page numbers where labels are known, as native citations do.
-                const rawPage = wrapped && locatorMatch ? unescapeAttr(locatorMatch[1]) : '';
+                const rawPage = wrapped && suffixPage ? suffixPage : '';
                 let page = rawPage;
                 let pageConvention: 'number' | 'label' | undefined = page ? 'label' : undefined;
                 const pageLabels = pageLabelsByItemId?.[itemId];

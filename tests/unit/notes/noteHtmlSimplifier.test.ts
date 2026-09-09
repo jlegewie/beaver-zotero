@@ -847,6 +847,31 @@ describe('expandToRawHtml', () => {
         expect(expandToRawHtml(simplified, metadata, 'old')).toBe(saved);
     });
 
+    it('keeps the physical-page convention for a link citation whose labels are offset', () => {
+        // Front matter puts printed page 3 on physical page 5. The agent works
+        // in physical pages, so that is what the simplified locator must show,
+        // and an edit to it must land on the physical page it names.
+        const labels = { 4: '3', 5: '4' };
+        const item = {
+            id: 42, key: 'ATTACH12', libraryID: 1, parentID: false,
+            isAttachment: () => true, isFileAttachment: () => true, isPDFAttachment: () => true,
+            getField: () => 'Report.pdf',
+        };
+        vi.mocked(Zotero.Items.getByLibraryAndKey).mockReturnValue(item as any);
+        (Zotero.Libraries as any).get = vi.fn(() => ({ isGroup: false }));
+        const saved = '(<a href="zotero://open/library/items/ATTACH12?page=5"'
+            + ' rel="noopener noreferrer nofollow">Report.pdf</a>, p. 3)';
+
+        const { simplified, metadata } = simplifyNoteHtml(wrap(`<p>${saved}</p>`), 1, { 'u-ATTACH12': labels });
+        expect(simplified).toContain('<citation id="u-ATTACH12" loc="page5" ref="c_ATTACH12_0"/>');
+
+        const edited = expandToRawHtml(
+            simplified.replace('loc="page5"', 'loc="page6"'), metadata, 'new', undefined, { 42: labels },
+        );
+        expect(edited).toContain('<a href="zotero://open/library/items/ATTACH12?page=6"'
+            + ' rel="noopener noreferrer nofollow">Report.pdf</a>, p. 4)');
+    });
+
     it.each(['id', 'att_id'])('rejects excluded attachment %s before looking up its metadata', (attribute) => {
         vi.mocked(checkLibraryExcluded).mockReturnValueOnce({ message: 'Library excluded' });
         expect(() => expandToRawHtml(`<citation ${attribute}="1-ATTACH12" loc="page6"/>`,

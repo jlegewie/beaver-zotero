@@ -32,6 +32,9 @@ import {
     buildZoteroCitationLinkHTML,
     isLinkCitationItem,
     isStandaloneAttachment,
+    parseLinkCitationPageSuffix,
+    parseZoteroCitationLinkHref,
+    zoteroLinkCitationPattern,
 } from './zoteroLinkCitation';
 import type { SimplificationMetadata } from './noteHtmlSimplifier';
 import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
@@ -165,7 +168,8 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
 }
 
 /**
- * Load cached page labels for citations already stored in a raw Zotero note.
+ * Load cached page labels for citations already stored in a raw Zotero note,
+ * both native ones and the plain links used for standalone attachments.
  *
  * This path is cache-first. Warm-cache reads only consult `documentCache`
  * metadata; callers can opt into local metadata seeding on a cache miss when
@@ -188,6 +192,42 @@ export async function preloadNotePageLabels(
     if (!cache) return labelsByItemId;
 
     const seen = new Set<string>();
+    // Keyed with the simplifier's portable item id so lookups in
+    // `simplifyNoteHtml` (which builds the same id via `modelObjectId`)
+    // resolve to the labels seeded here.
+    const loadLabels = async (targetLibraryID: number, itemKey: string): Promise<void> => {
+        const itemId = modelObjectId(targetLibraryID, itemKey);
+        if (seen.has(itemId)) return;
+        seen.add(itemId);
+        try {
+            const item = Zotero.Items.getByLibraryAndKey(targetLibraryID, itemKey);
+            const attachmentItem = item && typeof item !== 'boolean'
+                ? (item.isAttachment() ? item : await getBestPDFAttachmentAsync(item))
+                : null;
+            if (!attachmentItem) return;
+
+            const localFilePath = await attachmentItem.getFilePathAsync();
+            const filePath = localFilePath || makeRemoteFilePath(attachmentItem);
+            const isRemoteOnly = !localFilePath || isRemoteFilePath(filePath);
+            let record = await cache.getMetadata({
+                libraryId: attachmentItem.libraryID,
+                zoteroKey: attachmentItem.key,
+            }, filePath);
+            if (!record && extractOnCacheMiss && (!isRemoteOnly || allowRemoteDownloads)) {
+                await getAttachmentFileStatus(attachmentItem, false);
+                record = await cache.getMetadata({
+                    libraryId: attachmentItem.libraryID,
+                    zoteroKey: attachmentItem.key,
+                }, filePath);
+            }
+            if (record?.pageLabels && Object.keys(record.pageLabels).length > 0) {
+                labelsByItemId[itemId] = { ...record.pageLabels };
+            }
+        } catch {
+            // Skip attachments whose file or metadata cannot be read.
+        }
+    };
+
     const regex = /data-citation="([^"]*)"/g;
     let match: RegExpExecArray | null;
 
@@ -202,40 +242,28 @@ export async function preloadNotePageLabels(
                 const uri = ci?.uris?.[0] || '';
                 const itemKey = extractItemKeyFromUri(uri);
                 if (!itemKey) continue;
-                // Keyed with the simplifier's portable item id so lookups in
-                // `simplifyNoteHtml` (which builds the same id via `modelObjectId`)
-                // resolve to the labels seeded here.
-                const itemId = modelObjectId(libraryID, itemKey);
-                if (seen.has(itemId)) continue;
-                seen.add(itemId);
-
-                const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
-                const attachmentItem = item && typeof item !== 'boolean'
-                    ? (item.isAttachment() ? item : await getBestPDFAttachmentAsync(item))
-                    : null;
-                if (!attachmentItem) continue;
-
-                const localFilePath = await attachmentItem.getFilePathAsync();
-                const filePath = localFilePath || makeRemoteFilePath(attachmentItem);
-                const isRemoteOnly = !localFilePath || isRemoteFilePath(filePath);
-                let record = await cache.getMetadata({
-                    libraryId: attachmentItem.libraryID,
-                    zoteroKey: attachmentItem.key,
-                }, filePath);
-                if (!record && extractOnCacheMiss && (!isRemoteOnly || allowRemoteDownloads)) {
-                    await getAttachmentFileStatus(attachmentItem, false);
-                    record = await cache.getMetadata({
-                        libraryId: attachmentItem.libraryID,
-                        zoteroKey: attachmentItem.key,
-                    }, filePath);
-                }
-                if (record?.pageLabels && Object.keys(record.pageLabels).length > 0) {
-                    labelsByItemId[itemId] = { ...record.pageLabels };
-                }
+                await loadLabels(libraryID, itemKey);
             }
         } catch {
             // Skip malformed citation metadata or attachments that can't load.
         }
+    }
+
+    // Link citations (standalone attachments) carry no `data-citation`, so their
+    // labels have to come from the link itself. Without them the simplifier
+    // cannot translate the stored label into the physical page number the agent
+    // writes, and a later locator edit would be read in the wrong convention.
+    // The link names its own library, which need not be the note's.
+    for (const link of rawHtml.matchAll(zoteroLinkCitationPattern())) {
+        const [, openParen, , rawHref, rawSuffix, closeParen] = link;
+        // Only the wrapped form carries a locator into the simplified citation.
+        if (!openParen || !closeParen) continue;
+        if (parseLinkCitationPageSuffix(rawSuffix) === null) continue;
+        const parsed = parseZoteroCitationLinkHref(rawHref);
+        // Reading an excluded library's cached extraction is off limits; the
+        // citation still renders, only its locator convention is left as stored.
+        if (!parsed || checkLibraryExcluded(parsed.libraryId)) continue;
+        await loadLabels(parsed.libraryId, parsed.itemKey);
     }
 
     return labelsByItemId;

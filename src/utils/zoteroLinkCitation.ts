@@ -2,7 +2,7 @@ import { normalizeCitationTag, parseRawCitationAttributes, type Locator } from '
 import { noteCitationTagPattern } from './noteCitationTags';
 import { UNRESOLVED_LIBRARY_ID } from './libraryIdentity';
 import { externalFileLocatorSuffix } from './externalFileCitation';
-import { escapeAttr } from './noteHtmlEntities';
+import { escapeAttr, unescapeAttr } from './noteHtmlEntities';
 
 const MAX_LABEL_SNIPPET_LENGTH = 120;
 const MAX_NOTE_TITLE_LENGTH = 50;
@@ -177,6 +177,30 @@ export function buildZoteroCitationLinkHTML(item: any, locator?: Locator, navPag
     // Match the note normalizer so a newly saved link is also an exact edit anchor.
     const rel = 'noopener noreferrer nofollow';
     return `(<a href="${escapeAttr(uri)}" rel="${rel}">${escapeAttr(visibleLabel)}</a>${escapeAttr(suffix)})`;
+}
+
+/**
+ * Match a link citation in note HTML — the anchor plus the parentheses and
+ * locator suffix `buildZoteroCitationLinkHTML` writes around it. Capture
+ * groups: opening parenthesis, anchor, href, locator suffix, closing
+ * parenthesis; every one but the anchor and href is optional, so a bare link
+ * matches too and the caller decides what to do with a partial wrapper.
+ *
+ * Shared so the note simplifier and the page-label preload agree on which text
+ * belongs to a citation.
+ */
+export function zoteroLinkCitationPattern(): RegExp {
+    return /(\()?(<a\s+[^>]*href="(zotero:\/\/[^"]*)"[^>]*>[\s\S]*?<\/a>)(,[^<()]*)?(\))?/g;
+}
+
+/**
+ * The page a link citation's locator suffix displays (", p. 6-8" → "6-8"), or
+ * null when the suffix is absent or is not a page locator. The value is a
+ * display label, as stored in the note.
+ */
+export function parseLinkCitationPageSuffix(suffix: string | undefined): string | null {
+    const match = suffix ? /^,\s*p\.\s*(\S[^<]*?)\s*$/.exec(suffix) : null;
+    return match ? unescapeAttr(match[1]) : null;
 }
 
 /**
