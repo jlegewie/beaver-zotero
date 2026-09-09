@@ -326,7 +326,7 @@ describe('showDiffPreview approveAll revision-guard flow', () => {
         let titleLoaded = false;
         const attachment = {
             libraryID: 1, key: 'ATTACH12', parentID: false,
-            isAttachment: () => true,
+            isAttachment: () => true, isFileAttachment: () => true, isPDFAttachment: () => true,
             attachmentFilename: 'fallback.pdf',
             getField: vi.fn(() => {
                 if (!titleLoaded) throw new Error('Item data not loaded');
@@ -347,7 +347,7 @@ describe('showDiffPreview approveAll revision-guard flow', () => {
             expect(shown, JSON.stringify(vi.mocked(logger).mock.calls)).toBe(true);
             expect(Zotero.Items.loadDataTypes).toHaveBeenCalledWith([attachment], ['itemData']);
             const html = h.applyIncrementalUpdate.mock.calls[0][0].html;
-            expect(html).toContain('zotero://select/library/items/ATTACH12');
+            expect(html).toContain('zotero://open/library/items/ATTACH12?page=6');
             expect(html).toContain('Full report title');
             expect(html).toContain(', p. 6');
             expect(html).not.toContain('fallback.pdf');

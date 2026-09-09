@@ -132,6 +132,20 @@ describe('citation render context', () => {
         });
     });
 
+    it('resolves a cited standalone attachment file so link rendering knows it is reachable', async () => {
+        // Note creation renders citations synchronously; a standalone
+        // attachment link only opens the file when this preload has confirmed
+        // the file is here.
+        attachment.parentID = false;
+        attachment.isAttachment = () => true;
+        attachment.getFilePathAsync = vi.fn().mockResolvedValue('/storage/ATTACH01/file.pdf');
+        (Zotero as any).Items.loadDataTypes = vi.fn().mockResolvedValue(undefined);
+
+        await prepareCitationRenderContext('Claim <citation id="1-ATTACH01" loc="page6"/>', {});
+
+        expect(attachment.getFilePathAsync).toHaveBeenCalled();
+    });
+
     it('merges local citation metadata with explicit render context', async () => {
         const existing = { citation_id: 'c1', run_id: 'r1', locations: [] } as any;
         mockPreloadPageLabelsForContent.mockResolvedValue({ 42: { 2: '7' } });

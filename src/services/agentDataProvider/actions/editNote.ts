@@ -1,4 +1,4 @@
-import { preloadStandaloneAttachmentTitles } from '../../../utils/zoteroLinkCitation';
+import { preloadStandaloneAttachmentLinks } from '../../../utils/zoteroLinkCitation';
 import { preloadExternalFileCitations } from '../../../utils/externalFileCitation';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
@@ -182,7 +182,7 @@ async function findMarkdownRenderFallbackMatch(
 export async function getExternalRefContext(content: string): Promise<ExternalRefContext> {
     const [{ files, warnings }] = await Promise.all([
         preloadExternalFileCitations(content),
-        preloadStandaloneAttachmentTitles(content, libraryID => !checkLibraryExcluded(libraryID)),
+        preloadStandaloneAttachmentLinks(content, libraryID => !checkLibraryExcluded(libraryID)),
     ]);
     return {
         externalFiles: files,

@@ -64,13 +64,13 @@ describe('zoteroDocumentExport.renderCitation', () => {
     it('uses resolved pages for structural locators', () => {
         const loc = { kind: 'sentence', value: '4', raw: 's4' };
         zoteroDocumentExport.renderCitation(citationRequest({ requestedRef: { loc }, pages: [6] }));
-        expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item, { kind: 'page', value: '6', raw: 'page6' });
+        expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item, { kind: 'page', value: '6', raw: 'page6' }, 6);
     });
 
     it('retains all metadata pages when no requested locator exists', () => {
         zoteroDocumentExport.renderCitation(citationRequest({ pages: [6, 7] }));
         expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item,
-            { kind: 'page', value: '6-7', raw: 'page6-7' });
+            { kind: 'page', value: '6-7', raw: 'page6-7' }, 6);
     });
 
     it.each([
@@ -83,14 +83,14 @@ describe('zoteroDocumentExport.renderCitation', () => {
             pages, metadata: { page_labels: labels },
         }));
         expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item,
-            { kind: 'page', value: expected, raw: `page${expected}` });
+            { kind: 'page', value: expected, raw: `page${expected}` }, 2);
     });
 
     it.each([null, { loc: { kind: 'page', value: '2, 4', raw: 'page2, 4' } }])(
         'preserves separate cited pages without a structural span (%j)', (requestedRef) => {
             zoteroDocumentExport.renderCitation(citationRequest({ requestedRef, pages: [2, 4] }));
             expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item,
-                { kind: 'page', value: '2, 4', raw: 'page2, 4' });
+                { kind: 'page', value: '2, 4', raw: 'page2, 4' }, 2);
         },
     );
 
@@ -98,7 +98,7 @@ describe('zoteroDocumentExport.renderCitation', () => {
         zoteroDocumentExport.renderCitation(citationRequest({
             requestedRef: { loc: { kind: 'sentence', value: '1-5', raw: 's1-s5' } },
         }));
-        expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item, undefined);
+        expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item, undefined, undefined);
     });
 
     it('falls back to the legacy local library id when no portable ref exists', () => {

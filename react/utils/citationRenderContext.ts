@@ -1,4 +1,4 @@
-import { preloadStandaloneAttachmentTitles } from '../../src/utils/zoteroLinkCitation';
+import { preloadStandaloneAttachmentLinks } from '../../src/utils/zoteroLinkCitation';
 import type { Citation, PartLocation } from '@beaver/agent-core/types/citations';
 import type { RenderContextData } from './citationRenderers';
 import { store } from '../store';
@@ -286,7 +286,7 @@ export async function prepareCitationRenderContext(
         preloadPageLabelsForContent(content),
         buildLocalCitationDataMapForContent(content),
         resolveExternalFileCitations(content),
-        preloadStandaloneAttachmentTitles(content),
+        preloadStandaloneAttachmentLinks(content),
     ]);
 
     const localCitationDataMap = {

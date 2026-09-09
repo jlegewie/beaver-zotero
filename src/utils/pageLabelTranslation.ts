@@ -71,6 +71,20 @@ export function translatePageLabelToNumber(
     return translatedAny ? translatedParts.join('') : locStr;
 }
 
+/**
+ * First physical 1-based page in a page locator ("12", "12-15", "3, 7"), or
+ * undefined when the locator is not a physical page number ("xii", "§3.2").
+ *
+ * Reader navigation addresses pages by position, so a display label has to be
+ * translated back with `translatePageLabelToNumber` before it lands here.
+ */
+export function firstPageNumber(pageStr: string | null | undefined): number | undefined {
+    const match = pageStr?.match(/^\s*(\d+)/);
+    if (!match) return undefined;
+    const page = parseInt(match[1], 10);
+    return page > 0 ? page : undefined;
+}
+
 /** Format distinct physical pages as compact ranges, using display labels when available. */
 export function formatCitationPages(
     pages: number[],

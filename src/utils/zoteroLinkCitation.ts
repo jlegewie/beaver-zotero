@@ -86,14 +86,38 @@ export function isLinkCitationItem(item: any): boolean {
 }
 
 /**
- * Build a Zotero protocol URI for note, annotation, and standalone attachment citations.
+ * Build a Zotero protocol URI for note, annotation, and standalone attachment
+ * citations.
+ *
+ * A standalone attachment opens its file rather than revealing the library row:
+ * the note already names the attachment, the reader is what the citation points
+ * at, and opening leaves the note itself on screen instead of navigating the
+ * item pane away from it. `navPage` is the cited *physical* 1-based page, which
+ * is how Zotero reads `?page=`; it is only passed for PDFs, because the EPUB
+ * view resolves the same parameter through its own page mapping.
+ *
+ * Selecting is the fallback whenever opening would do nothing: an attachment
+ * with no file (a linked URL), and one whose file this computer does not have
+ * (never downloaded, or a linked file on a disconnected volume) — Zotero's
+ * `open` handler gives up silently when it cannot resolve a path. Availability
+ * is read from Zotero's cached file state, which
+ * `preloadStandaloneAttachmentLinks` primes for every cited attachment; an
+ * unchecked attachment reads as null and still opens.
  */
-export function buildZoteroCitationLinkURI(item: any): string | null {
+export function buildZoteroCitationLinkURI(item: any, navPage?: number): string | null {
     if (!item || !item.key || !item.libraryID) return null;
 
     const segment = librarySegment(item.libraryID);
-    if (item.isNote?.() === true || isStandaloneAttachment(item)) {
+    if (item.isNote?.() === true) {
         return `zotero://select/${segment}/items/${item.key}`;
+    }
+
+    if (isStandaloneAttachment(item)) {
+        if (item.isFileAttachment?.() !== true || item.fileExistsCached?.() === false) {
+            return `zotero://select/${segment}/items/${item.key}`;
+        }
+        const pageQuery = navPage && item.isPDFAttachment?.() === true ? `?page=${navPage}` : '';
+        return `zotero://open/${segment}/items/${item.key}${pageQuery}`;
     }
 
     if (isAnnotationItem(item)) {
@@ -135,9 +159,13 @@ export function buildZoteroCitationLinkLabel(item: any): string {
 
 /**
  * Build plain HTML for a note, annotation, or attachment citation link.
+ *
+ * `locator` is what the reader sees (a page label, possibly a range); `navPage`
+ * is the physical page the link navigates to. They are resolved separately
+ * because Zotero's `?page=` counts pages by position, not by label.
  */
-export function buildZoteroCitationLinkHTML(item: any, locator?: Locator): string {
-    const uri = buildZoteroCitationLinkURI(item);
+export function buildZoteroCitationLinkHTML(item: any, locator?: Locator, navPage?: number): string {
+    const uri = buildZoteroCitationLinkURI(item, navPage);
     if (!uri) {
         throw new Error(
             `Error: Zotero item "${item?.libraryID ?? ''}-${item?.key ?? ''}" cannot be embedded as a note link.`
@@ -170,23 +198,28 @@ export function parseZoteroCitationLinkHref(
         return { libraryId, itemKey: selectMatch[3] };
     }
 
-    const openPdfMatch = decodedHref.match(/^zotero:\/\/open-pdf\/(library|groups\/(\d+))\/items\/([^/?#]+)(?:\?([^#]*))?/);
-    if (openPdfMatch) {
-        const libraryId = openPdfMatch[1] === 'library'
+    // `open` / `open-pdf` name the attachment; an `annotation` query names the
+    // annotation inside it, which is the citation target in that case.
+    const openMatch = decodedHref.match(/^zotero:\/\/open(?:-pdf)?\/(library|groups\/(\d+))\/items\/([^/?#]+)(?:\?([^#]*))?/);
+    if (openMatch) {
+        const libraryId = openMatch[1] === 'library'
             ? Zotero.Libraries.userLibraryID
-            : Zotero.Groups.getLibraryIDFromGroupID(Number(openPdfMatch[2]));
+            : Zotero.Groups.getLibraryIDFromGroupID(Number(openMatch[2]));
         if (!libraryId) return null;
 
-        const params = new URLSearchParams(openPdfMatch[4] || '');
-        const annotationKey = params.get('annotation');
-        return annotationKey ? { libraryId, itemKey: annotationKey } : null;
+        const params = new URLSearchParams(openMatch[4] || '');
+        return { libraryId, itemKey: params.get('annotation') || openMatch[3] };
     }
 
     return null;
 }
 
-/** Load attachment titles before synchronous rendering; no file access is needed. */
-export async function preloadStandaloneAttachmentTitles(
+/**
+ * Prepare cited standalone attachments for synchronous link rendering: load the
+ * titles the label needs, and resolve each file once so Zotero's cached file
+ * state can tell `buildZoteroCitationLinkURI` whether opening it would work.
+ */
+export async function preloadStandaloneAttachmentLinks(
     content: string,
     allowLibrary: (libraryID: number) => boolean = () => true,
 ): Promise<void> {
@@ -213,4 +246,13 @@ export async function preloadStandaloneAttachmentTitles(
     } catch {
         // Rendering can still use filenames when title data is unavailable.
     }
+    // Resolving the path is what populates `fileExistsCached()`. Failures leave
+    // it unknown, which renders an open link — the same as before this check.
+    await Promise.all(items.map(async (item) => {
+        try {
+            await item.getFilePathAsync?.();
+        } catch {
+            // A file that cannot be checked is not a reason to drop the link.
+        }
+    }));
 }
