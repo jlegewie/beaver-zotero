@@ -1,3 +1,4 @@
+import { getContextWindow } from '../runtime/windowRuntime';
 import { getSelectedCollections } from '../../src/utils/zoteroSelection';
 import { collectionToReference } from '../utils/zoteroReferences';
 import { atom } from "jotai";
@@ -208,6 +209,7 @@ export const clearComposerAtom = atom(
     null,
     (get, set) => {
         set(currentMessageContentAtom, '');
+        set(readerActionContextAtom, null);
         set(currentMessagePillsAtom, []);
         // Pills staged but not yet inserted belong to the draft being
         // discarded — their targets were attached to it and have just been
@@ -246,6 +248,8 @@ export const currentNoteTabItemKeyAtom = atom<string | null>((get) => {
  * Current reader text selection
 */
 export const readerTextSelectionAtom = atom<TextSelection | null>(null);
+/** Explicit reader action context belongs to the draft, not the destination tab. */
+export const readerActionContextAtom = atom<{ item: Zotero.Item; selection: TextSelection | null } | null>(null);
 
 /**
 * Remove a library from the current selection
@@ -343,6 +347,7 @@ export const clearMessageContextAtom = atom(
         set(currentMessageExternalFilesAtom, []);
         set(currentMessageFiltersAtom, createDefaultMessageFilters());
         set(readerTextSelectionAtom, null);
+        set(readerActionContextAtom, null);
     }
 );
 
@@ -589,7 +594,7 @@ async function validateItemsInBackground(
 export const updateMessageCollectionsFromZoteroSelectionAtom = atom(null, (get, set) => {
     try {
         const searchableLibraryIds = get(searchableLibraryIdsAtom);
-        const collections = getSelectedCollections(Zotero.getActiveZoteroPane());
+        const collections = getSelectedCollections(getContextWindow()?.ZoteroPane);
         set(currentMessageCollectionsAtom, collections
             .filter(collection => !collection.deleted && searchableLibraryIds.includes(collection.libraryID))
             .map(collectionToReference));
@@ -605,7 +610,7 @@ export const updateMessageCollectionsFromZoteroSelectionAtom = atom(null, (get, 
 export const updateMessageItemsFromZoteroSelectionAtom = atom(
     null,
     async (get, set, limit?: number) => {
-        const items = Zotero.getActiveZoteroPane().getSelectedItems();
+        const items = getContextWindow()?.ZoteroPane?.getSelectedItems() ?? [];
         // Never stage items from libraries the user excluded from Beaver.
         const searchableLibraryIds = get(searchableLibraryIdsAtom);
         const supportedItems = items.filter((item) =>
@@ -713,7 +718,7 @@ export const updateReaderAttachmentAtom = atom(
     null,
     async (get, set, reader?: any) => {
         // also gets the current reader item (parent item)
-        // Zotero.getActiveZoteroPane().getSelectedItems()
+        // getContextWindow()?.ZoteroPane.getSelectedItems()
         const generation = ++readerAttachmentGeneration;
 
         // Remove popup message for current reader attachment

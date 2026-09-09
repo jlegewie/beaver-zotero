@@ -14,6 +14,8 @@
  * importing only from safe sources (builtinActions, actions types, prefs).
  */
 
+import { resolveChatWindow } from '../runtime/navigation';
+
 import {
     Action,
     ActionCustomizations,
@@ -388,7 +390,7 @@ function buildItemMenuItems(itemActions: Action[]): any[] {
                 filterItemAction(action, context);
             }),
             onCommand: (_event: any, context: any) => {
-                dispatchAction(action, context);
+                void dispatchAction(action, context, _event?.target?.ownerDocument?.defaultView).catch(Zotero.logError);
             },
         });
     }
@@ -417,7 +419,7 @@ function buildCollectionMenuItems(collectionActions: Action[]): any[] {
             filterCollectionAction(action, context);
         }),
         onCommand: (_event: any, context: any) => {
-            dispatchAction(action, context);
+            void dispatchAction(action, context, _event?.target?.ownerDocument?.defaultView).catch(Zotero.logError);
         },
     }));
 
@@ -460,8 +462,8 @@ function filterCollectionAction(_action: Action, context: any): void {
 // Event dispatch (onCommand handler)
 // ---------------------------------------------------------------------------
 
-function dispatchAction(action: Action, context: any): void {
-    const win = Zotero.getMainWindow();
+async function dispatchAction(action: Action, context: any, origin?: Window): Promise<void> {
+    const win = await resolveChatWindow(origin ?? context.window);
     const eventBus = win?.__beaverEventBus;
     if (!eventBus) return;
 
@@ -526,16 +528,17 @@ function removeStaleMenuDOM(): void {
     // Scoped to Beaver's own l10n IDs so we never wipe other plugins' menu
     // items (they share CUSTOM_MENU_CLASS via Zotero's MenuManager).
     try {
-        const win = Zotero.getMainWindow();
-        if (!win?.document) return;
+        for (const win of Zotero.getMainWindows()) {
+            if (!win?.document || win.closed) continue;
 
-        const selector = `.${CUSTOM_MENU_CLASS}[data-l10n-id^="beaver-context-menu-"]`;
-        for (const popupId of ['zotero-itemmenu', 'zotero-collectionmenu']) {
-            const popup = win.document.getElementById(popupId);
-            if (!popup) continue;
-            const stale = popup.querySelectorAll(selector);
-            if (stale.length > 0) {
-                stale.forEach((el: Element) => el.remove());
+            const selector = `.${CUSTOM_MENU_CLASS}[data-l10n-id^="beaver-context-menu-"]`;
+            for (const popupId of ['zotero-itemmenu', 'zotero-collectionmenu']) {
+                const popup = win.document.getElementById(popupId);
+                if (!popup) continue;
+                const stale = popup.querySelectorAll(selector);
+                if (stale.length > 0) {
+                    stale.forEach((el: Element) => el.remove());
+                }
             }
         }
     } catch (_e) {

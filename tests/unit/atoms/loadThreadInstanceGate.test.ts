@@ -39,6 +39,7 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
     const currentMessagePillsAtom = atom<unknown[]>([]);
     const composerResetTokenAtom = atom(0);
     return {
+        readerActionContextAtom: atom(null),
         currentMessageItemsAtom: atom<unknown[]>([]),
         currentMessageContentAtom,
         currentMessagePillsAtom,

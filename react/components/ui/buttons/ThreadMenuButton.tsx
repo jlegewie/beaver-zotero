@@ -1,3 +1,5 @@
+import { getContextWindow } from '../../../runtime/windowRuntime';
+import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
 import React, { useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
@@ -27,7 +29,7 @@ import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { getZoteroTargetContextSync } from '../../../../src/utils/zoteroUtils';
 import { getSelectedCollection } from '../../../../src/utils/zoteroSelection';
-import { selectItem, selectItemById } from '../../../../src/utils/selectItem';
+import { selectItem, selectItemById } from '../../../utils/selectItem';
 import { store } from '../../../store';
 import { prepareCitationRenderContext } from '../../../utils/citationRenderContext';
 import { threadService } from '@beaver/agent-core/transport/threadService';
@@ -47,6 +49,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     className = '',
     ariaLabel = 'Chat actions',
 }) => {
+    const surfaceWindow = useSurfaceWindow();
     const [, forceUpdate] = useState({});
     const threadId = useAtomValue(currentThreadIdAtom);
     // Derived from the thread store, so this entry cannot disagree with the
@@ -144,6 +147,11 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     };
 
     const handleSaveAsNote = async () => {
+        const win = getContextWindow();
+        const context = getZoteroTargetContextSync(win);
+        if (context.targetLibraryId === undefined) return;
+        const selectedCollection = getSelectedCollection(win?.ZoteroPane);
+        const isInReader = win?.Zotero_Tabs?.selectedType === 'reader';
         const content = await getThreadContent({ includeRunLinks: false, userMessageAsBlockquote: true });
         const renderContent = preprocessNoteContent(content);
         const renderContextData = await prepareCitationRenderContext(renderContent, {
@@ -152,7 +160,6 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
             externalReferencesMap,
         });
         let htmlContent = renderToHTML(renderContent, "markdown", renderContextData);
-        const context = getZoteroTargetContextSync();
         const threadId = store.get(currentThreadIdAtom);
 
         // Insert header after <h1> title, append footer
@@ -172,22 +179,22 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         await newNote.saveTx();
 
         // Always add to the current collection (even when items are selected)
-        const zp = Zotero.getActiveZoteroPane();
-        const selectedCollection = getSelectedCollection(zp);
         if (selectedCollection) {
             await Zotero.DB.executeTransaction(async () => {
                 selectedCollection.addItem(newNote.id);
             });
         }
 
-        const win = Zotero.getMainWindow();
-        const isInReader = win.Zotero_Tabs?.selectedType === 'reader';
         if (!isInReader) {
-            await selectItemById(newNote.id, true, selectedCollection?.id);
+            await selectItemById(newNote.id, true, selectedCollection?.id, win);
         }
     };
 
     const handleSaveAsChildNote = async () => {
+        const win = getContextWindow();
+        const context = getZoteroTargetContextSync(win);
+        if (context.targetLibraryId === undefined) return;
+        const isInReader = win?.Zotero_Tabs?.selectedType === 'reader';
         const content = await getThreadContent({ includeRunLinks: false, userMessageAsBlockquote: true });
         const renderContent = preprocessNoteContent(content);
         const renderContextData = await prepareCitationRenderContext(renderContent, {
@@ -196,7 +203,6 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
             externalReferencesMap,
         });
         let htmlContent = renderToHTML(renderContent, "markdown", renderContextData);
-        const context = getZoteroTargetContextSync();
         if (!context.parentReference) return;
 
         const threadId = store.get(currentThreadIdAtom);
@@ -216,10 +222,8 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         newNote.setNote(htmlContent);
         await newNote.saveTx();
 
-        const win = Zotero.getMainWindow();
-        const isInReader = win.Zotero_Tabs?.selectedType === 'reader';
         if (!isInReader) {
-            selectItem(newNote);
+            selectItem(newNote, true, win);
         }
     };
 
@@ -236,7 +240,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         // Native text-input dialog for renaming (no in-panel edit UI needed here).
         const input = { value: threadName || 'Unnamed conversation' };
         const confirmed = Services.prompt.prompt(
-            Zotero.getMainWindow() as any,
+            surfaceWindow as any,
             'Rename chat',
             'Enter a new name for this chat:',
             input,
@@ -293,7 +297,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         if (!threadId) return;
 
         const buttonIndex = Zotero.Prompt.confirm({
-            window: Zotero.getMainWindow(),
+            window: surfaceWindow,
             title: 'Delete chat?',
             text: 'Are you sure you want to delete this chat? This action cannot be undone.',
             button0: Zotero.Prompt.BUTTON_TITLE_YES,

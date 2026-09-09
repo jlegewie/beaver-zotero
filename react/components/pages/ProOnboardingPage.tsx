@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useState, useEffect, useMemo } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { overallSyncStatusAtom, syncStatusAtom, LibrarySyncStatus } from "../../atoms/sync";
@@ -27,6 +28,7 @@ import { parseTextWithLinksAndNewlines } from "../../utils/parseTextWithLinksAnd
  * 2. Library selection and syncing process
  */
 const ProOnboardingPage: React.FC = () => {
+    const surfaceWindow = useSurfaceWindow();
     // Auth state
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
     const user = useAtomValue(userAtom);
@@ -216,7 +218,7 @@ const ProOnboardingPage: React.FC = () => {
 
         if (overallSyncStatus === 'partially_completed') {
             const buttonIndex = Zotero.Prompt.confirm({
-                window: Zotero.getMainWindow(),
+                window: surfaceWindow,
                 title: "Complete Onboarding?",
                 text: "Are you sure you want to complete onboarding?\n\nLibraries with errors will not be synced with Beaver.",
                 button0: Zotero.Prompt.BUTTON_TITLE_YES,

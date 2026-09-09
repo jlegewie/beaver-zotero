@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useMemo, useEffect, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRun } from '@beaver/agent-core/agents/types';
@@ -37,6 +38,7 @@ interface AgentRunFooterProps {
  * Displays sources, share options, regenerate, and copy buttons.
  */
 export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
+    const surfaceWindow = useSurfaceWindow();
     const citationDataMap = useAtomValue(citationMapAtom);
     const citationsByRunId = useAtomValue(citationsByRunIdAtom);
     const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
@@ -275,7 +277,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     const handleRegenerate = async () => {
         // regenerateFromRunAtom walks the resume chain back to the root
         // internally, so we can pass the clicked run's id directly.
-        await regenerateFromRun(run.id);
+        await regenerateFromRun({ runId: run.id, window: surfaceWindow });
     };
 
     // Hide during streaming (but show during post-processing when citations are resolving)

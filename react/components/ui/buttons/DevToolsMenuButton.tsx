@@ -1,3 +1,4 @@
+import { getContextWindow } from '../../../runtime/windowRuntime';
 import React from 'react';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
@@ -136,7 +137,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
 
     // Test PDF extraction on selected item
     const handleTestPdfExtraction = async () => {
-        const selectedItems: Zotero.Item[] = Zotero.getActiveZoteroPane().getSelectedItems() || [];
+        const selectedItems: Zotero.Item[] = getContextWindow()?.ZoteroPane.getSelectedItems() || [];
         
         if (selectedItems.length === 0) {
             console.log("[PDF Test] No item selected");
@@ -304,7 +305,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
 
     // Find threads by Zotero item (attachments mode)
     const handleFindThreadsByAttachments = async () => {
-        const selectedItems: Zotero.Item[] = Zotero.getActiveZoteroPane().getSelectedItems() || [];
+        const selectedItems: Zotero.Item[] = getContextWindow()?.ZoteroPane.getSelectedItems() || [];
         if (selectedItems.length === 0) {
             console.log('[Find Threads by Item] No item selected');
             return;
@@ -334,7 +335,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
 
     // Find threads by Zotero item (citations mode)
     const handleFindThreadsByCitations = async () => {
-        const selectedItems: Zotero.Item[] = Zotero.getActiveZoteroPane().getSelectedItems() || [];
+        const selectedItems: Zotero.Item[] = getContextWindow()?.ZoteroPane.getSelectedItems() || [];
         if (selectedItems.length === 0) {
             console.log('[Find Threads by Item] No item selected');
             return;
@@ -520,7 +521,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
 
     // Test OCR detection on selected item
     const handleTestOCRDetection = async () => {
-        const selectedItems: Zotero.Item[] = Zotero.getActiveZoteroPane().getSelectedItems() || [];
+        const selectedItems: Zotero.Item[] = getContextWindow()?.ZoteroPane.getSelectedItems() || [];
         
         if (selectedItems.length === 0) {
             console.log("[OCR Detection Test] No item selected");
@@ -618,7 +619,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             return;
         }
 
-        const selectedItems: Zotero.Item[] = Zotero.getActiveZoteroPane().getSelectedItems() || [];
+        const selectedItems: Zotero.Item[] = getContextWindow()?.ZoteroPane.getSelectedItems() || [];
         
         if (selectedItems.length === 0) {
             console.log("[PDF Search Test] No item selected");

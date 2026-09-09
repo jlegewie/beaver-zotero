@@ -1,3 +1,4 @@
+import { getContextWindow } from '../../runtime/windowRuntime';
 import React, { useState, useEffect } from "react";
 import { LinkIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon, Icon, InformationCircleIcon } from '../icons/icons';
 import IconButton from "@beaver/agent-ui/primitives/IconButton";
@@ -163,7 +164,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                     <IconButton
                         variant="ghost-secondary"
                         icon={LinkIcon}
-                        onClick={() => Zotero.getActiveZoteroPane().loadURI(linkUrl)}
+                        onClick={() => getContextWindow()?.ZoteroPane.loadURI(linkUrl)}
                         className="scale-11 p-0"
                         ariaLabel="Read more"
                     />
@@ -202,7 +203,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                         Anthropic API keys require Tier 2 for reliable performance.{' '}
                         <a
                             href="https://platform.claude.com/docs/en/api/rate-limits#rate-limits"
-                            onClick={() => Zotero.getActiveZoteroPane().loadURI("https://platform.claude.com/docs/en/api/rate-limits#rate-limits")}
+                            onClick={() => getContextWindow()?.ZoteroPane.loadURI("https://platform.claude.com/docs/en/api/rate-limits#rate-limits")}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="font-color-link underline"
@@ -223,7 +224,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                             OpenAI requires verification to use this API key in Beaver. Please go to{' '}
                             <a
                                 href="https://platform.openai.com/settings/organization/general"
-                                onClick={() => Zotero.getActiveZoteroPane().loadURI("https://platform.openai.com/settings/organization/general")}
+                                onClick={() => getContextWindow()?.ZoteroPane.loadURI("https://platform.openai.com/settings/organization/general")}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="font-color-link underline"

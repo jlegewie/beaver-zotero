@@ -1,9 +1,13 @@
+import { openReader, openNote } from './runtime/navigation';
+import { buildZoteroApplicationState } from './atoms/applicationState';
+import { selectItemById } from './utils/selectItem';
+import { SurfaceWindowContext } from './runtime/SurfaceWindowContext';
 import { currentNoteItemAtom } from './atoms/zoteroContext';
 import { eventManager } from './events/eventManager';
 import { isSidebarVisibleAtom, isLibraryTabAtom, selectedZoteroTabIdAtom } from './atoms/ui';
 import { currentMessageContentAtom, currentReaderAttachmentAtom } from './atoms/messageComposition';
 import { isBackgroundWorkerRunningAtom } from './atoms/backgroundExtraction';
-import { getWindowRuntime } from './runtime/windowRuntime';
+import { getWindowRuntime, getContextWindow } from './runtime/windowRuntime';
 import { initializeWindowRuntime } from './runtime/windowRuntime';
 import type { WindowRuntime } from '../src/runtime/instance';
 import { uiManager } from './ui/UIManager';
@@ -257,28 +261,26 @@ const GlobalContextInitializer = () => {
 // Store root references for proper cleanup
 const rootsMap = new Map<HTMLElement, any>();
 
+function mountSurface(domElement: HTMLElement, children: React.ReactNode) {
+    unmountFromElement(domElement);
+    const root = createRoot(domElement);
+    rootsMap.set(domElement, root);
+    root.render(
+        <Provider store={store}>
+            <SurfaceWindowContext.Provider value={domElement.ownerDocument.defaultView}>
+                {children}
+            </SurfaceWindowContext.Provider>
+        </Provider>
+    );
+    return root;
+}
+
 /**
  * Renders the GlobalContextInitializer into a dedicated DOM element.
  * This should be called once per window.
  */
 export function renderGlobalInitializer(domElement: HTMLElement) {
-    // Clean up any existing root first
-    const existingRoot = rootsMap.get(domElement);
-    if (existingRoot) {
-        existingRoot.unmount();
-        rootsMap.delete(domElement);
-    }
-
-    const root = createRoot(domElement);
-    rootsMap.set(domElement, root);
-    
-    root.render(
-        <Provider store={store}>
-            <GlobalContextInitializer />
-        </Provider>
-    );
-    
-    return root;
+    return mountSurface(domElement, <GlobalContextInitializer />);
 }
 
 const App = ({ location }: { location: 'library' | 'reader' }) => {
@@ -289,24 +291,7 @@ const App = ({ location }: { location: 'library' | 'reader' }) => {
 };
 
 export function renderAiSidebar(domElement: HTMLElement, location: 'library' | 'reader') {
-    // Clean up any existing root first
-    const existingRoot = rootsMap.get(domElement);
-    if (existingRoot) {
-        existingRoot.unmount();
-        rootsMap.delete(domElement);
-    }
-
-    const root = createRoot(domElement);
-    rootsMap.set(domElement, root);
-
-    // Render the component
-    root.render(
-        <Provider store={store}>
-            <App location={location} />
-        </Provider>
-    );
-    
-    return root;
+    return mountSurface(domElement, <App location={location} />);
 }
 
 /**
@@ -314,23 +299,7 @@ export function renderAiSidebar(domElement: HTMLElement, location: 'library' | '
  * Uses the shared Jotai store for consistent state.
  */
 export function renderWindowSidebar(domElement: HTMLElement) {
-    // Clean up any existing root first
-    const existingRoot = rootsMap.get(domElement);
-    if (existingRoot) {
-        existingRoot.unmount();
-        rootsMap.delete(domElement);
-    }
-
-    const root = createRoot(domElement);
-    rootsMap.set(domElement, root);
-
-    root.render(
-        <Provider store={store}>
-            <WindowSidebar />
-        </Provider>
-    );
-
-    return root;
+    return mountSurface(domElement, <WindowSidebar />);
 }
 
 /**
@@ -338,23 +307,7 @@ export function renderWindowSidebar(domElement: HTMLElement) {
  * Displays notifications independent of the sidebar (bottom-right corner).
  */
 export function renderFloatingPopup(domElement: HTMLElement) {
-    // Clean up any existing root first
-    const existingRoot = rootsMap.get(domElement);
-    if (existingRoot) {
-        existingRoot.unmount();
-        rootsMap.delete(domElement);
-    }
-
-    const root = createRoot(domElement);
-    rootsMap.set(domElement, root);
-
-    root.render(
-        <Provider store={store}>
-            <FloatingPopupRoot />
-        </Provider>
-    );
-
-    return root;
+    return mountSurface(domElement, <FloatingPopupRoot />);
 }
 
 /**
@@ -362,27 +315,13 @@ export function renderFloatingPopup(domElement: HTMLElement) {
  * Uses the shared Jotai store for consistent state.
  */
 export function renderPreferencesWindow(domElement: HTMLElement, initialTab?: PreferencePageTab | null, initialActionsCategoryFilter?: ActionCategoryFilter | null, initialActionId?: string | null) {
-    // Clean up any existing root first
-    const existingRoot = rootsMap.get(domElement);
-    if (existingRoot) {
-        existingRoot.unmount();
-        rootsMap.delete(domElement);
-    }
-
-    const root = createRoot(domElement);
-    rootsMap.set(domElement, root);
-
-    root.render(
-        <Provider store={store}>
-            <PreferencesWindow
-                initialTab={initialTab ?? undefined}
-                initialActionsCategoryFilter={initialActionsCategoryFilter ?? undefined}
-                initialActionId={initialActionId ?? undefined}
-            />
-        </Provider>
-    );
-
-    return root;
+    return mountSurface(domElement, (
+        <PreferencesWindow
+            initialTab={initialTab ?? undefined}
+            initialActionsCategoryFilter={initialActionsCategoryFilter ?? undefined}
+            initialActionId={initialActionId ?? undefined}
+        />
+    ));
 }
 
 /**
@@ -439,10 +378,25 @@ export function disposeRuntime() {
 }
 
 /** Development commands execute inside the target renderer's atom graph. */
-export function inspectRuntime(command?: { draft?: string }) {
+export function inspectRuntime(request?: { command?: string; itemId?: number; draft?: string }) {
     if (process.env.NODE_ENV !== 'development') return undefined;
     const runtime = getWindowRuntime();
-    if (command?.draft !== undefined) store.set(currentMessageContentAtom, command.draft);
+    switch (request?.command) {
+        case 'open-reader':
+            if (request.itemId === undefined) return { error: 'item_required' };
+            return openReader(request.itemId).then(reader => ({ itemID: reader?.itemID, targetMatches: reader?._window === runtime.hostWindow }));
+        case 'open-note':
+            if (request.itemId === undefined) return { error: 'item_required' };
+            return openNote(request.itemId).then(editor => ({ itemID: editor?.itemID, tabID: editor?.tabID }));
+        case 'context':
+            return buildZoteroApplicationState(store.get);
+        case 'reveal':
+            if (request.itemId === undefined) return { error: 'item_required' };
+            return selectItemById(request.itemId, true, undefined, getContextWindow());
+        case 'draft':
+            if (request.draft !== undefined) store.set(currentMessageContentAtom, request.draft);
+            break;
+    }
     return {
         id: runtime.id,
         draft: store.get(currentMessageContentAtom),

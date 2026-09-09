@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../runtime/SurfaceWindowContext';
 import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { SearchIcon, EditIcon, DeleteIcon, TickIcon, CancelIcon, PinIcon, PinOffIcon } from './icons/icons';
@@ -80,6 +81,7 @@ const groupThreadsByDate = (threads: ThreadData[]) => {
 };
 
 const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) => {
+    const surfaceWindow = useSurfaceWindow();
     const setIsThreadListView = useSetAtom(isThreadListViewAtom);
     const loadThread = useSetAtom(loadThreadAtom);
     const newThread = useSetAtom(newThreadAtom);
@@ -267,6 +269,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         }
         try {
             const loaded = await loadThread({
+                window: surfaceWindow,
                 user_id: user.id,
                 threadId: thread.id,
                 threadName: thread.name,
@@ -293,7 +296,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
 
     const handleDelete = async (threadId: string) => {
         const buttonIndex = Zotero.Prompt.confirm({
-            window: Zotero.getMainWindow(),
+            window: surfaceWindow,
             title: 'Delete chat?',
             text: 'Are you sure you want to delete this chat? This action cannot be undone.',
             button0: Zotero.Prompt.BUTTON_TITLE_YES,
@@ -310,7 +313,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             // state read "unknown" and fire a GET for a chat that is gone.
             // The user already confirmed the delete, so skip the run confirm.
             if (threadId === currentThreadId) {
-                await newThread({ skipActiveRunConfirm: true });
+                await newThread({ skipActiveRunConfirm: true, window: surfaceWindow });
             }
             // One removal: every view resolves ids through the entity map and
             // drops what it cannot find, so no id set needs touching.

@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
+const runtime = vi.hoisted(() => ({ host: undefined as any }));
+vi.mock('../../../react/runtime/windowRuntime', () => ({
+    tryGetWindowRuntime: () => runtime.host ? { hostWindow: runtime.host } : undefined,
+}));
+
 // vi.mock is hoisted above the module body, so the store is created inside the
 // factory and read back through the mocked module.
 vi.mock('../../../react/store', async () => {
@@ -116,6 +121,7 @@ describe('streamingPartQueue', () => {
 
     beforeEach(() => {
         win = fakeWindow();
+        runtime.host = win;
         (globalThis as any).Zotero = { getMainWindow: () => win };
         testStore.set(activeRunAtom, streamingRun());
     });
@@ -125,6 +131,16 @@ describe('streamingPartQueue', () => {
         flushPendingPartEvents();
         delete (globalThis as any).Zotero;
         delete (globalThis as any).ChromeUtils;
+    });
+
+    it('paces frames on its runtime host while another main window is active', () => {
+        const other = fakeWindow();
+        (globalThis as any).Zotero = { getMainWindow: () => other };
+        queuePartEvent(textPart('Hello'));
+        expect(other.pendingFrames()).toBe(0);
+        expect(win.pendingFrames()).toBe(1);
+        win.runFrame();
+        expect(streamedText()).toBe('Hello');
     });
 
     it('does not apply a queued event before the frame runs', () => {
@@ -210,14 +226,14 @@ describe('streamingPartQueue', () => {
     });
 
     it('applies synchronously when there is no window to schedule against', () => {
-        (globalThis as any).Zotero = { getMainWindow: () => null };
+        runtime.host = undefined;
 
         queuePartEvent(textPart('Hello'));
 
         expect(streamedText()).toBe('Hello');
     });
 
-    it('re-arms on the live window when the one holding the frame has closed', () => {
+    it('does not move queued frames to another main window when its host closes', () => {
         queuePartEvent(textPart('Hello'));
         expect(streamedText()).toBeUndefined();
 
@@ -228,8 +244,7 @@ describe('streamingPartQueue', () => {
         (globalThis as any).Zotero = { getMainWindow: () => replacement };
 
         queuePartEvent(textPart('Hello there'));
-        expect(replacement.pendingFrames()).toBe(1);
-        replacement.runFrame();
+        expect(replacement.pendingFrames()).toBe(0);
 
         expect(streamedText()).toBe('Hello there');
     });
@@ -285,7 +300,7 @@ describe('streamingPartQueue', () => {
         });
 
         it('drains the queue even with no window at all', () => {
-            (globalThis as any).Zotero = { getMainWindow: () => null };
+            runtime.host = undefined;
 
             queuePartEvent(textPart('Hello'));
             timers.run();
@@ -308,7 +323,7 @@ describe('streamingPartQueue', () => {
     });
 
     it('applies synchronously in a window with no animation frames', () => {
-        (globalThis as any).Zotero = { getMainWindow: () => ({ closed: false }) };
+        runtime.host = { closed: false };
 
         queuePartEvent(textPart('Hello'));
 

@@ -8,7 +8,7 @@ import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
 import { ChipWithPopup, type ChipPopupContent } from '@beaver/agent-ui/chat/ChipPopup';
 import { ChipButton } from '../agentRuns/requestChips/ChipButton';
 import { ChipRemovableIcon } from '../agentRuns/requestChips/ChipRemovableIcon';
-import { selectTagFilter } from '../../../src/utils/selectItem';
+import { selectTagFilter } from '../../utils/selectItem';
 
 const MAX_TAGBUTTON_TEXT_LENGTH = 20;
 

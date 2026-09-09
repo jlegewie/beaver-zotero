@@ -1,3 +1,5 @@
+import { viewAttachment } from '../../../runtime/navigation';
+import { getContextWindow } from '../../../runtime/windowRuntime';
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
@@ -194,7 +196,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
             }
 
             // Select the new item in Zotero
-            const ZoteroPane = Zotero.getMainWindow()?.ZoteroPane;
+            const ZoteroPane = getContextWindow()?.ZoteroPane;
             if (ZoteroPane) {
                 ZoteroPane.selectItem(newItem.id);
             }
@@ -391,7 +393,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                 PdfIcon,
                 () => {
                     if (bestAttachment) {
-                        Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
+                        viewAttachment(bestAttachment.id);
                     } else if (item.open_access_url) {
                         Zotero.launchURL(item.open_access_url);
                     }

@@ -31,6 +31,8 @@
  * Beaver sidebar so the user lands directly on the pending approval or reply.
  */
 
+import { tryGetWindowRuntime } from '../../react/runtime/windowRuntime';
+
 import { config } from "../../package.json";
 import { logger } from "@beaver/agent-core/platform/logger";
 import { getPref } from "../utils/prefs";
@@ -75,7 +77,7 @@ let coalesceTimer: ReturnType<typeof setTimeout> | null = null;
 function getBeaverVisibility(): BeaverVisibility {
     let mainWindowFocused = false;
     try {
-        const mainWindow = Zotero.getMainWindow();
+        const mainWindow = tryGetWindowRuntime()?.hostWindow;
         mainWindowFocused = mainWindow?.document?.hasFocus?.() === true;
     } catch {
         // Ignore — treat as not focused
@@ -85,6 +87,7 @@ function getBeaverVisibility(): BeaverVisibility {
     try {
         const beaverWindow = BeaverUIFactory.findBeaverWindow();
         beaverWindowFocused = beaverWindow != null && !beaverWindow.closed &&
+            beaverWindow.__beaverOwnerWindowRef?.deref() === tryGetWindowRuntime()?.hostWindow &&
             beaverWindow.document?.hasFocus?.() === true;
     } catch {
         // Ignore — treat as not focused
@@ -176,12 +179,12 @@ function describeApprovals(events: WSDeferredApprovalRequest[]): { title: string
 function focusBeaver(): void {
     try {
         const beaverWindow = BeaverUIFactory.findBeaverWindow();
-        if (beaverWindow && !beaverWindow.closed) {
+        if (beaverWindow && !beaverWindow.closed && beaverWindow.__beaverOwnerWindowRef?.deref() === tryGetWindowRuntime()?.hostWindow) {
             beaverWindow.focus();
             return;
         }
 
-        const mainWindow = Zotero.getMainWindow();
+        const mainWindow = tryGetWindowRuntime()?.hostWindow;
         if (!mainWindow) return;
         mainWindow.focus();
 

@@ -14,6 +14,8 @@
  * Preferences route opens the Beaver preferences window.
  */
 
+import { resolveChatWindow } from '../runtime/navigation';
+
 import { openPreferencesWindow } from "../ui/openPreferencesWindow";
 import { PreferencePageTab } from "../../react/atoms/ui";
 
@@ -45,13 +47,13 @@ function doAction(uri: any): void {
 
     // --- Sidebar route ---
     if (stripped === "sidebar") {
-        handleSidebar();
+        void Zotero.Beaver.runtime.openChat().catch(Zotero.logError);
         return;
     }
 
     // --- Preferences route ---
     if (stripped === "preferences" || stripped.startsWith("preferences/")) {
-        handlePreferences(params.tab);
+        void handlePreferences(params.tab).catch(Zotero.logError);
         return;
     }
 
@@ -62,36 +64,12 @@ function doAction(uri: any): void {
         return;
     }
 
-    handleThread(threadId, runId);
+    void handleThread(threadId, runId).catch(Zotero.logError);
 }
 
-function handleSidebar(): void {
-    const win = Zotero.getMainWindow();
-    if (!win) {
-        ztoolkit.log("protocolHandler: No main window available");
-        return;
-    }
-
-    const eventBus = win.__beaverEventBus;
-    if (!eventBus) {
-        ztoolkit.log("protocolHandler: No __beaverEventBus on main window");
-        return;
-    }
-
-    ztoolkit.log("protocolHandler: Opening sidebar");
-    eventBus.dispatchEvent(
-        new win.CustomEvent("toggleChat", {
-            detail: { forceOpen: true },
-        }),
-    );
-}
-
-function handlePreferences(tab?: string): void {
-    const win = Zotero.getMainWindow();
-    if (!win) {
-        ztoolkit.log("protocolHandler: No main window available");
-        return;
-    }
+async function handlePreferences(tab?: string): Promise<void> {
+    // Preferences borrows a renderer, so wait for a live main window to be ready.
+    await resolveChatWindow();
 
     const resolvedTab = tab && VALID_PREFERENCE_TABS.has(tab as PreferencePageTab)
         ? (tab as PreferencePageTab)
@@ -101,18 +79,10 @@ function handlePreferences(tab?: string): void {
     openPreferencesWindow(resolvedTab);
 }
 
-function handleThread(threadId: string, runId?: string): void {
-    const win = Zotero.getMainWindow();
-    if (!win) {
-        ztoolkit.log("protocolHandler: No main window available");
-        return;
-    }
+async function handleThread(threadId: string, runId?: string): Promise<void> {
+    const win = await resolveChatWindow();
 
     const eventBus = win.__beaverEventBus;
-    if (!eventBus) {
-        ztoolkit.log("protocolHandler: No __beaverEventBus on main window");
-        return;
-    }
 
     ztoolkit.log(`protocolHandler: Loading thread ${threadId}${runId ? ` / run ${runId}` : ""}`);
 

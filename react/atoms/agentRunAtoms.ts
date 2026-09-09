@@ -5,6 +5,8 @@
  * using AgentRun for structured run management.
  */
 
+import { getHostWindow } from '../runtime/windowRuntime';
+
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { agentService } from '@beaver/agent-core/transport/agentService';
@@ -1016,7 +1018,7 @@ type UndoConfirmResult = 'undo' | 'skip' | 'cancel';
  * Returns 'undo' to undo and regenerate, 'skip' to regenerate without undoing,
  * or 'cancel' to abort regeneration entirely.
  */
-function confirmUndoAppliedActions(actions: ActionsToUndo): UndoConfirmResult {
+function confirmUndoAppliedActions(actions: ActionsToUndo, win: Window): UndoConfirmResult {
     const { annotations, annotationEdits, zoteroNotes, metadataEdits, noteEdits, createItems, createCollections, organizeItems, manageTags, manageCollections, createNotes } = actions;
     const totalActions = annotations.length + annotationEdits.length + zoteroNotes.length + metadataEdits.length +
                          noteEdits.length + createItems.length + createCollections.length + organizeItems.length +
@@ -1078,7 +1080,7 @@ function confirmUndoAppliedActions(actions: ActionsToUndo): UndoConfirmResult {
     const message = `The following changes were applied and can be undone:\n\n${changeLines.join('\n')}\n\nUndo them and retry, or retry without undoing?`;
 
     const buttonIndex = Zotero.Prompt.confirm({
-        window: Zotero.getMainWindow(),
+        window: win,
         title,
         text: message,
         button0: 'Undo && Retry',
@@ -2330,6 +2332,11 @@ export const sendWSMessageAtom = atom(
         set(isWSChatPendingAtom, true);
 
         try {
+            const applicationStatePromise = getApplicationStateProvider()(get);
+            // Attach a rejection handler immediately while attachment preparation runs.
+            void applicationStatePromise.catch(() => {});
+            const submissionReaderAttachment = get(currentReaderAttachmentAtom);
+            const submissionNoteItem = get(currentNoteItemAtom);
             // Get current model and build model selection options for the request
             const model = get(selectedModelAtom);
             const modelOptions = buildModelSelectionOptions(model);
@@ -2379,7 +2386,7 @@ export const sendWSMessageAtom = atom(
         }
 
         // Load note data for any note items (getNoteTitle() requires 'note' data type)
-        const currentNoteTabItem = get(currentNoteItemAtom);
+        const currentNoteTabItem = submissionNoteItem;
         const noteItems = selectedItems.filter(item => item.isNote());
         const allNoteItems = currentNoteTabItem
             ? [...noteItems, currentNoteTabItem]
@@ -2448,7 +2455,7 @@ export const sendWSMessageAtom = atom(
         // the thread. Reader position is captured in application state. Send gate:
         // never auto-attach a reader source in a library the user excluded from
         // Beaver — this path bypasses the currentMessageItems gate above.
-        const readerAttachment = get(currentReaderAttachmentAtom);
+        const readerAttachment = submissionReaderAttachment;
         if (readerAttachment && searchableLibraryIds.includes(readerAttachment.libraryID)) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
@@ -2542,8 +2549,7 @@ export const sendWSMessageAtom = atom(
         // Application state (current view, reader/note state, library context,
         // indexing status). Built via the injectable provider so a non-Zotero
         // host can supply its own document state through the same slot.
-        const applicationState = await getApplicationStateProvider()(get);
-
+        const applicationState = await applicationStatePromise;
         // Build the message
         const userPrompt: BeaverAgentPrompt = {
             content: message,
@@ -2627,6 +2633,7 @@ export const sendWSMessageAtom = atom(
 
 /** How a regenerate path replaces the target run. */
 interface RegenerateRunOptions {
+    window?: Window;
     logPrefix: string;
     /**
      * Walk a resume chain back to its root so the regeneration starts from
@@ -2850,7 +2857,7 @@ async function startRegenerateRun(
                 manageTags: manageTagsToUndo,
                 manageCollections: manageCollectionsToUndo,
                 createNotes: createNotesToUndo,
-            });
+            }, options.window ?? getHostWindow());
             if (confirmResult === 'cancel') {
                 return;
             }
@@ -3021,8 +3028,9 @@ async function startRegenerateRun(
  */
 export const regenerateFromRunAtom = atom(
     null,
-    async (get, set, runId: string) => {
-        await startRegenerateRun(get, set, runId, {
+    async (get, set, params: { runId: string; window?: Window }) => {
+        await startRegenerateRun(get, set, params.runId, {
+            window: params.window,
             logPrefix: 'regenerateFromRunAtom',
             walkResumeChain: true,
             failureMessage: 'Failed to regenerate response',
@@ -3036,9 +3044,10 @@ export const regenerateFromRunAtom = atom(
  */
 export const regenerateWithEditedPromptAtom = atom(
     null,
-    async (get, set, params: { runId: string; editedPrompt: BeaverAgentPrompt }) => {
+    async (get, set, params: { runId: string; editedPrompt: BeaverAgentPrompt; window?: Window }) => {
         await startRegenerateRun(get, set, params.runId, {
             logPrefix: 'regenerateWithEditedPromptAtom',
+            window: params.window,
             walkResumeChain: false,
             editedPrompt: params.editedPrompt,
             failureMessage: 'Failed to regenerate with edited prompt',

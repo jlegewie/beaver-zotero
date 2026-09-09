@@ -1,3 +1,5 @@
+import { viewAttachment } from '../../runtime/navigation';
+import { getContextWindow } from '../../runtime/windowRuntime';
 import React, { forwardRef } from 'react';
 import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon, LibraryIcon, PdfIcon, NoteIcon, FileViewIcon } from "../icons/icons";
 import { useAtomValue } from 'jotai';
@@ -10,7 +12,7 @@ import { ZoteroIcon } from '../icons/ZoteroIcon';
 import { navigateToAnnotation, isItemActiveTab } from '../../utils/readerUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
 import { toAnnotation } from '../../types/attachments/converters';
-import { selectItemById } from '../../../src/utils/selectItem';
+import { selectItemById } from '../../utils/selectItem';
 import { openNoteById } from '../../utils/sourceUtils';
 import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../../utils/annotationDisplay';
 import { ChipWithPopup, type ChipPopupContent } from '@beaver/agent-ui/chat/ChipPopup';
@@ -159,7 +161,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                     const collectionId = Zotero.Collections.getIDFromLibraryAndKey(item.libraryID, revealInCollectionKey);
                     selectItemById(item.id, true, collectionId !== false ? collectionId : undefined);
                 } else {
-                    const win = Zotero.getMainWindow();
+                    const win = getContextWindow();
                     if (win && win.ZoteroPane) {
                         win.ZoteroPane.selectItem(item.id);
                     }
@@ -171,7 +173,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
 
         // Open the attachment file in the reader (or its external app).
         const openAttachment = () => {
-            Zotero.getActiveZoteroPane()?.viewAttachment(item.id);
+            viewAttachment(item.id);
         };
 
         // Primary action for a left-click on the button. Annotations jump to the

@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useCallback, useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { activeRunAtom, currentThreadNameAtom } from '@beaver/agent-core/run-state/atoms';
@@ -156,6 +157,7 @@ const BlockedNotice: React.FC<{ reason: ChatAccessGate; onClose: () => void }> =
  * popup is showing.
  */
 const QuickPromptPopup: React.FC = () => {
+    const surfaceWindow = useSurfaceWindow();
     const state = useAtomValue(quickPromptStateAtom);
     const isSidebarVisible = useAtomValue(isSidebarVisibleAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
@@ -196,7 +198,7 @@ const QuickPromptPopup: React.FC = () => {
     }, [close]);
 
     useEventSubscription('toggleQuickPrompt', () => {
-        const doc = Zotero.getMainWindow()?.document;
+        const doc = surfaceWindow?.document;
         const active = doc?.activeElement as HTMLElement | null;
         // The document itself is not a place to send focus back to.
         const focused = active && active !== doc?.body && active !== doc?.documentElement ? active : null;

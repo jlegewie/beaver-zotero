@@ -1,3 +1,4 @@
+import { getContextWindow } from '../runtime/windowRuntime';
 import { CreateItemProposedAction, CreateItemProposedData, CreateItemResultData, PdfCandidate } from '@beaver/agent-core/types/agentActions/items';
 import { ExternalReference, NormalizedPublicationType } from '@beaver/agent-core/types/externalReferences';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -66,13 +67,13 @@ async function resolveImportTarget(options?: ImportItemOptions): Promise<{
     
     // If no library specified, get from current context
     if (libraryId === undefined) {
-        const selectedTabType = Zotero.getMainWindow().Zotero_Tabs?.selectedType;
+        const selectedTabType = getContextWindow().Zotero_Tabs?.selectedType;
 
         if (selectedTabType === 'reader') {
             const context = await getZoteroTargetContext();
             libraryId = context.targetLibraryId ?? Zotero.Libraries.userLibraryID;
         } else {
-            const zp = Zotero.getActiveZoteroPane();
+            const zp = getContextWindow().ZoteroPane;
             const selectedLibraryId = getSelectedLibraryId(zp);
             libraryId = typeof selectedLibraryId === 'number'
                 ? selectedLibraryId

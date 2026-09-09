@@ -127,3 +127,9 @@ describe("createZoteroItem import target", () => {
     expect(addItem).toHaveBeenCalledWith(99);
   });
 });
+
+// Bind this suite's single-window fixture as the originating renderer.
+vi.mock('../../../react/runtime/windowRuntime', async () => {
+    const { singleWindowRuntimeMock } = await import('../../helpers/singleWindowRuntime');
+    return singleWindowRuntimeMock();
+});

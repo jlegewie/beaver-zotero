@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { BeaverAgentPrompt, MessageSearchFilters } from '@beaver/agent-core/agents/types';
@@ -108,6 +109,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     maxContentHeight = 200,
     canEdit = true
 }) => {
+    const surfaceWindow = useSurfaceWindow();
     const contentRef = useRef<HTMLDivElement | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const overlayRef = useRef<HTMLDivElement | null>(null);
@@ -558,7 +560,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         closeEditSession();
         setSubmittedPrompt(editedPrompt);
         setIsEditing(false);
-        await regenerateWithEditedPrompt({ runId, editedPrompt });
+        await regenerateWithEditedPrompt({ runId, editedPrompt, window: surfaceWindow });
         // Regeneration bailed out and this message is still the thread's. On
         // the committed path this component is already gone.
         setSubmittedPrompt(null);

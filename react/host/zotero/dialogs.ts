@@ -1,3 +1,4 @@
+import { getHostWindow } from '../../runtime/windowRuntime';
 import type { DialogsHost } from '@beaver/agent-ui/host/types';
 
 /**
@@ -6,9 +7,9 @@ import type { DialogsHost } from '@beaver/agent-ui/host/types';
  * button so Enter never confirms a destructive/irreversible choice.
  */
 export const zoteroDialogs: DialogsHost = {
-    confirm({ title, text, confirmLabel }): boolean {
+    confirm({ title, text, confirmLabel, window: hostWindow }): boolean {
         const buttonIndex = Zotero.Prompt.confirm({
-            window: Zotero.getMainWindow(),
+            window: hostWindow ?? getHostWindow(),
             title,
             text,
             button0: confirmLabel,

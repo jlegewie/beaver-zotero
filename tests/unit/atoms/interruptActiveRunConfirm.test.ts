@@ -37,6 +37,7 @@ vi.mock('@beaver/agent-ui/host', () => ({
 vi.mock('../../../react/atoms/messageComposition', async () => {
     const { atom } = await import('jotai');
     return {
+        readerActionContextAtom: atom(null),
         currentMessageItemsAtom: atom<unknown[]>([]),
         clearComposerAtom: atom(null, () => {}),
         currentMessageCollectionsAtom: atom<unknown[]>([]),

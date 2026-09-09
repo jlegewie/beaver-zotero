@@ -16,7 +16,7 @@ vi.mock("../../../src/utils/zoteroUtils", () => ({
   isLibraryEditable: mocks.isLibraryEditable,
 }));
 
-vi.mock("../../../src/utils/selectItem", () => ({
+vi.mock("../../../react/utils/selectItem", () => ({
   selectItem: mocks.selectItem,
   selectItemById: mocks.selectItemById,
 }));
@@ -70,7 +70,7 @@ describe("zoteroNoteWriter", () => {
       })),
     };
 
-    mocks.getZoteroTargetContext.mockResolvedValue({
+    mocks.getZoteroTargetContextSync.mockReturnValue({
       targetLibraryId: 7,
       parentReference: null,
     });
@@ -90,4 +90,10 @@ describe("zoteroNoteWriter", () => {
       zotero_key: "NOTE1234",
     });
   });
+});
+
+// Bind this suite's single-window fixture as the originating renderer.
+vi.mock('../../../react/runtime/windowRuntime', async () => {
+    const { singleWindowRuntimeMock } = await import('../../helpers/singleWindowRuntime');
+    return singleWindowRuntimeMock();
 });

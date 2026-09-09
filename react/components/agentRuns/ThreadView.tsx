@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useEffect, useRef, forwardRef, useLayoutEffect, useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { activeRunAtom, allRunsAtom, threadRunIdsAtom } from "@beaver/agent-core/run-state/atoms";
@@ -43,7 +44,7 @@ type ThreadViewProps = {
  */
 export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
     function ThreadView({ className, isWindow = false }: ThreadViewProps, ref: React.ForwardedRef<HTMLDivElement>) {
-        const win = Zotero.getMainWindow();
+        const surfaceWindow = useSurfaceWindow();
         const runs = useAtomValue(allRunsAtom);
         // The rendered runs' ids, holding their array while the set of runs is
         // unchanged. Used below to re-observe the run elements only when they
@@ -133,7 +134,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             // Prevent restore/auto-bottom effects from overriding this jump.
             protocolScrollLockUntilRef.current = Date.now() + PROTOCOL_SCROLL_LOCKOUT_MS;
             isAnimatingRef.current = true;
-            win.setTimeout(() => {
+            surfaceWindow.setTimeout(() => {
                 isAnimatingRef.current = false;
             }, ANIMATION_LOCKOUT_MS);
 
@@ -160,7 +161,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             latchIntentFromDistance(projectedDistanceFromBottom, scrollAtoms);
             setPendingScrollToRun(null);
             return true;
-        }, [pendingRunId, currentThreadId, isLoadingThread, scrollContainerRef, runs, scrolledAtom, setPendingScrollToRun, win]);
+        }, [pendingRunId, currentThreadId, isLoadingThread, scrollContainerRef, runs, scrolledAtom, setPendingScrollToRun, surfaceWindow]);
 
         const setPendingRunRef = useCallback((node: HTMLDivElement | null) => {
             pendingRunElementRef.current = node;
@@ -288,9 +289,9 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 if (wasHidden && isVisible) {
                     // Debounce to avoid rapid-fire restores during visibility transitions
                     if (restoreDebounceRef.current !== null) {
-                        win.clearTimeout(restoreDebounceRef.current);
+                        surfaceWindow.clearTimeout(restoreDebounceRef.current);
                     }
-                    restoreDebounceRef.current = win.setTimeout(() => {
+                    restoreDebounceRef.current = surfaceWindow.setTimeout(() => {
                         restoreDebounceRef.current = null;
                         restoreScrollPosition();
                         tryScrollToPendingRun("visibility-transition");
@@ -335,10 +336,10 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             return () => {
                 observer.disconnect();
                 if (restoreDebounceRef.current !== null) {
-                    win.clearTimeout(restoreDebounceRef.current);
+                    surfaceWindow.clearTimeout(restoreDebounceRef.current);
                 }
             };
-        }, [restoreScrollPosition, scrollAtoms, scrolledAtom, tryScrollToPendingRun, isProtocolScrollLocked, win]);
+        }, [restoreScrollPosition, scrollAtoms, scrolledAtom, tryScrollToPendingRun, isProtocolScrollLocked, surfaceWindow]);
 
         // Follow the bottom, and keep the measured position honest, from the one
         // signal that says the content changed size.
@@ -519,7 +520,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             
             // Only scroll if there's a NEW pending approval (not the same ones re-rendering)
             if (hasNewApproval) {
-                const timeoutId = win.setTimeout(() => {
+                const timeoutId = surfaceWindow.setTimeout(() => {
                     if (scrollContainerRef.current) {
                         // Force scroll to bottom for pending approvals - user action is required
                         // Reset userScrolled to allow auto-scroll
@@ -539,7 +540,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                         if (isAnimating) {
                             isAnimatingRef.current = true;
                             // Clear animation flag after animation completes
-                            win.setTimeout(() => {
+                            surfaceWindow.setTimeout(() => {
                                 isAnimatingRef.current = false;
                             }, ANIMATION_LOCKOUT_MS);
                         }
@@ -550,11 +551,11 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
 
                 prevPendingApprovalIdsRef.current = currentApprovalIds;
 
-                return () => win.clearTimeout(timeoutId);
+                return () => surfaceWindow.clearTimeout(timeoutId);
             }
 
             prevPendingApprovalIdsRef.current = currentApprovalIds;
-        }, [pendingApprovalsMap, pendingRunId, isProtocolScrollLocked, scrollAtoms, scrollContainerRef, scrolledAtom, win]);
+        }, [pendingApprovalsMap, pendingRunId, isProtocolScrollLocked, scrollAtoms, scrollContainerRef, scrolledAtom, surfaceWindow]);
 
         // Re-evaluate scroll state when content expands/collapses
         // This ensures the ScrollDownButton visibility is updated when user toggles:
@@ -576,7 +577,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             prevAnnotationPanelRef.current = annotationPanelState;
             
             // Wait briefly for DOM to update after expansion toggle
-            const timeoutId = win.setTimeout(() => {
+            const timeoutId = surfaceWindow.setTimeout(() => {
                 const container = scrollContainerRef.current;
                 const distanceFromBottom = publishScrollPosition(container, scrollAtoms);
                 if (distanceFromBottom === null) return;
@@ -591,8 +592,8 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 }
             }, EXPANSION_SCROLL_EVAL_DELAY);
 
-            return () => win.clearTimeout(timeoutId);
-        }, [toolExpansionState, sourcesVisibilityState, annotationPanelState, scrollAtoms, scrollContainerRef, scrolledAtom, win]);
+            return () => surfaceWindow.clearTimeout(timeoutId);
+        }, [toolExpansionState, sourcesVisibilityState, annotationPanelState, scrollAtoms, scrollContainerRef, scrolledAtom, surfaceWindow]);
 
         if (runs.length === 0) {
             return (

@@ -1,3 +1,5 @@
+import { getContextWindow } from '../runtime/windowRuntime';
+import { resolveNavigationWindow } from '../../src/runtime/navigation';
 import { logger } from "@beaver/agent-core/platform/logger";
 
 /**
@@ -7,18 +9,19 @@ import { logger } from "@beaver/agent-core/platform/logger";
  * @param collectionId - Optional collection ID to navigate to instead of library root
  * @returns True if item was successfully selected, false otherwise
  */
-export async function selectItemById(itemId: number, changeView: boolean = true, collectionId?: number) {
+export async function selectItemById(itemId: number, changeView: boolean = true, collectionId?: number, win = getContextWindow()) {
     if (!itemId) return false;
 
+    win = await resolveNavigationWindow(win);
     // Get the item to check its properties
     const item = await Zotero.Items.getAsync(itemId);
     if (!item) return false;
 
-    const zoteroPane = Zotero.getActiveZoteroPane();
+    const zoteroPane = win.ZoteroPane;
     if (!zoteroPane || !zoteroPane.collectionsView) return false;
 
     // Check if item is in the currently visible collection/library
-    const isItemVisible = await checkItemVisibility(itemId);
+    const isItemVisible = await checkItemVisibility(itemId, win);
     
     if (!isItemVisible && changeView) {
         let success = false;
@@ -27,13 +30,13 @@ export async function selectItemById(itemId: number, changeView: boolean = true,
         if (collectionId) {
             const collection = Zotero.Collections.get(collectionId);
             if (collection) {
-                success = await switchToCollection(collection.id);
+                success = await switchToCollection(collection.id, win);
             }
         }
         
         // Fall back to library root if collection navigation failed or wasn't requested
         if (!success) {
-            success = await switchToLibraryRoot(item.libraryID);
+            success = await switchToLibraryRoot(item.libraryID, win);
         }
         
         if (!success) {
@@ -44,6 +47,8 @@ export async function selectItemById(itemId: number, changeView: boolean = true,
 
     // Now select the item using the existing Zotero method
     try {
+        if (win.closed) return false;
+        win.Zotero_Tabs.select('zotero-pane');
         const result = await zoteroPane.selectItem(itemId);
         return !!result;
     } catch (error) {
@@ -58,18 +63,19 @@ export async function selectItemById(itemId: number, changeView: boolean = true,
  * @param {boolean} changeView - Whether to change the view to the library root
  * @returns {Promise<boolean>} - True if item was successfully selected, false otherwise
  */
-export async function selectItem(item: Zotero.Item, changeView: boolean = true) {
+export async function selectItem(item: Zotero.Item, changeView: boolean = true, win = getContextWindow()) {
     if (!item) return false;
 
-    const zoteroPane = Zotero.getActiveZoteroPane();
+    win = await resolveNavigationWindow(win);
+    const zoteroPane = win.ZoteroPane;
     if (!zoteroPane || !zoteroPane.collectionsView) return false;
 
     // Check if item is in the currently visible collection/library
-    const isItemVisible = await checkItemVisibility(item.id);
+    const isItemVisible = await checkItemVisibility(item.id, win);
     
     if (!isItemVisible && changeView) {        
         // Switch to the item's library root
-        const success = await switchToLibraryRoot(item.libraryID);
+        const success = await switchToLibraryRoot(item.libraryID, win);
         if (!success) {
             logger(`Failed to switch to library ${item.libraryID}`, 2);
             return false;
@@ -78,6 +84,8 @@ export async function selectItem(item: Zotero.Item, changeView: boolean = true) 
 
     // Now select the item using the existing Zotero method
     try {
+        if (win.closed) return false;
+        win.Zotero_Tabs.select('zotero-pane');
         const result = await zoteroPane.selectItem(item.id);
         return !!result;
     } catch (error) {
@@ -92,8 +100,8 @@ export async function selectItem(item: Zotero.Item, changeView: boolean = true) 
  * @param {number} itemId - The ID of the item to check
  * @returns {Promise<boolean>} - True if item is visible, false otherwise
  */
-async function checkItemVisibility(itemId: number) {
-    const zoteroPane = Zotero.getActiveZoteroPane();
+async function checkItemVisibility(itemId: number, win: Window) {
+    const zoteroPane = win.ZoteroPane;
     if (!zoteroPane.itemsView) return false;
 
     // Wait for items to load
@@ -109,8 +117,8 @@ async function checkItemVisibility(itemId: number) {
  * @param collectionId - The ID of the collection to switch to
  * @returns True if successfully switched, false otherwise
  */
-async function switchToCollection(collectionId: number): Promise<boolean> {
-    const zoteroPane = Zotero.getActiveZoteroPane();
+async function switchToCollection(collectionId: number, win: Window): Promise<boolean> {
+    const zoteroPane = win.ZoteroPane;
     if (!zoteroPane.collectionsView || !zoteroPane.itemsView) return false;
 
     try {
@@ -130,8 +138,8 @@ async function switchToCollection(collectionId: number): Promise<boolean> {
  * @param libraryId - The ID of the library to switch to
  * @returns True if successfully switched, false otherwise
  */
-async function switchToLibraryRoot(libraryId: number) {
-    const zoteroPane = Zotero.getActiveZoteroPane();
+async function switchToLibraryRoot(libraryId: number, win: Window) {
+    const zoteroPane = win.ZoteroPane;
     if (!zoteroPane.collectionsView || !zoteroPane.itemsView) return false;
 
     try {
@@ -153,16 +161,18 @@ async function switchToLibraryRoot(libraryId: number) {
  * @param {Zotero.Library} library - The library to select
  * @returns {Promise<boolean>} - True if successfully selected, false otherwise
  */
-export async function selectLibrary(library: Zotero.Library) {
+export async function selectLibrary(library: Zotero.Library, win = getContextWindow()) {
     if (!library) return false;
 
-    const zoteroPane = Zotero.getActiveZoteroPane();
+    win = await resolveNavigationWindow(win);
+    const zoteroPane = win.ZoteroPane;
     if (!zoteroPane || !zoteroPane.collectionsView || !zoteroPane.itemsView) return false;
 
     try {
         // Switch to the library tab so the selection is visible when the user is
         // currently viewing a reader or note tab.
-        Zotero.getMainWindow()?.Zotero_Tabs?.select('zotero-pane');
+        if (win.closed) return false;
+        win.Zotero_Tabs.select('zotero-pane');
         const success = await zoteroPane.collectionsView.selectLibrary(library.libraryID);
         if (success) {
             await zoteroPane.itemsView.waitForLoad();
@@ -179,16 +189,18 @@ export async function selectLibrary(library: Zotero.Library) {
  * @param {Zotero.Collection} collection - The collection to select
  * @returns {Promise<boolean>} - True if successfully selected, false otherwise
  */
-export async function selectCollection(collection: Zotero.Collection) {
+export async function selectCollection(collection: Zotero.Collection, win = getContextWindow()) {
     if (!collection) return false;
 
-    const zoteroPane = Zotero.getActiveZoteroPane();
+    win = await resolveNavigationWindow(win);
+    const zoteroPane = win.ZoteroPane;
     if (!zoteroPane || !zoteroPane.collectionsView || !zoteroPane.itemsView) return false;
 
     try {
         // Switch to the library tab so the selection is visible when the user is
         // currently viewing a reader or note tab.
-        Zotero.getMainWindow()?.Zotero_Tabs?.select('zotero-pane');
+        if (win.closed) return false;
+        win.Zotero_Tabs.select('zotero-pane');
         const success = await zoteroPane.collectionsView.selectCollection(collection.id);
         if (success) {
             await zoteroPane.itemsView.waitForLoad();
@@ -238,8 +250,10 @@ async function libraryIDsForTag(tagName: string): Promise<number[]> {
 export async function selectTagFilter(
     tagName: string,
     libraryId?: number,
+    win = getContextWindow(),
 ): Promise<TagFilterOutcome> {
-    const zoteroPane = Zotero.getActiveZoteroPane();
+    const target = await resolveNavigationWindow(win).catch(() => null);
+    const zoteroPane = target?.ZoteroPane;
     // Checked before anything is resolved, so a caller is never told a tag is
     // missing when the truth is that there is no pane to show it in.
     if (!zoteroPane) return 'unavailable';
@@ -259,7 +273,8 @@ export async function selectTagFilter(
         }
         // Switch to the library tab so the filter is visible when the user is
         // currently viewing a reader or note tab.
-        Zotero.getMainWindow()?.Zotero_Tabs?.select('zotero-pane');
+        if (target.closed) return 'unavailable';
+        target.Zotero_Tabs.select('zotero-pane');
         if (zoteroPane.collectionsView) {
             await zoteroPane.collectionsView.selectLibrary(targetLibraryId);
         }

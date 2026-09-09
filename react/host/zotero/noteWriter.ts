@@ -1,11 +1,11 @@
+import { getContextWindow } from '../../runtime/windowRuntime';
 import type { NoteWriterHost, SaveNoteRequest, SavedNoteReference } from '@beaver/agent-ui/host/types';
 import {
-    getZoteroTargetContext,
     getZoteroTargetContextSync,
     getCurrentLibrary,
     isLibraryEditable,
 } from '../../../src/utils/zoteroUtils';
-import { selectItem, selectItemById } from '../../../src/utils/selectItem';
+import { selectItem, selectItemById } from '../../utils/selectItem';
 import { getSelectedCollection as getSelectedZoteroCollection } from '../../../src/utils/zoteroSelection';
 import {
     generateNoteTitle,
@@ -17,7 +17,7 @@ import { store } from '../../store';
 import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
 
 function isInReader(): boolean {
-    const win = Zotero.getMainWindow();
+    const win = getContextWindow();
     return win.Zotero_Tabs?.selectedType === 'reader';
 }
 
@@ -40,7 +40,7 @@ function assembleNoteHtml(request: SaveNoteRequest): string {
 }
 
 function getSelectedCollection(): Zotero.Collection | null {
-    const zp = Zotero.getActiveZoteroPane();
+    const zp = getContextWindow()?.ZoteroPane;
     return getSelectedZoteroCollection(zp);
 }
 
@@ -56,7 +56,10 @@ export const zoteroNoteWriter: NoteWriterHost = {
     },
 
     async saveNote(request: SaveNoteRequest): Promise<SavedNoteReference | null> {
-        const context = await getZoteroTargetContext();
+        const win = getContextWindow();
+        const context = getZoteroTargetContextSync(win);
+        const selectedCollection = !request.asChild ? getSelectedCollection() : null;
+        const inReader = isInReader();
         if (typeof context.targetLibraryId !== 'number') {
             throw new Error('Could not determine target library');
         }
@@ -80,18 +83,17 @@ export const zoteroNoteWriter: NoteWriterHost = {
         newNote.setNote(wrapWithSchemaVersion(assembleNoteHtml(request)));
         await newNote.saveTx();
 
-        const selectedCollection = !parentReference ? getSelectedCollection() : null;
         if (selectedCollection) {
             await Zotero.DB.executeTransaction(async () => {
                 selectedCollection.addItem(newNote.id);
             });
         }
 
-        if (!isInReader()) {
+        if (!inReader && !win.closed) {
             if (parentReference) {
-                await selectItem(newNote);
+                await selectItem(newNote, true, win);
             } else {
-                await selectItemById(newNote.id, true, selectedCollection?.id);
+                await selectItemById(newNote.id, true, selectedCollection?.id, win);
             }
         }
 

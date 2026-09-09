@@ -1,3 +1,5 @@
+import { getContextWindow } from '../../runtime/windowRuntime';
+import { openNote, openReader } from '../../runtime/navigation';
 import { store } from '../../store';
 import { pageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
@@ -30,7 +32,7 @@ import { getPageLabelsForItem } from './itemData';
 import { launchExternalFile, notifyReferenceUnavailable } from './sourceActions';
 import { getPref } from '../../../src/utils/prefs';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { selectItemById } from '../../../src/utils/selectItem';
+import { selectItemById } from '../../utils/selectItem';
 import {
     getBestPDFAttachmentAsync,
     getBestReadableTextAttachmentAsync,
@@ -160,9 +162,9 @@ export async function activateCitation(activation: CitationActivation): Promise<
     if (item.isNote()) {
         logger(`Citation activation: Note Link (${item.id})`);
         if (typeof Zotero.Notes?.open === 'function') {
-            await Zotero.Notes.open(item.id, undefined);
+            await openNote(item.id);
         } else {
-            await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
+            await getContextWindow()?.ZoteroPane.openNoteWindow(item.id);
         }
         return;
     }
@@ -178,7 +180,7 @@ export async function activateCitation(activation: CitationActivation): Promise<
         try {
             let reader = await getCurrentReaderAndWaitForView(undefined, true);
             if (!reader || reader.itemID !== parentAttachment.id) {
-                reader = await Zotero.Reader.open(parentAttachment.id);
+                reader = await openReader(parentAttachment.id);
                 await new Promise((resolve) => setTimeout(resolve, 300));
                 reader = await getCurrentReaderAndWaitForView(undefined, true);
             }
@@ -291,7 +293,7 @@ export async function activateCitation(activation: CitationActivation): Promise<
         }
         if (item.isAttachment()) {
             try {
-                await Zotero.Reader.open(item.id);
+                await openReader(item.id);
             } catch (error) {
                 logger(`Citation activation: Failed to open non-PDF attachment: ${error}`);
                 await selectItemById(item.id);
@@ -368,7 +370,7 @@ export async function activateCitation(activation: CitationActivation): Promise<
 
             // Open the PDF at page
             logger(`Citation activation: Opening item ${pdfItem.id} at page ${pageIndex}`);
-            reader = await Zotero.Reader.open(pdfItem.id, { pageIndex: pageIndex - 1 });
+            reader = await openReader(pdfItem.id, { pageIndex: pageIndex - 1 });
 
             // Wait for reader to initialize (should already be done by getCurrentReaderAndWaitForView)
             await new Promise(resolve => setTimeout(resolve, 300));
@@ -424,7 +426,7 @@ export async function activateCitation(activation: CitationActivation): Promise<
         try {
             const fallbackUri = createZoteroURI(item);
             if (fallbackUri.includes('zotero://')) {
-                Zotero.getMainWindow().location.href = fallbackUri;
+                getContextWindow()?.ZoteroPane.loadURI(fallbackUri);
             }
         } catch {
             // No usable fallback URI; nothing else to do.

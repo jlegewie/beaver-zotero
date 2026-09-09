@@ -4,10 +4,12 @@
  * new-thread → add-annotations-to-message → send-message / focus-input flow.
  */
 
+import { beginReaderActionThread } from '../utils/beginReaderActionThread';
+
 import { useSetAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { newThreadAtom } from '../atoms/threads';
-import { currentReaderAttachmentAtom, addItemsToCurrentMessageItemsAtom } from '../atoms/messageComposition';
+import { addItemsToCurrentMessageItemsAtom } from '../atoms/messageComposition';
 import { sendWSMessageAtom } from '../atoms/agentRunAtoms';
 import { eventManager } from '../events/eventManager';
 import { useEventSubscription } from './useEventSubscription';
@@ -17,7 +19,6 @@ import { getPref } from '../../src/utils/prefs';
 
 export function useReaderAnnotationActionHandler() {
     const newThread = useSetAtom(newThreadAtom);
-    const setReaderAttachment = useSetAtom(currentReaderAttachmentAtom);
     const addItems = useSetAtom(addItemsToCurrentMessageItemsAtom);
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
 
@@ -33,22 +34,18 @@ export function useReaderAnnotationActionHandler() {
         eventManager.dispatch('toggleChat', { forceOpen: true, skipAutoPopulate: true });
 
         // 2. New thread
-        await newThread({ skipAutoPopulate: true });
+        const isCurrent = await beginReaderActionThread(newThread);
+        if (!isCurrent) return;
 
         // 3. Load annotation items, add to message, and send/focus
         setTimeout(async () => {
             try {
+                if (!isCurrent()) return;
                 // Resolve the attachment (also used for libraryID in key lookups below)
                 const attachment = await Zotero.Items.getAsync(readerItemID);
                 if (!attachment) {
                     logger('useReaderAnnotationActionHandler: Could not resolve reader item', 1);
                     return;
-                }
-
-                // Ensure reader attachment is set
-                const readerAttachment = store.get(currentReaderAttachmentAtom);
-                if (!readerAttachment || readerAttachment.id !== readerItemID) {
-                    setReaderAttachment(attachment);
                 }
 
                 // Load annotation Zotero.Items by key
@@ -71,7 +68,9 @@ export function useReaderAnnotationActionHandler() {
                 }
 
                 // Add annotations to current message items
+                if (!isCurrent()) return;
                 await addItems(annotationItems);
+                if (!isCurrent()) return;
 
                 if (action === 'explain') {
                     const defaultPrompt = 'Explain the selected annotation(s) from this paper in plain language. '
@@ -87,5 +86,5 @@ export function useReaderAnnotationActionHandler() {
                 logger(`useReaderAnnotationActionHandler: Error: ${error}`, 1);
             }
         }, 0);
-    }, [newThread, setReaderAttachment, addItems, sendWSMessage]);
+    }, [newThread, addItems, sendWSMessage]);
 }

@@ -8,6 +8,8 @@
  * `setApplicationStateProvider` without changing the run-start path.
  */
 
+import { getContextWindow } from '../runtime/windowRuntime';
+
 import { Getter } from 'jotai';
 import { NoteState, ReaderState } from '@beaver/agent-core/types/attachments/apiTypes';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
@@ -18,7 +20,7 @@ import {
     CurrentSavedSearch,
     IndexingStatus,
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { currentReaderAttachmentAtom, readerTextSelectionAtom } from './messageComposition';
+import { currentReaderAttachmentAtom, readerTextSelectionAtom, readerActionContextAtom, currentMessageItemsAtom } from './messageComposition';
 import { currentNoteItemAtom } from './zoteroContext';
 import { getCurrentPage, getCurrentReader, getEpubReaderPage } from '../utils/readerUtils';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
@@ -59,18 +61,21 @@ const MAX_LIBRARY_SELECTION = 30;
  * Excluded libraries are never shared: if the open attachment lives in a
  * non-searchable library, no reader state is emitted.
  */
-export async function getReaderState(get: Getter, searchableLibraryIds: Set<number>): Promise<ReaderState | null> {
-    const readerAttachment = get(currentReaderAttachmentAtom);
+export function getReaderState(get: Getter, searchableLibraryIds: Set<number>): ReaderState | null {
+    const explicit = get(readerActionContextAtom);
+    const staged = explicit && get(currentMessageItemsAtom).some(item => item.id === explicit.item.id) ? explicit : null;
+    const readerAttachment = staged?.item ?? get(currentReaderAttachmentAtom);
     if (!readerAttachment) return null;
     if (!searchableLibraryIds.has(readerAttachment.libraryID)) return null;
 
-    const reader = getCurrentReader();
+    const activeReader = getCurrentReader();
+    const reader = activeReader?.itemID === readerAttachment.id ? activeReader : undefined;
     const contentKind = reader?.type === 'pdf' || reader?.type === 'epub' || reader?.type === 'snapshot'
         ? reader.type
         : undefined;
-    let currentTextSelection = get(readerTextSelectionAtom);
+    let currentTextSelection = staged ? staged.selection : get(readerTextSelectionAtom);
 
-    let currentPage = getCurrentPage(reader) || null;
+    let currentPage = staged?.selection?.page ?? (reader ? getCurrentPage(reader) : null);
     if (contentKind === 'epub') {
         currentPage = getEpubReaderPage(reader);
         if (currentTextSelection) {
@@ -116,10 +121,12 @@ export function getNoteState(get: Getter, searchableLibraryIds: Set<number>): No
  */
 export async function buildZoteroApplicationState(get: Getter): Promise<ApplicationStateInput> {
     // Excluded libraries must never appear in application state
+    const contextWindow = getContextWindow();
+    const pane = contextWindow?.closed ? undefined : contextWindow?.ZoteroPane;
     const searchableLibraryIds = get(searchableLibraryIdsAtom);
     const searchableLibrarySet = new Set(searchableLibraryIds);
 
-    const readerState = await getReaderState(get, searchableLibrarySet);
+    const readerState = getReaderState(get, searchableLibrarySet);
     const noteState = getNoteState(get, searchableLibrarySet);
 
     // Get current library and collection context
@@ -162,14 +169,15 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         }
     } else if (currentView === 'library') {
         // In library view, get from ZoteroPane
-        const zp = Zotero.getActiveZoteroPane();
-        if (zp) {
+        if (pane) {
+            const selectedSearches = getSelectedSavedSearches(pane);
+            const selectedPaneItems = pane.getSelectedItems() ?? [];
             // The primary (first) selected library. A selection can span
             // libraries, so this is deliberately not "the only library in
             // play" — it answers "where is the user working", while each
             // entry in current_collections carries its own library identity
             // for anything that needs to be addressed precisely.
-            const libraryId = getSelectedLibraryId(zp);
+            const libraryId = getSelectedLibraryId(pane);
             const library = libraryId !== null ? Zotero.Libraries.get(libraryId) : null;
             // Omit the current library entirely when it is excluded, rather than
             // reporting it with is_synced=false — excluded libraries are not
@@ -189,7 +197,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
             // and a selection can mix collections with saved searches and span
             // libraries. Report each kind as its own list, dropping rows in
             // excluded libraries.
-            const selectedCollections = getSelectedCollections(zp)
+            const selectedCollections = getSelectedCollections(pane)
                 .filter((collection: Zotero.Collection) => searchableLibrarySet.has(collection.libraryID));
 
             // Counts come from the same queries the list_collections tool uses,
@@ -217,7 +225,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                 };
             });
 
-            currentSearches = getSelectedSavedSearches(zp)
+            currentSearches = selectedSearches
                 .filter((search: Zotero.Search) => searchableLibrarySet.has(search.libraryID))
                 .map((search: Zotero.Search) => ({
                     search_key: search.key,
@@ -227,7 +235,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                 }));
 
             // Drop any selected items that belong to an excluded library.
-            const selectedItems = zp.getSelectedItems()
+            const selectedItems = selectedPaneItems
                 .filter((item: Zotero.Item) => searchableLibrarySet.has(item.libraryID));
             if (selectedItems.length > 0) {
                 librarySelection = selectedItems

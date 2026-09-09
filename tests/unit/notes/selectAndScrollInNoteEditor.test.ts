@@ -64,7 +64,7 @@ vi.mock('../../../src/utils/sync', () => ({
     isLibraryValidForSync: vi.fn(),
 }));
 
-vi.mock('../../../src/utils/selectItem', () => ({
+vi.mock('../../../react/utils/selectItem', () => ({
     selectItemById: vi.fn(),
 }));
 
@@ -276,6 +276,7 @@ function installMockEditorInstance(itemId: number, view: any, viewMode = 'tab') 
             itemID: itemId,
             viewMode,
             _iframeWindow: {
+                top: fixtureWindow,
                 wrappedJSObject: {
                     _currentEditorInstance: {
                         _editorCore: { view },
@@ -664,6 +665,7 @@ describe('getNoteEditorView', () => {
                 itemID: 42,
                 viewMode: 'tab',
                 _iframeWindow: {
+                top: fixtureWindow,
                     wrappedJSObject: {
                         _currentEditorInstance: {},
                     },
@@ -679,6 +681,7 @@ describe('getNoteEditorView', () => {
                 itemID: 42,
                 viewMode: 'tab',
                 _iframeWindow: {
+                top: fixtureWindow,
                     wrappedJSObject: {
                         _currentEditorInstance: {
                             _editorCore: {},
@@ -697,6 +700,7 @@ describe('getNoteEditorView', () => {
                 itemID: 42,
                 viewMode: 'tab',
                 _iframeWindow: {
+                top: fixtureWindow,
                     wrappedJSObject: {
                         _currentEditorInstance: {
                             _editorCore: { view: mockView },
@@ -715,6 +719,7 @@ describe('getNoteEditorView', () => {
             itemID: 42,
             viewMode,
             _iframeWindow: {
+                top: fixtureWindow,
                 wrappedJSObject: {
                     _currentEditorInstance: {
                         _editorCore: { view },
@@ -738,6 +743,7 @@ describe('getNoteEditorView', () => {
                 itemID: 42,
                 viewMode: 'window',
                 _iframeWindow: {
+                top: fixtureWindow,
                     wrappedJSObject: {
                         _currentEditorInstance: {
                             _editorCore: { view: windowView },
@@ -1482,6 +1488,7 @@ describe('Zotero API surface assumptions', () => {
             itemID: 42,
             viewMode: 'tab',
             _iframeWindow: {
+                top: fixtureWindow,
                 wrappedJSObject: {
                     _currentEditorInstance: {
                         _editorCore: {
@@ -1563,3 +1570,7 @@ describe('Zotero API surface assumptions', () => {
         expect(textSel.constructor).toBe(TextSelection);
     });
 });
+
+beforeEach(() => { (Zotero as any).getMainWindow = () => fixtureWindow; });
+const fixtureWindow = vi.hoisted(() => ({ closed: false, focus: vi.fn(), ZoteroPane: {}, Zotero_Tabs: {} }));
+vi.mock('../../../react/runtime/windowRuntime', () => ({ getContextWindow: () => fixtureWindow }));

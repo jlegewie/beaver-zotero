@@ -4,6 +4,8 @@
  * → set-items → stage-action-pill flow. The user submits the message themselves.
  */
 
+import { getContextWindow } from '../runtime/windowRuntime';
+
 import { useSetAtom, useAtomValue } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
@@ -104,7 +106,7 @@ export function useContextMenuActionHandler() {
                     targetType,
                     fallbackTitle: actionTitle,
                     contextOverride: { items: contextItems, collections: contextCollections },
-                    targetWindow: Zotero.getMainWindow(),
+                    targetWindow: getContextWindow(),
                 });
             } catch (error) {
                 logger(`useContextMenuActionHandler: Error executing action: ${error}`, 1);

@@ -393,7 +393,7 @@ export function installTemporaryAnnotationDismissOnNextClick(
 
     const documents = [
         options.ownerDocument,
-        Zotero.getMainWindow()?.document,
+        (reader as any)?._window?.document,
         reader?._iframeWindow?.document,
         reader?._internalReader?._primaryView?._iframeWindow?.document,
     ].filter(Boolean) as Document[];

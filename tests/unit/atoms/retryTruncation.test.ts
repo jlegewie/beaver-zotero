@@ -318,7 +318,7 @@ describe('retry via synchronous truncation', () => {
         store.set(threadAgentActionsAtom, [makeAppliedMetadataEdit('act-1', 'b')]);
         promptConfirmMock.mockReturnValue(1); // cancel
 
-        await store.set(regenerateFromRunAtom, 'b');
+        await store.set(regenerateFromRunAtom, { runId: 'b' });
 
         expect(promptConfirmMock).toHaveBeenCalled();
         expect(truncateMock).not.toHaveBeenCalled();
@@ -333,7 +333,7 @@ describe('retry via synchronous truncation', () => {
         store.set(citationsAtom, [{ run_id: 'c' } as any]);
         truncateMock.mockRejectedValue(new Error('network down'));
 
-        await store.set(regenerateFromRunAtom, 'b');
+        await store.set(regenerateFromRunAtom, { runId: 'b' });
 
         expect(truncateMock).toHaveBeenCalledWith('thread-1', ['b', 'c'], 'a');
         expect(connectMock).not.toHaveBeenCalled();
@@ -355,7 +355,7 @@ describe('retry via synchronous truncation', () => {
             return okReport(['b']);
         });
 
-        await store.set(regenerateFromRunAtom, 'b');
+        await store.set(regenerateFromRunAtom, { runId: 'b' });
 
         // Cleared once the replacement run shell took over.
         expect(store.get(retryPendingRunIdAtom)).toBeNull();
@@ -369,7 +369,7 @@ describe('retry via synchronous truncation', () => {
         // The reload serves the server's copy of the thread whole.
         loadThreadRunsMock.mockResolvedValue({ runs, citations: [], agentActions: [] });
 
-        await store.set(regenerateFromRunAtom, 'b');
+        await store.set(regenerateFromRunAtom, { runId: 'b' });
 
         expect(connectMock).not.toHaveBeenCalled();
         expect(popupTitles()).toContain('Chat changed elsewhere');
@@ -387,7 +387,7 @@ describe('retry via synchronous truncation', () => {
         truncateMock.mockResolvedValue(refusedReport([], 'tail_mismatch'));
         loadThreadRunsMock.mockResolvedValue({ runs, citations: [], agentActions: [] });
 
-        await store.set(regenerateFromRunAtom, 'b');
+        await store.set(regenerateFromRunAtom, { runId: 'b' });
 
         expect(connectMock).not.toHaveBeenCalled();
         expect(popupTitles()).toContain('Chat changed elsewhere');
@@ -416,7 +416,7 @@ describe('retry via synchronous truncation', () => {
             order.push('send');
         });
 
-        await store.set(regenerateFromRunAtom, 'b');
+        await store.set(regenerateFromRunAtom, { runId: 'b' });
 
         expect(order).toEqual(['truncate', 'undo', 'send']);
         expect(threadRunIds()).toEqual(['a']);
@@ -456,7 +456,7 @@ describe('retry via synchronous truncation', () => {
             return okReport(['b', 'c']);
         });
 
-        await store.set(regenerateFromRunAtom, 'b');
+        await store.set(regenerateFromRunAtom, { runId: 'b' });
 
         expect(truncateMock).toHaveBeenCalledWith('thread-1', ['b', 'c'], 'a');
         expect(connectMock).not.toHaveBeenCalled();
@@ -480,7 +480,7 @@ describe('retry via synchronous truncation', () => {
             beginNavigation();
         });
 
-        await store.set(regenerateFromRunAtom, 'live');
+        await store.set(regenerateFromRunAtom, { runId: 'live' });
 
         expect(cancelMock).toHaveBeenCalled();
         // Abandoned at the cancel, before anything reads live state: no
@@ -511,7 +511,7 @@ describe('retry via synchronous truncation', () => {
             store.set(isWSChatPendingAtom, true);
         });
 
-        await store.set(regenerateFromRunAtom, 'live');
+        await store.set(regenerateFromRunAtom, { runId: 'live' });
 
         expect(connectMock).not.toHaveBeenCalled();
         expect(store.get(isWSChatPendingAtom)).toBe(true);
@@ -531,7 +531,7 @@ describe('retry via synchronous truncation', () => {
             beginNavigation();
         });
 
-        await store.set(regenerateFromRunAtom, 'b');
+        await store.set(regenerateFromRunAtom, { runId: 'b' });
 
         expect(truncateMock).toHaveBeenCalledWith('thread-1', ['b', 'c'], 'a');
         expect(undoEditMetadataMock).toHaveBeenCalled();
@@ -550,7 +550,7 @@ describe('retry via synchronous truncation', () => {
         store.set(threadRunsAtom, [makeRun('a'), makeRun('b')]);
         truncateMock.mockResolvedValue(okReport(['b']));
 
-        await store.set(regenerateFromRunAtom, 'b');
+        await store.set(regenerateFromRunAtom, { runId: 'b' });
         expect(sentRequest().retry_trigger).toBe('user');
 
         store.set(threadRunsAtom, [makeRun('a'), makeRun('b')]);
@@ -572,7 +572,7 @@ describe('retry via synchronous truncation', () => {
         promptConfirmMock.mockReturnValue(2); // Retry without undoing
         truncateMock.mockResolvedValue(okReport(['failed']));
 
-        await store.set(regenerateFromRunAtom, 'failed');
+        await store.set(regenerateFromRunAtom, { runId: 'failed' });
 
         // The dialog listed the failed run's applied action.
         expect(promptConfirmMock).toHaveBeenCalled();
@@ -588,7 +588,7 @@ describe('retry via synchronous truncation', () => {
         store.set(threadRunsAtom, [makeRun('a'), makeRun('b')]);
         truncateMock.mockResolvedValue(okReport(['a', 'b']));
 
-        await store.set(regenerateFromRunAtom, 'a');
+        await store.set(regenerateFromRunAtom, { runId: 'a' });
 
         expect(truncateMock).toHaveBeenCalledWith('thread-1', ['a', 'b'], null);
         expect(threadRunIds()).toEqual([]);
@@ -774,12 +774,12 @@ describe('retry via synchronous truncation', () => {
             );
 
             // Not awaited: the first retry runs synchronously up to its POST.
-            const first = store.set(regenerateFromRunAtom, 'c');
+            const first = store.set(regenerateFromRunAtom, { runId: 'c' });
             expect(store.get(retryPendingRunIdAtom)).toBe('c');
 
             // Retry controls of other runs are still clickable — the lock is
             // what keeps this from issuing a second, racing truncation.
-            await store.set(regenerateFromRunAtom, 'b');
+            await store.set(regenerateFromRunAtom, { runId: 'b' });
             expect(truncateMock).toHaveBeenCalledTimes(1);
 
             resolveTruncate(okReport(['c']));
@@ -949,4 +949,10 @@ describe('retry via synchronous truncation', () => {
             expect(postMock).toHaveBeenCalledTimes(1);
         });
     });
+});
+
+// Bind this suite's single-window fixture as the originating renderer.
+vi.mock('../../../react/runtime/windowRuntime', async () => {
+    const { singleWindowRuntimeMock } = await import('../../helpers/singleWindowRuntime');
+    return singleWindowRuntimeMock();
 });

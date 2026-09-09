@@ -53,9 +53,9 @@ const createFilePicker = (): ZoteroFilePicker => {
  * Prompt for a location and write `action` there as a `.beaveraction` file.
  * Returns the written path, or null if the user cancelled.
  */
-export const exportActionToFile = async (action: Action): Promise<string | null> => {
+export const exportActionToFile = async (action: Action, win: Window): Promise<string | null> => {
     const fp = createFilePicker();
-    fp.init(Zotero.getMainWindow(), 'Save Action', fp.modeSave);
+    fp.init(win, 'Save Action', fp.modeSave);
     fp.appendFilter('Beaver action', `*${DOT_EXT}`);
     fp.appendFilters(fp.filterAll);
     fp.defaultString = suggestedFileName(action);
@@ -76,9 +76,9 @@ export const exportActionToFile = async (action: Action): Promise<string | null>
  * Prompt for a `.beaveraction` file and parse it. Returns null if the user
  * cancelled; otherwise a parse result (which may itself be an error).
  */
-export const importActionFromFile = async (): Promise<ParseShareableActionResult | null> => {
+export const importActionFromFile = async (win: Window): Promise<ParseShareableActionResult | null> => {
     const fp = createFilePicker();
-    fp.init(Zotero.getMainWindow(), 'Import Action', fp.modeOpen);
+    fp.init(win, 'Import Action', fp.modeOpen);
     fp.appendFilter('Beaver action', `*${DOT_EXT}`);
     fp.appendFilters(fp.filterAll);
 

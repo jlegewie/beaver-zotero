@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Button from "@beaver/agent-ui/primitives/Button";
 import {SettingsGroup, SettingsRow, DocLink} from "./components/SettingsElements";
@@ -29,6 +30,7 @@ function formatStorageStats(count: number, totalBytes: number): string {
 
 
 const AdvancedSection: React.FC = () => {
+    const surfaceWindow = useSurfaceWindow();
 
     const [voiceLanguage, setVoiceLanguage] = useState(() => normalizeVoiceLanguage(getPref("voice.language")));
 
@@ -61,7 +63,7 @@ const AdvancedSection: React.FC = () => {
     const handleDeleteAllExternalFiles = useCallback(async () => {
         const stats = externalFileStats ?? { count: 0, totalBytes: 0 };
         const buttonIndex = Zotero.Prompt.confirm({
-            window: Zotero.getMainWindow(),
+            window: surfaceWindow,
             title: 'Delete External Files?',
             text:
                 `Delete ${formatStorageStats(stats.count, stats.totalBytes)} attached to past chats?\n\n` +

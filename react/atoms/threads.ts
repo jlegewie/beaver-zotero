@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateMessageCollectionsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
+import { readerActionContextAtom, currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateMessageCollectionsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import { isAtBottomAtom, isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowIsAtBottomAtom, windowUserScrolledAtom } from "./ui";
 
 import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "@beaver/agent-core/citations/atoms";
@@ -230,9 +230,9 @@ export const recentThreadsAtom = atom<ThreadData[]>([]);
  * Ask the user to confirm interrupting the currently streaming run.
  * Returns true if the user confirmed (or there was nothing to confirm).
  */
-function confirmInterruptActiveRun(title: string, text: string, confirmLabel: string): boolean {
+function confirmInterruptActiveRun(title: string, text: string, confirmLabel: string, window?: Window): boolean {
     // Hosts without a dialogs slice proceed as confirmed.
-    return getHost().dialogs?.confirm({ title, text, confirmLabel }) ?? true;
+    return getHost().dialogs?.confirm({ title, text, confirmLabel, window }) ?? true;
 }
 
 /**
@@ -241,8 +241,9 @@ function confirmInterruptActiveRun(title: string, text: string, confirmLabel: st
  */
 const confirmedMismatchedThreadIds = new Set<string>();
 
-function confirmOpenMismatchedThread(): boolean {
+function confirmOpenMismatchedThread(window?: Window): boolean {
     return getHost().dialogs?.confirm({
+        window,
         title: 'Open chat from another Zotero?',
         text: 'This chat was created with a different Zotero account or database. '
             + 'Cited items and links may not work here. Any library changes like '
@@ -303,6 +304,7 @@ export const newThreadAtom = atom(
         get,
         set,
         options?: {
+            window?: Window;
             skipAutoPopulate?: boolean;
             skipActiveRunConfirm?: boolean;
             /** Keep the composer's text and pills; attachments are still reset. */
@@ -318,6 +320,7 @@ export const newThreadAtom = atom(
                 'Start new chat?',
                 'Beaver is still generating a response in this chat. Starting a new chat will stop it.',
                 'Start New Chat',
+                options?.window,
             )) {
                 return;
             }
@@ -351,6 +354,7 @@ export const newThreadAtom = atom(
             set(isWebSearchEnabledAtom, false);
             
             set(currentMessageItemsAtom, []);
+            set(readerActionContextAtom, null);
             set(currentMessageCollectionsAtom, []);
             set(currentMessageExternalFilesAtom, []);
             set(removePopupMessagesByTypeAtom, ['items_summary']);
@@ -395,7 +399,8 @@ export const loadThreadAtom = atom(
     async (
         get,
         set,
-        { user_id, threadId, threadName, threadIdentity, skipInstanceMismatchConfirm }: {
+        { user_id, threadId, threadName, threadIdentity, skipInstanceMismatchConfirm, window }: {
+            window?: Window;
             user_id: string;
             threadId: string;
             threadName?: string;
@@ -418,6 +423,7 @@ export const loadThreadAtom = atom(
             'Switch chat?',
             'Beaver is still generating a response in this chat. Switching chats will stop it.',
             'Switch Chat',
+            window,
         )) {
             // A canceled load can't fulfill a pending deep-link scroll target.
             set(pendingScrollToRunAtom, null);
@@ -477,7 +483,7 @@ export const loadThreadAtom = atom(
             && !skipInstanceMismatchConfirm
             && !confirmedMismatchedThreadIds.has(threadId)
         ) {
-            if (!confirmOpenMismatchedThread()) {
+            if (!confirmOpenMismatchedThread(window)) {
                 set(pendingScrollToRunAtom, null);
                 set(isLoadingThreadAtom, false);
                 return false;
@@ -704,6 +710,7 @@ export const loadThreadAtom = atom(
         }
         // Clear sources for now
         set(currentMessageItemsAtom, []);
+        set(readerActionContextAtom, null);
         set(currentMessageCollectionsAtom, []);
         set(currentMessageExternalFilesAtom, []);
         set(removePopupMessagesByTypeAtom, ['items_summary']);

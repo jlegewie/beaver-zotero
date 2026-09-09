@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { navigateToAnnotation } from '../../../utils/readerUtils';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -183,6 +184,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const removePendingApproval = useSetAtom(removePendingApprovalAtom);
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
+    const surfaceWindow = useSurfaceWindow();
     const undoAgentActions = useSetAtom(undoAgentActionsAtom);
 
     // Shared with the terminal review row for this tool call. The run belongs
@@ -419,7 +421,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         setIsProcessingAction(true);
         setClickedButton('undo');
         try {
-            const result = await undoAgentActions({ actions });
+            const result = await undoAgentActions({ actions, window: surfaceWindow });
             if (result.fatalError) setIsUndoError(true);
         } finally {
             setIsProcessingAction(false);
