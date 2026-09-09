@@ -414,11 +414,7 @@ export function describeTableItem(
 /** Retriable creation uses strict indexing; other callers retain best-effort behavior. */
 export async function queueTableFullText(item: Zotero.Item, strict = false): Promise<void> {
     try {
-        await (
-            Zotero as unknown as {
-                FullText?: { queueItem?: (item: Zotero.Item) => Promise<void> };
-            }
-        ).FullText?.queueItem?.(item);
+        await Zotero.FullText?.queueItem?.(item);
     } catch (error) {
         if (strict) throw error;
         logger(`queueTableFullText: ${String(error)}`, 2);
