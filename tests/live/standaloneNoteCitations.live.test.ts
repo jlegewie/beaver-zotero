@@ -60,14 +60,18 @@ describe.skipIf(!key)('standalone attachment note links (live)', () => {
             const read = await post<any>('/beaver/note/read', { note_id: `${libraryID}-${noteKey}` });
             expect(read.success, JSON.stringify(read)).toBe(true);
             expect(read.content).toContain(`ref="c_${key}_0"`);
+            // The locator is part of the citation tag, so editing it rebuilds
+            // the link rather than leaving it on the page it was built with.
+            expect(read.content).toContain('loc="page6"');
             const edit = await post<any>('/beaver/agent-action/execute', { action_type: 'edit_note', action_data: {
                 library_id: libraryID, zotero_key: noteKey, operation: 'str_replace',
-                old_string: ', p. 6', new_string: ', p. 7',
+                old_string: 'loc="page6"', new_string: 'loc="page7"',
             } });
             expect(edit.success, JSON.stringify(edit)).toBe(true);
             const html = (await readNote(libraryID, noteKey)).saved_html;
             expect(html).toContain(`href="${href}`);
             expect(html).toContain('p. 7');
+            expect(html).not.toContain('?page=6');
         }
     });
 
