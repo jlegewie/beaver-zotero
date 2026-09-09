@@ -148,6 +148,49 @@ export async function buildLocalCitationDataMapForContent(
 }
 
 /**
+ * The most pages one locator is expanded to. A citation naming a longer span is
+ * malformed rather than ambitious, so it keeps only its endpoints: the
+ * reference still reports what it covers without allocating the span.
+ */
+const MAX_CITED_PAGES = 100;
+
+/**
+ * Expand a page locator's value into the 1-based pages it cites.
+ *
+ * A locator carries the range or list the model wrote (`page6-8`, `page6,8`),
+ * while `Citation.pages` is the flat list the renderer collapses back into a
+ * display range. Reading only the locator's first number would silently narrow
+ * the citation to its opening page.
+ */
+function citedPagesFromLocator(value: string | undefined): number[] {
+    if (!value) return [];
+
+    const pages = new Set<number>();
+    // En/em dashes reach here from a model that wrote the range typographically.
+    for (const part of value.replace(/[\u2013\u2014]/g, '-').split(',')) {
+        const [startText, endText] = part.split('-');
+        const start = Number.parseInt(startText ?? '', 10);
+        if (!Number.isSafeInteger(start) || start <= 0) continue;
+
+        const end = endText === undefined ? start : Number.parseInt(endText, 10);
+        if (!Number.isSafeInteger(end) || end <= 0) {
+            pages.add(start);
+            continue;
+        }
+
+        const [low, high] = start <= end ? [start, end] : [end, start];
+        if (high - low >= MAX_CITED_PAGES) {
+            pages.add(low);
+            pages.add(high);
+            continue;
+        }
+        for (let page = low; page <= high; page++) pages.add(page);
+    }
+
+    return [...pages].sort((a, b) => a - b);
+}
+
+/**
  * Resolve the external-file citations in the content against the local
  * `external_files` registry.
  *
@@ -210,7 +253,7 @@ export async function resolveExternalFileCitations(content: string): Promise<{
         const record = recordsByExtKey.get(ref.ext_key);
         if (!record) continue;
 
-        const citedPage = Number.parseInt(getPageLocator(ref) ?? '', 10);
+        const citedPages = citedPagesFromLocator(getPageLocator(ref));
         citationDataMap[`local:${citationKey}`] = {
             citation_id: `local:${citationKey}`,
             run_id: 'local',
@@ -224,7 +267,7 @@ export async function resolveExternalFileCitations(content: string): Promise<{
             requested_ref: ref,
             resolved_ref: ref,
             raw_tag: rawTag,
-            ...(Number.isFinite(citedPage) && citedPage > 0 ? { pages: [citedPage] } : {}),
+            ...(citedPages.length > 0 ? { pages: citedPages } : {}),
         };
     }
 

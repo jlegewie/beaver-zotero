@@ -243,6 +243,39 @@ describe('citation render context', () => {
             expect(citation.pages).toEqual([3]);
         });
 
+        it('keeps every page of a cited range so the export shows the full span', async () => {
+            db.getExternalFileByKey.mockResolvedValue(record);
+            (globalThis as any).IOUtils.exists = vi.fn().mockResolvedValue(true);
+
+            const { citationDataMap } = await resolveExternalFileCitations(
+                'See <citation id="ext-ab12cd34" loc="page6-8"/>'
+            );
+
+            expect(citationDataMap['local:extfile:AB12CD34:page6-8'].pages).toEqual([6, 7, 8]);
+        });
+
+        it('keeps every page of a comma-separated locator', async () => {
+            db.getExternalFileByKey.mockResolvedValue(record);
+            (globalThis as any).IOUtils.exists = vi.fn().mockResolvedValue(true);
+
+            const { citationDataMap } = await resolveExternalFileCitations(
+                'See <citation id="ext-ab12cd34" loc="page2,5-6"/>'
+            );
+
+            expect(citationDataMap['local:extfile:AB12CD34:page2,5-6'].pages).toEqual([2, 5, 6]);
+        });
+
+        it('keeps only the endpoints of an implausibly long range', async () => {
+            db.getExternalFileByKey.mockResolvedValue(record);
+            (globalThis as any).IOUtils.exists = vi.fn().mockResolvedValue(true);
+
+            const { citationDataMap } = await resolveExternalFileCitations(
+                'See <citation id="ext-ab12cd34" loc="page1-999999"/>'
+            );
+
+            expect(citationDataMap['local:extfile:AB12CD34:page1-999999'].pages).toEqual([1, 999999]);
+        });
+
         it('builds no citation for a file this device does not have', async () => {
             db.getExternalFileByKey.mockResolvedValue(null);
             (globalThis as any).IOUtils.exists = vi.fn().mockResolvedValue(false);
