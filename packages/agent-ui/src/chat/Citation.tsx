@@ -159,17 +159,21 @@ const Citation: React.FC<CitationProps> = (props) => {
         // clickable link to the locally stored file; the plain-text form is the
         // client-agnostic fallback when the host can't (e.g. no local copy).
         if (isExternalFile) {
+            // A file this device has never seen carries neither metadata nor a
+            // local copy. Name it by its id rather than export an empty pair of
+            // parentheses.
+            const fileLabel = citation || (externalFileKey ? `Attached file ext-${externalFileKey}` : '');
             const locatorSuffix = hasLocatorDisplay ? `, p.${pagesDisplay}` : '';
             const exportedFile = getHost().documentExport?.renderExternalFileCitation?.({
                 externalFileKey,
-                displayName: citation,
+                displayName: fileLabel,
                 locatorSuffix,
                 localPathsByExtKey: externalFileLocalPaths,
             });
             if (exportedFile && exportedFile.kind === 'html') {
                 return <span dangerouslySetInnerHTML={{ __html: exportedFile.html }} />;
             }
-            return (<span>{`(${citation}${locatorSuffix})`}</span>);
+            return (<span>{`(${fileLabel}${locatorSuffix})`}</span>);
         }
 
         // For library citations, delegate host-native formatting (CSL for

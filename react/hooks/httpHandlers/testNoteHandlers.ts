@@ -7,7 +7,8 @@
  */
 
 import { wrapWithSchemaVersion } from '../../utils/noteActions';
-import { undoEditNoteOrBatchAction } from '../../utils/editNoteActions';
+import { executeEditNoteOrBatchAction, undoEditNoteOrBatchAction } from '../../utils/editNoteActions';
+import { containsPreviewMarkers } from '../../../src/utils/notePreviewGuard';
 import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
 import type { AgentAction } from '../../agents/agentActions';
 import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
@@ -184,4 +185,44 @@ export async function handleTestNoteUndoHttpRequest(request: any) {
     } catch (e: any) {
         return { ok: false, error: e?.message || String(e) };
     }
+}
+
+
+/** Exercise the same local executor used when approving a stored note action. */
+export async function handleTestNoteApplyHttpRequest(request: any) {
+    const action = request.action as AgentAction;
+    if (!action?.proposed_data || !['edit_note', 'edit_note_batch'].includes(action.action_type)) {
+        return { ok: false, error: 'An edit_note or edit_note_batch action is required' };
+    }
+    try {
+        return { ok: true, result_data: await executeEditNoteOrBatchAction(action) };
+    } catch (e: any) {
+        return { ok: false, error: e?.message || String(e) };
+    }
+}
+
+/** Render a real note-editor preview and return its displayed HTML for live checks. */
+export async function handleTestNotePreviewHttpRequest(request: any) {
+    const { showDiffPreview, dismissDiffPreview } = await import('../../utils/noteEditorDiffPreview');
+    if (request.dismiss) {
+        await dismissDiffPreview();
+        return { ok: true };
+    }
+    const { library_id, zotero_key, edits } = request;
+    if (typeof library_id !== 'number' || typeof zotero_key !== 'string' || !Array.isArray(edits)) {
+        return { ok: false, error: 'Provide library_id, zotero_key and edits' };
+    }
+    const shown = await showDiffPreview(library_id, zotero_key, edits);
+    const itemID = Zotero.Items.getIDFromLibraryAndKey(library_id, zotero_key);
+    const instance = (Zotero as any).Notes._editorInstances.find((inst: any) => (
+        inst.itemID === itemID && inst._disableSaving
+    ));
+    const readHtml = () => instance?._iframeWindow?.wrappedJSObject?._currentEditorInstance?._editorCore?.view?.dom?.innerHTML;
+    let html = readHtml();
+    // The editor receives its update asynchronously through postMessage.
+    for (let attempt = 0; shown && !containsPreviewMarkers(html ?? '') && attempt < 60; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+        html = readHtml();
+    }
+    return { ok: shown, html };
 }
