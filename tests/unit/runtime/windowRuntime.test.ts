@@ -8,6 +8,14 @@ function makeWindow() {
     return { EventTarget, CustomEvent, closed: false } as unknown as Window;
 }
 
+/** A frame window the way a reader tab's chrome window appears to the plugin. */
+function makeFrameWindow(embedder: Window | undefined) {
+    return {
+        closed: false,
+        browsingContext: embedder ? { embedderElement: { ownerGlobal: embedder } } : undefined,
+    } as unknown as Window;
+}
+
 beforeEach(() => {
     vi.clearAllMocks();
     Zotero.__beaverShuttingDown = false;
@@ -79,6 +87,28 @@ describe('window runtime lifetimes', () => {
         Zotero.__beaverShuttingDown = true;
         instance.publish('background-worker:status', { running: false });
         expect(listener).not.toHaveBeenCalled();
+    });
+
+    it('resolves a frame inside a main window to that window, and refuses unowned or unusable frames', () => {
+        const instance = new BeaverInstance();
+        const win = makeWindow();
+        const runtime = instance.attachWindow(win);
+        runtime.status = 'ready';
+        const readerFrame = makeFrameWindow(win);
+        const viewFrame = makeFrameWindow(readerFrame);
+
+        expect(instance.resolveWindowFrom(win)).toBe(runtime);
+        expect(instance.resolveWindowFrom(readerFrame)).toBe(runtime);
+        expect(instance.resolveWindowFrom(viewFrame)).toBe(runtime);
+        expect(instance.resolveWindowFrom(undefined)).toBeUndefined();
+        // A standalone reader window is a chrome window Beaver never attached to.
+        expect(instance.resolveWindowFrom(makeFrameWindow(makeWindow()))).toBeUndefined();
+
+        runtime.status = 'attaching';
+        expect(instance.resolveWindowFrom(readerFrame)).toBeUndefined();
+        runtime.status = 'ready';
+        instance.markClosing(win);
+        expect(instance.resolveWindowFrom(readerFrame)).toBeUndefined();
     });
 
     it('keeps one reader wrapper when either window closes and restores the original on disposal', () => {
