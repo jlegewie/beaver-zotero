@@ -291,7 +291,7 @@ const QuickPromptPopup: React.FC = () => {
                     <DragDropWrapper overlayBorderRadius={12}>
                         <div className="beaver-quick-prompt__composer">
                             <PopupOverlayContainer />
-                            <InputArea inputRef={inputRef} verticalPosition="above" placeholder="Ask Beaver — @ to add a source, / for actions" />
+                            <InputArea inputRef={inputRef} verticalPosition="above" placeholder="Ask Beaver" />
                         </div>
                     </DragDropWrapper>
                 </div>
