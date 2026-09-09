@@ -200,6 +200,24 @@ describe('the live batch panel', () => {
         expect(drawn()?.batch_id).toBe('second');
     });
 
+    it('lets a host own the expansion, and folds on its own otherwise', () => {
+        stampRef.current = stamp(entry());
+        hookState.index = 0;
+        const onExpandedChange = vi.fn();
+        const controlled = BatchProgressPanel({ expanded: true, onExpandedChange }) as React.ReactElement<any>;
+        expect(controlled.props.expanded).toBe(true);
+        controlled.props.onExpandedChange(false);
+        expect(onExpandedChange).toHaveBeenCalledExactlyOnceWith(false);
+        // The host's word stands; the panel kept nothing of its own.
+        hookState.index = 0;
+        expect((BatchProgressPanel({ expanded: true, onExpandedChange }) as React.ReactElement<any>).props.expanded).toBe(true);
+
+        hookState.slots = [];
+        expect(render()!.props.expanded).toBe(false);
+        render()!.props.onExpandedChange(true);
+        expect(render()!.props.expanded).toBe(true);
+    });
+
     it('draws a batch the backend did not flag as worth showing', () => {
         // The model decided this work was a batch; the panel says so.
         expect(drawn(stamp(entry({ batch_id: 'small', show_progress: false })))?.batch_id).toBe(

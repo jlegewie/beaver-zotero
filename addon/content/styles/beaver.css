@@ -246,6 +246,13 @@
     flex-direction: column;
     padding: 10px 12px 10px 12px;
     gap: 8px;
+    /* Bound to the floating host's own limit, less the room the frame takes,
+     * and scrolled inside: the card is sized to this element's height, so a
+     * request longer than the window — the batch approval card with both
+     * warnings — reaches its controls instead of being cut at the frame. */
+    box-sizing: border-box;
+    max-height: calc(80vh - 24px);
+    overflow-y: auto;
 }
 
 .beaver-run-status-popup__header {
@@ -337,18 +344,41 @@
     overflow: hidden;
 }
 
-/* The shared question card, drawn inside the popup: the popup is the frame,
- * so the card gives up its own. */
-.beaver-run-status-popup__question {
+/* A shared card — the question card, the batch approval card — drawn inside
+ * the popup: the popup is the frame, so the card gives up its own. The
+ * padding is forced because the batch approval card sets its own inline.
+ * A card whose every click is its own (the question's options fill it) does
+ * not show the frame's pointer; one with plain copy between its controls
+ * keeps it, since that copy still opens Beaver. */
+.beaver-run-status-popup__embedded--own-clicks {
     cursor: default;
 }
 
-.beaver-run-status-popup__question > .user-message-display {
+.beaver-run-status-popup__embedded > .user-message-display {
     margin: 0;
-    padding: 0;
+    padding: 0 !important;
     border: 0;
     background: transparent;
     box-shadow: none;
+}
+
+/* Live batch progress under the header: the composer's bar, framed like the
+ * completed card's rows instead of docked to a composer edge. The panel
+ * renders nothing without a batch in flight, and the empty wrapper hides
+ * with it so the column's gap is not paid for a slot with nothing in it. */
+.beaver-run-status-popup__batch-progress {
+    cursor: default;
+}
+
+.beaver-run-status-popup__batch-progress:empty {
+    display: none;
+}
+
+.beaver-run-status-popup .beaver-run-status-popup__batch-progress .batch-progress-bar {
+    margin: 0;
+    border: 1px solid var(--beaver-border-subtle);
+    border-radius: 8px;
+    background: var(--beaver-fill-subtle);
 }
 
 .beaver-run-status-popup__footer {

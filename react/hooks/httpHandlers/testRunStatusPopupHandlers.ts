@@ -9,7 +9,10 @@
  * controls only clear the preview. `{ completion: { runId } }` shows the real
  * completed card for a run of the open thread, so its rows can be exercised
  * without waiting for a run to finish with the sidebar closed. Every field but `kind` is optional and
- * falls back to sample copy — see `RunStatusPopupPreview`. `{ tip: true }`
+ * falls back to sample copy — see `RunStatusPopupPreview`. The `batch` preview
+ * draws the full approval card; combine a `running` or `approval` preview with
+ * `/beaver/test/batch-progress-preview` to see live batch progress on the
+ * card. `{ tip: true }`
  * shows the one-time onboarding tip about the popup (`tipInPanel` overrides
  * where it goes); `{ tip: false }` removes it.
  *

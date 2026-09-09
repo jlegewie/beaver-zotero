@@ -51,7 +51,23 @@ export type RunStatusPopupPreview =
         declineLabel?: string;
         stackDepth?: number;
     }
-    | { kind: 'batch'; threadName?: string; title?: string; scope?: string; stackDepth?: number }
+    | {
+        kind: 'batch';
+        threadName?: string;
+        /** The backend-composed copy the shared approval card renders verbatim. */
+        title?: string;
+        scopePrimary?: string;
+        scopeSecondary?: string;
+        message?: string;
+        destructiveWarning?: string;
+        costWarning?: string;
+        creditChip?: string;
+        creditTooltip?: string;
+        userInstructionsPrefill?: string;
+        /** A batch that changes nothing, so the card offers no coverage choice. */
+        readOnly?: boolean;
+        stackDepth?: number;
+    }
     | { kind: 'question'; threadName?: string; title?: string; stackDepth?: number }
     | {
         kind: 'completed';
