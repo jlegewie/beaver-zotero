@@ -5,7 +5,7 @@ import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import { AlertIcon, ArrowUpRightIcon, CancelIcon, Icon, Spinner } from '../icons/icons';
+import { AlertIcon, ArrowRightIcon, CancelIcon, Icon, Spinner } from '../icons/icons';
 import { isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { chatAccessGateAtom, type ChatAccessGate } from '../../atoms/chatAccess';
 import {
@@ -69,7 +69,7 @@ const NoticeCard: React.FC<{
         </div>
         <div className="beaver-quick-prompt__footer">
             <div className="flex-1" />
-            <Button variant="outline" style={FOOTER_BUTTON_STYLE} rightIcon={ArrowUpRightIcon} onClick={openBeaver}>
+            <Button variant="outline" style={FOOTER_BUTTON_STYLE} rightIcon={ArrowRightIcon} onClick={openBeaver}>
                 Open Beaver
             </Button>
         </div>

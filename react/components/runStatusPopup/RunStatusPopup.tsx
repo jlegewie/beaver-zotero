@@ -37,6 +37,7 @@ import { runStatusPopupForceVisibleAtom } from '../../atoms/runStatusPopup';
 import {
     AlertIcon,
     ArrowUpRightIcon,
+    ArrowRightIcon,
     CancelIcon,
     CheckmarkCircleIcon,
     DollarCircleIcon,
@@ -311,7 +312,7 @@ const CompletedView: React.FC<{ card: CompletedCard }> = ({ card }) => {
             )}
             <div className="beaver-run-status-popup__footer">
                 <div className="flex-1" />
-                <Button variant="outline" style={FOOTER_BUTTON_STYLE} rightIcon={ArrowUpRightIcon} onClick={card.onOpen}>
+                <Button variant="outline" style={FOOTER_BUTTON_STYLE} rightIcon={ArrowRightIcon} onClick={card.onOpen}>
                     Open Beaver
                 </Button>
             </div>
