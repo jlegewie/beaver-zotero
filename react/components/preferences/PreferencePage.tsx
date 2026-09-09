@@ -583,12 +583,10 @@ const PreferencePage: React.FC = () => {
                 {/* ===== SEARCH TAB ===== */}
                 {effectiveActiveTab === 'sync' && (
                     <>
-                        <BackgroundProcessingSection />
-
                         <SectionLabel>Libraries</SectionLabel>
                         <ExcludedLibrariesList />
 
-                        <SectionLabel>Search Index</SectionLabel>
+                                                <SectionLabel>Search Index</SectionLabel>
                         <SettingsGroup>
                             <SettingsRow
                                 title="Search Index"
@@ -626,6 +624,8 @@ const PreferencePage: React.FC = () => {
                                 <EmbeddingIndexProgress />
                             )}
                         </SettingsGroup>
+
+                        <BackgroundProcessingSection />
                     </>
                 )}
 
