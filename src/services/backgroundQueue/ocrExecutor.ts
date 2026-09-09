@@ -20,6 +20,7 @@ import type {
     DocumentProcessingFailureInput,
 } from '../database';
 import {
+    isRemoteAccessAvailable,
     loadAttachmentData,
     resolveAttachmentFileSource,
     type AttachmentFileSource,
@@ -51,7 +52,6 @@ import {
 import {
     OCR_ENGINE_VERSION,
     OCR_OUTCOME_DETAIL_MAX,
-    OCR_PRIORITY_BACKFILL,
     OCR_TRACK_BUDGET_MS,
     OCR_TERMINAL_FAILED,
     OCR_TERMINAL_GEOMETRY,
@@ -362,7 +362,9 @@ export class OcrExecutor implements JobExecutor {
         // Resolve a local path or a supported remote source. OCR needs the scan
         // bytes (to upload) and a stable identity (to key the cache). Remote-only
         // sources are downloaded in-memory like every other extraction path; the
-        // `accessRemoteFiles` gate is already enforced by resolveAttachmentFileSource.
+        // `accessRemoteFiles` gate is already enforced by resolveAttachmentFileSource,
+        // and it is the only download permission — a backfill ticket is the same
+        // access as an on-demand one, just at library scale.
         const source = await resolveAttachmentFileSource({
             item: resolvedItem,
             localSizeStrategy: 'zotero-total',
@@ -384,13 +386,6 @@ export class OcrExecutor implements JobExecutor {
         const fileSource = source.source;
         const isRemoteOnly = fileSource.isRemoteOnly;
         const filePath = fileSource.filePath;
-
-        // Backstop for a future whole-library backfill: a background sweep must not
-        // pull remote bytes (it should pre-filter not-local items at enqueue time).
-        if (isRemoteOnly && record.priority >= OCR_PRIORITY_BACKFILL) {
-            logger(`OcrExecutor: ${record.libraryId}-${record.zoteroKey} skipped (file_not_local_remote; backfill)`, 2);
-            return { outcome: { kind: 'complete', reason: 'file_not_local_remote' } };
-        }
 
         // attachmentHash hashes the local file and is undefined for remote-only
         // items; the synced server MD5 is the same content hash, so backend OCR
@@ -472,6 +467,17 @@ export class OcrExecutor implements JobExecutor {
             const data = await IOUtils.read(source.filePath);
             this.throwIfLibraryUnavailable(item.libraryID, ctx);
             return data;
+        }
+        // Re-read the download permission instead of trusting the resolve that
+        // produced this source. A whole backend round trip sits between the two
+        // (this load runs lazily, only once `/ocr/request` has asked for an
+        // upload), which is ample time for the user to turn remote file access
+        // off — and `loadAttachmentData` would honour the resolved source
+        // regardless. Releasing rather than failing keeps the row intact: the
+        // next claim re-resolves, gets a local-only answer and retires the job.
+        if (!isRemoteAccessAvailable(item)) {
+            logger(`OcrExecutor: ${item.libraryID}-${item.key} remote file access withdrawn before download`, 2);
+            throw new OcrAbort();
         }
         const result = await loadAttachmentData({
             item,
