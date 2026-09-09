@@ -6,7 +6,9 @@
  * without a run in that state: `{ preview: { kind: 'approval', ... } }` sets
  * the preview card, `{ clear: true }` removes it, and `{ forceVisible: true }`
  * keeps the popup on screen while the sidebar is open. The preview's own
- * controls only clear the preview. Every field but `kind` is optional and
+ * controls only clear the preview. `{ completion: { runId } }` shows the real
+ * completed card for a run of the open thread, so its rows can be exercised
+ * without waiting for a run to finish with the sidebar closed. Every field but `kind` is optional and
  * falls back to sample copy — see `RunStatusPopupPreview`. `{ tip: true }`
  * shows the one-time onboarding tip about the popup (`tipInPanel` overrides
  * where it goes); `{ tip: false }` removes it.
@@ -45,6 +47,11 @@ export async function handleTestRunStatusPopupHttpRequest(request: any): Promise
     }
     if (request?.clearCompletion) {
         store.set(runStatusPopupCompletionAtom, null);
+    }
+    // Draw the completed card for a run of the open thread, as if it had just
+    // finished while the sidebar was closed; its rows act on the real run.
+    if (typeof request?.completion?.runId === 'string') {
+        store.set(runStatusPopupCompletionAtom, { runId: request.completion.runId, completedAt: Date.now() });
     }
     if (request?.preview) {
         const preview = request.preview as RunStatusPopupPreview;

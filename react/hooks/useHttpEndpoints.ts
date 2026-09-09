@@ -202,6 +202,7 @@ import {
 } from './httpHandlers/testTableHandlers';
 import { handleTestRunStatusPopupHttpRequest } from './httpHandlers/testRunStatusPopupHandlers';
 import { handleTestQuickPromptHttpRequest } from './httpHandlers/testQuickPromptHandlers';
+import { handleTestListSavedActionsHttpRequest } from './httpHandlers/testSavedActionsHandlers';
 import type {
     WSZoteroDataRequest,
     WSExternalReferenceCheckRequest,
@@ -417,6 +418,7 @@ const ENDPOINT_PATHS = [
     '/beaver/test/table-item-pane',
     '/beaver/test/run-status-popup',
     '/beaver/test/quick-prompt',
+    '/beaver/test/saved-actions',
 ] as const;
 
 /**
@@ -1471,6 +1473,9 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/quick-prompt'] =
             createEndpoint(handleTestQuickPromptHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/saved-actions'] =
+            createEndpoint(handleTestListSavedActionsHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
