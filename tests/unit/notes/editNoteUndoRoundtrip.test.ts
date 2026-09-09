@@ -12,7 +12,7 @@
  * known limitations (e.g., replace_all with PM normalization).
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // =============================================================================
 // Module Mocks (must be before imports)
@@ -87,9 +87,12 @@ import {
 } from '../../../src/utils/noteWrapper';
 import {
     executeEditNoteAction,
+    executeEditNoteOrBatchAction,
     undoEditNoteAction,
 } from '../../../react/utils/editNoteActions';
 import type { AgentAction } from '../../../react/agents/agentActions';
+import { store } from '../../../react/store';
+import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 import type { EditNoteResultData } from '@beaver/agent-core/types/agentActions/editNote';
 
 // =============================================================================
@@ -2194,5 +2197,67 @@ describe('manual-Apply uses the full ranked matcher', () => {
 
         expect(caught).toBeDefined();
         expect(caught.code).toBe('old_string_not_found');
+    });
+});
+
+
+describe('external-file citations through React apply and undo', () => {
+    const tag = '<citation id="ext-MRDTFYHP" loc="page6"/>';
+    let previousBeaver: any;
+    let previousFile: any;
+    let previousLibraryGet: any;
+    beforeEach(() => {
+        previousBeaver = Zotero.Beaver;
+        previousFile = Zotero.File;
+        previousLibraryGet = Zotero.Libraries.get;
+        (Zotero.Libraries as any).get = vi.fn(() => ({ editable: true }));
+        vi.mocked(store.get).mockImplementation((atom: any) => atom === searchableLibraryIdsAtom ? [1] : null);
+        (Zotero as any).Beaver = { db: { getExternalFileByKey: vi.fn(async () => ({
+            filename: 'Report.pdf', storedPath: '/stored/Report.pdf',
+        })) } };
+        (Zotero as any).File = { pathToFileURI: vi.fn(() => 'file:///stored/Report.pdf') };
+        vi.mocked(IOUtils.exists).mockResolvedValue(true);
+    });
+    afterEach(() => {
+        (Zotero as any).Beaver = previousBeaver;
+        (Zotero as any).File = previousFile;
+        Zotero.Libraries.get = previousLibraryGet;
+        vi.mocked(store.get).mockImplementation(() => null);
+    });
+
+    it('applies a filename link and can undo without stored undo HTML', async () => {
+        const { item, action } = await applyEdit({ noteHtml: wrap('<p>Anchor</p>'), oldString: 'Anchor', newString: tag });
+        expect(item._getHtml()).toContain('href="file:///stored/Report.pdf"');
+        expect(item._getHtml()).toContain('Report.pdf</a>, p. 6');
+        delete (action.result_data as any).undo_new_html;
+        delete (action.result_data as any).undo_old_html;
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('<p>Anchor</p>');
+        expect(restored).not.toContain('Report.pdf');
+    });
+
+    it.each(['rewrite', 'append', 'str_replace'])('loads external files for React %s', async (operation) => {
+        const item = createMockNoteItem(wrap('<p>Anchor</p>'));
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+        const action = makeAction(1, 'TESTKEY', 'Anchor', tag);
+        (action.proposed_data as any).operation = operation;
+        const result = await executeEditNoteOrBatchAction(action);
+        expect(item._getHtml()).toContain('href="file:///stored/Report.pdf"');
+        expect(item._getHtml()).not.toContain('Attached file ext-');
+        expect(result.warnings).toBeUndefined();
+    });
+
+    it.each(['rewrite', 'str_replace'])('loads files and reports missing metadata for a React batch %s', async (operation) => {
+        vi.mocked(Zotero.Beaver.db.getExternalFileByKey).mockResolvedValue(null);
+        const item = createMockNoteItem(wrap('<p>Anchor</p>'));
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+        const action = makeAction(1, 'TESTKEY', 'Anchor', tag);
+        action.action_type = 'edit_note_batch';
+        action.proposed_data = { library_id: 1, zotero_key: 'TESTKEY', edits: [
+            { index: 0, operation, old_string: 'Anchor', new_string: tag },
+        ] } as any;
+        const result = await executeEditNoteOrBatchAction(action);
+        expect(item._getHtml()).toContain('(Attached file ext-MRDTFYHP, p. 6)');
+        expect(result.warnings?.[0]).toContain('no available filename metadata');
     });
 });

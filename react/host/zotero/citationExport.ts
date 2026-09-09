@@ -1,3 +1,4 @@
+import { formatExternalFileCitationHTML } from '../../../src/utils/externalFileCitation';
 import { getPageLabelsForItem } from './itemData';
 import { getPageLocator } from '@beaver/agent-core/citations/citationGrammar';
 import { translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
@@ -11,15 +12,6 @@ import type {
     DocumentExportHost,
     ExternalFileCitationExportRequest,
 } from '@beaver/agent-ui/host/types';
-
-/** Escape text for safe interpolation into an HTML attribute or text node. */
-function escapeHtml(value: string): string {
-    return value
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-}
 
 /**
  * Render a Zotero/library citation as CSL-formatted HTML for note export.
@@ -94,10 +86,8 @@ function renderExternalFileCitation(request: ExternalFileCitationExportRequest):
     const path = localPathsByExtKey[externalFileKey];
     if (!path) return null;
     try {
-        const href = escapeHtml(Zotero.File.pathToFileURI(path));
-        const label = escapeHtml(displayName);
-        const suffix = escapeHtml(locatorSuffix);
-        return { kind: 'html', html: `(<a href="${href}">${label}</a>${suffix})` };
+        const href = Zotero.File.pathToFileURI(path);
+        return { kind: 'html', html: formatExternalFileCitationHTML(displayName, locatorSuffix, href) };
     } catch (e) {
         logger(`zoteroDocumentExport: failed to build file link for ext-${externalFileKey}: ${e}`);
         return null;

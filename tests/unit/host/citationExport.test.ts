@@ -66,3 +66,27 @@ describe('zoteroDocumentExport.renderCitation', () => {
         expect(Zotero.Items.getByLibraryAndKey).toHaveBeenCalledWith(7, 'ABCD1234');
     });
 });
+
+describe('zoteroDocumentExport.renderExternalFileCitation', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        (Zotero as any).File = { pathToFileURI: vi.fn(() => 'file:///Report%20%26%20findings.pdf') };
+    });
+
+    it('uses the shared escaped file-link format', () => {
+        expect(zoteroDocumentExport.renderExternalFileCitation!({
+            externalFileKey: 'MRDTFYHP', displayName: 'Report & findings.pdf',
+            locatorSuffix: ', p. 6', localPathsByExtKey: { MRDTFYHP: '/Report & findings.pdf' },
+        })).toEqual({
+            kind: 'html',
+            html: '(<a href="file:///Report%20%26%20findings.pdf">Report &amp; findings.pdf</a>, p. 6)',
+        });
+    });
+
+    it('lets the render layer fall back to text when no local file is available', () => {
+        expect(zoteroDocumentExport.renderExternalFileCitation!({
+            externalFileKey: 'MRDTFYHP', displayName: 'Report.pdf',
+            locatorSuffix: ', p. 6', localPathsByExtKey: {},
+        })).toBeNull();
+    });
+});
