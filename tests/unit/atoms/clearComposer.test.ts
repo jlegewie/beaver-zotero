@@ -76,6 +76,8 @@ const {
     removeItemFromMessageAtom,
     readerActionContextAtom,
     stagedReaderActionContextAtom,
+    effectiveReaderTextSelectionAtom,
+    readerTextSelectionAtom,
 } = await import('../../../react/atoms/messageComposition');
 
 const pill = { commandName: 'summarize', actionId: 'custom-1' };
@@ -170,4 +172,25 @@ it('does not revive an old reader selection when its removed source is reattache
     store.set(removeItemFromMessageAtom, source);
     store.set(currentMessageItemsAtom, [source]);
     expect(store.get(stagedReaderActionContextAtom)).toBeNull();
+});
+
+
+it('displays and removes the staged selection without falling back to destination text', () => {
+    const store = createStore();
+    const source = { id: 42, libraryID: 1, key: 'SOURCE' } as any;
+    store.set(readerTextSelectionAtom, { text: 'destination passage' });
+    store.set(currentMessageItemsAtom, [source]);
+    store.set(readerActionContextAtom, { item: source, selection: { text: 'source passage', page: 3 } });
+    expect(store.get(effectiveReaderTextSelectionAtom)).toEqual({ text: 'source passage', page: 3 });
+    store.set(effectiveReaderTextSelectionAtom, null);
+    expect(store.get(effectiveReaderTextSelectionAtom)).toBeNull();
+    expect(store.get(stagedReaderActionContextAtom)?.selection).toBeNull();
+});
+
+it('removes the live selection when no reader action is staged', () => {
+    const store = createStore();
+    store.set(readerTextSelectionAtom, { text: 'live passage' });
+    expect(store.get(effectiveReaderTextSelectionAtom)).toEqual({ text: 'live passage' });
+    store.set(effectiveReaderTextSelectionAtom, null);
+    expect(store.get(readerTextSelectionAtom)).toBeNull();
 });

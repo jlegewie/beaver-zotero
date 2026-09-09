@@ -22,8 +22,35 @@ export async function openReader(
         const existing: any = tab && Zotero.Reader.getByTabID(tab.id);
         if (existing && tab) {
             win.Zotero_Tabs.select(tab.id);
-            if (location) await existing.navigate(location);
+            if (location) {
+                await existing._initPromise;
+                if (win.closed) throw new WindowUnavailableError();
+                await existing.navigate(location);
+            }
             return existing;
+        }
+        if (tab) {
+            // Selecting an unloaded local tab invokes Zotero's restore hook.
+            // That hook uses the active main window on legacy releases.
+            const restoring = tab.type === 'reader-unloaded';
+            focusLegacyTarget(win);
+            win.Zotero_Tabs.select(tab.id, false, { location });
+            const deadline = Date.now() + 15000;
+            let restored: any;
+            while (!(restored = Zotero.Reader.getByTabID(tab.id))) {
+                if (win.closed || !win.Zotero_Tabs._tabs.some(candidate => candidate.id === tab.id)
+                    || Date.now() >= deadline) throw new WindowUnavailableError();
+                await Zotero.Promise.delay(50);
+            }
+            if (win.closed || restored._window !== win) throw new WindowUnavailableError();
+            // A fresh restore consumes location in the native load hook.
+            // An already-loading tab needs it after initialization instead.
+            if (location && !restoring) {
+                await restored._initPromise;
+                if (win.closed) throw new WindowUnavailableError();
+                await restored.navigate(location);
+            }
+            return restored;
         }
         // Legacy duplicate detection is global. A new tab must not select a
         // different window's instance of the same attachment.

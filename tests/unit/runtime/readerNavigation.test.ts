@@ -57,3 +57,41 @@ it('contains unavailable-window failures in fire-and-forget attachment opening',
     await expect(viewAttachment(42, a)).resolves.toBeUndefined();
     await expect(viewAttachment(42)).resolves.toBeUndefined();
 });
+
+
+it('restores an unloaded local legacy tab instead of opening a duplicate', async () => {
+    delete a.Zotero_Tabs.isOwnTabEvent;
+    a.Zotero_Tabs._tabs = [{ id: 'local', type: 'reader-unloaded', data: { itemID: 42 } }];
+    const reader = { itemID: 42, _window: a, navigate: vi.fn() };
+    (Zotero as any).Promise = { delay: vi.fn(async () => {
+        vi.mocked(Zotero.Reader.getByTabID).mockReturnValue(reader as any);
+    }) };
+    expect(await openReader(42, { pageIndex: 8 }, {}, a)).toBe(reader);
+    expect(a.Zotero_Tabs.select).toHaveBeenCalledWith('local', false, { location: { pageIndex: 8 } });
+    expect(reader.navigate).not.toHaveBeenCalled();
+    expect(Zotero.Reader.open).not.toHaveBeenCalled();
+    expect(b.Zotero_Tabs.select).not.toHaveBeenCalled();
+});
+
+it('does not reopen a different tab when the restoring tab closes', async () => {
+    delete a.Zotero_Tabs.isOwnTabEvent;
+    a.Zotero_Tabs._tabs = [{ id: 'local', type: 'reader-unloaded', data: { itemID: 42 } }];
+    (Zotero as any).Promise = { delay: vi.fn(async () => { a.Zotero_Tabs._tabs = []; }) };
+    await expect(openReader(42, undefined, {}, a)).rejects.toMatchObject({ code: 'window_unavailable' });
+    expect(Zotero.Reader.open).not.toHaveBeenCalled();
+});
+
+
+it('waits for an already-loading local reader before applying a new location', async () => {
+    delete a.Zotero_Tabs.isOwnTabEvent;
+    a.Zotero_Tabs._tabs = [{ id: 'local', type: 'reader-loading', data: { itemID: 42 } }];
+    let initialize!: () => void;
+    const reader = { itemID: 42, _window: a, navigate: vi.fn(), _initPromise: new Promise<void>(resolve => { initialize = resolve; }) };
+    vi.mocked(Zotero.Reader.getByTabID).mockReturnValue(reader as any);
+    const pending = openReader(42, { pageIndex: 8 }, {}, a);
+    await Promise.resolve();
+    expect(reader.navigate).not.toHaveBeenCalled();
+    initialize();
+    expect(await pending).toBe(reader);
+    expect(reader.navigate).toHaveBeenCalledWith({ pageIndex: 8 });
+});

@@ -258,6 +258,19 @@ export const stagedReaderActionContextAtom = atom((get) => {
         ? context : null;
 });
 
+/** The editable selection displayed in the composer and sent with this draft. */
+export const effectiveReaderTextSelectionAtom = atom(
+    (get) => {
+        const staged = get(stagedReaderActionContextAtom);
+        return staged ? staged.selection : get(readerTextSelectionAtom);
+    },
+    (get, set, selection: TextSelection | null) => {
+        const staged = get(stagedReaderActionContextAtom);
+        if (staged) set(readerActionContextAtom, { ...staged, selection });
+        else set(readerTextSelectionAtom, selection);
+    },
+);
+
 /**
 * Remove a library from the current selection
 * Also removes any collections that belong to the removed library (cascading cleanup)
