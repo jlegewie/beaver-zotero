@@ -167,6 +167,29 @@ describe('BackgroundExtractor', () => {
         await conn.closeDatabase();
     });
 
+    it.each(['continuous', 'drain', 'idle'].flatMap((mode) =>
+        ['startup_delay', 'sync_in_progress', 'hot_busy', 'library_scope_unknown', 'disabled', 'no_window']
+            .map((blocker) => [mode, blocker]),
+    ))('keeps the backlog gate closed in %s mode while blocked by %s', async (mode, blocker) => {
+        (Zotero as any).Prefs.get = vi.fn((pref: string) =>
+            pref === 'extensions.zotero.beaver.backgroundProcessingEnabled' ? true
+                : pref === 'extensions.zotero.beaver.backgroundProcessingContinuous' ? mode === 'continuous'
+                    : undefined);
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        if (mode === 'drain') proc.requestImmediateDrain();
+        expect(proc.isBacklogGateOpen()).toBe(true);
+        if (blocker === 'startup_delay') (proc as any).startupDelayUntil = Date.now() + 30_000;
+        if (blocker === 'sync_in_progress') (proc as any).syncInProgress = true;
+        if (blocker === 'hot_busy') mockState.hotPendingCount = 1;
+        if (blocker === 'library_scope_unknown') (Zotero as any).Beaver.libraryScopeInitialized = false;
+        if (blocker === 'disabled') (proc as any).prefEnabled = false;
+        if (blocker === 'no_window') (Zotero as any).getMainWindow = () => null;
+        expect(proc.getDispatchBlocker()).toBe(blocker);
+        expect(proc.isBacklogGateOpen()).toBe(false);
+        if (blocker !== 'startup_delay') expect(await proc.processOnce()).toMatchObject({ processed: false, reason: blocker });
+    });
+
     it('returns no_window when Zotero.getMainWindow returns null', async () => {
         (Zotero as any).getMainWindow = vi.fn(() => null);
         const { BackgroundExtractor } = await loadProcessor();

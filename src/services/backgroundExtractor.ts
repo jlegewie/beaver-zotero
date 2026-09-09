@@ -57,6 +57,7 @@ const PREF_CONTINUOUS = 'backgroundProcessingContinuous';
 const COOPERATIVE_THROTTLE = true;
 
 export type ProcessOnceReason =
+    | 'startup_delay'
     | 'stopped'
     | 'shutting_down'
     | 'disabled'
@@ -145,10 +146,28 @@ export class BackgroundExtractor {
      * timer".
      */
     isBacklogGateOpen(): boolean {
+        if (this.getDispatchBlocker() !== null) return false;
         if (getPref(PREF_PROCESSING_ENABLED) !== true) return false;
         if (getPref(PREF_CONTINUOUS) === true) return true;
         if (this.drainNowRequested) return true;
         return getSystemIdleTimeMs() >= IDLE_THRESHOLD_MS;
+    }
+
+    /** Claim preconditions shared by dispatch and status; manual passes bypass the startup timer. */
+    getDispatchBlocker(includeStartup = true): ProcessOnceReason | null {
+        if (this.stopRequested) return 'stopped';
+        if (this.dbWritesPermanentlyDisabled || Zotero.__beaverShuttingDown === true) return 'shutting_down';
+        if (!this.prefEnabled || (!this.started && getPref(PREF_ENABLED) === false)) return 'disabled';
+        if (includeStartup && Date.now() < this.startupDelayUntil) return 'startup_delay';
+        if (!Zotero.getMainWindow?.()) return 'no_window';
+        if (this.syncInProgress) return 'sync_in_progress';
+        if (COOPERATIVE_THROTTLE) {
+            const hot = getExistingMuPDFWorkerClient('hot');
+            if (hot && hot.getStats().pendingCount > 0) return 'hot_busy';
+        }
+        if (!isLibraryScopeKnown()) return 'library_scope_unknown';
+        if (!Zotero.Beaver?.db || this.executors.size === 0) return 'empty';
+        return null;
     }
 
     /** Return capacity and in-flight counts for registered lanes. */
@@ -455,25 +474,8 @@ export class BackgroundExtractor {
 
         if (this.stopRequested) return inactive('stopped');
         if (this.shouldSkipDbWrites()) return inactive('shutting_down');
-        if (!this.prefEnabled) return inactive('disabled');
-
-        const win = Zotero.getMainWindow?.() ?? null;
-        if (!win) return inactive('no_window');
-
-        if (this.syncInProgress) return inactive('sync_in_progress');
-
-        if (COOPERATIVE_THROTTLE) {
-            const hot = getExistingMuPDFWorkerClient('hot');
-            if (hot && hot.getStats().pendingCount > 0) {
-                return inactive('hot_busy');
-            }
-        }
-
-        // Fail closed: without a resolved searchable-library scope the
-        // dispatcher cannot prove a queued row is allowed to run, so it claims
-        // nothing. Checked every pass because rows outlive both restarts and
-        // the exclusion state they were enqueued under.
-        if (!isLibraryScopeKnown()) return inactive('library_scope_unknown');
+        const blocker = this.getDispatchBlocker(false);
+        if (blocker) return inactive(blocker);
 
         const db = Zotero.Beaver?.db;
         if (!db || this.executors.size === 0) return inactive('empty');

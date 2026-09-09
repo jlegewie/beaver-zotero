@@ -29,6 +29,8 @@ export interface ProcessingStatusOptions {
 
 /** Dispatcher activity at read time, for the status sentence. */
 export interface BackgroundWorkerSnapshot {
+    /** A dispatcher precondition preventing new jobs from starting. */
+    dispatchBlocker: string | null;
     /** Available and deferred jobs restricted to registered, entitled lanes. */
     available: number;
     deferred: number;
@@ -91,6 +93,7 @@ export async function collectProcessingStatus(
         && (type !== 'document_ocr' || hasOcrAccess));
     const activeQueue = await db.getBackgroundQueueStats(Date.now(), activeTypes);
     const worker: BackgroundWorkerSnapshot = {
+        dispatchBlocker: extractor?.getDispatchBlocker?.() ?? null,
         available: activeQueue.available,
         deferred: activeQueue.deferred,
         inFlight: Object.values(lanes).reduce((sum, lane) => sum + (lane?.inFlight ?? 0), 0),

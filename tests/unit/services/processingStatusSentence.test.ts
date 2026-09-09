@@ -6,11 +6,17 @@ function status(deferred: number, total = 1) {
     return {
         ...backgroundProcessingStatusAtom.init,
         ledger: { ...backgroundProcessingStatusAtom.init.ledger, total, readable: total },
-        worker: { available: 0, deferred, inFlight: 0, backlogGateOpen: true, drainNow: false },
+        worker: { available: 0, deferred, inFlight: 0, backlogGateOpen: true, drainNow: false, dispatchBlocker: null as string | null },
     };
 }
 
 describe('processing status sentence', () => {
+    it('shows dispatcher-blocked work as waiting without offering an idle bypass', () => {
+        const snapshot = status(0);
+        snapshot.worker.available = 4;
+        snapshot.worker.dispatchBlocker = 'sync_in_progress';
+        expect(describeStatus(snapshot, true)).toMatchObject({ tone: 'waiting', processNow: false });
+    });
     it.each(['failed', 'skipped'] as const)('does not declare completion after terminal extraction is %s', (outcome) => {
         const snapshot = status(0);
         snapshot.ledger.readable = 0;

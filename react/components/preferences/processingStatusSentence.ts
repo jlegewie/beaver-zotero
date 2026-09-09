@@ -37,7 +37,8 @@ export function describeStatus(
     const inFlight = status.worker?.inFlight ?? 0;
     // The dispatcher's own verdict; the continuous pref is the fallback for a
     // snapshot taken before the worker reported.
-    const gateOpen = status.worker?.backlogGateOpen ?? continuous;
+    const blocker = status.worker?.dispatchBlocker;
+    const gateOpen = !blocker && (status.worker?.backlogGateOpen ?? continuous);
     const runnable = status.worker?.available ?? 0;
     if (inFlight > 0 || (runnable > 0 && gateOpen)) {
         const remaining = Math.max(inFlight + runnable, 1);
@@ -54,8 +55,10 @@ export function describeStatus(
         return {
             tone: 'waiting',
             headline: `${plural(runnable, 'file')} waiting`,
-            caption: 'Processing starts once Zotero has been idle for a moment.',
-            processNow: true,
+            caption: blocker
+                ? 'Processing is waiting for Zotero to be ready.'
+                : 'Processing starts once Zotero has been idle for a moment.',
+            processNow: !blocker,
         };
     }
     const deferred = status.worker?.deferred ?? 0;
