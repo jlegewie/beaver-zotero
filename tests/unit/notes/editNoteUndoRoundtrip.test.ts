@@ -2225,6 +2225,34 @@ describe('external-file citations through React apply and undo', () => {
         vi.mocked(store.get).mockImplementation(() => null);
     });
 
+    it('applies a standalone attachment link, edits its saved locator, and undoes both edits', async () => {
+        (Zotero.Libraries as any).userLibraryID = 1;
+        (Zotero.Items as any).loadDataTypes = vi.fn().mockResolvedValue(undefined);
+        const attachment = { libraryID: 1, key: 'ATTACH12', parentID: false,
+            isAttachment: () => true, getField: () => 'Report.pdf',
+            loadDataType: vi.fn().mockResolvedValue(undefined),
+        };
+        vi.mocked(Zotero.Items.getByLibraryAndKey).mockReturnValue(attachment as any);
+        const original = wrap('<p>Anchor</p>');
+        const { item, action } = await applyEdit({ noteHtml: original, oldString: 'Anchor',
+            newString: '<citation id="u-ATTACH12" loc="page6"/>',
+        });
+        expect(item._getHtml()).toContain('Report.pdf</a>, p. 6)');
+        expect(item._getHtml()).not.toContain('data-citation=');
+        const { simplified } = simplifyNoteHtml(item._getHtml(), 1);
+        expect(simplified).toContain('ref="c_ATTACH12_0"');
+        const nextAction = makeAction(1, 'TESTKEY', simplified, simplified.replace(', p. 6)', ', p. 7)'));
+        const result = await executeEditNoteAction(nextAction);
+        nextAction.result_data = result as any;
+        expect(item._getHtml()).toContain('Report.pdf</a>, p. 7)');
+        await undoEdit(item, nextAction);
+        expect(item._getHtml()).toContain('Report.pdf</a>, p. 6)');
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('<p>Anchor</p>');
+        expect(restored).not.toContain('Report.pdf');
+        expect(Zotero.Items.loadDataTypes).toHaveBeenCalledWith([attachment], ['itemData']);
+    });
+
     it('applies a filename link and can undo without stored undo HTML', async () => {
         const { item, action } = await applyEdit({ noteHtml: wrap('<p>Anchor</p>'), oldString: 'Anchor', newString: tag });
         expect(item._getHtml()).toContain('href="file:///stored/Report.pdf"');

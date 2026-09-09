@@ -1,3 +1,7 @@
+import { normalizeCitationTag, parseRawCitationAttributes, type Locator } from '@beaver/agent-core/citations/citationGrammar';
+import { noteCitationTagPattern } from './noteCitationTags';
+import { UNRESOLVED_LIBRARY_ID } from './libraryIdentity';
+import { externalFileLocatorSuffix } from './externalFileCitation';
 import { escapeAttr } from './noteHtmlEntities';
 
 const MAX_LABEL_SNIPPET_LENGTH = 120;
@@ -52,7 +56,7 @@ function getCompactItemDisplayName(item: any): string {
     if (item.isNote?.() === true) {
         return truncateLabel(safeGetNoteTitle(item) || 'Note', MAX_NOTE_TITLE_LENGTH);
     }
-    if (item.isAttachment?.() === true && !safeGetProperty(item, 'parentItem')) {
+    if (isStandaloneAttachment(item)) {
         const title = safeGetField(item, 'title') || safeGetProperty(item, 'attachmentFilename') || 'attachment';
         return truncateLabel(title, MAX_ATTACHMENT_TITLE_LENGTH);
     }
@@ -71,21 +75,24 @@ function decodeHrefAttrValue(href: string): string {
     return href.replace(/&amp;/g, '&');
 }
 
-/**
- * Return true when the Zotero item should be represented as a plain zotero:// link.
- */
+/** Whether the attachment has no bibliographic parent to cite. */
+export function isStandaloneAttachment(item: any): boolean {
+    return item?.isAttachment?.() === true && !item.parentID;
+}
+
+/** Whether to represent the item as a plain Zotero link instead of CSL. */
 export function isLinkCitationItem(item: any): boolean {
-    return item?.isNote?.() === true || isAnnotationItem(item);
+    return item?.isNote?.() === true || isAnnotationItem(item) || isStandaloneAttachment(item);
 }
 
 /**
- * Build a Zotero protocol URI for note and annotation citations.
+ * Build a Zotero protocol URI for note, annotation, and standalone attachment citations.
  */
 export function buildZoteroCitationLinkURI(item: any): string | null {
     if (!item || !item.key || !item.libraryID) return null;
 
     const segment = librarySegment(item.libraryID);
-    if (item.isNote?.() === true) {
+    if (item.isNote?.() === true || isStandaloneAttachment(item)) {
         return `zotero://select/${segment}/items/${item.key}`;
     }
 
@@ -99,9 +106,12 @@ export function buildZoteroCitationLinkURI(item: any): string | null {
 }
 
 /**
- * Build the visible label for a note or annotation citation link.
+ * Build the visible label for a note, annotation, or attachment citation link.
  */
 export function buildZoteroCitationLinkLabel(item: any): string {
+    if (isStandaloneAttachment(item)) {
+        return getCompactItemDisplayName(item);
+    }
     if (item?.isNote?.() === true) {
         const noteTitle = truncateLabel(safeGetNoteTitle(item) || 'Note', MAX_NOTE_TITLE_LENGTH);
         const parentItem = safeGetProperty(item, 'parentItem');
@@ -124,17 +134,21 @@ export function buildZoteroCitationLinkLabel(item: any): string {
 }
 
 /**
- * Build plain HTML for a note or annotation citation link.
+ * Build plain HTML for a note, annotation, or attachment citation link.
  */
-export function buildZoteroCitationLinkHTML(item: any, label?: string): string {
+export function buildZoteroCitationLinkHTML(item: any, locator?: Locator): string {
     const uri = buildZoteroCitationLinkURI(item);
     if (!uri) {
         throw new Error(
             `Error: Zotero item "${item?.libraryID ?? ''}-${item?.key ?? ''}" cannot be embedded as a note link.`
         );
     }
-    const visibleLabel = label || buildZoteroCitationLinkLabel(item);
-    return `(<a href="${escapeAttr(uri)}" rel="noopener noreferrer">${escapeAttr(visibleLabel)}</a>)`;
+    const visibleLabel = buildZoteroCitationLinkLabel(item);
+    const standalone = isStandaloneAttachment(item);
+    const suffix = standalone ? externalFileLocatorSuffix(locator) : '';
+    // Match the note normalizer so a newly saved link is also an exact edit anchor.
+    const rel = 'noopener noreferrer nofollow';
+    return `(<a href="${escapeAttr(uri)}" rel="${rel}">${escapeAttr(visibleLabel)}</a>${escapeAttr(suffix)})`;
 }
 
 /**
@@ -169,4 +183,34 @@ export function parseZoteroCitationLinkHref(
     }
 
     return null;
+}
+
+/** Load attachment titles before synchronous rendering; no file access is needed. */
+export async function preloadStandaloneAttachmentTitles(
+    content: string,
+    allowLibrary: (libraryID: number) => boolean = () => true,
+): Promise<void> {
+    const seen = new Set<string>();
+    const items: Zotero.Item[] = [];
+    for (const match of content.matchAll(noteCitationTagPattern())) {
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(match[1]));
+        if (!normalized.ok || normalized.ref.kind !== 'zotero') continue;
+        const { library_id: libraryID, zotero_key: key } = normalized.ref;
+        if (libraryID === UNRESOLVED_LIBRARY_ID || !allowLibrary(libraryID)) continue;
+        const identity = `${libraryID}-${key}`;
+        if (seen.has(identity)) continue;
+        seen.add(identity);
+        try {
+            const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
+            if (item && isStandaloneAttachment(item)) items.push(item);
+        } catch {
+            // Skip unavailable targets without preventing other titles from loading.
+        }
+    }
+    if (items.length === 0) return;
+    try {
+        await Zotero.Items.loadDataTypes(items, ['itemData']);
+    } catch {
+        // Rendering can still use filenames when title data is unavailable.
+    }
 }
