@@ -128,7 +128,7 @@ export class ReconcilerService {
         this.schedule(0);
     }
 
-    /** User-facing "Process now" entry point. */
+    /** Forced full pass, awaited: used by the dev endpoint and live tests. */
     async reconcileNow(): Promise<void> {
         if (this.running) {
             const completed = new Promise<void>((resolve) => {

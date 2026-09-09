@@ -420,6 +420,7 @@ declare namespace Zotero {
 
             getBackgroundQueueStats(
                 now: number,
+                jobTypes?: string[],
             ): Promise<import("../src/services/database").BackgroundQueueStats>;
 
             recordDocumentProcessingFailure(
@@ -507,6 +508,22 @@ declare namespace Zotero {
             getBackgroundProcessingFailures(
                 limit?: number,
             ): Promise<import("../src/services/database").BackgroundProcessingFailureSummary[]>;
+            getAttachmentProcessingIssueRows(
+                limit?: number,
+            ): Promise<import("../src/services/backgroundProcessing/issues").AttachmentProcessingIssueRow[]>;
+            getProcessingIssueCounts(
+                entitlements: import("../src/services/backgroundProcessing/issues").IssueEntitlements,
+            ): Promise<import("../src/services/backgroundProcessing/issues").ProcessingIssueSummary[]>;
+            getProcessingIssuePage(
+                entitlements: import("../src/services/backgroundProcessing/issues").IssueEntitlements,
+                reason: import("../src/services/backgroundProcessing/issues").ProcessingIssueReason,
+                offset?: number,
+                limit?: number,
+            ): Promise<import("../src/services/backgroundProcessing/issues").ProcessingIssueItem[]>;
+            getBackgroundDeadLetters(
+                limit?: number,
+                onlyUnresolved?: boolean,
+            ): Promise<import("../src/services/backgroundProcessing/issues").BackgroundQueueDeadRow[]>;
             getProcessingIndexState(
                 libraryId: number,
             ): Promise<import("../src/services/database").ProcessingIndexStateRecord | null>;

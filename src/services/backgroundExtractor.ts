@@ -99,9 +99,16 @@ export class BackgroundExtractor {
     private syncInProgress = false;
     private startupDelayUntil = 0;
     private prefObserverSymbol: symbol | null = null;
+    private processingPrefObserverSymbol: symbol | null = null;
     private syncObserverId: string | null = null;
     private unregisterIdleObserver: (() => void) | null = null;
     private workerRunning = false;
+    /**
+     * Set by {@link requestImmediateDrain}: the next passes claim backlog work
+     * regardless of the idle gate, until registered lanes have no queued or
+     * in-flight work left, including parked remote work and delayed retries.
+     */
+    private drainNowRequested = false;
     private readonly executors = new Map<BackgroundJobType, ExecutorRegistration>();
     private readonly laneInFlight = new Map<BackgroundJobType, Map<number, LaneEntry>>();
     private readonly muPDFLane = new MuPDFSerialLane();
@@ -113,6 +120,35 @@ export class BackgroundExtractor {
     /** Return the current background worker activity state for UI subscribers. */
     getStatus(): { running: boolean } {
         return { running: this.workerRunning };
+    }
+
+    /**
+     * User-facing "process now": run the queued backlog without waiting for
+     * Zotero to be idle. One-off — the bypass clears itself once a dispatch
+     * pass finds the queue empty, so the idle gate governs again afterwards.
+     */
+    requestImmediateDrain(): void {
+        this.drainNowRequested = getPref(PREF_PROCESSING_ENABLED) === true;
+        this.notify();
+    }
+
+    /** True while a {@link requestImmediateDrain} bypass is still active. */
+    isImmediateDrainRequested(): boolean {
+        return this.drainNowRequested;
+    }
+
+    /**
+     * Whether a dispatch pass right now may claim backlog work: the user
+     * allowed it while active, a one-off drain is pending, or Zotero has been
+     * idle long enough. Mirrors the gate {@link processOnce} applies, so the
+     * status UI can tell "queued and running" from "queued behind the idle
+     * timer".
+     */
+    isBacklogGateOpen(): boolean {
+        if (getPref(PREF_PROCESSING_ENABLED) !== true) return false;
+        if (getPref(PREF_CONTINUOUS) === true) return true;
+        if (this.drainNowRequested) return true;
+        return getSystemIdleTimeMs() >= IDLE_THRESHOLD_MS;
     }
 
     /** Return capacity and in-flight counts for registered lanes. */
@@ -230,6 +266,19 @@ export class BackgroundExtractor {
         }
 
         try {
+            this.processingPrefObserverSymbol = Zotero.Prefs.registerObserver(
+                'extensions.zotero.beaver.backgroundProcessingEnabled',
+                (value: unknown) => {
+                    if (value !== true) this.drainNowRequested = false;
+                    this.notify();
+                },
+                true,
+            );
+        } catch (e) {
+            logger(`BackgroundExtractor: registerObserver(processing pref) failed: ${e}`, 1);
+        }
+
+        try {
             this.unregisterIdleObserver = registerIdleObserver(
                 { onIdle: () => this.notify() },
                 IDLE_THRESHOLD_SEC,
@@ -247,6 +296,7 @@ export class BackgroundExtractor {
      */
     async stop(): Promise<void> {
         this.stopRequested = true;
+        this.drainNowRequested = false;
         if (Zotero.__beaverShuttingDown === true) {
             this.dbWritesPermanentlyDisabled = true;
         }
@@ -258,6 +308,14 @@ export class BackgroundExtractor {
                 // best-effort
             }
             this.prefObserverSymbol = null;
+        }
+        if (this.processingPrefObserverSymbol) {
+            try {
+                Zotero.Prefs.unregisterObserver(this.processingPrefObserverSymbol);
+            } catch {
+                // best-effort
+            }
+            this.processingPrefObserverSymbol = null;
         }
         if (this.syncObserverId) {
             try {
@@ -389,6 +447,7 @@ export class BackgroundExtractor {
             awaitLaunchedJobs?: boolean;
         } = {},
     ): Promise<ProcessOnceResult> {
+        if (getPref(PREF_PROCESSING_ENABLED) !== true) this.drainNowRequested = false;
         const inactive = (reason: ProcessOnceReason): ProcessOnceResult => {
             if (this.totalInFlight() === 0) this.setWorkerRunning(false);
             return { processed: false, reason };
@@ -422,7 +481,8 @@ export class BackgroundExtractor {
         const idleMs = getSystemIdleTimeMs();
         const processBacklog = getPref(PREF_PROCESSING_ENABLED) === true;
         const continuous = processBacklog && getPref(PREF_CONTINUOUS) === true;
-        const maxPriority = processBacklog && (continuous || idleMs >= IDLE_THRESHOLD_MS)
+        const drainNow = processBacklog && this.drainNowRequested;
+        const maxPriority = processBacklog && (continuous || drainNow || idleMs >= IDLE_THRESHOLD_MS)
             ? undefined
             : LOW_PRIORITY_CEILING;
 
@@ -432,7 +492,15 @@ export class BackgroundExtractor {
             awaitLaunchedJobs: options.awaitLaunchedJobs === true,
         });
 
-        if (launched === 0) return inactive('empty');
+        if (launched === 0) {
+            // Remote OCR frees its lane slot while its queue row is parked.
+            // Keep the bypass through that wait and any subsequent stages.
+            if (this.drainNowRequested && this.totalInFlight() === 0) {
+                const queue = await db.getBackgroundQueueStats(Date.now(), [...this.executors.keys()]);
+                if (queue.pending === 0) this.drainNowRequested = false;
+            }
+            return inactive('empty');
+        }
         if (!options.keepRunningAfterJob && this.totalInFlight() === 0) {
             this.setWorkerRunning(false);
         }

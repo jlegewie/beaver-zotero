@@ -499,6 +499,17 @@ describe('BeaverDB background queue', () => {
         expect(stats.dead).toBe(0);
     });
 
+    it('restricts available and deferred counts to the supplied lanes', async () => {
+        await db.enqueueBackgroundJob(makeInput({ zoteroKey: 'READ0000', now: 0 }));
+        await db.enqueueBackgroundJob(makeInput({ jobType: 'fulltext_upsert', zoteroKey: 'INDEX000', now: 0 }));
+        await db.enqueueBackgroundJob(makeInput({ jobType: 'fulltext_upsert', zoteroKey: 'INDEX001', now: 1000 }));
+        expect(await db.getBackgroundQueueStats(500, ['document_extract'])).toMatchObject({
+            available: 1, deferred: 0, pending: 1, byJobType: { document_extract: 1 },
+        });
+        expect(await db.getBackgroundQueueStats(500, [])).toMatchObject({ available: 0, deferred: 0, pending: 0 });
+        expect(await db.getBackgroundQueueStats(500)).toMatchObject({ available: 2, deferred: 1, pending: 3 });
+    });
+
     it('stores epoch-ms timestamps as integers (not strings)', async () => {
         await db.enqueueBackgroundJob(makeInput({ now: 12345 }));
         const rows: any[] = [];

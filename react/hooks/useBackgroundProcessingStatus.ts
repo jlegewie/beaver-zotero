@@ -22,7 +22,7 @@ export function useBackgroundProcessingStatus(options: {
         ) return;
         if (!Zotero.Beaver?.db) return;
         try {
-            const { queue, ledger, failures, coverage, documentCache } =
+            const { queue, ledger, failures, issues, worker, coverage, documentCache } =
                 await collectProcessingStatus(
                     { hasOcrAccess, hasSearchIndexAccess: hasSearchAccess },
                     {
@@ -35,6 +35,8 @@ export function useBackgroundProcessingStatus(options: {
                 ledger,
                 coverage: coverage === undefined ? previous.coverage : coverage,
                 failures: failures ?? previous.failures,
+                issues: issues ?? previous.issues,
+                worker,
                 documentCache: documentCache ?? previous.documentCache,
                 error: null,
                 updatedAt: Date.now(),

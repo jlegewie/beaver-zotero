@@ -24,6 +24,9 @@ async function post<T>(path: string, body: unknown = {}): Promise<T> {
 
 export interface AttachmentProcessingAggregates {
     total: number;
+    readable: number;
+    unreadable: number;
+    awaitingOcr: number;
     extracted: number;
     ocrNeeded: number;
     ocrDone: number;
@@ -89,6 +92,11 @@ export interface ProcessingStatusResponse {
     queue?: BackgroundQueueStats;
     ledger?: AttachmentProcessingAggregates;
     failures?: BackgroundProcessingFailureSummary[];
+    issues?: Array<{
+        reason: string;
+        count: number;
+    }>;
+    worker?: { available: number; deferred: number; inFlight: number; drainNow: boolean; backlogGateOpen: boolean };
     coverage?: unknown;
     documentCache?: DocumentCacheStats | null;
     entitlements?: {

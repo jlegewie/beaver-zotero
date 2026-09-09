@@ -2258,6 +2258,103 @@ describe('BackgroundExtractor', () => {
             claimSpy.mockRestore();
         });
 
+        it('a requested drain claims backlog while active and clears once the queue is empty', async () => {
+            const idleMod = await import('../../../src/utils/idleService');
+            (idleMod.getSystemIdleTimeMs as any).mockReturnValue(0);
+            const claimSpy = vi.spyOn(db, 'claimNextBackgroundJob');
+            try {
+                await db.enqueueBackgroundJob({
+                    jobType: 'document_extract',
+                    libraryId: 1,
+                    zoteroKey: 'AAAAAAAA',
+                    contentKind: 'pdf',
+                    payloadKind: 'structured',
+                    priority: 110,
+                    payload: payload(),
+                    now: 0,
+                });
+
+                const { BackgroundExtractor } = await loadProcessor();
+                const proc = new BackgroundExtractor();
+                expect(proc.isBacklogGateOpen()).toBe(false);
+
+                proc.requestImmediateDrain();
+                expect(proc.isImmediateDrainRequested()).toBe(true);
+                expect(proc.isBacklogGateOpen()).toBe(true);
+
+                const first = await proc.processOnce({ awaitLaunchedJobs: true });
+                expect(first.processed).toBe(true);
+                expect(claimSpy).toHaveBeenCalledWith(
+                    expect.any(Number),
+                    expect.any(Number),
+                    undefined,
+                    ['document_extract'],
+                );
+                expect(mockState.extractCalls).toHaveLength(1);
+                // The bypass outlives the first pass: only an empty pass clears it.
+                expect(proc.isImmediateDrainRequested()).toBe(true);
+
+                const second = await proc.processOnce({ awaitLaunchedJobs: true });
+                expect(second).toEqual({ processed: false, reason: 'empty' });
+                expect(proc.isImmediateDrainRequested()).toBe(false);
+                expect(proc.isBacklogGateOpen()).toBe(false);
+            } finally {
+                (idleMod.getSystemIdleTimeMs as any).mockReturnValue(Number.MAX_SAFE_INTEGER);
+                claimSpy.mockRestore();
+            }
+        });
+
+        it('keeps an immediate drain through parked OCR and its subsequent index job', async () => {
+            const idleMod = await import('../../../src/utils/idleService');
+            (idleMod.getSystemIdleTimeMs as any).mockReturnValue(0);
+            try {
+                const input = {
+                    libraryId: 1, zoteroKey: 'BBBBBBBB', contentKind: 'pdf' as const,
+                    payloadKind: 'structured' as const, priority: 110, payload: payload(), now: 0,
+                };
+                await db.enqueueBackgroundJob({ ...input, jobType: 'document_ocr' });
+                const { BackgroundExtractor } = await loadProcessor();
+                const proc = new BackgroundExtractor();
+                let resumed = false;
+                proc.registerExecutor(ocrExecutor(async () => {
+                    if (!resumed) return { kind: 'defer', reason: 'ocr_polling' };
+                    await db.enqueueBackgroundJob({ ...input, jobType: 'fulltext_upsert' });
+                    return { kind: 'complete', reason: 'ocr_done' };
+                }), { maxInFlight: 1 });
+                const indexed = vi.fn(async () => ({ kind: 'complete' as const, reason: 'indexed' }));
+                proc.requestImmediateDrain();
+                await proc.processOnce({ awaitLaunchedJobs: true });
+                expect(proc.getLaneStatus().document_ocr?.inFlight).toBe(0);
+                expect(await proc.processOnce()).toMatchObject({ processed: false });
+                expect(proc.isImmediateDrainRequested()).toBe(true);
+
+                const [parked] = await db.peekBackgroundJobs();
+                resumed = true;
+                await db.releaseBackgroundJob(parked.id, Date.now());
+                await proc.processOnce({ awaitLaunchedJobs: true });
+                proc.registerExecutor({ jobType: 'fulltext_upsert', execute: indexed }, { maxInFlight: 1 });
+                await proc.processOnce({ awaitLaunchedJobs: true });
+                expect(indexed).toHaveBeenCalledTimes(1);
+                await proc.processOnce();
+                expect(proc.isImmediateDrainRequested()).toBe(false);
+            } finally {
+                (idleMod.getSystemIdleTimeMs as any).mockReturnValue(Number.MAX_SAFE_INTEGER);
+            }
+        });
+
+        it('ends an immediate drain when only an unregistered lane has parked work', async () => {
+            await db.enqueueBackgroundJob({
+                jobType: 'document_ocr', libraryId: 1, zoteroKey: 'BBBBBBBB',
+                contentKind: 'pdf', payloadKind: 'structured', payload: payload(),
+                now: Date.now() + 60_000,
+            });
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            proc.requestImmediateDrain();
+            await proc.processOnce();
+            expect(proc.isImmediateDrainRequested()).toBe(false);
+        });
+
         it('in-flight job continues even when sync starts and the OS goes active mid-run', async () => {
             await db.enqueueBackgroundJob({
                 jobType: 'document_extract',
@@ -2303,6 +2400,44 @@ describe('BackgroundExtractor', () => {
             }
         });
 
+        it('cancels an immediate drain on disable even when re-enabled before the next pass', async () => {
+            let enabled = true;
+            (Zotero as any).Prefs.get = vi.fn((pref: string) =>
+                pref === 'extensions.zotero.beaver.backgroundProcessingEnabled' ? enabled : undefined);
+            const registerObserver = vi.fn(
+                (_pref: string, _handler: (v: unknown) => void) => Symbol('pref-obs'),
+            );
+            (Zotero as any).Prefs.registerObserver = registerObserver;
+            const idleMod = await import('../../../src/utils/idleService');
+            (idleMod.getSystemIdleTimeMs as any).mockReturnValue(0);
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            proc.start();
+            try {
+                await db.enqueueBackgroundJob({
+                    jobType: 'document_extract', libraryId: 1, zoteroKey: 'AAAAAAAA',
+                    contentKind: 'pdf', payloadKind: 'structured', priority: 110, payload: payload(), now: 0,
+                });
+                proc.requestImmediateDrain();
+                expect(proc.isImmediateDrainRequested()).toBe(true);
+                const handler = registerObserver.mock.calls.find(([pref]) =>
+                    pref === 'extensions.zotero.beaver.backgroundProcessingEnabled')![1];
+                enabled = false;
+                handler(false);
+                expect(proc.isImmediateDrainRequested()).toBe(false);
+                proc.requestImmediateDrain();
+                expect(proc.isImmediateDrainRequested()).toBe(false);
+                enabled = true;
+                handler(true);
+                expect(proc.isBacklogGateOpen()).toBe(false);
+                expect(await proc.processOnce()).toMatchObject({ processed: false });
+                expect(await db.peekBackgroundJobs()).toHaveLength(1);
+            } finally {
+                await proc.stop();
+                (idleMod.getSystemIdleTimeMs as any).mockReturnValue(Number.MAX_SAFE_INTEGER);
+            }
+        });
+
         it('stop() unregisters pref, notifier, and idle observers', async () => {
             const prefDisposer = vi.fn();
             const notifierDisposer = vi.fn();
@@ -2317,7 +2452,7 @@ describe('BackgroundExtractor', () => {
             await proc.start();
             await proc.stop();
 
-            expect(prefDisposer).toHaveBeenCalledTimes(1);
+            expect(prefDisposer).toHaveBeenCalledTimes(2);
             expect(notifierDisposer).toHaveBeenCalledTimes(1);
             expect(idleDisposer).toHaveBeenCalledTimes(1);
         });

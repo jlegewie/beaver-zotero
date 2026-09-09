@@ -16,6 +16,16 @@ import type {
     ExtractContentKind,
 } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import { BACKGROUND_UNTAG_PRIORITY } from './backgroundProcessing/constants';
+import {
+    processingIssuesSql,
+    PROCESSING_ISSUE_REASON_ORDER,
+    type AttachmentProcessingIssueRow,
+    type BackgroundQueueDeadRow,
+    type IssueEntitlements,
+    type ProcessingIssueSummary,
+    type ProcessingIssueReason,
+    type ProcessingIssueItem,
+} from './backgroundProcessing/issues';
 import { logger } from '@beaver/agent-core/platform/logger';
 
 export type { DocumentCachePageLabels } from '@beaver/agent-core/extract/document/shared/contentKinds';
@@ -390,6 +400,10 @@ export interface AttachmentProcessingStateInput {
 
 export interface AttachmentProcessingAggregates {
     total: number;
+    /** Mutually exclusive text-readiness counts for the requested OCR target. */
+    readable: number;
+    unreadable: number;
+    awaitingOcr: number;
     extracted: number;
     ocrNeeded: number;
     ocrDone: number;
@@ -2727,7 +2741,11 @@ export class BeaverDB {
                 SUM(CASE WHEN upsert_status = 'done' THEN 1 ELSE 0 END),
                 SUM(CASE WHEN extract_status = 'failed' OR ocr_status = 'failed' OR upsert_status = 'failed' THEN 1 ELSE 0 END),
                 SUM(CASE WHEN extract_status = 'skipped' THEN 1 ELSE 0 END),
-                MIN(CASE WHEN ${pendingConditions.join(' OR ')} THEN created_at END)
+                MIN(CASE WHEN ${pendingConditions.join(' OR ')} THEN created_at END),
+                SUM(CASE WHEN extract_status = 'done' AND (ocr_status IS NULL OR ocr_status IN ('na', 'done')) THEN 1 ELSE 0 END),
+                SUM(CASE WHEN extract_status IN ('failed', 'skipped')
+                    OR (extract_status = 'done' AND (ocr_status = 'failed' ${targets.ocr ? '' : "OR ocr_status = 'needed'"})) THEN 1 ELSE 0 END),
+                SUM(CASE WHEN extract_status = 'done' AND ocr_status = 'needed' AND ${targets.ocr ? '1' : '0'} THEN 1 ELSE 0 END)
              FROM attachment_processing_state${where}`,
             params,
             {
@@ -2740,11 +2758,17 @@ export class BeaverDB {
                     failed: Number(row.getResultByIndex(5)) || 0,
                     skipped: Number(row.getResultByIndex(6)) || 0,
                     oldestPendingAt: row.getResultByIndex(7) ?? null,
+                    readable: Number(row.getResultByIndex(8)) || 0,
+                    unreadable: Number(row.getResultByIndex(9)) || 0,
+                    awaitingOcr: Number(row.getResultByIndex(10)) || 0,
                 }),
             },
         );
         return rows[0] ?? {
             total: 0,
+            readable: 0,
+            unreadable: 0,
+            awaitingOcr: 0,
             extracted: 0,
             ocrNeeded: 0,
             ocrDone: 0,
@@ -2753,6 +2777,104 @@ export class BeaverDB {
             skipped: 0,
             oldestPendingAt: null,
         };
+    }
+
+    /**
+     * Ledger rows that did not reach a readable state, most recent first:
+     * terminal extraction outcomes (`failed` / `skipped`), OCR and index
+     * failures, and scans still waiting for OCR. The caller decides which of
+     * these count as issues for the current entitlements. Omit limit when
+     * building the complete grouped inventory.
+     */
+    public async getAttachmentProcessingIssueRows(
+        limit?: number,
+    ): Promise<AttachmentProcessingIssueRow[]> {
+        const rows: AttachmentProcessingIssueRow[] = [];
+        await this.queryAsync(
+            `SELECT library_id, zotero_key, extract_status, ocr_status,
+                    upsert_status, last_error, updated_at
+             FROM attachment_processing_state
+             WHERE extract_status IN ('failed', 'skipped')
+                OR ocr_status IN ('failed', 'needed')
+                OR upsert_status = 'failed'
+             ORDER BY updated_at DESC LIMIT ?`,
+            [limit === undefined ? -1 : Math.max(1, Math.floor(limit))],
+            { onRow: (row: any) => rows.push({
+                libraryId: row.getResultByIndex(0),
+                zoteroKey: row.getResultByIndex(1),
+                extractStatus: row.getResultByIndex(2) ?? null,
+                ocrStatus: row.getResultByIndex(3) ?? null,
+                upsertStatus: row.getResultByIndex(4) ?? null,
+                lastError: row.getResultByIndex(5) ?? null,
+                updatedAt: row.getResultByIndex(6) ?? null,
+            }) },
+        );
+        return rows;
+    }
+
+    /** Count the complete current issue inventory without materializing attachments in JS. */
+    public async getProcessingIssueCounts(entitlements: IssueEntitlements): Promise<ProcessingIssueSummary[]> {
+        const counts = new Map<ProcessingIssueReason, number>();
+        await this.queryAsync(
+            `SELECT * FROM (${processingIssuesSql(entitlements)} SELECT reason, COUNT(*) FROM issues GROUP BY reason)`,
+            [],
+            { onRow: (row: any) => counts.set(row.getResultByIndex(0), Number(row.getResultByIndex(1))) },
+        );
+        return PROCESSING_ISSUE_REASON_ORDER.filter((reason) => counts.has(reason))
+            .map((reason) => ({ reason, count: counts.get(reason)! }));
+    }
+
+    /** Load a bounded page for an expanded issue group, most recent first with stable ties. */
+    public async getProcessingIssuePage(
+        entitlements: IssueEntitlements,
+        reason: ProcessingIssueReason,
+        offset = 0,
+        limit = 10,
+    ): Promise<ProcessingIssueItem[]> {
+        const items: ProcessingIssueItem[] = [];
+        await this.queryAsync(
+            `SELECT * FROM (${processingIssuesSql(entitlements)}
+             SELECT library_id, zotero_key, last_error, timestamp FROM issues WHERE reason = ?
+             ORDER BY timestamp DESC, library_id, zotero_key LIMIT ? OFFSET ?)`,
+            [reason, Math.min(100, Math.max(1, Math.floor(limit))), Math.max(0, Math.floor(offset))],
+            { onRow: (row: any) => items.push({
+                libraryId: row.getResultByIndex(0), zoteroKey: row.getResultByIndex(1),
+                error: row.getResultByIndex(2) ?? null, timestamp: row.getResultByIndex(3) ?? null,
+            }) },
+        );
+        return items;
+    }
+
+    /** Dead letters, optionally restricted to current, unrecovered ledger entries. */
+    public async getBackgroundDeadLetters(
+        limit?: number,
+        onlyUnresolved = false,
+    ): Promise<BackgroundQueueDeadRow[]> {
+        const rows: BackgroundQueueDeadRow[] = [];
+        await this.queryAsync(
+            `SELECT d.job_type, d.library_id, d.zotero_key, d.last_error, d.died_at
+             FROM background_jobs_dead d
+             ${onlyUnresolved ? `WHERE EXISTS (
+                 SELECT 1 FROM attachment_processing_state s
+                 WHERE s.library_id = d.library_id AND s.zotero_key = d.zotero_key
+             ) AND NOT EXISTS (
+                 SELECT 1 FROM attachment_processing_state s
+                 WHERE s.library_id = d.library_id AND s.zotero_key = d.zotero_key
+                   AND ((d.job_type = 'document_extract' AND s.extract_status = 'done')
+                     OR (d.job_type = 'document_ocr' AND s.extract_status = 'done' AND s.ocr_status IN ('done', 'na'))
+                     OR (d.job_type = 'fulltext_upsert' AND s.upsert_status = 'done'))
+             )` : ''}
+             ORDER BY d.died_at DESC LIMIT ?`,
+            [limit === undefined ? -1 : Math.max(1, Math.floor(limit))],
+            { onRow: (row: any) => rows.push({
+                jobType: row.getResultByIndex(0),
+                libraryId: row.getResultByIndex(1) ?? null,
+                zoteroKey: row.getResultByIndex(2) ?? null,
+                lastError: row.getResultByIndex(3) ?? null,
+                diedAt: row.getResultByIndex(4) ?? null,
+            }) },
+        );
+        return rows;
     }
 
     public async getBackgroundProcessingFailures(
@@ -4414,19 +4536,23 @@ export class BeaverDB {
     /** Counts surfaced through the dev queue-stats endpoint. */
     public async getBackgroundQueueStats(
         now: number,
+        jobTypes?: string[],
     ): Promise<BackgroundQueueStats> {
+        const laneFilter = jobTypes === undefined ? '1' : jobTypes.length === 0
+            ? '0' : `job_type IN (${jobTypes.map(() => '?').join(', ')})`;
+        const laneParams = jobTypes ?? [];
         const totalsRows: number[] = [];
         await this.queryAsync(
-            `SELECT COUNT(*) FROM background_jobs`,
-            [],
+            `SELECT COUNT(*) FROM background_jobs WHERE ${laneFilter}`,
+            laneParams,
             { onRow: (row: any) => totalsRows.push(row.getResultByIndex(0)) },
         );
         const pending = totalsRows[0] ?? 0;
 
         const availableRows: number[] = [];
         await this.queryAsync(
-            `SELECT COUNT(*) FROM background_jobs WHERE available_at <= ?`,
-            [now],
+            `SELECT COUNT(*) FROM background_jobs WHERE available_at <= ? AND ${laneFilter}`,
+            [now, ...laneParams],
             { onRow: (row: any) => availableRows.push(row.getResultByIndex(0)) },
         );
         const available = availableRows[0] ?? 0;
@@ -4434,16 +4560,16 @@ export class BeaverDB {
 
         const deadRows: number[] = [];
         await this.queryAsync(
-            `SELECT COUNT(*) FROM background_jobs_dead`,
-            [],
+            `SELECT COUNT(*) FROM background_jobs_dead WHERE ${laneFilter}`,
+            laneParams,
             { onRow: (row: any) => deadRows.push(row.getResultByIndex(0)) },
         );
         const dead = deadRows[0] ?? 0;
 
         const byJobType: Record<string, number> = {};
         await this.queryAsync(
-            `SELECT job_type, COUNT(*) FROM background_jobs GROUP BY job_type`,
-            [],
+            `SELECT job_type, COUNT(*) FROM background_jobs WHERE ${laneFilter} GROUP BY job_type`,
+            laneParams,
             {
                 onRow: (row: any) => {
                     const jobType: string = row.getResultByIndex(0);

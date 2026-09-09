@@ -1,21 +1,23 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import {
-    hasOcrAccessAtom,
-    hasSearchIndexAccessAtom,
-    localZoteroLibrariesAtom,
-    searchableLibraryIdsAtom,
+    hasOcrAccessAtom, hasSearchIndexAccessAtom,
+    localZoteroLibrariesAtom, searchableLibraryIdsAtom,
 } from '../../atoms/profile';
-import { backgroundProcessingStatusAtom } from '../../atoms/backgroundProcessing';
+import {
+    backgroundProcessingStatusAtom,
+    type BackgroundProcessingStatus,
+} from '../../atoms/backgroundProcessing';
 import { useBackgroundProcessingStatus } from '../../hooks/useBackgroundProcessingStatus';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { getIndexScopeRef } from '../../../src/utils/zoteroUtils';
 import {
     backgroundProcessingLibraryToken,
     getBackgroundProcessingSkipTokens,
 } from '../../../src/services/backgroundProcessing/utils';
-import Button from '@beaver/agent-ui/primitives/Button';
+import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { SettingsGroup, SettingsRow, SectionLabel } from './components/SettingsElements';
+import ProcessingIssueGroupRow from './ProcessingIssueList';
+import { describeStatus, plural, type StatusTone } from './processingStatusSentence';
 
 /** Format a byte count with one decimal in the largest fitting binary unit. */
 function formatBytes(bytes: number): string {
@@ -30,31 +32,132 @@ function formatBytes(bytes: number): string {
     return `${unit === 0 ? value : value.toFixed(1)} ${units[unit]}`;
 }
 
+const TONE_COLOR: Record<StatusTone, string> = {
+    idle: 'var(--accent-green)',
+    busy: 'var(--accent-blue)',
+    waiting: 'var(--tag-yellow)',
+    error: 'var(--tag-red)',
+};
+
+/**
+ * Status row: one sentence, a segmented progress bar and its legend. Counts
+ * come from disjoint ledger text-readiness categories. Index failures do not
+ * change readability; scans awaiting an available OCR stage remain pending.
+ */
+const ProcessingStatusRow: React.FC<{
+    status: BackgroundProcessingStatus;
+    continuous: boolean;
+    hasSearchAccess: boolean;
+    onProcessNow: () => void;
+}> = ({ status, continuous, hasSearchAccess, onProcessNow }) => {
+    const sentence = describeStatus(status, continuous);
+    const { total, readable, unreadable, awaitingOcr, upserted } = status.ledger;
+    const pending = Math.max(0, total - readable - unreadable);
+    const pct = (count: number) => (total > 0 ? `${(count / total) * 100}%` : '0%');
+
+    return (
+        <div className="display-flex flex-col gap-2 border-top-quinary" style={{ padding: '10px 12px 12px' }}>
+            <div className="display-flex flex-col gap-05">
+                <div className="display-flex flex-row items-center gap-2">
+                    {sentence.tone === 'busy'
+                        ? <Spinner size={10} className="font-color-accent-blue flex-shrink-0" />
+                        : <span
+                            aria-hidden="true"
+                            className="flex-shrink-0"
+                            style={{ width: '8px', height: '8px', borderRadius: '50%', background: TONE_COLOR[sentence.tone] }}
+                        />}
+                    <span
+                        role="status"
+                        className={`text-base font-medium ${sentence.tone === 'error' ? 'font-color-red' : 'font-color-primary'}`}
+                    >
+                        {sentence.headline}
+                    </span>
+                </div>
+                <div className="text-sm font-color-secondary" style={{ paddingLeft: '16px' }}>
+                    {sentence.caption}
+                    {sentence.processNow && (
+                        <>
+                            {' '}
+                            <button type="button" className="text-link" onClick={onProcessNow}>
+                                Process now
+                            </button>
+                        </>
+                    )}
+                    {sentence.tone === 'error' && status.error && (
+                        <span className="font-color-tertiary"> ({status.error})</span>
+                    )}
+                </div>
+            </div>
+
+            {total > 0 && (
+                <>
+                    <div
+                        aria-hidden="true"
+                        className="display-flex flex-row overflow-hidden"
+                        style={{ height: '6px', borderRadius: '3px', background: 'var(--fill-quinary)' }}
+                    >
+                        <div style={{ width: pct(readable), background: 'var(--accent-blue)' }} />
+                        <div style={{ width: pct(unreadable), background: 'var(--tag-red)', opacity: 0.7 }} />
+                    </div>
+                    <div className="display-flex flex-row items-center flex-wrap gap-4 text-sm font-color-secondary">
+                        <Legend color="var(--accent-blue)" label={`${readable.toLocaleString()} readable`} />
+                        {hasSearchAccess && (
+                            <Legend color="var(--accent-blue)" hollow label={`${upserted.toLocaleString()} in the search index`} />
+                        )}
+                        {unreadable > 0 && (
+                            <Legend color="var(--tag-red)" label={`${unreadable.toLocaleString()} could not be read`} />
+                        )}
+                        {awaitingOcr > 0 && (
+                            <Legend color="var(--fill-quinary)" label={`${awaitingOcr.toLocaleString()} waiting for OCR`} />
+                        )}
+                        {pending - awaitingOcr > 0 && (
+                            <Legend color="var(--fill-quinary)" label={`${(pending - awaitingOcr).toLocaleString()} not processed yet`} />
+                        )}
+                    </div>
+                </>
+            )}
+        </div>
+    );
+};
+
+const Legend: React.FC<{ color: string; label: string; hollow?: boolean }> = ({ color, label, hollow }) => (
+    <span className="display-flex flex-row items-center gap-1">
+        <span
+            aria-hidden="true"
+            style={{
+                width: '7px',
+                height: '7px',
+                borderRadius: '50%',
+                background: hollow ? 'transparent' : color,
+                border: hollow ? `1.5px solid ${color}` : 'none',
+                boxSizing: 'border-box',
+            }}
+        />
+        {label}
+    </span>
+);
+
 export default function BackgroundProcessingSection(): React.ReactElement | null {
     const hasOcrAccess = useAtomValue(hasOcrAccessAtom);
     const hasSearchAccess = useAtomValue(hasSearchIndexAccessAtom);
     const localLibraries = useAtomValue(localZoteroLibrariesAtom);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
-    const libraries = localLibraries.filter((library) =>
-        searchableLibraryIds.includes(library.library_id),
-    );
+    const libraries = localLibraries.filter((library) => searchableLibraryIds.includes(library.library_id));
+    const [skipTokens, setSkipTokens] = useState(() => [...getBackgroundProcessingSkipTokens()]);
     const status = useAtomValue(backgroundProcessingStatusAtom);
-    const refresh = useBackgroundProcessingStatus({
-        includeCoverage: true,
-        includeFailures: true,
-        pollIntervalMs: 15_000,
-    });
     const [enabled, setEnabled] = useState(
         () => getPref('backgroundProcessingEnabled') === true,
     );
     const [continuous, setContinuous] = useState(
         () => getPref('backgroundProcessingContinuous') === true,
     );
-    const [skipTokens, setSkipTokens] = useState<string[]>(
-        () => [...getBackgroundProcessingSkipTokens()],
-    );
-    const [showFailures, setShowFailures] = useState(false);
-    const entitled = hasOcrAccess || hasSearchAccess;
+    const working = (status.worker?.inFlight ?? 0) > 0 || status.worker?.drainNow === true;
+    const refresh = useBackgroundProcessingStatus({
+        includeCoverage: hasSearchAccess,
+        includeFailures: true,
+        // Poll faster while files are being processed so the bar keeps up.
+        pollIntervalMs: working ? 4_000 : 15_000,
+    });
 
     useEffect(() => {
         const observers: symbol[] = [];
@@ -71,6 +174,10 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
             'extensions.zotero.beaver.backgroundProcessingContinuous',
             () => setContinuous(getPref('backgroundProcessingContinuous') === true),
         );
+        observe(
+            'extensions.zotero.beaver.backgroundProcessingLibrariesToSkip',
+            () => setSkipTokens([...getBackgroundProcessingSkipTokens()]),
+        );
         return () => {
             for (const observer of observers) {
                 try { Zotero.Prefs.unregisterObserver(observer); } catch { /* best effort */ }
@@ -79,12 +186,13 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
     }, []);
 
     const toggleLibrary = (token: string, shouldProcess: boolean) => {
-        const next = shouldProcess
-            ? skipTokens.filter((entry) => entry !== token)
-            : [...new Set([...skipTokens, token])];
-        setSkipTokens(next);
-        setPref('backgroundProcessingLibrariesToSkip', JSON.stringify(next));
+        const next = getBackgroundProcessingSkipTokens();
+        if (shouldProcess) next.delete(token);
+        else next.add(token);
+        setSkipTokens([...next]);
+        setPref('backgroundProcessingLibrariesToSkip', JSON.stringify([...next]));
         Zotero.Beaver?.processingReconciler?.notify();
+        Zotero.Beaver?.backgroundExtractor?.notify();
     };
 
     const updateEnabled = (next: boolean) => {
@@ -100,39 +208,40 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
         Zotero.Beaver?.backgroundExtractor?.notify();
     };
 
-    const coverageByScope = useMemo(() => new Map(
-        (status.coverage?.documents ?? [])
-            .filter((entry) => entry.source === 'zotero_attachment')
-            .map((entry) => [entry.scope_ref, entry]),
-    ), [status.coverage]);
-
-    const processNow = async () => {
-        await Zotero.Beaver?.processingReconciler?.reconcileNow();
-        Zotero.Beaver?.backgroundExtractor?.notify();
-        await refresh();
+    const processNow = () => {
+        Zotero.Beaver?.backgroundExtractor?.requestImmediateDrain();
+        void refresh();
     };
+
+    const cache = status.documentCache;
 
     return (
         <>
-            <SectionLabel>Background File Processing</SectionLabel>
+            <SectionLabel>Background Processing</SectionLabel>
             <SettingsGroup>
                 <SettingsRow
-                    title="Process library files in the background"
-                    description={entitled
-                        ? 'Extracts readable attachments and keeps entitled OCR and cloud search coverage current.'
-                        : 'Reads your attachments once so Beaver can answer without opening them again. OCR and cloud indexing require an eligible plan.'}
+                    title="Process files in the background"
+                    description="Beaver reads the PDFs and other attachments in your library ahead of time, so it can answer questions about them without opening each file first."
                     onClick={() => updateEnabled(!enabled)}
                     control={<input
                         type="checkbox"
-                        aria-label="Process library files in the background"
+                        aria-label="Process files in the background"
                         checked={enabled}
                         onChange={(event) => updateEnabled(event.target.checked)}
                         onClick={(event) => event.stopPropagation()}
                     />}
                 />
+                {enabled && (
+                    <ProcessingStatusRow
+                        status={status}
+                        continuous={continuous}
+                        hasSearchAccess={hasSearchAccess}
+                        onProcessNow={processNow}
+                    />
+                )}
                 <SettingsRow
-                    title="Process continuously"
-                    description="Runs backlog jobs while you are active instead of waiting for Zotero to be idle."
+                    title="Also run while Zotero is in use"
+                    description="When off, Beaver only processes files while Zotero is idle, so it never slows you down."
                     disabled={!enabled}
                     hasBorder
                     onClick={() => {
@@ -141,7 +250,7 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                     }}
                     control={<input
                         type="checkbox"
-                        aria-label="Process continuously"
+                        aria-label="Also run while Zotero is in use"
                         checked={continuous}
                         disabled={!enabled}
                         onChange={(event) => updateContinuous(event.target.checked)}
@@ -149,117 +258,64 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                     />}
                 />
                 <SettingsRow
-                    title="Processing status"
+                    title="Storage on this computer"
                     hasBorder
-                    description={
-                        <div className="display-flex flex-col gap-05">
-                            <span>
-                                {status.ledger.extracted.toLocaleString()} extracted
-                                {hasOcrAccess && ` · ${status.ledger.ocrDone.toLocaleString()} OCR complete`}
-                                {hasSearchAccess && ` · ${status.ledger.upserted.toLocaleString()} indexed`}
-                            </span>
-                            <span>
-                                {status.queue.pending.toLocaleString()} queued · {' '}
-                                {status.ledger.skipped.toLocaleString()} skipped · {' '}
-                                {(status.ledger.failed + status.queue.dead).toLocaleString()} failed
-                            </span>
-                            {!hasOcrAccess && status.ledger.ocrNeeded > 0 && (
-                                <span>
-                                    {status.ledger.ocrNeeded.toLocaleString()} scanned file(s) need OCR
-                                    to be readable. OCR requires an eligible plan.
-                                </span>
-                            )}
-                            {status.ledger.oldestPendingAt && (
-                                <span>Oldest pending: {new Date(`${status.ledger.oldestPendingAt}Z`).toLocaleString()}</span>
-                            )}
-                            {status.error && <span className="font-color-red">{status.error}</span>}
-                        </div>
-                    }
-                    control={<div className="display-flex flex-row gap-2">
-                        <Button variant="outline" onClick={() => void refresh()}>Refresh</Button>
-                        <Button variant="outline" onClick={() => void processNow()}>Process now</Button>
-                    </div>}
+                    description={cache
+                        ? `${formatBytes(cache.payload_total_bytes)} used for ${plural(cache.payload_count, 'document')}`
+                            + (cache.payload_budget_bytes > 0
+                                ? ` · ${formatBytes(cache.payload_budget_bytes)} limit`
+                                : '')
+                        : 'Extracted text is kept on disk so files are not read twice.'}
                 />
-                <SettingsRow
-                    title="Local extraction cache"
-                    hasBorder
-                    description={status.documentCache
-                        ? `${formatBytes(status.documentCache.payload_total_bytes)} in ${status.documentCache.payload_count.toLocaleString()} cached document(s)`
-                            + (status.documentCache.payload_budget_bytes > 0
-                                ? ` · limit ${formatBytes(status.documentCache.payload_budget_bytes)}`
-                                : ' · no size limit')
-                        : 'Extracted document text Beaver keeps on disk to avoid re-reading files.'}
-                />
-                {(status.ledger.failed > 0 || status.queue.dead > 0) && (
-                    <SettingsRow
-                        title="Failures"
-                        hasBorder
-                        description={showFailures
-                            ? <div className="display-flex flex-col gap-1">
-                                <span>{status.ledger.failed} attachment stage failure(s) and {status.queue.dead} dead-lettered job(s).</span>
-                                {status.failures.slice(0, 10).map((failure, index) => (
-                                    <span key={`${failure.source}-${failure.stage}-${failure.zoteroKey ?? index}`}>
-                                        {failure.stage}{failure.zoteroKey ? ` · ${failure.libraryId}-${failure.zoteroKey}` : ''}
-                                        {failure.error ? ` · ${failure.error}` : ''}
-                                    </span>
-                                ))}
-                            </div>
-                            : 'Review failed and dead-lettered background work.'}
-                        control={<Button
-                            variant="outline"
-                            onClick={() => setShowFailures((value) => !value)}
-                        >
-                            {showFailures ? 'Hide details' : 'Show details'}
-                        </Button>}
-                    />
-                )}
             </SettingsGroup>
 
-            <SectionLabel>Libraries to Process</SectionLabel>
-            <SettingsGroup>
-                {libraries.map((library, index) => {
-                    const token = backgroundProcessingLibraryToken(library.library_id);
-                    if (!token) return null;
-                    const checked = !skipTokens.includes(token);
-                    return (
-                        <SettingsRow
-                            key={token}
-                            title={library.name}
-                            description={library.is_group ? 'Group library' : 'My Library'}
-                            hasBorder={index > 0}
-                            onClick={() => toggleLibrary(token, !checked)}
-                            control={<input
-                                type="checkbox"
-                                checked={checked}
-                                aria-label={`Process ${library.name}`}
-                                onChange={(event) => toggleLibrary(token, event.target.checked)}
-                                onClick={(event) => event.stopPropagation()}
-                            />}
-                        />
-                    );
-                })}
-            </SettingsGroup>
-
-            {hasSearchAccess && (
+            {libraries.length > 0 && (
                 <>
-                    <SectionLabel>Cloud Index Coverage</SectionLabel>
+                    <SectionLabel>Libraries to Process</SectionLabel>
                     <SettingsGroup>
                         {libraries.map((library, index) => {
-                            const scopeRef = getIndexScopeRef(library.library_id);
-                            const coverage = scopeRef ? coverageByScope.get(scopeRef) : undefined;
                             const token = backgroundProcessingLibraryToken(library.library_id);
-                            const skipped = token != null && skipTokens.includes(token);
+                            if (!token) return null;
+                            const checked = !skipTokens.includes(token);
                             return (
                                 <SettingsRow
-                                    key={library.library_id}
+                                    key={token}
                                     title={library.name}
+                                    description={library.is_group ? 'Group library' : 'My Library'}
                                     hasBorder={index > 0}
-                                    description={skipped
-                                        ? 'Skipped for background processing'
-                                        : `${(coverage?.indexed ?? 0).toLocaleString()} indexed · ${(coverage?.pending ?? 0).toLocaleString()} pending · ${(coverage?.indexed_chunks ?? 0).toLocaleString()} chunks`}
+                                    onClick={() => toggleLibrary(token, !checked)}
+                                    control={<input
+                                        type="checkbox"
+                                        checked={checked}
+                                        aria-label={`Process ${library.name}`}
+                                        onChange={(event) => toggleLibrary(token, event.target.checked)}
+                                        onClick={(event) => event.stopPropagation()}
+                                    />}
                                 />
                             );
                         })}
+                    </SettingsGroup>
+                </>
+            )}
+
+            {enabled && status.issues.length > 0 && (
+                <>
+                    <SectionLabel>Files Beaver Could Not Read</SectionLabel>
+                    <SettingsGroup>
+                        <div className="font-color-secondary text-base" style={{ padding: '8px 12px' }}>
+                            {plural(status.issues.reduce((sum, group) => sum + group.count, 0), 'attachment')} could
+                            not be processed.
+                        </div>
+                        {status.issues.map((group) => (
+                            <ProcessingIssueGroupRow
+                                key={group.reason}
+                                group={group}
+                                hasOcrAccess={hasOcrAccess}
+                                hasSearchAccess={hasSearchAccess}
+                                updatedAt={status.updatedAt}
+                                hasBorder
+                            />
+                        ))}
                     </SettingsGroup>
                 </>
             )}
