@@ -1,3 +1,4 @@
+import { getContextWindow } from '../runtime/windowRuntime';
 import { useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { isSidebarVisibleAtom } from '../atoms/ui';
@@ -14,7 +15,7 @@ export function useObservePaneCollapse(location: SidebarLocation) {
     const setSidebarVisible = useSetAtom(isSidebarVisibleAtom);
 
     useEffect(() => {
-        const win = Zotero.getMainWindow();
+        const win = getContextWindow();
         const paneId = location === 'library' ? "zotero-item-pane" : "zotero-context-pane";
         const itemPane = win.document.getElementById(paneId);
         const sidebar = itemPane?.querySelector(`#beaver-pane-${location}`) as HTMLElement;

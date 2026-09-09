@@ -200,11 +200,18 @@ threaded through `BeaverUIFactory` methods and hooks, or `ownerDocument.defaultV
 A hidden `#beaver-global-initializer-root` mounts `<GlobalContextInitializer />` for global
 hooks (auth, tab tracking, …).
 
-- **One Jotai store** is shared across all mount points (`Zotero.__beaverJotaiStore`, see
-  `react/store.ts`). **Scroll state is separate**: `useAutoScroll()` picks sidebar vs. window
-  atoms from the `isWindow` prop — pass it correctly.
-- Events always dispatch to the main window's event bus (`react/events/eventManager.ts`); the
-  separate window listens via the shared store.
+- **Each main-window renderer owns its Jotai store and atom identities** (`react/store.ts`).
+  Its library/reader sidebars and borrowed Beaver/preferences surfaces share that store.
+  `win.__beaverJotaiStore` is a lifetime-bounded diagnostic handle, never a cross-window API.
+  **Scroll state is separate**: `useAutoScroll()` picks sidebar vs. borrowed-window atoms from
+  the `isWindow` prop — pass it correctly.
+- `addon.runtime` owns stable runtime ids, the window registry, instance notifications and
+  one reader-width dispatcher. Attach installs a targeted UI bus on each main window;
+  `BeaverReact.initializeRuntime` binds the renderer before any React roots mount. Renderer
+  code uses `getHostWindow()` / `getContextWindow()` from `react/runtime/windowRuntime.ts`.
+- UI events target the owning renderer's bus (`react/events/eventManager.ts`). Background
+  events use `addon.runtime.publish` / `subscribeWindow`; closing a window synchronously
+  revokes its subscriptions. Never send foreign atom objects or read another window's store.
 
 ### Window lifecycle (close window ≠ quit app)
 
@@ -217,14 +224,14 @@ quitting (full global cleanup behind the `isAppQuitting || isAppShuttingDown` gu
 `onStartup()` just ran.
 
 During cleanup, unmount React roots **before** removing DOM (stale `Zotero.Notifier` observers
-otherwise cause SIGSEGV), and restore `Zotero.Reader.onChangeSidebarWidth` in
-`UIManager.cleanup()`.
+otherwise cause SIGSEGV), and unsubscribe its UI manager from reader-width updates. The plugin-owned dispatcher
+restores `Zotero.Reader.onChangeSidebarWidth` on instance disposal.
 
 ### Cross-window state: `Zotero` global vs `window`
 
 Anything that must span windows or outlive one goes on the **`Zotero` global**
 (`Zotero.Beaver`, `Zotero.__beaver*`) — it lives as long as the app. Per-window handles go on
-**that window** (`win.BeaverReact`, `win.__beaverEventBus`, `win.__beaverDisposeSupabase`, …)
+**that window** (`win.BeaverReact`, `win.__beaverEventBus`, `win.__beaverDisposeSupabase`, `win.__beaverRuntime`, …)
 and die with it. Never park shared state on `window`: on macOS the last window can close while
 the app runs, and a second main window loads its own React bundle.
 

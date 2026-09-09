@@ -59,9 +59,14 @@ async function onMainWindowUnload({ window }, reason) {
 
 async function shutdown({ id, version, resourceURI, rootURI }, reason) {
   if (reason === APP_SHUTDOWN) {
-    // During APP_SHUTDOWN we skip full cleanup (the process is exiting),
-    // but we MUST close the beaver.sqlite connection if it was opened.
-    // An unclosed Sqlite.sys.mjs connection triggers a FATAL
+    // Last-window close can leave instance services running. Dispose them
+    // even when there are no windows left to deliver an unload hook.
+    try {
+      await Zotero.__addonInstance__?.hooks.onAppShutdown();
+    } catch (_) {
+      // Keep the database safeguard independent of service cleanup failures.
+    }
+    // An unclosed Sqlite.sys.mjs connection can block the shutdown barrier.
     try {
       const db = Zotero.__addonInstance__?.db;
       if (db) {

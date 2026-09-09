@@ -1,3 +1,4 @@
+import { BeaverInstance } from '../../../src/runtime/instance';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -157,6 +158,7 @@ describe('BackgroundExtractor', () => {
         // mirrored, so every case starts with library 1 (the id all fixtures
         // use) in scope.
         (Zotero as any).Beaver = {
+            runtime: new BeaverInstance(),
             db,
             libraryScopeInitialized: true,
             searchableLibraryIds: [1],
@@ -306,13 +308,10 @@ describe('BackgroundExtractor', () => {
         it('completes a queued job whose library is no longer searchable', async () => {
             (Zotero as any).Beaver.searchableLibraryIds = [2];
             await enqueueJob(1);
-            const bus = new EventTarget();
-            const win: any = (Zotero as any).getMainWindow();
-            win.__beaverEventBus = bus;
-            win.CustomEvent = CustomEvent;
+
             const reasons: string[] = [];
-            bus.addEventListener('background-job:done', (event) => {
-                reasons.push((event as CustomEvent<{ reason: string }>).detail.reason);
+            Zotero.Beaver.runtime.subscribe('background-job:done', (event) => {
+                reasons.push(event.reason);
             });
 
             const { BackgroundExtractor } = await loadProcessor();
@@ -523,13 +522,10 @@ describe('BackgroundExtractor', () => {
             payload: payload(),
             now: 0,
         });
-        const bus = new EventTarget();
-        const win: any = (Zotero as any).getMainWindow();
-        win.__beaverEventBus = bus;
-        (win as any).CustomEvent = CustomEvent;
+
         const reasons: string[] = [];
-        bus.addEventListener('background-job:done', (event) => {
-            reasons.push((event as CustomEvent<{ reason: string }>).detail.reason);
+        Zotero.Beaver.runtime.subscribe('background-job:done', (event) => {
+            reasons.push(event.reason);
         });
 
         const { BackgroundExtractor } = await loadProcessor();
@@ -560,13 +556,10 @@ describe('BackgroundExtractor', () => {
             payload: null,
             now: 0,
         });
-        const bus = new EventTarget();
-        const win: any = (Zotero as any).getMainWindow();
-        win.__beaverEventBus = bus;
-        (win as any).CustomEvent = CustomEvent;
+
         const reasons: string[] = [];
-        bus.addEventListener('background-job:done', (event) => {
-            reasons.push((event as CustomEvent<{ reason: string }>).detail.reason);
+        Zotero.Beaver.runtime.subscribe('background-job:done', (event) => {
+            reasons.push(event.reason);
         });
 
         const { BackgroundExtractor } = await loadProcessor();
@@ -589,13 +582,10 @@ describe('BackgroundExtractor', () => {
             payload: null,
             now: 0,
         });
-        const bus = new EventTarget();
-        const win: any = (Zotero as any).getMainWindow();
-        win.__beaverEventBus = bus;
-        (win as any).CustomEvent = CustomEvent;
+
         const reasons: string[] = [];
-        bus.addEventListener('background-job:done', (event) => {
-            reasons.push((event as CustomEvent<{ reason: string }>).detail.reason);
+        Zotero.Beaver.runtime.subscribe('background-job:done', (event) => {
+            reasons.push(event.reason);
         });
 
         const { BackgroundExtractor } = await loadProcessor();
@@ -735,6 +725,7 @@ describe('BackgroundExtractor', () => {
 
     it('rejects an excluded library before looking up the queued item', async () => {
         (Zotero as any).Beaver = {
+            runtime: new BeaverInstance(),
             db,
             libraryScopeInitialized: true,
             searchableLibraryIds: [],
@@ -909,7 +900,7 @@ describe('BackgroundExtractor', () => {
         expect(rows[0].lastError).toBeNull();
     });
 
-    it('dispatches background-job:start on the main window event bus when present', async () => {
+    it('publishes background job transitions through the instance', async () => {
         await db.enqueueBackgroundJob({
             jobType: 'document_extract',
             libraryId: 1,
@@ -919,13 +910,10 @@ describe('BackgroundExtractor', () => {
             payload: payload(),
             now: 0,
         });
-        const bus = new EventTarget();
-        const win: any = (Zotero as any).getMainWindow();
-        win.__beaverEventBus = bus;
-        (win as any).CustomEvent = CustomEvent;
+
         const events: string[] = [];
-        bus.addEventListener('background-job:start', () => events.push('start'));
-        bus.addEventListener('background-job:done', () => events.push('done'));
+        Zotero.Beaver.runtime.subscribe('background-job:start', () => events.push('start'));
+        Zotero.Beaver.runtime.subscribe('background-job:done', () => events.push('done'));
         mockState.nextResult = {
             kind: 'ok',
             cached: false,
@@ -961,13 +949,10 @@ describe('BackgroundExtractor', () => {
             payload: payload(),
             now: 1,
         });
-        const bus = new EventTarget();
-        const win: any = (Zotero as any).getMainWindow();
-        win.__beaverEventBus = bus;
-        (win as any).CustomEvent = CustomEvent;
+
         const events: boolean[] = [];
-        bus.addEventListener('background-worker:status', (event) => {
-            const detail = (event as CustomEvent<{ running: boolean }>).detail;
+        Zotero.Beaver.runtime.subscribe('background-worker:status', (event) => {
+            const detail = event;
             events.push(detail.running);
         });
         mockState.nextResult = {

@@ -31,20 +31,15 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
  * Every `react/` module the esbuild bundle is allowed to contain.
  *
  * These are the deliberate, esbuild-safe exceptions `src/hooks.ts` imports —
- * the event bus, the UI manager and the plain data/constant modules they reach.
+ * plain data and constant modules.
  * Adding a line here is a claim that the module and its whole import closure
  * are free of React, the Jotai store and `process`. Verify that before you
  * add one; a wrong entry here is exactly the failure this script exists for.
  */
 const ALLOWED_REACT_INPUTS = [
     'react/constants/versionUpdateMessages.ts',
-    'react/eventBus.ts',
-    'react/events/eventManager.ts',
     'react/types/archivedActions.ts',
     'react/types/builtinActions.ts',
-    'react/ui/UIManager.ts',
-    'react/ui/initialization.ts',
-    'react/utils/zoteroLayout.ts',
 ];
 
 /**
