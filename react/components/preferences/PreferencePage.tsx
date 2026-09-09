@@ -399,11 +399,11 @@ const PreferencePage: React.FC = () => {
                                 }
                             />
                             <SettingsRow
-                                title="Add Selected Items to New Threads"
-                                description="Automatically attach selected items to new thread"
+                                title="Add Selected Items and Collections to New Threads"
+                                description="Automatically attach selected items and collections to new threads"
                                 onClick={handleAddSelectedOnNewThreadToggle}
                                 hasBorder
-                                tooltip="When enabled, any items you have selected in Zotero will be automatically added as sources when you start a new conversation thread."
+                                tooltip="When enabled, selected Zotero items and collections are attached when you start a new conversation, including from the quick prompt."
                                 control={
                                     <input
                                         type="checkbox"
