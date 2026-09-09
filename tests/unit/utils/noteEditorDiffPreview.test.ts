@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
+
 vi.mock('../../../react/store', () => ({
     store: { get: vi.fn(() => null) },
 }));
@@ -63,6 +65,7 @@ import {
     isDiffPreviewPendingFor,
     isDiffPreviewPending,
 } from '../../../react/utils/noteEditorDiffPreview';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { preloadNotePageLabels } from '../../../src/utils/noteCitationExpand';
 
 describe('constructMultiDiffHtml', () => {
@@ -309,6 +312,31 @@ describe('showDiffPreview approveAll revision-guard flow', () => {
             await p;
         } finally {
             vi.useRealTimers();
+        }
+    });
+
+    it('previews a preloaded external-file filename and link', async () => {
+        vi.useFakeTimers();
+        const h = makeHarness(NOTE);
+        const previousBeaver = Zotero.Beaver;
+        const previousFile = Zotero.File;
+        try {
+            (Zotero as any).Beaver = { db: { getExternalFileByKey: vi.fn(async () => ({
+                filename: 'Report.pdf', storedPath: '/stored/Report.pdf',
+            })) } };
+            (Zotero as any).File = { pathToFileURI: vi.fn(() => 'file:///stored/Report.pdf') };
+            vi.mocked(IOUtils.exists).mockResolvedValue(true);
+            const shown = await showDiffPreview(1, 'NOTE0001', [{
+                operation: 'append', oldString: '', newString: '<p><citation id="ext-MRDTFYHP" loc="page6"/></p>',
+            }]);
+            expect(shown, JSON.stringify(vi.mocked(logger).mock.calls)).toBe(true);
+            const html = h.applyIncrementalUpdate.mock.calls[0][0].html;
+            expect(html).toContain('href="file:///stored/Report.pdf"');
+            expect(html).toContain('Report.pdf');
+            expect(html).not.toContain('Attached file ext-');
+        } finally {
+            (Zotero as any).Beaver = previousBeaver;
+            (Zotero as any).File = previousFile;
         }
     });
 

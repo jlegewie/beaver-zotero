@@ -16,6 +16,7 @@
  *                                  tags to an unresolvable-ref error
  */
 
+import { noteCitationTagPattern } from './noteCitationTags';
 import type { SimplificationMetadata } from './noteHtmlSimplifier';
 import {
     extractAttr,
@@ -76,7 +77,7 @@ export function validateNewString(
     }
 
     // Check for new compound citations (items attr without ref)
-    const compoundRegex = /<citation\s+(?!.*ref=)([^/]*items="[^"]*"[^/]*)\/>/g;
+    const compoundRegex = /<citation\s+(?![^>]*ref=)([^>]*items="[^"]*"[^>]*)\/>/g;
     let compMatch;
     while ((compMatch = compoundRegex.exec(newString)) !== null) {
         return 'Error: Cannot create new compound citations. Insert individual <citation id="..." /> tags instead.';
@@ -97,7 +98,7 @@ export function checkNewCitationItemsExist(
     newString: string,
     metadata: SimplificationMetadata,
 ): string | null {
-    const citationRegex = /<citation\s+([^/]*?)\s*\/>/g;
+    const citationRegex = noteCitationTagPattern();
     let m;
     while ((m = citationRegex.exec(newString)) !== null) {
         const attrStr = m[1];
@@ -142,7 +143,7 @@ export function checkDuplicateCitations(
     metadata: SimplificationMetadata
 ): string | null {
     // Find new citations (item_id without ref) in new_string
-    const newCitationRegex = /<citation\s+(?![^/]*\bref=)([^>]*?)\/>/g;
+    const newCitationRegex = /<citation\s+(?![^>]*\bref=)([^>]*?)\/>/g;
     let match;
     const warnings: string[] = [];
 
@@ -314,7 +315,7 @@ export function enrichOldStringCitationRefs(
     interface Replacement { start: number; end: number; replacement: string; }
     const replacements: Replacement[] = [];
 
-    const citationRe = /<citation\s+([^/]*?)\s*\/>/g;
+    const citationRe = noteCitationTagPattern();
     let m: RegExpExecArray | null;
     while ((m = citationRe.exec(oldString)) !== null) {
         const attrStr = m[1];

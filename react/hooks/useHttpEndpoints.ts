@@ -86,6 +86,8 @@ import {
     handleTestNoteOpenEditorHttpRequest,
     handleTestNoteCloseEditorHttpRequest,
     handleTestNoteUndoHttpRequest,
+    handleTestNoteApplyHttpRequest,
+    handleTestNotePreviewHttpRequest,
 } from './httpHandlers/testNoteHandlers';
 import {
     handleTestCollectionCreateHttpRequest,
@@ -276,6 +278,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/note-open-editor',
     '/beaver/test/note-close-editor',
     '/beaver/test/note-undo',
+    '/beaver/test/note-apply',
+    '/beaver/test/note-preview',
     // Test-only endpoints (collection seeding/teardown)
     '/beaver/test/collection-create',
     '/beaver/test/collection-delete',
@@ -1141,6 +1145,12 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/note-undo'] =
             createEndpoint(handleTestNoteUndoHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/note-apply'] =
+            createEndpoint(handleTestNoteApplyHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/note-preview'] =
+            createEndpoint(handleTestNotePreviewHttpRequest);
 
         // Collection seeding/teardown (dev-only)
         Zotero.Server.Endpoints['/beaver/test/collection-create'] =

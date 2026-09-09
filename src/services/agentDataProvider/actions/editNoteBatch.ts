@@ -174,8 +174,8 @@ export interface PreloadedLabels {
 
 /**
  * Separator inserted between edits' strings before they're concatenated for a
- * single preload scan. It contains a literal `/`, which the citation-tag
- * regex's attribute capture (`[^/]*?`) cannot span, so a partial tag at the
+ * single preload scan. The comment closes with `>`, which the citation-tag
+ * attribute capture cannot span, so a partial tag at the
  * end of one fragment can never merge with content from the next fragment
  * into a false citation match.
  */
@@ -483,7 +483,7 @@ async function validateEditNoteBatchAction(
     const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, resolvedLibraryId, { extractOnCacheMiss: true });
     const { simplified, metadata } = getOrSimplify(noteId, rawHtml, resolvedLibraryId, pageLabelsByItemId);
 
-    const externalRefContext = getExternalRefContext();
+    const externalRefContext = await getExternalRefContext(edits.map(edit => edit.new_string).join(BATCH_LABEL_SEPARATOR));
     const labels = await preloadBatchLabels(edits);
 
     // Strip data-citation-items ONCE — the shared match/apply haystack.
@@ -523,7 +523,7 @@ async function validateEditNoteBatchAction(
     for (const r of resolvedEdits) resolvedByIndex.set(r.index, r);
 
     const normalizedEdits: EditNoteBatchEditItem[] = [];
-    const warnings: string[] = [...labels.locatorWarnings];
+    const warnings: string[] = [...labels.locatorWarnings, ...(externalRefContext.externalFileWarnings ?? [])];
     let anyChanged = false;
     for (const edit of edits) {
         const r = resolvedByIndex.get(edit.index);
@@ -667,6 +667,7 @@ async function executeEditNoteBatchAction(
     }
 
     // Preload page labels for ALL edits before the final note snapshot.
+    const externalRefContext = await getExternalRefContext(edits.map(edit => edit.new_string).join(BATCH_LABEL_SEPARATOR));
     const labels = await preloadBatchLabels(edits);
 
     const preSeedHtml = item.getNote();
@@ -677,7 +678,6 @@ async function executeEditNoteBatchAction(
     const noteId = `${resolvedLibraryId}-${zotero_key}`;
     const pageLabelsByItemId = await preloadNotePageLabels(oldHtml, resolvedLibraryId);
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, resolvedLibraryId, pageLabelsByItemId);
-    const externalRefContext = getExternalRefContext();
 
     const normalizedOldHtml = normalizeNoteHtml(oldHtml);
     const existingCitationCache = extractDataCitationItems(normalizedOldHtml);
@@ -808,7 +808,7 @@ async function executeEditNoteBatchAction(
     captureUndoContexts(finalStripped, undoDrafts, newStrippedHtml);
 
     // Warnings: per-edit duplicate-citation + batch locator warnings.
-    const warnings: string[] = [...labels.locatorWarnings];
+    const warnings: string[] = [...labels.locatorWarnings, ...(externalRefContext.externalFileWarnings ?? [])];
     for (const edit of edits) {
         const dup = checkDuplicateCitations(edit.new_string, metadata);
         if (dup) warnings.push(dup);
@@ -923,7 +923,7 @@ async function executeSingleRewrite(
     clearNoteEditorSelection(resolvedLibraryId, zotero_key);
     invalidateSimplificationCache(noteId);
 
-    const warnings: string[] = [...labels.locatorWarnings];
+    const warnings: string[] = [...labels.locatorWarnings, ...(externalRefContext.externalFileWarnings ?? [])];
     const dup = checkDuplicateCitations(edit.new_string, metadata);
     if (dup) warnings.push(dup);
 

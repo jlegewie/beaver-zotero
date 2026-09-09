@@ -12,6 +12,12 @@
  * exclusively during expansion.
  */
 
+import { noteCitationTagPattern } from './noteCitationTags';
+import {
+    formatExternalFileCitationHTML,
+    externalFileLocatorSuffix,
+    type ExternalFileCitationData,
+} from './externalFileCitation';
 import { createCitationHTML } from './zoteroUtils';
 import { getBestPDFAttachment, getBestPDFAttachmentAsync } from './zoteroItemHelpers';
 import { getAttachmentFileStatus, checkLibraryExcluded } from '../services/agentDataProvider/utils';
@@ -93,7 +99,7 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
     if (!cache) return labelsByAttachmentId;
 
     const seen = new Set<number>();
-    const regex = /<citation\s+([^/]*?)\s*\/>/g;
+    const regex = noteCitationTagPattern();
     let match: RegExpExecArray | null;
 
     while ((match = regex.exec(str)) !== null) {
@@ -262,7 +268,7 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
 
     const seen = new Set<string>();
     const resultsByAttachment = new Map<number, Promise<StructuredExtractResult | null>>();
-    const regex = /<citation\s+([^/]*?)\s*\/>/g;
+    const regex = noteCitationTagPattern();
     let match: RegExpExecArray | null;
 
     while ((match = regex.exec(str)) !== null) {
@@ -448,6 +454,9 @@ function parseSimplifiedCitationAttrs(
     resolvedLocatorPages?: ResolvedLocatorPages,
 ): SimplifiedCitationAttrs {
     const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
+    if (normalized.ok && normalized.ref.kind === 'external_file') {
+        throw citationRefNotFoundError('External-file references are stored as links or plain text in notes. Copy the existing link or text from read_note into old_string.');
+    }
     if (!normalized.ok || normalized.ref.kind !== 'zotero') {
         throw new Error('Citation must have an "id" attribute. Legacy "item_id" / "att_id" are also accepted.');
     }
@@ -580,6 +589,9 @@ function buildCitationFromAttId(
  * helpful message instead of silently dropping the citation.
  */
 export interface ExternalRefContext {
+    /** Every external-file key in new_string must have a preloaded entry, including missing files. */
+    externalFiles?: Record<string, ExternalFileCitationData>;
+    externalFileWarnings?: string[];
     /** source_id → ExternalReference object (title, authors, urls, identifiers, ...) */
     externalRefs: Record<string, ExternalReference>;
     /** source_id → mapped Zotero item, or null if checked but not in library */
@@ -706,7 +718,7 @@ export function expandToRawHtml(
 ): string {
     // Expand citations (all self-closing: <citation ... />)
     str = str.replace(
-        /<citation\s+([^/]*?)\s*\/>/g,
+        noteCitationTagPattern(),
         (match, attrStr) => {
             const ref = extractAttr(attrStr, 'ref');
             const explicitItemId = extractAttr(attrStr, 'item_id');
@@ -715,6 +727,23 @@ export function expandToRawHtml(
             const attId = extractAttr(attrStr, 'att_id') || extractAttr(attrStr, 'attachment_id');
             const items = extractAttr(attrStr, 'items');
             const externalId = extractAttr(attrStr, 'external_id');
+
+            const normalizedCitation = normalizeCitationTag(parseRawCitationAttributes(attrStr));
+            // External files are ordinary links/text in notes, including when
+            // replacing an existing Zotero citation's identity in new_string.
+            if (context === 'new' && normalizedCitation.ok && normalizedCitation.ref.kind === 'external_file'
+                && !(ref && metadata.elements.get(ref)?.isCompound)) {
+                const fileRef = normalizedCitation.ref;
+                const file = externalRefContext?.externalFiles?.[fileRef.ext_key];
+                if (!file) {
+                    throw new Error(`External file ext-${fileRef.ext_key} was not preloaded for note expansion.`);
+                }
+                return formatExternalFileCitationHTML(
+                    file.filename,
+                    externalFileLocatorSuffix(fileRef.loc),
+                    file.href,
+                );
+            }
 
             // Case 1: Existing citation (has ref) — look up from metadata map
             if (ref) {
@@ -789,7 +818,6 @@ export function expandToRawHtml(
                 );
             }
             // New citations from the model always use 1-based page numbers → translate
-            const normalizedCitation = normalizeCitationTag(parseRawCitationAttributes(attrStr));
             if (itemId) {
                 const attrs = parseSimplifiedCitationAttrs(attrStr, resolvedLocatorPages);
                 return buildCitationFromSimplifiedAttrs(attrs, true, pageLabels);

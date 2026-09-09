@@ -6,14 +6,17 @@ import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '
 import { CITATION_TAG_PATTERN } from './citationPreprocessing';
 import {
     citationIndexCandidateIdsForLocator,
+    getPageLocator,
     normalizeCitationTag,
     parseRawCitationAttributes,
     requestedCitationKey,
+    type ExternalFileCitationRef,
     type Locator,
 } from '@beaver/agent-core/citations/citationGrammar';
 import { getCitationPreloadFilePath, preloadPageLabelsForContent } from './pageLabels';
 import type { CitationIndexEntry, StructuredExtractResult } from '@beaver/agent-core/extract/schema';
 import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
+import type { ExternalFileRecord } from '../../src/services/database';
 
 function citationLocationsFromEntries(entries: CitationIndexEntry[]): PartLocation[] {
     const byPage = new Map<number, PartLocation>();
@@ -145,19 +148,32 @@ export async function buildLocalCitationDataMapForContent(
 }
 
 /**
- * Resolve absolute local paths for external-file citations in the content,
- * limited to files that exist on this computer. Used by note export to offer a
- * clickable file link; files attached on another machine resolve to no entry and
- * fall back to plain text.
+ * Resolve the external-file citations in the content against the local
+ * `external_files` registry.
+ *
+ * Returns the absolute path of each cited file that exists on this computer
+ * (so the export can offer a clickable file link) and a synthetic citation per
+ * cited identity carrying the file's name, content kind and cited pages.
+ *
+ * That synthetic metadata is what makes the exported reference readable.
+ * Backend citation metadata is resolved from a run's message text only, so a
+ * file cited inside note content has none — and unlike a library citation
+ * there is no Zotero item the export could format from instead, so the
+ * reference would render with an empty label. Real backend metadata, when it
+ * exists, still wins: `prepareCitationRenderContext` merges it over this map.
  */
-export async function resolveExternalFileLocalPaths(
-    content: string,
-): Promise<Record<string, string>> {
-    const db = Zotero.Beaver?.db;
-    if (!db) return {};
+export async function resolveExternalFileCitations(content: string): Promise<{
+    localPaths: Record<string, string>;
+    citationDataMap: Record<string, Citation>;
+}> {
+    const localPaths: Record<string, string> = {};
+    const citationDataMap: Record<string, Citation> = {};
 
-    const result: Record<string, string> = {};
-    const seen = new Set<string>();
+    const db = Zotero.Beaver?.db;
+    if (!db) return { localPaths, citationDataMap };
+
+    // One entry per cited identity (ext key + locator), in citation order.
+    const citedRefs = new Map<string, { ref: ExternalFileCitationRef; rawTag: string }>();
     const regex = new RegExp(CITATION_TAG_PATTERN.source, CITATION_TAG_PATTERN.flags);
     let match: RegExpExecArray | null;
 
@@ -165,23 +181,54 @@ export async function resolveExternalFileLocalPaths(
         const normalized = normalizeCitationTag(parseRawCitationAttributes(match[1] || ''));
         if (!normalized.ok || normalized.ref.kind !== 'external_file') continue;
 
-        const extKey = normalized.ref.ext_key;
-        if (seen.has(extKey)) continue;
-        seen.add(extKey);
-
-        try {
-            const record = await db.getExternalFileByKey(extKey);
-            const path = record?.storedPath ?? null;
-            if (path && (await IOUtils.exists(path).catch(() => false))) {
-                result[extKey] = path;
-            }
-        } catch {
-            // The file link is an export enhancement; unresolved external files
-            // fall back to plain-text citation rendering.
-        }
+        const citationKey = requestedCitationKey(normalized.ref);
+        if (citedRefs.has(citationKey)) continue;
+        citedRefs.set(citationKey, { ref: normalized.ref, rawTag: match[0] });
     }
 
-    return result;
+    if (citedRefs.size === 0) return { localPaths, citationDataMap };
+
+    // Each distinct file is read once, however often it is cited.
+    const extKeys = new Set([...citedRefs.values()].map(({ ref }) => ref.ext_key));
+    const recordsByExtKey = new Map<string, ExternalFileRecord>();
+    await Promise.all([...extKeys].map(async (extKey) => {
+        try {
+            const record = await db.getExternalFileByKey(extKey);
+            if (!record) return;
+            recordsByExtKey.set(extKey, record);
+            if (await IOUtils.exists(record.storedPath).catch(() => false)) {
+                localPaths[extKey] = record.storedPath;
+            }
+        } catch {
+            // Both the link and the filename are export enhancements; a file
+            // this device knows nothing about falls back to the plain-text
+            // citation rendering.
+        }
+    }));
+
+    for (const [citationKey, { ref, rawTag }] of citedRefs) {
+        const record = recordsByExtKey.get(ref.ext_key);
+        if (!record) continue;
+
+        const citedPage = Number.parseInt(getPageLocator(ref) ?? '', 10);
+        citationDataMap[`local:${citationKey}`] = {
+            citation_id: `local:${citationKey}`,
+            run_id: 'local',
+            citation_type: 'external_file',
+            // External files are attachments living outside Zotero; the client
+            // branches on content_kind for the per-type icon and for how a
+            // cited page reads (an EPUB "page" is a section ordinal).
+            item_type: 'attachment',
+            content_kind: record.contentKind,
+            display_name: record.filename,
+            requested_ref: ref,
+            resolved_ref: ref,
+            raw_tag: rawTag,
+            ...(Number.isFinite(citedPage) && citedPage > 0 ? { pages: [citedPage] } : {}),
+        };
+    }
+
+    return { localPaths, citationDataMap };
 }
 
 /**
@@ -191,11 +238,17 @@ export async function prepareCitationRenderContext(
     content: string,
     contextData?: RenderContextData,
 ): Promise<RenderContextData | undefined> {
-    const [pageLabelsByAttachmentId, localCitationDataMap, externalFileLocalPaths] = await Promise.all([
+    const [pageLabelsByAttachmentId, structuredCitationDataMap, externalFiles] = await Promise.all([
         preloadPageLabelsForContent(content),
         buildLocalCitationDataMapForContent(content),
-        resolveExternalFileLocalPaths(content),
+        resolveExternalFileCitations(content),
     ]);
+
+    const localCitationDataMap = {
+        ...structuredCitationDataMap,
+        ...externalFiles.citationDataMap,
+    };
+    const externalFileLocalPaths = externalFiles.localPaths;
 
     const hasPageLabels = Object.keys(pageLabelsByAttachmentId).length > 0;
     const hasLocalCitations = Object.keys(localCitationDataMap).length > 0;
