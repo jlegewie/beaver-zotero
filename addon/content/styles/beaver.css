@@ -627,6 +627,136 @@
     cursor: default;
 }
 
+/* Release-note showcases (react/components/ui/popup/showcases): the corner
+ * cards drawn right on the note, from their own classes, in a slot sized for
+ * the tallest of them so the note does not jump as the scene changes; a
+ * Decorative only. */
+.beaver-showcase {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    /* Closer to the text above than the note's own gap puts it. */
+    margin-top: -6px;
+    pointer-events: none;
+    user-select: none;
+}
+
+.beaver-showcase__stage {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* The composer card with its two-line prompt, the tallest scene. */
+    height: 120px;
+    /* Softened toward the bottom-right, like the feature tips' previews, so
+     * the visual reads as an illustration rather than a live card. */
+    mask-image: linear-gradient(to bottom right, black 45%, rgba(0, 0, 0, 0.45) 100%);
+}
+
+.beaver-showcase__chord {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.beaver-showcase__key {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    min-width: 34px;
+    height: 36px;
+    padding: 0 10px;
+    border: 1px solid var(--beaver-border-strong);
+    border-radius: 8px;
+    background: var(--beaver-surface-overlay);
+    box-shadow: 0 2px 0 var(--fill-quarternary);
+    color: var(--fill-primary);
+    font-size: 15px;
+    font-weight: 500;
+    transition: transform 90ms ease, box-shadow 90ms ease, background-color 90ms ease;
+}
+
+.beaver-showcase__chord--pressed .beaver-showcase__key {
+    transform: translateY(2px);
+    box-shadow: 0 0 0 var(--fill-quarternary);
+    background: var(--fill-quinary);
+}
+
+/* The wrapper also carries the real cards' container classes (for the rules
+ * scoped under them), so their corner geometry is overridden here. */
+.beaver-showcase__card,
+.beaver-showcase__card.beaver-quick-prompt,
+.beaver-showcase__card.beaver-run-status-popup {
+    position: relative;
+    align-self: center;
+    width: 100%;
+    max-width: 324px;
+    margin: 0;
+    padding: 0;
+    animation: beaverShowcaseCardIn 240ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes beaverShowcaseCardIn {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+.beaver-showcase__run-card {
+    cursor: default;
+}
+
+/* The editor line, with the composer's typography. */
+.beaver-showcase__editor {
+    min-height: calc(1.25em + 2px);
+    padding: 1px 0;
+    color: var(--fill-primary);
+    font-size: 13px;
+    line-height: 1.25;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.beaver-showcase__placeholder {
+    color: var(--fill-tertiary);
+}
+
+.beaver-showcase__caret {
+    display: inline-block;
+    width: 1px;
+    height: 1.1em;
+    margin: 0 1px;
+    vertical-align: text-bottom;
+    background: var(--fill-primary);
+    animation: beaverShowcaseCaret 1s steps(1, end) infinite;
+}
+
+@keyframes beaverShowcaseCaret {
+    50% {
+        opacity: 0;
+    }
+}
+
+.beaver-showcase__model {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.9rem;
+}
+
+.beaver-showcase__send--pressed {
+    transform: scale(0.85);
+    transition: transform 120ms ease;
+}
+
 /* A working run: a dot with a ring that keeps expanding out of it and fading. */
 .beaver-run-pulse {
     position: relative;
@@ -804,6 +934,12 @@
 [id^="beaver-pane-"] .source-preview.no-fade {
     animation: none;
     opacity: 1;
+}
+
+/* A release note is as tall as what it has to show — a showcase does not fit
+ * the cap above, and nothing in the card scrolls. */
+[id^="beaver-pane-"] .source-preview.beaver-popup-message--unbounded {
+    max-height: none;
 }
 
 @keyframes fadeIn {

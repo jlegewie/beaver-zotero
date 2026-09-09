@@ -7,6 +7,8 @@ import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { getPendingVersionNotifications, clearPendingVersionNotifications } from '../../src/utils/versionNotificationPrefs';
 import { compareVersions } from '../../src/utils/compareVersions';
 import { getVersionUpdateMessageConfig } from '../constants/versionUpdateMessages';
+import { versionUpdatePopupMessage } from '../utils/versionUpdatePopup';
+import { deferFeatureTips } from '../utils/featureTipPrefs';
 
 /**
  * Hook to handle tasks that need to run after a plugin upgrade.
@@ -48,38 +50,16 @@ export const useUpgradeHandler = () => {
             // Record when the version popup is shown so onboarding tips can enforce a gap after it
             setPref('versionUpdatePopupShownAt', new Date().toISOString());
 
-            addFloatingPopupMessage({
-                type: 'version_update',
-                version: latestFloating.version,
-                title: latestFloating.title,
-                text: latestFloating.text,
-                featureList: latestFloating.featureList,
-                learnMoreUrl: latestFloating.learnMoreUrl,
-                learnMoreLabel: latestFloating.learnMoreLabel,
-                footer: latestFloating.footer,
-                steps: latestFloating.steps,
-                subtitle: latestFloating.subtitle,
-                expire: false,
-            });
+            addFloatingPopupMessage(versionUpdatePopupMessage(latestFloating));
+            if (latestFloating.deferFeatureTips) deferFeatureTips(latestFloating.deferFeatureTips, Date.now());
         }
 
         if (latestInPanel) {
             processedVersionsRef.current.add(latestInPanel.version);
             logger(`useUpgradeHandler: Displaying in-panel release notes for version ${latestInPanel.version}.`, 3);
 
-            addPopupMessage({
-                type: 'version_update',
-                version: latestInPanel.version,
-                title: latestInPanel.title,
-                text: latestInPanel.text,
-                featureList: latestInPanel.featureList,
-                learnMoreUrl: latestInPanel.learnMoreUrl,
-                learnMoreLabel: latestInPanel.learnMoreLabel,
-                footer: latestInPanel.footer,
-                steps: latestInPanel.steps,
-                subtitle: latestInPanel.subtitle,
-                expire: false,
-            });
+            addPopupMessage(versionUpdatePopupMessage(latestInPanel));
+            if (latestInPanel.deferFeatureTips) deferFeatureTips(latestInPanel.deferFeatureTips, Date.now());
         }
 
         if (!latestFloating && !latestInPanel && sorted.length > 0) {

@@ -104,7 +104,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
     return (
         <div
             ref={containerRef}
-            className="source-preview border-popup shadow-md mx-0 w-full"
+            className={`source-preview border-popup shadow-md mx-0 w-full ${message.type === 'version_update' ? 'beaver-popup-message--unbounded' : ''}`}
             style={{
                 background: backgroundColor,
                 backdropFilter: 'blur(6px)',

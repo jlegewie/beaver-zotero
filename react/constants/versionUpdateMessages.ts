@@ -1,5 +1,13 @@
 import { PopupMessageFeature } from '../types/popupMessage';
 import { compareVersions } from '../../src/utils/compareVersions';
+import type { FeatureTipId } from './featureTips';
+
+/**
+ * A visual a release note can carry — what `react/constants/versionShowcases.ts`
+ * draws for the id. An id rather than the component: this list is read by the
+ * plugin bundle at startup, which has no React.
+ */
+export type VersionShowcaseId = 'quick-prompt';
 
 /**
  * Example prompt shown as a chat bubble in the feature tour
@@ -23,12 +31,21 @@ export interface FeatureStep {
     description?: string;
     /** Example prompts shown as chat bubbles */
     examplePrompts?: ExamplePrompt[];
+    /** A visual between the description and the prompts — the feature itself. */
+    showcase?: VersionShowcaseId;
     /** URL to learn more about this feature */
     learnMoreUrl?: string;
 }
 
+/**
+ * The copy fields (`text`, `subtitle`, descriptions) may use
+ * `{{quickPromptShortcut}}` for the quick prompt chord on the user's machine;
+ * it is filled when the note is built (`react/utils/versionUpdatePopup.ts`).
+ */
 export interface VersionUpdateMessageConfig {
     version: string;
+    /** Delay related tips from when this release notification is shown, in milliseconds. */
+    deferFeatureTips?: Partial<Record<FeatureTipId, number>>;
     title: string;
     /** Subtitle/intro text shown on the first screen */
     subtitle?: string;
@@ -38,6 +55,8 @@ export interface VersionUpdateMessageConfig {
     featureList?: PopupMessageFeature[];
     /** Feature steps for the guided tour (new format) */
     steps?: FeatureStep[];
+    /** A visual under the intro text — the feature itself, not a description of it. */
+    showcase?: VersionShowcaseId;
     learnMoreUrl?: string;
     learnMoreLabel?: string;
     footer?: string;
@@ -566,7 +585,15 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         ],
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.24.0" target='_blank'>Full changelog</a>`,
     },
-
+    {
+        version: "0.25.0",
+        deferFeatureTips: { 'run-status-popup': 7 * 24 * 60 * 60 * 1000 },
+        title: "Introducing Quick Prompt",
+        text: "Press {{quickPromptShortcut}} to open a composer in the corner. Beaver works while you stay in Zotero: the card shows progress, asks for approvals, and reports the result.",
+        showcase: 'quick-prompt',
+        inPanel: false,
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.25.0" target='_blank'>Full changelog</a>`,
+    },
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));

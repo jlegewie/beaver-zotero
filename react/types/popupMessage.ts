@@ -1,5 +1,5 @@
 import { FileStatusSummary } from "./fileStatus";
-import { FeatureStep } from "../constants/versionUpdateMessages";
+import { FeatureStep, VersionShowcaseId } from "../constants/versionUpdateMessages";
 import { ButtonVariant } from "@beaver/agent-ui/primitives/Button";
 import type { FeatureTipId } from "../constants/featureTips";
 
@@ -53,4 +53,6 @@ export interface PopupMessage {
     steps?: FeatureStep[];
     /** Subtitle shown below the title in step-based tours */
     subtitle?: string;
+    /** The visual a version update message carries — see `react/constants/versionShowcases.ts`. */
+    showcase?: VersionShowcaseId;
 }
