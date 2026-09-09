@@ -501,6 +501,45 @@ describe('OcrExecutor', () => {
         expect(mockedPut).not.toHaveBeenCalled();
     });
 
+    it('retires a permanently-unavailable scan instead of burning the retry budget', async () => {
+        // A 404 on the OCR original: retrying costs three attempts on the
+        // largest files Beaver downloads, and the answer will not change.
+        mockRemoteItem('synced999');
+        mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
+        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345 }));
+        mockedLoad.mockResolvedValue({ kind: 'error', code: 'download_failed', permanent: true } as any);
+        api.requestOcr.mockResolvedValue({ status: 'pending', job_id: 'job-rem', put_url: 'https://gcs/put' });
+        const ctx = makeCtx();
+
+        const outcome = await executor.execute(record, ctx);
+
+        expect(outcome).toEqual({ kind: 'complete', reason: 'terminal:download_failed' });
+        expect(mockedPut).not.toHaveBeenCalled();
+    });
+
+    it('stamps the OCR ledger when retiring a permanently-unavailable scan', async () => {
+        // Without the stamp the row stays `ocr_status='needed'` and the
+        // reconciler re-enqueues it on every pass — a worse outcome than the
+        // retries this replaces.
+        mockRemoteItem('synced999');
+        mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
+        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345 }));
+        mockedLoad.mockResolvedValue({ kind: 'error', code: 'download_failed', permanent: true } as any);
+        api.requestOcr.mockResolvedValue({ status: 'pending', job_id: 'job-rem', put_url: 'https://gcs/put' });
+        const ctx = makeCtx();
+        ctx.db.getAttachmentProcessingState = vi.fn(async () => ({ fileHash: 'synced999' })) as any;
+        ctx.db.markAttachmentOcrFailed = vi.fn(async () => undefined) as any;
+
+        await executor.execute(record, ctx);
+
+        expect(ctx.db.markAttachmentOcrFailed).toHaveBeenCalledWith(
+            record.libraryId,
+            record.zoteroKey,
+            'synced999',
+            expect.stringContaining('download_failed'),
+        );
+    });
+
     it('completes file_too_large when the remote download exceeds the cap', async () => {
         mockRemoteItem('synced999');
         mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
