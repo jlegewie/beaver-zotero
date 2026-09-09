@@ -67,6 +67,24 @@ export function describeStatus(
             processNow: false,
         };
     }
+    const { total, readable, unreadable, awaitingOcr, oldestPendingAt } = status.ledger;
+    if (unreadable > 0 || status.issues.some((group) => group.count > 0)) {
+        return {
+            tone: 'error',
+            headline: 'Some files could not be processed',
+            caption: 'Some attachments need attention before processing can finish.',
+            processNow: false,
+        };
+    }
+    // A reconcile pass may not have queued every unfinished ledger stage yet.
+    if (total > readable + unreadable || awaitingOcr > 0 || oldestPendingAt !== null) {
+        return {
+            tone: 'waiting',
+            headline: 'Files are waiting to be processed',
+            caption: 'Beaver checks for unfinished work automatically.',
+            processNow: false,
+        };
+    }
     if (status.ledger.total === 0) {
         return {
             tone: 'idle',

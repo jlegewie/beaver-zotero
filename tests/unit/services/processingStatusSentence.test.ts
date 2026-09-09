@@ -5,12 +5,42 @@ import { describeStatus } from '../../../react/components/preferences/processing
 function status(deferred: number, total = 1) {
     return {
         ...backgroundProcessingStatusAtom.init,
-        ledger: { ...backgroundProcessingStatusAtom.init.ledger, total },
+        ledger: { ...backgroundProcessingStatusAtom.init.ledger, total, readable: total },
         worker: { available: 0, deferred, inFlight: 0, backlogGateOpen: true, drainNow: false },
     };
 }
 
 describe('processing status sentence', () => {
+    it.each(['failed', 'skipped'] as const)('does not declare completion after terminal extraction is %s', (outcome) => {
+        const snapshot = status(0);
+        snapshot.ledger.readable = 0;
+        snapshot.ledger.unreadable = 1;
+        snapshot.ledger[outcome] = 1;
+        expect(describeStatus(snapshot, false)).toMatchObject({
+            tone: 'error', headline: 'Some files could not be processed', processNow: false,
+        });
+    });
+
+    it('does not declare completion for readable files with unresolved index issues', () => {
+        const snapshot = status(0);
+        snapshot.issues = [{ reason: 'index_failed', count: 1 }];
+        expect(describeStatus(snapshot, false).headline).toBe('Some files could not be processed');
+    });
+
+    it.each(['extraction', 'ocr', 'index'])('reports unfinished %s ledger work without a queued job as waiting', (stage) => {
+        const snapshot = status(0);
+        if (stage === 'index') snapshot.ledger.oldestPendingAt = '2026-09-09 00:00:00';
+        else snapshot.ledger.readable = 0;
+        if (stage === 'ocr') snapshot.ledger.awaitingOcr = 1;
+        expect(describeStatus(snapshot, true)).toMatchObject({
+            tone: 'waiting', headline: 'Files are waiting to be processed', processNow: false,
+        });
+    });
+
+    it('preserves the empty-library state when there are no issues or pending stages', () => {
+        expect(describeStatus(status(0, 0), false).headline).toBe('No attachments to process yet');
+    });
+
     it.each([false, true])('shows parked work as waiting with immediate drain %s', (drainNow) => {
         const snapshot = status(3);
         snapshot.worker.drainNow = drainNow;
