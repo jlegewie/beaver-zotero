@@ -346,8 +346,11 @@
 
 /* A shared card — the question card, the batch approval card — drawn inside
  * the popup: the popup is the frame, so the card gives up its own. The
- * padding is forced because the batch approval card sets its own inline. */
-.beaver-run-status-popup__embedded {
+ * padding is forced because the batch approval card sets its own inline.
+ * A card whose every click is its own (the question's options fill it) does
+ * not show the frame's pointer; one with plain copy between its controls
+ * keeps it, since that copy still opens Beaver. */
+.beaver-run-status-popup__embedded--own-clicks {
     cursor: default;
 }
 

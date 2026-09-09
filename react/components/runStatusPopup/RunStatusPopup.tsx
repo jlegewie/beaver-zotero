@@ -215,25 +215,20 @@ const CreditView: React.FC<{ card: CreditCard }> = ({ card }) => (
  * The batch is approved right here, with the same card the composer shows
  * for it: the backend's title, scope, goal and warnings, the coverage choice,
  * and a field for instructions. The card names the batch itself, so it
- * stands without the popup's header and takes the close button into its
- * title row. Keyed on the request so a new one starts from a fresh draft.
+ * stands without the popup's header — and without a close button: the run
+ * is blocked on this decision, and Cancel is the way out of it. Keyed on the
+ * request so a new one starts from a fresh draft.
+ *
+ * Its controls are all buttons, links and fields, which the card's click
+ * handler leaves alone on its own, so the copy around them still opens
+ * Beaver like any other card's background.
  */
 const BatchView: React.FC<{ card: BatchCard }> = ({ card }) => (
-    <div className="beaver-run-status-popup__embedded" data-run-status-popup-interactive>
+    <div className="beaver-run-status-popup__embedded">
         <BatchApprovalCard
             key={card.approval.approvalId}
             approval={card.approval}
             onSubmit={card.onSubmit}
-            titleTrailing={(
-                <div className="beaver-run-status-popup__trailing beaver-run-status-popup__dismiss">
-                    <IconButton
-                        icon={CancelIcon}
-                        variant="ghost-secondary"
-                        onClick={card.onDismiss}
-                        ariaLabel="Close"
-                    />
-                </div>
-            )}
         />
     </div>
 );
@@ -249,7 +244,7 @@ const QuestionView: React.FC<{ card: QuestionCard }> = ({ card }) => (
             leading={<Mark icon={HelpCircleIcon} className="font-color-secondary" />}
             detail={null}
         />
-        <div className="beaver-run-status-popup__embedded" data-run-status-popup-interactive>
+        <div className="beaver-run-status-popup__embedded beaver-run-status-popup__embedded--own-clicks" data-run-status-popup-interactive>
             <AskUserQuestionCard
                 key={card.question.questionId}
                 pendingQuestion={card.question}

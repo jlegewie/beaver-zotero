@@ -108,7 +108,9 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
             role="group"
             aria-label="Batch job progress"
         >
-            {/* Overlay so it does not stack on the composer's 1px top border. */}
+            {/* Overlay so it does not stack on the composer's 1px top border.
+                Hidden while expanded: the body draws the full track then, and
+                the hairline would only repeat it along the top edge. */}
             <div
                 className="display-flex flex-row batch-progress-hairline"
                 style={{
@@ -117,7 +119,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                     left: 0,
                     right: 0,
                     height: 2,
-                    opacity: isOver ? 0 : 1,
+                    opacity: isOver || expanded ? 0 : 1,
                     overflow: 'hidden',
                     pointerEvents: 'none',
                     transition: 'opacity 0.7s ease',

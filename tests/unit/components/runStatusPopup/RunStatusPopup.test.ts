@@ -20,10 +20,9 @@ vi.mock('../../../../react/host/zotero/components/agentActionViewHelpers', () =>
 vi.mock('../../../../react/components/ui/buttons/RunPermissionButton', () => ({ default: () => null }));
 vi.mock('@beaver/agent-ui/chat/AskUserQuestionCard', () => ({ default: () => null }));
 vi.mock('@beaver/agent-ui/chat/BatchApprovalCard', () => ({
-    default: ({ approval, onSubmit, titleTrailing }: any) => React.createElement(
+    default: ({ approval, onSubmit }: any) => React.createElement(
         'div', { className: 'batch-card', 'data-approval': approval.approvalId },
         React.createElement('button', { type: 'button', onClick: () => onSubmit({ approved: true, mode: 'ask_each_time', user_instructions: null }) }, approval.approveLabel),
-        titleTrailing,
     ),
 }));
 // The panel's stamp reading is its own test's business; here it draws a
@@ -108,18 +107,21 @@ describe('RunStatusPopup batch approval', () => {
             onSubmit: vi.fn(), onOpen: vi.fn(), onDismiss: vi.fn(),
         };
     });
-    it('draws the shared approval card alone, with the close button in its title row', () => {
+    it('draws the shared approval card alone, with no header and no close button', () => {
         render();
         const card = container.querySelector<HTMLElement>('.batch-card')!;
         expect(card.dataset.approval).toBe('b1');
         expect(container.querySelector('.beaver-run-status-popup__header')).toBeNull();
+        expect(container.querySelector('[aria-label="Close"]')).toBeNull();
+    });
+    it('opens Beaver from the copy around its controls, but not from the controls', () => {
+        render();
+        const card = container.querySelector<HTMLElement>('.batch-card')!;
         act(() => card.click());
-        expect(mocks.card.onOpen).not.toHaveBeenCalled();
+        expect(mocks.card.onOpen).toHaveBeenCalledTimes(1);
         act(() => card.querySelector('button')!.click());
         expect(mocks.card.onSubmit).toHaveBeenCalledWith({ approved: true, mode: 'ask_each_time', user_instructions: null });
-        act(() => card.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click());
-        expect(mocks.card.onDismiss).toHaveBeenCalledTimes(1);
-        expect(mocks.card.onOpen).not.toHaveBeenCalled();
+        expect(mocks.card.onOpen).toHaveBeenCalledTimes(1);
     });
 });
 

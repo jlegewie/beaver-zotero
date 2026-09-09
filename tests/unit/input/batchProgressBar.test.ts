@@ -122,6 +122,33 @@ function outcomeBody(node: React.ReactNode): React.ReactElement<any> | null {
     return outcomeBody(props.children ?? null);
 }
 
+/** The 2px hairline along the bar's top edge, wherever it sits in the tree. */
+function hairline(node: React.ReactNode): React.ReactElement<any> | null {
+    if (Array.isArray(node)) {
+        for (const child of node) {
+            const found = hairline(child);
+            if (found) return found;
+        }
+        return null;
+    }
+    if (!React.isValidElement(node)) return null;
+    const props = (node as React.ReactElement<any>).props ?? {};
+    if (typeof props.className === 'string' && props.className.includes('batch-progress-hairline')) {
+        return node as React.ReactElement<any>;
+    }
+    return hairline(props.children ?? null);
+}
+
+describe('the batch progress bar hairline', () => {
+    it("is drawn while collapsed and gives way to the body's track when opened", () => {
+        hookState.slots = [];
+        hookState.index = 0;
+        const collapsed = hairline(BatchProgressBar({ batch: tracked, queuedBatches: [] }) as React.ReactNode);
+        expect(collapsed?.props.style.opacity).toBe(1);
+        expect(hairline(renderExpanded(tracked))?.props.style.opacity).toBe(0);
+    });
+});
+
 describe('the batch progress bar, opened', () => {
     const batch = entry({
         blocks: [
