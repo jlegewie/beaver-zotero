@@ -8,6 +8,7 @@ import {
 function row(overrides: Partial<AttachmentProcessingIssueRow>): AttachmentProcessingIssueRow {
     return {
         libraryId: 1,
+        contentKind: 'pdf',
         zoteroKey: 'AAAAAAAA',
         extractStatus: null,
         ocrStatus: null,
@@ -29,6 +30,14 @@ describe('classifyProcessingIssue', () => {
         }
     });
 
+    it.each(['file_missing', 'download_failed: 404', 'ocr_remote_download_failed: download_failed',
+        'ocr_remote_download_failed: read_failed'])('classifies OCR file access failure %s as unavailable', (lastError) => {
+        for (const entitlements of [noOcr, withOcr]) {
+            expect(classifyProcessingIssue(row({ extractStatus: 'done', ocrStatus: 'failed', lastError }), entitlements))
+                .toBe('file_unavailable');
+        }
+    });
+
     it('recognises encrypted, oversized and unsupported files', () => {
         expect(classifyProcessingIssue(row({ extractStatus: 'skipped', lastError: 'encrypted' }), noOcr)).toBe('encrypted');
         expect(classifyProcessingIssue(row({ extractStatus: 'skipped', lastError: 'too_many_pages' }), noOcr)).toBe('too_large');
@@ -40,6 +49,13 @@ describe('classifyProcessingIssue', () => {
         const empty = row({ extractStatus: 'failed', lastError: 'empty_document' });
         expect(classifyProcessingIssue(empty, noOcr)).toBe('scanned');
         expect(classifyProcessingIssue(empty, withOcr)).toBe('no_text');
+    });
+
+    it.each(['epub', 'snapshot'])('does not recommend OCR for text-empty %s files', (contentKind) => {
+        for (const entitlements of [noOcr, withOcr]) {
+            expect(classifyProcessingIssue(row({ contentKind, extractStatus: 'failed', lastError: 'no_text_layer' }), entitlements))
+                .toBe('no_text');
+        }
     });
 
     it('treats a scan waiting for OCR as an issue only without OCR access', () => {

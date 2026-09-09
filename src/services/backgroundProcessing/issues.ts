@@ -35,6 +35,7 @@ export interface BackgroundQueueDeadRow {
 
 /** One ledger row that did not reach a readable state. */
 export interface AttachmentProcessingIssueRow {
+    contentKind: string | null;
     libraryId: number;
     zoteroKey: string;
     extractStatus: string | null;
@@ -75,10 +76,14 @@ export function processingIssuesSql(entitlements: IssueEntitlements): string {
                     WHEN ${hasCodeSql('encrypted')} THEN 'encrypted'
                     WHEN ${anyCodeSql(TOO_LARGE_CODES)} THEN 'too_large'
                     WHEN instr(last_error, 'unsupported_') = 1 OR instr(last_error, ': unsupported_') > 0 THEN 'unsupported'
-                    WHEN ${anyCodeSql(NO_TEXT_CODES)} THEN '${entitlements.hasOcrAccess ? 'no_text' : 'scanned'}'
+                    WHEN ${anyCodeSql(NO_TEXT_CODES)} THEN CASE
+                        WHEN content_kind = 'pdf' AND ${entitlements.hasOcrAccess ? 0 : 1} THEN 'scanned'
+                        ELSE 'no_text' END
                     ELSE 'extract_failed' END
                 WHEN upsert_status = 'failed' AND ${entitlements.hasSearchIndexAccess ? 1 : 0} THEN 'index_failed'
-                WHEN ocr_status = 'failed' THEN 'ocr_failed'
+                WHEN ocr_status = 'failed' THEN CASE
+                    WHEN ${anyCodeSql(FILE_UNAVAILABLE_CODES)} THEN 'file_unavailable'
+                    ELSE 'ocr_failed' END
                 WHEN ocr_status = 'needed' AND ${entitlements.hasOcrAccess ? 0 : 1} THEN 'scanned'
             END AS reason
         FROM attachment_processing_state
@@ -139,7 +144,7 @@ function hasAnyCode(error: string | null, codes: string[]): boolean {
  * With OCR entitlement a scan awaiting OCR is pending work, not an issue, so
  * `ocr_status = 'needed'` rows are only classified when the caller has no OCR
  * access; then they share the "scanned" group with extraction outcomes that
- * found no text, since OCR is the remedy for both. Returns `null` for rows that
+ * found no text in PDFs, since OCR is the remedy for both. Returns `null` for rows that
  * are not an issue from the user's point of view.
  */
 export function classifyProcessingIssue(
@@ -155,13 +160,15 @@ export function classifyProcessingIssue(
         if (hasAnyCode(error, TOO_LARGE_CODES)) return 'too_large';
         if (error && /(^|: )unsupported_/.test(error)) return 'unsupported';
         if (hasAnyCode(error, NO_TEXT_CODES)) {
-            return entitlements.hasOcrAccess ? 'no_text' : 'scanned';
+            return row.contentKind === 'pdf' && !entitlements.hasOcrAccess ? 'scanned' : 'no_text';
         }
         return 'extract_failed';
     }
 
     if (row.upsertStatus === 'failed' && entitlements.hasSearchIndexAccess) return 'index_failed';
-    if (row.ocrStatus === 'failed') return 'ocr_failed';
+    if (row.ocrStatus === 'failed') {
+        return hasAnyCode(row.lastError, FILE_UNAVAILABLE_CODES) ? 'file_unavailable' : 'ocr_failed';
+    }
     if (row.ocrStatus === 'needed' && !entitlements.hasOcrAccess) return 'scanned';
     return null;
 }

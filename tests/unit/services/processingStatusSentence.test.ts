@@ -11,6 +11,16 @@ function status(deferred: number, total = 1) {
 }
 
 describe('processing status sentence', () => {
+    it.each([false, true])('offers a manual recheck after unavailable files drain with continuous mode %s', (continuous) => {
+        const snapshot = status(0);
+        snapshot.ledger.readable = 0;
+        snapshot.ledger.unreadable = 1;
+        snapshot.issues = [{ reason: 'file_unavailable', count: 1 }];
+        expect(describeStatus(snapshot, continuous)).toMatchObject({ tone: 'error', processNow: true });
+        snapshot.worker.dispatchBlocker = 'sync_in_progress';
+        expect(describeStatus(snapshot, continuous).processNow).toBe(false);
+    });
+
     it('shows dispatcher-blocked work as waiting without offering an idle bypass', () => {
         const snapshot = status(0);
         snapshot.worker.available = 4;
