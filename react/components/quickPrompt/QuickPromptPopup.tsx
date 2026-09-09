@@ -15,11 +15,15 @@ import {
     quickPromptStateAtom,
     toggleQuickPromptAtom,
 } from '../../atoms/quickPrompt';
+import { runStatusPopupEnabledAtom } from '../../atoms/runStatusPopup';
+import { threadNavigationSeqAtom } from '../../atoms/threads';
+import { useRunFocusHandoff } from './useRunFocusHandoff';
 import { isSidebarVisibleAtom, selectedZoteroTabIdAtom } from '../../atoms/ui';
 import { eventManager } from '../../events/eventManager';
 import { useEventSubscription } from '../../hooks/useEventSubscription';
 import { uiManager } from '../../ui/UIManager';
 import InputArea from '../input/InputArea';
+import DragDropWrapper from '../input/DragDropWrapper';
 import PopupOverlayContainer from '../PopupOverlayContainer';
 import RunPulse from '../runStatusPopup/RunPulse';
 import { threadDisplayName } from '../runStatusPopup/runStatusPopupModel';
@@ -161,6 +165,16 @@ const QuickPromptPopup: React.FC = () => {
     const toggle = useSetAtom(toggleQuickPromptAtom);
     const open = useSetAtom(openQuickPromptAtom);
     const close = useSetAtom(closeQuickPromptAtom);
+    const runPopupEnabled = useAtomValue(runStatusPopupEnabledAtom);
+    const navigationSeq = useAtomValue(threadNavigationSeqAtom);
+    const activeRun = useAtomValue(activeRunAtom);
+    const requestRunFocus = useRunFocusHandoff({
+        navigationKey: `${navigationSeq}:${selectedTabId}`,
+        enabled: runPopupEnabled,
+        sidebarVisible: isSidebarVisible,
+        isPending,
+        runId: activeRun?.id ?? null,
+    });
     const rootRef = useRef<HTMLDivElement>(null);
     // The tab the popup was opened in. Its attachments — the open file, a
     // selection, selected items — belong to that tab, so it does not outlive it.
@@ -213,13 +227,24 @@ const QuickPromptPopup: React.FC = () => {
         if (isSidebarVisible) {
             close();
         } else if (state.mode === 'compose' && isPending) {
-            dismiss();
+            // Keep keyboard control with the run this composer started.
+            // Restoring focus to the toolbar makes Enter reopen Beaver.
+            const root = rootRef.current;
+            const ownsFocus = root?.ownerDocument.hasFocus() && root.contains(root.ownerDocument.activeElement);
+            if (!runPopupEnabled) {
+                if (ownsFocus) dismiss();
+                else close();
+                return;
+            }
+            const host = root?.closest<HTMLElement>('#beaver-pane-floating-popup');
+            if (ownsFocus && host) requestRunFocus(host, dismiss);
+            close();
         } else if (state.mode === 'busy' && !hasActiveWork) {
             dismiss();
         } else if (state.mode === 'blocked' && chatAccessGate === null) {
             void open();
         }
-    }, [state, isSidebarVisible, isPending, hasActiveWork, chatAccessGate, close, dismiss, open]);
+    }, [state, isSidebarVisible, isPending, hasActiveWork, chatAccessGate, close, dismiss, open, requestRunFocus, runPopupEnabled]);
 
     // Switching tabs closes the popup without touching focus: Zotero has just
     // moved it into the new tab, and the draft is kept for the next open.
@@ -263,10 +288,12 @@ const QuickPromptPopup: React.FC = () => {
             ) : (
                 <div className="beaver-quick-prompt__card">
                     <CloseButton onClose={dismiss} />
-                    <div className="beaver-quick-prompt__composer">
-                        <PopupOverlayContainer />
-                        <InputArea inputRef={inputRef} verticalPosition="above" placeholder="Ask Beaver — @ to add a source, / for actions" />
-                    </div>
+                    <DragDropWrapper overlayBorderRadius={12}>
+                        <div className="beaver-quick-prompt__composer">
+                            <PopupOverlayContainer />
+                            <InputArea inputRef={inputRef} verticalPosition="above" placeholder="Ask Beaver — @ to add a source, / for actions" />
+                        </div>
+                    </DragDropWrapper>
                 </div>
             )}
         </div>

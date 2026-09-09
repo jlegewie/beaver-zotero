@@ -30,6 +30,7 @@ vi.mock('../../../../react/ui/UIManager', () => ({
 vi.mock('../../../../react/atoms/threads', async () => {
     const { atom } = await import('jotai');
     return {
+        threadNavigationSeqAtom: atom(0),
         newThreadAtom: atom(null, async (_get, _set, options?: unknown) => mocks.newThread(options)),
     };
 });
@@ -40,6 +41,10 @@ vi.mock('../../../../react/atoms/agentRunAtoms', async () => {
 vi.mock('../../../../react/atoms/chatAccess', async () => {
     const { atom } = await import('jotai');
     return { chatAccessGateAtom: atom<string | null>(null) };
+});
+vi.mock('../../../../react/atoms/runStatusPopup', async () => {
+    const { atom } = await import('jotai');
+    return { runStatusPopupEnabledAtom: atom(true) };
 });
 vi.mock('../../../../react/atoms/ui', async () => {
     const { atom } = await import('jotai');
@@ -65,7 +70,10 @@ vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 // exposes an editor to press keys in is all these tests need.
 vi.mock('../../../../react/components/input/InputArea', () => ({
     default: () => React.createElement('div', { className: 'stub-composer' },
-        React.createElement('div', { className: 'beaver-lexical-content', contentEditable: true, 'data-testid': 'editor' })),
+        React.createElement('div', { className: 'beaver-lexical-content', contentEditable: true, tabIndex: 0, 'data-testid': 'editor' })),
+}));
+vi.mock('../../../../react/components/input/DragDropWrapper', () => ({
+    default: ({ children }: { children: React.ReactNode }) => React.createElement('div', { 'data-testid': 'drop-zone' }, children),
 }));
 vi.mock('../../../../react/components/PopupOverlayContainer', () => ({ default: () => null }));
 vi.mock('../../../../react/components/runStatusPopup/RunPulse', () => ({ default: () => null }));
@@ -75,6 +83,7 @@ import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { isWSChatPendingAtom } from '../../../../react/atoms/agentRunAtoms';
 import { isSidebarVisibleAtom, selectedZoteroTabIdAtom } from '../../../../react/atoms/ui';
 import { chatAccessGateAtom } from '../../../../react/atoms/chatAccess';
+import { runStatusPopupEnabledAtom } from '../../../../react/atoms/runStatusPopup';
 import { quickPromptStateAtom } from '../../../../react/atoms/quickPrompt';
 import QuickPromptPopup from '../../../../react/components/quickPrompt/QuickPromptPopup';
 
@@ -148,7 +157,7 @@ describe('QuickPromptPopup', () => {
         mount();
         await fireShortcut();
         expect(store.get(quickPromptStateAtom)).toEqual({ mode: 'compose' });
-        expect(container.querySelector('.stub-composer')).not.toBeNull();
+        expect(container.querySelector('[data-testid="drop-zone"] .stub-composer')).not.toBeNull();
         expect(mocks.newThread).toHaveBeenCalledWith({ skipActiveRunConfirm: true, preserveDraft: true });
     });
 
@@ -209,12 +218,41 @@ describe('QuickPromptPopup', () => {
         expect(store.get(quickPromptStateAtom)).toEqual({ mode: 'compose' });
     });
 
-    it('closes once the message it composed is being sent', async () => {
+    it('closes after sending without focusing the toolbar', async () => {
         mount();
         await fireShortcut();
         act(() => { store.set(isWSChatPendingAtom, true); });
         expect(store.get(quickPromptStateAtom)).toBeNull();
-        expect(mocks.focusToggleButton).toHaveBeenCalled();
+        expect(mocks.focusToggleButton).not.toHaveBeenCalled();
+    });
+
+    it('hands focus from the sent composer to the approval button', async () => {
+        mount();
+        await fireShortcut();
+        container.querySelector<HTMLElement>('[data-testid="editor"]')!.focus();
+        act(() => { store.set(isWSChatPendingAtom, true); });
+        const card = document.createElement('div');
+        card.className = 'beaver-run-status-popup__card';
+        const approve = document.createElement('button');
+        approve.setAttribute('data-run-status-approve', '');
+        card.appendChild(approve);
+        floatingRoot.appendChild(card);
+        act(() => { store.set(activeRunAtom, run('in_progress')); });
+        expect(document.activeElement).toBe(approve);
+        expect(mocks.focusToggleButton).not.toHaveBeenCalled();
+    });
+
+    it('restores the original focus after sending when run popups are disabled', async () => {
+        store.set(runStatusPopupEnabledAtom, false);
+        const tree = document.createElement('button');
+        document.body.appendChild(tree);
+        tree.focus();
+        mount();
+        await fireShortcut();
+        container.querySelector<HTMLElement>('[data-testid="editor"]')!.focus();
+        act(() => { store.set(isWSChatPendingAtom, true); });
+        expect(document.activeElement).toBe(tree);
+        tree.remove();
     });
 
     it('closes when the sidebar opens over it', async () => {
@@ -262,6 +300,7 @@ describe('QuickPromptPopup', () => {
         expect(store.get(quickPromptStateAtom)).toEqual({ mode: 'busy' });
         expect(container.querySelector('.beaver-quick-prompt__card--busy')?.textContent).toContain('Beaver is still working');
         expect(container.querySelector('.stub-composer')).toBeNull();
+        expect(container.querySelector('[data-testid="drop-zone"]')).toBeNull();
         act(() => { store.set(activeRunAtom, run('completed')); });
         expect(store.get(quickPromptStateAtom)).toBeNull();
     });
@@ -281,6 +320,7 @@ describe('QuickPromptPopup', () => {
         await fireShortcut();
         expect(store.get(quickPromptStateAtom)).toEqual({ mode: 'blocked', reason: 'signed-out' });
         expect(container.querySelector('.stub-composer')).toBeNull();
+        expect(container.querySelector('[data-testid="drop-zone"]')).toBeNull();
         expect(container.textContent).toContain('Sign in to use Beaver');
         const open = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('Open Beaver'))!;
         act(() => { open.click(); });
@@ -297,7 +337,7 @@ describe('QuickPromptPopup', () => {
             await Promise.resolve();
         });
         expect(store.get(quickPromptStateAtom)).toEqual({ mode: 'compose' });
-        expect(container.querySelector('.stub-composer')).not.toBeNull();
+        expect(container.querySelector('[data-testid="drop-zone"] .stub-composer')).not.toBeNull();
     });
 
     it('toggles closed on a second shortcut press', async () => {

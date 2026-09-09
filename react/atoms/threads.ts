@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
+import { currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateMessageCollectionsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import { isAtBottomAtom, isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowIsAtBottomAtom, windowUserScrolledAtom } from "./ui";
 
 import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "@beaver/agent-core/citations/atoms";
@@ -366,6 +366,7 @@ export const newThreadAtom = atom(
                 if (isLibraryTab && addSelectedItemsOnNewThread) {
                     const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage');
                     set(updateMessageItemsFromZoteroSelectionAtom, maxAddAttachmentToMessage);
+                    set(updateMessageCollectionsFromZoteroSelectionAtom);
                 }
                 if (!isLibraryTab) {
                     await set(updateReaderAttachmentAtom);

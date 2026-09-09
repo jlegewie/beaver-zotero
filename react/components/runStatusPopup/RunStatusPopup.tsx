@@ -1,4 +1,5 @@
-import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 /**
  * The shimmering status line, cut with a visible ellipsis.
@@ -156,6 +157,7 @@ const ApprovalView: React.FC<{ card: ApprovalCard }> = ({ card }) => (
                 {card.rejectLabel}
             </Button>
             <Button
+                data-run-status-approve
                 variant="solid"
                 style={FOOTER_BUTTON_STYLE}
                 onClick={() => card.onDecide(true)}
@@ -187,6 +189,7 @@ const CreditView: React.FC<{ card: CreditCard }> = ({ card }) => (
                 {card.declineLabel}
             </Button>
             <Button
+                data-run-status-approve
                 variant="solid"
                 style={FOOTER_BUTTON_STYLE}
                 onClick={() => card.onDecide(true)}
@@ -320,6 +323,13 @@ const CardView: React.FC<{ card: RunStatusPopupCard }> = ({ card }) => {
  * first paint is not animated: a card appearing should not unfold from zero.
  */
 const AnimatedCard: React.FC<{ card: RunStatusPopupCard; children: React.ReactNode }> = ({ card, children }) => {
+    const cardRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        const element = cardRef.current;
+        if (element?.ownerDocument.hasFocus() && element.ownerDocument.activeElement === element) {
+            element.querySelector<HTMLElement>('[data-run-status-approve]:not(:disabled)')?.focus();
+        }
+    }, [card.kind]);
     const [height, setHeight] = useState<number | null>(null);
     // The height as last measured, so a measurement that finds it unchanged
     // does not reach the setter: a setter called with the current value still
@@ -367,7 +377,7 @@ const AnimatedCard: React.FC<{ card: RunStatusPopupCard; children: React.ReactNo
     }, [card]);
 
     const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLElement>) => {
-        if (event.target !== event.currentTarget) return;
+        if (event.target !== event.currentTarget || event.defaultPrevented || isImeKeyEvent(event.nativeEvent) || event.repeat) return;
         if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             card.onOpen();
@@ -376,6 +386,7 @@ const AnimatedCard: React.FC<{ card: RunStatusPopupCard; children: React.ReactNo
 
     return (
         <div
+            ref={cardRef}
             className={`beaver-run-status-popup__card beaver-run-status-popup__card--${card.kind} ${settled ? 'beaver-run-status-popup__card--settled' : ''}`}
             style={{ height: height ?? undefined }}
             role="button"
