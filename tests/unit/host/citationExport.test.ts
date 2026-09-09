@@ -19,6 +19,7 @@ vi.mock('../../../src/utils/zoteroLinkCitation', () => ({
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
+import { buildZoteroCitationLinkHTML } from '../../../src/utils/zoteroLinkCitation';
 import { zoteroDocumentExport } from '../../../react/host/zotero/citationExport';
 
 function citationRequest(overrides: Record<string, unknown> = {}) {
@@ -58,6 +59,46 @@ describe('zoteroDocumentExport.renderCitation', () => {
             html: '<a href="https://example.com">Example</a>',
         });
         expect(Zotero.Items.getByLibraryAndKey).toHaveBeenCalledWith(42, 'ABCD1234');
+    });
+
+    it('uses resolved pages for structural locators', () => {
+        const loc = { kind: 'sentence', value: '4', raw: 's4' };
+        zoteroDocumentExport.renderCitation(citationRequest({ requestedRef: { loc }, pages: [6] }));
+        expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item, { kind: 'page', value: '6', raw: 'page6' });
+    });
+
+    it('retains all metadata pages when no requested locator exists', () => {
+        zoteroDocumentExport.renderCitation(citationRequest({ pages: [6, 7] }));
+        expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item,
+            { kind: 'page', value: '6-7', raw: 'page6-7' });
+    });
+
+    it.each([
+        { pages: [2, 4], labels: undefined, expected: '2-4' },
+        { pages: [2, 4, 2], labels: { 1: 'iv', 3: 'vi' }, expected: 'iv-vi' },
+        { pages: [2, 2], labels: { 1: 'iv' }, expected: 'iv' },
+    ])('formats structural spans as inclusive page ranges: $expected', ({ pages, labels, expected }) => {
+        zoteroDocumentExport.renderCitation(citationRequest({
+            requestedRef: { loc: { kind: 'sentence', value: '1-5', raw: 's1-s5' } },
+            pages, metadata: { page_labels: labels },
+        }));
+        expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item,
+            { kind: 'page', value: expected, raw: `page${expected}` });
+    });
+
+    it.each([null, { loc: { kind: 'page', value: '2, 4', raw: 'page2, 4' } }])(
+        'preserves separate cited pages without a structural span (%j)', (requestedRef) => {
+            zoteroDocumentExport.renderCitation(citationRequest({ requestedRef, pages: [2, 4] }));
+            expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item,
+                { kind: 'page', value: '2, 4', raw: 'page2, 4' });
+        },
+    );
+
+    it('omits unresolved structural locators rather than displaying sentence numbers', () => {
+        zoteroDocumentExport.renderCitation(citationRequest({
+            requestedRef: { loc: { kind: 'sentence', value: '1-5', raw: 's1-s5' } },
+        }));
+        expect(buildZoteroCitationLinkHTML).toHaveBeenCalledWith(item, undefined);
     });
 
     it('falls back to the legacy local library id when no portable ref exists', () => {

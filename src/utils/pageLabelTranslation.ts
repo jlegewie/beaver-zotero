@@ -70,3 +70,25 @@ export function translatePageLabelToNumber(
 
     return translatedAny ? translatedParts.join('') : locStr;
 }
+
+/** Format distinct physical pages as compact ranges, using display labels when available. */
+export function formatCitationPages(
+    pages: number[],
+    labels?: PageLabels | null,
+    { inclusiveRange = false }: { inclusiveRange?: boolean } = {},
+): string | undefined {
+    const sorted = [...new Set(pages.filter(page => Number.isInteger(page) && page > 0))].sort((a, b) => a - b);
+    const ranges: string[] = [];
+    const label = (page: number) => labels?.[page - 1]?.trim() || String(page);
+    // Structural spans may supply only endpoint pages, with interior pages omitted.
+    if (inclusiveRange && sorted.length > 1) {
+        return `${label(sorted[0])}-${label(sorted[sorted.length - 1])}`;
+    }
+    for (let i = 0; i < sorted.length; i++) {
+        const start = sorted[i];
+        let end = start;
+        while (sorted[i + 1] === end + 1) end = sorted[++i];
+        ranges.push(start === end ? label(start) : `${label(start)}-${label(end)}`);
+    }
+    return ranges.length ? ranges.join(', ') : undefined;
+}
