@@ -84,7 +84,7 @@ import { citationsAtom } from '@beaver/agent-core/citations/atoms';
 import { threadAgentActionsAtom } from '../../../react/agents/agentActions';
 import { popupMessagesAtom } from '../../../react/atoms/ui';
 import type { PopupMessage } from '../../../react/types/popupMessage';
-import { threadNavigationSeqAtom } from '../../../react/atoms/threads';
+import { newThreadAtom, threadNavigationSeqAtom } from '../../../react/atoms/threads';
 import {
     autoRetryErroredRunAtom,
     isWSChatPendingAtom,
@@ -100,8 +100,11 @@ import { selectedModelAtom } from '../../../react/atoms/models';
 import { sessionAtom } from '../../../react/atoms/auth';
 import {
     currentMessageContentAtom, currentMessageItemsAtom,
-    currentMessageFiltersAtom, currentReaderAttachmentAtom,
+    currentMessageFiltersAtom, currentReaderAttachmentAtom, readerActionContextAtom,
 } from '../../../react/atoms/messageComposition';
+
+import { localZoteroLibrariesAtom } from '../../../react/atoms/profile';
+import { currentNoteItemAtom } from '../../../react/atoms/zoteroContext';
 
 import { ApiError, ServerError } from '@beaver/agent-core/types/apiErrors';
 
@@ -824,6 +827,38 @@ describe('retry via synchronous truncation', () => {
     });
 
     describe('paths that never truncate', () => {
+        it('sends only the explicit reader-action source, without destination reader or note attachments', async () => {
+            const source = {
+                id: 42, libraryID: 1, key: 'SOURCE',
+                isNote: () => false, isRegularItem: () => false,
+                isAttachment: () => true, isAnnotation: () => false,
+            } as any;
+            const previousItems = Zotero.Items;
+            Zotero.Items = { loadDataTypes: vi.fn().mockResolvedValue(undefined) } as any;
+            const destinationReader = { ...source, id: 99, key: 'DESTINATION' };
+            const destinationNote = { ...source, id: 100, key: 'OTHERNOTE', isNote: () => true, loadDataType: vi.fn() };
+            store.set(localZoteroLibrariesAtom, [{ library_id: 1 }] as any);
+            store.set(currentReaderAttachmentAtom, destinationReader);
+            store.set(currentNoteItemAtom, destinationNote);
+            store.set(currentMessageItemsAtom, [source]);
+            store.set(readerActionContextAtom, { item: source, selection: null });
+            try {
+                await store.set(sendWSMessageAtom, 'Explain this annotation');
+                expect(store.get(wsErrorAtom)).toBeNull();
+                expect(sentRequest().user_prompt.attachments).toEqual([
+                    expect.objectContaining({ type: 'source', zotero_key: 'SOURCE', include: 'fulltext' }),
+                ]);
+                expect(destinationNote.loadDataType).not.toHaveBeenCalled();
+            } finally {
+                store.set(currentReaderAttachmentAtom, null);
+                Zotero.Items = previousItems;
+                store.set(currentNoteItemAtom, null);
+                store.set(currentMessageItemsAtom, []);
+                store.set(readerActionContextAtom, null);
+                store.set(localZoteroLibrariesAtom, []);
+            }
+        });
+
         it('an ordinary send makes no POST and asserts nothing', async () => {
             store.set(threadRunsAtom, [makeRun('a'), makeRun('b')]);
 
@@ -955,4 +990,21 @@ describe('retry via synchronous truncation', () => {
 vi.mock('../../../react/runtime/windowRuntime', async () => {
     const { singleWindowRuntimeMock } = await import('../../helpers/singleWindowRuntime');
     return singleWindowRuntimeMock();
+});
+
+
+it('does not let an older new-thread cleanup overwrite a later navigation', async () => {
+    let finish!: () => void;
+    cleanupAnnotationsMock.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    store.set(activeRunAtom, null);
+    store.set(isWSChatPendingAtom, false);
+    const pending = store.set(newThreadAtom, { skipAutoPopulate: true });
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    store.set(threadNavigationSeqAtom, seq => seq + 1);
+    store.set(currentThreadIdAtom, 'later-thread');
+    store.set(currentMessageContentAtom, 'later draft');
+    finish();
+    expect(await pending).toBeUndefined();
+    expect(store.get(currentThreadIdAtom)).toBe('later-thread');
+    expect(store.get(currentMessageContentAtom)).toBe('later draft');
 });

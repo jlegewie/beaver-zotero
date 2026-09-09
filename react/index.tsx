@@ -255,6 +255,12 @@ const GlobalContextInitializer = () => {
 
     useBackgroundProcessingScopeCleanup();
 
+    // Command readiness follows the subscription effects above, not createRoot().render().
+    React.useEffect(() => {
+        const runtime = getWindowRuntime();
+        if (runtime.status === 'attaching') runtime.status = 'ready';
+    }, []);
+
     return null; // This component does not render any UI
 };
 

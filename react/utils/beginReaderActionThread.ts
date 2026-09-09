@@ -4,12 +4,11 @@ import { store } from '../store';
 
 /** Start a reader-action draft, retaining a guard for its asynchronous preparation. */
 export async function beginReaderActionThread(
-    newThread: (options: { skipAutoPopulate: boolean }) => Promise<void>,
+    newThread: (options: { skipAutoPopulate: boolean }) => Promise<number | undefined>,
 ): Promise<(() => boolean) | null> {
-    const beforeNavigation = store.get(threadNavigationSeqAtom);
-    await newThread({ skipAutoPopulate: true });
-    const navigation = store.get(threadNavigationSeqAtom);
-    // A cancelled new-thread confirmation leaves the navigation sequence unchanged.
-    if (navigation === beforeNavigation) return null;
-    return () => !!tryGetWindowRuntime() && store.get(threadNavigationSeqAtom) === navigation;
+    const navigation = await newThread({ skipAutoPopulate: true });
+    // Cancellation or superseding navigation does not return a committed token.
+    if (navigation === undefined) return null;
+    const isCurrent = () => !!tryGetWindowRuntime() && store.get(threadNavigationSeqAtom) === navigation;
+    return isCurrent() ? isCurrent : null;
 }

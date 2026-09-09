@@ -1,3 +1,4 @@
+import type { ReaderActionLocation } from '../../src/runtime/readerActionLocation';
 import { getContextWindow } from '../runtime/windowRuntime';
 import { getSelectedCollections } from '../../src/utils/zoteroSelection';
 import { collectionToReference } from '../utils/zoteroReferences';
@@ -249,7 +250,13 @@ export const currentNoteTabItemKeyAtom = atom<string | null>((get) => {
 */
 export const readerTextSelectionAtom = atom<TextSelection | null>(null);
 /** Explicit reader action context belongs to the draft, not the destination tab. */
-export const readerActionContextAtom = atom<{ item: Zotero.Item; selection: TextSelection | null } | null>(null);
+export const readerActionContextAtom = atom<{ item: Zotero.Item; selection: TextSelection | null; location?: ReaderActionLocation } | null>(null);
+
+export const stagedReaderActionContextAtom = atom((get) => {
+    const context = get(readerActionContextAtom);
+    return context && get(currentMessageItemsAtom).some(item => item.id === context.item.id)
+        ? context : null;
+});
 
 /**
 * Remove a library from the current selection
@@ -316,8 +323,9 @@ const messageItemKey = (item: Zotero.Item): string => `${item.libraryID}-${item.
 */
 export const removeItemFromMessageAtom = atom(
     null,
-    (_, set, item: Zotero.Item) => {
+    (get, set, item: Zotero.Item) => {
         const key = messageItemKey(item);
+        if (get(readerActionContextAtom)?.item.id === item.id) set(readerActionContextAtom, null);
         set(currentMessageItemsAtom, (prevItems) =>
             prevItems.filter((i) => messageItemKey(i) !== key)
         );
@@ -541,6 +549,8 @@ async function validateItemsInBackground(
             const invalidKeys = new Set(rejectedItems.map(({ item }) => item.key));
             const validItems = currentItems.filter((item: Zotero.Item) => !invalidKeys.has(item.key));
             set(currentMessageItemsAtom, validItems);
+            const context = get(readerActionContextAtom);
+            if (context && !validItems.some((item: Zotero.Item) => item.id === context.item.id)) set(readerActionContextAtom, null);
 
             // Show error message with custom content
             let title = `${rejectedItems.length} Items Removed`;

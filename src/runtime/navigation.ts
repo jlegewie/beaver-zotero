@@ -29,14 +29,20 @@ export async function resolveNavigationWindow(origin?: Window | null): Promise<M
         throw new WindowUnavailableError();
     }
     let target = Zotero.getMainWindow();
-    if (!isMainWindow(target)) target = (Zotero as any).openMainWindow();
+    if (!target || target.closed) {
+        // Zotero opens asynchronously and does not return the new window.
+        (Zotero as any).openMainWindow();
+        target = null as any;
+    }
     const deadline = Date.now() + 15000;
-    while (target && !target.closed && (!isMainWindow(target) || !(target.ZoteroPane as any).itemsView)) {
+    for (;;) {
+        // Reacquire until a window appears, then retain that command's target.
+        if (!target) target = Zotero.getMainWindow();
+        if (target?.closed) throw new WindowUnavailableError();
+        if (isMainWindow(target) && (target.ZoteroPane as any).itemsView) return target;
         if (Date.now() >= deadline) throw new WindowUnavailableError();
         await Zotero.Promise.delay(50);
     }
-    if (!isMainWindow(target)) throw new WindowUnavailableError();
-    return target;
 }
 
 /** Main origins stay local; standalone reader/note commands choose a live chat. */
@@ -70,4 +76,9 @@ export function acceptsTabEvent(win: MainWindow, ids: readonly (string | number)
 export function selectedTabIfAccepted(win: MainWindow, ids: readonly (string | number)[], extraData: any) {
     if (!acceptsTabEvent(win, ids, extraData)) return undefined;
     return win.Zotero_Tabs._tabs.find(tab => tab.id === win.Zotero_Tabs.selectedID);
+}
+
+/** Reader saves carry their instance ID; sync/background writes must not stage draft items. */
+export function isReaderAnnotationEvent(reader: { _instanceID?: string } | null, id: string | number, extraData: any): boolean {
+    return reader?._instanceID != null && extraData?.[id]?.instanceID === reader._instanceID;
 }

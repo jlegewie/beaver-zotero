@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { acceptsTabEvent, contextMainWindow, resolveNavigationWindow, resolveChatWindow } from '../../../src/runtime/navigation';
+import { isReaderAnnotationEvent, acceptsTabEvent, contextMainWindow, resolveNavigationWindow, resolveChatWindow } from '../../../src/runtime/navigation';
 
 function main(id: string) {
     return {
@@ -14,7 +14,7 @@ beforeEach(() => {
     a = main('a'); b = main('b');
     vi.stubGlobal('Zotero', {
         getMainWindow: vi.fn(() => b),
-        openMainWindow: vi.fn(() => a),
+        openMainWindow: vi.fn(() => undefined),
         Promise: { delay: async () => {} },
     });
 });
@@ -37,8 +37,35 @@ describe('navigation ownership', () => {
     });
     it('opens a main window for an originless user command with no windows', async () => {
         vi.mocked(Zotero.getMainWindow).mockReturnValue(null as any);
+        Zotero.Promise.delay = vi.fn(async () => {
+            vi.mocked(Zotero.getMainWindow).mockReturnValue(a);
+        });
         expect(await resolveNavigationWindow()).toBe(a);
         expect((Zotero as any).openMainWindow).toHaveBeenCalledOnce();
+    });
+    it('pins the newly discovered window while its pane initializes', async () => {
+        vi.mocked(Zotero.getMainWindow).mockReturnValue(null as any);
+        delete a.ZoteroPane.itemsView;
+        let ticks = 0;
+        Zotero.Promise.delay = vi.fn(async () => {
+            if (++ticks === 1) vi.mocked(Zotero.getMainWindow).mockReturnValue(a);
+            else {
+                vi.mocked(Zotero.getMainWindow).mockReturnValue(b);
+                a.ZoteroPane.itemsView = {};
+            }
+        });
+        expect(await resolveNavigationWindow()).toBe(a);
+        expect(ticks).toBe(2);
+    });
+    it('times out when opening never exposes a main window', async () => {
+        vi.mocked(Zotero.getMainWindow).mockReturnValue(null as any);
+        const now = vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(15001);
+        try {
+            await expect(resolveNavigationWindow()).rejects.toMatchObject({ code: 'window_unavailable' });
+            expect((Zotero as any).openMainWindow).toHaveBeenCalledOnce();
+        } finally {
+            now.mockRestore();
+        }
     });
     it('routes a standalone reader to a chat rather than treating its host as a main window', async () => {
         b.__beaverRuntime = { status: 'ready', contextWindow: b };
@@ -72,4 +99,13 @@ it('independently evaluated renderer modules keep their own context after focus 
     rendererA.getWindowRuntime().status = 'closing';
     expect(rendererA.tryGetWindowRuntime()).toBeUndefined();
     expect(rendererB.getContextWindow()).toBe(b);
+});
+
+it('stages reader annotation batches only in their originating instance, even for the same PDF', () => {
+    const a = { _instanceID: 'reader-a' };
+    const b = { _instanceID: 'reader-b' };
+    const data = { 1: { instanceID: 'reader-a' }, 2: { instanceID: 'reader-b' }, 3: {} };
+    expect([1, 2, 3].filter(id => isReaderAnnotationEvent(a, id, data))).toEqual([1]);
+    expect([1, 2, 3].filter(id => isReaderAnnotationEvent(b, id, data))).toEqual([2]);
+    expect(isReaderAnnotationEvent({}, 3, data)).toBe(false);
 });

@@ -19,6 +19,8 @@ const TEMPORARY_NOTE_SIDE_MARGIN = 12;
 * Types for the Zotero Reader API
 */
 export interface ZoteroReader {
+    type?: 'pdf' | 'epub' | 'snapshot';
+    _instanceID?: string;
     _internalReader: {
         _annotationManager: {
             addAnnotation: (data: any) => Promise<Annotation>;

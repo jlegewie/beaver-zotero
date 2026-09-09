@@ -20,7 +20,7 @@ import {
     CurrentSavedSearch,
     IndexingStatus,
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { currentReaderAttachmentAtom, readerTextSelectionAtom, readerActionContextAtom, currentMessageItemsAtom } from './messageComposition';
+import { currentReaderAttachmentAtom, readerTextSelectionAtom, stagedReaderActionContextAtom } from './messageComposition';
 import { currentNoteItemAtom } from './zoteroContext';
 import { getCurrentPage, getCurrentReader, getEpubReaderPage } from '../utils/readerUtils';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
@@ -62,22 +62,23 @@ const MAX_LIBRARY_SELECTION = 30;
  * non-searchable library, no reader state is emitted.
  */
 export function getReaderState(get: Getter, searchableLibraryIds: Set<number>): ReaderState | null {
-    const explicit = get(readerActionContextAtom);
-    const staged = explicit && get(currentMessageItemsAtom).some(item => item.id === explicit.item.id) ? explicit : null;
+    const staged = get(stagedReaderActionContextAtom);
     const readerAttachment = staged?.item ?? get(currentReaderAttachmentAtom);
     if (!readerAttachment) return null;
     if (!searchableLibraryIds.has(readerAttachment.libraryID)) return null;
 
     const activeReader = getCurrentReader();
-    const reader = activeReader?.itemID === readerAttachment.id ? activeReader : undefined;
-    const contentKind = reader?.type === 'pdf' || reader?.type === 'epub' || reader?.type === 'snapshot'
+    const reader = !staged && activeReader?.itemID === readerAttachment.id ? activeReader : undefined;
+    const contentKind = staged?.location?.contentKind ?? (reader?.type === 'pdf' || reader?.type === 'epub' || reader?.type === 'snapshot'
         ? reader.type
-        : undefined;
+        : undefined);
     let currentTextSelection = staged ? staged.selection : get(readerTextSelectionAtom);
 
-    let currentPage = staged?.selection?.page ?? (reader ? getCurrentPage(reader) : null);
+    let currentPage = staged
+        ? staged.selection?.page ?? staged.location?.currentPage ?? null
+        : reader ? getCurrentPage(reader) : null;
     if (contentKind === 'epub') {
-        currentPage = getEpubReaderPage(reader);
+        if (!staged) currentPage = getEpubReaderPage(reader);
         if (currentTextSelection) {
             // EPUB selection locations are section-based; keep page context at
             // the reader level.
@@ -127,7 +128,8 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
     const searchableLibrarySet = new Set(searchableLibraryIds);
 
     const readerState = getReaderState(get, searchableLibrarySet);
-    const noteState = getNoteState(get, searchableLibrarySet);
+    const stagedReaderAction = get(stagedReaderActionContextAtom);
+    const noteState = stagedReaderAction ? null : getNoteState(get, searchableLibrarySet);
 
     // Get current library and collection context
     let currentLibrary: CurrentLibrary | undefined = undefined;
@@ -139,7 +141,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
     // Detect the note-editor view from the raw tab context, NOT from the
     // exclusion-filtered noteState
     const isNoteTabActive = !!get(currentNoteItemAtom);
-    const currentView: 'library' | 'file_reader' | 'note_editor' = get(isLibraryTabAtom) ? 'library' : isNoteTabActive ? 'note_editor' : 'file_reader';
+    const currentView: 'library' | 'file_reader' | 'note_editor' = stagedReaderAction ? 'file_reader' : get(isLibraryTabAtom) ? 'library' : isNoteTabActive ? 'note_editor' : 'file_reader';
 
     if (currentView === 'file_reader' && readerState) {
         // In reader view, use the library from the reader attachment

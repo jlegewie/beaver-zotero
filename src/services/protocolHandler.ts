@@ -69,14 +69,14 @@ function doAction(uri: any): void {
 
 async function handlePreferences(tab?: string): Promise<void> {
     // Preferences borrows a renderer, so wait for a live main window to be ready.
-    await resolveChatWindow();
+    const win = await resolveChatWindow();
 
     const resolvedTab = tab && VALID_PREFERENCE_TABS.has(tab as PreferencePageTab)
         ? (tab as PreferencePageTab)
         : undefined;
 
     ztoolkit.log(`protocolHandler: Opening preferences${resolvedTab ? ` (tab: ${resolvedTab})` : ""}`);
-    openPreferencesWindow(resolvedTab);
+    openPreferencesWindow(resolvedTab, undefined, undefined, win);
 }
 
 async function handleThread(threadId: string, runId?: string): Promise<void> {

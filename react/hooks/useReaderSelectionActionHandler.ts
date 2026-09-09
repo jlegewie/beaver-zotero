@@ -24,7 +24,7 @@ export function useReaderSelectionActionHandler() {
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
 
     useEventSubscription('readerSelectionAction', async (detail) => {
-        const { action, text, page, readerItemID } = detail;
+        const { action, text, page, readerItemID, readerLocation } = detail;
 
         // Skip if not authenticated
         if (!store.get(userAtom)) return;
@@ -47,7 +47,7 @@ export function useReaderSelectionActionHandler() {
                 if (!isCurrent()) return;
                 await addItems([item]);
                 if (!isCurrent()) return;
-                setReaderActionContext({ item, selection: text ? { text, page } : null });
+                setReaderActionContext({ item, selection: text ? { text, page } : null, location: readerLocation });
 
                 // Either send explain prompt or focus input
                 if (action === 'explain') {

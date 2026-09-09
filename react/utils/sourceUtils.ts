@@ -1307,7 +1307,9 @@ export function getNoteEditorView(itemId: number, win = getContextWindow()): any
         const matching = instances.filter((e: any) => {
             if (e.itemID !== itemId || win.closed) return false;
             const owner = e._iframeWindow?.top ?? e._iframe?.ownerDocument?.defaultView;
-            return owner === win || (e.tabID && win.Zotero_Tabs?._tabs?.some((tab: any) => tab.id === e.tabID));
+            if (owner?.closed) return false;
+            // Legacy note windows are opened with their initiating main window as opener.
+            return owner === win || (e.viewMode === 'window' && owner?.opener === win) || (e.tabID && win.Zotero_Tabs?._tabs?.some((tab: any) => tab.id === e.tabID));
         });
         if (matching.length === 0) return null;
 

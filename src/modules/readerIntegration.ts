@@ -11,6 +11,7 @@
  * Lives in the esbuild bundle — must NOT import from react/store or Jotai.
  */
 
+import { captureReaderActionLocation } from '../runtime/readerActionLocation';
 import { resolveChatWindow } from '../runtime/navigation';
 
 // Module-level references for cleanup
@@ -64,14 +65,15 @@ async function dispatchReaderAction(
     text: string,
     page: number | undefined,
     readerItemID: number,
-    origin: Window,
+    reader: any,
 ): Promise<void> {
-    const win = await resolveChatWindow(origin);
+    const readerLocation = captureReaderActionLocation(reader);
+    const win = await resolveChatWindow(reader._window);
     const eventBus = win?.__beaverEventBus;
     if (!eventBus) return;
 
     eventBus.dispatchEvent(new win.CustomEvent('readerSelectionAction', {
-        detail: { action, text, page, readerItemID },
+        detail: { action, text, page, readerItemID, readerLocation },
     }));
 }
 
@@ -115,7 +117,7 @@ function onRenderTextSelectionPopup(event: any): void {
     explainBtn.style.cssText = 'flex: 1;';
     explainBtn.textContent = 'Explain';
     explainBtn.addEventListener('click', () => {
-        void dispatchReaderAction('explain', annotationText, page, readerItemID, reader._window).catch(Zotero.logError);
+        void dispatchReaderAction('explain', annotationText, page, readerItemID, reader).catch(Zotero.logError);
     });
 
     const askBtn = doc.createElement('button');
@@ -123,7 +125,7 @@ function onRenderTextSelectionPopup(event: any): void {
     askBtn.style.cssText = 'flex: 1;';
     askBtn.textContent = 'Ask...';
     askBtn.addEventListener('click', () => {
-        void dispatchReaderAction('ask', annotationText, page, readerItemID, reader._window).catch(Zotero.logError);
+        void dispatchReaderAction('ask', annotationText, page, readerItemID, reader).catch(Zotero.logError);
     });
 
     row.appendChild(explainBtn);
@@ -171,7 +173,7 @@ function onCreateViewContextMenu(event: any): void {
             persistent: true,
             onCommand: () => {
                 if (selectedText && readerItemID) {
-                    void dispatchReaderAction('explain', selectedText, page, readerItemID, reader._window).catch(Zotero.logError);
+                    void dispatchReaderAction('explain', selectedText, page, readerItemID, reader).catch(Zotero.logError);
                 }
             },
         },
@@ -181,7 +183,7 @@ function onCreateViewContextMenu(event: any): void {
             persistent: true,
             onCommand: () => {
                 if (selectedText && readerItemID) {
-                    void dispatchReaderAction('ask', selectedText, page, readerItemID, reader._window).catch(Zotero.logError);
+                    void dispatchReaderAction('ask', selectedText, page, readerItemID, reader).catch(Zotero.logError);
                 }
             },
         },
@@ -197,14 +199,15 @@ async function dispatchAnnotationAction(
     action: 'explain' | 'ask',
     annotationIds: string[],
     readerItemID: number,
-    origin: Window,
+    reader: any,
 ): Promise<void> {
-    const win = await resolveChatWindow(origin);
+    const readerLocation = captureReaderActionLocation(reader);
+    const win = await resolveChatWindow(reader._window);
     const eventBus = win?.__beaverEventBus;
     if (!eventBus) return;
 
     eventBus.dispatchEvent(new win.CustomEvent('readerAnnotationAction', {
-        detail: { action, annotationIds, readerItemID },
+        detail: { action, annotationIds, readerItemID, readerLocation },
     }));
 }
 
@@ -225,14 +228,14 @@ function onCreateAnnotationContextMenu(event: any): void {
             label: 'Explain with Beaver...',
             persistent: true,
             onCommand: () => {
-                void dispatchAnnotationAction('explain', annotationIds, readerItemID, reader._window).catch(Zotero.logError);
+                void dispatchAnnotationAction('explain', annotationIds, readerItemID, reader).catch(Zotero.logError);
             },
         },
         {
             label: 'Ask Beaver...',
             persistent: true,
             onCommand: () => {
-                void dispatchAnnotationAction('ask', annotationIds, readerItemID, reader._window).catch(Zotero.logError);
+                void dispatchAnnotationAction('ask', annotationIds, readerItemID, reader).catch(Zotero.logError);
             },
         },
     );

@@ -4,6 +4,7 @@
  * → set-items → stage-action-pill flow. The user submits the message themselves.
  */
 
+import { beginReaderActionThread } from '../utils/beginReaderActionThread';
 import { getContextWindow } from '../runtime/windowRuntime';
 
 import { useSetAtom, useAtomValue } from 'jotai';
@@ -53,19 +54,22 @@ export function useContextMenuActionHandler() {
 
         // 2. Start new thread (clears current thread state + message items)
         //    Skip auto-populate — we manage items/collection ourselves below
-        await newThread({ skipAutoPopulate: true });
+        const isCurrent = await beginReaderActionThread(newThread);
+        if (!isCurrent) return;
 
         // 3. Load items/collection and set on the message
         //    Use setTimeout(0) to let the sidebar-open state settle
         //    (toggleChat's synchronous clear of items runs in the same tick)
         setTimeout(async () => {
             try {
+                if (!isCurrent()) return;
                 // Target context for the action's prompt: the rows the user
                 // right-clicked, which are not always what the live Zotero
                 // selection resolves to (e.g. with a reader tab open).
                 let contextItems: Zotero.Item[] = [];
                 if (itemIds.length > 0) {
                     const items = await Zotero.Items.getAsync(itemIds);
+                    if (!isCurrent()) return;
                     if (items.length > 0) {
                         // Multi-target actions can dispatch mixed selections,
                         // so check the items themselves for notes
@@ -73,6 +77,7 @@ export function useContextMenuActionHandler() {
                             ? ['itemData', 'note']
                             : ['itemData'];
                         await Zotero.Items.loadDataTypes(items, dataTypes);
+                        if (!isCurrent()) return;
                         setCurrentMessageItems(items);
                         contextItems = items;
                     }

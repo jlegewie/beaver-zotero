@@ -321,11 +321,9 @@ describe('interrupt-active-run confirm', () => {
             expect(store.get(threadNavigationSeqAtom)).toBe(before + 1);
         });
 
-        it('counts before the identity preflight, not after it', async () => {
-            // The preflight is a network round trip, and the confirm the user
-            // just cleared is added to it. A count taken after would leave a
-            // retry that finishes inside that window free to act on the chat
-            // being left.
+        it('preserves the current generation during identity preflight and counts the accepted load', async () => {
+            // Preflight can still produce a mismatch confirmation. Until it is
+            // accepted, retries still belong to the unchanged current chat.
             getPrefMock.mockImplementation((k: string) => k === 'statefulChat');
             const before = store.get(threadNavigationSeqAtom);
             let seqAtFetch: number | null = null;
@@ -341,13 +339,13 @@ describe('interrupt-active-run confirm', () => {
             });
 
             expect(getThreadMock).toHaveBeenCalled();
-            expect(seqAtFetch).toBe(before + 1);
+            expect(seqAtFetch).toBe(before);
+            expect(store.get(threadNavigationSeqAtom)).toBe(before + 1);
         });
 
-        it('still counts a load that aborts after the user committed', async () => {
-            // The accepted cost of counting at the commit point: work already
-            // abandoned cannot be un-abandoned when the load later fails. Safe
-            // direction — see the atom's own note.
+        it('does not count a failed identity preflight as committed navigation', async () => {
+            // A failed preflight keeps the current chat, including any retry
+            // whose backend truncation is still pending.
             getPrefMock.mockImplementation((k: string) => k === 'statefulChat');
             getThreadMock.mockRejectedValue(new Error('offline'));
             const before = store.get(threadNavigationSeqAtom);
@@ -358,7 +356,7 @@ describe('interrupt-active-run confirm', () => {
             });
 
             expect(loaded).toBe(false);
-            expect(store.get(threadNavigationSeqAtom)).toBe(before + 1);
+            expect(store.get(threadNavigationSeqAtom)).toBe(before);
         });
 
         it('does not count a navigation the user declined', async () => {

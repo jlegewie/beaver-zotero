@@ -177,7 +177,7 @@ export class BeaverUIFactory {
                     if (root) roots.add(root);
                     ztoolkit.log("registerChatPanel: renderAiSidebar mounted for reader");
                 }
-                runtime.status = "ready";
+                // The renderer marks readiness after its command subscriptions mount.
             } catch (error) {
                 if (win.__beaverRuntime === runtime) {
                     this.removeChatPanel(win);
@@ -729,7 +729,7 @@ export class BeaverUIFactory {
      * that the Actions tab pre-filter its list to that category (or "uncategorized").
      * `actionId` requests that the Actions tab reveal that action in edit mode.
      */
-    static openPreferencesWindow(tab?: PreferencePageTab, actionsCategoryFilter?: ActionCategoryFilter, actionId?: string): void {
+    static openPreferencesWindow(tab?: PreferencePageTab, actionsCategoryFilter?: ActionCategoryFilter, actionId?: string, window?: Window): void {
         const existingWindow = this.findPreferencesWindow();
         if (existingWindow) {
             // Switch tab (and apply the category filter / action-edit request)
@@ -742,7 +742,8 @@ export class BeaverUIFactory {
             return;
         }
 
-        const mainWindow = Zotero.getMainWindow();
+        const mainWindow = window ?? Zotero.getMainWindow();
+        if (!mainWindow || mainWindow.closed) return;
         mainWindow.openDialog(
             'chrome://beaver/content/beaverPreferences.xhtml',
             BEAVER_PREFERENCES_WINDOW_NAME,

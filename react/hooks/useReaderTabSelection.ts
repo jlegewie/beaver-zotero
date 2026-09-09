@@ -1,4 +1,4 @@
-import { selectedTabIfAccepted } from '../../src/runtime/navigation';
+import { isReaderAnnotationEvent, selectedTabIfAccepted } from '../../src/runtime/navigation';
 import { getContextWindow } from '../runtime/windowRuntime';
 import { useEffect, useRef, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -450,6 +450,7 @@ export function useReaderTabSelection() {
                             // registered globally, so annotations arriving on a
                             // library/note tab — or from sync, or from a background
                             // reader tab — must not touch the draft message.
+                            if (!isReaderAnnotationEvent(currentReaderRef.current, id, extraData)) return;
                             const activeReaderItemID = currentReaderIdRef.current;
                             if (activeReaderItemID === null) return;
 

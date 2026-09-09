@@ -405,6 +405,7 @@ export {
     getCurrentReader,
     getCurrentReaderAndWaitForView,
     waitForReaderForItem,
+    waitForReaderView,
     getCurrentPage,
     getEpubReaderPage,
     navigateToPage,

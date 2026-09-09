@@ -736,14 +736,28 @@ describe('getNoteEditorView', () => {
         expect(getNoteEditorView(42)).toBe(tabView);
     });
 
-    it('falls back to first matching instance when no tab instance exists', () => {
+    it('ignores a separate note window opened by another main window', () => {
+        (globalThis as any).Zotero.Notes = {
+            _editorInstances: [{
+                itemID: 42,
+                viewMode: 'window',
+                _iframeWindow: {
+                    top: { opener: {}, closed: false },
+                    wrappedJSObject: { _currentEditorInstance: { _editorCore: { view: { dom: {} } } } },
+                },
+            }],
+        };
+        expect(getNoteEditorView(42)).toBeNull();
+    });
+
+    it('finds a separate note window opened by this main window', () => {
         const windowView = { dom: {}, id: 'window' };
         (globalThis as any).Zotero.Notes = {
             _editorInstances: [{
                 itemID: 42,
                 viewMode: 'window',
                 _iframeWindow: {
-                top: fixtureWindow,
+                top: { opener: fixtureWindow, closed: false },
                     wrappedJSObject: {
                         _currentEditorInstance: {
                             _editorCore: { view: windowView },

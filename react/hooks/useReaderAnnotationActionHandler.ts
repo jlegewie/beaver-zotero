@@ -9,7 +9,7 @@ import { beginReaderActionThread } from '../utils/beginReaderActionThread';
 import { useSetAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { newThreadAtom } from '../atoms/threads';
-import { addItemsToCurrentMessageItemsAtom } from '../atoms/messageComposition';
+import { readerActionContextAtom, addItemsToCurrentMessageItemsAtom } from '../atoms/messageComposition';
 import { sendWSMessageAtom } from '../atoms/agentRunAtoms';
 import { eventManager } from '../events/eventManager';
 import { useEventSubscription } from './useEventSubscription';
@@ -20,10 +20,11 @@ import { getPref } from '../../src/utils/prefs';
 export function useReaderAnnotationActionHandler() {
     const newThread = useSetAtom(newThreadAtom);
     const addItems = useSetAtom(addItemsToCurrentMessageItemsAtom);
+    const setReaderActionContext = useSetAtom(readerActionContextAtom);
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
 
     useEventSubscription('readerAnnotationAction', async (detail) => {
-        const { action, annotationIds, readerItemID } = detail;
+        const { action, annotationIds, readerItemID, readerLocation } = detail;
 
         // Skip if not authenticated
         if (!store.get(userAtom)) return;
@@ -67,10 +68,11 @@ export function useReaderAnnotationActionHandler() {
                     return;
                 }
 
-                // Add annotations to current message items
+                // Keep the originating document as a source even in a different renderer.
                 if (!isCurrent()) return;
-                await addItems(annotationItems);
+                await addItems([attachment, ...annotationItems]);
                 if (!isCurrent()) return;
+                setReaderActionContext({ item: attachment, selection: null, location: readerLocation });
 
                 if (action === 'explain') {
                     const defaultPrompt = 'Explain the selected annotation(s) from this paper in plain language. '
@@ -86,5 +88,5 @@ export function useReaderAnnotationActionHandler() {
                 logger(`useReaderAnnotationActionHandler: Error: ${error}`, 1);
             }
         }, 0);
-    }, [newThread, addItems, sendWSMessage]);
+    }, [newThread, addItems, setReaderActionContext, sendWSMessage]);
 }

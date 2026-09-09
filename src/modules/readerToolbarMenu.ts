@@ -9,6 +9,7 @@
  * Lives in the esbuild bundle — must NOT import from react/store or Jotai.
  */
 
+import { captureReaderActionLocation } from '../runtime/readerActionLocation';
 import { resolveChatWindow } from '../runtime/navigation';
 
 import { getMergedActions } from './zoteroContextMenu';
@@ -155,7 +156,7 @@ async function dispatchVisualizerAction(
     if (!eventBus) return;
 
     eventBus.dispatchEvent(new win.CustomEvent('readerVisualizerAction', {
-        detail: { action, readerItemID: reader.itemID, readerTabID: reader.tabID },
+        detail: { action, readerInstanceID: reader._instanceID },
     }));
 }
 
@@ -194,11 +195,12 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
     const askItem = xulDoc.createXULElement('menuitem');
     askItem.setAttribute('label', 'Ask Beaver');
     askItem.addEventListener('command', async () => {
+        const readerLocation = captureReaderActionLocation(reader);
         const mainWin = await resolveChatWindow(win);
         const eventBus = mainWin?.__beaverEventBus;
         if (!eventBus) return;
         eventBus.dispatchEvent(new mainWin.CustomEvent('readerSelectionAction', {
-            detail: { action: 'ask', text: '', readerItemID: reader.itemID },
+            detail: { action: 'ask', text: '', readerItemID: reader.itemID, readerLocation },
         }));
         setTimeout(() => {
             eventBus.dispatchEvent(new mainWin.CustomEvent('focusInput', {

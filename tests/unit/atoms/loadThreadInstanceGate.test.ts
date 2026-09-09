@@ -188,10 +188,13 @@ vi.mock('../../../src/utils/libraryIdentity', () => ({
 
 import {
     loadThreadAtom,
+    newThreadAtom,
+    threadNavigationSeqAtom,
     currentThreadIdAtom,
     isLoadingThreadAtom,
     pendingScrollToRunAtom,
 } from '../../../react/atoms/threads';
+import { currentMessageContentAtom, readerActionContextAtom } from '../../../react/atoms/messageComposition';
 import { ApiError } from '@beaver/agent-core/types/apiErrors';
 
 const CURRENT = { zoteroUserId: '111', zoteroLocalId: 'CURKEY' };
@@ -217,12 +220,14 @@ describe('loadThreadAtom instance-mismatch gate', () => {
         confirmMock.mockReturnValue(false);
         const threadId = nextThreadId();
         store.set(pendingScrollToRunAtom, 'run-1');
+        store.set(threadNavigationSeqAtom, 7);
 
         const loaded = await store.set(loadThreadAtom, {
             user_id: 'u1', threadId, threadName: 'Foreign', threadIdentity: FOREIGN,
         });
 
         expect(loaded).toBe(false);
+        expect(store.get(threadNavigationSeqAtom)).toBe(7);
         expect(confirmMock).toHaveBeenCalledTimes(1);
         expect(getThreadRunsMock).not.toHaveBeenCalled();
         expect(store.get(currentThreadIdAtom)).toBeNull();
@@ -375,4 +380,25 @@ describe('loadThreadAtom instance-mismatch gate', () => {
         expect(store.get(currentThreadIdAtom)).toBeNull();
         expect(store.get(isLoadingThreadAtom)).toBe(false);
     });
+    it.each(['identity', 'runs'])('does not let a stale %s response overwrite a new reader-action draft', async (phase) => {
+        let finish!: (value: any) => void;
+        const deferred = new Promise(resolve => { finish = resolve; });
+        if (phase === 'identity') getThreadMock.mockReturnValueOnce(deferred);
+        else getThreadRunsMock.mockReturnValueOnce(deferred);
+        const old = store.set(loadThreadAtom, {
+            user_id: 'u1', threadId: nextThreadId(),
+            ...(phase === 'runs' ? { threadIdentity: CURRENT } : {}),
+        });
+        await vi.waitFor(() => expect(phase === 'identity' ? getThreadMock : getThreadRunsMock).toHaveBeenCalled());
+        await store.set(newThreadAtom, { skipAutoPopulate: true });
+        store.set(currentMessageContentAtom, 'new reader action');
+        const context = { item: { id: 42 }, selection: null } as any;
+        store.set(readerActionContextAtom, context);
+        finish(phase === 'identity' ? { id: 'old', name: 'Old' } : { runs: [], agent_actions: [] });
+        expect(await old).toBe(false);
+        expect(store.get(currentThreadIdAtom)).toBeNull();
+        expect(store.get(currentMessageContentAtom)).toBe('new reader action');
+        expect(store.get(readerActionContextAtom)).toBe(context);
+    });
+
 });

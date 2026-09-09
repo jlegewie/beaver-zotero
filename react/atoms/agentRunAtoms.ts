@@ -69,6 +69,7 @@ import {
     currentMessageCollectionsAtom,
     currentMessageExternalFilesAtom,
     currentReaderAttachmentAtom,
+    stagedReaderActionContextAtom,
     currentMessageFiltersAtom,
     clearComposerAtom,
 } from './messageComposition';
@@ -2335,8 +2336,11 @@ export const sendWSMessageAtom = atom(
             const applicationStatePromise = getApplicationStateProvider()(get);
             // Attach a rejection handler immediately while attachment preparation runs.
             void applicationStatePromise.catch(() => {});
-            const submissionReaderAttachment = get(currentReaderAttachmentAtom);
-            const submissionNoteItem = get(currentNoteItemAtom);
+            const readerActionContext = get(stagedReaderActionContextAtom);
+            // Routed reader actions carry their own document; destination tabs
+            // must not add unrelated reader or note attachments.
+            const submissionReaderAttachment = readerActionContext ? null : get(currentReaderAttachmentAtom);
+            const submissionNoteItem = readerActionContext ? null : get(currentNoteItemAtom);
             // Get current model and build model selection options for the request
             const model = get(selectedModelAtom);
             const modelOptions = buildModelSelectionOptions(model);
