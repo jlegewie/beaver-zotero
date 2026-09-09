@@ -48,6 +48,8 @@ export interface BeaverEvents {
             | 'copy-ocr-fixture-command';
     };
     focusInput: Record<string, never>;
+    /** The quick prompt shortcut: open or close the closed-sidebar composer. */
+    toggleQuickPrompt: Record<string, never>;
     'background-worker:status': {
         running: boolean;
     };

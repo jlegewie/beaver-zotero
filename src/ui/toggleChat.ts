@@ -14,3 +14,12 @@ export function triggerToggleChat(win: Window) {
         location: location
     });
 }
+
+/**
+ * Toggle the quick prompt — the composer shown in the corner of the main
+ * window while the sidebar is closed. The React side decides what the
+ * shortcut does when the sidebar is open or Beaver is not signed in.
+ */
+export function triggerToggleQuickPrompt() {
+    eventManager.dispatch('toggleQuickPrompt', {});
+}

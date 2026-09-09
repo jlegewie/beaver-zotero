@@ -135,8 +135,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     // The footer's buttons never wrap; when the row is too narrow for them,
     // the permission trigger drops to its icon.
-    const footerRef = useRef<HTMLDivElement>(null);
-    const permissionIconOnly = useOverflowCollapse(footerRef, 1) >= 1;
+    const footer = useOverflowCollapse(1);
+    const permissionIconOnly = footer.level >= 1;
 
     const prevAwaitingRef = useRef(isAwaitingApproval);
     const hasInitializedRef = useRef(false);
@@ -704,7 +704,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         </div>
                     )}
 
-                    <div ref={footerRef} className="display-flex flex-row items-center gap-2 px-2 py-2">
+                    <div ref={footer.ref} className="display-flex flex-row items-center gap-2 px-2 py-2">
                         {/* A cost confirmation has no permission control to offer:
                             what a request may spend is set once by the credit
                             limit. While the run is waiting on this card the

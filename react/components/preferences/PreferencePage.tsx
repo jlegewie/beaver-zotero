@@ -212,6 +212,7 @@ const PreferencePage: React.FC = () => {
     const rebuildIndexButtonProps = getRebuildIndexButtonProps();
     const sidebarShortcutLabel = `${Zotero.isMac ? '⌘' : 'Ctrl'}+${keyboardShortcut}`;
     const windowShortcutLabel = `${Zotero.isMac ? '⌘⇧' : 'Ctrl+Shift'}+${keyboardShortcut}`;
+    const quickPromptShortcutLabel = `${Zotero.isMac ? '⌘⌥' : 'Ctrl+Alt'}+${keyboardShortcut}`;
     type VisiblePreferencePageTab = Exclude<PreferencePageTab, 'account'>;
     interface PreferenceTabDefinition {
         id: VisiblePreferencePageTab;
@@ -381,7 +382,7 @@ const PreferencePage: React.FC = () => {
                         <SettingsGroup>
                             <SettingsRow
                                 title="Keyboard Shortcut"
-                                description={<>Sidebar: {sidebarShortcutLabel} &middot; Window: {windowShortcutLabel} &middot; Changes require restart</>}
+                                description={<>Sidebar: {sidebarShortcutLabel} &middot; Window: {windowShortcutLabel} &middot; Quick prompt: {quickPromptShortcutLabel} &middot; Changes require restart</>}
                                 control={
                                     <select
                                         id="keyboard-shortcut"

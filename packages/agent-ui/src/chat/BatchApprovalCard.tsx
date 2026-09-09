@@ -148,8 +148,8 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
 
     // The footer's buttons never wrap; when the row is too narrow for them,
     // the mode trigger drops to its icon.
-    const footerRef = useRef<HTMLDivElement>(null);
-    const modeIconOnly = useOverflowCollapse(footerRef, 1) >= 1;
+    const footer = useOverflowCollapse(1);
+    const modeIconOnly = footer.level >= 1;
 
     return (
         <div
@@ -320,7 +320,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                     run alive, so neither is an escape hatch and the destructive
                     one is not given a leading position. */}
                 <div
-                    ref={footerRef}
+                    ref={footer.ref}
                     className="display-flex flex-row items-center gap-2 min-w-0"
                     style={{ borderTop: '1px solid var(--fill-quinary)', paddingTop: '0.7rem' }}
                 >
