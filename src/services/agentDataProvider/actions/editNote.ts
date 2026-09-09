@@ -647,7 +647,7 @@ async function validateEditNoteAction(
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
                 valid: false,
-                error: buildPartialSimplifiedTagMessage(partial),
+                error: buildPartialSimplifiedTagMessage(partial, operation),
                 error_code: 'partial_simplified_tag',
                 preference: 'always_ask',
             };
@@ -1158,7 +1158,7 @@ async function executeEditNoteAction(
                 type: 'agent_action_execute_response',
                 request_id: request.request_id,
                 success: false,
-                error: buildPartialSimplifiedTagMessage(partial),
+                error: buildPartialSimplifiedTagMessage(partial, operation),
                 error_code: 'partial_simplified_tag',
             };
         }

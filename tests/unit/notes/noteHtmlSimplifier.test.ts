@@ -3743,3 +3743,25 @@ describe('buildUnresolvedLocatorWarning', () => {
         expect(warning).toMatch(/only support page locators/i);
     });
 });
+
+describe('detectPartialSimplifiedTag — citation attributes', () => {
+    it.each([
+        'loc="page3"', ' ref="c_X_0"/>', 'loc="page1" ref="c_X_0"',
+        'id="u-ABCDEFGH"', 'label="Example">', ' item_id = "u-ABCDEFGH" ',
+        'att_id="u-ABCDEFGH"', 'external_id="ext-example"',
+        'items="u-AAAAAAAA; u-BBBBBBBB"', 'items="u-AAAAAAAA" ref="c_X_0"/>',
+    ])('flags an attribute-only anchor: %s', (anchor) => {
+        expect(detectPartialSimplifiedTag(anchor)).toEqual({
+            kind: 'citation', snippet: anchor.trim(),
+        });
+    });
+
+    it.each([
+        'The attribute loc="page3" identifies a page.',
+        '<citation id="u-ABCDEFGH" loc="page3" ref="c_X_0"/>',
+        '<p id="example">Text</p>',
+        'class="example"',
+    ])('leaves prose and complete tags alone: %s', (anchor) => {
+        expect(detectPartialSimplifiedTag(anchor)).toBeNull();
+    });
+});

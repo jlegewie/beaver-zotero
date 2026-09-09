@@ -827,7 +827,7 @@ export async function executeEditNoteAction(
         // action_data on stale paths.
         const partial = detectPartialSimplifiedTag(old_string ?? '');
         if (partial) {
-            const err = new Error(buildPartialSimplifiedTagMessage(partial));
+            const err = new Error(buildPartialSimplifiedTagMessage(partial, operation));
             (err as any).code = 'partial_simplified_tag';
             throw err;
         }
