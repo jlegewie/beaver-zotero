@@ -90,8 +90,10 @@ async function disableProcessing(): Promise<void> {
  * Call this *after* `resetProcessingState()`, immediately before the explicit
  * reconcile.
  */
-async function enableProcessing(options: { executor: boolean }): Promise<void> {
-    await setPref('accessRemoteFiles', false);
+async function enableProcessing(
+    options: { executor: boolean; remoteFiles?: boolean },
+): Promise<void> {
+    await setPref('accessRemoteFiles', options.remoteFiles === true);
     await setPref('backgroundExtractorEnabled', options.executor);
     // Left off deliberately: the suite drives every pass explicitly, and
     // continuous mode would let the auto-tick claim the backlog mid-assertion.
@@ -360,6 +362,81 @@ describe('draining an extract job fills in the ledger', () => {
             // The upsell number for non-entitled users in the prefs section.
             expect(status.ledger?.ocrNeeded ?? 0).toBeGreaterThan(0);
         }
+    });
+});
+
+describe('availability failures recover on a deep pass', () => {
+    beforeEach((ctx) => skipIfNoZotero(ctx, available));
+
+    let skipped: LedgerRow | null = null;
+    let recovered: LedgerRow | null = null;
+    let queuedAfterRecovery = false;
+
+    beforeAll(async () => {
+        if (!available) return;
+        await disableProcessing();
+        await resetProcessingState();
+
+        // 1. Remote access off: an attachment with no local file is skipped
+        //    `file_missing`. Every branch after this in `reconcileAttachment`
+        //    returns early for a non-`done` status, so before the availability
+        //    re-check nothing ever looked at this row again.
+        await enableProcessing({ executor: false, remoteFiles: false });
+        expect((await processingReconcileNow()).ok).toBe(true);
+        skipped = await getLedgerRow(
+            MISSING_FILE_PDF.library_id,
+            MISSING_FILE_PDF.zotero_key,
+        );
+
+        // 2. The file becomes reachable. `processingReconcileNow` is the
+        //    "Process now" path, which is one of the two deep passes that
+        //    re-attempt an availability failure (the other is the weekly
+        //    safety diff, not reachable from a test).
+        await backgroundClear();
+        await setPref('accessRemoteFiles', true);
+        expect((await processingReconcileNow()).ok).toBe(true);
+        recovered = await getLedgerRow(
+            MISSING_FILE_PDF.library_id,
+            MISSING_FILE_PDF.zotero_key,
+        );
+        queuedAfterRecovery = await isJobQueued({
+            libraryId: MISSING_FILE_PDF.library_id,
+            zoteroKey: MISSING_FILE_PDF.zotero_key,
+            jobType: 'document_extract',
+        });
+    }, 300_000);
+
+    it('records the unreachable file as skipped', SLOW, async () => {
+        expect(skipped?.extractStatus).toBe('skipped');
+        expect(skipped?.lastError).toBe('file_missing');
+    });
+
+    it('re-attempts the row once the file is reachable again', SLOW, async () => {
+        // The whole point: a 404 or a missing file is only permanent for that
+        // attempt. A sync race that resolves later must not leave the
+        // attachment unprocessed forever.
+        expect(recovered?.extractStatus).toBeNull();
+        expect(queuedAfterRecovery).toBe(true);
+    });
+
+    it('leaves a still-unreachable file skipped rather than looping', SLOW, async () => {
+        // The re-check is a retry, not a licence to re-download forever: with
+        // the file still unreachable the row lands back on `skipped` and no
+        // job is queued, so repeated deep passes cost a resolve and nothing more.
+        await backgroundClear();
+        await setPref('accessRemoteFiles', false);
+        expect((await processingReconcileNow()).ok).toBe(true);
+        const row = await getLedgerRow(
+            MISSING_FILE_PDF.library_id,
+            MISSING_FILE_PDF.zotero_key,
+        );
+        expect(row?.extractStatus).toBe('skipped');
+        expect(row?.lastError).toBe('file_missing');
+        expect(await isJobQueued({
+            libraryId: MISSING_FILE_PDF.library_id,
+            zoteroKey: MISSING_FILE_PDF.zotero_key,
+            jobType: 'document_extract',
+        })).toBe(false);
     });
 });
 

@@ -38,6 +38,39 @@ interface LibraryCursor {
 
 const IDLE_THRESHOLD_MS = 30_000;
 
+/**
+ * Terminal reasons that say "the bytes were not reachable", not "these bytes
+ * are unusable". Every one of them can stop being true without the attachment
+ * itself changing: metadata syncs ahead of the upload backing it, a WebDAV
+ * share or its configuration comes back, a user downloads the file later.
+ */
+const RECOVERABLE_AVAILABILITY_ERRORS = [
+    'file_missing',
+    'download_failed',
+    'read_failed',
+];
+
+/**
+ * True when a row's terminal state came from the file being unreachable.
+ *
+ * Matches on prefix because the same cause reaches the ledger in two shapes: a
+ * bare code when an executor retires the job itself, and `"<code>: <message>"`
+ * when the queue dead-letters it.
+ */
+function hasRecoverableAvailabilityFailure(
+    row: AttachmentProcessingStateRecord,
+): boolean {
+    const terminal = row.extractStatus === 'skipped'
+        || row.extractStatus === 'failed'
+        || row.ocrStatus === 'failed';
+    if (!terminal || !row.lastError) return false;
+    return RECOVERABLE_AVAILABILITY_ERRORS.some((code) =>
+        row.lastError === code || row.lastError!.startsWith(`${code}:`)
+        // The OCR lane wraps its own load failures before recording them.
+        || row.lastError!.includes(`: ${code}`));
+}
+
+
 /** Whole-library producer. Expensive work remains in the dispatcher lanes. */
 export class ReconcilerService {
     private stopped = true;
@@ -298,6 +331,29 @@ export class ReconcilerService {
                     row = { ...row, extractStatus: null, lastError: 'file_signature_changed' };
                 }
             }
+        }
+
+        // Nothing else clears an availability failure. The signature check above
+        // needs a stored mtime/size that an attachment we never read does not
+        // have, and the branches below return early for any status that is not
+        // `done` — so without this a file that shows up later stays unprocessed
+        // forever. Retried on the passes that are already deep (an explicit
+        // "Process now", or the weekly safety diff), which bounds the cost: a
+        // still-missing file simply fails again and waits for the next one,
+        // rather than re-downloading every five minutes.
+        if (statFile && hasRecoverableAvailabilityFailure(row)) {
+            await db.resetAttachmentExtraction(item.libraryID, item.key, 'availability_recheck');
+            if (row.ocrStatus === 'failed') {
+                // The OCR verdict is derived from extraction, so let the
+                // re-extract restate it instead of guessing here.
+                await db.resetAttachmentOcr(item.libraryID, item.key, 'availability_recheck');
+            }
+            row = {
+                ...row,
+                extractStatus: null,
+                ocrStatus: row.ocrStatus === 'failed' ? null : row.ocrStatus,
+                lastError: 'availability_recheck',
+            };
         }
 
         if (row.extractStatus === null) {

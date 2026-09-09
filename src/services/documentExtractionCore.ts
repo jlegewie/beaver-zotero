@@ -341,6 +341,11 @@ export type ExtractAndCacheResult =
           kind: 'response_error';
           code: ZoteroDocumentErrorCode;
           message: string;
+          /**
+           * See the EPUB result's `permanent`. Local-only: the wire `code` is
+           * unchanged, so nothing the backend or the model sees is affected.
+           */
+          permanent?: boolean;
           pageCount: number | null;
           resolvedAttachment: ResolvedAttachment | null;
           contentKind?: ExtractContentKind;
@@ -1165,6 +1170,7 @@ export async function extractAndCacheResolvedPdfDocument(
                     kind: 'response_error',
                     code: 'download_failed',
                     message: `Failed to download PDF for ${resolvedKeyStr} from remote storage: ${loaded.error instanceof Error ? loaded.error.message : String(loaded.error)}`,
+                    permanent: loaded.permanent === true,
                     pageCount: null,
                     resolvedAttachment,
                 };
@@ -1230,6 +1236,7 @@ export async function extractAndCacheResolvedPdfDocument(
                     kind: 'response_error',
                     code: 'download_failed',
                     message: `Failed to download PDF for ${resolvedKeyStr} from remote storage: ${loaded.error instanceof Error ? loaded.error.message : String(loaded.error)}`,
+                    permanent: loaded.permanent === true,
                     pageCount: totalPages,
                     resolvedAttachment,
                 };

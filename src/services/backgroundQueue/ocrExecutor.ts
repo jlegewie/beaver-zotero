@@ -89,7 +89,11 @@ interface ResolvedJob {
 
 /** Sentinel raised when the original remote scan cannot be loaded for upload. */
 class OcrRemoteLoadError extends Error {
-    constructor(public readonly code: 'file_too_large' | 'download_failed' | 'read_failed') {
+    constructor(
+        public readonly code: 'file_too_large' | 'download_failed' | 'read_failed',
+        /** The server answered definitively; retrying cannot change the result. */
+        public readonly permanent: boolean = false,
+    ) {
         super(`ocr_remote_load_failed: ${code}`);
         this.name = 'OcrRemoteLoadError';
     }
@@ -149,12 +153,43 @@ export class OcrExecutor implements JobExecutor {
                 if (error.code === 'file_too_large') {
                     return { kind: 'complete', reason: 'file_too_large' };
                 }
+                if (error.permanent) {
+                    // The scan is not on the server. Retrying would burn the full
+                    // budget on the largest files Beaver ever downloads, so retire
+                    // the job now — but stamp the ledger first, or the reconciler
+                    // sees `ocr_status='needed'` and re-enqueues it every pass.
+                    await this.markOcrLoadFailure(record, ctx, error.code);
+                    return { kind: 'complete', reason: `terminal:${error.code}` };
+                }
                 return { kind: 'retry', error: `ocr_remote_download_failed: ${error.code}`, reason: 'ocr_remote_download_failed' };
             }
             const message = error instanceof Error ? error.message : String(error);
             logger(`OcrExecutor: job ${record.libraryId}-${record.zoteroKey} error: ${message}`, 1);
             return { kind: 'retry', error: `ocr_unexpected: ${message}`, reason: 'ocr_unexpected' };
         }
+    }
+
+    /**
+     * Stamp `ocr_status='failed'` so a retired OCR job is not re-enqueued.
+     * Mirrors what the queue does when a job dead-letters; without the file
+     * hash there is no row to stamp, and the job simply retires.
+     */
+    private async markOcrLoadFailure(
+        record: BackgroundJobRecord,
+        ctx: JobExecutionContext,
+        code: string,
+    ): Promise<void> {
+        const ledger = await ctx.db.getAttachmentProcessingState(
+            record.libraryId,
+            record.zoteroKey,
+        );
+        if (!ledger?.fileHash) return;
+        await ctx.db.markAttachmentOcrFailed(
+            record.libraryId,
+            record.zoteroKey,
+            ledger.fileHash,
+            `ocr_remote_download_failed: ${code}`,
+        );
     }
 
     /** Transient dead-letters are tracked by the queue; no content row needed. */
@@ -447,7 +482,7 @@ export class OcrExecutor implements JobExecutor {
             },
         });
         if (result.kind === 'error') {
-            throw new OcrRemoteLoadError(result.code);
+            throw new OcrRemoteLoadError(result.code, result.permanent === true);
         }
         this.throwIfLibraryUnavailable(item.libraryID, ctx);
         return result.data;

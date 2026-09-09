@@ -8,6 +8,7 @@ import {
 import { logger } from '@beaver/agent-core/platform/logger';
 import { getPref } from '../../utils/prefs';
 import {
+    PermanentDownloadError,
     getAttachmentDataInMemory,
     isAttachmentAvailableRemotely,
     type DownloadOptions,
@@ -41,6 +42,13 @@ export type AttachmentDataResult =
           kind: 'error';
           code: Extract<AttachmentSourceFailureCode, 'file_too_large' | 'download_failed' | 'read_failed'>;
           error?: unknown;
+          /**
+           * The server gave a definitive answer (missing file, no access), so
+           * retrying cannot help. Consumers that queue work use this instead of
+           * the `code` alone, which cannot distinguish a 404 from a dropped
+           * connection.
+           */
+          permanent?: boolean;
           sizeMB?: number;
           maxMB?: number;
       };
@@ -323,7 +331,12 @@ export async function loadAttachmentData(args: {
             if (error instanceof TimeoutError || error instanceof ExternalAbortError) {
                 throw error;
             }
-            return { kind: 'error', code: 'download_failed', error };
+            return {
+                kind: 'error',
+                code: 'download_failed',
+                error,
+                permanent: error instanceof PermanentDownloadError,
+            };
         }
 
         const exceeded = checkAttachmentDataSize(data, args.skipSizeCheck);
