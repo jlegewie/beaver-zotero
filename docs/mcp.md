@@ -22,13 +22,13 @@ This is a **stateless POST-only subset** of Streamable HTTP. Each request gets a
 | `react/hooks/useMcpServer.ts` | webpack | React hook: reads pref, registers tools with handlers, manages lifecycle |
 | `react/hooks/mcp/libraryAnnotationTools.ts` | webpack | Library and annotation tool schemas, validation, and adapters |
 | `react/index.tsx` | webpack | Mounts `useMcpServer()` in `GlobalContextInitializer` |
-| `addon/prefs.js` | N/A | `mcpServerEnabled` preference (default: `false`) |
+| `addon/prefs.js` | N/A | `mcpServerEnabled` and `mcpCreateNoteToolEnabled` preferences (both default: `false`) |
 
 ### How It Works
 
 1. `GlobalContextInitializer` calls `useMcpServer()` on mount.
 2. The hook reads the `mcpServerEnabled` preference. If `false`, it returns immediately.
-3. When enabled, it creates an `MCPService` instance, registers tools with their handlers, sets up auth checking, and calls `service.register()` to mount the `/beaver/mcp` endpoint.
+3. When enabled, it creates an `MCPService` instance, registers tools with their handlers, sets up auth checking, and calls `service.register()` to mount the `/beaver/mcp` endpoint. Mutating tools are registered only when `mcpCreateNoteToolEnabled` is `true`, so they are neither advertised nor callable otherwise. That key gates every write tool; it keeps its original name so users who already opted in stay opted in.
 4. MCP clients send JSON-RPC 2.0 requests. The service dispatches to `initialize`, `tools/list`, or `tools/call`.
 5. `tools/call` checks Beaver authentication first. If the user isn't logged in, it returns an `isError: true` response telling the model to ask the user to sign in.
 6. On unmount, the hook calls `service.unregister()` to remove the endpoint.
@@ -249,7 +249,7 @@ Read a Zotero note as simplified HTML. Citation, annotation, and image nodes are
 
 ### `create_note`
 
-Create a Zotero note from markdown. This is a mutating tool: MCP clients should apply their own approval policy before calling it.
+Create a Zotero note from markdown. This is a mutating tool: it is advertised only when **Write Tools** is enabled (`extensions.zotero.beaver.mcpCreateNoteToolEnabled`, default `false`), and MCP clients should apply their own approval policy before calling it.
 
 Citation tags use the unified format `<citation id="libraryID-zoteroKey"/>`. Add page locators with `loc`, for example `loc="page5"` or `loc="page5-page6"`. Use the 1-based page numbers from `read_attachment` `<pageN>` tags (physical page index, not printed labels). Use only IDs returned by tool results in the current session, copy page locators verbatim from `read_note` when editing existing notes, omit `loc` for metadata-only citations, and do not use legacy attributes such as `item_id`, `att_id`, `page`, or `sid`.
 
@@ -364,9 +364,9 @@ Sort with `sort_by` (`date_modified`, `date_added`, `reading_order`) and
 
 ### `create_highlight_annotations` and `create_note_annotations`
 
-Enable **Annotation Tools** in Beaver's advanced preferences
-(`extensions.zotero.beaver.mcpAnnotationToolsEnabled`, default `false`) and refresh
-the MCP client's tool list. This setting is independent of the Create Note tool.
+Enable **Write Tools** in Beaver's advanced preferences
+(`extensions.zotero.beaver.mcpCreateNoteToolEnabled`, default `false`) and refresh
+the MCP client's tool list. The same setting gates `create_note`.
 The tools create reader annotations on a single local PDF, EPUB, or HTML snapshot;
 `create_note_annotations` creates sticky notes on the attachment.
 

@@ -101,8 +101,12 @@ export interface PendingActionEditRequest {
 }
 export const pendingActionEditRequestAtom = atom<PendingActionEditRequest | null>(null);
 export const mcpServerEnabledAtom = atom(getPref('mcpServerEnabled'));
-export const mcpCreateNoteToolEnabledAtom = atom(getPref('mcpCreateNoteToolEnabled'));
-export const mcpAnnotationToolsEnabledAtom = atom(getPref('mcpAnnotationToolsEnabled'));
+/**
+ * Gates every mutating MCP tool: note creation and annotation creation. The
+ * preference key predates annotation writing and is kept so users who already
+ * opted in do not have to opt in again.
+ */
+export const mcpWriteToolsEnabledAtom = atom(getPref('mcpCreateNoteToolEnabled'));
 export const dataProviderEnabledAtom = atom(getPref('dataProviderEnabled'));
 export const requestPlusToolsAtom = atom(getPref('requestPlusTools'));
 export const isWebSearchAllowedAtom = atom((get) => Boolean(get(isUsingBeaverCreditsAtom) || get(requestPlusToolsAtom)));

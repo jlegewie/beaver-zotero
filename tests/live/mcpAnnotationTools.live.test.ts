@@ -1,4 +1,4 @@
-/** Exercise the actual JSON-RPC endpoint with MCP and annotation tools enabled. */
+/** Exercise the actual JSON-RPC endpoint with the MCP server and write tools enabled. */
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { isZoteroAvailable, skipIfNoZotero } from '../helpers/zoteroAvailability';
 import { SMALL_PDF, NON_PDF } from '../helpers/fixtures';

@@ -142,8 +142,9 @@ pref("threadsClaimKey", "");
 
 // MCP server
 pref("mcpServerEnabled", false);
+// Gates every mutating MCP tool. The key predates annotation writing and keeps
+// its original name so users who opted in do not have to opt in again.
 pref("mcpCreateNoteToolEnabled", false);
-pref("mcpAnnotationToolsEnabled", false);
 
 // Background extractor kill-switch (drains the background_jobs queue)
 pref("backgroundExtractorEnabled", true);

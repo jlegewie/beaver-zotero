@@ -77,7 +77,6 @@ declare namespace _ZoteroTypes {
       "threadsClaimKey": string;
       "mcpServerEnabled": boolean;
       "mcpCreateNoteToolEnabled": boolean;
-      "mcpAnnotationToolsEnabled": boolean;
       "backgroundExtractorEnabled": boolean;
       "backgroundProcessingEnabled": boolean;
       "backgroundProcessingContinuous": boolean;

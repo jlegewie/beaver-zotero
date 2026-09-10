@@ -43,7 +43,7 @@ import {
 } from '../../src/utils/libraryIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isAuthenticatedAtom } from '../atoms/auth';
-import { mcpAnnotationToolsEnabledAtom, mcpCreateNoteToolEnabledAtom, mcpServerEnabledAtom } from '../atoms/ui';
+import { mcpServerEnabledAtom, mcpWriteToolsEnabledAtom } from '../atoms/ui';
 import { store } from '../store';
 import type {
     WSItemSearchByTopicRequest,
@@ -1529,8 +1529,7 @@ async function handleListItems(args: any): Promise<any> {
 
 export function useMcpServer() {
     const enabled = useAtomValue(mcpServerEnabledAtom);
-    const createNoteToolEnabled = useAtomValue(mcpCreateNoteToolEnabledAtom);
-    const annotationToolsEnabled = useAtomValue(mcpAnnotationToolsEnabledAtom);
+    const writeToolsEnabled = useAtomValue(mcpWriteToolsEnabledAtom);
 
     useEffect(() => {
         if (!enabled) {
@@ -1559,12 +1558,11 @@ export function useMcpServer() {
             { def: LIST_LIBRARIES_TOOL, handler: handleListLibraries },
             { def: FIND_ANNOTATIONS_TOOL, handler: handleFindAnnotations },
         ];
-        if (createNoteToolEnabled) {
-            tools.push({ def: CREATE_NOTE_TOOL, handler: handleCreateNote });
-        }
-
-        if (annotationToolsEnabled) {
+        // Mutating tools are advertised only when the user opts in. An unregistered
+        // name is rejected by the dispatcher, so the gate also blocks direct calls.
+        if (writeToolsEnabled) {
             tools.push(
+                { def: CREATE_NOTE_TOOL, handler: handleCreateNote },
                 { def: CREATE_HIGHLIGHT_ANNOTATIONS_TOOL, handler: handleCreateHighlightAnnotations },
                 { def: CREATE_NOTE_ANNOTATIONS_TOOL, handler: handleCreateNoteAnnotations },
             );
@@ -1582,5 +1580,5 @@ export function useMcpServer() {
                 service.unregister();
             }
         };
-    }, [enabled, createNoteToolEnabled, annotationToolsEnabled]);
+    }, [enabled, writeToolsEnabled]);
 }

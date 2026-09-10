@@ -28,10 +28,9 @@ const mockValidateHighlights = vi.fn();
 const mockExecuteHighlights = vi.fn();
 const mockValidateAnnotationNotes = vi.fn();
 const mockExecuteAnnotationNotes = vi.fn();
-const mockMcpAnnotationToolsEnabled = vi.hoisted(() => ({ value: false }));
 const mockValidateCreateNoteAction = vi.fn();
 const mockExecuteCreateNoteAction = vi.fn();
-const mockMcpCreateNoteToolEnabled = vi.hoisted(() => ({ value: false }));
+const mockMcpWriteToolsEnabled = vi.hoisted(() => ({ value: false }));
 
 vi.mock('../../../src/services/agentDataProvider', () => ({
     handleItemSearchByTopicRequest: (...args: any[]) => mockHandleItemSearchByTopicRequest(...args),
@@ -66,9 +65,8 @@ vi.mock('../../../react/atoms/auth', () => ({
 }));
 
 vi.mock('../../../react/atoms/ui', () => ({
-    mcpAnnotationToolsEnabledAtom: { toString: () => 'mcpAnnotationToolsEnabledAtom' },
     mcpServerEnabledAtom: { toString: () => 'mcpServerEnabledAtom' },
-    mcpCreateNoteToolEnabledAtom: { toString: () => 'mcpCreateNoteToolEnabledAtom' },
+    mcpWriteToolsEnabledAtom: { toString: () => 'mcpWriteToolsEnabledAtom' },
 }));
 
 vi.mock('../../../react/store', () => ({
@@ -85,10 +83,7 @@ vi.mock('react', () => ({
 
 vi.mock('jotai', () => ({
     useAtomValue: vi.fn((atom: any) => {
-        if (atom?.toString?.() === 'mcpAnnotationToolsEnabledAtom') return mockMcpAnnotationToolsEnabled.value;
-        if (atom?.toString?.() === 'mcpCreateNoteToolEnabledAtom') {
-            return mockMcpCreateNoteToolEnabled.value;
-        }
+        if (atom?.toString?.() === 'mcpWriteToolsEnabledAtom') return mockMcpWriteToolsEnabled.value;
         return true; // MCP server enabled and authenticated by default
     }),
 }));
@@ -100,8 +95,7 @@ vi.mock('jotai', () => ({
 const zotero = (globalThis as any).Zotero;
 
 beforeEach(() => {
-    mockMcpCreateNoteToolEnabled.value = false;
-    mockMcpAnnotationToolsEnabled.value = false;
+    mockMcpWriteToolsEnabled.value = false;
     zotero.Utilities = { randomString: vi.fn(() => 'test-request-id') };
     zotero.DataDirectory = { dir: '/mock/data' };
     zotero.Server = { Endpoints: {} };
@@ -246,15 +240,19 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(result.tools).toHaveLength(10);
         });
 
-        it('registers create_note when enabled by preference', async () => {
-            mockMcpCreateNoteToolEnabled.value = true;
+        it('registers every write tool when enabled by preference', async () => {
+            mockMcpWriteToolsEnabled.value = true;
             endpoint = setupMcpEndpoint();
 
             const result = await listTools(endpoint);
             const names = result.tools.map((t: any) => t.name);
 
-            expect(names).toContain('create_note');
-            expect(result.tools).toHaveLength(11);
+            expect(names).toEqual(expect.arrayContaining([
+                'create_note',
+                'create_highlight_annotations',
+                'create_note_annotations',
+            ]));
+            expect(result.tools).toHaveLength(13);
         });
 
         it('each tool has name, description, and inputSchema', async () => {
@@ -281,7 +279,7 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
         });
 
         it('advertises MCP tool annotations', async () => {
-            mockMcpCreateNoteToolEnabled.value = true;
+            mockMcpWriteToolsEnabled.value = true;
             endpoint = setupMcpEndpoint();
 
             const result = await listTools(endpoint);
@@ -1314,7 +1312,7 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
 
     describe('create_note', () => {
         beforeEach(() => {
-            mockMcpCreateNoteToolEnabled.value = true;
+            mockMcpWriteToolsEnabled.value = true;
             endpoint = setupMcpEndpoint();
         });
 
@@ -2702,7 +2700,7 @@ describe('MCP portable ids', () => {
     });
 
     it('create_note returns portable note ids', async () => {
-        mockMcpCreateNoteToolEnabled.value = true;
+        mockMcpWriteToolsEnabled.value = true;
         endpoint = setupMcpEndpoint();
         mockValidateCreateNoteAction.mockResolvedValue({ valid: true });
         mockExecuteCreateNoteAction.mockResolvedValue({
@@ -2733,7 +2731,7 @@ describe('MCP libraries and annotations', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         zotero.Libraries.userLibraryID = 1;
-        mockMcpAnnotationToolsEnabled.value = true;
+        mockMcpWriteToolsEnabled.value = true;
         endpoint = setupMcpEndpoint();
         for (const validate of [mockValidateHighlights, mockValidateAnnotationNotes]) {
             validate.mockResolvedValue({ valid: true, current_value: { content_kind: 'pdf' } });
@@ -2743,7 +2741,7 @@ describe('MCP libraries and annotations', () => {
         }
     });
 
-    it('advertises reads by default and writes only with their separate preference', async () => {
+    it('advertises reads by default and writes only with the write tools preference', async () => {
         let tools = (await listTools(endpoint)).tools;
         for (const name of ['list_libraries', 'find_annotations']) {
             expect(tools.find((tool: any) => tool.name === name).annotations.readOnlyHint).toBe(true);
@@ -2751,7 +2749,7 @@ describe('MCP libraries and annotations', () => {
         for (const name of ['create_highlight_annotations', 'create_note_annotations']) {
             expect(tools.find((tool: any) => tool.name === name).annotations).toMatchObject({ readOnlyHint: false, idempotentHint: false, destructiveHint: false });
         }
-        mockMcpAnnotationToolsEnabled.value = false;
+        mockMcpWriteToolsEnabled.value = false;
         endpoint = setupMcpEndpoint();
         tools = (await listTools(endpoint)).tools;
         expect(tools.map((tool: any) => tool.name)).not.toContain('create_highlight_annotations');
