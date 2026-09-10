@@ -17,7 +17,7 @@ describe('processing status sentence', () => {
         snapshot.ledger.unreadable = 1;
         snapshot.issues = [{ reason: 'file_unavailable', count: 1 }];
         expect(describeStatus(snapshot, continuous)).toMatchObject({
-            tone: 'idle', headline: 'Background processing is idle', processNow: false,
+            tone: 'idle', headline: 'Up to date', processNow: false,
         });
     });
 
@@ -62,14 +62,14 @@ describe('processing status sentence', () => {
         snapshot.ledger.unreadable = 1;
         snapshot.ledger[outcome] = 1;
         expect(describeStatus(snapshot, false)).toMatchObject({
-            tone: 'idle', headline: 'Background processing is idle', processNow: false,
+            tone: 'idle', headline: 'Up to date', processNow: false,
         });
     });
 
     it('keeps the settled headline for readable files with unresolved index issues', () => {
         const snapshot = status(0);
         snapshot.issues = [{ reason: 'index_failed', count: 1 }];
-        expect(describeStatus(snapshot, false)).toMatchObject({ tone: 'idle', headline: 'Background processing is idle' });
+        expect(describeStatus(snapshot, false)).toMatchObject({ tone: 'idle', headline: 'Up to date' });
     });
 
     it.each(['extraction', 'ocr', 'index'])('reports unfinished %s ledger work without a queued job as waiting', (stage) => {
@@ -78,31 +78,54 @@ describe('processing status sentence', () => {
         else snapshot.ledger.readable = 0;
         if (stage === 'ocr') snapshot.ledger.awaitingOcr = 1;
         expect(describeStatus(snapshot, true)).toMatchObject({
-            tone: 'waiting', headline: 'Files are waiting to be processed', processNow: false,
+            tone: 'waiting', headline: 'Files waiting to be processed', processNow: false,
         });
     });
 
     it('preserves the empty-library state when there are no issues or pending stages', () => {
-        expect(describeStatus(status(0, 0), false).headline).toBe('No attachments to process yet');
+        expect(describeStatus(status(0, 0), false).headline).toBe('Nothing to process yet');
     });
 
     it.each([false, true])('shows parked work as waiting with immediate drain %s', (drainNow) => {
         const snapshot = status(3);
         snapshot.worker.drainNow = drainNow;
         expect(describeStatus(snapshot, false)).toMatchObject({
-            tone: 'waiting', headline: 'Waiting for processing to finish', processNow: false, stopDrain: drainNow,
+            tone: 'waiting', headline: 'Finishing in the background', processNow: false, stopDrain: drainNow,
         });
     });
 
     it('shows delayed retries as waiting even before a ledger row exists', () => {
         expect(describeStatus(status(1, 0), true)).toMatchObject({
-            tone: 'waiting', headline: 'Waiting for processing to finish', processNow: false,
+            tone: 'waiting', headline: 'Finishing in the background', processNow: false,
         });
     });
 
     it('reports completion only after deferred work finishes', () => {
         expect(describeStatus(status(0), false)).toMatchObject({
-            tone: 'idle', headline: 'Background processing is idle',
+            tone: 'idle', headline: 'Up to date',
+        });
+    });
+
+    it.each([
+        ['startup_delay', 'Beaver just started. Processing begins shortly.'],
+        ['sync_in_progress', 'Zotero is syncing.'],
+        ['library_scope_unknown', 'Waiting for your Beaver account to load.'],
+        ['not_a_known_reason', 'Waiting for Zotero to be ready.'],
+    ])('names the %s blocker in the caption', (blocker, caption) => {
+        const snapshot = status(0);
+        snapshot.worker.available = 2;
+        snapshot.worker.dispatchBlocker = blocker;
+        expect(describeStatus(snapshot, false)).toMatchObject({ headline: 'Waiting to start', caption });
+    });
+
+    it('explains the idle gate rather than a blocker when nothing blocks dispatch', () => {
+        const snapshot = status(0);
+        snapshot.worker.available = 2;
+        snapshot.worker.backlogGateOpen = false;
+        expect(describeStatus(snapshot, false)).toMatchObject({
+            headline: 'Waiting to start',
+            caption: 'Starts after about 30 seconds without activity in Zotero.',
+            processNowBlocked: false,
         });
     });
 

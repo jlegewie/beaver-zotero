@@ -19,6 +19,25 @@ interface StatusSentence {
 }
 
 /**
+ * Caption per dispatcher blocker (`BackgroundExtractor.getDispatchBlocker`).
+ * The reasons differ by orders of magnitude in how long they last — a startup
+ * pause clears in seconds, an unresolved library scope waits for a sign-in —
+ * so each says what is actually being waited on. Unlisted reasons fall back to
+ * the generic sentence below.
+ */
+const BLOCKER_CAPTION: Record<string, string> = {
+    startup_delay: 'Beaver just started. Processing begins shortly.',
+    sync_in_progress: 'Zotero is syncing.',
+    hot_busy: 'Beaver is reading a file you asked for.',
+    library_scope_unknown: 'Waiting for your Beaver account to load.',
+    no_window: 'Waiting for the Zotero window.',
+};
+
+function blockerCaption(blocker: string): string {
+    return BLOCKER_CAPTION[blocker] ?? 'Waiting for Zotero to be ready.';
+}
+
+/**
  * Reduce the status snapshot to the one sentence the status row shows.
  *
  * Order matters: an unreadable status wins, then running work, then work
@@ -30,13 +49,13 @@ export function describeStatus(
     continuous: boolean,
 ): StatusSentence {
     if (status.updatedAt === null && !status.worker && !status.error) return {
-        tone: 'waiting', headline: 'Checking background activity…',
-        caption: 'Reading the current processing status.', processNow: false, stopDrain: false,
+        tone: 'waiting', headline: 'Checking status…',
+        caption: 'Reading background activity.', processNow: false, stopDrain: false,
     };
     if (status.error) {
         return {
             tone: 'error',
-            headline: 'Could not read the processing status',
+            headline: 'Status unavailable',
             caption: 'Beaver will try again in a few seconds.',
             processNow: false,
             stopDrain: false,
@@ -56,7 +75,7 @@ export function describeStatus(
             tone: 'busy',
             headline: 'Processing files…',
             caption: inFlight > 0
-                ? 'Preparing document text and updating enabled services.'
+                ? 'Reading text from your files.'
                 : 'Starting…',
             processNow: false,
             stopDrain: draining,
@@ -65,10 +84,10 @@ export function describeStatus(
     if (runnable > 0) {
         return {
             tone: 'waiting',
-            headline: 'Background processing is waiting',
+            headline: 'Waiting to start',
             caption: blocker
-                ? 'Processing is waiting for Zotero to be ready.'
-                : 'Processing starts once Zotero has been idle for a moment.',
+                ? blockerCaption(blocker)
+                : 'Starts after about 30 seconds without activity in Zotero.',
             processNow: !continuous && !draining,
             processNowBlocked: Boolean(blocker),
             stopDrain: draining,
@@ -78,8 +97,8 @@ export function describeStatus(
     if (deferred > 0) {
         return {
             tone: 'waiting',
-            headline: 'Waiting for processing to finish',
-            caption: 'Waiting for remote processing or a scheduled retry.',
+            headline: 'Finishing in the background',
+            caption: 'Some files are processing remotely or waiting to retry.',
             processNow: false,
             stopDrain: draining,
         };
@@ -89,8 +108,8 @@ export function describeStatus(
     if (total > readable + unreadable || awaitingOcr > 0 || oldestPendingAt !== null) {
         return {
             tone: 'waiting',
-            headline: 'Files are waiting to be processed',
-            caption: 'Beaver checks for unfinished work automatically.',
+            headline: 'Files waiting to be processed',
+            caption: 'Beaver picks up unfinished work automatically.',
             processNow: false,
             stopDrain: false,
         };
@@ -98,7 +117,7 @@ export function describeStatus(
     if (status.ledger.total === 0) {
         return {
             tone: 'idle',
-            headline: 'No attachments to process yet',
+            headline: 'Nothing to process yet',
             caption: 'Beaver checks your libraries for new files automatically.',
             processNow: false,
             stopDrain: false,
@@ -106,10 +125,10 @@ export function describeStatus(
     }
     return {
         tone: 'idle',
-        headline: 'Background processing is idle',
+        headline: 'Up to date',
         caption: status.issues.length > 0
-            ? 'Some attachments need attention. See the problems below.'
-            : 'Beaver checks for new and changed files automatically.',
+            ? 'Some files need attention. See the problems below.'
+            : 'Beaver processes new and changed files automatically.',
         processNow: false,
         stopDrain: false,
     };

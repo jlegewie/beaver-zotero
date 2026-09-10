@@ -80,7 +80,7 @@ const ProcessingStatusRow: React.FC<{
                 </div>
                 {sentence.stopDrain ? (
                     <Tooltip
-                        content="The current file will finish. Processing resumes when Zotero is idle."
+                        content="The current file finishes first. Processing then waits until Zotero is idle."
                         placement="top"
                     >
                         <Button
@@ -94,7 +94,7 @@ const ProcessingStatusRow: React.FC<{
                     </Tooltip>
                 ) : sentence.processNow ? (
                     <Tooltip
-                        content="Processing will start once Zotero is ready."
+                        content={sentence.caption}
                         disabled={!sentence.processNowBlocked}
                         placement="top"
                     >
@@ -104,7 +104,7 @@ const ProcessingStatusRow: React.FC<{
                             rightIcon={PlayIcon}
                             disabled={sentence.processNowBlocked}
                             ariaLabel={sentence.processNowBlocked
-                                ? 'Process now. Waiting for Zotero to be ready.'
+                                ? `Process now. ${sentence.caption}`
                                 : undefined}
                             onClick={onProcessNow}
                         >

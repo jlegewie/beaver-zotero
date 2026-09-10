@@ -170,7 +170,7 @@ it('leaves unreadable files to the issue list instead of a red status headline',
     const root = createRoot(container);
     try {
         await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(BackgroundProcessingSection))));
-        expect(container.querySelector('[role="status"]')?.textContent).toBe('Background processing is idle');
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Up to date');
         expect(Array.from(container.querySelectorAll('button')).some((node) => node.textContent === 'Process now')).toBe(false);
         expect(container.textContent).toContain('1 attachment could not be read');
         expect(container.textContent).not.toContain('Libraries to Process');
