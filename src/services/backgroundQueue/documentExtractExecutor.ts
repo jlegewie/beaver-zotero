@@ -21,6 +21,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
 import { OCR_PRIORITY_BACKFILL } from '../ocr/constants';
+import { enqueueOcrJob } from '../ocr/enqueueOcr';
 import {
     BACKGROUND_UPSERT_PRIORITY,
 } from '../backgroundProcessing/constants';
@@ -173,6 +174,27 @@ export class DocumentExtractExecutor implements JobExecutor {
         });
         if (!applied) {
             return { kind: 'complete', reason: 'stale_completion_ignored' };
+        }
+
+        if (extracted.ocrStatus === 'needed') {
+            // Ticket the OCR continuation before this job retires. Fresh
+            // detection fires its own fire-and-forget enqueue inside the
+            // extraction, but a cached "no text layer" verdict does not, and a
+            // ticket that lands only after the queue looks empty loses an
+            // immediate-drain request. The enqueue dedupes against an existing
+            // ticket, so the double call is harmless.
+            try {
+                await enqueueOcrJob({
+                    item,
+                    libraryId: item.libraryID,
+                    zoteroKey: item.key,
+                    itemId: item.id,
+                    pageCount: null,
+                    priority: record.priority >= 100 ? OCR_PRIORITY_BACKFILL : undefined,
+                });
+            } catch (error) {
+                logger(`DocumentExtractExecutor: OCR enqueue failed for ${item.libraryID}-${item.key}: ${error}`, 2);
+            }
         }
 
         const hashChanged = previous.structuredDocumentHash !== documentHash;

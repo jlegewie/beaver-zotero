@@ -11,14 +11,14 @@ function status(deferred: number, total = 1) {
 }
 
 describe('processing status sentence', () => {
-    it.each([false, true])('offers a manual recheck after unavailable files drain with continuous mode %s', (continuous) => {
+    it.each([false, true])('settles without a red headline or Process now when only unavailable files remain (continuous %s)', (continuous) => {
         const snapshot = status(0);
         snapshot.ledger.readable = 0;
         snapshot.ledger.unreadable = 1;
         snapshot.issues = [{ reason: 'file_unavailable', count: 1 }];
-        expect(describeStatus(snapshot, continuous)).toMatchObject({ tone: 'error', processNow: true });
-        snapshot.worker.dispatchBlocker = 'sync_in_progress';
-        expect(describeStatus(snapshot, continuous).processNow).toBe(false);
+        expect(describeStatus(snapshot, continuous)).toMatchObject({
+            tone: 'idle', headline: 'All files are processed', processNow: false,
+        });
     });
 
     it('shows dispatcher-blocked work as waiting without offering an idle bypass', () => {
@@ -27,20 +27,20 @@ describe('processing status sentence', () => {
         snapshot.worker.dispatchBlocker = 'sync_in_progress';
         expect(describeStatus(snapshot, true)).toMatchObject({ tone: 'waiting', processNow: false });
     });
-    it.each(['failed', 'skipped'] as const)('does not declare completion after terminal extraction is %s', (outcome) => {
+    it.each(['failed', 'skipped'] as const)('treats a terminal %s extraction as settled, leaving it to the legend and issue list', (outcome) => {
         const snapshot = status(0);
         snapshot.ledger.readable = 0;
         snapshot.ledger.unreadable = 1;
         snapshot.ledger[outcome] = 1;
         expect(describeStatus(snapshot, false)).toMatchObject({
-            tone: 'error', headline: 'Some files could not be processed', processNow: false,
+            tone: 'idle', headline: 'All files are processed', processNow: false,
         });
     });
 
-    it('does not declare completion for readable files with unresolved index issues', () => {
+    it('keeps the settled headline for readable files with unresolved index issues', () => {
         const snapshot = status(0);
         snapshot.issues = [{ reason: 'index_failed', count: 1 }];
-        expect(describeStatus(snapshot, false).headline).toBe('Some files could not be processed');
+        expect(describeStatus(snapshot, false)).toMatchObject({ tone: 'idle', headline: 'All files are processed' });
     });
 
     it.each(['extraction', 'ocr', 'index'])('reports unfinished %s ledger work without a queued job as waiting', (stage) => {

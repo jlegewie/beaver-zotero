@@ -9,9 +9,11 @@ import { ArrowDownIcon, ArrowLeftIcon, ArrowRightIcon, Icon } from '../icons/ico
 import { hydrateItemListRows } from '../../compat/legacyToolResults';
 import ItemListResultView from '../agentRuns/toolResultViews/ItemListResultView';
 import { activePreferencePageTabAtom } from '../../atoms/ui';
-import type {
-    ProcessingIssueSummary,
-    ProcessingIssueReason,
+import {
+    isRetryableProcessingIssue,
+    type AttachmentRef,
+    type ProcessingIssueSummary,
+    type ProcessingIssueReason,
 } from '../../../src/services/backgroundProcessing/issues';
 
 const PAGE_SIZE = 10;
@@ -42,12 +44,12 @@ function reasonCopy(reason: ProcessingIssueReason, hasOcrAccess: boolean): Reaso
         case 'file_unavailable':
             return {
                 title: 'File not available',
-                description: 'The attachment is missing on this computer or could not be downloaded. Beaver checks again automatically.',
+                description: 'The attachment is missing on this computer or could not be downloaded. Retry after restoring the file.',
             };
         case 'encrypted':
             return {
                 title: 'Password protected',
-                description: 'Encrypted files cannot be read.',
+                description: 'Encrypted files cannot be read. Beaver re-reads a file if it is replaced.',
             };
         case 'too_large':
             return {
@@ -67,7 +69,7 @@ function reasonCopy(reason: ProcessingIssueReason, hasOcrAccess: boolean): Reaso
         case 'index_failed':
             return {
                 title: 'Not added to the search index',
-                description: 'These files were read but could not be uploaded to the cloud search index. Beaver retries automatically.',
+                description: 'These files were read but could not be uploaded to the cloud search index.',
             };
         case 'extract_failed':
         default:
@@ -92,7 +94,9 @@ const ProcessingIssuePage: React.FC<{
     hasOcrAccess: boolean;
     hasSearchAccess: boolean;
     updatedAt: number | null;
-}> = ({ page, reason, hasOcrAccess, hasSearchAccess, updatedAt }) => {
+    /** Present only for retryable reasons; renders a per-row retry link. */
+    onRetry?: (refs: AttachmentRef[]) => Promise<void>;
+}> = ({ page, reason, hasOcrAccess, hasSearchAccess, updatedAt, onRetry }) => {
     const [rows, setRows] = useState<ItemListRow[] | null>(null);
     const [error, setError] = useState(false);
     const pageRef = useRef<HTMLDivElement>(null);
@@ -143,6 +147,19 @@ const ProcessingIssuePage: React.FC<{
                 ? <div className="p-2 text-sm font-color-tertiary">Loading…</div>
                 : <ItemListResultView
                     view={{ view_type: 'item_list', tool_name: 'background_processing', items: rows }}
+                    rowAction={onRetry && ((row) => (
+                        <button
+                            type="button"
+                            className="text-link text-sm mr-2"
+                            aria-label={`Retry ${row.display_name}`}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                void onRetry([{ libraryId: row.library_id, zoteroKey: row.zotero_key }]);
+                            }}
+                        >
+                            Retry
+                        </button>
+                    ))}
                 />}
         </div>
     );
@@ -151,7 +168,9 @@ const ProcessingIssuePage: React.FC<{
 /**
  * A collapsible group of attachments that share one reason for not being
  * processed. The header carries the reason's title, count and explanation;
- * expanding it pages through the affected files.
+ * expanding it pages through the affected files. Retryable reasons get a
+ * group-level "Retry all" and a per-row retry; `onRetry` receives the ledger
+ * refs to requeue, or `null` for the whole group.
  */
 export const ProcessingIssueGroupRow: React.FC<{
     group: ProcessingIssueSummary;
@@ -159,11 +178,23 @@ export const ProcessingIssueGroupRow: React.FC<{
     hasSearchAccess: boolean;
     updatedAt: number | null;
     hasBorder?: boolean;
-}> = ({ group, hasOcrAccess, hasSearchAccess, updatedAt, hasBorder = false }) => {
+    onRetry?: (reason: ProcessingIssueReason, refs: AttachmentRef[] | null) => Promise<void>;
+}> = ({ group, hasOcrAccess, hasSearchAccess, updatedAt, hasBorder = false, onRetry }) => {
     const [open, setOpen] = useState(false);
     const [page, setPage] = useState(0);
+    const [retrying, setRetrying] = useState(false);
     const setActiveTab = useSetAtom(activePreferencePageTabAtom);
     const copy = reasonCopy(group.reason, hasOcrAccess);
+    const retryable = Boolean(onRetry) && isRetryableProcessingIssue(group.reason);
+    const retry = async (refs: AttachmentRef[] | null) => {
+        if (!onRetry || retrying) return;
+        setRetrying(true);
+        try {
+            await onRetry(group.reason, refs);
+        } finally {
+            setRetrying(false);
+        }
+    };
     const pageCount = Math.max(1, Math.ceil(group.count / PAGE_SIZE));
     const safePage = Math.min(page, pageCount - 1);
     const first = safePage * PAGE_SIZE + 1;
@@ -210,12 +241,24 @@ export const ProcessingIssueGroupRow: React.FC<{
                         See plans
                     </Button>
                 )}
+                {retryable && (
+                    <Button
+                        variant="outline"
+                        loading={retrying}
+                        disabled={retrying}
+                        ariaLabel={`Retry all: ${copy.title}`}
+                        onClick={() => void retry(null)}
+                    >
+                        Retry all
+                    </Button>
+                )}
             </div>
             {open && (
                 <div id={panelId} role="region" aria-labelledby={headerId} className="display-flex flex-col bg-senary">
                     <div style={{ paddingLeft: '28px' }}>
                         <ProcessingIssuePage page={safePage} reason={group.reason}
-                            hasOcrAccess={hasOcrAccess} hasSearchAccess={hasSearchAccess} updatedAt={updatedAt} />
+                            hasOcrAccess={hasOcrAccess} hasSearchAccess={hasSearchAccess} updatedAt={updatedAt}
+                            onRetry={retryable ? (refs) => retry(refs) : undefined} />
                     </div>
                     {pageCount > 1 && (
                         <div

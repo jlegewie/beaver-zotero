@@ -2522,6 +2522,25 @@ export class BeaverDB {
         await this.resetAttachmentStatusColumn('ocr_status', libraryId, zoteroKey, reason);
     }
 
+    /**
+     * Put a failed OCR stage back to "needed" so the reconciler and the retry
+     * path can ticket it again without re-running extraction.
+     */
+    public async requeueAttachmentOcr(
+        libraryId: number,
+        zoteroKey: string,
+        reason: string | null = null,
+    ): Promise<void> {
+        await this.queryAsync(
+            `UPDATE attachment_processing_state SET
+                ocr_status = 'needed',
+                last_error = ?,
+                updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ?`,
+            [reason, libraryId, zoteroKey],
+        );
+    }
+
     public async resetAttachmentUpsert(
         libraryId: number,
         zoteroKey: string,
@@ -2844,6 +2863,44 @@ export class BeaverDB {
             }) },
         );
         return items;
+    }
+
+    /**
+     * Every attachment in one issue group, for a group-level retry. Bounded so a
+     * pathological ledger cannot materialize an unbounded array; the retry
+     * re-reads the group afterwards, so a second click picks up the remainder.
+     */
+    public async getProcessingIssueRefs(
+        entitlements: IssueEntitlements,
+        reason: ProcessingIssueReason,
+        limit = 5_000,
+    ): Promise<Array<{ libraryId: number; zoteroKey: string }>> {
+        const refs: Array<{ libraryId: number; zoteroKey: string }> = [];
+        await this.queryAsync(
+            `SELECT * FROM (${processingIssuesSql(entitlements)}
+             SELECT library_id, zotero_key FROM issues WHERE reason = ?
+             ORDER BY timestamp DESC, library_id, zotero_key LIMIT ?)`,
+            [reason, Math.max(1, Math.floor(limit))],
+            { onRow: (row: any) => refs.push({
+                libraryId: row.getResultByIndex(0), zoteroKey: row.getResultByIndex(1),
+            }) },
+        );
+        return refs;
+    }
+
+    /**
+     * Drop one attachment's dead-lettered processing jobs so a retry can
+     * re-enqueue them and the issues list stops reporting the old failure.
+     * Untag dead letters are remote-cleanup intents with their own redrive and
+     * are left alone.
+     */
+    public async deleteBackgroundDeadLetters(libraryId: number, zoteroKey: string): Promise<void> {
+        await this.queryAsync(
+            `DELETE FROM background_jobs_dead
+             WHERE library_id = ? AND zotero_key = ?
+               AND job_type IN ('document_extract', 'document_ocr', 'fulltext_upsert')`,
+            [libraryId, zoteroKey],
+        );
     }
 
     /** Dead letters, optionally restricted to current, unrecovered ledger entries. */

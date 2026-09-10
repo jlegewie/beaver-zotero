@@ -521,6 +521,13 @@ declare namespace Zotero {
                 offset?: number,
                 limit?: number,
             ): Promise<import("../src/services/backgroundProcessing/issues").ProcessingIssueItem[]>;
+            getProcessingIssueRefs(
+                entitlements: import("../src/services/backgroundProcessing/issues").IssueEntitlements,
+                reason: import("../src/services/backgroundProcessing/issues").ProcessingIssueReason,
+                limit?: number,
+            ): Promise<import("../src/services/backgroundProcessing/issues").AttachmentRef[]>;
+            deleteBackgroundDeadLetters(libraryId: number, zoteroKey: string): Promise<void>;
+            requeueAttachmentOcr(libraryId: number, zoteroKey: string, reason?: string | null): Promise<void>;
             getBackgroundDeadLetters(
                 limit?: number,
                 onlyUnresolved?: boolean,

@@ -9,7 +9,8 @@ import { getReadableContentKind } from '../documentExtraction/attachmentResoluti
 import { resolveAttachmentFileSource } from '../documentExtraction/attachmentSource';
 import { getFileSignature, isRemoteFilePath } from '../documentFileIdentity';
 import { OCR_ENGINE_VERSION, OCR_PRIORITY_BACKFILL } from '../ocr/constants';
-import { maybeEnqueueOcrJob } from '../ocr/enqueueOcr';
+import type { AttachmentRef } from './issues';
+import { enqueueOcrJob, maybeEnqueueOcrJob } from '../ocr/enqueueOcr';
 import { getSystemIdleTimeMs } from '../../utils/idleService';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -88,10 +89,7 @@ export class ReconcilerService {
         if (!this.stopped) return;
         this.stopped = false;
         this.generation += 1;
-        for (const pref of [
-            'extensions.zotero.beaver.backgroundProcessingEnabled',
-            'extensions.zotero.beaver.backgroundProcessingLibrariesToSkip',
-        ]) {
+        for (const pref of ['extensions.zotero.beaver.backgroundProcessingEnabled']) {
             try {
                 this.prefObservers.push(Zotero.Prefs.registerObserver(
                     pref,
@@ -140,6 +138,119 @@ export class ReconcilerService {
             await this.run(true);
         }
         Zotero.Beaver?.backgroundExtractor?.notify();
+    }
+
+    /**
+     * User-initiated retry of attachments listed under "could not read".
+     *
+     * Each attachment's failed stage is put back, its dead-lettered jobs and
+     * per-hash failure records are dropped, and the next job is enqueued
+     * before the drain bypass is requested, so the work runs without waiting
+     * for Zotero to go idle:
+     *
+     * - A failed or skipped extraction (and an OCR stage that failed because
+     *   the file was unreachable) restarts from extraction. The attachment's
+     *   document-cache entry is invalidated first: the cache remembers
+     *   terminal verdicts such as `invalid_pdf`, and a retry that merely
+     *   re-read that verdict would skip the file again without touching it.
+     *   A still-missing file fails source resolution right here and reappears
+     *   in the issue list.
+     * - A failed OCR stage on a readable extraction goes straight back to
+     *   `needed` and is ticketed here, awaited, rather than through a fresh
+     *   extraction whose cached "no text layer" verdict would leave the OCR
+     *   continuation to the next periodic reconcile. That shortcut is only
+     *   taken while the cached detection metadata the OCR executor reads its
+     *   page count from is still present and current; a cleared cache or a
+     *   replaced file restarts from extraction so the metadata is rewritten.
+     * - A failed index upload re-enqueues only the upsert.
+     *
+     * Excluded libraries and attachments that no longer exist are skipped.
+     * Returns the number of attachments reset.
+     */
+    async retryAttachments(refs: AttachmentRef[]): Promise<number> {
+        const db = Zotero.Beaver?.db;
+        if (!db || !backgroundProcessingEnabled()) return 0;
+        const jobs: BackgroundJobInput[] = [];
+        let retried = 0;
+        for (const ref of refs) {
+            if (!isBackgroundProcessingLibraryEnabled(ref.libraryId)) continue;
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.libraryId, ref.zoteroKey);
+            if (!item || safeIsInTrash(item) === true) continue;
+            const kind = getReadableContentKind(item);
+            if (kind !== 'pdf' && kind !== 'epub' && kind !== 'snapshot') continue;
+            let row = await db.getAttachmentProcessingState(ref.libraryId, ref.zoteroKey);
+            if (!row) continue;
+
+            const extractFailed = row.extractStatus === 'failed' || row.extractStatus === 'skipped';
+            const ocrFailed = row.ocrStatus === 'failed';
+            const restartExtraction = extractFailed
+                || (ocrFailed && (
+                    hasRecoverableAvailabilityFailure(row)
+                    || !(await this.hasOcrDetectionMetadata(item))
+                ));
+            if (ocrFailed && row.fileHash) {
+                await db.clearDocumentProcessingFailure(row.fileHash, 'ocr', OCR_ENGINE_VERSION);
+            }
+            if (restartExtraction) {
+                await Zotero.Beaver?.documentCache?.invalidate(ref.libraryId, ref.zoteroKey);
+                await db.resetAttachmentExtraction(ref.libraryId, ref.zoteroKey, 'user_retry');
+                if (ocrFailed) await db.resetAttachmentOcr(ref.libraryId, ref.zoteroKey, 'user_retry');
+                row = {
+                    ...row,
+                    extractStatus: null,
+                    ocrStatus: ocrFailed ? null : row.ocrStatus,
+                    lastError: 'user_retry',
+                };
+            } else if (ocrFailed) {
+                await db.requeueAttachmentOcr(ref.libraryId, ref.zoteroKey, 'user_retry');
+                await db.deleteBackgroundDeadLetters(ref.libraryId, ref.zoteroKey);
+                await enqueueOcrJob({
+                    item,
+                    libraryId: ref.libraryId,
+                    zoteroKey: ref.zoteroKey,
+                    itemId: item.id,
+                    pageCount: null,
+                    priority: OCR_PRIORITY_BACKFILL,
+                });
+                retried += 1;
+                continue;
+            } else if (row.upsertStatus === 'failed') {
+                await db.resetAttachmentUpsert(ref.libraryId, ref.zoteroKey, 'user_retry');
+                if (row.structuredDocumentHash) {
+                    await db.clearDocumentProcessingFailure(row.structuredDocumentHash, 'fulltext_upsert');
+                }
+                row = { ...row, upsertStatus: null, lastError: 'user_retry' };
+            }
+            // A dead letter can outlive a non-terminal ledger row (the job died
+            // before an executor recorded a verdict); dropping it is what lets
+            // the fresh job be counted as progress rather than as the old failure.
+            await db.deleteBackgroundDeadLetters(ref.libraryId, ref.zoteroKey);
+            await this.reconcileAttachment(db, item, kind, false, jobs, row);
+            retried += 1;
+        }
+        if (jobs.length > 0) await db.enqueueBackgroundJobs(jobs);
+        if (retried > 0) {
+            Zotero.Beaver?.backgroundExtractor?.requestImmediateDrain();
+            Zotero.Beaver?.backgroundExtractor?.notify();
+        }
+        return retried;
+    }
+
+    /**
+     * True when the document cache still holds current "no text layer"
+     * metadata with a page count for this attachment. The OCR executor resolves
+     * its job from that row and retires with `no_page_count` without it, so an
+     * OCR retry may only skip re-extraction while it is present.
+     */
+    private async hasOcrDetectionMetadata(item: Zotero.Item): Promise<boolean> {
+        const cache = Zotero.Beaver?.documentCache;
+        if (!cache) return false;
+        const source = await resolveAttachmentFileSource({ item, localSizeStrategy: 'stat' });
+        if (source.kind === 'error') return false;
+        const meta = await cache
+            .getMetadata({ libraryId: item.libraryID, zoteroKey: item.key }, source.source.filePath)
+            .catch(() => null);
+        return (meta?.pageCount ?? 0) >= 1;
     }
 
     private schedule(delayMs: number, force = false): void {

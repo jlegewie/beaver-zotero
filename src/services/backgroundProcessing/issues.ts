@@ -45,6 +45,12 @@ export interface AttachmentProcessingIssueRow {
     updatedAt: string | null;
 }
 
+/** Ledger identity of one attachment. */
+export interface AttachmentRef {
+    libraryId: number;
+    zoteroKey: string;
+}
+
 export interface ProcessingIssueItem {
     libraryId: number;
     zoteroKey: string;
@@ -118,6 +124,23 @@ export const PROCESSING_ISSUE_REASON_ORDER: ProcessingIssueReason[] = [
     'too_large',
     'unsupported',
 ];
+
+/**
+ * Reasons a user can retry from the issues list. The rest describe the bytes
+ * themselves (encrypted, too large, unsupported, no text) or an entitlement
+ * (scans without OCR access), so re-running them fails identically; a replaced
+ * file is picked up by the reconciler's own signature check instead.
+ */
+export const RETRYABLE_PROCESSING_ISSUE_REASONS: readonly ProcessingIssueReason[] = [
+    'file_unavailable',
+    'extract_failed',
+    'ocr_failed',
+    'index_failed',
+];
+
+export function isRetryableProcessingIssue(reason: ProcessingIssueReason): boolean {
+    return RETRYABLE_PROCESSING_ISSUE_REASONS.includes(reason);
+}
 
 const FILE_UNAVAILABLE_CODES = ['file_missing', 'download_failed', 'read_failed'];
 const TOO_LARGE_CODES = ['file_too_large', 'too_many_pages'];

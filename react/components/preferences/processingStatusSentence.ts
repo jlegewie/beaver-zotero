@@ -18,8 +18,9 @@ interface StatusSentence {
  * Reduce the status snapshot to the one sentence the status row shows.
  *
  * Order matters: an unreadable status wins, then running work, then work
- * queued behind the idle gate, then the settled summary. Unavailable files
- * retain a manual recheck once queued work has finished.
+ * queued behind the idle gate, then the settled summary. Files that could not
+ * be read are not an error state here: the bar's red segment and the issue
+ * list below the row carry them, with per-group retries where one can help.
  */
 export function describeStatus(
     status: BackgroundProcessingStatus,
@@ -71,17 +72,6 @@ export function describeStatus(
         };
     }
     const { total, readable, unreadable, awaitingOcr, oldestPendingAt } = status.ledger;
-    if (unreadable > 0 || status.issues.some((group) => group.count > 0)) {
-        const hasUnavailableFiles = status.issues.some((group) => group.reason === 'file_unavailable' && group.count > 0);
-        return {
-            tone: 'error',
-            headline: 'Some files could not be processed',
-            caption: hasUnavailableFiles
-                ? 'After restoring access to unavailable files, process now to check them again.'
-                : 'Some attachments need attention before processing can finish.',
-            processNow: hasUnavailableFiles && !blocker,
-        };
-    }
     // A reconcile pass may not have queued every unfinished ledger stage yet.
     if (total > readable + unreadable || awaitingOcr > 0 || oldestPendingAt !== null) {
         return {

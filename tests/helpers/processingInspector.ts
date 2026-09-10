@@ -109,7 +109,6 @@ export interface ProcessingStatusResponse {
         backgroundProcessingEnabled: boolean;
         backgroundProcessingContinuous: boolean;
         backgroundExtractorEnabled: boolean;
-        backgroundProcessingLibrariesToSkip: unknown;
         accessRemoteFiles: boolean;
     };
     library_scope?: {

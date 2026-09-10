@@ -1,19 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useAtomValue } from 'jotai';
-import {
-    hasOcrAccessAtom, hasSearchIndexAccessAtom,
-    localZoteroLibrariesAtom, searchableLibraryIdsAtom,
-} from '../../atoms/profile';
+import { hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../../atoms/profile';
 import {
     backgroundProcessingStatusAtom,
     type BackgroundProcessingStatus,
 } from '../../atoms/backgroundProcessing';
 import { useBackgroundProcessingStatus } from '../../hooks/useBackgroundProcessingStatus';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import {
-    backgroundProcessingLibraryToken,
-    getBackgroundProcessingSkipTokens,
-} from '../../../src/services/backgroundProcessing/utils';
+import type { AttachmentRef, ProcessingIssueReason } from '../../../src/services/backgroundProcessing/issues';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { SettingsGroup, SettingsRow, SectionLabel } from './components/SettingsElements';
 import ProcessingIssueGroupRow from './ProcessingIssueList';
@@ -140,10 +134,6 @@ const Legend: React.FC<{ color: string; label: string; hollow?: boolean }> = ({ 
 export default function BackgroundProcessingSection(): React.ReactElement | null {
     const hasOcrAccess = useAtomValue(hasOcrAccessAtom);
     const hasSearchAccess = useAtomValue(hasSearchIndexAccessAtom);
-    const localLibraries = useAtomValue(localZoteroLibrariesAtom);
-    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
-    const libraries = localLibraries.filter((library) => searchableLibraryIds.includes(library.library_id));
-    const [skipTokens, setSkipTokens] = useState(() => [...getBackgroundProcessingSkipTokens()]);
     const status = useAtomValue(backgroundProcessingStatusAtom);
     const [enabled, setEnabled] = useState(
         () => getPref('backgroundProcessingEnabled') === true,
@@ -174,26 +164,12 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
             'extensions.zotero.beaver.backgroundProcessingContinuous',
             () => setContinuous(getPref('backgroundProcessingContinuous') === true),
         );
-        observe(
-            'extensions.zotero.beaver.backgroundProcessingLibrariesToSkip',
-            () => setSkipTokens([...getBackgroundProcessingSkipTokens()]),
-        );
         return () => {
             for (const observer of observers) {
                 try { Zotero.Prefs.unregisterObserver(observer); } catch { /* best effort */ }
             }
         };
     }, []);
-
-    const toggleLibrary = (token: string, shouldProcess: boolean) => {
-        const next = getBackgroundProcessingSkipTokens();
-        if (shouldProcess) next.delete(token);
-        else next.add(token);
-        setSkipTokens([...next]);
-        setPref('backgroundProcessingLibrariesToSkip', JSON.stringify([...next]));
-        Zotero.Beaver?.processingReconciler?.notify();
-        Zotero.Beaver?.backgroundExtractor?.notify();
-    };
 
     const updateEnabled = (next: boolean) => {
         setEnabled(next);
@@ -211,6 +187,22 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
     const processNow = async () => {
         await Zotero.Beaver?.processingReconciler?.reconcileNow();
         Zotero.Beaver?.backgroundExtractor?.requestImmediateDrain();
+        await refresh();
+    };
+
+    /**
+     * Requeue attachments from an issue group; `refs === null` retries the
+     * whole group. The reconciler resets the failed stage and drains at once,
+     * so the refreshed status shows the files running rather than listed.
+     */
+    const retryIssues = async (reason: ProcessingIssueReason, refs: AttachmentRef[] | null) => {
+        const reconciler = Zotero.Beaver?.processingReconciler;
+        const db = Zotero.Beaver?.db;
+        if (!reconciler || !db) return;
+        const targets = refs ?? await db.getProcessingIssueRefs(
+            { hasOcrAccess, hasSearchIndexAccess: hasSearchAccess }, reason,
+        );
+        if (targets.length > 0) await reconciler.retryAttachments(targets);
         await refresh();
     };
 
@@ -270,35 +262,6 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                 />
             </SettingsGroup>
 
-            {libraries.length > 0 && (
-                <>
-                    <SectionLabel>Libraries to Process</SectionLabel>
-                    <SettingsGroup>
-                        {libraries.map((library, index) => {
-                            const token = backgroundProcessingLibraryToken(library.library_id);
-                            if (!token) return null;
-                            const checked = !skipTokens.includes(token);
-                            return (
-                                <SettingsRow
-                                    key={token}
-                                    title={library.name}
-                                    description={library.is_group ? 'Group library' : 'My Library'}
-                                    hasBorder={index > 0}
-                                    onClick={() => toggleLibrary(token, !checked)}
-                                    control={<input
-                                        type="checkbox"
-                                        checked={checked}
-                                        aria-label={`Process ${library.name}`}
-                                        onChange={(event) => toggleLibrary(token, event.target.checked)}
-                                        onClick={(event) => event.stopPropagation()}
-                                    />}
-                                />
-                            );
-                        })}
-                    </SettingsGroup>
-                </>
-            )}
-
             {enabled && status.issues.length > 0 && (
                 <>
                     <SectionLabel>Files Beaver Could Not Read</SectionLabel>
@@ -315,6 +278,7 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                                 hasSearchAccess={hasSearchAccess}
                                 updatedAt={status.updatedAt}
                                 hasBorder
+                                onRetry={retryIssues}
                             />
                         ))}
                     </SettingsGroup>

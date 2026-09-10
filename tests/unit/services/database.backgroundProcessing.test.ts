@@ -574,6 +574,35 @@ describe('BeaverDB background processing state', () => {
             .toEqual([{ reason: 'extract_failed', count: 1 }, { reason: 'encrypted', count: 1 }]);
     });
 
+    it('lists every attachment of one issue group for a group-level retry', async () => {
+        const entitlements = { hasOcrAccess: true, hasSearchIndexAccess: true };
+        for (const key of ['MISSING1', 'MISSING2']) {
+            await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: key, contentKind: 'pdf' });
+            await db.markAttachmentExtractFailure({ libraryId: 1, zoteroKey: key, status: 'skipped', error: 'file_missing' });
+        }
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'LOCKED00', contentKind: 'pdf' });
+        await db.markAttachmentExtractFailure({ libraryId: 1, zoteroKey: 'LOCKED00', status: 'failed', error: 'encrypted' });
+
+        const refs = await db.getProcessingIssueRefs(entitlements, 'file_unavailable');
+        expect(refs.map((ref) => ref.zoteroKey).sort()).toEqual(['MISSING1', 'MISSING2']);
+        expect(refs.every((ref) => ref.libraryId === 1)).toBe(true);
+        expect(await db.getProcessingIssueRefs(entitlements, 'extract_failed')).toEqual([]);
+        expect(await db.getProcessingIssueRefs(entitlements, 'file_unavailable', 1)).toHaveLength(1);
+    });
+
+    it('drops one attachment\'s processing dead letters but keeps untag intents and other attachments', async () => {
+        await connection.queryAsync(`INSERT INTO background_jobs_dead
+            (job_type, library_id, zotero_key, content_kind, payload_kind, enqueued_at, died_at, attempt_count)
+            VALUES ('document_extract', 1, 'ABCDEFGH', 'pdf', 'structured', 0, 1, 3),
+                   ('document_ocr', 1, 'ABCDEFGH', 'pdf', 'structured', 0, 2, 3),
+                   ('fulltext_untag', 1, 'ABCDEFGH', 'pdf', 'structured', 0, 3, 3),
+                   ('document_extract', 1, 'ZZZZZZZZ', 'pdf', 'structured', 0, 4, 3)`);
+        await db.deleteBackgroundDeadLetters(1, 'ABCDEFGH');
+        const remaining = await db.getBackgroundDeadLetters();
+        expect(remaining.map((row) => `${row.zoteroKey}:${row.jobType}`).sort())
+            .toEqual(['ABCDEFGH:fulltext_untag', 'ZZZZZZZZ:document_extract']);
+    });
+
     it('redrives dead content-addressed untag jobs', async () => {
         const hash = 'e'.repeat(64);
         const queued = await db.enqueueBackgroundJob({
