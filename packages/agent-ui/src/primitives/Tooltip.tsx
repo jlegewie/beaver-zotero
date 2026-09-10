@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState, ReactNode } from 'react';
-import ReactDOM from 'react-dom';
-import { getWindowFromElement, getDocumentFromElement } from '../utils/windowContext';
+import { getWindowFromElement } from '../utils/windowContext';
 
 /**
 * Props for the Tooltip component
@@ -20,8 +19,6 @@ export interface TooltipProps {
     classNames?: string;
     /** Whether the tooltip is disabled */
     disabled?: boolean;
-    /** Whether to use a portal for rendering (prevents containment issues) */
-    usePortal?: boolean;
     /** Padding */
     padding?: boolean;
     /** Whether to show the tooltip on hover */
@@ -59,7 +56,6 @@ const Tooltip: React.FC<TooltipProps> = ({
     singleLine = false,
     classNames = '',
     disabled = false,
-    usePortal = false,
     padding = true,
     width,
     allowHtml = false,
@@ -309,31 +305,11 @@ const Tooltip: React.FC<TooltipProps> = ({
         </span>
     );
     
-    // Use portal if requested - this helps when the tooltip needs to 
-    // break out of a container with overflow:hidden or similar
-    if (usePortal && isOpen) {
-        // Portal into the document the anchor lives in. While the anchor is not
-        // attached there is no document to portal into, so render inline rather
-        // than guess a window and land the tooltip in the wrong one.
-        //
-        // A host document need not have a `body` at all — a XUL chrome window is
-        // rooted at `<window>` — and `createPortal` throws on a null container,
-        // which takes down the whole tree. Fall back to rendering in place; the
-        // tooltip is `position: fixed`, so it is only containment that is lost.
-        const container = getDocumentFromElement(anchorRef.current)?.body;
-        if (container) {
-            return (
-                <>
-                {wrappedChildren}
-                {ReactDOM.createPortal(
-                    tooltipElement,
-                    container
-                )}
-                </>
-            );
-        }
-    }
-    
+    // The tooltip is rendered inline, never through a portal: a host document
+    // need not have an HTML `body` to portal into (a XUL chrome window is rooted
+    // at `<window>`), and `createPortal` throws on a null container, taking the
+    // whole tree down with it. `position: fixed` already escapes ancestor
+    // overflow clipping, which is the only thing a portal would buy here.
     return (
         <>
         {wrappedChildren}
