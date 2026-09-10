@@ -33,7 +33,7 @@ function reasonCopy(reason: ProcessingIssueReason, hasOcrAccess: boolean): Reaso
                 title: 'Scanned files without a text layer',
                 description: hasOcrAccess
                     ? 'These files contain only images of text.'
-                    : 'OCR can turn scans into readable, searchable text. It is included with eligible plans.',
+                    : 'OCR can turn scans into readable, searchable text. It will be included with eligible plans soon.',
                 plansLink: !hasOcrAccess,
             };
         case 'no_text':
@@ -241,7 +241,7 @@ export const ProcessingIssueGroupRow: React.FC<{
                     //     See plans
                     // </Button>
                     <Button variant="outline" onClick={() => setActiveTab('billing')} disabled>
-                        Soon
+                        Supported soon
                     </Button>
                 )}
                 {retryable && (
