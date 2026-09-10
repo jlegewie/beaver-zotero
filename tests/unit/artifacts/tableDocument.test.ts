@@ -9,10 +9,27 @@ import {
     BEAVER_HOME_URL,
     buildTableDocument,
     parseTableDocument,
+    parseTableDocumentState,
+    TABLE_STORE_SCRIPT_ID,
     renderTableHtml,
     TABLE_CSS,
 } from "../../../src/services/artifacts/tableDocument";
 import { CSS_RULE_BUDGET } from "../../../src/utils/html";
+
+describe('table operation state', () => {
+    const state = { operations: [{ operation_id: 'op', request_sha256: 'request', version: 1, sha256: 'spec' }] };
+    it.each([
+        `id="${TABLE_STORE_SCRIPT_ID}" type="application/json"`,
+        `data-extra="value" type="application/json" id="${TABLE_STORE_SCRIPT_ID}" defer`,
+    ])('reads receipts with reordered or additional attributes: %s', (attributes) => {
+        expect(parseTableDocumentState(`<script ${attributes}>${JSON.stringify(state)}</script>`)).toEqual(state);
+    });
+    it.each([null, [], { operations: {} }, { operations: [null] }, { operations: [{ version: 1 }] }])(
+        'rejects malformed receipt state %j', (invalid) => {
+            expect(() => parseTableDocumentState(`<script id="${TABLE_STORE_SCRIPT_ID}">${JSON.stringify(invalid)}</script>`)).toThrow();
+        }
+    );
+});
 
 const spec: TableSpec = {
     id: "t",

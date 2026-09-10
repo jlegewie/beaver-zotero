@@ -1,18 +1,13 @@
-import { eventManager } from '../../react/events/eventManager';
-
 /**
-* Toggle the chat panel on and off.
-* 
-* @param win - The window to toggle the chat in.
-* @param turnOn - Whether to turn the chat on or off.
-*/
+ * Toggle the sidebar in the originating main window. The receiving runtime
+ * decides library versus reader presentation from its own context window, so
+ * nothing about the tab state is read or sent here.
+ */
 export function triggerToggleChat(win: Window) {
-    win = Zotero.getMainWindow();
-    const selectedType = win.Zotero_Tabs.selectedType;
-    const location = selectedType === 'library' ? 'library' : 'reader';
-    eventManager.dispatch('toggleChat', { 
-        location: location
-    });
+    if (win.closed || win.__beaverRuntime?.status === 'closing') return;
+    win.__beaverEventBus?.dispatchEvent(new win.CustomEvent('toggleChat', {
+        detail: {},
+    }));
 }
 
 /**
@@ -20,6 +15,9 @@ export function triggerToggleChat(win: Window) {
  * window while the sidebar is closed. The React side decides what the
  * shortcut does when the sidebar is open or Beaver is not signed in.
  */
-export function triggerToggleQuickPrompt() {
-    eventManager.dispatch('toggleQuickPrompt', {});
+export function triggerToggleQuickPrompt(win: Window) {
+    if (win.closed || win.__beaverRuntime?.status === 'closing') return;
+    win.__beaverEventBus?.dispatchEvent(new win.CustomEvent('toggleQuickPrompt', {
+        detail: {},
+    }));
 }

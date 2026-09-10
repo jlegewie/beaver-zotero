@@ -117,8 +117,9 @@ export async function handleTestNoteOpenEditorHttpRequest(request: any) {
             if (Array.isArray(instances)) {
                 inEditor = instances.some((inst: any) => {
                     if (!inst._item || inst._item.id !== item.id) return false;
-                    const frame = inst._iframeWindow?.frameElement;
-                    return frame?.isConnected === true;
+                    // Zotero can expose the content window without frameElement.
+                    const editor = inst._iframeWindow?.document?.querySelector('.ProseMirror');
+                    return editor?.isConnected === true;
                 });
             }
         } catch {

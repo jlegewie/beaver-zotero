@@ -3,7 +3,7 @@
  * These functions are used by AgentActionView for post-run action handling.
  */
 
-import { preloadExternalFileCitations } from '../../src/utils/externalFileCitation';
+import { getExternalRefContext } from '../../src/services/agentDataProvider/actions/editNote';
 import { AgentAction } from '../agents/agentActions';
 import type { EditNoteResultData, EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import type {
@@ -69,10 +69,6 @@ import { currentThreadIdAtom } from '../atoms/threads';
 import { addOrUpdateEditFooter, getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
 import { assertNoPreviewMarkers, containsPreviewMarkers, stripPreviewMarkers } from '../../src/utils/notePreviewGuard';
 import {
-    externalReferenceMappingAtom,
-    externalReferenceItemMappingAtom,
-} from '@beaver/agent-core/citations/externalReferences';
-import {
     resolveBatchEdits,
     detectOverlaps,
     applyResolvedEdits,
@@ -90,17 +86,6 @@ import {
     buildUndoList,
 } from '../../src/services/agentDataProvider/actions/editNoteBatch';
 import { checkLibraryExcluded, excludedLibraryUserMessage } from '../../src/services/agentDataProvider/utils';
-
-/** Preload external files and snapshot external-work mappings for note expansion. */
-async function getExternalRefContext(content: string): Promise<ExternalRefContext> {
-    const { files, warnings } = await preloadExternalFileCitations(content);
-    return {
-        externalFiles: files,
-        externalFileWarnings: warnings,
-        externalRefs: store.get(externalReferenceMappingAtom),
-        externalItemMapping: store.get(externalReferenceItemMappingAtom),
-    };
-}
 
 /**
  * Undo a str_replace_all edit by locating each occurrence via its stored context anchors.
@@ -827,7 +812,7 @@ export async function executeEditNoteAction(
         // action_data on stale paths.
         const partial = detectPartialSimplifiedTag(old_string ?? '');
         if (partial) {
-            const err = new Error(buildPartialSimplifiedTagMessage(partial));
+            const err = new Error(buildPartialSimplifiedTagMessage(partial, operation));
             (err as any).code = 'partial_simplified_tag';
             throw err;
         }

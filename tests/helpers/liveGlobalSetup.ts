@@ -13,6 +13,7 @@ import {
     restoreExclusions,
     type ExclusionSnapshot,
 } from './liveExclusions';
+import { post } from './zoteroHttpClient';
 import { isZoteroAvailable } from './zoteroAvailability';
 
 let snapshot: ExclusionSnapshot = null;
@@ -45,8 +46,48 @@ async function requireNamedInstance(): Promise<void> {
     );
 }
 
+/**
+ * Fail the run when the instance has more main windows open than the suites expect.
+ *
+ * Each main window evaluates its own renderer, so `/beaver/test/*` handlers that
+ * still resolve their window with `Zotero.getMainWindow()` can drive one window
+ * while reading another window's atoms. The mismatch surfaces as a plausible but
+ * wrong value — a stale attachment, an unchanged tab — far from its cause, rather
+ * than as an error. Refuse to start instead of reporting that as a product failure.
+ *
+ * `BEAVER_MULTI_WINDOW_TEST=1` opts in, for the suites that need two windows.
+ * A build without the endpoint, or an instance that cannot answer, is left alone:
+ * only a positive reading of extra windows stops the run.
+ */
+async function requireExpectedWindowCount(): Promise<void> {
+    if (process.env.BEAVER_MULTI_WINDOW_TEST === '1') return;
+    if (!(await isZoteroAvailable())) return;
+
+    let windows: Array<{ id: string; status: string }>;
+    try {
+        ({ windows } = await post<{ windows: Array<{ id: string; status: string }> }>(
+            '/beaver/test/window-runtime',
+            { command: 'list' },
+            { timeout: 5000 },
+        ));
+    } catch {
+        return;
+    }
+    if (!Array.isArray(windows) || windows.length <= 1) return;
+
+    throw new Error(
+        `${windows.length} main Zotero windows are open, but the live suites assume one.\n`
+        + `Dev endpoints are owned by the window that registered last, while some still act\n`
+        + `on Zotero.getMainWindow(), so tab and reader assertions can read the wrong window\n`
+        + `and fail as if the code were broken.\n`
+        + `  - Close the extra windows and re-run.\n`
+        + `  - Set BEAVER_MULTI_WINDOW_TEST=1 to run the suites that want two windows.`,
+    );
+}
+
 export async function setup(): Promise<void> {
     await requireNamedInstance();
+    await requireExpectedWindowCount();
     snapshot = await clearExclusions();
     if (snapshot) {
         console.warn(

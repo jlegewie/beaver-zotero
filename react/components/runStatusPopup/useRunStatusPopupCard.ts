@@ -54,6 +54,7 @@ import {
     type RunStatusPopupPreview,
 } from '../../atoms/runStatusPopup';
 import { eventManager } from '../../events/eventManager';
+import { useBatchApprovalSubmit } from '../input/BatchApprovalPanel';
 import { resolveToolCallLabelEnrich } from '../../utils/toolCallLabelEnrich';
 import { openNoteByKey } from '../../utils/sourceUtils';
 import { resolveItemReference, resolveLibraryRef } from '../../../src/utils/libraryIdentity';
@@ -395,6 +396,7 @@ function useLiveCard(): RunStatusPopupCard | null {
     const approvalControls = useApprovalControls(liveRun?.id ?? null, approvals);
     const creditControls = useCreditControls(credit);
     const onSubmitQuestion = useQuestionControls(question);
+    const onSubmitBatch = useBatchApprovalSubmit(batch?.approvalId ?? null);
     const completed = useCompletedDetails(isLive ? null : completion?.runId ?? null);
     const setPanelState = useSetAtom(setAnnotationPanelStateAtom);
     // The changes card keys its expansion by the answer's last run, so the
@@ -427,7 +429,7 @@ function useLiveCard(): RunStatusPopupCard | null {
     };
 
     if (liveRun) {
-        const base = { threadName: threadDisplayName(threadName, liveRun), stackDepth: 0, onOpen: openBeaver, onDismiss };
+        const base = { runId: liveRun.id, threadName: threadDisplayName(threadName, liveRun), stackDepth: 0, onOpen: openBeaver, onDismiss };
         if (approvals.length > 0) {
             const summary = describePendingApprovals(approvals, singleTitle);
             const plural = summary.count > 1;
@@ -451,12 +453,7 @@ function useLiveCard(): RunStatusPopupCard | null {
             };
         }
         if (batch) {
-            return {
-                ...base,
-                kind: 'batch',
-                title: batch.title,
-                scope: [batch.scopePrimary, batch.scopeSecondary].filter(Boolean).join(' '),
-            };
+            return { ...base, kind: 'batch', approval: batch, onSubmit: onSubmitBatch };
         }
         if (credit) {
             return {
@@ -480,6 +477,7 @@ function useLiveCard(): RunStatusPopupCard | null {
         const run = completed.run;
         const outcome = run.status === 'error' ? 'error' : run.status === 'canceled' ? 'canceled' : 'completed';
         return {
+            runId: run.id,
             threadName: threadDisplayName(threadName, run),
             stackDepth: 0,
             onOpen: openBeaver,
@@ -509,6 +507,7 @@ function usePreviewCard(preview: RunStatusPopupPreview | null): RunStatusPopupCa
 
     if (!preview) return null;
     const base = {
+        runId: 'preview-run',
         threadName: preview.threadName ?? 'Summarize Legewie et al. 2024 on neighborhood effects',
         stackDepth: Math.min(Math.max(preview.stackDepth ?? 0, 0), MAX_STACK_DEPTH),
         onOpen: openBeaver,
@@ -550,8 +549,28 @@ function usePreviewCard(preview: RunStatusPopupPreview | null): RunStatusPopupCa
             return {
                 ...base,
                 kind: 'batch',
-                title: preview.title ?? 'Summarize each paper into a note',
-                scope: preview.scope ?? '568 items in Methods and its subcollections',
+                approval: {
+                    approvalId: 'preview-batch',
+                    runId: 'preview-run',
+                    toolcallId: 'preview-toolcall',
+                    batchId: 'preview-batch',
+                    title: preview.title ?? 'Summarize each paper into a note',
+                    scopePrimary: preview.scopePrimary ?? '568 items',
+                    scopeSecondary: preview.scopeSecondary ?? 'in Methods and its subcollections',
+                    message: preview.message ?? 'Write one note per item covering its question, method, and main findings.',
+                    destructiveWarning: preview.destructiveWarning ?? '',
+                    costWarning: preview.costWarning ?? '',
+                    creditChip: preview.creditChip ?? '',
+                    creditTooltip: preview.creditTooltip ?? '',
+                    defaultMode: 'ask_each_time',
+                    approveLabel: 'Start batch',
+                    declineLabel: 'Cancel',
+                    declineWithInstructionsLabel: 'Cancel and send instructions',
+                    userInstructionsPrefill: preview.userInstructionsPrefill ?? '',
+                    readOnly: preview.readOnly ?? false,
+                    timeoutSeconds: 300,
+                },
+                onSubmit: clear,
             };
         case 'question':
             return {

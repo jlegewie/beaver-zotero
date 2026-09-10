@@ -1,3 +1,4 @@
+import type { WindowRuntime } from "../runtime/instance";
 /**
  * MCP (Model Context Protocol) Service
  *
@@ -90,7 +91,8 @@ export class MCPService {
     /**
      * Register the /beaver/mcp endpoint on Zotero's HTTP server.
      */
-    register(): boolean {
+    register(runtime?: WindowRuntime): boolean {
+        this.unregister();
         if (!Zotero?.Server?.Endpoints) {
             logger('MCPService: Zotero.Server.Endpoints not available', 2);
             return false;
@@ -118,23 +120,26 @@ export class MCPService {
             },
         };
 
-        Zotero.Server.Endpoints['/beaver/mcp'] = Endpoint;
+        if (runtime) {
+            this.releaseEndpoint = Zotero.Beaver.runtime.registerWindowEndpoint(runtime, '/beaver/mcp', Endpoint);
+        } else {
+            Zotero.Server.Endpoints['/beaver/mcp'] = Endpoint;
+            this.releaseEndpoint = () => {
+                if (Zotero.Server?.Endpoints['/beaver/mcp'] === Endpoint) delete Zotero.Server.Endpoints['/beaver/mcp'];
+            };
+        }
         this.registered = true;
         logger(`MCPService: Registered /beaver/mcp endpoint with ${this.tools.size} tools`, 3);
         return true;
     }
 
-    /**
-     * Unregister the endpoint.
-     */
-    unregister(): void {
-        if (!Zotero?.Server?.Endpoints) return;
+    private releaseEndpoint?: () => void;
 
-        if (Zotero.Server.Endpoints['/beaver/mcp']) {
-            delete Zotero.Server.Endpoints['/beaver/mcp'];
-        }
+    /** Unregister only this service’s endpoint ownership. */
+    unregister(): void {
+        this.releaseEndpoint?.();
+        this.releaseEndpoint = undefined;
         this.registered = false;
-        logger('MCPService: Unregistered /beaver/mcp endpoint', 3);
     }
 
     // =========================================================================

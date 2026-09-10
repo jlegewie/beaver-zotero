@@ -16,6 +16,7 @@
  *                                  tags to an unresolvable-ref error
  */
 
+import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import { noteCitationTagPattern } from './noteCitationTags';
 import type { SimplificationMetadata } from './noteHtmlSimplifier';
 import {
@@ -197,7 +198,7 @@ function findUniqueCitationRef(
  * Resolve an `att_id="LIB-KEY"` (attachment reference) to the parent item's
  * `item_id="LIB-PARENT_KEY"`. Returns the resolved parent id and the
  * attachment item (so callers can translate page numbers the same way
- * `buildCitationFromAttId` did at insert time), or `null` when:
+ * `buildCitation` did at insert time), or `null` when:
  *   - the id is malformed
  *   - the item doesn't exist
  *   - the item isn't an attachment
@@ -220,7 +221,7 @@ function resolveAttIdToParent(
 }
 
 /**
- * Normalize a citation page locator the way `buildCitationFromAttId` did at
+ * Normalize a citation page locator the way `buildCitation` did at
  * insert time: strip whitespace, then translate pure-numeric locators from
  * 1-based page numbers to the attachment's page labels. Mirrors
  * `resolvePageForCitation(item, page, true)` in noteCitationExpand. Returns
@@ -407,16 +408,19 @@ export interface PartialSimplifiedTag {
  * `old_string_not_found` error. This detector lets the validator/executor
  * surface a targeted message instead.
  *
- * Detection is intentionally narrow: only unclosed `<citation` /
- * `<annotation` openers count. Generic unmatched-attribute heuristics on
- * prose (e.g. `label="..."` without a tag context) are excluded because
- * they misclassify normal text. Returns the first partial encountered, or
- * `null` when every opener closes cleanly.
+ * Detection is intentionally narrow: unclosed openers and anchors consisting
+ * entirely of citation attributes count. Attribute fragments embedded in prose
+ * are left alone to avoid misclassifying normal text. Call only after matching
+ * fails, since attribute-only anchors can also be literal note text.
  */
 export function detectPartialSimplifiedTag(
     oldString: string,
 ): PartialSimplifiedTag | null {
     if (!oldString) return null;
+    const citationAttrFragmentRe = /^\s*(?:(?:id|loc|ref|label|item_id|att_id|external_id|items)\s*=\s*"[^"]*"\s*)+(?:\/?>)?\s*$/;
+    if (citationAttrFragmentRe.test(oldString)) {
+        return { kind: 'citation', snippet: oldString.trim().slice(0, 60) };
+    }
     const openerRe = /<(citation|annotation|link)(?=\s|>|\/|$)/g;
     let m: RegExpExecArray | null;
     while ((m = openerRe.exec(oldString)) !== null) {
@@ -462,7 +466,22 @@ export function detectPartialSimplifiedTag(
  * `read_note`) so the model can self-correct on the next turn instead of
  * reading the generic zero-match hint.
  */
-export function buildPartialSimplifiedTagMessage(partial: PartialSimplifiedTag): string {
+export function buildPartialSimplifiedTagMessage(
+    partial: PartialSimplifiedTag,
+    operation: EditNoteOperation,
+): string {
+    if (partial.kind === 'citation') {
+        const message = 'Citation tags are atomic: the matcher cannot match a fragment of a '
+            + `simplified <citation .../> tag. Unmatched old_string fragment: \`${partial.snippet}\`. `
+            + 'If targeting a citation, copy the WHOLE tag exactly as shown by read_note '
+            + '(including its ref attribute) as old_string, one edit per tag. ';
+        if (operation === 'insert_before' || operation === 'insert_after') {
+            return message + 'Keep new_string as the content to insert; the citation anchor remains unchanged.';
+        }
+        return message
+            + 'To replace a citation, put the full replacement tag (without ref) in new_string. '
+            + "To change many citations at once, use a single operation='rewrite' with the full note body.";
+    }
     if (partial.kind === 'link') {
         return (
             '`<link/>` tags are atomic — the matcher cannot match a partial tag. '
@@ -472,7 +491,7 @@ export function buildPartialSimplifiedTagMessage(partial: PartialSimplifiedTag):
         );
     }
     return (
-        `${partial.kind === 'citation' ? 'Citation' : 'Annotation'} tags are atomic — `
+        'Annotation tags are atomic — '
         + `the matcher cannot match a partial tag. Found a partial opener in old_string: `
         + `\`${partial.snippet}\`.\n`
         + 'To rename across all citations, use `str_replace_all` on the FULL '

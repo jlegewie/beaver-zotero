@@ -30,6 +30,7 @@
 import type { Citation } from "../types/citations";
 import {
     hasFixedVocabulary,
+    pruneTableCitations,
     normalizeSelectLabel,
     SELECT_COLORS,
     type Cell,
@@ -277,7 +278,7 @@ export function applyMutations(
         const failure = applyOne(draft, mutation);
         if (failure) return failure;
     }
-    return { ok: true, spec: draft.spec };
+    return { ok: true, spec: pruneTableCitations(draft.spec) };
 }
 
 /** Applies one mutation to the draft, or returns the failure that stops the list. */

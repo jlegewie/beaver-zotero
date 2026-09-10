@@ -70,3 +70,39 @@ export function translatePageLabelToNumber(
 
     return translatedAny ? translatedParts.join('') : locStr;
 }
+
+/**
+ * First physical 1-based page in a page locator ("12", "12-15", "3, 7"), or
+ * undefined when the locator is not a physical page number ("xii", "§3.2").
+ *
+ * Reader navigation addresses pages by position, so a display label has to be
+ * translated back with `translatePageLabelToNumber` before it lands here.
+ */
+export function firstPageNumber(pageStr: string | null | undefined): number | undefined {
+    const match = pageStr?.match(/^\s*(\d+)/);
+    if (!match) return undefined;
+    const page = parseInt(match[1], 10);
+    return page > 0 ? page : undefined;
+}
+
+/** Format distinct physical pages as compact ranges, using display labels when available. */
+export function formatCitationPages(
+    pages: number[],
+    labels?: PageLabels | null,
+    { inclusiveRange = false }: { inclusiveRange?: boolean } = {},
+): string | undefined {
+    const sorted = [...new Set(pages.filter(page => Number.isInteger(page) && page > 0))].sort((a, b) => a - b);
+    const ranges: string[] = [];
+    const label = (page: number) => labels?.[page - 1]?.trim() || String(page);
+    // Structural spans may supply only endpoint pages, with interior pages omitted.
+    if (inclusiveRange && sorted.length > 1) {
+        return `${label(sorted[0])}-${label(sorted[sorted.length - 1])}`;
+    }
+    for (let i = 0; i < sorted.length; i++) {
+        const start = sorted[i];
+        let end = start;
+        while (sorted[i + 1] === end + 1) end = sorted[++i];
+        ranges.push(start === end ? label(start) : `${label(start)}-${label(end)}`);
+    }
+    return ranges.length ? ranges.join(', ') : undefined;
+}

@@ -409,9 +409,10 @@ async function enforceBudget(ref: TableRef): Promise<void> {
  *
  * Called when the table is deleted: the shadow describes a table that no longer
  * exists, and the whole reason it lives outside the storage directory is that
- * nothing else would ever clean it up.
+ * nothing else would ever clean it up. Trim uses strict mode before rollback,
+ * because an undeleted shadow would falsely report the rewind as sync loss.
  */
-export async function pruneTableShadow(ref: TableRef): Promise<number> {
+export async function pruneTableShadow(ref: TableRef, strict = false): Promise<number> {
     const db = shadowDb();
     if (!db) return 0;
     try {
@@ -421,6 +422,7 @@ export async function pruneTableShadow(ref: TableRef): Promise<number> {
         }
         return removed.length;
     } catch (error) {
+        if (strict) throw error;
         logger(`recoveryShadow: could not prune ${ref.key}: ${String(error)}`, 2);
         return 0;
     }

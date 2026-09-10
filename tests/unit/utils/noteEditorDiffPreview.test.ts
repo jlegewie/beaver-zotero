@@ -51,6 +51,7 @@ vi.mock('../../../src/utils/noteCitationExpand', async () => {
     return {
         ...actual,
         preloadNotePageLabels: vi.fn(async () => ({})),
+        preloadStructuralLocatorPages: vi.fn(async () => ({ pages: {}, unresolved: [] })),
         preloadPageLabelsForNewCitations: vi.fn(async () => ({})),
     };
 });
@@ -66,6 +67,8 @@ import {
     isDiffPreviewPending,
 } from '../../../react/utils/noteEditorDiffPreview';
 import { logger } from '@beaver/agent-core/platform/logger';
+import { store } from '../../../react/store';
+import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 import { preloadNotePageLabels } from '../../../src/utils/noteCitationExpand';
 
 describe('constructMultiDiffHtml', () => {
@@ -312,6 +315,45 @@ describe('showDiffPreview approveAll revision-guard flow', () => {
             await p;
         } finally {
             vi.useRealTimers();
+        }
+    });
+
+    it('preloads a standalone attachment title before rendering the proposed edit', async () => {
+        vi.useFakeTimers();
+        const h = makeHarness(NOTE);
+        const previousLibraries = Zotero.Libraries;
+        vi.mocked(store.get).mockImplementation((atom: any) => atom === searchableLibraryIdsAtom ? [1] : null);
+        let titleLoaded = false;
+        const attachment = {
+            libraryID: 1, key: 'ATTACH12', parentID: false,
+            isAttachment: () => true, isFileAttachment: () => true, isPDFAttachment: () => true,
+            attachmentFilename: 'fallback.pdf',
+            getField: vi.fn(() => {
+                if (!titleLoaded) throw new Error('Item data not loaded');
+                return 'Full report title';
+            }),
+        };
+        (Zotero as any).Libraries = { userLibraryID: 1, get: () => ({ isGroup: false }) };
+        (Zotero.Items as any).getByLibraryAndKey = vi.fn(() => attachment);
+        (Zotero.Items as any).loadDataTypes = vi.fn(async () => {
+            await Promise.resolve();
+            titleLoaded = true;
+        });
+        try {
+            const shown = await showDiffPreview(1, 'NOTE0001', [{
+                operation: 'append', oldString: '',
+                newString: '<p><citation id="u-ATTACH12" loc="page6"/></p>',
+            }]);
+            expect(shown, JSON.stringify(vi.mocked(logger).mock.calls)).toBe(true);
+            expect(Zotero.Items.loadDataTypes).toHaveBeenCalledWith([attachment], ['itemData']);
+            const html = h.applyIncrementalUpdate.mock.calls[0][0].html;
+            expect(html).toContain('zotero://open/library/items/ATTACH12?page=6');
+            expect(html).toContain('Full report title');
+            expect(html).toContain(', p. 6');
+            expect(html).not.toContain('fallback.pdf');
+        } finally {
+            (Zotero as any).Libraries = previousLibraries;
+            vi.mocked(store.get).mockImplementation(() => null);
         }
     });
 

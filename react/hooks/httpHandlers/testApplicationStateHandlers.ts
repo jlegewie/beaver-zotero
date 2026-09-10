@@ -173,10 +173,9 @@ export async function handleTestBeaverSidebarHttpRequest(request: any): Promise<
     const open = request?.open !== false;
 
     if (store.get(isSidebarVisibleAtom) !== open) {
-        const location = store.get(isLibraryTabAtom) ? 'library' : 'reader';
         eventManager.dispatch('toggleChat', open
-            ? { location, forceOpen: true, skipAutoPopulate: true }
-            : { location });
+            ? { forceOpen: true, skipAutoPopulate: true }
+            : {});
     }
 
     const timeoutMs = settleTimeout(request);

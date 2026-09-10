@@ -1,3 +1,4 @@
+import { getContextWindow } from '../runtime/windowRuntime';
 import { useSetAtom } from 'jotai';
 import { store } from '../store';
 import { isSidebarVisibleAtom } from '../atoms/ui';
@@ -24,7 +25,7 @@ export function useToggleSidebar() {
 
             // Already in the desired state — no-op
             if (newIsVisible === currentlyOpen) return prev;
-            const isLibraryTab = Zotero.getMainWindow().Zotero_Tabs.selectedType === 'library';
+            const isLibraryTab = getContextWindow().Zotero_Tabs.selectedType === 'library';
 
             logger(`useToggleSidebar: toggleChat event received - currently open: ${currentlyOpen}, will be: ${newIsVisible}, location: ${isLibraryTab ? 'library' : 'reader'}`);
 

@@ -90,6 +90,7 @@ import {
     restoreTable,
     revertTable,
     writeTable,
+    trimTable,
     type TableRef,
     type TableWriteMeta,
 } from '../../../src/services/artifacts/tableStore';
@@ -605,6 +606,7 @@ function selectLabelFor(itemType: string): string {
  */
 
 interface TableCreateRequest extends OpenTableRequest {
+    operation_id?: string;
     /** The spec to store. Omit it and a demo spec is built from the library. */
     spec?: TableSpec;
     libraryID?: number;
@@ -630,6 +632,7 @@ export async function handleTestTableCreateHttpRequest(
         // revertable.
         const created = await createTable({
             spec,
+            operation_id: request.operation_id,
             title: request.title,
             libraryID: request.libraryID,
             collectionID: request.collectionID,
@@ -638,6 +641,9 @@ export async function handleTestTableCreateHttpRequest(
         return {
             ok: true,
             key: created.key,
+            sha256: created.sha256 ?? created.entry.sha256,
+            replayed: created.replayed,
+            operation: created.operation,
             item_id: created.itemID,
             library_id: created.libraryID,
             title: created.title,
@@ -820,11 +826,15 @@ function writeResponse(
             error: `The table is at version ${result.version}.`,
             version: result.version,
             spec: result.spec,
+            sha256: result.sha256,
         };
     }
     return {
         ok: true,
         version: result.version,
+        sha256: result.sha256,
+        replayed: result.replayed,
+        operation: result.operation,
         // False here after a second write in the same run means the collapse
         // rule did not fire when it should have.
         collapsed: result.collapsed,
@@ -842,6 +852,8 @@ function writeResponse(
 interface TableWriteRequest extends TableStoreRequest {
     spec?: TableSpec;
     expectedVersion?: number;
+    expected_sha256?: string;
+    operation_id?: string;
 }
 
 export async function handleTestTableWriteHttpRequest(
@@ -858,7 +870,13 @@ export async function handleTestTableWriteHttpRequest(
                 ref,
                 request.spec,
                 writeMetaFrom(request),
-                request.expectedVersion
+                request.expectedVersion,
+                request.operation_id !== undefined || request.expected_sha256 !== undefined
+                    ? {
+                          operation_id: request.operation_id ?? '',
+                          expected_sha256: request.expected_sha256 ?? '',
+                      }
+                    : undefined
             )
         );
     } catch (error) {
@@ -967,6 +985,7 @@ export async function handleTestTableOpenHttpRequest(
             version: opened.version,
             // Empty on a table nothing interrupted; the shapes are documented
             // on `TableRecovery`.
+            sha256: opened.sha256,
             recovered: opened.recovered,
             // Null on every table this device is still ahead of. Deliberately
             // separate from `recovered`: nothing has been repaired.
@@ -1374,4 +1393,17 @@ export async function handleTestTableItemPaneHttpRequest(
         fields: report.fields,
         actions: report.actions,
     };
+}
+
+/** Exercises conversation rewind through the same locked store path. */
+export async function handleTestTableTrimHttpRequest(
+    request: TableStoreRequest & { run_ids?: string[] } = {}
+): Promise<any> {
+    const ref = tableRefFrom(request);
+    if (!ref) return MISSING_KEY;
+    try {
+        return await trimTable(ref, { thread_id: request.thread_id ?? '', run_ids: request.run_ids ?? [] });
+    } catch (error) {
+        return errorResponse(error);
+    }
 }

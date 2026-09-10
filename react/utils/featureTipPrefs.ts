@@ -14,6 +14,8 @@ export interface FeatureTipState {
     shown: Record<string, string>;
     /** When the newest tip of any kind was shown. */
     lastShownAt?: string;
+    /** Earliest eligible time for each postponed tip, as ISO timestamps. */
+    deferredUntil?: Record<string, string>;
 }
 
 /** The gap kept between two feature tips, whichever they are. */
@@ -32,6 +34,12 @@ export function parseFeatureTipState(raw: unknown): FeatureTipState {
             if (typeof at === 'string') state.shown[id] = at;
         }
         if (typeof parsed.lastShownAt === 'string') state.lastShownAt = parsed.lastShownAt;
+        if (parsed.deferredUntil && typeof parsed.deferredUntil === 'object') {
+            state.deferredUntil = {};
+            for (const [id, at] of Object.entries(parsed.deferredUntil)) {
+                if (typeof at === 'string' && Number.isFinite(Date.parse(at))) state.deferredUntil[id] = at;
+            }
+        }
         return state;
     } catch {
         return { shown: {} };
@@ -40,6 +48,23 @@ export function parseFeatureTipState(raw: unknown): FeatureTipState {
 
 export function hasSeenFeatureTip(state: FeatureTipState, tipId: string): boolean {
     return tipId in state.shown;
+}
+
+export function isFeatureTipDeferred(state: FeatureTipState, tipId: string, now: number): boolean {
+    const until = state.deferredUntil?.[tipId];
+    return !!until && Date.parse(until) > now;
+}
+
+/** Postpones selected tips without marking them seen or delaying unrelated tips. */
+export function deferFeatureTips(delays: Readonly<Record<string, number>>, now: number): void {
+    const state = readFeatureTipState();
+    const deferredUntil = { ...state.deferredUntil };
+    for (const [id, delayMs] of Object.entries(delays)) {
+        if (!Number.isFinite(delayMs) || delayMs <= 0) continue;
+        const previous = Date.parse(deferredUntil[id] ?? '');
+        deferredUntil[id] = new Date(Math.max(now + delayMs, Number.isFinite(previous) ? previous : 0)).toISOString();
+    }
+    writeFeatureTipState({ ...state, deferredUntil });
 }
 
 /**
@@ -66,7 +91,7 @@ export function isWithinFeatureTipGap(
 
 export function markFeatureTipShown(state: FeatureTipState, tipId: string, now: number): FeatureTipState {
     const at = new Date(now).toISOString();
-    return { shown: { ...state.shown, [tipId]: at }, lastShownAt: at };
+    return { ...state, shown: { ...state.shown, [tipId]: at }, lastShownAt: at };
 }
 
 export function readFeatureTipState(): FeatureTipState {

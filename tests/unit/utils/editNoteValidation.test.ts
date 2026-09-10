@@ -286,7 +286,7 @@ describe('enrichOldStringCitationRefs (att_id)', () => {
     });
 
     it('translates 1-based page number to the attachment\'s display label', () => {
-        // Repro of the reviewer's concern: when buildCitationFromAttId ran at
+        // Repro of the reviewer's concern: when buildCitation ran at
         // insert time, it converted `page="3"` → the attachment's label
         // "iii" (roman frontmatter). Stored metadata carries the label; the
         // model's follow-up old_string still uses the raw number. Without

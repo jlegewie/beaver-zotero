@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
-    uiManager,
+    ReaderWidthDispatcher,
     unwrapReaderWidthHandler,
     restoreReaderSidebarWidthHandler,
-} from '../../../react/ui/UIManager';
+} from '../../../src/runtime/readerWidth';
 
 const ORIGINAL_HANDLER_PROP = '__beaverOriginalSidebarWidthHandler';
 
@@ -43,10 +43,10 @@ function makeLegacyWrapper(): (width: number) => void {
 }
 
 describe('reader sidebar width handler lifecycle', () => {
+    let dispatcher: ReaderWidthDispatcher;
     beforeEach(() => {
         vi.clearAllMocks();
-        // Reset the singleton's per-instance install state between tests.
-        (uiManager as any).installedReaderWidthWrapper = null;
+        dispatcher = new ReaderWidthDispatcher();
     });
 
     afterEach(() => {
@@ -126,7 +126,7 @@ describe('reader sidebar width handler lifecycle', () => {
             const base = vi.fn();
             const reader = installReaderStub(base);
 
-            (uiManager as any).initSidebarWidthTracking();
+            dispatcher.install();
 
             const installed = reader.onChangeSidebarWidth;
             expect(installed).not.toBe(base);
@@ -140,9 +140,9 @@ describe('reader sidebar width handler lifecycle', () => {
             const base = vi.fn();
             const reader = installReaderStub(base);
 
-            (uiManager as any).initSidebarWidthTracking();
+            dispatcher.install();
             const first = reader.onChangeSidebarWidth;
-            (uiManager as any).initSidebarWidthTracking();
+            dispatcher.install();
 
             expect(reader.onChangeSidebarWidth).toBe(first);
         });
@@ -151,14 +151,14 @@ describe('reader sidebar width handler lifecycle', () => {
             const base = vi.fn();
             const reader = installReaderStub(base);
 
-            (uiManager as any).initSidebarWidthTracking();
+            dispatcher.install();
             const own = reader.onChangeSidebarWidth;
 
             // Another window/generation wraps over us.
             const displacer = makeTaggedWrapper(own);
             reader.onChangeSidebarWidth = displacer;
 
-            (uiManager as any).initSidebarWidthTracking();
+            dispatcher.install();
 
             const reinstalled = reader.onChangeSidebarWidth;
             expect(reinstalled).not.toBe(displacer);
@@ -176,7 +176,7 @@ describe('reader sidebar width handler lifecycle', () => {
             const legacy = makeLegacyWrapper();
             const reader = installReaderStub(legacy);
 
-            (uiManager as any).initSidebarWidthTracking();
+            dispatcher.install();
 
             const installed = reader.onChangeSidebarWidth;
             expect(installed).not.toBe(legacy);
@@ -189,7 +189,7 @@ describe('reader sidebar width handler lifecycle', () => {
             const staleWrapper = makeTaggedWrapper(base);
             const reader = installReaderStub(staleWrapper);
 
-            (uiManager as any).initSidebarWidthTracking();
+            dispatcher.install();
 
             const installed = reader.onChangeSidebarWidth;
             // The new wrapper must reference the true original, not the stale
@@ -202,15 +202,17 @@ describe('reader sidebar width handler lifecycle', () => {
             expect(staleWrapper).not.toHaveBeenCalled();
         });
 
-        it('cleanup() restores the original handler even when called on an instance that did not install the wrapper', () => {
+        it('disposal restores only the handler this dispatcher owns', () => {
             const base = vi.fn();
-            // Simulate the other bundle copy's install: a tagged wrapper this
-            // instance knows nothing about.
-            const reader = installReaderStub(makeTaggedWrapper(base));
-
-            uiManager.cleanup();
-
+            const reader = installReaderStub(base);
+            dispatcher.install();
+            dispatcher.dispose();
             expect(reader.onChangeSidebarWidth).toBe(base);
+            const foreign = vi.fn();
+            dispatcher.install();
+            reader.onChangeSidebarWidth = foreign;
+            dispatcher.dispose();
+            expect(reader.onChangeSidebarWidth).toBe(foreign);
         });
     });
 });

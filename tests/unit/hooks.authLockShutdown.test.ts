@@ -1,3 +1,4 @@
+import { BeaverInstance } from '../../src/runtime/instance';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
@@ -9,7 +10,6 @@ const {
     mockRegisterChatPanel,
     mockRegisterShortcuts,
     mockRemoveChatPanel,
-    mockUiManagerCleanup,
     mockUnregisterBeaverProtocolHandler,
     mockUnregisterShortcuts,
 } = vi.hoisted(() => ({
@@ -21,7 +21,6 @@ const {
     mockRegisterChatPanel: vi.fn(),
     mockRegisterShortcuts: vi.fn(),
     mockRemoveChatPanel: vi.fn(),
-    mockUiManagerCleanup: vi.fn(),
     mockUnregisterBeaverProtocolHandler: vi.fn(),
     mockUnregisterShortcuts: vi.fn(),
 }));
@@ -42,12 +41,6 @@ vi.mock('../../src/beaver-extract', () => ({
     disposeMuPDFWorker: mockDisposeMuPDFWorker,
 }));
 
-vi.mock('../../react/ui/UIManager', () => ({
-    uiManager: {
-        cleanup: mockUiManagerCleanup,
-    },
-    restoreReaderSidebarWidthHandler: vi.fn(),
-}));
 
 vi.mock('../../src/services/protocolHandler', () => ({
     registerBeaverProtocolHandler: vi.fn(),
@@ -141,12 +134,15 @@ function makeAuthLock() {
 }
 
 function makeWindow() {
-    return {
+    const win = {
+        EventTarget,
         closed: false,
         document: {
             getElementById: vi.fn().mockReturnValue(null),
         },
     } as Window & Record<string, unknown>;
+    (globalThis as any).addon.runtime.attachWindow(win);
+    return win;
 }
 
 function setupGlobals() {
@@ -186,6 +182,7 @@ function setupGlobals() {
     };
 
     (globalThis as any).addon = {
+        runtime: new BeaverInstance(),
         data: {
             alive: true,
             config: {
@@ -282,16 +279,12 @@ describe('hooks auth lock shutdown cleanup', () => {
         (globalThis as any).addon.backgroundExtractor = { stop };
         await hooks.onShutdown();
         expect(stop).toHaveBeenCalledOnce(); expect(closeDatabase).toHaveBeenCalledOnce();
-        expect(mockUiManagerCleanup).toHaveBeenCalledOnce();
+        expect((globalThis as any).addon.runtime.getSnapshot()).toEqual([]);
         expect((globalThis as any).addon.voice).toBeUndefined();
         expect((globalThis as any).addon.voiceHarness).toBeUndefined();
     });
 
-    // TODO: re-enable. Pre-existing failure unrelated to MuPDF cleanup —
-    // `__beaverDisposeSupabase` is left on the window object after
-    // `onMainWindowUnload`. Needs investigation in the unload cleanup
-    // path.
-    it.skip('clears the persisted auth lock during full shutdown unload', async () => {
+    it('clears the persisted auth lock during full shutdown unload', async () => {
         const hooks = await loadHooks();
         const win = makeWindow();
         win.__beaverAuthLock = makeAuthLock();
@@ -306,11 +299,7 @@ describe('hooks auth lock shutdown cleanup', () => {
         expect(mockCancelAllActiveTasks).toHaveBeenCalledOnce();
     });
 
-    // TODO: re-enable. Pre-existing failure unrelated to MuPDF cleanup —
-    // when Supabase disposal rejects, `__beaverDisposeSupabase` is left on
-    // the window object instead of being cleared. Needs investigation in
-    // `onMainWindowUnload`'s error path.
-    it.skip('clears the persisted auth lock even if Supabase disposal throws during unload', async () => {
+    it('clears the persisted auth lock even if Supabase disposal throws during unload', async () => {
         const hooks = await loadHooks();
         const win = makeWindow();
         win.__beaverAuthLock = makeAuthLock();
@@ -325,11 +314,7 @@ describe('hooks auth lock shutdown cleanup', () => {
         expect(ztoolkit.log).toHaveBeenCalledWith(expect.stringContaining('disposeSupabase: Error: dispose failed'));
     });
 
-    // TODO: re-enable. Pre-existing failure unrelated to MuPDF cleanup —
-    // the Supabase-disposal timeout path does not clear
-    // `__beaverDisposeSupabase` from the window. Needs investigation in
-    // `onMainWindowUnload`'s timeout branch.
-    it.skip('clears the persisted auth lock after a timed-out Supabase disposal during unload', async () => {
+    it('clears the persisted auth lock after a timed-out Supabase disposal during unload', async () => {
         vi.useFakeTimers();
 
         const hooks = await loadHooks();

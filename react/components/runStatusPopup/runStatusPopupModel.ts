@@ -8,6 +8,8 @@ import type { AgentRun, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { isAutoLoadingToolCall, isThinkingInProgress } from '@beaver/agent-core/agents/messageVisibility';
 import { getToolCallStatus, type ToolResult } from '@beaver/agent-core/run-state/atoms';
 import type { PendingApproval } from '@beaver/agent-ui/host';
+import type { PendingBatchApproval } from '@beaver/agent-core/run-state/pendingBatchApprovals';
+import type { BatchApprovalDecision } from '@beaver/agent-core/run-state/batchApprovalAnswers';
 import type { PendingQuestion } from '@beaver/agent-core/run-state/pendingQuestions';
 import type { AskUserQuestionAnswer } from '@beaver/agent-core/protocol/agentProtocol';
 import type { RunPermissionMode } from '../ui/buttons/RunPermissionButton';
@@ -35,6 +37,8 @@ export interface RunStatusArtifact {
 }
 
 interface RunStatusCardBase {
+    /** The run the card is about, so state kept beside the card can follow it. */
+    runId: string;
     threadName: string;
     /** Further running threads layered behind this card, capped by MAX_STACK_DEPTH. */
     stackDepth: number;
@@ -86,9 +90,9 @@ export interface CreditCard extends RunStatusCardBase {
 
 export interface BatchCard extends RunStatusCardBase {
     kind: 'batch';
-    title: string;
-    /** The population, e.g. "184 items in Methods". Empty when unknown. */
-    scope: string;
+    /** The request itself; the card draws the shared approval UI for it. */
+    approval: PendingBatchApproval;
+    onSubmit: (decision: BatchApprovalDecision) => void;
 }
 
 export interface QuestionCard extends RunStatusCardBase {
