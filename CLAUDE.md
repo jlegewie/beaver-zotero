@@ -61,7 +61,7 @@ Consequences:
 | Root | Bundled by | Entry → output |
 |------|-----------|----------------|
 | `src/` | esbuild | `src/index.ts` → `content/scripts/beaver.js` — lifecycle, hooks, database, services |
-| `react/` | webpack | `react/index.tsx` → `content/reactBundle.js` — React UI, Jotai atoms, Supabase client, auth |
+| `react/` | webpack | `react/index.tsx` → `content/reactBundle.js` — React UI and per-window Jotai store (account/auth live on `addon.account`) |
 | `packages/agent-core/` | both (compiled from source) | consumed as `@beaver/agent-core/<subpath>` |
 | `packages/agent-ui/` | webpack only (compiled from source) | consumed as `@beaver/agent-ui/<subpath>`; its `src/theme/*.css` is copied into `addon/content/styles/` by `scripts/copy-agent-ui-css.mjs` |
 
@@ -217,27 +217,37 @@ hooks (auth, tab tracking, …).
 
 ### Instance account and preferences
 
-`addon.account` owns the only Supabase client, encrypted storage, token refresh and profile
-pipeline in the plugin realm. Renderers register `setCredentialAdapter` and
-`setSupabaseClientProvider`; they never construct or dispose a Supabase client. Shared hosts
-that omit those adapters retain the core's existing storage and refresh-policy behavior.
+The plugin owns account state for the app lifetime: the only Supabase client, encrypted
+storage, token refresh, profile, library exclusions, entitlements, native preference
+observation, and user-scoped realtime (`addon.account`, `addon.preferences`). Windows do not
+construct or dispose a Supabase client.
 
-Account snapshots carry generation and revision. Subscribe before mounting, apply only newer
-snapshots, and unregister on window detach. Account replacement revokes access and clears local
-chat state synchronously; same-user token refresh preserves drafts and history. HTTP requests
-check the account generation before dispatch/retry and after body parsing. Classify errors
-with the structural helpers in `apiErrors`, since bundle constructors are distinct.
+That owner is the API windows use. Mutations (sign-in/out, exclusions, persisted account
+prefs, profile refresh) go through instance commands. Renderers subscribe to snapshots and
+realtime; they do not poll `getSnapshot()` from components. Background / esbuild code never
+reads Jotai — it uses the same owner via `Zotero.Beaver` (searchable library ids, OCR and
+search-index flags).
 
-Profile atoms are projections. Persisted account changes go through instance commands;
-profile projections are read-only and mutation callers await an authoritative refresh. Library exclusions apply immediately
-and invalidate older reads before the backend save. `addon.preferences` owns native preference
-observation; local preference atoms follow its revision, while unsaved settings editors and
-chat model selection remain local.
+Each window's Jotai store is a projection so React can re-render. Profile and auth atoms are
+read-only copies filled by `attachAccountProjection` (`react/runtime/accountProjection.ts`).
+Do not write those atoms from components. Window-local state stays local: composer drafts,
+unsaved settings editors, chat model selection. Account replacement clears some of that
+state; same-user token refresh preserves drafts and history.
 
-`addon.account.realtime` owns shared user-scoped thread and provider-wake channels.
-Renderers subscribe through its listener API and release only their own listener on cleanup;
-never unsubscribe a shared SDK channel from a renderer. The final listener releases the channel,
-and account revocation clears listeners before late events can reach another account.
+Renderers register `setCredentialAdapter` and `setSupabaseClientProvider` so the webpack
+copy of agent-core talks to the instance client. Shared hosts that omit those adapters
+retain the core's existing storage and refresh-policy behavior. Subscribe before mounting,
+apply only newer generation/revision snapshots, and unregister on window detach. HTTP
+requests check the account generation before dispatch/retry and after body parsing.
+Classify errors with the structural helpers in `apiErrors`, since bundle constructors are
+distinct. Library exclusions apply immediately and invalidate older reads before the
+backend save. `addon.preferences` owns native preference observation; local preference
+atoms follow its revision.
+
+`addon.account.realtime` owns shared thread and provider-wake channels. Renderers subscribe
+through its listener API and release only their own listener on cleanup; never unsubscribe
+a shared SDK channel from a renderer. The final listener releases the channel, and account
+revocation clears listeners before late events can reach another account.
 
 ### Window lifecycle (close window ≠ quit app)
 
