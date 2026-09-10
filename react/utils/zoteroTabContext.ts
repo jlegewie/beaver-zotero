@@ -9,6 +9,8 @@
  * `@beaver/agent-ui` or other client-agnostic surfaces.
  */
 
+import { getContextWindow } from '../runtime/windowRuntime';
+
 export interface ReaderOrNoteContext {
     item: Zotero.Item;
     libraryId: number;
@@ -49,7 +51,7 @@ export function getReaderOrNoteContextItem(selectedTabId: string | null): Reader
 
     // If not a reader tab, check for note tab
     try {
-        const mainWindow = Zotero.getMainWindow();
+        const mainWindow = getContextWindow();
         const tab = mainWindow?.Zotero_Tabs?._tabs?.find((t: any) => t.id === selectedTabId);
         if (tab && NOTE_TAB_TYPES.has(tab.type) && tab.data?.itemID) {
             const item = Zotero.Items.get(tab.data.itemID);

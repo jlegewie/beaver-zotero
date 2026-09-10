@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 const openPreferencesWindow = vi.fn();
-vi.mock('../../../src/ui/openPreferencesWindow', () => ({
+vi.mock('../../../react/ui/openPreferencesWindow', () => ({
     openPreferencesWindow: (...args: unknown[]) => openPreferencesWindow(...args),
 }));
 

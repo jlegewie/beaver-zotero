@@ -3,7 +3,7 @@ import { useSetAtom } from 'jotai';
 import { CSSIcon, LibraryIcon } from '../icons/icons';
 import { removeCollectionIdAtom } from '../../atoms/messageComposition';
 import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
-import { selectCollection } from '../../../src/utils/selectItem';
+import { selectCollection } from '../../utils/selectItem';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
 import { ChipWithPopup, type ChipPopupContent } from '@beaver/agent-ui/chat/ChipPopup';
 import { ChipButton } from '../agentRuns/requestChips/ChipButton';

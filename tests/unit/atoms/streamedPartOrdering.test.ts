@@ -21,6 +21,10 @@ const { mockSupabase } = vi.hoisted(() => ({
     },
 }));
 
+vi.mock('../../../react/runtime/windowRuntime', () => ({
+    tryGetWindowRuntime: () => ({ hostWindow: frozenWindow }),
+}));
+
 vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: mockSupabase,
 }));

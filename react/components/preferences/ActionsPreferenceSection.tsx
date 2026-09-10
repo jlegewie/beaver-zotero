@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useState, useCallback, useEffect, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { Icon, TickIcon, ArrowDownIcon, UploadCircleIcon, ImportIcon } from '../icons/icons';
@@ -39,6 +40,7 @@ const filterMenuItem = (label: string, isSelected: boolean, onSelect: () => void
 });
 
 const ActionsPreferenceSection: React.FC = () => {
+    const surfaceWindow = useSurfaceWindow();
 
     // --- Atoms ---
     const actions = useAtomValue(actionsAtom);
@@ -120,7 +122,7 @@ const ActionsPreferenceSection: React.FC = () => {
     // it. A renamed command is surfaced in a popup.
     const handleImportAction = useCallback(() => {
         (async () => {
-            const result = await importActionFromFile();
+            const result = await importActionFromFile(surfaceWindow);
             if (!result) return; // user cancelled the file picker
             if (!result.ok) {
                 addPopupMessage({ type: 'error', title: 'Import failed', text: result.error, expire: true });

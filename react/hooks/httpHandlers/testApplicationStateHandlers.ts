@@ -24,6 +24,10 @@
  * Wired to their paths in `useHttpEndpoints.ts`.
  */
 
+import { openBeaverWindow } from '../../ui/openBeaverWindow';
+import { borrowedWindowCommandError } from './borrowedWindowCommand';
+import { getContextWindow } from '../../runtime/windowRuntime';
+
 import { BeaverUIFactory } from '../../../src/ui/ui';
 import { eventManager } from '../../events/eventManager';
 import { store } from '../../store';
@@ -134,10 +138,12 @@ async function waitForReaderContext(timeoutMs: number): Promise<boolean> {
  * catch up so callers can assert on `application_state` immediately after.
  */
 export async function handleTestBeaverWindowHttpRequest(request: any): Promise<any> {
+    const ownerError = borrowedWindowCommandError();
+    if (ownerError) return ownerError;
     const open = request?.open !== false;
 
     if (open) {
-        BeaverUIFactory.openBeaverWindow();
+        openBeaverWindow();
     } else {
         BeaverUIFactory.closeBeaverWindow();
     }
@@ -150,7 +156,7 @@ export async function handleTestBeaverWindowHttpRequest(request: any): Promise<a
     // plugin closes it when that window unloads.
     const beaverWindow = BeaverUIFactory.findBeaverWindow();
     const ownerIsMainWindow = beaverWindow
-        ? beaverWindow.__beaverOwnerWindowRef?.deref() === Zotero.getMainWindow()
+        ? beaverWindow.__beaverOwnerWindowRef?.deref() === getContextWindow()
         : null;
 
     return {
@@ -203,7 +209,7 @@ export async function handleTestBeaverSidebarHttpRequest(request: any): Promise<
  * has to poll for it. Pair it with a generous `timeout_ms`.
  */
 export async function handleTestSelectTabHttpRequest(request: any): Promise<any> {
-    const mainWindow = Zotero.getMainWindow();
+    const mainWindow = getContextWindow();
     const tabs = (mainWindow as any).Zotero_Tabs;
     const { tab, library_id, zotero_key, close_tabs } = request || {};
     const timeoutMs = settleTimeout(request);
@@ -224,7 +230,7 @@ export async function handleTestSelectTabHttpRequest(request: any): Promise<any>
         if (!item) return { ok: false, error: 'not_found' };
         if (!item.isAttachment()) return { ok: false, error: 'not_an_attachment' };
         // Opens the tab if needed and selects it either way.
-        await Zotero.Reader.open(item.id);
+        await Zotero.Reader.open(item.id, undefined, { window: mainWindow } as any);
     } else {
         return { ok: false, error: 'Provide tab:"library" or library_id + zotero_key' };
     }

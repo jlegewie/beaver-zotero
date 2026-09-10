@@ -1,3 +1,4 @@
+import type { ReaderActionLocation } from '../../src/runtime/readerActionLocation';
 import type { ActionTargetType } from '@beaver/agent-core/types/actions';
 
 export interface BeaverEvents {
@@ -25,15 +26,18 @@ export interface BeaverEvents {
     readerSelectionAction: {
         action: 'explain' | 'ask';
         text: string;
-        page: number;
+        page?: number;
         readerItemID: number;
+        readerLocation?: ReaderActionLocation;
     };
     readerAnnotationAction: {
         action: 'explain' | 'ask';
         annotationIds: string[];
         readerItemID: number;
+        readerLocation?: ReaderActionLocation;
     };
     readerVisualizerAction: {
+        readerInstanceID: string;
         action:
             | 'columns'
             | 'lines'

@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../runtime/SurfaceWindowContext';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { userAtom } from '../atoms/auth';
@@ -85,6 +86,7 @@ function formatCompactTime(utcDateString: string): string {
 }
 
 const RecentChats: React.FC = () => {
+    const surfaceWindow = useSurfaceWindow();
     const user = useAtomValue(userAtom);
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
     const selectedTabId = useAtomValue(selectedZoteroTabIdAtom);
@@ -264,6 +266,7 @@ const RecentChats: React.FC = () => {
         if (!user || thread.id === currentThreadId) return;
         try {
             await loadThread({
+                window: surfaceWindow,
                 user_id: user.id,
                 threadId: thread.id,
                 threadName: thread.name,

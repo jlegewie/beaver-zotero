@@ -152,7 +152,7 @@ export async function handleTestNoteCloseEditorHttpRequest(request: any) {
                     continue;
                 }
                 if (inst.tabID) {
-                    const mainWin: any = Zotero.getMainWindow?.();
+                    const mainWin: any = Zotero.getMainWindows().find(win => win.Zotero_Tabs?._tabs?.some((tab: any) => tab.id === inst.tabID));
                     if (mainWin?.Zotero_Tabs?.close) {
                         mainWin.Zotero_Tabs.close(inst.tabID);
                         closed++;

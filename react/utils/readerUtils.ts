@@ -1,3 +1,5 @@
+import { openReader } from '../runtime/navigation';
+import { getContextWindow } from '../runtime/windowRuntime';
 import { TextSelection } from '@beaver/agent-core/types/attachments/apiTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { ZoteroReader } from './annotationUtils';
@@ -10,7 +12,8 @@ import { waitForPDFDocument } from './pdfUtils';
  * @returns The current reader instance or undefined if no reader is found.
  */
 function getCurrentReader(window?: Window): any | undefined {
-    window = window || Zotero.getMainWindow();
+    window = window ?? getContextWindow();
+    if (!window || window.closed || !window.Zotero_Tabs) return undefined;
     const reader = Zotero.Reader.getByTabID(window.Zotero_Tabs.selectedID);
     return reader;
 }
@@ -51,9 +54,9 @@ async function waitForReaderView(reader: any, waitForPDF: boolean = false): Prom
 }
 
 /**
- * Waits for Zotero.Reader.open() to produce or select a reader for an item.
+ * Waits for openReader() to produce or select a reader for an item.
  */
-async function waitForReaderForItem(itemID: number, openedReader?: any, timeoutMs: number = 5000): Promise<any | undefined> {
+async function waitForReaderForItem(itemID: number, openedReader?: any, timeoutMs: number = 5000, win = getContextWindow()): Promise<any | undefined> {
     if (openedReader?.itemID === itemID) {
         await waitForReaderView(openedReader, true);
         return openedReader;
@@ -61,7 +64,7 @@ async function waitForReaderForItem(itemID: number, openedReader?: any, timeoutM
 
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
-        const reader = getCurrentReader();
+        const reader = getCurrentReader(win);
         if (reader?.itemID === itemID) {
             await waitForReaderView(reader, true);
             return reader;
@@ -78,10 +81,10 @@ async function waitForReaderForItem(itemID: number, openedReader?: any, timeoutM
  * @param itemID - The item ID.
  * @param page - The page number to navigate to.
  */
-async function navigateToPage(itemID: number, page: number): Promise<void | _ZoteroTypes.ReaderInstance> {
+async function navigateToPage(itemID: number, page: number, win = getContextWindow()): Promise<void | _ZoteroTypes.ReaderInstance> {
     const pageIndex = page - 1;
-    const openedReader = await Zotero.Reader.open(itemID, {pageIndex})
-    const reader = await waitForReaderForItem(itemID, openedReader);
+    const openedReader = await openReader(itemID, {pageIndex}, {}, win)
+    const reader = await waitForReaderForItem(itemID, openedReader, 5000, win);
     if (reader) {
         await reader.navigate?.({ pageIndex });
     }
@@ -100,7 +103,7 @@ async function navigateToPageInCurrentReader(page: number) {
  * @param annotation - The annotation to navigate to.
  * @param reader - The reader instance.
  */
-async function navigateToAnnotation(annotationItem: Zotero.Item) {
+async function navigateToAnnotation(annotationItem: Zotero.Item, win = getContextWindow()) {
     if (!annotationItem.isAnnotation()) return;
     const parentID = annotationItem.parentID;
     if (!parentID) return;
@@ -109,15 +112,15 @@ async function navigateToAnnotation(annotationItem: Zotero.Item) {
     // with the annotation as the location): one Reader.open call selects the
     // annotation and covers every case — reader closed, on another tab, or
     // already showing the attachment.
-    const reader: any = await Zotero.Reader.open(parentID, { annotationID: annotationItem.key } as any);
+    const reader: any = await openReader(parentID, { annotationID: annotationItem.key } as any, {}, win);
 
     // EPUB only: Zotero strips an { annotationID } location and navigates to the
     // annotation *after* the view initializes (Reader.setSelectedAnnotations),
     // bypassing the EPUB view's initial navigation.
     try {
-        const resolved = reader ?? await waitForReaderForItem(parentID);
+        const resolved = reader ?? await waitForReaderForItem(parentID, undefined, 5000, win);
         if (resolved?.type !== 'epub') return;
-        await waitForReaderForItem(parentID, resolved);
+        await waitForReaderForItem(parentID, resolved, 5000, win);
 
         let position: any;
         try {
@@ -283,7 +286,7 @@ function getCurrentItem(reader: any): Zotero.Item {
  * @returns The item.
  */
 async function getCurrentReaderItemAsync(win?: Window): Promise<Zotero.Item | null> {
-    win = win || Zotero.getMainWindow();
+    win = win || getContextWindow();
     const selectedTabType = win.Zotero_Tabs.selectedType;
     if (selectedTabType !== 'reader') return null;
     const reader = getCurrentReader(win);
@@ -370,7 +373,7 @@ function addSelectionChangeListener(
  */
 function isItemActiveTab(itemId: number): boolean {
     try {
-        const tabs = Zotero.getMainWindow()?.Zotero_Tabs;
+        const tabs = getContextWindow()?.Zotero_Tabs;
         if (!tabs) return false;
         const tabID = tabs.getTabIDByItemID?.(itemId);
         return !!tabID && tabID === tabs.selectedID;
@@ -402,6 +405,7 @@ export {
     getCurrentReader,
     getCurrentReaderAndWaitForView,
     waitForReaderForItem,
+    waitForReaderView,
     getCurrentPage,
     getEpubReaderPage,
     navigateToPage,

@@ -1,14 +1,15 @@
+import { tryGetWindowRuntime } from '../../runtime/windowRuntime';
 import type { NavigationHost, AttachmentMatchNavigation } from '@beaver/agent-ui/host/types';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { AttachmentMatchTarget } from '@beaver/agent-core/run-state/toolResultTypes';
 import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgress';
 import { revealSource, openSource as openZoteroSource } from '../../utils/sourceUtils';
-import { selectCollection, selectLibrary, selectTagFilter } from '../../../src/utils/selectItem';
+import { selectCollection, selectLibrary, selectTagFilter } from '../../utils/selectItem';
 import { activateCitation } from './citationActivation';
 import { launchExternalFile, notifyReferenceUnavailable, notifyTagAmbiguous } from './sourceActions';
 import { navigateToAnnotation } from '../../utils/readerUtils';
 import { navigateToAttachmentMatch as navigateToAttachmentMatchImpl } from '../../utils/attachmentMatchNavigation';
-import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
+import { openPreferencesWindow } from '../../ui/openPreferencesWindow';
 import { getMergedActions } from '../../types/actionStorage';
 import { resolveItemReference, resolveLibraryRef } from '../../../src/utils/libraryIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -121,7 +122,9 @@ export const zoteroNavigation: NavigationHost = {
         // their registered protocol extension in-process (including Beaver's
         // own thread links) and hands everything else to the OS browser.
         // Never navigate the window itself — the UI lives in a chrome document.
-        const pane = Zotero.getMainWindow()?.ZoteroPane;
+        const win = tryGetWindowRuntime()?.contextWindow;
+        if (!win || win.closed) return;
+        const pane = win.ZoteroPane;
         if (pane) {
             pane.loadURI(url);
             return;

@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
 import React, { useState, useEffect, useMemo, useRef, Dispatch, SetStateAction } from 'react';
 import { getLibraryItemCounts, LibraryStatistics } from '../../../../src/utils/libraries';
 import { Icon, DeleteIcon, CSSIcon, PlusSignIcon, AlertIcon } from '../../icons/icons';
@@ -22,6 +23,7 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
     setLibraryStatistics,
     useZoteroSync,
 }) => {
+    const surfaceWindow = useSurfaceWindow();
     const [allLibraries, setAllLibraries] = useState<{ libraryID: number, name: string, isGroup: boolean }[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -118,7 +120,7 @@ const SelectLibraries: React.FC<SelectLibrariesProps> = ({
             const isValid = await isLibraryValidForSyncWithServerCheck(library, useZoteroSync);
             if (!isValid) {
                 Zotero.alert(
-                    Zotero.getMainWindow(),
+                    surfaceWindow,
                     'Unable to add library "' + library.name + '"',
                     'The library includes too many files that are stored on the Zotero server and not locally.\n\nConsider changing the "Download files" setting to "at sync time" in Zotero preferences -> Sync.\n\nLater versions of Beaver might support syncing files stored on the Zotero server.',
                 );

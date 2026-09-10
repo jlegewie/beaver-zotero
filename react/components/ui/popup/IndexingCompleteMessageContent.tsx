@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
 import React from 'react';
 import { PopupMessage } from '../../../types/popupMessage';
 import Button from "@beaver/agent-ui/primitives/Button";
@@ -12,6 +13,7 @@ interface IndexingCompleteMessageContentProps {
 }
 
 const IndexingCompleteMessageContent: React.FC<IndexingCompleteMessageContentProps> = ({ message }) => {
+    const surfaceWindow = useSurfaceWindow();
     const newThread = useSetAtom(newThreadAtom);
     const setShowFileStatusDetails = useSetAtom(showFileStatusDetailsAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
@@ -25,7 +27,7 @@ const IndexingCompleteMessageContent: React.FC<IndexingCompleteMessageContentPro
 
     const handleShowDetails = async () => {
         if (currentThreadId !== null) {
-            await newThread();
+            if (await newThread({ window: surfaceWindow }) === undefined) return;
         }
         setShowFileStatusDetails(true);
         updatePopupMessage({

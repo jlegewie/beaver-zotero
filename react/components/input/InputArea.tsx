@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { useComposerVoice } from "../../hooks/useComposerVoice";
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { MicIcon, StopIcon, GlobalSearchIcon, ArrowUpLineIcon } from '../icons/icons';
@@ -59,6 +60,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     hideModelSelector = false,
     hideAttachmentMenu = false,
 }) => {
+    const surfaceWindow = useSurfaceWindow();
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
     const [messagePills, setMessagePills] = useAtom(currentMessagePillsAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
@@ -449,9 +451,9 @@ const InputArea: React.FC<InputAreaProps> = ({
         if (handleSlashMenuKeyDown(e)) return;
         if ((e.key === 'n' || e.key === 'N') && ((Zotero.isMac && e.metaKey) || (!Zotero.isMac && e.ctrlKey))) {
             e.preventDefault();
-            newThread();
+            newThread({ window: surfaceWindow });
         }
-    }, [handleAddSourcesKeyDown, handleSlashMenuKeyDown, newThread]);
+    }, [handleAddSourcesKeyDown, handleSlashMenuKeyDown, newThread, surfaceWindow]);
 
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent
@@ -606,7 +608,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                     onNewThread={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        newThread();
+                        newThread({ window: surfaceWindow });
                     }}
                     onDismiss={handleDismissHighTokenWarning}
                     isUsingBeaverCredits={isUsingBeaverCredits}

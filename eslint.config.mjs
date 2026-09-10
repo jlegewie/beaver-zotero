@@ -11,8 +11,8 @@ const tsconfigRootDir = path.dirname(fileURLToPath(import.meta.url));
 
 /** Globals banned everywhere — use the Zotero-aware accessors instead. */
 const restrictedGlobals = [
-    { message: "Use `Zotero.getMainWindow()` instead.", name: "window" },
-    { message: "Use `Zotero.getMainWindow().document` instead.", name: "document" },
+    { message: "Use the originating surface host or explicit runtime context window.", name: "window" },
+    { message: "Use the rendered element ownerDocument or surface host document.", name: "document" },
     { message: "Use `Zotero.getActiveZoteroPane()` instead.", name: "ZoteroPane" },
     "Zotero_Tabs",
 ];
@@ -125,7 +125,7 @@ const l1CoreAmbientTypeBan = [
  *
  * Derived from `restrictedGlobals`, minus its `window` / `document` entries.
  * Those are banned repo-wide because Zotero plugin code runs across several
- * windows and must ask `Zotero.getMainWindow()` which one it is in — reasoning
+ * windows and must use its originating host/context window — reasoning
  * that does not transfer here, since a shared component has no Zotero to ask.
  * The rule this package follows instead, which lint cannot express: derive the
  * window and document from an element (`ownerDocument` /

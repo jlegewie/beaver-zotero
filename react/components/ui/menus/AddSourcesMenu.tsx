@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
 import React from 'react';
 import { useState, useEffect, useRef, useCallback, useMemo, useImperativeHandle, forwardRef } from 'react';
 import { PlusSignIcon, Icon } from '../../icons/icons';
@@ -163,6 +164,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     verticalPosition = 'above',
     target,
 }, ref) {
+    const surfaceWindow = useSurfaceWindow();
     const [isLoading, setIsLoading] = useState(false);
     const [searchResults, setSearchResults] = useState<ItemSearchResult[]>([]);
     const [menuMode, setMenuMode] = useState<MenuMode>('sources');
@@ -329,7 +331,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
                 'chrome://zotero/content/modules/filePicker.mjs'
             ) as { FilePicker: any };
             const fp = new FilePicker();
-            fp.init(Zotero.getMainWindow(), 'Select Files', fp.modeOpenMultiple);
+            fp.init(surfaceWindow, 'Select Files', fp.modeOpenMultiple);
             fp.appendFilter('Supported files (PDF, EPUB, text, images)', EXTERNAL_FILE_PICKER_EXTENSIONS.join('; '));
             const rv = await fp.show();
             if (rv !== fp.returnOK) return;
@@ -527,7 +529,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
             
             // Force any active tooltip to close — Tooltip listens on the window,
             // and our e.stopPropagation() above prevents the real click from reaching it.
-            const mainWindow = Zotero.getMainWindow();
+            const mainWindow = surfaceWindow;
             mainWindow.dispatchEvent(new MouseEvent('click'));
         }
     };

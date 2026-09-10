@@ -1,0 +1,30 @@
+// @vitest-environment jsdom
+import React from 'react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { createRoot, Root } from 'react-dom/client';
+import { act } from 'react';
+(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+let root: Root;
+let container: HTMLDivElement;
+const mocks = vi.hoisted(() => ({ staged: null as any, open: vi.fn().mockResolvedValue(undefined), remove: vi.fn() }));
+vi.mock('jotai', () => ({ useAtomValue: () => mocks.staged, useSetAtom: () => mocks.remove }));
+vi.mock('../../../react/atoms/messageComposition', () => ({ effectiveReaderTextSelectionAtom: {}, stagedReaderActionContextAtom: {} }));
+vi.mock('../../../react/runtime/navigation', () => ({ openReader: mocks.open }));
+vi.mock('../../../react/utils/readerUtils', () => ({ getCurrentReader: () => ({ type: 'pdf' }), navigateToPageInCurrentReader: vi.fn() }));
+vi.mock('../../../react/components/icons/icons', () => ({ Icon: () => null, TextAlignLeftIcon: {}, PdfIcon: {}, FileViewIcon: {} }));
+vi.mock('../../../react/hooks/useRemoveContextMenu', () => ({ useRemoveContextMenu: ({ onRemove }: any) => ({ removeHandlers: { onClick: onRemove }, contextMenuHandlers: {} }) }));
+vi.mock('@beaver/agent-ui/chat/ChipPopup', () => ({ ChipWithPopup: ({ children }: any) => children }));
+vi.mock('../../../react/components/agentRuns/requestChips/ChipButton', () => ({ ChipButton: ({ children, ...props }: any) => React.createElement('button', props, children) }));
+vi.mock('../../../react/components/agentRuns/requestChips/ChipRemovableIcon', () => ({ ChipRemovableIcon: ({ removeHandlers }: any) => React.createElement('span', { 'data-testid': 'remove', ...removeHandlers }) }));
+import { TextSelectionButton } from '../../../react/components/input/TextSelectionButton';
+afterEach(() => { act(() => root?.unmount()); container?.remove(); vi.clearAllMocks(); });
+it.each(['epub', 'snapshot', 'pdf'])('reveals the staged %s source, including selections with no PDF page', (kind) => {
+    mocks.staged = { item: { id: 42 }, location: { contentKind: kind } };
+    const selection = { text: 'Source passage', ...(kind === 'pdf' ? { page: 3 } : {}) };
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => root.render(React.createElement(TextSelectionButton, { selection })));
+    act(() => container.querySelector('button')!.click());
+    expect(mocks.open).toHaveBeenCalledWith(42, kind === 'pdf' ? { pageIndex: 2 } : undefined);
+});

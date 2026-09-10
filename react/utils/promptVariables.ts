@@ -19,6 +19,8 @@
  *   {{current_collection}} — (text)  Name of the currently selected collection
  */
 
+import { getContextWindow } from '../runtime/windowRuntime';
+
 import { logger } from '@beaver/agent-core/platform/logger';
 import { agentItemFilter } from '../../src/utils/agentItemSupport';
 import { getCurrentReader } from './readerUtils';
@@ -320,7 +322,7 @@ async function resolveRecentPaper(): Promise<ResolvedVariable> {
 
 async function resolveSelectedItems(): Promise<ResolvedVariable> {
     try {
-        const zp = Zotero.getActiveZoteroPane?.();
+        const zp = getContextWindow()?.ZoteroPane;
         if (!zp) return { text: '', items: [] };
 
         const selectedItems: Zotero.Item[] = zp.getSelectedItems?.() || [];
@@ -387,7 +389,7 @@ async function resolveActiveItem(): Promise<ResolvedVariable> {
         }
 
         // 3. Selected items in library view
-        const zp = Zotero.getActiveZoteroPane?.();
+        const zp = getContextWindow()?.ZoteroPane;
         if (zp) {
             const selectedItems: Zotero.Item[] = zp.getSelectedItems?.() || [];
             const regularItems = keepSearchable(
@@ -430,7 +432,7 @@ async function resolveCurrentCollection(): Promise<ResolvedVariable> {
 
 /** Get the attachment item currently open in the reader, or null */
 async function getOpenReaderAttachment(): Promise<Zotero.Item | null> {
-    const win = Zotero.getMainWindow();
+    const win = getContextWindow();
     if (win.Zotero_Tabs?.selectedType !== 'reader') return null;
     const reader = getCurrentReader(win);
     if (!reader?.itemID) return null;

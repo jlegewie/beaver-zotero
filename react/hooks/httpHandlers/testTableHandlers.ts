@@ -37,6 +37,8 @@
  * finds no namespace answers `tables_api_unavailable` instead of guessing.
  */
 
+import { openBeaverWindow } from '../../ui/openBeaverWindow';
+import { borrowedWindowCommandError } from './borrowedWindowCommand';
 import type {
     Cell,
     Column,
@@ -137,11 +139,16 @@ interface OpenTableRequest {
 export async function handleTestOpenTableHttpRequest(
     request: OpenTableRequest = {}
 ): Promise<any> {
+    const initialError = borrowedWindowCommandError();
+    if (initialError) return initialError;
     const variant = request.variant === 'extraction' ? 'extraction' : 'search';
     const table =
         request.table ??
         (await buildDemoTable(variant, request.limit ?? DEMO_ROW_LIMIT));
 
+    // Building the demo may yield while another renderer opens the singleton.
+    const ownerError = borrowedWindowCommandError();
+    if (ownerError) return ownerError;
     store.set(showTableInWindowAtom, {
         variant,
         table,
@@ -150,7 +157,7 @@ export async function handleTestOpenTableHttpRequest(
     });
 
     if (request.open !== false) {
-        BeaverUIFactory.openBeaverWindow(TABLE_WINDOW_SIZE);
+        openBeaverWindow(TABLE_WINDOW_SIZE);
     }
 
     return {
@@ -194,6 +201,8 @@ export async function handleTestOpenStoredTableHttpRequest(
 
 /** Hands the window back to the thread. */
 export async function handleTestCloseTableHttpRequest(): Promise<any> {
+    const ownerError = borrowedWindowCommandError();
+    if (ownerError) return ownerError;
     store.set(windowSurfaceAtom, { kind: 'thread' });
     return { ok: true, window_open: !!BeaverUIFactory.findBeaverWindow() };
 }

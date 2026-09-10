@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: () => {} }));
 
-import { selectTagFilter } from '../../../src/utils/selectItem';
+import { selectTagFilter } from '../../../react/utils/selectItem';
 
 /** Libraries holding each tag, as the `itemTags` query would report them. */
 let tagLibraries: Record<string, number[]>;
@@ -119,4 +119,10 @@ describe('filtering with nowhere to show the result', () => {
         expect(await selectTagFilter('methods', 1)).toBe('unavailable');
         expect(selectedLibrary).toBeNull();
     });
+});
+
+// Bind this suite's single-window fixture as the originating renderer.
+vi.mock('../../../react/runtime/windowRuntime', async () => {
+    const { singleWindowRuntimeMock } = await import('../../helpers/singleWindowRuntime');
+    return singleWindowRuntimeMock();
 });

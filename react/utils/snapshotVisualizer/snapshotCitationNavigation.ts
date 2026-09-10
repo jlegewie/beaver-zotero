@@ -1,3 +1,4 @@
+import { openReader } from '../../runtime/navigation';
 import { BEAVER_CITATION_ANNOTATION_AUTHOR } from "../../../src/constants/annotations";
 import { logger } from "@beaver/agent-core/platform/logger";
 import { getBestSnapshotAttachmentAsync } from "../../../src/utils/zoteroItemHelpers";
@@ -61,7 +62,7 @@ export async function navigateToSnapshotCitation(
     let reader = await getCurrentReaderAndWaitForView(undefined, false);
     if (!reader || reader.itemID !== attachment.id) {
         logger(`navigateToSnapshotCitation: Opening snapshot ${attachment.id} in reader`);
-        const opened = await Zotero.Reader.open(attachment.id);
+        const opened = await openReader(attachment.id);
         reader = await waitForReaderForItem(attachment.id, opened);
     }
     if (!reader) return "failed";

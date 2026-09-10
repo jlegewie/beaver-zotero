@@ -1,7 +1,8 @@
+import { openReader } from '../runtime/navigation';
 import { BEAVER_CITATION_ANNOTATION_AUTHOR } from '../../src/constants/annotations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { getPref } from '../../src/utils/prefs';
-import { selectItemById } from '../../src/utils/selectItem';
+import { selectItemById } from './selectItem';
 import type { AttachmentMatchTarget } from '@beaver/agent-core/run-state/toolResultTypes';
 import { CoordOrigin, type BoundingBox, type SymbolicLocation } from '@beaver/agent-core/types/citations';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
@@ -148,7 +149,7 @@ export async function navigateToAttachmentMatch(nav: AttachmentMatchNavRequest):
     // Other non-PDF attachments: open the reader without locators
     if (nav.content_kind !== 'pdf') {
         try {
-            await Zotero.Reader.open(item.id);
+            await openReader(item.id);
         } catch (error) {
             logger(`navigateToAttachmentMatch: failed to open non-PDF attachment: ${error}`);
             await selectItemById(item.id);
@@ -168,7 +169,7 @@ export async function navigateToAttachmentMatch(nav: AttachmentMatchNavRequest):
         let reader = await getCurrentReaderAndWaitForView(undefined, true);
         if (!reader || reader.itemID !== item.id) {
             logger(`navigateToAttachmentMatch: opening item ${item.id} at page index ${pageIndex}`);
-            reader = await Zotero.Reader.open(item.id, { pageIndex });
+            reader = await openReader(item.id, { pageIndex });
             // Wait for the reader to initialize before navigating
             await new Promise(resolve => setTimeout(resolve, 300));
             reader = await getCurrentReaderAndWaitForView(undefined, true);

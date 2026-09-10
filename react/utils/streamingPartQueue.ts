@@ -10,7 +10,7 @@
  * parts are accumulated rather than incremental, so applying five events in one
  * store write produces exactly the state the fifth event describes.
  *
- * Frames are the pacing signal, not the guarantee: they come from the main
+ * Frames are the pacing signal, not the guarantee: they come from the runtime host
  * window, which stops painting while it is minimized or occluded — and the
  * reader may be watching the separate Beaver window meanwhile. A realm-safe
  * timer backstops every frame so a queue can never wait on a window that has
@@ -29,6 +29,7 @@ import { WSPartEvent } from '@beaver/agent-core/protocol/agentProtocol';
 import { activeRunAtom, updateRunWithPart } from '@beaver/agent-core/run-state/atoms';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { store } from '../store';
+import { tryGetWindowRuntime } from '../runtime/windowRuntime';
 
 /**
  * How long a queued event may wait when the main window is not painting. Slower
@@ -124,7 +125,7 @@ function scheduleFlush(): void {
     // The frame callback belongs to the window that scheduled it and dies with
     // it, so the window is recorded and re-checked before the queue is left in
     // its hands (see the cross-window notes in CLAUDE.md).
-    const win = Zotero.getMainWindow();
+    const win = tryGetWindowRuntime()?.hostWindow;
     if (win && !win.closed && typeof win.requestAnimationFrame === 'function') {
         scheduledWindow = win;
         scheduledFrame = win.requestAnimationFrame(runScheduledFlush);
@@ -150,7 +151,7 @@ export function queuePartEvent(event: WSPartEvent): void {
 
     if (isFlushScheduled()) {
         // A frame armed by a window that has since closed will never run, so
-        // the queue is re-armed on whichever window is current.
+        // the queue falls back to system timers once its runtime is gone.
         const frameIsLost = scheduledFrame !== null && (!scheduledWindow || scheduledWindow.closed);
         if (!frameIsLost) return;
         cancelScheduledFlush();

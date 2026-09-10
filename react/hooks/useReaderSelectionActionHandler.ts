@@ -4,10 +4,12 @@
  * new-thread → set-text-selection → send-message / focus-input flow.
  */
 
+import { beginReaderActionThread } from '../utils/beginReaderActionThread';
+
 import { useSetAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { newThreadAtom } from '../atoms/threads';
-import { readerTextSelectionAtom, currentReaderAttachmentAtom } from '../atoms/messageComposition';
+import { readerActionContextAtom, addItemsToCurrentMessageItemsAtom } from '../atoms/messageComposition';
 import { sendWSMessageAtom } from '../atoms/agentRunAtoms';
 import { eventManager } from '../events/eventManager';
 import { useEventSubscription } from './useEventSubscription';
@@ -17,12 +19,12 @@ import { getPref } from '../../src/utils/prefs';
 
 export function useReaderSelectionActionHandler() {
     const newThread = useSetAtom(newThreadAtom);
-    const setReaderTextSelection = useSetAtom(readerTextSelectionAtom);
-    const setReaderAttachment = useSetAtom(currentReaderAttachmentAtom);
+    const setReaderActionContext = useSetAtom(readerActionContextAtom);
+    const addItems = useSetAtom(addItemsToCurrentMessageItemsAtom);
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
 
     useEventSubscription('readerSelectionAction', async (detail) => {
-        const { action, text, page, readerItemID } = detail;
+        const { action, text, page, readerItemID, readerLocation } = detail;
 
         // Skip if not authenticated
         if (!store.get(userAtom)) return;
@@ -33,20 +35,19 @@ export function useReaderSelectionActionHandler() {
         eventManager.dispatch('toggleChat', { forceOpen: true, skipAutoPopulate: true });
 
         // 2. New thread
-        await newThread({ skipAutoPopulate: true });
+        const isCurrent = await beginReaderActionThread(newThread);
+        if (!isCurrent) return;
 
         // 3. Set text selection and send message (after sidebar-open state settles)
         setTimeout(async () => {
             try {
-                // Set text selection
-                setReaderTextSelection({ text, page });
-
-                // Ensure reader attachment is set
-                const readerAttachment = store.get(currentReaderAttachmentAtom);
-                if (!readerAttachment || readerAttachment.id !== readerItemID) {
-                    const item = await Zotero.Items.getAsync(readerItemID);
-                    if (item) setReaderAttachment(item);
-                }
+                if (!isCurrent()) return;
+                const item = await Zotero.Items.getAsync(readerItemID);
+                if (!item) return;
+                if (!isCurrent()) return;
+                await addItems([item]);
+                if (!isCurrent()) return;
+                setReaderActionContext({ item, selection: text ? { text, page } : null, location: readerLocation });
 
                 // Either send explain prompt or focus input
                 if (action === 'explain') {
@@ -63,5 +64,5 @@ export function useReaderSelectionActionHandler() {
                 logger(`useReaderSelectionActionHandler: Error: ${error}`, 1);
             }
         }, 0);
-    }, [newThread, setReaderTextSelection, setReaderAttachment, sendWSMessage]);
+    }, [newThread, setReaderActionContext, addItems, sendWSMessage]);
 }

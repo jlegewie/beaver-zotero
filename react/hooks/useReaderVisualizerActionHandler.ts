@@ -21,63 +21,67 @@ import {
     visualizeEpubSentences,
 } from '../utils/epubVisualizer/epubExtractionVisualizer';
 import { copyToClipboard } from '../utils/clipboard';
-import { getCurrentReader } from '../utils/readerUtils';
+import type { ZoteroReader } from '../utils/annotationUtils';
 import { getItemLanguage } from '../../src/utils/zoteroUtils';
 import { logger } from '@beaver/agent-core/platform/logger';
 
 export function useReaderVisualizerActionHandler() {
     useEventSubscription('readerVisualizerAction', async (detail) => {
-        if (process.env.NODE_ENV !== 'development') return;
+        if (process.env.NODE_ENV !== 'development' || !detail.readerInstanceID) return;
+
+        const reader = (Zotero.Reader as any)._readers.find((candidate: any) =>
+            candidate._instanceID === detail.readerInstanceID) as ZoteroReader | undefined;
+        if (!reader || (reader as any)._window?.closed) return;
 
         try {
             switch (detail.action) {
                 case 'columns': {
-                    const r = await visualizeCurrentPageColumns();
+                    const r = await visualizeCurrentPageColumns({ reader });
                     logger(`[ReaderVisualizer] columns: ${r.message}`);
                     return;
                 }
                 case 'columns-graphics': {
-                    const r = await visualizeCurrentPageColumns({ graphicsLayerMode: 'on' });
+                    const r = await visualizeCurrentPageColumns({ reader, graphicsLayerMode: 'on' });
                     logger(`[ReaderVisualizer] columns-graphics: ${r.message}`);
                     return;
                 }
                 case 'lines': {
-                    const r = await visualizeCurrentPageLines();
+                    const r = await visualizeCurrentPageLines({ reader });
                     logger(`[ReaderVisualizer] lines: ${r.message}`);
                     return;
                 }
                 case 'items': {
-                    const r = await visualizeItemsForActiveReader();
+                    const r = await visualizeItemsForActiveReader(reader);
                     logger(`[ReaderVisualizer] items: ${r.message}`);
                     return;
                 }
                 case 'items-graphics': {
-                    const r = await visualizeCurrentPageItems({ graphicsLayerMode: 'on' });
+                    const r = await visualizeCurrentPageItems({ reader, graphicsLayerMode: 'on' });
                     logger(`[ReaderVisualizer] items-graphics: ${r.message}`);
                     return;
                 }
                 case 'sentences': {
-                    const r = await visualizeSentencesForActiveReader();
+                    const r = await visualizeSentencesForActiveReader(reader);
                     logger(`[ReaderVisualizer] sentences: ${r.message}`);
                     return;
                 }
                 case 'sentences-graphics': {
-                    const r = await visualizeCurrentPageSentences({ graphicsLayerMode: 'on' });
+                    const r = await visualizeCurrentPageSentences({ reader, graphicsLayerMode: 'on' });
                     logger(`[ReaderVisualizer] sentences-graphics: ${r.message}`);
                     return;
                 }
                 case 'clear': {
-                    await clearVisualizationAnnotations();
+                    await clearVisualizationAnnotations(reader);
                     logger('[ReaderVisualizer] cleared');
                     return;
                 }
                 case 'copy-extract-fixture-command': {
-                    const r = await copyExtractFixtureCommand();
+                    const r = await copyExtractFixtureCommand(reader);
                     logger(`[ReaderVisualizer] copy-extract-fixture-command: ${r.message}`);
                     return;
                 }
                 case 'copy-ocr-fixture-command': {
-                    const r = await copyOcrFixtureCommand();
+                    const r = await copyOcrFixtureCommand(reader);
                     logger(`[ReaderVisualizer] copy-ocr-fixture-command: ${r.message}`);
                     return;
                 }
@@ -88,16 +92,14 @@ export function useReaderVisualizerActionHandler() {
     }, []);
 }
 
-async function visualizeItemsForActiveReader(): Promise<{ success: boolean; message: string }> {
-    const reader = getCurrentReader();
-    if (reader?.type === 'epub') return visualizeEpubItems();
-    return visualizeCurrentPageItems();
+async function visualizeItemsForActiveReader(reader: ZoteroReader): Promise<{ success: boolean; message: string }> {
+    if (reader?.type === 'epub') return visualizeEpubItems(reader);
+    return visualizeCurrentPageItems({ reader });
 }
 
-async function visualizeSentencesForActiveReader(): Promise<{ success: boolean; message: string }> {
-    const reader = getCurrentReader();
-    if (reader?.type === 'epub') return visualizeEpubSentences();
-    return visualizeCurrentPageSentences();
+async function visualizeSentencesForActiveReader(reader: ZoteroReader): Promise<{ success: boolean; message: string }> {
+    if (reader?.type === 'epub') return visualizeEpubSentences(reader);
+    return visualizeCurrentPageSentences({ reader });
 }
 
 /**
@@ -105,8 +107,8 @@ async function visualizeSentencesForActiveReader(): Promise<{ success: boolean; 
  * id `paperKey__pN`) targeting the current reader page and copy it to the
  * clipboard.
  */
-async function copyExtractFixtureCommand(): Promise<{ ok: boolean; message: string }> {
-    const ctx = await resolveActiveReaderContext();
+async function copyExtractFixtureCommand(reader: ZoteroReader): Promise<{ ok: boolean; message: string }> {
+    const ctx = await resolveActiveReaderContext(reader);
     if ('error' in ctx) return { ok: false, message: ctx.error };
     const { item, filePath, pageIndex } = ctx;
 
@@ -139,8 +141,8 @@ async function copyExtractFixtureCommand(): Promise<{ ok: boolean; message: stri
  * the clipboard. Reuses `_shared/<sha>.pdf` when an extract fixture has
  * already been captured for the same PDF.
  */
-async function copyOcrFixtureCommand(): Promise<{ ok: boolean; message: string }> {
-    const ctx = await resolveActiveReaderContext();
+async function copyOcrFixtureCommand(reader: ZoteroReader): Promise<{ ok: boolean; message: string }> {
+    const ctx = await resolveActiveReaderContext(reader);
     if ('error' in ctx) return { ok: false, message: ctx.error };
     const { item, filePath } = ctx;
 

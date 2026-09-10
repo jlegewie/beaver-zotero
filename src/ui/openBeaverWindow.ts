@@ -6,6 +6,6 @@ import { BeaverUIFactory } from './ui';
  *
  * `minSize` only ever grows the window — see `BeaverUIFactory.openBeaverWindow`.
  */
-export function openBeaverWindow(minSize?: { width?: number; height?: number }): void {
-    BeaverUIFactory.openBeaverWindow(minSize);
+export function openBeaverWindow(minSize?: { width?: number; height?: number }, origin?: Window): void {
+    BeaverUIFactory.openBeaverWindow(minSize, origin);
 }

@@ -105,10 +105,11 @@ async function undoWithOverwriteConfirmation(
     action: AgentAction,
     undoAction: (action: AgentAction, forceRevert: boolean) => Promise<UndoResult>,
     fieldLabel: string,
+    window?: Window,
 ): Promise<UndoResult> {
     let result = await undoAction(action, false);
     if (result.needsConfirmation && result.manuallyModified.length > 0) {
-        if (confirmOverwriteManualChanges(result.manuallyModified)) {
+        if (confirmOverwriteManualChanges(result.manuallyModified, window)) {
             result = await undoAction(action, true);
             logger(`agentActionExecution: Force-reverted ${result.fieldsReverted} ${fieldLabel} after user confirmation`, 1);
         } else {
@@ -301,7 +302,7 @@ async function applyClaimedActions(
  */
 export const undoAgentActionsAtom = atom(
     null,
-    async (get, set, { actions }: { actions: AgentAction[] }): Promise<UndoAgentActionsResult> => {
+    async (get, set, { actions, window }: { actions: AgentAction[]; window?: Window }): Promise<UndoAgentActionsResult> => {
         if (actions.length === 0) return { undone: [], failed: [] };
 
         const claimed = claimActions(get, set, actions);
@@ -310,14 +311,14 @@ export const undoAgentActionsAtom = atom(
             return { undone: [], failed: [] };
         }
         try {
-            return await undoClaimedActions(set, claimed);
+            return await undoClaimedActions(set, claimed, window);
         } finally {
             releaseActions(get, set, claimed);
         }
     }
 );
 
-async function undoClaimedActions(set: Setter, actions: AgentAction[]): Promise<UndoAgentActionsResult> {
+async function undoClaimedActions(set: Setter, actions: AgentAction[], window?: Window): Promise<UndoAgentActionsResult> {
     const undone: string[] = [];
     const failed: AgentActionFailure[] = [];
     const action = actions[0];
@@ -356,6 +357,7 @@ async function undoClaimedActions(set: Setter, actions: AgentAction[]): Promise<
                 action,
                 isMetadata ? undoEditMetadataAction : undoEditAnnotationsAction,
                 isMetadata ? 'fields' : 'annotation fields',
+                window,
             );
             // Also reached when the user declined the overwrite: the fields
             // they kept are theirs, but the action is no longer applied.
