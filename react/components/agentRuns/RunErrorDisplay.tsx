@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { Icon, AlertIcon, RepeatIcon, ArrowDownIcon, ArrowRightIcon, LinkForwardIcon, DollarCircleIcon } from '../icons/icons';
@@ -9,7 +10,7 @@ import { regenerateFromRunAtom, resumeFromRunAtom, retryPendingRunIdAtom } from 
 import { runErrorVisibilityAtom, setRunErrorVisibilityAtom } from '../../atoms/messageUIState';
 import { remainingBeaverCreditsAtom, errorCreditCheckAtom } from '../../atoms/profile';
 import { beaverDefaultModelAtom, updateSelectedModelAtom, type ModelConfig } from '../../atoms/models';
-import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
+import { openPreferencesWindow } from '../../ui/openPreferencesWindow';
 import { getRunErrorTitle, stripRunErrorTypePrefix } from '@beaver/agent-core/run-state/runErrorCopy';
 
 interface RunError {
@@ -34,6 +35,7 @@ interface RunErrorDisplayProps {
  * Shows a collapsible error message with retry and resume buttons.
  */
 export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, isLastRun }) => {
+    const surfaceWindow = useSurfaceWindow();
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
     const resumeFromRun = useSetAtom(resumeFromRunAtom);
     const updateSelectedModel = useSetAtom(updateSelectedModelAtom);
@@ -74,7 +76,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
 
     const handleRetry = async () => {
         setClickedAction('retry');
-        await regenerateFromRun(runId);
+        await regenerateFromRun({ runId, window: surfaceWindow });
     };
 
     const handleResume = async () => {
@@ -85,7 +87,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
         if (!defaultBeaverModel) return;
         setClickedAction('try-with-beaver');
         updateSelectedModel({ ...defaultBeaverModel, access_mode: 'app_key' });
-        await regenerateFromRun(runId);
+        await regenerateFromRun({ runId, window: surfaceWindow });
     };
 
     const handleToggle = () => {

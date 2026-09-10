@@ -1,3 +1,4 @@
+import { resolveChatWindow } from './navigation';
 import { ReaderWidthDispatcher } from './readerWidth';
 /** Window handles are registered only for the lifetime of their renderer. */
 export interface WindowRuntime {
@@ -44,6 +45,12 @@ export class BeaverInstance {
         win.__beaverRuntime = runtime;
         win.__beaverEventBus = runtime.events;
         return runtime;
+    }
+
+    async openChat(): Promise<void> {
+        const win = await resolveChatWindow();
+        win.focus();
+        win.__beaverEventBus?.dispatchEvent(new win.CustomEvent('toggleChat', { detail: { forceOpen: true } }));
     }
 
     getWindow(win: Window): WindowRuntime | undefined { return this.windows.get(win); }

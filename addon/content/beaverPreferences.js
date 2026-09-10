@@ -6,9 +6,24 @@ var BeaverReact;
 var root;
 
 async function onLoad() {
+    // Pin the initiating owner before initialization can yield to another window.
+    const ownerRef = window.arguments?.[0]?.ownerWindowRef ?? window.__beaverOwnerWindowRef;
+    const mainWindow = ownerRef ? ownerRef.deref() : window.opener;
+    if (!mainWindow || mainWindow.closed || !mainWindow.ZoteroPane || !mainWindow.Zotero_Tabs
+        || mainWindow.__beaverRuntime?.status === 'closing') {
+        window.close();
+        return;
+    }
+    window.__beaverOwnerWindowRef = new WeakRef(mainWindow);
+
     // Wait for Zotero initialization
     await Zotero.initializationPromise;
     await Zotero.uiReadyPromise;
+    if (window.closed || mainWindow.closed || mainWindow.__beaverRuntime?.status === 'closing'
+        || !mainWindow.BeaverReact) {
+        if (!window.closed) window.close();
+        return;
+    }
 
     // Apply Zotero's font-size and UI density preferences to the React mount point.
     // This mirrors how Zotero's own windows do it (e.g. zoteroPane.js calls registerRoot
@@ -52,7 +67,6 @@ async function onLoad() {
     }
 
     // Use the main window's BeaverReact instance to ensure shared state (Jotai store)
-    const mainWindow = Zotero.getMainWindow();
 
     if (mainWindow && mainWindow.BeaverReact) {
         BeaverReact = mainWindow.BeaverReact;

@@ -6,6 +6,8 @@ import { getPref } from "../utils/prefs";
 import { PreferencePageTab } from "../../react/atoms/ui";
 import { ActionCategoryFilter } from "@beaver/agent-core/types/actions";
 
+import { contextMainWindow, resolveChatWindow } from "../runtime/navigation";
+
 let keyboardManager: KeyboardManager | null = null;
 
 /**
@@ -188,7 +190,7 @@ export class BeaverUIFactory {
                     if (root) roots.add(root);
                     ztoolkit.log("registerChatPanel: renderAiSidebar mounted for reader");
                 }
-                runtime.status = "ready";
+                // The renderer marks readiness after its command subscriptions mount.
             } catch (error) {
                 if (win.__beaverRuntime === runtime) {
                     this.removeChatPanel(win);
@@ -551,7 +553,8 @@ export class BeaverUIFactory {
                 
                 if (isMacShortcut || isWindowsShortcut) {
                     ev.preventDefault();
-                    this.openBeaverWindow();
+                    const origin = (ev.target as HTMLElement)?.ownerDocument?.defaultView;
+                    void resolveChatWindow(origin).then(win => this.openBeaverWindow(undefined, win)).catch(Zotero.logError);
                 }
             }
         );
@@ -616,7 +619,7 @@ export class BeaverUIFactory {
      * this window keeps their size unless it is too small for what is about to
      * be shown.
      */
-    static openBeaverWindow(minSize?: { width?: number; height?: number }): void {
+    static openBeaverWindow(minSize?: { width?: number; height?: number }, origin?: Window): void {
         const existingWindow = this.findBeaverWindow();
         if (existingWindow) {
             this.growWindowTo(existingWindow, minSize);
@@ -625,7 +628,9 @@ export class BeaverUIFactory {
             return;
         }
 
-        const mainWindow = Zotero.getMainWindow();
+        const mainWindow = contextMainWindow(origin ?? Zotero.getMainWindow());
+        if (!mainWindow) return;
+        const ownerWindowRef = new WeakRef(mainWindow);
         const features = [
             'chrome',
             'resizable',
@@ -641,8 +646,9 @@ export class BeaverUIFactory {
             'chrome://beaver/content/beaverWindow.xhtml',
             BEAVER_WINDOW_NAME,
             features,
-            {}
+            { ownerWindowRef }
         );
+        if (opened) opened.__beaverOwnerWindowRef = ownerWindowRef;
         // A persisted width smaller than the feature string's is reapplied once
         // the window's attributes load, so grow it again after that.
         if (opened && minSize) {
@@ -724,7 +730,7 @@ export class BeaverUIFactory {
      * that the Actions tab pre-filter its list to that category (or "uncategorized").
      * `actionId` requests that the Actions tab reveal that action in edit mode.
      */
-    static openPreferencesWindow(tab?: PreferencePageTab, actionsCategoryFilter?: ActionCategoryFilter, actionId?: string): void {
+    static openPreferencesWindow(tab?: PreferencePageTab, actionsCategoryFilter?: ActionCategoryFilter, actionId?: string, window?: Window): void {
         const existingWindow = this.findPreferencesWindow();
         if (existingWindow) {
             // Switch tab (and apply the category filter / action-edit request)
@@ -737,14 +743,17 @@ export class BeaverUIFactory {
             return;
         }
 
-        const mainWindow = Zotero.getMainWindow();
-        mainWindow.openDialog(
+        const mainWindow = contextMainWindow(window ?? Zotero.getMainWindow());
+        if (!mainWindow) return;
+        const ownerWindowRef = new WeakRef(mainWindow);
+        const opened = mainWindow.openDialog(
             'chrome://beaver/content/beaverPreferences.xhtml',
             BEAVER_PREFERENCES_WINDOW_NAME,
             'chrome,resizable,centerscreen,dialog=false',
             // `??` so the uncategorized filter (`""`) is not dropped as falsy.
-            { tab: tab || null, actionsCategoryFilter: actionsCategoryFilter ?? null, actionId: actionId || null }
+            { tab: tab || null, actionsCategoryFilter: actionsCategoryFilter ?? null, actionId: actionId || null, ownerWindowRef }
         );
+        if (opened) opened.__beaverOwnerWindowRef = ownerWindowRef;
         Zotero.debug("Beaver: Opened preferences window");
     }
 

@@ -571,6 +571,7 @@ export async function getAttachmentInfo(
         title: item.getField?.('title') || item.getDisplayTitle?.() || null,
         filename: safeAttachmentFilename(item),
         content_kind: contentKind,
+        mime_type: item.attachmentContentType || null,
         status: 'unreadable',
         page_count: null,
         line_count: null,

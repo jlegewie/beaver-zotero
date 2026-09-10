@@ -1,9 +1,11 @@
+import { openNote, viewAttachment } from '../runtime/navigation';
+import { getContextWindow, tryGetWindowRuntime } from '../runtime/windowRuntime';
 import { getItemDisplayName, MAX_NOTE_TITLE_LENGTH } from '../../src/utils/itemDisplayName';
 import { stripHtmlTags, computeDiff } from '../components/agentRuns/EditNotePreview';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isAgentSupportedItem, agentItemFilter, agentItemFilterAsync } from '../../src/utils/agentItemSupport';
 import { isValidAnnotationType, SourceAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
-import { selectItemById } from '../../src/utils/selectItem';
+import { selectItemById } from './selectItem';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { store } from '../store';
@@ -226,7 +228,8 @@ export function revealSource(source: ZoteroItemReference | SourceAttachment, col
         notifyReferenceUnavailable('item');
         return;
     }
-    if (Zotero.getActiveZoteroPane()) {
+    const win = tryGetWindowRuntime()?.contextWindow;
+    if (win && !win.closed) {
         // Convert collection key to collection ID if provided
         let collectionId: number | undefined;
         if (collectionKey) {
@@ -235,7 +238,7 @@ export function revealSource(source: ZoteroItemReference | SourceAttachment, col
                 collectionId = id;
             }
         }
-        selectItemById(itemID, true, collectionId);
+        selectItemById(itemID, true, collectionId, getContextWindow());
     }
 }
 
@@ -254,7 +257,7 @@ export async function getCurrentCollectionKeyForItem(
 ): Promise<string | undefined> {
     if (libraryId === UNRESOLVED_LIBRARY_ID) return undefined;
     try {
-        const selectedCollection = getSelectedCollection(Zotero.getActiveZoteroPane());
+        const selectedCollection = getSelectedCollection(getContextWindow()?.ZoteroPane);
         if (!selectedCollection || selectedCollection.libraryID !== libraryId) return undefined;
 
         const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
@@ -292,13 +295,13 @@ export async function openSource(source: SourceAttachment | ZoteroItemReference)
     if (item.isRegularItem()) {
         const bestAttachment = await item.getBestAttachment();
         if (bestAttachment) {
-            Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
+            viewAttachment(bestAttachment.id);
         }
     }
 
     // Attachments
     if (item.isAttachment()) {
-        Zotero.getActiveZoteroPane().viewAttachment(item.id);
+        viewAttachment(item.id);
     }
 
     // Notes
@@ -311,16 +314,11 @@ export async function openSource(source: SourceAttachment | ZoteroItemReference)
  * Open a note in the Zotero editor (tab or window based on user preference).
  * Uses Zotero.Notes.open() which respects the `extensions.zotero.openNoteInNewWindow` setting.
  */
-export async function openNoteById(itemId: number): Promise<void> {
-    if (typeof (Zotero as any).Notes?.open === 'function') {
-        try {
-            await (Zotero as any).Notes.open(itemId);
-        } catch (e) {
-            logger(`openNoteById: Notes.open failed for itemId=${itemId}: ${e}`, 1);
-        }
-    } else {
-        // Fallback for older Zotero versions without Notes.open
-        Zotero.getActiveZoteroPane()?.openNoteWindow?.(itemId);
+export async function openNoteById(itemId: number, win?: Window): Promise<void> {
+    try {
+        await openNote(itemId, win);
+    } catch (error) {
+        logger(`openNoteById: ${error}`, 2);
     }
 }
 
@@ -1302,12 +1300,18 @@ export function stripEllipsis(term: string): string {
  * would log success but nothing would appear on screen.
  */
 /** @internal Exported for testing only. */
-export function getNoteEditorView(itemId: number): any | null {
+export function getNoteEditorView(itemId: number, win = getContextWindow()): any | null {
     try {
         const instances: any[] = (Zotero as any).Notes?._editorInstances;
         if (!instances) return null;
 
-        const matching = instances.filter((e: any) => e.itemID === itemId);
+        const matching = instances.filter((e: any) => {
+            if (e.itemID !== itemId || win.closed) return false;
+            const owner = e._iframeWindow?.top ?? e._iframe?.ownerDocument?.defaultView;
+            if (owner?.closed) return false;
+            // Legacy note windows are opened with their initiating main window as opener.
+            return owner === win || (e.viewMode === 'window' && owner?.opener === win) || (e.tabID && win.Zotero_Tabs?._tabs?.some((tab: any) => tab.id === e.tabID));
+        });
         if (matching.length === 0) return null;
 
         // Prefer tab instance (openNoteById opens in a tab), then any other

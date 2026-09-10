@@ -1,3 +1,4 @@
+import { openReader } from '../../../runtime/navigation';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { getReadableContentKind } from '../../../../src/services/documentExtraction/attachmentResolution';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../../components/icons/ZoteroIcon';
@@ -279,13 +280,13 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         const location = kind === 'highlight'
                             ? { position: resolved.position }
                             : { pageNumber: resolved.position.value };
-                        await Zotero.Reader.open(attachmentId, location as any);
+                        await openReader(attachmentId, location as any);
                         located = true;
                     }
                 }
                 if (!located) {
                     // Fall back to the section start when the passage can't be resolved.
-                    await Zotero.Reader.open(attachmentId, sectionHref ? { href: sectionHref } as any : undefined);
+                    await openReader(attachmentId, sectionHref ? { href: sectionHref } as any : undefined);
                 }
                 return;
             }

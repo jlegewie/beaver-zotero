@@ -188,8 +188,10 @@ Beaver runs in the **main Zotero window** and in a **separate Beaver window**
 (`addon/content/beaverWindow.xhtml`), which reuses the main window's React instance rather
 than loading its own bundle.
 
-**Never use bare `window`** in plugin code. Use `Zotero.getMainWindow()`, the `win` parameter
-threaded through `BeaverUIFactory` methods and hooks, or `ownerDocument.defaultView`.
+**Never use bare `window`** in plugin code. Use the `win` parameter threaded through UI methods, `useSurfaceWindow()` for the
+rendered surface, or `ownerDocument.defaultView`. Context reads use `getContextWindow()`;
+originless user commands resolve a destination once with `resolveChatWindow()`. Never use
+`getMainWindow()` to infer the origin of a local interaction.
 
 | Mount point | Location | Component |
 |-------------|----------|-----------|

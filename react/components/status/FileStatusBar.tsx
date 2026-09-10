@@ -3,7 +3,7 @@ import React from "react";
 import { useAtomValue } from "jotai";
 import { fileStatusSummaryAtom, connectionStatusAtom } from "../../atoms/files";
 import { Spinner, Icon, AlertIcon, TickIcon, InformationCircleIcon } from "../icons/icons";
-import { openPreferencesWindow } from "../../../src/ui/openPreferencesWindow";
+import { openPreferencesWindow } from "../../ui/openPreferencesWindow";
 import { useFileStatus } from "../../hooks/useFileStatus";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
 import { hasPopupMessagesAtom } from "../../atoms/ui";

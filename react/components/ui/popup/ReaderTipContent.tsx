@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
 import React, { useCallback } from 'react';
 import { useSetAtom } from 'jotai';
 import { ChartIcon, ChattingIcon, CancelIcon, HighlighterIcon, Icon, LibraryIcon } from '../../icons/icons';
@@ -45,6 +46,7 @@ const features: ReaderTipFeature[] = [
 ];
 
 const ReaderTipContent: React.FC<ReaderTipContentProps> = ({ onDismiss }) => {
+    const surfaceWindow = useSurfaceWindow();
     const { isBusy } = useActionRunner();
     const stageActionPill = useSetAtom(stageActionPillAtom);
 
@@ -63,7 +65,7 @@ const ReaderTipContent: React.FC<ReaderTipContentProps> = ({ onDismiss }) => {
         stageActionPill({
             actionId,
             targetType: 'attachment',
-            targetWindow: Zotero.getMainWindow(),
+            targetWindow: surfaceWindow,
         });
         onDismiss();
     }, [isBusy, onDismiss, stageActionPill]);

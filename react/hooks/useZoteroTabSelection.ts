@@ -1,3 +1,4 @@
+import { selectedTabIfAccepted } from '../../src/runtime/navigation';
 import { getContextWindow } from '../runtime/windowRuntime';
 import { useEffect } from "react";
 import { useSetAtom } from "jotai";
@@ -31,13 +32,18 @@ export function useZoteroTabSelection() {
         setIsLibraryTab(initialIsLibrary);
         setSelectedTabId(window.Zotero_Tabs.selectedID);
 
+        let lastSelectedID = window.Zotero_Tabs.selectedID;
+        let lastSelectedType = window.Zotero_Tabs.selectedType;
+
         // Handler for tab selection changes
         const tabObserver: { notify: _ZoteroTypes.Notifier.Notify } = {
             notify: async function(event: _ZoteroTypes.Notifier.Event, type: _ZoteroTypes.Notifier.Type, ids: string[] | number[], extraData: any) {
                 if (type === 'tab' && event === 'select') {
-                    if (ids[0] !== window.Zotero_Tabs.selectedID) return;
-                    const selectedTab = window.Zotero_Tabs._tabs.find(tab => tab.id === ids[0]);
+                    const selectedTab = selectedTabIfAccepted(window, ids, extraData);
                     if (!selectedTab) return;
+                    if (lastSelectedID === selectedTab.id && lastSelectedType === selectedTab.type) return;
+                    lastSelectedID = selectedTab.id;
+                    lastSelectedType = selectedTab.type;
 
                     // Update isLibraryTab atom
                     const isLibrary = selectedTab.type === 'library';

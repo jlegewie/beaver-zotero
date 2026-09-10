@@ -9,6 +9,6 @@ import { ActionCategoryFilter } from '@beaver/agent-core/types/actions';
  * that category (or "uncategorized"). `actionId` requests that the Actions tab
  * reveal that action and open it in edit mode.
  */
-export function openPreferencesWindow(tab?: PreferencePageTab, actionsCategoryFilter?: ActionCategoryFilter, actionId?: string): void {
-    BeaverUIFactory.openPreferencesWindow(tab, actionsCategoryFilter, actionId);
+export function openPreferencesWindow(tab?: PreferencePageTab, actionsCategoryFilter?: ActionCategoryFilter, actionId?: string, window?: Window): void {
+    BeaverUIFactory.openPreferencesWindow(tab, actionsCategoryFilter, actionId, window);
 }

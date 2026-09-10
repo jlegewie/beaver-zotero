@@ -659,7 +659,7 @@ export interface DialogsHost {
      * (interrupting a run, opening a thread from another Zotero instance) on
      * the answer before mutating any state.
      */
-    confirm(opts: { title: string; text: string; confirmLabel: string }): boolean;
+    confirm(opts: { title: string; text: string; confirmLabel: string; window?: Window }): boolean;
 }
 
 /**

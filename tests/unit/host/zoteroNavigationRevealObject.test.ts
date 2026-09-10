@@ -23,7 +23,7 @@ vi.mock('../../../react/utils/sourceUtils', () => ({
     revealSource,
     openSource: vi.fn(),
 }));
-vi.mock('../../../src/utils/selectItem', () => ({
+vi.mock('../../../react/utils/selectItem', () => ({
     selectCollection,
     selectLibrary: vi.fn(),
     selectTagFilter: vi.fn(),

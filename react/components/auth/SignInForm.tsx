@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@beaver/agent-core/transport/supabaseClient'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
@@ -26,6 +27,7 @@ interface SignInFormProps {
 }
 
 export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormProps) {
+    const surfaceWindow = useSurfaceWindow();
   // Shared atoms for login form state
   const [email, setEmail] = useAtom(loginEmailAtom)
   const [password, setPassword] = useAtom(loginPasswordAtom)
@@ -101,7 +103,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
       return true;
     }
     const buttonIndex = Zotero.Prompt.confirm({
-      window: Zotero.getMainWindow(),
+      window: surfaceWindow,
       title: "Switch Beaver account?",
       text:
         `This Zotero is currently associated with ${storedUserEmail}.\n\n` +

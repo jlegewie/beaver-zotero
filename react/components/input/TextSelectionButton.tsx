@@ -1,7 +1,9 @@
 import React, { forwardRef } from 'react'
 import { Icon, TextAlignLeftIcon, PdfIcon, FileViewIcon } from "../icons/icons"
-import { useSetAtom } from 'jotai'
-import { readerTextSelectionAtom } from '../../atoms/messageComposition'
+import { useAtomValue, useSetAtom } from 'jotai'
+import { effectiveReaderTextSelectionAtom, stagedReaderActionContextAtom } from '../../atoms/messageComposition'
+import { openReader } from '../../runtime/navigation'
+import { logger } from '@beaver/agent-core/platform/logger'
 import { getCurrentReader, navigateToPageInCurrentReader } from '../../utils/readerUtils'
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu'
 import { TextSelection } from '@beaver/agent-core/types/attachments/apiTypes'
@@ -36,11 +38,18 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
         } = props
 
         // States/Atoms needed for non-preview logic
-        const setReaderTextSelection = useSetAtom(readerTextSelectionAtom)
+        const setReaderTextSelection = useSetAtom(effectiveReaderTextSelectionAtom)
 
         // PDFs get the page-aware reveal label + navigation. EPUB and snapshot
         // reader types fall back to a generic file affordance with no page.
-        const readerType = getCurrentReader()?.type;
+        const staged = useAtomValue(stagedReaderActionContextAtom);
+        const readerType = staged ? staged.location?.contentKind : getCurrentReader()?.type;
+        const revealSelection = () => {
+            if (staged) {
+                void openReader(staged.item.id, selection.page == null ? undefined : { pageIndex: selection.page - 1 })
+                    .catch(error => logger(`TextSelectionButton: ${error}`, 2));
+            } else if (selection.page != null) navigateToPageInCurrentReader(selection.page);
+        };
         const isPdf = readerType === 'pdf';
         const readerTypeName = readerType === 'epub' ? 'EPUB'
             : readerType === 'snapshot' ? 'Snapshot'
@@ -61,7 +70,7 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
             extraMenuItems: [{
                 label: revealLabel,
                 icon: revealIcon,
-                onClick: () => { if (selection.page != null) navigateToPageInCurrentReader(selection.page); },
+                onClick: () => { revealSelection(); },
             }],
         })
 
@@ -92,7 +101,7 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
                     onMouseLeave={onMouseLeave}
                     onClick={(e) => {
                         e.stopPropagation();
-                        if (selection.page != null) navigateToPageInCurrentReader(selection.page);
+                        revealSelection();
                         onClick?.(e);
                     }}
                 >

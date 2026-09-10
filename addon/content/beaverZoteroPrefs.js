@@ -21,19 +21,5 @@ document.addEventListener("command", (event) => {
         return;
     }
 
-    const mainWin = Zotero.getMainWindow();
-    if (!mainWin) {
-        return;
-    }
-    mainWin.focus();
-
-    const eventBus = mainWin.__beaverEventBus;
-    if (!eventBus) {
-        return;
-    }
-    eventBus.dispatchEvent(
-        new mainWin.CustomEvent("toggleChat", {
-            detail: { forceOpen: true },
-        }),
-    );
+    Zotero.Beaver?.runtime?.openChat().catch(error => Zotero.logError(error));
 });

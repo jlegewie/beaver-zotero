@@ -8,7 +8,7 @@ import { Action, ActionCategory, TARGET_TYPE_LABELS, UNCATEGORIZED_FILTER } from
 import { actionsForContextAtom, actionContextAtom } from "../atoms/actions";
 import { GroupIconInfo, splitCategoryActions, getActiveTarget } from "../utils/actionVisibility";
 import { useActionRunner } from "../hooks/useActionRunner";
-import { openPreferencesWindow } from "../../src/ui/openPreferencesWindow";
+import { openPreferencesWindow } from "../ui/openPreferencesWindow";
 import { buildActionPopup } from "@beaver/agent-ui/chat/actionPopup";
 import { ChipPopupCard } from "@beaver/agent-ui/chat/ChipPopup";
 

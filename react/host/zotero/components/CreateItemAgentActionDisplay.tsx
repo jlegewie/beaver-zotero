@@ -1,3 +1,4 @@
+import { tryGetWindowRuntime } from '../../../runtime/windowRuntime';
 import React, { useState, useCallback, useRef } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import {
@@ -275,7 +276,8 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
             // Select the newly created item in Zotero (single item import)
             const newItem = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
             if (newItem) {
-                const ZoteroPane = Zotero.getMainWindow()?.ZoteroPane;
+                const contextWindow = tryGetWindowRuntime()?.contextWindow;
+                const ZoteroPane = contextWindow && !contextWindow.closed ? contextWindow.ZoteroPane : undefined;
                 if (ZoteroPane) {
                     ZoteroPane.selectItem(newItem.id);
                 }
@@ -396,7 +398,8 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                     const data = successfulResults[0].result_data as CreateItemResultData;
                     const newItem = await Zotero.Items.getByLibraryAndKeyAsync(data.library_id, data.zotero_key);
                     if (newItem) {
-                        const ZoteroPane = Zotero.getMainWindow()?.ZoteroPane;
+                        const contextWindow = tryGetWindowRuntime()?.contextWindow;
+                        const ZoteroPane = contextWindow && !contextWindow.closed ? contextWindow.ZoteroPane : undefined;
                         if (ZoteroPane) {
                             ZoteroPane.selectItem(newItem.id);
                         }

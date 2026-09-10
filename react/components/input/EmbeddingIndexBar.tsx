@@ -5,7 +5,7 @@ import { isBackgroundWorkerRunningAtom } from '../../atoms/backgroundExtraction'
 import { backgroundProcessingStatusAtom } from '../../atoms/backgroundProcessing';
 import { hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../../atoms/profile';
 import { getPref } from '../../../src/utils/prefs';
-import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
+import { openPreferencesWindow } from '../../ui/openPreferencesWindow';
 
 /** Compact whole-library processing indicator; kept under the legacy filename. */
 const EmbeddingIndexBar: React.FC = () => {

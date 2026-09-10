@@ -1,3 +1,4 @@
+import { getContextWindow } from '../../react/runtime/windowRuntime';
 import { getDisplayNameFromItem } from "../../react/utils/sourceUtils";
 import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
 import type { CreatorJSON } from "@beaver/agent-core/types/agentActions/base";
@@ -29,13 +30,14 @@ export interface ZoteroTargetContext {
  * Handles both reader view (uses current document's library/parent) and library view (uses selected item or collection).
  * @returns Target library ID, parent reference, and optional collection
  */
-export async function getZoteroTargetContext(): Promise<ZoteroTargetContext> {
-    const win = Zotero.getMainWindow();
-    const zp = Zotero.getActiveZoteroPane();
+export async function getZoteroTargetContext(win = getContextWindow()): Promise<ZoteroTargetContext> {
+    const zp = win?.ZoteroPane;
     
     let targetLibraryId: number | undefined = undefined;
     let parentReference: ZoteroItemReference | null = null;
     let collectionToAddTo: Zotero.Collection | null = null;
+
+    if (!win || win.closed || !zp) return { targetLibraryId, parentReference, collectionToAddTo };
 
     // Reader view - check if we're in a reader tab
     const selectedTabType = win.Zotero_Tabs?.selectedType;
@@ -88,13 +90,14 @@ export async function getZoteroTargetContext(): Promise<ZoteroTargetContext> {
  * Uses sync Zotero.Items.get() which works because items are loaded when open in reader.
  * @returns Target library ID, parent reference, and optional collection
  */
-export function getZoteroTargetContextSync(): ZoteroTargetContext {
-    const win = Zotero.getMainWindow();
-    const zp = Zotero.getActiveZoteroPane();
+export function getZoteroTargetContextSync(win = getContextWindow()): ZoteroTargetContext {
+    const zp = win?.ZoteroPane;
     
     let targetLibraryId: number | undefined = undefined;
     let parentReference: ZoteroItemReference | null = null;
     let collectionToAddTo: Zotero.Collection | null = null;
+
+    if (!win || win.closed || !zp) return { targetLibraryId, parentReference, collectionToAddTo };
 
     // Reader view - check if we're in a reader tab
     const selectedTabType = win.Zotero_Tabs?.selectedType;
@@ -755,8 +758,8 @@ export async function getParentLoadPromises(item: Zotero.Item) {
  * Get the active Zotero library ID
  * @returns The active Zotero library ID, or null if no library is selected
  */
-export function getActiveZoteroLibraryId(): number | null {
-    const zoteroPane = Zotero.getActiveZoteroPane?.() as any;
+export function getActiveZoteroLibraryId(win = getContextWindow()): number | null {
+    const zoteroPane = win?.ZoteroPane as any;
     if (!zoteroPane) return null;
 
     const libraryID = getSelectedLibraryId(zoteroPane);
@@ -793,8 +796,7 @@ export function getActiveZoteroLibraryId(): number | null {
  *
  * @returns The current library object, or null if no library is available
  */
-export function getCurrentLibrary(): _ZoteroTypes.Library.LibraryLike | null {
-	const win = Zotero.getMainWindow();
+export function getCurrentLibrary(win = getContextWindow()): _ZoteroTypes.Library.LibraryLike | null {
 	if (!win) {
 		return null;
 	}

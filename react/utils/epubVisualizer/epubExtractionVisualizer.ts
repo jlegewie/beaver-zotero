@@ -1,6 +1,6 @@
 import { extractEpubDocument } from "../../../src/services/documentExtraction/epub";
 import { logger } from "@beaver/agent-core/platform/logger";
-import { BeaverTemporaryAnnotations } from "../annotationUtils";
+import { BeaverTemporaryAnnotations, ZoteroReader } from "../annotationUtils";
 import {
     annotationFromRange,
     getActiveEpubView,
@@ -21,18 +21,18 @@ interface EpubVisualizerResult {
 }
 
 /** Visualize extracted EPUB items in the visible reader sections. */
-export async function visualizeEpubItems(): Promise<EpubVisualizerResult> {
-    return visualizeEpub("items");
+export async function visualizeEpubItems(reader?: ZoteroReader): Promise<EpubVisualizerResult> {
+    return visualizeEpub("items", reader);
 }
 
 /** Visualize extracted EPUB sentences in the visible reader sections. */
-export async function visualizeEpubSentences(): Promise<EpubVisualizerResult> {
-    return visualizeEpub("sentences");
+export async function visualizeEpubSentences(reader?: ZoteroReader): Promise<EpubVisualizerResult> {
+    return visualizeEpub("sentences", reader);
 }
 
-async function visualizeEpub(level: "items" | "sentences"): Promise<EpubVisualizerResult> {
+async function visualizeEpub(level: "items" | "sentences", sourceReader?: ZoteroReader): Promise<EpubVisualizerResult> {
     try {
-        const ctx = await getActiveEpubView();
+        const ctx = await getActiveEpubView(sourceReader);
         if ("error" in ctx) return { success: false, message: ctx.error };
         const { reader, primaryView, item } = ctx;
 

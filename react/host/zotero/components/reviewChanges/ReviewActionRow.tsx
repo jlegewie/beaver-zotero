@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../../../../runtime/SurfaceWindowContext';
 import React, { useCallback, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
@@ -73,6 +74,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
 
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
+    const surfaceWindow = useSurfaceWindow();
     const undoAgentActions = useSetAtom(undoAgentActionsAtom);
 
     // Expansion lives in the global panel state so it survives pane switches and
@@ -161,7 +163,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         setIsProcessing(true);
         setClickedButton('undo');
         try {
-            const result = await undoAgentActions({ actions: row.actions });
+            const result = await undoAgentActions({ actions: row.actions, window: surfaceWindow });
             if (result.fatalError) setIsUndoError(true);
         } finally {
             setIsProcessing(false);

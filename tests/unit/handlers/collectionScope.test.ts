@@ -195,12 +195,38 @@ describe('resolveCollectionsFilter', () => {
         (globalThis as any).Zotero = previousZotero;
     });
 
-    it('resolves a shared name in every searched library', () => {
+    it('requires disambiguation for a shared name across searched libraries', () => {
         const resolution = resolveCollectionsFilter(['Papers'], [1, 100]);
 
-        expect(resolution.collections.map(c => (c as any).id)).toEqual([11, 12]);
+        expect(resolution.collections).toEqual([]);
+        expect(collectionsFilterError(resolution)).toMatchObject({ error_code: 'ambiguous_collection' });
+        expect(resolution.ambiguity).toContain('AAAAAAAA');
+        expect(resolution.ambiguity).toContain('BBBBBBBB');
+        expect(resolution.ambiguity).not.toContain('Private');
         expect(resolution.unresolved).toEqual([]);
         expect(resolution.outOfScope).toEqual([]);
+    });
+
+    it('rejects duplicate names within one library and shows parent paths', () => {
+        const root = { id: 21, key: 'ROOTAAAA', name: 'Root', libraryID: 1 };
+        const first = { id: 22, key: 'CHILDAAA', name: 'Research', libraryID: 1, parentID: 21 };
+        const second = { id: 23, key: 'CHILDBBB', name: 'Research', libraryID: 1 };
+        COLLECTIONS.push(root, first, second);
+        try {
+            const result = resolveCollectionsFilter(['Research'], [1]);
+            expect(result.collections).toEqual([]);
+            expect(result.ambiguity).toContain('Root / Research');
+            expect(result.ambiguity).toContain('CHILDAAA');
+            expect(result.ambiguity).toContain('CHILDBBB');
+        } finally { COLLECTIONS.splice(-3); }
+    });
+
+    it('does not treat an eight-character collection name as an unambiguous key', () => {
+        COLLECTIONS.push({ id: 21, key: 'NAMEAAAA', name: 'Research', libraryID: 1 }, { id: 22, key: 'NAMEBBBB', name: 'Research', libraryID: 100 });
+        try {
+            const result = resolveCollectionsFilter(['Research'], [1, 100]);
+            expect(collectionsFilterError(result)?.error_code).toBe('ambiguous_collection');
+        } finally { COLLECTIONS.splice(-2); }
     });
 
     it('returns a collection once when several filter entries resolve to it', () => {

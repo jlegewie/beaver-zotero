@@ -1,3 +1,4 @@
+import { getContextWindow } from '../runtime/windowRuntime';
 import { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { getPref, setPref } from '../../src/utils/prefs';
@@ -93,7 +94,7 @@ export function useOnboardingPopups() {
         }
 
         // Verify it's a PDF (not EPUB, HTML snapshot, etc.)
-        const reader = getCurrentReader(Zotero.getMainWindow());
+        const reader = getCurrentReader(getContextWindow());
         if (!reader) return;
         try {
             const item = Zotero.Items.get(reader.itemID);

@@ -1,3 +1,5 @@
+import { viewAttachment } from '../../../runtime/navigation';
+import { getContextWindow } from '../../../runtime/windowRuntime';
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
@@ -194,7 +196,7 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
 
     const handleOpenPdf = useCallback(() => {
         if (bestAttachment) {
-            Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
+            viewAttachment(bestAttachment.id);
         } else if (item.open_access_url) {
             Zotero.launchURL(item.open_access_url);
         }

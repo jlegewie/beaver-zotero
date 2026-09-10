@@ -129,8 +129,13 @@ async function countCollections(libraryId: number): Promise<number> {
 
 async function countTags(libraryId: number): Promise<number> {
     try {
-        const tags = await Zotero.Tags.getAll(libraryId);
-        return (tags as any[]).length;
+        let count = 0;
+        await Zotero.DB.queryAsync(`
+            SELECT COUNT(DISTINCT IT.tagID)
+            FROM itemTags IT JOIN items I ON I.itemID = IT.itemID
+            WHERE I.libraryID = ? AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
+        `, [libraryId], { onRow: (row: any) => { count = row.getResultByIndex(0); } });
+        return count;
     } catch (error) {
         logger(
             `getLibrarySummaries: Error counting tags for library ${libraryId}: ${error}`,

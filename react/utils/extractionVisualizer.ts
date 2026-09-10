@@ -23,7 +23,7 @@ import type {
 } from "../../src/beaver-extract";
 import type { PageDebugData } from "../../src/beaver-extract/schema";
 import { getItemLanguage } from "../../src/utils/zoteroUtils";
-import { getCurrentReaderAndWaitForView } from "./readerUtils";
+import { getCurrentReaderAndWaitForView, waitForReaderView } from "./readerUtils";
 import { getPageViewportInfo } from "./pdfUtils";
 import { BeaverTemporaryAnnotations, ZoteroReader } from "./annotationUtils";
 import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
@@ -93,7 +93,7 @@ function rectToZoteroFormat(
  * Returns `null` when no PDF reader is available — callers convert that
  * into a user-facing error message.
  */
-export async function resolveActiveReaderContext(): Promise<
+export async function resolveActiveReaderContext(sourceReader?: ZoteroReader): Promise<
     | {
         reader: ZoteroReader;
         item: Zotero.Item;
@@ -102,7 +102,8 @@ export async function resolveActiveReaderContext(): Promise<
     }
     | { error: string }
 > {
-    const reader = await getCurrentReaderAndWaitForView(undefined, true);
+    const reader = sourceReader ?? await getCurrentReaderAndWaitForView(undefined, true);
+    if (sourceReader) await waitForReaderView(sourceReader, true);
     if (!reader || !reader._internalReader) return { error: "No active PDF reader found" };
     if (reader.type !== "pdf") return { error: "Current reader is not a PDF" };
 
@@ -276,6 +277,7 @@ async function loadStructuredPage(
  * Visualize column detection results for the current page in the reader.
  */
 interface VisualizerOptions {
+    reader?: ZoteroReader;
     graphicsLayerMode?: ExtractionSettings["graphicsLayerMode"];
 }
 
@@ -292,7 +294,7 @@ export async function visualizeCurrentPageColumns(options?: VisualizerOptions): 
     pageIndex?: number;
 }> {
     try {
-        const ctx = await resolveActiveReaderContext();
+        const ctx = await resolveActiveReaderContext(options?.reader);
         if ("error" in ctx) return { success: false, message: ctx.error };
         const { reader, item, filePath, pageIndex } = ctx;
 
@@ -346,7 +348,7 @@ export async function visualizeCurrentPageLines(options?: VisualizerOptions): Pr
     pageIndex?: number;
 }> {
     try {
-        const ctx = await resolveActiveReaderContext();
+        const ctx = await resolveActiveReaderContext(options?.reader);
         if ("error" in ctx) return { success: false, message: ctx.error };
         const { reader, item, filePath, pageIndex } = ctx;
 
@@ -410,7 +412,7 @@ export async function visualizeCurrentPageItems(options?: VisualizerOptions): Pr
     pageIndex?: number;
 }> {
     try {
-        const ctx = await resolveActiveReaderContext();
+        const ctx = await resolveActiveReaderContext(options?.reader);
         if ("error" in ctx) return { success: false, message: ctx.error };
         const { reader, item, filePath, pageIndex } = ctx;
 
@@ -476,7 +478,7 @@ export async function visualizeCurrentPageSentences(options?: VisualizerOptions)
     pageIndex?: number;
 }> {
     try {
-        const ctx = await resolveActiveReaderContext();
+        const ctx = await resolveActiveReaderContext(options?.reader);
         if ("error" in ctx) return { success: false, message: ctx.error };
         const { reader, item, filePath, pageIndex } = ctx;
 
@@ -542,9 +544,9 @@ export async function visualizeCurrentPageSentences(options?: VisualizerOptions)
 /**
  * Clear all visualization annotations.
  */
-export async function clearVisualizationAnnotations(): Promise<void> {
+export async function clearVisualizationAnnotations(sourceReader?: ZoteroReader): Promise<void> {
     try {
-        const reader = await getCurrentReaderAndWaitForView(undefined, false);
+        const reader = sourceReader ?? await getCurrentReaderAndWaitForView(undefined, false);
         if (reader) await BeaverTemporaryAnnotations.cleanupAll(reader as ZoteroReader);
     } catch (error) {
         logger(`[Visualizer] Error clearing annotations: ${error}`);

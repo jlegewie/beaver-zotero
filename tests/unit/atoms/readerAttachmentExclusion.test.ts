@@ -319,3 +319,9 @@ describe('selected collection attachments', () => {
         expect(store.get(currentMessageCollectionsAtom)).toEqual([]);
     });
 });
+
+// Bind this suite's single-window fixture as the originating renderer.
+vi.mock('../../../react/runtime/windowRuntime', async () => {
+    const { singleWindowRuntimeMock } = await import('../../helpers/singleWindowRuntime');
+    return singleWindowRuntimeMock();
+});

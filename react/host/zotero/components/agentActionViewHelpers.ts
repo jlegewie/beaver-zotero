@@ -1,3 +1,4 @@
+import { getHostWindow } from '../../../runtime/windowRuntime';
 import React from 'react';
 import { AgentAction, isCreateAnnotationsAgentAction } from '../../../agents/agentActions';
 import type { PendingApproval } from '@beaver/agent-ui/host';
@@ -28,7 +29,7 @@ export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'erro
  * Prompt user to confirm overwriting manually modified fields during undo.
  * Returns true if user confirms, false otherwise.
  */
-export function confirmOverwriteManualChanges(modifiedFields: string[]): boolean {
+export function confirmOverwriteManualChanges(modifiedFields: string[], win = getHostWindow()): boolean {
     const fieldList = modifiedFields.join(', ');
     const title = 'Overwrite manual changes?';
     const message = modifiedFields.length === 1
@@ -36,7 +37,7 @@ export function confirmOverwriteManualChanges(modifiedFields: string[]): boolean
         : `The following fields have been manually modified since the edit was applied: ${fieldList}. Do you want to overwrite your changes and revert to the original values?`;
 
     const buttonIndex = Zotero.Prompt.confirm({
-        window: Zotero.getMainWindow(),
+        window: win,
         title,
         text: message,
         button0: Zotero.Prompt.BUTTON_TITLE_YES,

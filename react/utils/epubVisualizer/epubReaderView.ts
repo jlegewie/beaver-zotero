@@ -3,7 +3,7 @@ import { logger } from "@beaver/agent-core/platform/logger";
 import { libraryRefForLibraryID } from "../../../src/utils/libraryIdentity";
 import type { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
 import { ZoteroReader } from "../annotationUtils";
-import { getCurrentReaderAndWaitForView } from "../readerUtils";
+import { getCurrentReaderAndWaitForView, waitForReaderView } from "../readerUtils";
 
 export type EpubAnnotationType = "highlight" | "underline";
 
@@ -47,8 +47,9 @@ export interface ActiveEpubView {
 }
 
 /** Resolve the active Zotero EPUB reader and its primary DOM view. */
-export async function getActiveEpubView(): Promise<ActiveEpubView | { error: string }> {
-    const reader = await getCurrentReaderAndWaitForView(undefined, false);
+export async function getActiveEpubView(sourceReader?: ZoteroReader): Promise<ActiveEpubView | { error: string }> {
+    const reader = sourceReader ?? await getCurrentReaderAndWaitForView(undefined, false);
+    if (sourceReader) await waitForReaderView(sourceReader);
     if (!reader || !reader._internalReader) return { error: "No active EPUB reader found" };
     if (reader.type !== "epub") return { error: "Current reader is not an EPUB" };
 

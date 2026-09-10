@@ -9,6 +9,9 @@
  * Lives in the esbuild bundle — must NOT import from react/store or Jotai.
  */
 
+import { captureReaderActionLocation } from '../runtime/readerActionLocation';
+import { resolveChatWindow } from '../runtime/navigation';
+
 import { getMergedActions } from './zoteroContextMenu';
 import { openPreferencesWindow } from '../ui/openPreferencesWindow';
 import { ActionCategory, KnownActionCategory } from '@beaver/agent-core/types/actions';
@@ -134,7 +137,7 @@ function injectIntoExistingReader(reader: any): void {
 
 // Dev-only: dispatch an extraction-visualizer action so the React layer
 // (which owns the visualizer code in the webpack bundle) can run it.
-function dispatchVisualizerAction(
+async function dispatchVisualizerAction(
     action:
         | 'columns'
         | 'lines'
@@ -146,13 +149,14 @@ function dispatchVisualizerAction(
         | 'clear'
         | 'copy-extract-fixture-command'
         | 'copy-ocr-fixture-command',
-): void {
-    const win = Zotero.getMainWindow();
+    reader: any,
+): Promise<void> {
+    const win = await resolveChatWindow(reader._window);
     const eventBus = win?.__beaverEventBus;
     if (!eventBus) return;
 
     eventBus.dispatchEvent(new win.CustomEvent('readerVisualizerAction', {
-        detail: { action },
+        detail: { action, readerInstanceID: reader._instanceID },
     }));
 }
 
@@ -179,7 +183,7 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
         const menuitem = xulDoc.createXULElement('menuitem');
         menuitem.setAttribute('label', label);
         menuitem.addEventListener('command', () => {
-            dispatchVisualizerAction(action);
+            void dispatchVisualizerAction(action, reader).catch(Zotero.logError);
         });
         popup.appendChild(menuitem);
     };
@@ -190,12 +194,13 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
     // ---- Ask Beaver ----
     const askItem = xulDoc.createXULElement('menuitem');
     askItem.setAttribute('label', 'Ask Beaver');
-    askItem.addEventListener('command', () => {
-        const mainWin = Zotero.getMainWindow();
+    askItem.addEventListener('command', async () => {
+        const readerLocation = captureReaderActionLocation(reader);
+        const mainWin = await resolveChatWindow(win);
         const eventBus = mainWin?.__beaverEventBus;
         if (!eventBus) return;
-        eventBus.dispatchEvent(new mainWin.CustomEvent('toggleChat', {
-            detail: { forceOpen: true },
+        eventBus.dispatchEvent(new mainWin.CustomEvent('readerSelectionAction', {
+            detail: { action: 'ask', text: '', readerItemID: reader.itemID, readerLocation },
         }));
         setTimeout(() => {
             eventBus.dispatchEvent(new mainWin.CustomEvent('focusInput', {
@@ -231,8 +236,8 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
                 menuitem.setAttribute('label', action.title);
                 menuitem.classList.add('menuitem-iconic');
                 menuitem.setAttribute('image', categoryIconDataUri(action.category, win));
-                menuitem.addEventListener('command', () => {
-                    const mainWin = Zotero.getMainWindow();
+                menuitem.addEventListener('command', async () => {
+                    const mainWin = await resolveChatWindow(win);
                     const eventBus = mainWin?.__beaverEventBus;
                     if (!eventBus) return;
                     eventBus.dispatchEvent(new mainWin.CustomEvent('contextMenuAction', {
@@ -256,7 +261,8 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
     const addItem = xulDoc.createXULElement('menuitem');
     addItem.setAttribute('label', 'Add custom action\u2026');
     addItem.addEventListener('command', () => {
-        openPreferencesWindow('actions');
+        void resolveChatWindow(reader._window).then(mainWin =>
+            openPreferencesWindow('actions', undefined, undefined, mainWin)).catch(Zotero.logError);
     });
     popup.appendChild(addItem);
 

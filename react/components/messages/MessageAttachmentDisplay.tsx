@@ -1,6 +1,6 @@
 import React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai';
-import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, removeItemFromMessageAtom, currentMessageItemsAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, removeExternalFileFromMessageAtom, clearMessageContextAtom } from '../../atoms/messageComposition';
+import { stagedReaderActionContextAtom, currentReaderAttachmentAtom, effectiveReaderTextSelectionAtom, currentMessageFiltersAtom, removeItemFromMessageAtom, currentMessageItemsAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, removeExternalFileFromMessageAtom, clearMessageContextAtom } from '../../atoms/messageComposition';
 import { currentNoteItemAtom } from '../../atoms/zoteroContext';
 import { removePopupMessagesByTypeAtom } from '../../atoms/ui';
 import { TextSelectionButton } from '../input/TextSelectionButton';
@@ -25,9 +25,12 @@ const MAX_ATTACHMENTS = 4;
  * no reason to occupy a line.
  */
 const MessageAttachmentDisplay = () => {
-    const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
-    const currentNoteItem = useAtomValue(currentNoteItemAtom);
-    const readerTextSelection = useAtomValue(readerTextSelectionAtom);
+    const staged = useAtomValue(stagedReaderActionContextAtom);
+    const readerAttachment = useAtomValue(currentReaderAttachmentAtom);
+    const noteItem = useAtomValue(currentNoteItemAtom);
+    const currentReaderAttachment = staged ? null : readerAttachment;
+    const currentNoteItem = staged ? null : noteItem;
+    const readerTextSelection = useAtomValue(effectiveReaderTextSelectionAtom);
     const currentMessageFilters = useAtomValue(currentMessageFiltersAtom);
     const { libraryIds: currentLibraryIds, collectionIds: currentCollectionIds, tagSelections: currentTagSelections } = currentMessageFilters;
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);

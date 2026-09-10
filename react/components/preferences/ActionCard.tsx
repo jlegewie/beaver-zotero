@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Action, ActionCategory, ActionTargetType, KNOWN_ACTION_CATEGORIES, KnownActionCategory, categoryLabel, TARGET_PRESETS, targetsLabel, targetsDescription } from "@beaver/agent-core/types/actions";
@@ -96,6 +97,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
     forceEdit = false,
     onForceEditHandled,
 }) => {
+    const surfaceWindow = useSurfaceWindow();
     const [isEditing, setIsEditing] = useState(() => !action.title && !action.text);
     const [editTitle, setEditTitle] = useState(action.title);
     const [editText, setEditText] = useState(action.text);
@@ -305,7 +307,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                 category: editCategory,
             }
             : action;
-        exportActionToFile(snapshot)
+        exportActionToFile(snapshot, surfaceWindow)
             .then((path) => {
                 if (!path) return; // user cancelled
                 addPopupMessage({

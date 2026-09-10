@@ -1,3 +1,4 @@
+import { selectedTabIfAccepted } from '../../src/runtime/navigation';
 import { getContextWindow } from '../runtime/windowRuntime';
 import { useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -186,7 +187,7 @@ export function useZoteroContext() {
         Zotero.Items.getAsync(selectedTab.data.itemID).then(async (item: Zotero.Item) => {
             if (!item || cancelled) return;
             await item.loadDataType('itemData');
-            if (!cancelled) setNoteItem(item);
+            if (!cancelled && !mainWindow.closed && mainWindow.Zotero_Tabs.selectedID === selectedTab.id) setNoteItem(item);
         }).catch((error: unknown) => {
             logger(`useZoteroContext: failed to revalidate active note tab: ${error}`, 2);
         });
@@ -205,6 +206,8 @@ export function useZoteroContext() {
         }
 
         logger('useZoteroContext: initializing');
+        let disposed = false;
+        let noteGeneration = 0;
 
         // --- collectionsView.onSelect listener ---
         const handleCollectionSelect = () => {
@@ -321,16 +324,20 @@ export function useZoteroContext() {
         }
 
         const setNoteItemFromTab = async (tab: any) => {
+            const generation = ++noteGeneration;
+            const isCurrent = () => !disposed && !mainWindow.closed
+                && generation === noteGeneration && mainWindow.Zotero_Tabs.selectedID === tab.id;
+            setNoteItem(null);
             if (isNoteTabType(tab.type) && tab.data?.itemID) {
                 const item = await Zotero.Items.getAsync(tab.data.itemID);
                 if (item) {
                     await item.loadDataType('itemData');
                     logger(`useZoteroContext: note tab active, type=${tab.type}, itemID=${tab.data.itemID}`);
-                    setNoteItem(item);
+                    if (isCurrent()) setNoteItem(item);
                     return;
                 }
             }
-            setNoteItem(null);
+            if (isCurrent()) setNoteItem(null);
         };
 
         const tabObserver = {
@@ -338,24 +345,18 @@ export function useZoteroContext() {
                 event: string,
                 type: string,
                 ids: string[] | number[],
+                extraData: any,
             ) {
                 if (type !== 'tab') return;
 
                 if (event === 'select') {
-                    if (ids[0] !== mainWindow.Zotero_Tabs.selectedID) return;
-                    const selectedTab = mainWindow.Zotero_Tabs._tabs.find(
-                        (tab: any) => tab.id === ids[0],
-                    );
+                    const selectedTab = selectedTabIfAccepted(mainWindow, ids, extraData);
                     if (!selectedTab) return;
                     await setNoteItemFromTab(selectedTab);
                 } else if (event === 'load') {
                     // When an unloaded note tab finishes loading, re-check
                     // if it's the currently selected tab and update the atom.
-                    const loadedTabId = ids[0];
-                    if (loadedTabId !== mainWindow.Zotero_Tabs.selectedID) return;
-                    const loadedTab = mainWindow.Zotero_Tabs._tabs.find(
-                        (tab: any) => tab.id === loadedTabId,
-                    );
+                    const loadedTab = selectedTabIfAccepted(mainWindow, ids, extraData);
                     if (!loadedTab) return;
                     await setNoteItemFromTab(loadedTab);
                 }
@@ -388,12 +389,7 @@ export function useZoteroContext() {
                 (tab: any) => tab.id === mainWindow.Zotero_Tabs.selectedID,
             );
             if (currentTab && isNoteTabType(currentTab.type) && currentTab.data?.itemID) {
-                Zotero.Items.getAsync(currentTab.data.itemID).then(async (item: Zotero.Item) => {
-                    if (item) {
-                        await item.loadDataType('itemData');
-                        setNoteItem(item);
-                    }
-                });
+                void setNoteItemFromTab(currentTab);
             } else {
                 setNoteItem(null);
             }
@@ -404,6 +400,8 @@ export function useZoteroContext() {
 
         // --- Cleanup ---
         return () => {
+            disposed = true;
+            ++noteGeneration;
             logger('useZoteroContext: cleaning up');
             cv?.onSelect?.removeListener(handleCollectionSelect);
             iv?.onSelect?.removeListener(handleItemSelect);

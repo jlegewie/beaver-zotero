@@ -76,12 +76,6 @@ export class KeyboardManager {
     private initKeyboardListener() {
         try {
             // Initialize for main window
-            const win = Zotero.getMainWindow();
-            if (win && !win.closed) {
-                this._initKeyboardListener(win);
-            }
-
-            // Initialize for any additional windows
             const mainWindows = Zotero.getMainWindows();
             mainWindows?.forEach(window => {
                 if (window && !window.closed && !this._initializedWindows.has(window)) {

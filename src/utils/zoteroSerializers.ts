@@ -1,3 +1,4 @@
+import { cleanMetadataUrl } from './metadataUrl';
 import { v4 as uuidv4 } from 'uuid';
 import { calculateObjectHash } from '../utils/hash';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -304,7 +305,7 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
         year: getYearFromItem(item),
         publication_title: item.getField('publicationTitle', false, true),
         abstract: item.getField('abstractNote'),
-        url: item.getField('url'),
+        url: cleanMetadataUrl(item.getField('url')),
         identifiers: getIdentifiersFromItem(item),
         language: item.getField('language'),
         formatted_citation: formatItemReference(item),
@@ -553,7 +554,7 @@ export async function serializeAttachment(
         library_id: item.libraryID,
         zotero_key: item.key,
         parent_key: item.parentKey || null,
-        attachment_url: item.getField('url'),
+        attachment_url: cleanMetadataUrl(item.getField('url')),
         link_mode: item.attachmentLinkMode,
         tags: item.getTags().length > 0 ? item.getTags() : null,
         collections: getCollectionKeysFromItem(item),

@@ -83,7 +83,7 @@ describe('resolveItemsByFilters', () => {
 
         const allConds = searches.flatMap((s) => s.conditions);
         expect(allConds).toContainEqual({ c: 'date', op: 'isAfter', val: '2017-12-31' });
-        expect(allConds).toContainEqual({ c: 'date', op: 'isBefore', val: '2021-01-01' });
+        expect(allConds).toContainEqual({ c: 'date', op: 'isBefore', val: '2021' });
     });
 
     it('uses an exact-year condition when year.exact is set', async () => {

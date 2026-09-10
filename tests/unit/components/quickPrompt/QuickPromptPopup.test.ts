@@ -27,9 +27,6 @@ vi.mock('../../../../react/events/eventManager', () => ({
 vi.mock('../../../../react/ui/UIManager', () => ({
     uiManager: { focusToggleButton: mocks.focusToggleButton },
 }));
-vi.mock('../../../../react/runtime/windowRuntime', () => ({
-    getHostWindow: () => window,
-}));
 vi.mock('../../../../react/atoms/threads', async () => {
     const { atom } = await import('jotai');
     return {
@@ -368,4 +365,10 @@ describe('QuickPromptPopup', () => {
         await fireShortcut();
         expect(store.get(quickPromptStateAtom)).toBeNull();
     });
+});
+
+// Bind this suite's single-window fixture as the originating renderer.
+vi.mock('../../../../react/runtime/windowRuntime', async () => {
+    const { singleWindowRuntimeMock } = await import('../../../helpers/singleWindowRuntime');
+    return singleWindowRuntimeMock();
 });

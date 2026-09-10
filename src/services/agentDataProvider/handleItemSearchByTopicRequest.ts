@@ -1,3 +1,4 @@
+import { matchesPublicationYear, matchesCreatorName } from '../../utils/searchFilters';
 /**
  * Agent Data Provider
  * 
@@ -313,27 +314,9 @@ export async function handleItemSearchByTopicRequest(
         if (!item) continue;
 
         // Apply filters
-        // Year filter
-        if (request.year_min || request.year_max) {
-            const yearStr = item.getField('date', false, true);
-            const yearMatch = yearStr ? String(yearStr).match(/\d{4}/) : null;
-            const year = yearMatch ? parseInt(yearMatch[0], 10) : null;
-
-            if (year) {
-                if (request.year_min && year < request.year_min) continue;
-                if (request.year_max && year > request.year_max) continue;
-            }
-        }
-
-        // Author filter
-        if (request.author_filter && request.author_filter.length > 0) {
-            const creators = item.getCreators();
-            const creatorLastNames = creators.map(c => (c.lastName || '').toLowerCase());
-            const matchesAuthor = request.author_filter.some(authorName =>
-                creatorLastNames.some(lastName => lastName.includes(authorName.toLowerCase()))
-            );
-            if (!matchesAuthor) continue;
-        }
+        if ((request.year_min != null || request.year_max != null)
+            && !matchesPublicationYear(item.getField('date', false, true), request.year_min, request.year_max)) continue;
+        if (request.author_filter?.length && !request.author_filter.some(name => matchesCreatorName(item.getCreators(), name))) continue;
 
         // Tags filter, applied to the resolved tag names rather than the request's
         // own spelling so it matches what the library actually stores.

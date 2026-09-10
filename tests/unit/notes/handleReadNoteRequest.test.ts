@@ -36,6 +36,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     prepareAttachmentInfoBatchData: vi.fn(async () => ({ bestAttachmentMap: new Map() })),
     processAttachmentInfoBatch: vi.fn(async () => []),
     toAttachmentSummary: vi.fn((attachment: any) => attachment),
+    getAttachmentInfoForItem: vi.fn(async item => ({ attachment_id: `u-${item.key}`, content_kind: 'pdf', status: 'readable', is_primary: false })),
     checkLibraryExcluded: vi.fn(() => null),
 }));
 
@@ -334,7 +335,7 @@ describe('handleReadNoteRequest — cited_items extraction', () => {
         );
     });
 
-    it('does not populate cited_items from attachment citations', async () => {
+    it('resolves legacy attachment citations', async () => {
         vi.mocked(getOrSimplify).mockReturnValueOnce({
             simplified: '<p><citation att_id="1-ATTACH1" page="3"/></p>',
             metadata: { elements: new Map() },
@@ -350,8 +351,17 @@ describe('handleReadNoteRequest — cited_items extraction', () => {
         const response = await handleReadNoteRequest(makeRequest());
 
         expect(response.success).toBe(true);
-        expect(response.cited_items).toBeUndefined();
-        expect(getByLibraryAndKeyAsync).not.toHaveBeenCalledWith(1, 'ATTACH1');
+        expect(response.cited_items).toHaveLength(1);
+        expect(getByLibraryAndKeyAsync).toHaveBeenCalledWith(1, 'ATTACH1');
+    });
+
+    it('preserves the identity of a portable attachment citation without a ref attribute', async () => {
+        Zotero.Libraries.userLibraryID = 1;
+        vi.mocked(getOrSimplify).mockReturnValueOnce({ simplified: '<p><citation id="u-PDF12345" loc="page2"/></p>', metadata: { elements: new Map() }, isStale: false });
+        const attachment = { libraryID: 1, key: 'PDF12345', isAttachment: () => true, loadDataType: vi.fn(), getField: () => 'Source PDF' };
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockImplementation(async (_library, key) => key === 'ABCD1234' ? makeMockItem() : attachment as any);
+        const result = await handleReadNoteRequest(makeRequest());
+        expect(result.cited_items).toEqual([expect.objectContaining({ zotero_key: 'PDF12345', item_type: 'attachment', title: 'Source PDF' })]);
     });
 
     it('populates cited_items for note and annotation link citations', async () => {

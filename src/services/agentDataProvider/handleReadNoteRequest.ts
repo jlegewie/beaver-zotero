@@ -22,12 +22,11 @@ import {
     resolveObjectId,
     UNRESOLVED_LIBRARY_ID,
 } from '../../utils/libraryIdentity';
-import { checkLibraryExcluded, prepareAttachmentInfoBatchData, processAttachmentInfoBatch } from './utils';
+import { checkLibraryExcluded, getAttachmentInfoForItem, prepareAttachmentInfoBatchData, processAttachmentInfoBatch } from './utils';
 import { CITATION_TAG_PATTERN } from '../../../react/utils/citationPreprocessing';
 import {
     normalizeCitationTag,
     parseRawCitationAttributes,
-    parseZoteroId,
 } from '@beaver/agent-core/citations/citationGrammar';
 import { getNoteContentPreviewText } from '../../../react/utils/noteText';
 
@@ -86,7 +85,7 @@ function extractCitedItemRefs(simplifiedHtml: string): { libraryId: number; item
         const colonIdx = itemId.indexOf(':');
         const cleanId = (colonIdx !== -1 ? itemId.substring(0, colonIdx) : itemId).trim();
 
-        const parsed = parseZoteroId(cleanId);
+        const parsed = resolveObjectId(cleanId);
         if (!parsed) return;
 
         // Key on library_ref when available: an unresolved portable ref
@@ -104,12 +103,9 @@ function extractCitedItemRefs(simplifiedHtml: string): { libraryId: number; item
     while ((match = CITATION_TAG_PATTERN.exec(simplifiedHtml)) !== null) {
         const rawAttrs = parseRawCitationAttributes(match[1] || '');
 
-        // Attachment-to-parent cited_items resolution is out of v0.20 scope.
-        if (rawAttrs.att_id || rawAttrs.attachment_id) continue;
-
         const normalized = normalizeCitationTag(rawAttrs);
         if (normalized.ok && normalized.ref.kind === 'zotero') {
-            addRef(`${normalized.ref.library_id}-${normalized.ref.zotero_key}`);
+            addRef(`${normalized.ref.library_ref ?? normalized.ref.library_id}-${normalized.ref.zotero_key}`);
             continue;
         }
 
@@ -138,7 +134,7 @@ async function resolveCitedItems(
         if (checkLibraryExcluded(ref.libraryId)) continue;
         try {
             const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.libraryId, ref.itemKey);
-            if (item && !item.deleted && (item.isRegularItem?.() || item.isNote?.() || isAnnotationItem(item))) {
+            if (item && !item.deleted && (item.isRegularItem?.() || item.isNote?.() || item.isAttachment?.() || isAnnotationItem(item))) {
                 items.push(item);
             }
         } catch {
@@ -190,6 +186,17 @@ async function resolveCitedItems(
             if (summary) results.push(summary);
         } else if (item.isNote?.() === true) {
             results.push(serializeNoteCitationSummary(item));
+        } else if (item.isAttachment?.()) {
+            await item.loadDataType('itemData');
+            results.push({
+                library_id: item.libraryID,
+                zotero_key: item.key,
+                library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
+                item_type: 'attachment',
+                title: item.getField('title') || item.attachmentFilename || 'Attachment',
+                parent_key: item.parentKey || null,
+                attachments: [await getAttachmentInfoForItem(item, { skipWorkerFallback: true, includeAnnotationsCount: true })],
+            });
         } else if (isAnnotationItem(item)) {
             results.push(serializeAnnotationCitationSummary(item));
         }

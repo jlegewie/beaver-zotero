@@ -89,6 +89,15 @@ beforeEach(() => {
 });
 
 describe('handleListCollectionsRequest recursive', () => {
+    it('omits all item counts when they were not requested', async () => {
+        const result = await handleListCollectionsRequest(request({ include_item_counts: false }));
+        for (const row of JSON.parse(JSON.stringify(result)).collections) {
+            expect(row).not.toHaveProperty('item_count');
+            expect(row).not.toHaveProperty('standalone_attachment_count');
+            expect(row).not.toHaveProperty('standalone_note_count');
+        }
+    });
+
     it('returns top-level collections only by default', async () => {
         const res = await handleListCollectionsRequest(request());
 

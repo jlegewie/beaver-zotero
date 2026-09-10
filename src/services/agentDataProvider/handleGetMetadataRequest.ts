@@ -1,3 +1,4 @@
+import { cleanMetadataUrl } from '../../utils/metadataUrl';
 /**
  * Agent Data Provider
  * 
@@ -99,7 +100,7 @@ export async function handleGetMetadataRequest(
                 // it serves notes and child items as well as regular ones.
                 await loadQuickSearchHitData([item]);
                 items.push({
-                    item_id: itemId,
+                    item_id: modelObjectId(item.libraryID, item.key),
                     ...toQuickSearchHit(item),
                 });
                 continue;
@@ -151,7 +152,7 @@ export async function handleGetMetadataRequest(
                 }
                 items.push({
                     ...info,
-                    item_id: itemId,
+                    item_id: modelObjectId(item.libraryID, item.key),
                     itemType: 'attachment',
                     parent_item: parentSummary,
                     collections: enrichItemCollections(item),
@@ -231,7 +232,8 @@ export async function handleGetMetadataRequest(
 
             // Get full item data via toJSON({ mode: 'full' }) - includes all fields
             const itemData: Record<string, any> = item.toJSON({ mode: 'full' });
-            itemData.item_id = itemId;
+            itemData.item_id = modelObjectId(item.libraryID, item.key);
+            if ('url' in itemData) itemData.url = cleanMetadataUrl(itemData.url);
             itemData.library_ref = libraryRefForLibraryID(libraryId) ?? undefined;
             
             // Return all fields (including tags and collections)
@@ -302,14 +304,14 @@ export async function handleGetMetadataRequest(
                         
                         try {
                             const attachmentInfo = await getAttachmentInfoForItem(attachment, {
-                                parentItemId: itemId,
+                                parentItemId: modelObjectId(item.libraryID, item.key),
                                 isPrimary: bestAttachment ? attachment.id === bestAttachment.id : false,
                                 includeAnnotationsCount: true,
                                 skipWorkerFallback: true,
                             });
                             attachments.push({
                                 ...attachmentInfo,
-                                url: attachment.getField('url') || null,
+                                url: cleanMetadataUrl(attachment.getField('url')),
                             });
                         } catch (error) {
                             logger(`handleGetMetadataRequest: Error processing attachment ${attachment.key}: ${error}`, 2);

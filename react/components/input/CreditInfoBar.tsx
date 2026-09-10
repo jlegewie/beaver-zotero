@@ -2,7 +2,7 @@ import React, { useEffect, useCallback } from 'react';
 import { useSetAtom } from 'jotai';
 import { SpeedIcon, CancelIcon, Icon } from '../icons/icons';
 import { RunWarning, dismissWarningAtom } from '../../atoms/warnings';
-import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
+import { openPreferencesWindow } from '../../ui/openPreferencesWindow';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 
 const AUTO_DISMISS_MS = 300_000;

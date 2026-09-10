@@ -1,9 +1,10 @@
+import { useSurfaceWindow } from '../runtime/SurfaceWindowContext';
 import React, { useRef, useCallback } from 'react';
 import { CancelIcon, PlusSignIcon, PictureInPictureIcon, ChattingIcon } from './icons/icons';
 import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
 import EmbeddingIndexStatusButton from './ui/buttons/EmbeddingIndexStatusButton';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
-import { openBeaverWindow } from '../../src/ui/openBeaverWindow';
+import { openBeaverWindow } from '../ui/openBeaverWindow';
 import { newThreadAtom } from '../atoms/threads';
 import { currentThreadIdAtom, runsCountAtom } from '@beaver/agent-core/run-state/atoms';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
@@ -27,6 +28,7 @@ interface HeaderProps {
 }
 
 const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
+    const surfaceWindow = useSurfaceWindow();
     const runsCount = useAtomValue(runsCountAtom);
     const newThread = useSetAtom(newThreadAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
@@ -57,7 +59,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
 
     const handleNewThread = async () => {
         setIsThreadListView(false);
-        await newThread();
+        await newThread({ window: surfaceWindow });
     }
 
     const handleClose = useCallback(() => {
@@ -67,7 +69,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
             const currentWindow = getWindowFromElement(closeButtonRef.current);
             currentWindow?.close();
         } else {
-            triggerToggleChat(Zotero.getMainWindow());
+            triggerToggleChat(surfaceWindow);
         }
     }, [isWindow, setIsThreadListView]);
 

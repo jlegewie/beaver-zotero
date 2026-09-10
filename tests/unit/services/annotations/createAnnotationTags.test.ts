@@ -112,6 +112,15 @@ describe("createAnnotation tag application", () => {
     expect(constructedItems[0].tagsAtSave).toEqual(["methods"]);
   });
 
+  it("resolves an omitted PDF note label from cached document metadata", async () => {
+    (globalThis as any).Zotero.Beaver.documentCache.getMetadata.mockResolvedValue({ pages: [geometry], pageLabels: { 0: '220' } });
+    await createNoteAnnotation(mockAttachment(), {
+      notePosition: { page_index: 0, x: 100, y: 100, side: 'right', coord_origin: CoordOrigin.TOPLEFT },
+      comment: 'A note',
+    });
+    expect((constructedItems[0] as any).annotationPageLabel).toBe('220');
+  });
+
   it("applies note tags before saveTx", async () => {
     await createNoteAnnotation(mockAttachment(), {
       notePosition: {

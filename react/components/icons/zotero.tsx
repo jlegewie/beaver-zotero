@@ -28,26 +28,6 @@ const CSSItemTypeIcon: React.FC<CSSItemTypeIconProps> = ({ itemType, ...rest }) 
     return <CSSIcon name="item-type" data-item-type={itemType} {...rest} />;
 };
 
-const cssIconsCache = new Map<string, HTMLSpanElement>();
-
-function getCSSIcon(key: string): HTMLSpanElement {
-    if (!cssIconsCache.has(key)) {
-        const iconEl = Zotero.getMainWindow().document.createElement('span');
-        iconEl.classList.add('icon');
-        iconEl.classList.add('icon-css');
-        iconEl.classList.add(`icon-${key}`);
-        cssIconsCache.set(key, iconEl);
-    }
-
-    return cssIconsCache.get(key)!.cloneNode(true) as HTMLSpanElement;
-}
-
-function getCSSItemTypeIcon(itemType: string, key = 'item-type'): HTMLSpanElement {
-    const icon = getCSSIcon(key);
-    icon.dataset.itemType = itemType;
-    return icon;
-}
-
 const IconAttachSmall: React.FC<Omit<IconProps, 'name'>> = (props) => 
     <CSSIcon name="attachment" className="icon-16" {...props} />;
 
@@ -58,8 +38,6 @@ export {
     Icon,
     CSSIcon,
     CSSItemTypeIcon,
-    getCSSIcon,
-    getCSSItemTypeIcon,
     IconAttachSmall,
     IconTreeitemNoteSmall
 }; 
