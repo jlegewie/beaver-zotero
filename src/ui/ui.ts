@@ -560,9 +560,13 @@ export class BeaverUIFactory {
         // corner while the sidebar is closed).
         // Mac: Cmd+Option+J, Windows/Linux: Ctrl+Alt+J
         manager.register(
-            (ev) => {
+            (ev, keyOptions) => {
+                // Keyup can still carry the full chord when the letter is
+                // released first. Only the initial keydown toggles the popup.
+                if (keyOptions.type !== 'keydown') return;
                 if (isQuickPromptShortcut(ev, keyboardShortcut, Zotero.isMac)) {
                     ev.preventDefault();
+                    if (ev.repeat) return;
                     const win = resolveShortcutWindow(ev);
                     if (win) triggerToggleQuickPrompt(win);
                 }
