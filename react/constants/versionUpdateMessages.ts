@@ -586,13 +586,13 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.24.0" target='_blank'>Full changelog</a>`,
     },
     {
-        version: "0.25.0",
+        version: "0.25.0-beta.1",
         deferFeatureTips: { 'run-status-popup': 7 * 24 * 60 * 60 * 1000 },
         title: "Introducing Quick Prompt",
         text: "Press {{quickPromptShortcut}} to open a composer in the corner. Beaver works while you stay in Zotero: the card shows progress, asks for approvals, and reports the result.",
         showcase: 'quick-prompt',
         inPanel: false,
-        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.25.0" target='_blank'>Full changelog</a>`,
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.25.0-beta.1" target='_blank'>Full changelog</a>`,
     },
 ];
 
