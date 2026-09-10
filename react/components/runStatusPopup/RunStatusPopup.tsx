@@ -86,18 +86,40 @@ function isCardBackgroundClick(event: React.MouseEvent<HTMLElement>): boolean {
     );
 }
 
+/** Keep short errors fully visible; fade only text that exceeds three lines. */
+const ErrorPreview: React.FC<{ text: string }> = ({ text }) => {
+    const ref = useRef<HTMLDivElement>(null);
+    const [clipped, setClipped] = useState(false);
+    useLayoutEffect(() => {
+        const el = ref.current;
+        const win = el?.ownerDocument.defaultView;
+        if (!el || !win) return;
+        const measure = () => setClipped(el.scrollHeight > el.clientHeight + 1);
+        measure();
+        const observer = new win.ResizeObserver(measure);
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, [text]);
+    return (
+        <div ref={ref} title={text} className={`beaver-run-status-popup__error-preview${clipped ? ' beaver-run-status-popup__error-preview--clipped' : ''}`}>
+            {text}
+        </div>
+    );
+};
+
 const Header: React.FC<{
     card: RunStatusPopupCard;
+    title?: string;
     leading: React.ReactNode;
     /** The second line; null for a card whose title is the whole story. */
     detail: React.ReactNode;
     detailClassName?: string;
-}> = ({ card, leading, detail, detailClassName = 'font-color-secondary' }) => (
+}> = ({ card, title = card.threadName, leading, detail, detailClassName = 'font-color-secondary' }) => (
     <div className="beaver-run-status-popup__header">
         <div className="beaver-run-status-popup__leading">{leading}</div>
         <div className="beaver-run-status-popup__text">
-            <div className="beaver-run-status-popup__title font-color-primary" title={card.threadName}>
-                {card.threadName}
+            <div className="beaver-run-status-popup__title font-color-primary" title={title}>
+                {title}
             </div>
             {detail !== null && (
                 <div className={`beaver-run-status-popup__detail ${detailClassName}`}>{detail}</div>
@@ -270,7 +292,10 @@ const CompletedView: React.FC<{ card: CompletedCard }> = ({ card }) => {
             <Header
                 card={card}
                 leading={<Mark icon={mark.icon} className={mark.className} />}
-                detail={card.detail}
+                title={card.outcome === 'error' ? card.detail ?? 'An error occurred' : undefined}
+                detail={card.outcome === 'error'
+                    ? card.errorMessage ? <ErrorPreview text={card.errorMessage} /> : null
+                    : card.detail}
             />
             {hasRows && (
                 <div className="beaver-run-status-popup__rows">
