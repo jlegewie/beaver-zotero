@@ -14,7 +14,7 @@
  */
 
 import { ApiService, type RequestOptions } from '../apiService';
-import { ApiError } from '../../types/apiErrors';
+import { isApiError } from '../../types/apiErrors';
 import type {
     CollectionInfo,
     ItemProjectionDetail,
@@ -323,7 +323,7 @@ export const ZOTERO_OFFLINE_CODE = 'zotero_offline';
 
 /** True when the request failed because the user's Zotero is not running. */
 export function isZoteroOffline(error: unknown): boolean {
-    return error instanceof ApiError && error.code === ZOTERO_OFFLINE_CODE;
+    return isApiError(error) && error.code === ZOTERO_OFFLINE_CODE;
 }
 
 // =============================================================================

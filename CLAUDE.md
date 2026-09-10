@@ -215,6 +215,30 @@ hooks (auth, tab tracking, …).
   events use `addon.runtime.publish` / `subscribeWindow`; closing a window synchronously
   revokes its subscriptions. Never send foreign atom objects or read another window's store.
 
+### Instance account and preferences
+
+`addon.account` owns the only Supabase client, encrypted storage, token refresh and profile
+pipeline in the plugin realm. Renderers register `setCredentialAdapter` and
+`setSupabaseClientProvider`; they never construct or dispose a Supabase client. Shared hosts
+that omit those adapters retain the core's existing storage and refresh-policy behavior.
+
+Account snapshots carry generation and revision. Subscribe before mounting, apply only newer
+snapshots, and unregister on window detach. Account replacement revokes access and clears local
+chat state synchronously; same-user token refresh preserves drafts and history. HTTP requests
+check the account generation before dispatch/retry and after body parsing. Classify errors
+with the structural helpers in `apiErrors`, since bundle constructors are distinct.
+
+Profile atoms are projections. Persisted account changes go through instance commands;
+profile projections are read-only and mutation callers await an authoritative refresh. Library exclusions apply immediately
+and invalidate older reads before the backend save. `addon.preferences` owns native preference
+observation; local preference atoms follow its revision, while unsaved settings editors and
+chat model selection remain local.
+
+`addon.account.realtime` owns shared user-scoped thread and provider-wake channels.
+Renderers subscribe through its listener API and release only their own listener on cleanup;
+never unsubscribe a shared SDK channel from a renderer. The final listener releases the channel,
+and account revocation clears listeners before late events can reach another account.
+
 ### Window lifecycle (close window ≠ quit app)
 
 On macOS, closing the last window does not quit Zotero. `onMainWindowUnload()`
@@ -233,7 +257,7 @@ restores `Zotero.Reader.onChangeSidebarWidth` on instance disposal.
 
 Anything that must span windows or outlive one goes on the **`Zotero` global**
 (`Zotero.Beaver`, `Zotero.__beaver*`) — it lives as long as the app. Per-window handles go on
-**that window** (`win.BeaverReact`, `win.__beaverEventBus`, `win.__beaverDisposeSupabase`, `win.__beaverRuntime`, …)
+**that window** (`win.BeaverReact`, `win.__beaverEventBus`, `win.__beaverRuntime`, …)
 and die with it. Never park shared state on `window`: on macOS the last window can close while
 the app runs, and a second main window loads its own React bundle.
 
@@ -308,7 +332,9 @@ Render paths, view models, preview components, and reveal/open click handlers ma
 library references and perform local lookups to enrich persisted history, and must **not** be
 gated with `isLibrarySearchable` / `checkLibraryExcluded`.
 
-Single source of truth: `searchableLibraryIdsAtom` (`react/atoms/profile.ts`). Helpers in
+Single source of truth: `addon.account` (`src/services/instanceAccount.ts`). It publishes
+fail-closed scope and entitlements synchronously; `searchableLibraryIdsAtom` is a local UI
+projection. Helpers in
 `src/services/agentDataProvider/utils.ts`: `checkLibraryExcluded(libraryId)` (returns
 `{ message }` or `null`; also `null` for a nonexistent library so the caller's own not-found
 path handles bad refs), `isLibrarySearchable`, `getSearchableLibraryIds`,

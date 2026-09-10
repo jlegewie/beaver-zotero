@@ -13,7 +13,7 @@ vi.mock('@beaver/agent-core/transport/threadService', () => ({
 }));
 
 const getZoteroUserIdentifierMock = vi.fn();
-vi.mock('../../../src/utils/zoteroUtils', () => ({
+vi.mock('../../../src/utils/zoteroInstanceIdentity', () => ({
     getZoteroUserIdentifier: (...args: unknown[]) => getZoteroUserIdentifierMock(...args),
     currentZoteroInstanceRef: vi.fn(() => null),
 }));
@@ -71,7 +71,8 @@ vi.mock('../../../react/atoms/profile', async () => {
     };
 });
 
-import { claimPreSyncThreads } from '../../../react/hooks/useProfileSync';
+import { claimPreSyncThreads as claim } from '../../../src/services/claimPreSyncThreads';
+const claimPreSyncThreads = (userId: string) => claim(userId, () => storeGetMock()?.id === userId);
 
 const USER_ID = 'beaver-user-1';
 

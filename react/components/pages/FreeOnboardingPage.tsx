@@ -1,11 +1,10 @@
 import React, { useState } from "react";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtomValue } from "jotai";
 import { profileWithPlanAtom } from "../../atoms/profile";
 import { userAtom } from "../../atoms/auth";
 import { accountService } from "@beaver/agent-core/transport/clients/accountService";
 import { logger } from "@beaver/agent-core/platform/logger";
 import { setPref } from "../../../src/utils/prefs";
-import { getZoteroUserIdentifier } from "../../../src/utils/zoteroUtils";
 import { OnboardingHeader, OnboardingFooter, ExamplePrompts } from "./onboarding";
 import { LockIcon, Icon } from "../icons/icons";
 import ConsentToggles from "./onboarding/ConsentToggles";
@@ -21,7 +20,7 @@ import ConsentToggles from "./onboarding/ConsentToggles";
  */
 const FreeOnboardingPage: React.FC = () => {
     // Profile state
-    const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
+    const profileWithPlan = useAtomValue(profileWithPlanAtom);
     const user = useAtomValue(userAtom);
 
     // Local state
@@ -66,23 +65,8 @@ const FreeOnboardingPage: React.FC = () => {
                 emailNotifications
             );
 
-            // Update local profile state
-            // Note: Free users set has_authorized_free_access, NOT has_authorized_access
-            // Also, free users do NOT set has_completed_onboarding (they skip full onboarding)
-            const { userID, localUserKey } = getZoteroUserIdentifier();
-            setProfileWithPlan({
-                ...profileWithPlan,
-                libraries: [],
-                has_authorized_free_access: true,
-                free_consented_at: new Date(),
-                consent_to_share: consentToShare,
-                email_notifications: emailNotifications,
-                zotero_user_id: userID || profileWithPlan.zotero_user_id,
-                zotero_local_ids: [localUserKey],
-                first_run_completed_at: profileWithPlan.first_run_completed_at ?? new Date().toISOString(),
-                first_run_completion_kind: profileWithPlan.first_run_completion_kind ?? 'legacy_onboarding',
-                // Note: has_completed_onboarding is NOT set for free users
-            });
+            // Publish the authoritative profile before advancing.
+            await Zotero.Beaver.account!.invalidateProfile();
 
             // Update user ID and email in prefs
             setPref("userId", user?.id ?? "");

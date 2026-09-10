@@ -70,8 +70,13 @@ function createDeferred<T>(): {
  * a test that exercises reload behavior has to register it per generation.
  */
 async function registerReloadBridge(): Promise<void> {
-    const { registerZoteroSupabaseReloadBridge } = await import('../../../src/services/zoteroSupabaseStorage');
-    registerZoteroSupabaseReloadBridge();
+    const { setSupabaseReloadBridge } = await import('@beaver/agent-core/transport/supabaseClient');
+    const host = globalThis.window as any;
+    setSupabaseReloadBridge({
+        previousDisposer: () => host.__beaverDisposeSupabase,
+        publishDisposer: dispose => { host.__beaverDisposeSupabase = dispose; },
+        shareAuthLock: fallback => host.__beaverAuthLock ??= fallback,
+    });
 }
 
 /** Let the disposer's promise chain settle. */

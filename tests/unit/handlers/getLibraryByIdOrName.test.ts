@@ -85,16 +85,10 @@ const numericPrefix = { libraryID: 200, name: '2024 Projects' };
 const groupExcluded = { libraryID: 300, name: 'Excluded Group' };
 const allLibraries = [userLibrary, groupAlpha, numericPrefix, groupExcluded];
 
-/**
- * Answer per atom: the searchable set and the access-ready flag are read from the
- * same store, and conflating them hides the loading state these helpers gate on.
- */
+const access = { searchableLibraryIds: [] as number[], libraryScopeInitialized: false };
 function setLibraryAccess(ids: number[], accessReady = true) {
-    vi.mocked(store.get).mockImplementation((atom: any) => {
-        if (atom === isLibraryAccessReadyAtom) return accessReady;
-        if (atom === searchableLibraryIdsAtom) return ids;
-        return undefined;
-    });
+    access.searchableLibraryIds = ids;
+    access.libraryScopeInitialized = accessReady;
 }
 
 function setSearchableLibraryIds(ids: number[]) {
@@ -103,6 +97,7 @@ function setSearchableLibraryIds(ids: number[]) {
 
 function installZoteroMock() {
     (globalThis as any).Zotero = {
+        Beaver: access,
         Libraries: {
             get: vi.fn((id: number) => allLibraries.find(l => l.libraryID === id) ?? false),
             getAll: vi.fn(() => allLibraries),

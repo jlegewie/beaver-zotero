@@ -1,3 +1,7 @@
+import { accountGenerationAtom, accountRevisionAtom, profileWithPlanAtom, isProfileLoadedAtom, searchableLibraryIdsAtom } from './atoms/profile';
+import { sessionAtom } from './atoms/auth';
+import { preferencesRevisionAtom } from './atoms/preferences';
+import { runStatusPopupEnabledAtom } from './atoms/runStatusPopup';
 import { openReader, openNote } from './runtime/navigation';
 import { buildZoteroApplicationState } from './atoms/applicationState';
 import { selectItemById } from './utils/selectItem';
@@ -47,9 +51,7 @@ import { useOnboardingPopups } from './hooks/useOnboardingPopups';
 import { useInterruptedThreadPopup } from './hooks/useInterruptedThreadPopup';
 import { useRunStatusTip } from './hooks/useRunStatusTip';
 import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
-import { useLibraryScopeMirror } from './hooks/useLibraryScopeMirror';
 import { useOcrLane } from './hooks/useOcrLane';
-import { useSearchIndexAccess } from './hooks/useSearchIndexAccess';
 import { useFulltextUpsertLane } from './hooks/useFulltextUpsertLane';
 import { useBackgroundProcessingStatus } from './hooks/useBackgroundProcessingStatus';
 import { useBackgroundProcessingWelcome } from './hooks/useBackgroundProcessingWelcome';
@@ -64,8 +66,9 @@ import { registerZoteroClientIdentity } from '../src/services/zoteroClientIdenti
 import { setThreadAgentName } from '@beaver/agent-core/transport/threadService';
 import { setActionClient } from '@beaver/agent-core/types/actions';
 import { ZOTERO_AGENT_NAME, ZOTERO_PLUGIN_CLIENT_TYPE } from '@beaver/agent-core/protocol/agentProtocol';
-import { registerZoteroSupabaseStorage, registerZoteroSupabaseReloadBridge } from '../src/services/zoteroSupabaseStorage';
-import { setSupabaseAuthPolicy } from '@beaver/agent-core/transport/supabaseClient';
+import { setCredentialAdapter } from '@beaver/agent-core/transport/credentials';
+import { attachAccountProjection } from './runtime/accountProjection';
+import { setSupabaseClientProvider } from '@beaver/agent-core/transport/supabaseClient';
 import { registerTableShadowRestore } from '../src/services/artifacts/tableStore';
 import { registerZoteroBusyContext } from '../src/services/busyContext';
 import { registerZoteroSyncPause } from '../src/services/syncPause';
@@ -129,22 +132,10 @@ setActionClient(ZOTERO_PLUGIN_CLIENT_TYPE);
 // also show threads created by the user's other Beaver clients.
 setThreadAgentName(ZOTERO_AGENT_NAME);
 
-// Register the Zotero encrypted-storage adapter the Supabase auth session
-// persists into. Must run before the exported `supabase` client is first
-// used (the client is created lazily on first property access).
-registerZoteroSupabaseStorage();
-
-// Zotero runs a single window that may sit obscured for long stretches while
-// its session must stay alive, so the auth client refreshes on its own ticker
-// rather than only while the window is visible. Must run before the client is
-// first used; this restates the default explicitly.
-setSupabaseAuthPolicy({ forceAutoRefresh: true });
-
-// Register the window-scoped bridge to Supabase state that survives a plugin
-// reload. Registering is what stops a previous bundle instance's auto-refresh
-// ticker (two tickers race for the single-use refresh token) and adopts its
-// auth lock, so it must run before the client is first used.
-registerZoteroSupabaseReloadBridge();
+const instanceAccount = Zotero.Beaver.account;
+if (!instanceAccount) throw new Error('Instance account service unavailable');
+setSupabaseClientProvider(() => instanceAccount.client);
+setCredentialAdapter({ auth: instanceAccount.auth, getGeneration: () => instanceAccount.getGeneration() });
 
 // Register the Zotero busy-context snapshot attached to outgoing WS
 // diagnostics, and the sync-pause resume handler released when a mutating
@@ -234,13 +225,13 @@ const GlobalContextInitializer = () => {
 
     // Publish the searchable-library scope for esbuild background code. Runs
     // before the lane hooks so the mirror is set when a lane first dispatches.
-    useLibraryScopeMirror();
+
 
     // Register the OCR background lane + mirror the OCR entitlement flag
     useOcrLane();
 
     // Mirror the cloud search-index entitlement flag (background-processing plan)
-    useSearchIndexAccess();
+
 
     // Register the authenticated cloud-index lane and reconcile tag coverage.
     useFulltextUpsertLane();
@@ -371,6 +362,7 @@ export function closeAgentConnection(
 export function initializeRuntime(runtime: WindowRuntime) {
     initializeWindowRuntime(runtime);
     runtime.hostWindow.__beaverJotaiStore = store;
+    attachAccountProjection(runtime);
     initializeReactUI(runtime.hostWindow);
 }
 
@@ -388,6 +380,14 @@ export function inspectRuntime(request?: { command?: string; itemId?: number; dr
     if (process.env.NODE_ENV !== 'development') return undefined;
     const runtime = getWindowRuntime();
     switch (request?.command) {
+        case 'account-state':
+            return {
+                generation: store.get(accountGenerationAtom), revision: store.get(accountRevisionAtom),
+                authenticated: !!store.get(sessionAtom), profileLoaded: store.get(isProfileLoadedAtom),
+                identityMatches: store.get(sessionAtom)?.user.id === store.get(profileWithPlanAtom)?.user_id,
+                scope: store.get(searchableLibraryIdsAtom), preferencesRevision: store.get(preferencesRevisionAtom),
+                runStatusPopupEnabled: store.get(runStatusPopupEnabledAtom),
+            };
         case 'open-reader':
             if (request.itemId === undefined) return { error: 'item_required' };
             return openReader(request.itemId).then(reader => ({ itemID: reader?.itemID, targetMatches: reader?._window === runtime.hostWindow }));

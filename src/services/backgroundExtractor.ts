@@ -297,9 +297,9 @@ export class BackgroundExtractor {
     }
 
     /**
-     * Abort in-flight jobs whose library is no longer searchable.
+     * Abort in-flight jobs after library access or required entitlements are revoked.
      *
-     * Called when the searchable-library mirror changes. A single extraction
+     * Called when the instance access policy changes. A single extraction
      * can run for minutes, so revoking access has to interrupt work already
      * underway rather than only gating the next claim. The aborted job releases
      * its row, which the claim-time gate then retires.
@@ -308,13 +308,15 @@ export class BackgroundExtractor {
      * so this stops in-flight work there too; those rows are released and run
      * again once a scope is published.
      */
-    abortJobsOutsideScope(): void {
-        for (const lane of this.laneInFlight.values()) {
+    abortJobsWithoutAccess(): void {
+        for (const [jobType, lane] of this.laneInFlight) {
             for (const [id, entry] of lane) {
-                if (entry.libraryId === UNRESOLVED_LIBRARY_ID) continue;
-                if (isLibraryInScope(entry.libraryId)) continue;
+                const deniedEntitlement = (jobType === 'document_ocr' && Zotero.Beaver?.hasOcrAccess === false)
+                    || (jobType === 'fulltext_upsert' && Zotero.Beaver?.hasSearchIndexAccess === false);
+                if (!deniedEntitlement && entry.libraryId === UNRESOLVED_LIBRARY_ID) continue;
+                if (!deniedEntitlement && isLibraryInScope(entry.libraryId)) continue;
                 logger(
-                    `BackgroundExtractor: aborting in-flight job id=${id} (library_excluded)`,
+                    `BackgroundExtractor: aborting in-flight job id=${id} (access_revoked)`,
                     2,
                 );
                 try {

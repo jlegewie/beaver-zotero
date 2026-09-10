@@ -18,6 +18,7 @@ import { preflightZoteroAttachmentRequest } from '../../../src/services/agentDat
 
 describe('preflightZoteroAttachmentRequest', () => {
     beforeEach(() => {
+        Zotero.Beaver = { ...Zotero.Beaver, libraryScopeInitialized: true, get searchableLibraryIds() { return mocks.searchableLibraryIds; } } as any;
         vi.clearAllMocks();
         mocks.searchableLibraryIds = [42];
         (globalThis as any).Zotero.Libraries = {

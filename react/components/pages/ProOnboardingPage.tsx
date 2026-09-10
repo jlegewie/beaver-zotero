@@ -1,6 +1,6 @@
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useState, useEffect, useMemo } from "react";
-import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { overallSyncStatusAtom, syncStatusAtom, LibrarySyncStatus } from "../../atoms/sync";
 import { hasAuthorizedProAccessAtom, syncedLibrariesAtom } from '../../atoms/profile';
 import { setPref } from "../../../src/utils/prefs";
@@ -9,7 +9,7 @@ import { logger } from "@beaver/agent-core/platform/logger";
 import { accountService } from "@beaver/agent-core/transport/clients/accountService";
 import { DatabaseSyncStatus } from "../status/DatabaseSyncStatus";
 import { profileWithPlanAtom } from "../../atoms/profile";
-import { getZoteroUserIdentifier, isLibrarySynced } from "../../../src/utils/zoteroUtils";
+import { isLibrarySynced } from "../../../src/utils/zoteroUtils";
 import { userAtom } from "../../atoms/auth";
 import { isLibraryValidForSync } from "../../../src/utils/sync";
 import { store } from "../../store";
@@ -30,7 +30,7 @@ import { parseTextWithLinksAndNewlines } from "../../utils/parseTextWithLinksAnd
 const ProOnboardingPage: React.FC = () => {
     const surfaceWindow = useSurfaceWindow();
     // Auth state
-    const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
+    const profileWithPlan = useAtomValue(profileWithPlanAtom);
     const user = useAtomValue(userAtom);
     
     // Onboarding state
@@ -119,18 +119,8 @@ const ProOnboardingPage: React.FC = () => {
                 emailNotifications
             );
 
-            // Update local state
-            const { userID, localUserKey } = getZoteroUserIdentifier();
-            setProfileWithPlan({
-                ...profileWithPlan,
-                libraries: [],
-                has_authorized_access: true,
-                consented_at: new Date(),
-                consent_to_share: consentToShare,
-                email_notifications: emailNotifications,
-                zotero_user_id: userID || profileWithPlan.zotero_user_id,
-                zotero_local_ids: [localUserKey],
-            });
+            // Publish the authoritative profile before advancing.
+            await Zotero.Beaver.account!.invalidateProfile();
 
             // Update user ID and email in prefs
             setPref("userId", user?.id ?? "");
@@ -194,11 +184,8 @@ const ProOnboardingPage: React.FC = () => {
             // Update backend with selected libraries
             await accountService.updateSyncLibraries(libraries);
 
-            // Update local profile
-            setProfileWithPlan({
-                ...profileWithPlan,
-                libraries: libraries,
-            });
+            // Publish the authoritative profile before advancing.
+            await Zotero.Beaver.account!.invalidateProfile();
 
         } catch (error) {
             logger(`ProOnboardingPage: Error starting sync: ${error}`);
@@ -249,22 +236,11 @@ const ProOnboardingPage: React.FC = () => {
             // Show indexing complete message
             setPref("showIndexingCompleteMessage", true);
 
-            // Update profile atom for immediate UI feedback
-            setProfileWithPlan({
-                ...profileWithPlan,
-                libraries: updatedLibraries ?? profileWithPlan.libraries,
-                has_completed_onboarding: true,
-                first_run_completed_at: profileWithPlan.first_run_completed_at ?? new Date().toISOString(),
-                first_run_completion_kind: profileWithPlan.first_run_completion_kind ?? 'legacy_onboarding',
-            });
+            // Await the authoritative onboarding state.
+            await Zotero.Beaver.account!.invalidateProfile();
 
         } catch (error) {
             logger(`ProOnboardingPage: Error completing onboarding: ${error}`);
-            // Revert optimistic update on error
-            setProfileWithPlan({
-                ...profileWithPlan,
-                has_completed_onboarding: false
-            });
         } finally {
             setIsCompletingOnboarding(false);
         }

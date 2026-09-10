@@ -1,3 +1,5 @@
+import { InstancePreferences } from './services/instancePreferences';
+import { createInstanceAccount } from './services/instanceAccount';
 import { productVoiceAdapters } from "./services/voice/productVoice";
 import { version } from "../package.json";
 import { initLocale } from "./utils/locale";
@@ -65,21 +67,10 @@ function withShutdownTimeout<T>(
     ]).finally(() => clearTimeout(timeoutId));
 }
 
-async function cleanupSupabaseWindowState(
-    win: Window | null | undefined,
-): Promise<void> {
-    if (!win) return;
-
-    try {
-        if (win.__beaverDisposeSupabase) {
-            await withShutdownTimeout(win.__beaverDisposeSupabase(), "disposeSupabase");
-        }
-    } catch (e) {
-        ztoolkit.log(`disposeSupabase: ${e}`);
-    } finally {
-        win.__beaverDisposeSupabase = undefined;
-        delete (win as any).__beaverAuthLock;
-    }
+async function disposeAccountServices(): Promise<void> {
+    try { addon.preferences?.dispose(); } catch (error) { ztoolkit.log(`disposePreferences: ${error}`); }
+    try { if (addon.account) await withShutdownTimeout(addon.account.dispose(), 'disposeAccount'); }
+    catch (error) { ztoolkit.log(`disposeAccount: ${error}`); }
 }
 
 /**
@@ -128,6 +119,7 @@ const quitObserver = {
         // profile-before-change barrier where Sqlite.sys.mjs waits for all
         // connections.
         if (topic === "quit-application") {
+            void disposeAccountServices();
             try {
                 if (addon?.db) {
                     addon.db.closeDatabase().catch((error: unknown) => {
@@ -250,6 +242,9 @@ async function onStartup() {
 
     // -------- Store plugin version --------
     addon.pluginVersion = version;
+    addon.preferences ??= new InstancePreferences();
+    addon.account ??= createInstanceAccount();
+    addon.account.start();
     ztoolkit.log(`Plugin version: ${version}`);
 
     // -------- Initialize database --------
@@ -551,6 +546,8 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             Zotero.__beaverShuttingDown = true;
             addon.data.alive = false;
 
+            await disposeAccountServices();
+
             // Cancel all background tasks (sync, PDF fetch, metadata enrich)
             // and clear their 60-second cleanup timers that keep the event loop alive.
             cancelAllActiveTasks();
@@ -600,7 +597,6 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // flag and skip any fire-and-forget DB/network operations.
         BeaverUIFactory.removeChatPanel(win);
         addon.runtime.detachWindow(win);
-        await cleanupSupabaseWindowState(win);
 
         // Remove the <link rel="localization"> we added in onMainWindowLoad.
         // Leaving it behind after disable causes the locale bundle to log
@@ -884,6 +880,7 @@ async function disposeAppServices(): Promise<void> {
             ztoolkit.log(`onAppShutdown: ${label} failed:`, error);
         }
     };
+    await attempt('disposeAccount', disposeAccountServices);
     await attempt('cancelAllActiveTasks', () => cancelAllActiveTasks());
     await attempt('newItemWatcher.stop', () => addon.newItemWatcher?.stop());
     addon.newItemWatcher = undefined;
@@ -929,13 +926,7 @@ async function disposePlugin(): Promise<void> {
             await cleanupDevTemporaryAnnotations(win as Window);
             BeaverUIFactory.removeChatPanel(win as Window);
             addon.runtime.detachWindow(win);
-            await cleanupSupabaseWindowState(win);
         }
-
-        // These should already be done in onMainWindowUnload, but just in case
-        try {
-            await cleanupSupabaseWindowState(Zotero.getMainWindow());
-        } catch (_e) { /* may not be available during shutdown */ }
 
         addon.newItemWatcher?.stop();
         addon.newItemWatcher = undefined;
@@ -950,6 +941,7 @@ async function disposePlugin(): Promise<void> {
         }
 
         addon.documentCache = undefined;
+        await disposeAccountServices();
 
         if (addon.db) {
             await addon.db.closeDatabase();

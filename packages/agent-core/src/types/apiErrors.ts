@@ -79,3 +79,20 @@ export class ServerError extends Error {
         this.name = 'ServerError';
     }
 }
+
+/** Structural classification survives separately evaluated bundles and serialized errors. */
+export function isApiError(error: unknown): error is ApiError {
+    return !!error && typeof error === 'object'
+        && typeof (error as ApiError).message === 'string'
+        && typeof (error as ApiError).status === 'number'
+        && typeof (error as ApiError).statusText === 'string';
+}
+export function isSessionExpiredError(error: unknown): error is SessionExpiredError {
+    return isApiError(error) && error.code === 'SESSION_EXPIRED';
+}
+export function isSessionRefreshError(error: unknown): error is SessionRefreshError {
+    return isApiError(error) && error.code === 'SESSION_REFRESH_FAILED';
+}
+export function isServerError(error: unknown): error is ServerError {
+    return !!error && typeof error === 'object' && (error as Error).name === 'ServerError';
+}

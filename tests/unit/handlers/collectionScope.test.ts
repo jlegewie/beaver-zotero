@@ -119,6 +119,7 @@ describe('getCollectionScopeItemIds', () => {
             }
         });
         (globalThis as any).Zotero = {
+            Beaver: { searchableLibraryIds: [1, 100], libraryScopeInitialized: true },
             DB: { queryAsync },
         };
     });
@@ -175,6 +176,7 @@ describe('resolveCollectionsFilter', () => {
         vi.clearAllMocks();
         previousZotero = (globalThis as any).Zotero;
         (globalThis as any).Zotero = {
+            Beaver: { searchableLibraryIds: [1, 100], libraryScopeInitialized: true },
             Utilities: { isValidObjectKey: (input: string) => /^[A-Z0-9]{8}$/.test(input) },
             Collections: {
                 get: (id: number) => COLLECTIONS.find(c => (c as any).id === id) ?? false,
@@ -291,6 +293,7 @@ describe('collectionsFilterError', () => {
     beforeEach(() => {
         previousZotero = (globalThis as any).Zotero;
         (globalThis as any).Zotero = {
+            Beaver: { searchableLibraryIds: [1, 100], libraryScopeInitialized: true },
             Libraries: {
                 get: (libraryId: number) =>
                     LIBRARY_NAMES.has(libraryId) ? { name: LIBRARY_NAMES.get(libraryId) } : false,

@@ -22,6 +22,9 @@
  */
 
 import { build } from 'esbuild';
+import { loadBuildEnvironment } from '../build-env.mjs';
+
+const { mode, definitions } = loadBuildEnvironment();
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
@@ -126,13 +129,15 @@ const result = await build({
     bundle: true,
     write: false,
     metafile: true,
+    minifyWhitespace: true, // Remove dependency documentation before checking executable output.
     // Mirrors the main esbuild entry in zotero-plugin.config.ts. `NODE_ENV`
     // matters: a `process.env.NODE_ENV` branch that survives undefined is the
     // very thing this checks for.
     target: 'firefox115',
     define: {
-        __env__: `"${process.env.NODE_ENV ?? 'production'}"`,
-        'process.env.NODE_ENV': `"${process.env.NODE_ENV ?? 'production'}"`,
+        ...definitions,
+        __env__: JSON.stringify(mode),
+        'process.env.NODE_ENV': JSON.stringify(mode),
     },
     outfile: resolve(root, '.scaffold/check-bundle/beaver.js'),
     logLevel: 'error',
@@ -171,7 +176,7 @@ if (missingVoiceInputs.length || unclassifiedVoiceInputs.length) {
     for (const file of unclassifiedVoiceInputs) problems.push(`  unclassified: ${file}`);
 }
 // Parsed imports include dead development branches; only emitted bytes prove leakage.
-if (process.env.NODE_ENV !== 'development') {
+if (mode !== 'development') {
     const developmentVoiceModules = Object.values(result.metafile.outputs)
         .flatMap((output) => Object.entries(output.inputs))
         .filter(([file, input]) => input.bytesInOutput > 0

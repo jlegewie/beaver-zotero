@@ -34,7 +34,6 @@ import {
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { isAgentSupportedItem } from '../../utils/agentItemSupport';
 import { store } from '../../../react/store';
-import { isLibraryAccessReadyAtom, searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 import { TimingAccumulator } from '../../utils/timing';
 import { getAttachmentInfo as resolveAttachmentInfo, type AttachmentInfoOptions } from '../documentExtraction/attachmentInfo';
 export {
@@ -1248,11 +1247,10 @@ export interface AvailableLibraryInfo {
 }
 
 /**
- * Get searchable library IDs from the store.
- * Pro users: synced libraries only. Free users: all local libraries.
+ * Read the instance-owned, fail-closed library access boundary.
  */
 export function getSearchableLibraryIds(): number[] {
-    return store.get(searchableLibraryIdsAtom);
+    return Zotero.Beaver?.libraryScopeInitialized ? [...Zotero.Beaver.searchableLibraryIds ?? []] : [];
 }
 
 /**
@@ -1271,7 +1269,7 @@ export function isLibrarySearchable(libraryId: number): boolean {
  * gate.
  */
 export function isLibraryAccessReady(): boolean {
-    return store.get(isLibraryAccessReadyAtom);
+    return !!Zotero.Beaver?.libraryScopeInitialized;
 }
 
 /** A `libraries_filter` entry that matched a library the user excluded from Beaver. */

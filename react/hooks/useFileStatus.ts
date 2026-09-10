@@ -4,6 +4,7 @@ import { RealtimeChannel, REALTIME_SUBSCRIBE_STATES, REALTIME_CHANNEL_STATES } f
 import { fileStatusAtom, connectionStatusAtom } from '../atoms/files';
 import { FileStatus, ConnectionStatus } from '../types/fileStatus';
 import { supabase } from '@beaver/agent-core/transport/supabaseClient';
+import { credentials } from '@beaver/agent-core/transport/credentials';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { hasAuthorizedProAccessAtom, isDatabaseSyncSupportedAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
@@ -155,7 +156,7 @@ export const useFileStatus = (enabled: boolean = true): FileStatusConnection => 
             }
 
             // Refresh auth token if needed
-            const { data: sessionData } = await supabase.auth.getSession();
+            const { data: sessionData } = await credentials.getSession();
             if (sessionData.session?.access_token) {
                 supabase.realtime.setAuth(sessionData.session.access_token);
             }
@@ -259,7 +260,7 @@ export const useFileStatus = (enabled: boolean = true): FileStatusConnection => 
             setFileStatus(initialStatus);
 
             // Set auth for private channels (if needed)
-            const { data: sessionData } = await supabase.auth.getSession();
+            const { data: sessionData } = await credentials.getSession();
             if (sessionData.session?.access_token) {
                 supabase.realtime.setAuth(sessionData.session.access_token);
             }
@@ -386,7 +387,7 @@ export const useFileStatus = (enabled: boolean = true): FileStatusConnection => 
             }
         };
 
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(handleAuthStateChange);
+        const { data: { subscription } } = credentials.onAuthStateChange(handleAuthStateChange);
 
         return () => {
             subscription.unsubscribe();

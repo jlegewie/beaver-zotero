@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { accountService, PlanInfo } from '@beaver/agent-core/transport/clients/accountService';
-import { ApiError, ServerError } from '@beaver/agent-core/types/apiErrors';
+import { isApiError, isServerError } from '@beaver/agent-core/types/apiErrors';
 import { logger } from '@beaver/agent-core/platform/logger';
 
 const WEBAPP_BASE_URL = (process.env.WEBAPP_BASE_URL || '').replace(/\/$/, '');
@@ -21,7 +21,7 @@ export function useBilling() {
             setPlans(fetchedPlans);
         } catch (e: any) {
             logger(`useBilling: fetchPlans error - ${e?.message}`, 1);
-            const message = e instanceof ApiError || e instanceof ServerError
+            const message = isApiError(e) || isServerError(e)
                 ? 'Unable to load plan details'
                 : (e?.message || 'Unable to load plan details');
             setPlansError(message);

@@ -1,20 +1,10 @@
 /**
- * Esbuild-readable view of the searchable-library boundary.
- *
- * The authoritative scope is `searchableLibraryIdsAtom` (local libraries minus
- * the profile's excluded libraries), which lives in the webpack bundle.
- * Background code in the esbuild bundle — the queue dispatcher and the OCR
- * enqueue gate — cannot import Jotai atoms, so `useLibraryScopeMirror`
- * publishes the resolved scope onto `Zotero.Beaver` and these helpers read it
- * back.
- *
- * Both helpers are fail-closed: an unpublished mirror (plugin startup, logged
- * out, profile still loading) reads as "no library is in scope" rather than
- * "every library is in scope".
+ * The instance account service publishes this fail-closed access boundary before
+ * notifying any renderer. Background work reads the same authority as chat data handlers.
  */
 
 /**
- * True once the mirror holds a resolved scope that can back allow/deny
+ * True once the instance holds a resolved scope that can back allow/deny
  * decisions. Callers that would otherwise deny should usually retry later
  * instead of failing a job permanently, because this is also the startup state.
  */

@@ -182,6 +182,8 @@ function setupGlobals() {
     };
 
     (globalThis as any).addon = {
+        account: { dispose: vi.fn().mockResolvedValue(undefined), start: vi.fn() },
+        preferences: { dispose: vi.fn() },
         runtime: new BeaverInstance(),
         data: {
             alive: true,
@@ -284,43 +286,38 @@ describe('hooks auth lock shutdown cleanup', () => {
         expect((globalThis as any).addon.voiceHarness).toBeUndefined();
     });
 
-    it('clears the persisted auth lock during full shutdown unload', async () => {
+    it('disposes instance auth during full shutdown unload', async () => {
         const hooks = await loadHooks();
         const win = makeWindow();
-        win.__beaverAuthLock = makeAuthLock();
-        win.__beaverDisposeSupabase = vi.fn().mockResolvedValue(undefined);
+        (globalThis as any).addon.account.dispose = vi.fn().mockResolvedValue(undefined);
 
         vi.mocked(Zotero.getMainWindows).mockReturnValue([win]);
 
         await hooks.onMainWindowUnload(win);
 
-        expect(win.__beaverDisposeSupabase).toBeUndefined();
-        expect('__beaverAuthLock' in win).toBe(false);
+        expect((globalThis as any).addon.account.dispose).toHaveBeenCalled();
         expect(mockCancelAllActiveTasks).toHaveBeenCalledOnce();
     });
 
-    it('clears the persisted auth lock even if Supabase disposal throws during unload', async () => {
+    it('continues cleanup when instance auth disposal throws', async () => {
         const hooks = await loadHooks();
         const win = makeWindow();
-        win.__beaverAuthLock = makeAuthLock();
-        win.__beaverDisposeSupabase = vi.fn().mockRejectedValue(new Error('dispose failed'));
+        (globalThis as any).addon.account.dispose = vi.fn().mockRejectedValue(new Error('dispose failed'));
 
         vi.mocked(Zotero.getMainWindows).mockReturnValue([win]);
 
         await hooks.onMainWindowUnload(win);
 
-        expect(win.__beaverDisposeSupabase).toBeUndefined();
-        expect('__beaverAuthLock' in win).toBe(false);
-        expect(ztoolkit.log).toHaveBeenCalledWith(expect.stringContaining('disposeSupabase: Error: dispose failed'));
+        expect((globalThis as any).addon.account.dispose).toHaveBeenCalled();
+        expect(ztoolkit.log).toHaveBeenCalledWith(expect.stringContaining('disposeAccount: Error: dispose failed'));
     });
 
-    it('clears the persisted auth lock after a timed-out Supabase disposal during unload', async () => {
+    it('continues cleanup after instance auth disposal times out', async () => {
         vi.useFakeTimers();
 
         const hooks = await loadHooks();
         const win = makeWindow();
-        win.__beaverAuthLock = makeAuthLock();
-        win.__beaverDisposeSupabase = vi.fn(() => new Promise<void>(() => {}));
+        (globalThis as any).addon.account.dispose = vi.fn(() => new Promise<void>(() => {}));
 
         vi.mocked(Zotero.getMainWindows).mockReturnValue([win]);
 
@@ -328,22 +325,19 @@ describe('hooks auth lock shutdown cleanup', () => {
         await vi.advanceTimersByTimeAsync(3000);
         await unloadPromise;
 
-        expect(win.__beaverDisposeSupabase).toBeUndefined();
-        expect('__beaverAuthLock' in win).toBe(false);
-        expect(Zotero.debug).toHaveBeenCalledWith(expect.stringContaining('disposeSupabase timed out after 3000ms'));
+        expect((globalThis as any).addon.account.dispose).toHaveBeenCalled();
+        expect(Zotero.debug).toHaveBeenCalledWith(expect.stringContaining('disposeAccount timed out after 3000ms'));
     });
 
-    it('clears the persisted auth lock in fallback shutdown cleanup', async () => {
+    it('disposes instance auth in fallback shutdown cleanup', async () => {
         const hooks = await loadHooks();
         const mainWin = makeWindow();
-        mainWin.__beaverAuthLock = makeAuthLock();
-        mainWin.__beaverDisposeSupabase = vi.fn().mockRejectedValue(new Error('dispose failed'));
+        (globalThis as any).addon.account.dispose = vi.fn().mockRejectedValue(new Error('dispose failed'));
 
         vi.mocked(Zotero.getMainWindow).mockReturnValue(mainWin);
 
         await hooks.onShutdown();
 
-        expect(mainWin.__beaverDisposeSupabase).toBeUndefined();
-        expect('__beaverAuthLock' in mainWin).toBe(false);
+        expect((globalThis as any).addon.account.dispose).toHaveBeenCalled();
     });
 });

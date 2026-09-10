@@ -13,7 +13,7 @@ import { isThreadInstanceMismatch, threadModelToThreadData } from "../utils/thre
 import { upsertThreadsAtom, threadWriteStampAtom } from "./threadList";
 import { getHost } from '@beaver/agent-ui/host';
 import { logger } from "@beaver/agent-core/platform/logger";
-import { ApiError } from "@beaver/agent-core/types/apiErrors";
+import { isApiError } from "@beaver/agent-core/types/apiErrors";
 import { resetMessageUIStateAtom } from "./messageUIState";
 import { checkExternalReferencesAtom } from "./externalReferences";
 import { clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "@beaver/agent-core/citations/externalReferences";
@@ -729,7 +729,7 @@ export const loadThreadAtom = atom(
             // Load failed, so any pending deep-link target can no longer be fulfilled.
             set(pendingScrollToRunAtom, null);
 
-            if (error instanceof ApiError && error.status === 404) {
+            if (isApiError(error) && error.status === 404) {
                 logger(`loadThreadAtom: Thread ${threadId} not found, resetting to empty thread state`, 1);
                 set(currentThreadIdAtom, null);
                 resetRunSelectorCaches();

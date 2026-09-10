@@ -36,10 +36,10 @@ import {
     libraryScopeInitializedAtom,
     localZoteroLibrariesAtom,
     localZoteroLibrariesInitializedAtom,
-    profileWithPlanAtom,
+    profileProjectionAtom as profileWithPlanAtom,
     searchableLibraryIdsAtom,
 } from '../../../react/atoms/profile';
-import { toggleExcludedLibraryAtom } from '../../../react/atoms/excludedLibraries';
+import { toggleExcludedLibraryAtom, isUpdatingExcludedLibrariesAtom } from '../../../react/atoms/excludedLibraries';
 
 function library(overrides: Partial<ZoteroLibrary>): ZoteroLibrary {
     return {
@@ -136,7 +136,7 @@ describe('searchableLibraryIdsAtom', () => {
         store.set(profileWithPlanAtom, profile());
         store.set(localZoteroLibrariesAtom, [library({ library_id: 1 })]);
 
-        expect(store.get(searchableLibraryIdsAtom)).toEqual([1]);
+        expect(store.get(searchableLibraryIdsAtom)).toEqual([]);
         expect(store.get(isLibraryAccessReadyAtom)).toBe(false);
 
         store.set(isProfileLoadedAtom, true);
@@ -146,6 +146,7 @@ describe('searchableLibraryIdsAtom', () => {
 
     it('returns all local library IDs when nothing is excluded', () => {
         const store = createStore();
+        store.set(isProfileLoadedAtom, true);
         store.set(profileWithPlanAtom, profile());
         store.set(localZoteroLibrariesAtom, [
             library({ library_id: 1 }),
@@ -157,6 +158,7 @@ describe('searchableLibraryIdsAtom', () => {
 
     it('removes the personal library for the global user exclusion entry', () => {
         const store = createStore();
+        store.set(isProfileLoadedAtom, true);
         store.set(profileWithPlanAtom, profile({ excluded_libraries: [{ type: 'user' }] }));
         store.set(localZoteroLibrariesAtom, [
             library({ library_id: 1 }),
@@ -168,6 +170,7 @@ describe('searchableLibraryIdsAtom', () => {
 
     it('removes group libraries by global group ID', () => {
         const store = createStore();
+        store.set(isProfileLoadedAtom, true);
         store.set(profileWithPlanAtom, profile({ excluded_libraries: [{ type: 'group', group_id: 123 }] }));
         store.set(localZoteroLibrariesAtom, [
             library({ library_id: 1 }),
@@ -196,91 +199,39 @@ describe('searchableLibraryIdsAtom', () => {
 describe('toggleExcludedLibraryAtom', () => {
     beforeEach(() => {
         updateExcludedLibrariesMock.mockReset();
-        updateExcludedLibrariesMock.mockResolvedValue({ message: 'ok' });
+        updateExcludedLibrariesMock.mockResolvedValue(undefined);
+        Zotero.Beaver ??= {} as any;
+        Zotero.Beaver.account = { updateExcludedLibraries: updateExcludedLibrariesMock } as any;
         popupMessages.length = 0;
     });
 
-    it('adds a library while preserving exclusions absent from this device', async () => {
+    it('delegates addition while preserving exclusions absent from this device', async () => {
         const store = createStore();
-        const absentGroup = { type: 'group' as const, group_id: 999 };
-        const visibleGroup = library({
-            library_id: 42,
-            group_id: 123,
-            name: 'Visible Group',
-            is_group: true,
-            type: 'group',
-        });
-        store.set(profileWithPlanAtom, profile({ excluded_libraries: [absentGroup] }));
-
-        await store.set(toggleExcludedLibraryAtom, visibleGroup);
-
-        expect(store.get(profileWithPlanAtom)?.excluded_libraries).toEqual([
-            absentGroup,
-            { type: 'group', group_id: 123 },
-        ]);
-        expect(updateExcludedLibrariesMock).toHaveBeenCalledWith([
-            absentGroup,
-            { type: 'group', group_id: 123 },
-        ]);
+        const absent = { type: 'group' as const, group_id: 999 };
+        store.set(profileWithPlanAtom, profile({ excluded_libraries: [absent] }));
+        await store.set(toggleExcludedLibraryAtom, library({library_id: 42, group_id: 123, is_group: true, type: 'group'}));
+        expect(updateExcludedLibrariesMock).toHaveBeenCalledWith([absent, {type: 'group', group_id: 123}]);
     });
 
-    it('removes a library and keeps other stored exclusions', async () => {
+    it('delegates removal without overwriting the authoritative projection', async () => {
         const store = createStore();
-        const absentGroup = { type: 'group' as const, group_id: 999 };
-        const personal = library({ library_id: 1 });
-        store.set(profileWithPlanAtom, profile({
-            excluded_libraries: [{ type: 'user' }, absentGroup],
-        }));
-
-        await store.set(toggleExcludedLibraryAtom, personal);
-
-        expect(store.get(profileWithPlanAtom)?.excluded_libraries).toEqual([absentGroup]);
-        expect(updateExcludedLibrariesMock).toHaveBeenCalledWith([absentGroup]);
+        const entries = [{type: 'user' as const}, {type: 'group' as const, group_id: 999}];
+        store.set(profileWithPlanAtom, profile({excluded_libraries: entries}));
+        await store.set(toggleExcludedLibraryAtom, library({library_id: 1}));
+        expect(updateExcludedLibrariesMock).toHaveBeenCalledWith([entries[1]]);
+        expect(store.get(profileWithPlanAtom)?.excluded_libraries).toEqual(entries);
     });
 
-    it('reverts the optimistic update and surfaces a popup on save failure', async () => {
+    it('waits for the instance command and surfaces save failures', async () => {
         const store = createStore();
-        const initial = [{ type: 'user' as const }];
-        const personal = library({ library_id: 1 });
-        updateExcludedLibrariesMock.mockRejectedValueOnce(new Error('offline'));
-        store.set(profileWithPlanAtom, profile({ excluded_libraries: initial }));
-
-        await store.set(toggleExcludedLibraryAtom, personal);
-
-        expect(store.get(profileWithPlanAtom)?.excluded_libraries).toEqual(initial);
-        expect(popupMessages).toHaveLength(1);
-        expect(popupMessages[0]).toMatchObject({ type: 'error' });
-    });
-
-    it('does not clobber a profile refresh when reverting a failed save', async () => {
-        const store = createStore();
-        const initial = [{ type: 'user' as const }];
-        const personal = library({ library_id: 1 });
-        let rejectSave!: (error: Error) => void;
-        updateExcludedLibrariesMock.mockReturnValueOnce(new Promise((_resolve, reject) => {
-            rejectSave = reject;
-        }));
-        store.set(profileWithPlanAtom, profile({
-            data_version: 1,
-            excluded_libraries: initial,
-        }));
-
-        const operation = store.set(toggleExcludedLibraryAtom, personal);
-        const refreshedProfile = store.get(profileWithPlanAtom);
-        store.set(profileWithPlanAtom, refreshedProfile ? {
-            ...refreshedProfile,
-            data_version: 2,
-            credit_plan: 'plus',
-        } : refreshedProfile);
-
-        rejectSave(new Error('offline'));
-        await operation;
-
-        expect(store.get(profileWithPlanAtom)).toMatchObject({
-            data_version: 2,
-            credit_plan: 'plus',
-            excluded_libraries: initial,
-        });
-        expect(popupMessages).toHaveLength(1);
+        store.set(profileWithPlanAtom, profile());
+        let reject!: (error: Error) => void;
+        updateExcludedLibrariesMock.mockReturnValueOnce(new Promise((_, fail) => { reject = fail; }));
+        const pending = store.set(toggleExcludedLibraryAtom, library({library_id: 1}));
+        expect(store.get(isUpdatingExcludedLibrariesAtom)).toBe(true);
+        reject(new Error('offline'));
+        await pending;
+        expect(store.get(isUpdatingExcludedLibrariesAtom)).toBe(false);
+        expect(popupMessages).toEqual([expect.objectContaining({type: 'error'})]);
     });
 });

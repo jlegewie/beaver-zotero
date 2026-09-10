@@ -8,7 +8,7 @@ import {
     type VoiceSnapshot,
 } from "@beaver/agent-core/voice/contracts";
 import { getApiBaseUrl } from "@beaver/agent-core/transport/config";
-import { supabase } from "@beaver/agent-core/transport/supabaseClient";
+import { credentials } from '@beaver/agent-core/transport/credentials';
 import type { LexicalEditorInputHandle } from "@beaver/agent-ui/composer/LexicalEditorInput";
 import { getPref } from "../../src/utils/prefs";
 import { sessionAtom } from "../atoms/auth";
@@ -350,7 +350,7 @@ export function useComposerVoice(
                 { kind: "composer", id },
                 async () => {
                     if (!validate()) return null;
-                    const { data, error } = await supabase.auth.getSession();
+                    const { data, error } = await credentials.getSession();
                     if (error || !validate() || data.session?.user.id !== user)
                         return null;
                     return {

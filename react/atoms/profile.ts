@@ -6,9 +6,13 @@ import { fileStatusAtom } from "./files";
 import { compareVersions } from "../utils/compareVersions";
 import { effectiveMaxPageCount } from "@beaver/agent-core/transport/attachmentLimits";
 
+export const accountGenerationAtom = atom(-1);
+export const accountRevisionAtom = atom(-1);
+
 // Profile and plan state
 export const isProfileLoadedAtom = atom<boolean>(false);
-export const profileWithPlanAtom = atom<SafeProfileWithPlan | null>(null);
+export const profileProjectionAtom = atom<SafeProfileWithPlan | null>(null);
+export const profileWithPlanAtom = atom(get => get(profileProjectionAtom));
 
 // Profile sync status. After a successful initial load this is the only signal of a refresh
 // failure — profileWithPlanAtom and isProfileLoadedAtom are not torn down on transient errors.
@@ -104,6 +108,7 @@ export const syncedLibraryIdsAtom = selectAtom(
 
 // Searchable library IDs
 export const searchableLibraryIdsAtom = atom<number[]>((get) => {
+    if (!get(isProfileLoadedAtom)) return [];
     const excluded = new Set(get(excludedLibrariesAtom).map(excludedEntryKey));
     return get(localZoteroLibrariesAtom)
         .filter(lib => !excluded.has(libraryExclusionKey(lib)))

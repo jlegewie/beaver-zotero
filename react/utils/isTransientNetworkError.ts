@@ -1,4 +1,4 @@
-import { ApiError, ServerError, SessionRefreshError } from '@beaver/agent-core/types/apiErrors';
+import { isApiError, isSessionRefreshError, isServerError } from '@beaver/agent-core/types/apiErrors';
 
 /**
  * True for errors that callers should retry rather than treat as terminal.
@@ -9,7 +9,7 @@ import { ApiError, ServerError, SessionRefreshError } from '@beaver/agent-core/t
  * down, leading to infinite retry loops.
  */
 export function isTransientNetworkError(error: unknown): boolean {
-    return error instanceof SessionRefreshError
-        || error instanceof ServerError
-        || (error instanceof ApiError && (error.status === 429 || error.status >= 500));
+    return isSessionRefreshError(error)
+        || isServerError(error)
+        || (isApiError(error) && (error.status === 429 || error.status >= 500));
 }

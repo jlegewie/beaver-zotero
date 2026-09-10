@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtomValue } from "jotai";
 import { profileWithPlanAtom, dataDeletionScheduledForAtom } from "../../atoms/profile";
 import { accountService } from "@beaver/agent-core/transport/clients/accountService";
 import { logger } from "@beaver/agent-core/platform/logger";
@@ -13,7 +13,7 @@ import { Icon, CancelIcon, TickIcon, LockIcon } from "../icons/icons";
  * to the Free plan (beta account type is being discontinued).
  */
 const DowngradeAcknowledgmentPage: React.FC = () => {
-    const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
+    const profileWithPlan = useAtomValue(profileWithPlanAtom);
     const dataDeletionScheduledFor = useAtomValue(dataDeletionScheduledForAtom);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -28,13 +28,8 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
             // Call the service to acknowledge downgrade
             await accountService.acknowledgeDowngrade();
 
-            // Update local state
-            setProfileWithPlan({
-                ...profileWithPlan,
-                has_authorized_free_access: true,
-                pending_downgrade_ack: false,
-                free_consented_at: new Date(),
-            });
+            // Publish the authoritative profile before advancing.
+            await Zotero.Beaver.account!.invalidateProfile();
 
             logger(`DowngradeAcknowledgmentPage: Downgrade acknowledged`);
 

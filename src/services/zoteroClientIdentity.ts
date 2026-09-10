@@ -8,8 +8,6 @@
 
 import { ZOTERO_PLUGIN_CLIENT_TYPE, ZOTERO_PLUGIN_FEATURES } from '@beaver/agent-core/protocol/agentProtocol';
 import { ClientIdentity, setClientIdentityProvider } from '@beaver/agent-core/transport/clientIdentity';
-import { searchableLibraryIdsAtom } from '../../react/atoms/profile';
-import { store } from '../../react/store';
 import { buildZoteroInstanceWire } from './zoteroInstanceWire';
 
 function resolveZoteroClientIdentity(): ClientIdentity {
@@ -17,7 +15,7 @@ function resolveZoteroClientIdentity(): ClientIdentity {
         frontendVersion: Zotero.Beaver?.pluginVersion || '',
         clientType: ZOTERO_PLUGIN_CLIENT_TYPE,
         clientFeatures: ZOTERO_PLUGIN_FEATURES,
-        zoteroInstance: buildZoteroInstanceWire(store.get(searchableLibraryIdsAtom)),
+        zoteroInstance: buildZoteroInstanceWire(Zotero.Beaver?.searchableLibraryIds ?? []),
     };
 }
 

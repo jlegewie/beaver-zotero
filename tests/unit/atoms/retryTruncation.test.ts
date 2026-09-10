@@ -1,3 +1,4 @@
+import { isProfileLoadedAtom } from '../../../react/atoms/profile';
 /**
  * A retry commits its removal on the backend before anything local changes:
  * confirm dialog (consent) → POST /truncate (commit) → undo → local removal →
@@ -843,6 +844,7 @@ describe('retry via synchronous truncation', () => {
             store.set(currentMessageItemsAtom, [source]);
             store.set(readerActionContextAtom, { item: source, selection: null });
             try {
+                store.set(isProfileLoadedAtom, true);
                 await store.set(sendWSMessageAtom, 'Explain this annotation');
                 expect(store.get(wsErrorAtom)).toBeNull();
                 expect(sentRequest().user_prompt.attachments).toEqual([

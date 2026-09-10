@@ -17,7 +17,7 @@
 
 import { getApiBaseUrl, isTransportConfigRegistered } from '../config';
 import { logger } from '../../platform/logger';
-import { supabase } from '../supabaseClient';
+import { credentials } from '../credentials';
 import { resolveClientIdentity } from '../clientIdentity';
 import { getRuntimeAdapter } from '../../platform/runtime';
 import { getLastBackendHttpSuccess, recordBackendHttpSuccess } from '../backendReachability';
@@ -61,7 +61,7 @@ async function getAuthTokenBestEffort(): Promise<string | null> {
         const timeout = new Promise<null>((resolve) => {
             timeoutId = setTimeout(() => resolve(null), AUTH_TOKEN_TIMEOUT_MS);
         });
-        const result = await Promise.race([supabase.auth.getSession(), timeout]);
+        const result = await Promise.race([credentials.getSession(), timeout]);
         return result?.data.session?.access_token ?? null;
     } catch {
         return null;

@@ -66,9 +66,9 @@ const withCustomModels = (models: ModelConfig[]): ModelConfig[] => {
  */
 
 // Stores all models supported by the backend
-const googleApiKeyAtom = atom(getPref('googleGenerativeAiApiKey') ?? '');
-const openAiApiKeyAtom = atom(getPref('openAiApiKey') ?? '');
-const anthropicApiKeyAtom = atom(getPref('anthropicApiKey') ?? '');
+export const googleApiKeyAtom = atom(getPref('googleGenerativeAiApiKey') ?? '');
+export const openAiApiKeyAtom = atom(getPref('openAiApiKey') ?? '');
+export const anthropicApiKeyAtom = atom(getPref('anthropicApiKey') ?? '');
 
 export const supportedModelsAtom = atom<ModelConfig[]>(initialCustomModels);
 

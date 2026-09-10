@@ -5,7 +5,7 @@ const { mockGetInstanceIndexScopeRefs, mockGetZoteroUserIdentifier } = vi.hoiste
     mockGetZoteroUserIdentifier: vi.fn(),
 }));
 
-vi.mock('../../../src/utils/zoteroUtils', () => ({
+vi.mock('../../../src/utils/zoteroInstanceIdentity', () => ({
     getInstanceIndexScopeRefs: mockGetInstanceIndexScopeRefs,
     getZoteroUserIdentifier: mockGetZoteroUserIdentifier,
 }));
