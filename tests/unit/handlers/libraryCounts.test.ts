@@ -83,6 +83,8 @@ describe('getLibrarySummaries', () => {
                 } else if (sql.includes('JOIN itemNotes N')) {
                     noteCountSql.push(sql);
                     count = libraryId === 1 ? 5 : 1;
+                } else if (sql.includes('COUNT(DISTINCT IT.tagID)')) {
+                    count = libraryId === 1 ? 2 : 1;
                 } else if (sql.includes('FROM collections')) {
                     count = libraryId === 1 ? 3 : 2;
                 }
@@ -206,6 +208,7 @@ describe('getLibrarySummaries', () => {
                 _params: number[],
                 options?: { onRow?: (row: any) => void }
             ) => {
+                if (sql.includes('COUNT(DISTINCT IT.tagID)')) throw new Error('tags failed');
                 if (sql.includes('JOIN itemNotes N')) {
                     throw new Error('notes failed');
                 }

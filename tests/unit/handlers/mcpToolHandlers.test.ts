@@ -1524,7 +1524,7 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             const result = await callTool(endpoint, 'get_item_details', {});
 
             expect(result.isError).toBe(true);
-            expect(result.content[0].text).toContain('non-empty array');
+            expect(result.content[0].text).toContain('item_ids');
         });
 
         it('returns error for too many items (>25)', async () => {
@@ -2193,17 +2193,17 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(req.recursive).toBe(false);
         });
 
-        it('falls back to regular for unsupported annotation category', async () => {
-            mockHandleListItemsRequest.mockResolvedValue({
-                type: 'list_items',
-                items: [],
-                total_count: 0,
-            });
+        it('rejects unsupported annotation category without listing regular items', async () => {
+            const result = await callTool(endpoint, 'list_items', { item_category: 'annotation' });
+            expect(result.isError).toBe(true);
+            expect(mockHandleListItemsRequest).not.toHaveBeenCalled();
+        });
 
-            await callTool(endpoint, 'list_items', { item_category: 'annotation' });
-
-            const req = mockHandleListItemsRequest.mock.calls[0][0];
-            expect(req.item_category).toBe('regular');
+        it('rejects search-tool tag parameters rather than ignoring the filter', async () => {
+            const result = await callTool(endpoint, 'list_items', { tags_filter: ['important'] });
+            expect(result.isError).toBe(true);
+            expect(result.content[0].text).toContain('tags_filter');
+            expect(mockHandleListItemsRequest).not.toHaveBeenCalled();
         });
 
         it('passes valid item_category values', async () => {
@@ -2912,6 +2912,6 @@ describe('MCP libraries and annotations', () => {
         const result = JSON.parse((await callTool(endpoint, 'read_attachment', { attachment_id: 'u-ATT00001', start_page: 2, include_annotation_locations: true })).content[0].text);
         expect(mockHandleZoteroDocumentRequest).toHaveBeenCalledWith(expect.objectContaining({ mode: 'structured' }));
         expect(result.pages).toHaveLength(1);
-        expect(result.pages[0].passages[0]).toEqual({ text: 'Source.', page_locations: [{ page_idx: 1, page_label: 'iii', boxes: [box] }], note_position: { ...note.note_position, page_index: 1 } });
+        expect(result.pages[0].passages[0]).toEqual({ text: 'Source.', page_label: 'iii', page_locations: [{ page_idx: 1, page_label: 'iii', boxes: [box] }], note_position: { ...note.note_position, page_index: 1 } });
     });
 });

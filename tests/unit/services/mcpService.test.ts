@@ -59,7 +59,7 @@ describe('MCPService', () => {
             service.registerTool('my_tool', {
                 name: 'my_tool',
                 description: 'A test tool',
-                inputSchema: { type: 'object', properties: {} },
+                inputSchema: { type: 'object', properties: {}, additionalProperties: false },
             }, handler);
 
             const res = await rpc(service, {
@@ -73,7 +73,7 @@ describe('MCPService', () => {
             expect(res.body.result.tools[0]).toEqual({
                 name: 'my_tool',
                 description: 'A test tool',
-                inputSchema: { type: 'object', properties: {} },
+                inputSchema: { type: 'object', properties: {}, additionalProperties: false },
             });
         });
 
@@ -309,12 +309,31 @@ describe('MCPService', () => {
     // =====================================================================
 
     describe('tools/call', () => {
+        it.each([
+            { category: 'annotation' }, { unexpected: true }, { category: 3 },
+            { names: ['ok', 3] }, { placement: { x: '10' } }, null,
+        ])('rejects invalid arguments before invoking the handler: %j', async args => {
+            const handler = vi.fn();
+            service.registerTool('validated', {
+                name: 'validated', description: 'Validated tool', inputSchema: {
+                    type: 'object', properties: {
+                        category: { type: 'string', enum: ['regular', 'note'] },
+                        names: { type: 'array', items: { type: 'string' } },
+                        placement: { type: 'object', additionalProperties: false, properties: { x: { type: 'number' } } },
+                    },
+                },
+            }, handler);
+            const result = await rpc(service, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'validated', arguments: args } });
+            expect(result.body.result.isError).toBe(true);
+            expect(handler).not.toHaveBeenCalled();
+        });
+
         it('calls the registered handler with arguments', async () => {
             const handler = vi.fn().mockResolvedValue('hello world');
             service.registerTool('greet', {
                 name: 'greet',
                 description: 'Greet',
-                inputSchema: {},
+                inputSchema: { type: 'object', properties: { name: { type: 'string' } } },
             }, handler);
 
             const res = await rpc(service, {

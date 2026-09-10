@@ -164,7 +164,7 @@ export async function handleListCollectionsRequest(
             name: collection.name,
             parent_key: collection.parentKey || null,
             parent_name: collection.parentID ? collectionIdToName.get(collection.parentID) || null : null,
-            item_count: request.include_item_counts ? (itemCountById.get(collection.id) || 0) : 0,
+            item_count: request.include_item_counts ? (itemCountById.get(collection.id) || 0) : undefined,
             // Left off entirely when counts were not requested: absent means
             // "not reported", which a zero would misrepresent as "none here".
             standalone_attachment_count: request.include_item_counts ? (attachmentCountById.get(collection.id) || 0) : undefined,

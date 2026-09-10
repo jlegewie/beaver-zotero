@@ -177,7 +177,7 @@ Semantic (meaning-based) search across the user's Zotero library. The most impor
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `topic_query` | `string` | Yes | Concise topic phrase (2-8 words). Use canonical academic terms. |
-| `author_filter` | `string[]` | No | Author last names (OR logic). |
+| `author_filter` | `string[]` | No | Creator names (first, last, full, or institutional) (OR logic). |
 | `min_year` | `integer` | No | Earliest publication year (inclusive). |
 | `max_year` | `integer` | No | Latest publication year (inclusive). |
 | `libraries_filter` | `string[]` | No | Library names or IDs. |
@@ -198,7 +198,7 @@ Find specific papers when you know bibliographic details (author name, title key
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `author_query` | `string` | No* | Author's last name to search for. |
+| `author_query` | `string` | No* | Creator name tokens (first, last, full, or institutional); case-insensitive within one creator. |
 | `title_query` | `string` | No* | Keyword or phrase from the title. |
 | `publication_query` | `string` | No* | Journal or publication name. |
 | `min_year` | `integer` | No | Earliest publication year (inclusive). |
@@ -217,15 +217,16 @@ Find specific papers when you know bibliographic details (author name, title key
 
 ### `read_attachment`
 
-Read the text content of a PDF attachment from the user's Zotero library. Maximum 30 pages per request.
+Read supported attachment text from the user's Zotero library. Maximum 30 pages per request; EPUB page windows use extraction pages, not section ordinals.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `attachment_id` | `string` | Yes | Attachment ID in `<library_id>-<zotero_key>` format. |
 | `start_page` | `integer` | No | Starting page number (1-indexed). Default: 1. |
 | `end_page` | `integer` | No | Ending page number (inclusive). Default: last page (up to 30). |
+| `include_annotation_locations` | `boolean` | No | Return structured source passages and copyable annotation locators. Default: false. |
 
-**Response**: Plain text with page content wrapped in `<pageN>...</pageN>` XML tags. Includes a header with attachment ID, total page count, and the page range shown.
+**Response**: With `include_annotation_locations=true`, JSON discriminated by `content_kind`: PDF uses `pages[].passages[]`, while EPUB and snapshots use `passages[]`. Otherwise, plain text with page content wrapped in `<pageN>...</pageN>` XML tags. Includes a header with attachment ID, total page count, and the page range shown.
 
 **Underlying handler**: `handleZoteroDocumentRequest` from `src/services/agentDataProvider/`, sliced to the requested page window.
 
@@ -291,7 +292,8 @@ List collections (folders) in the user's Zotero library.
 |-----------|------|----------|-------------|
 | `library` | `string` | No | Library name or ID. Default: user's library. |
 | `parent_collection` | `string` | No | Collection key to list subcollections within. |
-| `include_item_counts` | `boolean` | No | Include item counts. Default: true. |
+| `recursive` | `boolean` | No | Include every descendant instead of direct children only. Default: false. |
+| `include_item_counts` | `boolean` | No | Include item counts. Default: true. Counts are omitted when false. |
 | `limit` | `integer` | No | Max results per page (default 50, max 100). |
 | `offset` | `integer` | No | Results to skip for pagination (default 0). |
 
@@ -309,11 +311,13 @@ List tags in the user's Zotero library.
 |-----------|------|----------|-------------|
 | `library` | `string` | No | Library name or ID. Default: user's library. |
 | `collection` | `string` | No | Collection key to list tags within. |
-| `min_item_count` | `integer` | No | Minimum items a tag must have. Default: 1. |
+| `name_query` | `string` | No | Case-insensitive tag-name substring. |
+| `tag_type` | `string` | No | `manual` (default), `automatic`, or `all`. Mixed tags count as manual. |
+| `min_item_count` | `integer` | No | Minimum tagged objects (regular items, attachments, notes, and annotations). Default: 1. |
 | `limit` | `integer` | No | Max results per page (default 50, max 100). |
 | `offset` | `integer` | No | Results to skip for pagination (default 0). |
 
-**Response**: JSON with `total_count`, `has_more`, `next_offset`, and `tags[]`. Each tag has `name`, `item_count`, and optionally `color`.
+**Response**: JSON with `total_count`, `has_more`, `next_offset`, and `tags[]`. Each tag has `name`, `tag_type`, per-object-type counts, and optionally `color`. `manual_count` and `automatic_count` apply after `name_query` and `min_item_count`, before `tag_type` and pagination.
 
 **Underlying handler**: `handleListTagsRequest` from `src/services/agentDataProvider/`.
 
@@ -328,7 +332,7 @@ Browse items in the library, optionally filtered by collection or tag.
 | `library` | `string` | No | Library name or ID. Default: user's library. |
 | `collection` | `string` | No | Collection name or key. |
 | `tag` | `string` | No | Tag to filter by. |
-| `item_category` | `string` | No | Item type to return: "regular", "note", "attachment", "annotation", or "all". Default: "regular". |
+| `item_category` | `string` | No | Item type to return: "regular", "note", "attachment", or "all"; use `find_annotations` for annotations. Default: "regular". |
 | `recursive` | `boolean` | No | Include subcollection items. Default: true. |
 | `sort_by` | `string` | No | Sort field: "dateAdded", "dateModified", "title", "creator", "year". Default: "dateModified". |
 | `sort_order` | `string` | No | "asc" or "desc". Default: "desc". |
@@ -353,7 +357,7 @@ Use `library_ref` in the `library` argument of library-scoped tools.
 Searches annotation text and comments, with optional `tag`, `color`,
 `annotation_type` (`highlight`, `underline`, `note`), `author`, `attachment_id`,
 `collection`, `library`, and `modified_in_last` (e.g. `7 days`) filters.
-Supply at least one narrowing filter besides `library`. Filters combine with AND.
+Omit filters to browse all annotations with pagination. Filters combine with AND. `author` matches the annotation creator (for example, `Beaver`), not the paper author. `attachment_id` requires an actual file attachment ID; resolve parent items with `get_item_details(include_attachments=true)` first.
 The personal library is the default. Collection searches recurse by default.
 
 Results include annotation IDs, text, comments, source IDs, tags, and Zotero links.
@@ -382,7 +386,7 @@ creation request; do not invent coordinates. Page indices in locations are
 zero-based; the read tool's page range is one-based. Highlight boxes are PDF
 points in Beaver's extraction frame with an explicit `coord_origin` (`t` for
 top-left, `b` for bottom-left). Multi-page highlights produce one annotation per
-page. Note positions use `page_index`, `x`, `y`, `side`, and `coord_origin`.
+page. Note positions use `page_index`, `x`, `y`, `side`, and `coord_origin`. Copy the passage's `page_label` too; when omitted, PDF note creation resolves it from document metadata. Physical `page` is one-based and distinct from the printed `page_label`.
 
 For EPUBs, provide `section_href` or a one-based `section_ordinal`, plus `text` or
 `anchor_id` to locate the passage. Snapshots use `text` or `anchor_id`. The same
@@ -515,3 +519,13 @@ Add the new tool to the [Available Tools](#available-tools) section above.
 - [ ] TypeScript compiles cleanly (`npx tsc --noEmit`)
 - [ ] Tested with `curl` against the endpoint
 - [ ] This document updated with the new tool
+
+### Argument and identity rules
+
+All MCP calls validate types, enums, required fields, and unknown properties before executing. For example, `list_items(tags_filter=[...])` is rejected; its filter is `tag`. Omitted parameters receive documented defaults; invalid categories never fall back to regular items.
+
+Publication-year bounds are inclusive and exclude undated items. Collection names must be unambiguous within the requested scope; ambiguity errors list accessible collection IDs and paths for retrying. Successful metadata results emit portable IDs even when requested with legacy numeric IDs.
+
+`read_note.cited_items` describes resolved citations in the returned line slice, including directly cited attachments. Deleted, excluded, and unresolved targets are omitted.
+
+`list_libraries.tag_count` counts distinct tag names on non-deleted objects, merging manual/automatic uses of the same name. It matches an unfiltered `list_tags(tag_type="all", min_item_count=0)` scope.

@@ -437,6 +437,7 @@ export function degradedAttachmentInfo(
         title: safeStub(() => item.getDisplayTitle?.()) ?? null,
         filename: safeAttachmentFilename(item),
         content_kind: 'other',
+        mime_type: item.attachmentContentType || null,
         status: 'unreadable',
         // States what is known (the read failed) without asserting a cause: the
         // catch this comes from covers any failure, not just a malformed record.
@@ -628,12 +629,17 @@ export function getCollectionByIdOrName(
         ...otherLibraryIds.filter(id => !searchableIds.includes(id)),
     ];
 
+    const matches: CollectionLookupResult[] = [];
     for (const libId of sortedLibraryIds) {
+        if (!isKeyLike && !searchableIds.includes(libId)) continue;
         const found = findCollectionInLibrary(collectionIdOrName, libId, isKeyLike);
-        if (found) return found;
+        if (found) {
+            if (isKeyLike && found.collection.key === collectionIdOrName) return found;
+            if (searchableIds.includes(libId)) matches.push(found);
+        }
     }
-    
-    return null;
+    if (matches.length > 1) throw ambiguousCollectionError(collectionIdOrName, matches.map(match => match.collection));
+    return matches[0] ?? null;
 }
 
 /**
@@ -651,12 +657,35 @@ function findCollectionInLibrary(
     
     const collections = Zotero.Collections.getByLibrary(libraryId, true);
     const inputLower = input.toLowerCase();
-    const byName = collections.find(
+    const byName = collections.filter(
         (c: Zotero.Collection) => c.name.toLowerCase() === inputLower
     );
-    if (byName) return { collection: byName, libraryID: byName.libraryID };
+    if (byName.length > 1 && isLibrarySearchable(libraryId)) throw ambiguousCollectionError(input, byName);
+    if (byName[0]) return { collection: byName[0], libraryID: byName[0].libraryID };
     
     return null;
+}
+
+class CollectionAmbiguityError extends Error {
+    readonly code = 'ambiguous_collection';
+}
+
+/** Describe ambiguous names using only libraries the caller may access. */
+function ambiguousCollectionError(input: string, collections: Zotero.Collection[]): Error {
+    const candidates = collections.filter(c => isLibrarySearchable(c.libraryID)).map(collection => {
+        const path = [collection.name];
+        const seen = new Set<number>([collection.id]);
+        let parentId = collection.parentID;
+        while (parentId && !seen.has(parentId)) {
+            seen.add(parentId);
+            const parent = Zotero.Collections.get(parentId);
+            if (!parent) break;
+            path.unshift(parent.name);
+            parentId = parent.parentID;
+        }
+        return `${modelObjectId(collection.libraryID, collection.key)} (${path.join(' / ')})`;
+    });
+    return new CollectionAmbiguityError(`Ambiguous collection name "${input}". Use a collection ID: ${candidates.join('; ')}.`);
 }
 
 /** A collection a `collections_filter` entry matched outside the searched libraries. */
@@ -681,19 +710,20 @@ export interface CollectionsFilterResolution {
     unresolved: string[];
     /** Filter entries that matched only outside the searched libraries. */
     outOfScope: OutOfScopeCollection[];
+    ambiguity?: string;
 }
 
 /** A `collections_filter` that left the search with no usable collection. */
 export interface CollectionsFilterError {
     message: string;
-    error_code: 'collection_not_found' | 'library_not_searchable';
+    error_code: 'collection_not_found' | 'library_not_searchable' | 'ambiguous_collection';
 }
 
 /**
  * Resolve a `collections_filter` against the libraries a search will cover.
  *
- * A name is resolved in every searched library, because the same name can
- * legitimately exist in several of them. Matches outside those libraries are
+ * Names must identify a single collection across the searched libraries.
+ * Matches outside those libraries are
  * reported separately rather than dropped: numeric IDs and key-like entries
  * resolve through a cross-library fallback that can land in a library the
  * request is not scoped to, or that the user excluded from Beaver, and the
@@ -725,12 +755,23 @@ export function resolveCollectionsFilter(
             if (collection) matches.push(collection);
         } else {
             for (const libraryId of libraryIds) {
-                const match = getCollectionByIdOrName(filter, libraryId);
-                if (match) matches.push(match.collection);
+                try {
+                    const match = getCollectionByIdOrName(filter, libraryId);
+                    if (match) matches.push(match.collection);
+                } catch (error) {
+                    if (!(error instanceof CollectionAmbiguityError)) throw error;
+                    return { collections: [], unresolved, outOfScope, ambiguity: error.message };
+                }
             }
         }
 
-        const inScope = matches.filter((collection) => libraryIds.includes(collection.libraryID));
+        const inScope = Array.from(new Map(matches
+            .filter(collection => libraryIds.includes(collection.libraryID))
+            .map(collection => [collection.id, collection])).values());
+        if (inScope.length > 1 && typeof filter === 'string' && !/^\d+$/.test(filter)
+            && !parseItemReference(filter) && inScope.some(collection => collection.key !== filter)) {
+            return { collections: [], unresolved, outOfScope, ambiguity: ambiguousCollectionError(filter, inScope).message };
+        }
         if (inScope.length > 0) {
             for (const collection of inScope) collections.set(collection.id, collection);
         } else if (matches.length > 0) {
@@ -762,6 +803,7 @@ export function resolveCollectionsFilter(
 export function collectionsFilterError(
     resolution: CollectionsFilterResolution
 ): CollectionsFilterError | null {
+    if (resolution.ambiguity) return { message: resolution.ambiguity, error_code: 'ambiguous_collection' };
     if (resolution.collections.length > 0) return null;
 
     if (resolution.unresolved.length > 0) {

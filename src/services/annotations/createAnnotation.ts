@@ -529,7 +529,13 @@ export async function createNoteAnnotation(
     item.annotationType = "note";
     item.annotationComment = input.comment;
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
-    applyAnnotationPlacement(item, buildNotePlacement(input, geometry));
+    const filePath = await attachment.getFilePathAsync();
+    const metadata = filePath ? await Zotero.Beaver?.documentCache?.getMetadata(
+        { libraryId: attachment.libraryID, zoteroKey: attachment.key }, filePath,
+    ) : null;
+    const pageLabel = firstNonBlankPageLabel(input.pageLabel)
+        ?? metadata?.pageLabels?.[input.notePosition.page_index];
+    applyAnnotationPlacement(item, buildNotePlacement({ ...input, pageLabel }, geometry));
     await saveBeaverAnnotation(item, input.tags);
 
     return createdAnnotationReference(attachment, item);
