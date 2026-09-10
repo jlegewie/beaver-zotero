@@ -22,9 +22,15 @@ const mockHandleListCollectionsRequest = vi.fn();
 const mockHandleListTagsRequest = vi.fn();
 const mockHandleListItemsRequest = vi.fn();
 const mockHandleReadNoteRequest = vi.fn();
+const mockHandleListLibrariesRequest = vi.fn();
+const mockHandleFindAnnotationsRequest = vi.fn();
+const mockValidateHighlights = vi.fn();
+const mockExecuteHighlights = vi.fn();
+const mockValidateAnnotationNotes = vi.fn();
+const mockExecuteAnnotationNotes = vi.fn();
 const mockValidateCreateNoteAction = vi.fn();
 const mockExecuteCreateNoteAction = vi.fn();
-const mockMcpCreateNoteToolEnabled = vi.hoisted(() => ({ value: false }));
+const mockMcpWriteToolsEnabled = vi.hoisted(() => ({ value: false }));
 
 vi.mock('../../../src/services/agentDataProvider', () => ({
     handleItemSearchByTopicRequest: (...args: any[]) => mockHandleItemSearchByTopicRequest(...args),
@@ -35,6 +41,12 @@ vi.mock('../../../src/services/agentDataProvider', () => ({
     handleListTagsRequest: (...args: any[]) => mockHandleListTagsRequest(...args),
     handleListItemsRequest: (...args: any[]) => mockHandleListItemsRequest(...args),
     handleReadNoteRequest: (...args: any[]) => mockHandleReadNoteRequest(...args),
+    handleListLibrariesRequest: (...args: any[]) => mockHandleListLibrariesRequest(...args),
+    handleFindAnnotationsRequest: (...args: any[]) => mockHandleFindAnnotationsRequest(...args),
+    validateCreateHighlightAnnotationsAction: (...args: any[]) => mockValidateHighlights(...args),
+    executeCreateHighlightAnnotationsAction: (...args: any[]) => mockExecuteHighlights(...args),
+    validateCreateNoteAnnotationsAction: (...args: any[]) => mockValidateAnnotationNotes(...args),
+    executeCreateNoteAnnotationsAction: (...args: any[]) => mockExecuteAnnotationNotes(...args),
     validateCreateNoteAction: (...args: any[]) => mockValidateCreateNoteAction(...args),
     executeCreateNoteAction: (...args: any[]) => mockExecuteCreateNoteAction(...args),
 }));
@@ -54,7 +66,7 @@ vi.mock('../../../react/atoms/auth', () => ({
 
 vi.mock('../../../react/atoms/ui', () => ({
     mcpServerEnabledAtom: { toString: () => 'mcpServerEnabledAtom' },
-    mcpCreateNoteToolEnabledAtom: { toString: () => 'mcpCreateNoteToolEnabledAtom' },
+    mcpWriteToolsEnabledAtom: { toString: () => 'mcpWriteToolsEnabledAtom' },
 }));
 
 vi.mock('../../../react/store', () => ({
@@ -71,9 +83,7 @@ vi.mock('react', () => ({
 
 vi.mock('jotai', () => ({
     useAtomValue: vi.fn((atom: any) => {
-        if (atom?.toString?.() === 'mcpCreateNoteToolEnabledAtom') {
-            return mockMcpCreateNoteToolEnabled.value;
-        }
+        if (atom?.toString?.() === 'mcpWriteToolsEnabledAtom') return mockMcpWriteToolsEnabled.value;
         return true; // MCP server enabled and authenticated by default
     }),
 }));
@@ -85,7 +95,7 @@ vi.mock('jotai', () => ({
 const zotero = (globalThis as any).Zotero;
 
 beforeEach(() => {
-    mockMcpCreateNoteToolEnabled.value = false;
+    mockMcpWriteToolsEnabled.value = false;
     zotero.Utilities = { randomString: vi.fn(() => 'test-request-id') };
     zotero.DataDirectory = { dir: '/mock/data' };
     zotero.Server = { Endpoints: {} };
@@ -227,18 +237,22 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(names).toContain('list_collections');
             expect(names).toContain('list_tags');
             expect(names).toContain('list_items');
-            expect(result.tools).toHaveLength(8);
+            expect(result.tools).toHaveLength(10);
         });
 
-        it('registers create_note when enabled by preference', async () => {
-            mockMcpCreateNoteToolEnabled.value = true;
+        it('registers every write tool when enabled by preference', async () => {
+            mockMcpWriteToolsEnabled.value = true;
             endpoint = setupMcpEndpoint();
 
             const result = await listTools(endpoint);
             const names = result.tools.map((t: any) => t.name);
 
-            expect(names).toContain('create_note');
-            expect(result.tools).toHaveLength(9);
+            expect(names).toEqual(expect.arrayContaining([
+                'create_note',
+                'create_highlight_annotations',
+                'create_note_annotations',
+            ]));
+            expect(result.tools).toHaveLength(13);
         });
 
         it('each tool has name, description, and inputSchema', async () => {
@@ -265,7 +279,7 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
         });
 
         it('advertises MCP tool annotations', async () => {
-            mockMcpCreateNoteToolEnabled.value = true;
+            mockMcpWriteToolsEnabled.value = true;
             endpoint = setupMcpEndpoint();
 
             const result = await listTools(endpoint);
@@ -1298,7 +1312,7 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
 
     describe('create_note', () => {
         beforeEach(() => {
-            mockMcpCreateNoteToolEnabled.value = true;
+            mockMcpWriteToolsEnabled.value = true;
             endpoint = setupMcpEndpoint();
         });
 
@@ -2686,7 +2700,7 @@ describe('MCP portable ids', () => {
     });
 
     it('create_note returns portable note ids', async () => {
-        mockMcpCreateNoteToolEnabled.value = true;
+        mockMcpWriteToolsEnabled.value = true;
         endpoint = setupMcpEndpoint();
         mockValidateCreateNoteAction.mockResolvedValue({ valid: true });
         mockExecuteCreateNoteAction.mockResolvedValue({
@@ -2704,5 +2718,200 @@ describe('MCP portable ids', () => {
 
         expect(data.note_id).toBe('u-NOTE0001');
         expect(data.parent_item_id).toBe('u-PARENT01');
+    });
+});
+
+describe('MCP libraries and annotations', () => {
+    let endpoint: Endpoint;
+    const box = { l: 10, t: 20, r: 80, b: 30, coord_origin: 't' };
+    const highlight = { text: 'A source sentence.', page_locations: [{ page_idx: 0, boxes: [box] }] };
+    const note = { comment: 'A reading note.', note_position: { page_index: 0, x: 80, y: 25, side: 'right', coord_origin: 't' } };
+    const created = { library_id: 1, library_ref: 'u', zotero_key: 'ANNOT001', index: 0, client_item_id: '0' };
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        zotero.Libraries.userLibraryID = 1;
+        mockMcpWriteToolsEnabled.value = true;
+        endpoint = setupMcpEndpoint();
+        for (const validate of [mockValidateHighlights, mockValidateAnnotationNotes]) {
+            validate.mockResolvedValue({ valid: true, current_value: { content_kind: 'pdf' } });
+        }
+        for (const execute of [mockExecuteHighlights, mockExecuteAnnotationNotes]) {
+            execute.mockResolvedValue({ success: true, result_data: { created: [created], failed: [], total_created: 1, total_failed: 0 } });
+        }
+    });
+
+    it('advertises reads by default and writes only with the write tools preference', async () => {
+        let tools = (await listTools(endpoint)).tools;
+        for (const name of ['list_libraries', 'find_annotations']) {
+            expect(tools.find((tool: any) => tool.name === name).annotations.readOnlyHint).toBe(true);
+        }
+        for (const name of ['create_highlight_annotations', 'create_note_annotations']) {
+            expect(tools.find((tool: any) => tool.name === name).annotations).toMatchObject({ readOnlyHint: false, idempotentHint: false, destructiveHint: false });
+        }
+        mockMcpWriteToolsEnabled.value = false;
+        endpoint = setupMcpEndpoint();
+        tools = (await listTools(endpoint)).tools;
+        expect(tools.map((tool: any) => tool.name)).not.toContain('create_highlight_annotations');
+        expect(tools.map((tool: any) => tool.name)).not.toContain('create_note_annotations');
+        expect((await callTool(endpoint, 'create_note_annotations', { attachment_id: 'u-ATT00001', items: [note] }))._error).toBeDefined();
+        expect(mockExecuteAnnotationNotes).not.toHaveBeenCalled();
+    });
+
+    it('lists available library identities, permissions, and counts', async () => {
+        const libraries = [{ library_ref: 'u', library_id: 1, name: 'My Library', read_only: false, item_count: 12 }];
+        mockHandleListLibrariesRequest.mockResolvedValue({ libraries, total_count: 1 });
+        const result = JSON.parse((await callTool(endpoint, 'list_libraries')).content[0].text);
+        expect(result).toEqual({ libraries, total_count: 1 });
+        expect(mockHandleListLibrariesRequest).toHaveBeenCalledWith(expect.objectContaining({ event: 'list_libraries_request' }));
+    });
+
+    it('returns an empty library set without fabricating a default library', async () => {
+        mockHandleListLibrariesRequest.mockResolvedValue({ libraries: [], total_count: 0 });
+        expect(JSON.parse((await callTool(endpoint, 'list_libraries')).content[0].text)).toEqual({ libraries: [], total_count: 0 });
+    });
+
+    it('reports library listing failures as MCP tool errors', async () => {
+        mockHandleListLibrariesRequest.mockRejectedValue(new Error('Database unavailable'));
+        expect(await callTool(endpoint, 'list_libraries')).toMatchObject({ isError: true });
+    });
+
+    it('forwards annotation filters and formats pagination and links', async () => {
+        const args = { library: 'u', text_contains: 'source', comment_contains: 'note', tag: 'review', color: 'yellow',
+            annotation_type: 'highlight', author: 'Beaver', attachment_id: 'u-ATT00001', collection: 'Reading',
+            recursive: false, modified_in_last: '7 days', sort_by: 'reading_order', sort_order: 'asc', offset: 1, limit: 1 };
+        mockHandleFindAnnotationsRequest.mockResolvedValue({ annotations: [{ annotation_id: 'u-ANNOT001', text: 'source', attachment_id: 'u-ATT00001' }], total_count: 3, note: 'Scan capped' });
+        const result = JSON.parse((await callTool(endpoint, 'find_annotations', args)).content[0].text);
+        const { library, ...filters } = args;
+        expect(mockHandleFindAnnotationsRequest).toHaveBeenCalledWith(expect.objectContaining({ ...filters, library_id: library }));
+        expect(result).toMatchObject({ total_count: 3, has_more: true, next_offset: 2, note: 'Scan capped' });
+        expect(result.annotations[0].zotero_uri).toContain('ANNOT001');
+    });
+
+    it('supplies search defaults and terminates pagination on an empty page', async () => {
+        mockHandleFindAnnotationsRequest.mockResolvedValue({ annotations: [], total_count: 0 });
+        const result = JSON.parse((await callTool(endpoint, 'find_annotations', { tag: 'missing' })).content[0].text);
+        expect(mockHandleFindAnnotationsRequest).toHaveBeenCalledWith(expect.objectContaining({ limit: 25, offset: 0, recursive: true, sort_by: 'date_modified', sort_order: 'desc' }));
+        expect(result).toMatchObject({ has_more: false, next_offset: null });
+    });
+
+    it.each([{ limit: 0 }, { limit: 51 }, { offset: -1 }, { offset: 1.5 }, { recursive: 'yes' }, { tag: [] }, { annotation_type: 'ink' }, { sort_by: 'bogus' }])('rejects invalid search inputs %j', async args => {
+        expect((await callTool(endpoint, 'find_annotations', args)).isError).toBe(true);
+        expect(mockHandleFindAnnotationsRequest).not.toHaveBeenCalled();
+    });
+
+    it('preserves exclusion failures from the annotation search handler', async () => {
+        mockHandleFindAnnotationsRequest.mockResolvedValue({ error: 'Library is excluded', error_code: 'library_not_searchable' });
+        const result = await callTool(endpoint, 'find_annotations', { library: 'u', tag: 'review' });
+        expect(result.isError).toBe(true);
+        expect(result.content[0].text).toContain('excluded');
+    });
+
+    for (const [name, item, validate, execute] of [
+        ['create_highlight_annotations', highlight, mockValidateHighlights, mockExecuteHighlights],
+        ['create_note_annotations', note, mockValidateAnnotationNotes, mockExecuteAnnotationNotes],
+    ] as const) {
+        describe(name, () => {
+            it('validates then executes with portable references and returns created IDs', async () => {
+                validate.mockResolvedValue({ valid: true, current_value: { content_kind: 'pdf' }, normalized_action_data: { tags: ['normalized'] } });
+                const result = await callTool(endpoint, name, { attachment_id: 'u-ATT00001', items: [item], tags: ['review'] });
+                expect(result.isError).not.toBe(true);
+                expect(validate).toHaveBeenCalledWith(expect.objectContaining({ action_type: name, action_data: expect.objectContaining({ resolved_ref: { library_id: 1, library_ref: 'u', zotero_key: 'ATT00001' } }) }));
+                expect(execute).toHaveBeenCalledWith(expect.objectContaining({ action_data: expect.objectContaining({ tags: ['normalized'], items: [expect.objectContaining({ ...item, index: 0, color: 'yellow' })] }) }), expect.objectContaining({ timeoutSeconds: 120 }));
+                expect(JSON.parse(result.content[0].text).created[0]).toMatchObject({ annotation_id: 'u-ANNOT001', zotero_uri: expect.stringContaining('ANNOT001') });
+            });
+
+            it.each(['Library is excluded', 'Library is read-only', 'Attachment file is not available locally'])('does not execute when validation fails: %s', async error => {
+                validate.mockResolvedValue({ valid: false, error });
+                const result = await callTool(endpoint, name, { attachment_id: 'u-ATT00001', items: [item] });
+                expect(result).toMatchObject({ isError: true });
+                expect(result.content[0].text).toContain(error);
+                expect(execute).not.toHaveBeenCalled();
+            });
+
+            it.each([[], [null], Array(51).fill(item), [{ ...item, color: 'invisible' }]])('rejects invalid batches before validation', async items => {
+                expect((await callTool(endpoint, name, { attachment_id: 'u-ATT00001', items })).isError).toBe(true);
+                expect(validate).not.toHaveBeenCalled();
+                expect(execute).not.toHaveBeenCalled();
+            });
+
+            it('returns partial successes together with failures and sets isError', async () => {
+                execute.mockResolvedValue({ success: true, result_data: { created: [created], failed: [{ index: 1, error: 'Missing geometry' }], total_created: 1, total_failed: 1 } });
+                const result = await callTool(endpoint, name, { attachment_id: 'u-ATT00001', items: [item, item] });
+                expect(result.isError).toBe(true);
+                expect(JSON.parse(result.content[0].text)).toMatchObject({ total_created: 1, total_failed: 1, failed: [{ index: 1, error: 'Missing geometry' }] });
+            });
+
+            it('reports execution errors without pretending annotations were created', async () => {
+                execute.mockResolvedValue({ success: false, error: 'Library became excluded' });
+                expect((await callTool(endpoint, name, { attachment_id: '1-ATT00001', items: [item] })).isError).toBe(true);
+            });
+
+            it('requires PDF geometry instead of accepting a DOM locator', async () => {
+                const domItem = name === 'create_highlight_annotations' ? { text: 'Source', section_ordinal: 1 } : { comment: 'Note', anchor_id: 'p1' };
+                expect((await callTool(endpoint, name, { attachment_id: 'u-ATT00001', items: [domItem] })).isError).toBe(true);
+                expect(execute).not.toHaveBeenCalled();
+            });
+
+            it('accepts EPUB section and text locators without PDF geometry', async () => {
+                validate.mockResolvedValue({ valid: true, current_value: { content_kind: 'epub' } });
+                const result = await callTool(endpoint, name, { attachment_id: 'u-ATT00001', items: [{ text: 'Source passage', comment: 'Note', section_ordinal: 2 }] });
+                expect(result.isError).not.toBe(true);
+                expect(execute).toHaveBeenCalledOnce();
+            });
+        });
+    }
+
+    it('rejects inverted highlight boxes', async () => {
+        expect((await callTool(endpoint, 'create_highlight_annotations', { attachment_id: 'u-ATT00001', items: [{ ...highlight, page_locations: [{ page_idx: 0, boxes: [{ ...box, r: 1 }] }] }] })).isError).toBe(true);
+        expect(mockExecuteHighlights).not.toHaveBeenCalled();
+    });
+
+    it.each(['epub', 'snapshot'])('returns copyable %s locators using section identities rather than synthetic page numbers', async content_kind => {
+        mockHandleZoteroDocumentRequest.mockResolvedValue({ result: { content_kind, pageCount: 3, sections: [
+            { index: 0, rawHref: 'chapter.xhtml', items: [{ kind: 'picture', order: 0, sectionIndex: 0, anchorId: 'cover', pageNumber: 3, text: 'Image alt text' }, { kind: 'text', order: 1, sectionIndex: 0, anchorId: 'intro', pageNumber: 3, text: 'Source passage.' }] },
+        ] } });
+        const result = JSON.parse((await callTool(endpoint, 'read_attachment', { attachment_id: 'u-ATT00001', start_page: 3, include_annotation_locations: true })).content[0].text);
+        expect(result.passages).toEqual([{ text: 'Source passage.', anchor_id: 'intro', ...(content_kind === 'epub' ? { section_href: 'chapter.xhtml', section_ordinal: 1 } : {}) }]);
+    });
+
+    it.each(['pdf', 'epub', 'snapshot'])('uses the same range error for %s annotation locations', async content_kind => {
+        const result = content_kind === 'pdf'
+            ? { content_kind, mode: 'structured', document: { pageCount: 1, pages: [{ index: 0, items: [] }] } }
+            : { content_kind, pageCount: 1, sections: [{ index: 0, rawHref: 'chapter.xhtml', items: [] }] };
+        mockHandleZoteroDocumentRequest.mockResolvedValue({ result });
+        const response = await callTool(endpoint, 'read_attachment', { attachment_id: 'u-ATT00001', start_page: 2, include_annotation_locations: true });
+        expect(response.isError).toBe(true);
+        expect(response.content[0].text).toContain('Requested start_page 2 is out of range; attachment has 1 pages.');
+    });
+
+    it('rejects an empty structured PDF page window', async () => {
+        mockHandleZoteroDocumentRequest.mockResolvedValue({ result: { content_kind: 'pdf', mode: 'structured', document: { pageCount: 2, pages: [{ index: 0, items: [] }] } } });
+        const response = await callTool(endpoint, 'read_attachment', { attachment_id: 'u-ATT00001', start_page: 2, include_annotation_locations: true });
+        expect(response.isError).toBe(true);
+        expect(response.content[0].text).toContain('contains no extractable pages');
+    });
+
+    it('does not silently return empty locations when extraction returns markdown', async () => {
+        mockHandleZoteroDocumentRequest.mockResolvedValue({ result: { content_kind: 'pdf', mode: 'markdown', document: { pageCount: 1, pages: [{ index: 0, markdown: 'Source' }] } } });
+        expect((await callTool(endpoint, 'read_attachment', { attachment_id: 'u-ATT00001', include_annotation_locations: true })).isError).toBe(true);
+    });
+
+    it('rejects a mixed PDF note batch before any write when one item lacks a position', async () => {
+        const response = await callTool(endpoint, 'create_note_annotations', { attachment_id: 'u-ATT00001', items: [note, { comment: 'Missing position' }] });
+        expect(response.isError).toBe(true);
+        expect(mockValidateAnnotationNotes).toHaveBeenCalledOnce();
+        expect(mockExecuteAnnotationNotes).not.toHaveBeenCalled();
+    });
+
+    it('returns copyable PDF geometry from read_attachment', async () => {
+        mockHandleZoteroDocumentRequest.mockResolvedValue({ result: { content_kind: 'pdf', mode: 'structured', document: { pageCount: 2, pages: [
+            { index: 0, items: [] },
+            { index: 1, label: 'iii', items: [{ kind: 'text', text: 'Source.', bbox: [10, 20, 80, 30], sentences: [{ text: 'Source.', bboxes: [[10, 20, 80, 30]] }] }] },
+        ] } } });
+        const result = JSON.parse((await callTool(endpoint, 'read_attachment', { attachment_id: 'u-ATT00001', start_page: 2, include_annotation_locations: true })).content[0].text);
+        expect(mockHandleZoteroDocumentRequest).toHaveBeenCalledWith(expect.objectContaining({ mode: 'structured' }));
+        expect(result.pages).toHaveLength(1);
+        expect(result.pages[0].passages[0]).toEqual({ text: 'Source.', page_locations: [{ page_idx: 1, page_label: 'iii', boxes: [box] }], note_position: { ...note.note_position, page_index: 1 } });
     });
 });

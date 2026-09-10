@@ -250,6 +250,7 @@ export async function validateCreateNoteAnnotationsAction(
         request_id: request.request_id,
         valid: true,
         current_value: {
+            content_kind: contentKind,
             library_name: library.name,
             attachment_title: await getAttachmentTitle(attachment),
             item_count: items.length,

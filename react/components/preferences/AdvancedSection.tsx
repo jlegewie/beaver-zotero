@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Button from "@beaver/agent-ui/primitives/Button";
 import {SettingsGroup, SettingsRow, DocLink} from "./components/SettingsElements";
-import { dataProviderEnabledAtom, mcpCreateNoteToolEnabledAtom, mcpServerEnabledAtom } from "../../atoms/ui";
+import { dataProviderEnabledAtom, mcpServerEnabledAtom, mcpWriteToolsEnabledAtom } from "../../atoms/ui";
 import { isMcpServerSupportedAtom } from "../../atoms/profile";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { currentMessageExternalFilesAtom } from "../../atoms/messageComposition";
@@ -101,7 +101,7 @@ const AdvancedSection: React.FC = () => {
 
     // --- Atoms: MCP Server enabled ---
     const [mcpServerEnabled, setMcpServerEnabled] = useAtom(mcpServerEnabledAtom);
-    const [mcpCreateNoteToolEnabled, setMcpCreateNoteToolEnabled] = useAtom(mcpCreateNoteToolEnabledAtom);
+    const [mcpWriteToolsEnabled, setMcpWriteToolsEnabled] = useAtom(mcpWriteToolsEnabledAtom);
     const [mcpCopied, setMcpCopied] = useState(false);
     const [mcpHttpCopied, setMcpHttpCopied] = useState(false);
     const isMcpServerSupported = useAtomValue(isMcpServerSupportedAtom);
@@ -164,12 +164,12 @@ const AdvancedSection: React.FC = () => {
         setMcpServerEnabled(newValue);
     }, [mcpServerEnabled, isMcpServerSupported, setMcpServerEnabled]);
 
-    const handleMcpCreateNoteToolToggle = useCallback(() => {
+    const handleMcpWriteToolsToggle = useCallback(() => {
         if (!isMcpServerSupported) return;
-        const newValue = !mcpCreateNoteToolEnabled;
+        const newValue = !mcpWriteToolsEnabled;
         setPref('mcpCreateNoteToolEnabled', newValue);
-        setMcpCreateNoteToolEnabled(newValue);
-    }, [mcpCreateNoteToolEnabled, isMcpServerSupported, setMcpCreateNoteToolEnabled]);
+        setMcpWriteToolsEnabled(newValue);
+    }, [mcpWriteToolsEnabled, isMcpServerSupported, setMcpWriteToolsEnabled]);
 
     // --- Data provider (library access for other Beaver clients) ---
     const [dataProviderEnabled, setDataProviderEnabled] = useAtom(dataProviderEnabledAtom);
@@ -321,21 +321,21 @@ const AdvancedSection: React.FC = () => {
                     }
                 />
                 <SettingsRow
-                    title="Enable Create Note Tool"
-                    description="Allow MCP clients to create Zotero notes. Changing setting requires reloading of the MCP server."
-                    onClick={handleMcpCreateNoteToolToggle}
+                    title="Enable Write Tools"
+                    description="Allow MCP clients to create Zotero notes, highlights, and sticky-note annotations. Changing setting requires reloading of the MCP server."
+                    onClick={handleMcpWriteToolsToggle}
                     hasBorder
                     disabled={!isMcpServerSupported}
                     tooltip={isMcpServerSupported
-                        ? 'Advertise and allow the create_note MCP tool'
+                        ? 'Advertise and allow the MCP tools that write to your library'
                         : 'Only available with Beaver Pro'}
                     control={
                         <div className="display-flex flex-row items-center gap-2">
                             <input
                                 type="checkbox"
-                                aria-label="Enable Create Note Tool"
-                                checked={mcpCreateNoteToolEnabled}
-                                onChange={handleMcpCreateNoteToolToggle}
+                                aria-label="Enable Write Tools"
+                                checked={mcpWriteToolsEnabled}
+                                onChange={handleMcpWriteToolsToggle}
                                 onClick={(e) => e.stopPropagation()}
                                 disabled={!isMcpServerSupported}
                                 style={{ cursor: isMcpServerSupported ? 'pointer' : 'not-allowed', margin: 0 }}
