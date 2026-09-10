@@ -31,7 +31,10 @@
  *                                 needle `共识 [14]` matches a note `共识[14]`
  *                                 and vice versa, because language models
  *                                 silently insert / drop boundary spaces when
- *                                 reproducing mixed-script text. Gated on
+ *                                 reproducing mixed-script text. Likewise
+ *                                 tolerates the newlines the note-editor
+ *                                 serializer writes around block elements
+ *                                 (`<td><p>` vs `<td>\n<p>`). Gated on
  *                                 uniqueness and a non-ws character floor;
  *                                 conservative last resort.
  *  13. markdown_render          — match a handler-rendered Markdown fragment
@@ -815,15 +818,35 @@ function escapeRegExp(s: string): string {
  * and additionally tolerates Pangu-style spacing drift at CJK ↔ non-CJK
  * character boundaries.
  *
- * Two relaxations are applied:
+ * Three relaxations are applied:
  * 1. Whitespace runs in the needle become `\s+` (or `\s*` if at least one
- *    side of the run is CJK — needles with a space between `识` and `[` must
- *    still match notes that elide that space).
+ *    side of the run is CJK, or if the run is ASCII whitespace sitting in a
+ *    serializer gap — needles with a space between `识` and `[`, or a newline
+ *    between `<td>` and `<p>`, must still match notes that elide it).
  * 2. Adjacent non-whitespace characters whose scripts differ (one CJK, one
  *    not) get an optional `\s*` inserted between them — needles WITHOUT a
  *    boundary space must still match notes that have one.
+ * 3. A serializer gap — a `>` that ends one of the note-editor serializer's
+ *    newline sites, immediately followed by `<` — gets an optional
+ *    `[\t\n\f\r ]*` inserted between the two. The haystack is
+ *    `normalizeNoteHtml(rawHtml)`, the same round trip the editor performs, so
+ *    a note Beaver stored as `<td><p>…` is always matched against `<td>\n<p>…`.
+ *    Models anchor on their own earlier HTML, so both directions have to match.
+ *    `findWhitespaceTolerant` in `editNotePositionLookup.ts` does a looser
+ *    version of this on the undo side.
  *
- * Both relaxations apply ONLY to visible prose. While walking inside an HTML
+ *    Two restrictions on relaxation 3 are load-bearing, because outside the
+ *    serializer's own sites this whitespace is visible content:
+ *      - the gap must be one the serializer actually writes at
+ *        (`CLOSE_TAG_GAP_ELEMENTS` / `OPEN_TAG_GAP_ELEMENTS`). Between two
+ *        INLINE elements it is prose, so `<strong>a</strong><em>b</em>` must
+ *        NOT match `<strong>a</strong> <em>b</em>`; and an opening `<p>` is not
+ *        a site at all, so `<p><em>x</em>` must not match `<p>\n<em>x</em>`.
+ *      - only ASCII whitespace qualifies. `&nbsp;` and U+00A0 do not collapse
+ *        when rendered, so `<p><em>x</em></p>` must NOT match
+ *        `<p>&nbsp;<em>x</em></p>`.
+ *
+ * Relaxations 1 and 2 apply ONLY to visible prose. While walking inside an HTML
  * tag (between `<` and the matching `>`) or when either side of a boundary is
  * an HTML delimiter (`< > = " ' /`), the relaxation is suppressed so that
  * needles like `<span title="中文">` cannot match `<span title="中文 ">` —
@@ -850,6 +873,45 @@ const MATH_CLASS_ATTR = /class\s*=\s*(?:"[^"]*\bmath\b[^"]*"|'[^']*\bmath\b[^']*
 const PRE_OPEN_TAG_STICKY = /<pre\b([^>]*)>/iy;
 const PRE_CLOSE_TAG_STICKY = /<\/pre\s*>/iy;
 const PRE_ELEMENT_PATTERN = /<pre\b([^>]*)>[\s\S]*?<\/pre\s*>/gi;
+
+// Where the note-editor serializer puts its newlines, taken verbatim from
+// `buildToHTML` (note-editor's `src/core/schema/utils.js`, mirrored by
+// `src/prosemirror/serializer.ts`). It walks `textNodes` + `blockNodes` and:
+//   - inserts `\n` AFTER every one of them  → after each CLOSING tag below
+//     (and after `<hr>`, which is void so its only tag is the opening one);
+//   - inserts `\n` before the first child of the `blockNodes` only
+//     → after those elements' OPENING tag.
+// An opening `<p>` / `<h2>` / `<pre>` is therefore NOT a place the serializer
+// writes anything, so those gaps stay byte-exact.
+const AFTER_CLOSE_NEWLINE_ELEMENTS
+    = 'h1|h2|h3|h4|h5|h6|p|pre|ol|ul|li|hr|blockquote|table|th|tr|thead|tbody|tfoot|td';
+const AFTER_OPEN_NEWLINE_ELEMENTS
+    = 'ol|ul|li|hr|blockquote|table|th|tr|thead|tbody|tfoot|td';
+const CLOSE_TAG_GAP_ELEMENTS = new Set(AFTER_CLOSE_NEWLINE_ELEMENTS.split('|'));
+const OPEN_TAG_GAP_ELEMENTS = new Set(AFTER_OPEN_NEWLINE_ELEMENTS.split('|'));
+
+// The serializer writes a plain `\n` and nothing else, so only ASCII
+// whitespace may be treated as its formatting. `WS_OR_NBSP_CLASS` must NOT be
+// used here: `&nbsp;` (and U+00A0, which JS `\s` matches) is visible content —
+// `<p><em>x</em></p>` must not match `<p>&nbsp;<em>x</em></p>`.
+const HTML_WS_CLASS = '[\\t\\n\\f\\r ]';
+const ASCII_WS_RUN = /^[\t\n\f\r ]+$/;
+
+/** Sticky: reads `/` + tag name at a `<` while walking the needle. */
+const TAG_NAME_STICKY = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)/y;
+/** A tag whose `>` is one of the serializer's newline sites. */
+const SERIALIZER_GAP_TAG
+    = `(?:</(?:${AFTER_CLOSE_NEWLINE_ELEMENTS})\\s*>`
+    + `|<(?:${AFTER_OPEN_NEWLINE_ELEMENTS})(?:\\s[^<>]*)?/?>)`;
+/** Such a tag followed, across ASCII whitespace only, by another tag. */
+const SERIALIZER_GAP_IN_NEEDLE = new RegExp(
+    `${SERIALIZER_GAP_TAG}${HTML_WS_CLASS}*<`, 'i',
+);
+/** The same gap, for removal before whitespace collapsing. Zero-width
+ *  lookahead so a run of adjacent gaps all collapse. */
+const SERIALIZER_GAP_RAW = new RegExp(
+    `(${SERIALIZER_GAP_TAG})${HTML_WS_CLASS}+(?=<)`, 'gi',
+);
 
 interface PreRegion {
     /** Offset of the `<` that opens the element. */
@@ -884,6 +946,13 @@ function buildWhitespaceRelaxedPattern(needle: string): RegExp {
     // Track nested `<pre>` types so math blocks cannot affect code blocks.
     const preStack: boolean[] = [];
     let significantPreDepth = 0;
+    // Tag read at the last `<`, and whether the `>` most recently consumed ends
+    // one of the serializer's newline sites. Only there may whitespace be
+    // optional. A bare `>` in prose leaves `pendingTagName` empty, so it never
+    // qualifies.
+    let pendingTagName = '';
+    let pendingTagIsClosing = false;
+    let lastTagStartsSerializerGap = false;
     let i = 0;
     while (i < needle.length) {
         // Whitespace run (regex `\s` or literal `&nbsp;` entity) anchored at i.
@@ -911,7 +980,18 @@ function buildWhitespaceRelaxedPattern(needle: string): RegExp {
                 && !!before && !!after
                 && !isHtmlDelim(before) && !isHtmlDelim(after)
                 && isCjkChar(before) !== isCjkChar(after);
-            parts.push(`${WS_OR_NBSP_CLASS}${crossesCjkBoundary ? '*' : '+'}`);
+            // Serializer-inserted newline: optional in this direction too, so a
+            // needle carrying `>\n<` matches a note written as `><`. The run
+            // itself must be ASCII whitespace — a needle holding an `&nbsp;`
+            // here is describing visible content, not formatting.
+            const isSerializerGap = before === '>' && after === '<'
+                && lastTagStartsSerializerGap
+                && ASCII_WS_RUN.test(needle.substring(i, i + runLen));
+            if (isSerializerGap) {
+                parts.push(`${HTML_WS_CLASS}*`);
+            } else {
+                parts.push(`${WS_OR_NBSP_CLASS}${crossesCjkBoundary ? '*' : '+'}`);
+            }
             i += runLen;
             continue;
         }
@@ -923,6 +1003,10 @@ function buildWhitespaceRelaxedPattern(needle: string): RegExp {
         // relaxation.
         if (ch === '<') {
             inTag = true;
+            TAG_NAME_STICKY.lastIndex = i;
+            const nameMatch = TAG_NAME_STICKY.exec(needle);
+            pendingTagIsClosing = nameMatch ? nameMatch[1] === '/' : false;
+            pendingTagName = nameMatch ? nameMatch[2].toLowerCase() : '';
             // Enter/leave `<pre>` when its tag opens.
             PRE_OPEN_TAG_STICKY.lastIndex = i;
             const openTag = PRE_OPEN_TAG_STICKY.exec(needle);
@@ -936,14 +1020,27 @@ function buildWhitespaceRelaxedPattern(needle: string): RegExp {
                     significantPreDepth -= 1;
                 }
             }
-        } else if (ch === '>') inTag = false;
+        } else if (ch === '>') {
+            inTag = false;
+            lastTagStartsSerializerGap = pendingTagIsClosing
+                ? CLOSE_TAG_GAP_ELEMENTS.has(pendingTagName)
+                : OPEN_TAG_GAP_ELEMENTS.has(pendingTagName);
+            pendingTagName = '';
+            pendingTagIsClosing = false;
+        }
 
         const next = needle.charAt(i + 1);
         const nextStartsWs = !!next && (
             /\s/.test(next)
             || needle.substring(i + 1, i + 1 + NBSP_ENTITY.length) === NBSP_ENTITY
         );
-        if (
+        if (ch === '>' && next === '<' && lastTagStartsSerializerGap && significantPreDepth === 0) {
+            // An opening `<pre>` is not a gap site anyway (it is a textNode, so
+            // the serializer writes nothing after it); the depth check keeps
+            // whitespace inside the block byte-exact as well.
+            flushLiteral();
+            parts.push(`${HTML_WS_CLASS}*`);
+        } else if (
             next
             && !nextStartsWs
             && !inTag
@@ -959,6 +1056,24 @@ function buildWhitespaceRelaxedPattern(needle: string): RegExp {
     }
     flushLiteral();
     return new RegExp(parts.join(''), 'g');
+}
+
+/**
+ * Comparator for the relaxed strategy's uniqueness and sanity gates: drop the
+ * serializer's own inter-tag newlines, then collapse whitespace CJK-aware, so
+ * `<td>\n<p>` and `<td><p>` compare equal. Without the first step the gates
+ * would reject the very drift `buildWhitespaceRelaxedPattern` just matched.
+ *
+ * It must drop no more than the pattern relaxes, or the sanity gate would wave
+ * through a slice the anchor never specified — `</strong> <em>` vs
+ * `</strong><em>`, or `<p>&nbsp;<em>` vs `<p><em>`. That is why it reuses the
+ * same gap definition and runs before, not after, whitespace collapsing.
+ * `normalizeUndoComparisonHtml` does the unrestricted collapse on the undo side.
+ */
+function normalizeForRelaxedMatch(s: string): string {
+    // Drop the gaps BEFORE collapsing whitespace: afterwards an `&nbsp;` and a
+    // serializer `\n` have both become a plain space and are indistinguishable.
+    return normalizeCjkSpacing(s.replace(SERIALIZER_GAP_RAW, '$1'));
 }
 
 const whitespaceRelaxedStrategy: Strategy = {
@@ -984,15 +1099,20 @@ const whitespaceRelaxedStrategy: Strategy = {
         // whitespace — the haystack may have `共识 [14]` (Pangu spacing the
         // model dropped). Using `hasWhitespaceOrNbsp` covers the symmetric
         // case where the needle's only whitespace is `&nbsp;`.
+        // A serializer gap is the third entry point: an all-tags needle such as
+        // `<td><p>…</p></td>` has neither whitespace nor a CJK boundary, yet
+        // must still reach the serializer-newline relaxation.
         const needleHasWs = hasWhitespaceOrNbsp(needle);
         const needleHasCjkBoundary = hasCjkAsciiBoundary(needle);
-        if (!needleHasWs && !needleHasCjkBoundary) return null;
+        const needleHasTagBoundary = SERIALIZER_GAP_IN_NEEDLE.test(needle);
+        if (!needleHasWs && !needleHasCjkBoundary && !needleHasTagBoundary) return null;
 
-        // Use the CJK-aware normalizer so the length/uniqueness gates below
-        // treat Pangu spacing as a non-difference (otherwise `共识 [14]` and
-        // `共识[14]` would normalize differently and fail the sanity check
-        // even when the regex correctly matched).
-        const normalizedOld = normalizeCjkSpacing(needle);
+        // Use the relaxed normalizer so the length/uniqueness gates below treat
+        // Pangu spacing and inter-tag whitespace as non-differences (otherwise
+        // `共识 [14]` and `共识[14]`, or `<td>\n<p>` and `<td><p>`, would
+        // normalize differently and fail the sanity check even when the regex
+        // correctly matched).
+        const normalizedOld = normalizeForRelaxedMatch(needle);
         if (normalizedOld.length < MIN_WS_RELAXED_NORMALIZED_LENGTH) return null;
         if (normalizedOld.replace(/\s/g, '').length < MIN_WS_RELAXED_NON_WS_LENGTH) return null;
 
@@ -1013,16 +1133,16 @@ const whitespaceRelaxedStrategy: Strategy = {
         // Normalized-space uniqueness: catches scenarios where the regex
         // happened to find a single shape but the model's reference is
         // ambiguous because the normalized form repeats elsewhere.
-        const normalizedHaystack = normalizeCjkSpacing(input.strippedHtml);
+        const normalizedHaystack = normalizeForRelaxedMatch(input.strippedHtml);
         const normFirst = normalizedHaystack.indexOf(normalizedOld);
         if (normFirst === -1) return null;
         if (normalizedHaystack.indexOf(normalizedOld, normFirst + 1) !== -1) return null;
 
         // Sanity: the matched raw slice must normalize to the same form as
-        // the needle under the same CJK-aware rules. Guards against
-        // adversarial input where the regex engine interpreted the pattern
-        // differently than `normalizeCjkSpacing` would.
-        if (normalizeCjkSpacing(actualRawSlice) !== normalizedOld) return null;
+        // the needle under the same relaxed rules. Guards against adversarial
+        // input where the regex engine interpreted the pattern differently
+        // than `normalizeForRelaxedMatch` would.
+        if (normalizeForRelaxedMatch(actualRawSlice) !== normalizedOld) return null;
 
         // A needle starting inside `<pre>` lacks enough context for the pattern
         // builder to protect indentation. Insert ops are safe because they
