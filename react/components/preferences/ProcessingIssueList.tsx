@@ -5,7 +5,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '@beaver/agent-core/transport/attachmentLimits';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
-import { ArrowDownIcon, ArrowLeftIcon, ArrowRightIcon, Icon } from '../icons/icons';
+import { ArrowDownIcon, ArrowLeftIcon, ArrowRightIcon, Icon, SyncIcon } from '../icons/icons';
 import { hydrateItemListRows } from '../../compat/legacyToolResults';
 import ItemListResultView from '../agentRuns/toolResultViews/ItemListResultView';
 import { activePreferencePageTabAtom } from '../../atoms/ui';
@@ -94,7 +94,7 @@ const ProcessingIssuePage: React.FC<{
     hasOcrAccess: boolean;
     hasSearchAccess: boolean;
     updatedAt: number | null;
-    /** Present only for retryable reasons; renders a per-row retry link. */
+    /** Present only for retryable reasons; renders a per-row retry icon. */
     onRetry?: (refs: AttachmentRef[]) => Promise<void>;
 }> = ({ page, reason, hasOcrAccess, hasSearchAccess, updatedAt, onRetry }) => {
     const [rows, setRows] = useState<ItemListRow[] | null>(null);
@@ -148,17 +148,17 @@ const ProcessingIssuePage: React.FC<{
                 : <ItemListResultView
                     view={{ view_type: 'item_list', tool_name: 'background_processing', items: rows }}
                     rowAction={onRetry && ((row) => (
-                        <button
-                            type="button"
-                            className="text-link text-sm mr-2"
-                            aria-label={`Retry ${row.display_name}`}
+                        <IconButton
+                            icon={SyncIcon}
+                            variant="ghost-secondary"
+                            className="scale-11 mr-1"
+                            ariaLabel={`Retry ${row.display_name}`}
+                            title="Retry"
                             onClick={(event) => {
                                 event.stopPropagation();
                                 void onRetry([{ libraryId: row.library_id, zoteroKey: row.zotero_key }]);
                             }}
-                        >
-                            Retry
-                        </button>
+                        />
                     ))}
                 />}
         </div>

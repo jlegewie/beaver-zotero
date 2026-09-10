@@ -88,7 +88,7 @@ interface RowEventProps {
 }
 
 /**
- * Optional trailing control per item row (a retry link, for instance). Rendered
+ * Optional trailing control per item row (a retry icon, for instance). Rendered
  * inside the clickable row, so the control must stop propagation itself if its
  * click should not also reveal the item.
  */

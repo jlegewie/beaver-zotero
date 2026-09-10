@@ -54,7 +54,7 @@ const ProcessingStatusRow: React.FC<{
             <div className="display-flex flex-col gap-05">
                 <div className="display-flex flex-row items-center gap-2">
                     {sentence.tone === 'busy'
-                        ? <Spinner size={10} className="font-color-accent-blue flex-shrink-0" />
+                        ? <Spinner size={14} className="font-color-accent-blue flex-shrink-0" />
                         : <span
                             aria-hidden="true"
                             className="flex-shrink-0"
