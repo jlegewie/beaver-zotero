@@ -1430,6 +1430,320 @@ describe('whitespace_relaxed strategy', () => {
         expect(result?.strategy).toBe('whitespace_relaxed');
         expect(result?.expandedOld).toBe(rawSlice);
     });
+
+    // -- Inter-tag whitespace (note-editor serializer drift) --
+
+    describe('inter-tag whitespace', () => {
+        // The note editor's serializer inserts a `\n` after every block tag and
+        // before the first child of every list/table element on save, so HTML
+        // Beaver wrote as `<td><p>` reads back as `<td>\n<p>` once the user has
+        // opened the note. Models anchor on their own earlier HTML, so both
+        // directions have to match.
+        //
+        // `newString` deliberately shares no wrapper with `oldString` here: a
+        // shared `<td>`/`</td>` would let `spurious_wrap_strip` (rank 9) claim
+        // the edit before `whitespace_relaxed` (rank 12) is reached.
+
+        const ROW_FLUSH =
+            '<tr><td><p>Alpha cell body</p></td><td><p>Beta cell body</p></td></tr>';
+        const ROW_SERIALIZED =
+            '<tr>\n<td>\n<p>Alpha cell body</p>\n</td>\n<td>\n<p>Beta cell body</p>\n</td>\n</tr>';
+
+        it('matches a flush needle against a note with serializer newlines', () => {
+            const html = `<div data-schema-version="9"><table>\n${ROW_SERIALIZED}\n</table>\n</div>`;
+            const result = match(makeInput({
+                oldString: ROW_FLUSH,
+                newString: '<p>Replaced</p>',
+                strippedHtml: html,
+            }));
+            expect(result?.strategy).toBe('whitespace_relaxed');
+            expect(result?.matchCount).toBe(1);
+            // The note's own bytes are what gets replaced.
+            expect(result?.expandedOld).toBe(ROW_SERIALIZED);
+            expect(html.indexOf(result!.expandedOld)).toBeGreaterThanOrEqual(0);
+        });
+
+        it('matches a newline-carrying needle against a flush note', () => {
+            const html = `<div data-schema-version="9"><table>${ROW_FLUSH}</table></div>`;
+            const result = match(makeInput({
+                oldString: ROW_SERIALIZED,
+                newString: '<p>Replaced</p>',
+                strippedHtml: html,
+            }));
+            expect(result?.strategy).toBe('whitespace_relaxed');
+            expect(result?.expandedOld).toBe(ROW_FLUSH);
+        });
+
+        it('enters the strategy for an all-tags needle with no whitespace of its own', () => {
+            // Neither whitespace nor a CJK boundary — `><` is the only gate
+            // that can let this needle in.
+            const rawSlice = '<blockquote>\n<p>Untouchedparagraphbody</p>\n</blockquote>';
+            const html = `<div data-schema-version="9">${rawSlice}</div>`;
+            const needle = '<blockquote><p>Untouchedparagraphbody</p></blockquote>';
+            expect(/\s/.test(needle)).toBe(false);
+            const result = match(makeInput({
+                oldString: needle,
+                newString: '<p>Replaced</p>',
+                strippedHtml: html,
+            }));
+            expect(result?.strategy).toBe('whitespace_relaxed');
+            expect(result?.expandedOld).toBe(rawSlice);
+        });
+
+        it('does not relax the newline after a <pre> opener', () => {
+            // Code-block indentation stays byte-exact: `<pre>` raises the
+            // significant depth at its `<`, so its own `>` is not a relax point.
+            const html = '<div data-schema-version="9"><pre>\n<code>const answer = 42;</code></pre></div>';
+            const result = match(makeInput({
+                oldString: '<pre><code>const answer = 42;</code></pre>',
+                newString: '<p>Replaced</p>',
+                strippedHtml: html,
+            }));
+            expect(result).toBeNull();
+        });
+
+        it('rejects a needle that is unique only before inter-tag collapsing', () => {
+            // Two cells that are identical once inter-tag whitespace is
+            // optional: the uniqueness gate must refuse rather than pick one.
+            const cell = '<td>\n<p>Some cell body text</p>\n</td>';
+            const html = `<div data-schema-version="9"><table><tr>${cell}${cell}</tr></table></div>`;
+            const result = match(makeInput({
+                oldString: '<td><p>Some cell body text</p></td>',
+                newString: '<p>Replaced</p>',
+                strippedHtml: html,
+            }));
+            expect(result).toBeNull();
+        });
+
+        it('still refuses str_replace_all with inter-tag drift', () => {
+            const html = '<div data-schema-version="9"><table><tr>'
+                + '<td>\n<p>Some cell body text</p>\n</td>'
+                + '</tr></table></div>';
+            const result = match(makeInput({
+                operation: 'str_replace_all' as EditNoteOperation,
+                oldString: '<td><p>Some cell body text</p></td>',
+                newString: '<p>Replaced</p>',
+                strippedHtml: html,
+            }));
+            expect(result).toBeNull();
+        });
+
+        it('does not make prose whitespace optional', () => {
+            // Only `>`↔`<` gaps become optional; a missing word space must
+            // still fail.
+            const html = '<div data-schema-version="9"><p>alpha beta gamma delta epsilon</p></div>';
+            const result = match(makeInput({
+                oldString: '<p>alpha beta gamma deltaepsilon</p>',
+                newString: '<p>x</p>',
+                strippedHtml: html,
+            }));
+            expect(result).toBeNull();
+        });
+
+        it('does not relax whitespace between two inline elements', () => {
+            // `<strong>Alpha</strong><em>Beta</em>` reads "AlphaBeta" while the
+            // note reads "Alpha Beta" — the anchor did not specify that space,
+            // so matching it would replace text the model never named.
+            const html = '<div data-schema-version="9">'
+                + '<p>Lead in text. <strong>Alpha</strong> <em>Beta</em> trailing words.</p></div>';
+            const result = match(makeInput({
+                oldString: '<p>Lead in text. <strong>Alpha</strong><em>Beta</em> trailing words.</p>',
+                newString: '<p>Replaced</p>',
+                strippedHtml: html,
+            }));
+            expect(result).toBeNull();
+        });
+
+        it('does not relax inline whitespace in the reverse direction either', () => {
+            const html = '<div data-schema-version="9">'
+                + '<p>Lead in text. <strong>Alpha</strong><em>Beta</em> trailing words.</p></div>';
+            const result = match(makeInput({
+                oldString: '<p>Lead in text. <strong>Alpha</strong> <em>Beta</em> trailing words.</p>',
+                newString: '<p>Replaced</p>',
+                strippedHtml: html,
+            }));
+            expect(result).toBeNull();
+        });
+
+        it('does not relax an &nbsp; separator between inline elements', () => {
+            const html = '<div data-schema-version="9">'
+                + '<p>Lead in text. <strong>Alpha</strong>&nbsp;<em>Beta</em> trailing words.</p></div>';
+            const result = match(makeInput({
+                oldString: '<p>Lead in text. <strong>Alpha</strong><em>Beta</em> trailing words.</p>',
+                newString: '<p>Replaced</p>',
+                strippedHtml: html,
+            }));
+            expect(result).toBeNull();
+        });
+
+        it('relaxes a block boundary that sits next to inline markup', () => {
+            // `</p>` is block, so its trailing newline is still optional even
+            // though the neighbouring content is inline-heavy.
+            const rawSlice = '<p>First <em>emphasised</em> paragraph</p>\n<p>Second <strong>bold</strong> one</p>';
+            const html = `<div data-schema-version="9">${rawSlice}</div>`;
+            const result = match(makeInput({
+                oldString: '<p>First <em>emphasised</em> paragraph</p><p>Second <strong>bold</strong> one</p>',
+                newString: '<p>Replaced</p>',
+                strippedHtml: html,
+            }));
+            expect(result?.strategy).toBe('whitespace_relaxed');
+            expect(result?.expandedOld).toBe(rawSlice);
+        });
+
+        it('does not relax after a bare `>` in prose', () => {
+            // A `>` that is not a tag close must not license optional
+            // whitespace before the next tag.
+            const html = '<div data-schema-version="9"><p>Compare 5 > <em>threshold</em> in the table.</p></div>';
+            const result = match(makeInput({
+                oldString: '<p>Compare 5 ><em>threshold</em> in the table.</p>',
+                newString: '<p>Replaced</p>',
+                strippedHtml: html,
+            }));
+            expect(result).toBeNull();
+        });
+
+        it('relaxes a block tag that carries attributes', () => {
+            // Only `</p>` gets a trailing newline — `<em>` is inline, so the
+            // serializer leaves its boundaries flush.
+            const rawSlice = '<p style="text-align: center"><em>Centred caption line</em></p>\n<p>Following paragraph body</p>';
+            const html = `<div data-schema-version="9">${rawSlice}</div>`;
+            const result = match(makeInput({
+                oldString: '<p style="text-align: center"><em>Centred caption line</em></p><p>Following paragraph body</p>',
+                newString: '<p>Replaced</p>',
+                strippedHtml: html,
+            }));
+            expect(result?.strategy).toBe('whitespace_relaxed');
+            expect(result?.expandedOld).toBe(rawSlice);
+        });
+
+        it('does not relax between two adjacent citation spans', () => {
+            // Raw citations are inline `<span>`s and the serializer never puts
+            // a newline between them, so the space here is real content.
+            const cite = (k: string) => `<span class="citation" data-item="${k}">(x)</span>`;
+            const html = '<div data-schema-version="9">'
+                + `<p>Body text with citations ${cite('A')} ${cite('B')} and a tail.</p></div>`;
+            const result = match(makeInput({
+                oldString: `<p>Body text with citations ${cite('A')}${cite('B')} and a tail.</p>`,
+                newString: '<p>Replaced</p>',
+                strippedHtml: html,
+            }));
+            expect(result).toBeNull();
+        });
+
+        it('does not treat an &nbsp; after an opening <p> as serializer whitespace', () => {
+            // Reviewer case: a paragraph that starts with a non-breaking space
+            // is visible content, and the serializer never writes an NBSP.
+            const html = '<div data-schema-version="9">'
+                + '<p>&nbsp;<em>Indented paragraph body</em></p></div>';
+            const result = match(makeInput({
+                oldString: '<p><em>Indented paragraph body</em></p>',
+                // Shares no wrapper with old_string, so `spurious_wrap_strip`
+                // cannot claim the edit before `whitespace_relaxed` is reached.
+                newString: '<blockquote>Replaced</blockquote>',
+                strippedHtml: html,
+            }));
+            expect(result).toBeNull();
+        });
+
+        it('does not treat a literal U+00A0 as serializer whitespace', () => {
+            // JS `\s` matches U+00A0, so the ASCII-only class is what stops this.
+            const html = '<div data-schema-version="9">'
+                + '<td> <p>Some cell body text</p></td></div>';
+            const result = match(makeInput({
+                oldString: '<td><p>Some cell body text</p></td>',
+                newString: '<p>Replaced</p>',
+                strippedHtml: html,
+            }));
+            expect(result).toBeNull();
+        });
+
+        it('does not treat an &nbsp; entity at a real gap site as serializer whitespace', () => {
+            const html = '<div data-schema-version="9">'
+                + '<td>&nbsp;<p>Some cell body text</p></td></div>';
+            const result = match(makeInput({
+                oldString: '<td><p>Some cell body text</p></td>',
+                newString: '<p>Replaced</p>',
+                strippedHtml: html,
+            }));
+            expect(result).toBeNull();
+        });
+
+        it('does not relax after an opening <p>, which is not a serializer gap site', () => {
+            // `p` is a textNode: the serializer writes a newline AFTER `</p>`,
+            // never after `<p>`. A note in that shape did not come from the
+            // serializer, so the anchor must match it byte-for-byte.
+            const html = '<div data-schema-version="9">'
+                + '<p>\n<em>Indented paragraph body</em></p></div>';
+            const result = match(makeInput({
+                oldString: '<p><em>Indented paragraph body</em></p>',
+                // Shares no wrapper with old_string, so `spurious_wrap_strip`
+                // cannot claim the edit before `whitespace_relaxed` is reached.
+                newString: '<blockquote>Replaced</blockquote>',
+                strippedHtml: html,
+            }));
+            expect(result).toBeNull();
+        });
+
+        it('does not relax after an opening <h2> either', () => {
+            const html = '<div data-schema-version="9">'
+                + '<h2>\n<em>Heading body text here</em></h2></div>';
+            const result = match(makeInput({
+                oldString: '<h2><em>Heading body text here</em></h2>',
+                newString: '<blockquote>Replaced</blockquote>',
+                strippedHtml: html,
+            }));
+            expect(result).toBeNull();
+        });
+
+        it('still relaxes after a closing </p>, which is a gap site', () => {
+            const rawSlice = '<p>First paragraph body</p>\n<p>Second paragraph body</p>';
+            const html = `<div data-schema-version="9">${rawSlice}</div>`;
+            const result = match(makeInput({
+                oldString: '<p>First paragraph body</p><p>Second paragraph body</p>',
+                newString: '<p>Replaced</p>',
+                strippedHtml: html,
+            }));
+            expect(result?.strategy).toBe('whitespace_relaxed');
+            expect(result?.expandedOld).toBe(rawSlice);
+        });
+
+        it('still relaxes after an opening <td>, which is a gap site', () => {
+            const rawSlice = '<td>\n<p>Some cell body text</p>\n</td>';
+            const html = `<div data-schema-version="9"><table><tr>${rawSlice}</tr></table></div>`;
+            const result = match(makeInput({
+                oldString: '<td><p>Some cell body text</p></td>',
+                newString: '<p>Replaced</p>',
+                strippedHtml: html,
+            }));
+            expect(result?.strategy).toBe('whitespace_relaxed');
+            expect(result?.expandedOld).toBe(rawSlice);
+        });
+
+        it('relaxes after <hr>, a void element whose only tag is the opening one', () => {
+            const rawSlice = '<hr>\n<p>Paragraph after the rule here</p>';
+            const html = `<div data-schema-version="9">${rawSlice}</div>`;
+            const result = match(makeInput({
+                oldString: '<hr><p>Paragraph after the rule here</p>',
+                newString: '<p>Replaced</p>',
+                strippedHtml: html,
+            }));
+            expect(result?.strategy).toBe('whitespace_relaxed');
+            expect(result?.expandedOld).toBe(rawSlice);
+        });
+
+        it('insert_after splices the note bytes, newlines and all', () => {
+            const html = `<div data-schema-version="9"><table>${ROW_SERIALIZED}</table></div>`;
+            const result = match(makeInput({
+                operation: 'insert_after' as EditNoteOperation,
+                oldString: ROW_FLUSH,
+                newString: '<tr><td><p>Appended</p></td></tr>',
+                strippedHtml: html,
+            }));
+            expect(result?.strategy).toBe('whitespace_relaxed');
+            expect(result?.expandedOld).toBe(ROW_SERIALIZED);
+            expect(result?.expandedNew).toBe(ROW_SERIALIZED + '<tr><td><p>Appended</p></td></tr>');
+        });
+    });
 });
 
 // =============================================================================

@@ -33,3 +33,5 @@ export { handleAgentActionExecuteRequest } from './agentDataProvider/handleAgent
 export { handleDeleteItemsRequest } from './agentDataProvider/handleDeleteItemsRequest';
 export { handleReadNoteRequest } from './agentDataProvider/handleReadNoteRequest';
 export { validateCreateNoteAction, executeCreateNoteAction } from './agentDataProvider/actions/createNote';
+export { validateCreateHighlightAnnotationsAction, executeCreateHighlightAnnotationsAction } from './agentDataProvider/actions/createHighlightAnnotations';
+export { validateCreateNoteAnnotationsAction, executeCreateNoteAnnotationsAction } from './agentDataProvider/actions/createNoteAnnotations';
