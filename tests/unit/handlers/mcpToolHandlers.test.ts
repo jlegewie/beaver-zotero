@@ -2877,6 +2877,35 @@ describe('MCP libraries and annotations', () => {
         expect(result.passages).toEqual([{ text: 'Source passage.', anchor_id: 'intro', ...(content_kind === 'epub' ? { section_href: 'chapter.xhtml', section_ordinal: 1 } : {}) }]);
     });
 
+    it.each(['pdf', 'epub', 'snapshot'])('uses the same range error for %s annotation locations', async content_kind => {
+        const result = content_kind === 'pdf'
+            ? { content_kind, mode: 'structured', document: { pageCount: 1, pages: [{ index: 0, items: [] }] } }
+            : { content_kind, pageCount: 1, sections: [{ index: 0, rawHref: 'chapter.xhtml', items: [] }] };
+        mockHandleZoteroDocumentRequest.mockResolvedValue({ result });
+        const response = await callTool(endpoint, 'read_attachment', { attachment_id: 'u-ATT00001', start_page: 2, include_annotation_locations: true });
+        expect(response.isError).toBe(true);
+        expect(response.content[0].text).toContain('Requested start_page 2 is out of range; attachment has 1 pages.');
+    });
+
+    it('rejects an empty structured PDF page window', async () => {
+        mockHandleZoteroDocumentRequest.mockResolvedValue({ result: { content_kind: 'pdf', mode: 'structured', document: { pageCount: 2, pages: [{ index: 0, items: [] }] } } });
+        const response = await callTool(endpoint, 'read_attachment', { attachment_id: 'u-ATT00001', start_page: 2, include_annotation_locations: true });
+        expect(response.isError).toBe(true);
+        expect(response.content[0].text).toContain('contains no extractable pages');
+    });
+
+    it('does not silently return empty locations when extraction returns markdown', async () => {
+        mockHandleZoteroDocumentRequest.mockResolvedValue({ result: { content_kind: 'pdf', mode: 'markdown', document: { pageCount: 1, pages: [{ index: 0, markdown: 'Source' }] } } });
+        expect((await callTool(endpoint, 'read_attachment', { attachment_id: 'u-ATT00001', include_annotation_locations: true })).isError).toBe(true);
+    });
+
+    it('rejects a mixed PDF note batch before any write when one item lacks a position', async () => {
+        const response = await callTool(endpoint, 'create_note_annotations', { attachment_id: 'u-ATT00001', items: [note, { comment: 'Missing position' }] });
+        expect(response.isError).toBe(true);
+        expect(mockValidateAnnotationNotes).toHaveBeenCalledOnce();
+        expect(mockExecuteAnnotationNotes).not.toHaveBeenCalled();
+    });
+
     it('returns copyable PDF geometry from read_attachment', async () => {
         mockHandleZoteroDocumentRequest.mockResolvedValue({ result: { content_kind: 'pdf', mode: 'structured', document: { pageCount: 2, pages: [
             { index: 0, items: [] },

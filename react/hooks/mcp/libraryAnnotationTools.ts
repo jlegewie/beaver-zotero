@@ -1,3 +1,4 @@
+import { mcpError, generateRequestId, buildNoopTimeoutContext } from './utils';
 import {
     handleListLibrariesRequest,
     handleFindAnnotationsRequest,
@@ -11,6 +12,7 @@ import { resolveObjectId, modelObjectIdFromReference, UNRESOLVED_LIBRARY_ID } fr
 import { getZoteroSelectURI } from '../../../src/utils/zoteroUtils';
 
 const readHints = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+const writeHints = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 const colors = ['yellow', 'red', 'green', 'blue', 'purple', 'magenta', 'orange', 'gray'];
 const string = { type: 'string', minLength: 1 };
 const pageIndex = { type: 'integer', minimum: 0 };
@@ -69,7 +71,7 @@ export const FIND_ANNOTATIONS_TOOL = {
 function creationTool(highlight: boolean) {
     return {
         name: highlight ? 'create_highlight_annotations' : 'create_note_annotations',
-        annotations: { title: highlight ? 'Create Highlight Annotations' : 'Create Note Annotations', ...readHints, readOnlyHint: false, idempotentHint: false },
+        annotations: { title: highlight ? 'Create Highlight Annotations' : 'Create Note Annotations', ...writeHints },
         description: `Create a batch of ${highlight ? 'highlights' : 'sticky-note annotations (not standalone Zotero notes)'} on one local PDF, EPUB, or HTML snapshot attachment. ` +
             'For PDFs, copy exact page_locations or note_position from read_attachment with include_annotation_locations=true; never guess coordinates. ' +
             'The same read option returns EPUB section and text/anchor locators; snapshots use text or anchor_id. ' +
@@ -130,18 +132,13 @@ function validateInput(value: any, schema: any, path = 'arguments'): void {
     }
 }
 
-function errorResult(error: unknown) {
-    return { isError: true, content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }] };
-}
-function requestId(): string { return Zotero.Utilities.randomString(16); }
-
 export async function handleListLibraries(args: unknown = {}): Promise<any> {
     try {
         validateInput(args, LIST_LIBRARIES_TOOL.inputSchema);
-        const response = await handleListLibrariesRequest({ event: 'list_libraries_request', request_id: requestId() });
-        if (response.error) return errorResult(response.error);
+        const response = await handleListLibrariesRequest({ event: 'list_libraries_request', request_id: generateRequestId() });
+        if (response.error) return mcpError(response.error);
         return { libraries: response.libraries, total_count: response.total_count };
-    } catch (error) { return errorResult(error); }
+    } catch (error) { return mcpError(error); }
 }
 
 export async function handleFindAnnotations(args: any = {}): Promise<any> {
@@ -149,12 +146,12 @@ export async function handleFindAnnotations(args: any = {}): Promise<any> {
         validateInput(args, FIND_ANNOTATIONS_TOOL.inputSchema);
         const { library, ...filters } = args;
         const request: WSFindAnnotationsRequest = {
-            ...filters, event: 'find_annotations_request', request_id: requestId(), library_id: library,
+            ...filters, event: 'find_annotations_request', request_id: generateRequestId(), library_id: library,
             recursive: args.recursive ?? true, sort_by: args.sort_by ?? 'date_modified', sort_order: args.sort_order ?? 'desc',
             limit: args.limit ?? 25, offset: args.offset ?? 0,
         };
         const response = await handleFindAnnotationsRequest(request);
-        if (response.error) return errorResult(response.error);
+        if (response.error) return mcpError(response.error);
         const next = request.offset + response.annotations.length;
         const hasMore = response.annotations.length > 0 && next < response.total_count;
         return {
@@ -165,7 +162,7 @@ export async function handleFindAnnotations(args: any = {}): Promise<any> {
             total_count: response.total_count, has_more: hasMore, next_offset: hasMore ? next : null,
             ...(response.note ? { note: response.note } : {}),
         };
-    } catch (error) { return errorResult(error); }
+    } catch (error) { return mcpError(error); }
 }
 
 async function createAnnotations(args: any, highlight: boolean): Promise<any> {
@@ -176,10 +173,6 @@ async function createAnnotations(args: any, highlight: boolean): Promise<any> {
         if (!ref) throw new Error('Invalid attachment_id. Use an ID returned by search or get_item_details.');
         if (ref.library_id === UNRESOLVED_LIBRARY_ID) throw new Error('The attachment library is not available on this computer.');
         for (const [index, item] of args.items.entries()) {
-            const hasPdf = highlight ? !!item.page_locations : !!item.note_position;
-            const hasDom = !!(item.section_href || item.section_ordinal || item.anchor_id || (!highlight && item.text));
-            if (!hasPdf && !hasDom && !highlight) throw new Error(`items[${index}] requires note_position or a DOM text/section/anchor locator.`);
-            // Snapshot highlights can be located by their required text alone.
             for (const location of item.page_locations ?? []) {
                 for (const box of location.boxes) {
                     if (box.r <= box.l || (box.coord_origin === 't' ? box.b <= box.t : box.t <= box.b)) {
@@ -198,8 +191,8 @@ async function createAnnotations(args: any, highlight: boolean): Promise<any> {
         };
         const validate = highlight ? validateCreateHighlightAnnotationsAction : validateCreateNoteAnnotationsAction;
         const execute = highlight ? executeCreateHighlightAnnotationsAction : executeCreateNoteAnnotationsAction;
-        const validation = await validate({ event: 'agent_action_validate', request_id: requestId(), action_type: actionType, action_data: data });
-        if (!validation.valid) return errorResult(validation.error ?? 'Annotation validation failed.');
+        const validation = await validate({ event: 'agent_action_validate', request_id: generateRequestId(), action_type: actionType, action_data: data });
+        if (!validation.valid) return mcpError(validation.error ?? 'Annotation validation failed.');
         const kind = validation.current_value?.content_kind;
         for (const [index, item] of args.items.entries()) {
             if (kind === 'pdf' && !(highlight ? item.page_locations : item.note_position)) {
@@ -213,10 +206,10 @@ async function createAnnotations(args: any, highlight: boolean): Promise<any> {
             }
         }
         const response = await execute({
-            event: 'agent_action_execute', request_id: requestId(), action_type: actionType,
+            event: 'agent_action_execute', request_id: generateRequestId(), action_type: actionType,
             action_data: { ...data, ...validation.normalized_action_data },
-        }, { signal: new AbortController().signal, timeoutSeconds: 120, startTime: Date.now() });
-        if (!response.success) return errorResult(response.error ?? 'Annotation creation failed.');
+        }, buildNoopTimeoutContext());
+        if (!response.success) return mcpError(response.error ?? 'Annotation creation failed.');
         const result = response.result_data ?? {};
         const output = {
             attachment_id: modelObjectIdFromReference(ref),
@@ -227,7 +220,7 @@ async function createAnnotations(args: any, highlight: boolean): Promise<any> {
             failed: result.failed ?? [], total_created: result.total_created ?? 0, total_failed: result.total_failed ?? 0,
         };
         return { content: [{ type: 'text', text: JSON.stringify(output) }], ...(output.total_failed > 0 ? { isError: true } : {}) };
-    } catch (error) { return errorResult(error); }
+    } catch (error) { return mcpError(error); }
 }
 export const handleCreateHighlightAnnotations = (args: any) => createAnnotations(args, true);
 export const handleCreateNoteAnnotations = (args: any) => createAnnotations(args, false);

@@ -32,7 +32,7 @@ import {
     validateCreateNoteAction,
     executeCreateNoteAction,
 } from '../../src/services/agentDataProvider';
-import type { TimeoutContext } from '../../src/services/agentDataProvider/timeout';
+import { mcpError, generateRequestId, buildNoopTimeoutContext } from './mcp/utils';
 import { getCitationKeyFromItem, getZoteroSelectURI } from '../../src/utils/zoteroUtils';
 import {
     libraryRefForLibraryID,
@@ -670,13 +670,6 @@ const LIST_ITEMS_TOOL = {
 // Utilities
 // =============================================================================
 
-function generateRequestId(): string {
-    if (typeof Zotero !== 'undefined' && Zotero.Utilities?.randomString) {
-        return Zotero.Utilities.randomString(16);
-    }
-    return `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
-}
-
 /**
  * Parses an MCP item/attachment id in the portable ("u-KEY" / "g<groupID>-KEY")
  * or legacy numeric ("<libraryID>-KEY") form. `libraryId` is resolved to this
@@ -704,13 +697,6 @@ function getMcpAttachmentStatus(attachment: any): string {
     if (status === 'unreadable') return 'unavailable';
     if (status) return status;
     return attachment.path ? 'available' : 'unavailable';
-}
-
-function mcpError(message: string) {
-    return {
-        content: [{ type: 'text', text: message }],
-        isError: true,
-    };
 }
 
 type McpToolRegistration = {
@@ -944,88 +930,77 @@ export async function handleReadAttachment(args: any): Promise<any> {
         return mcpError(response.error ?? 'Failed to read attachment');
     }
     const result = response.result;
-    if (args.include_annotation_locations && (result.content_kind === 'epub' || result.content_kind === 'snapshot')) {
-        const document = domDocumentToMarkdownPages(result);
-        if (startPage > document.pageCount) return mcpError('start_page is out of range.');
-        return {
-            attachment_id: response.resolved_attachment ? modelObjectIdFromReference(response.resolved_attachment) : args.attachment_id,
-            content_kind: result.content_kind,
-            total_pages: document.pageCount,
-            passages: result.sections.flatMap(section => section.items
-                .filter(item => item.kind !== 'picture')
-                .filter(item => (item.pageNumber ?? section.index + 1) >= startPage && (item.pageNumber ?? section.index + 1) <= endPage)
-                .flatMap(item => {
-                    const texts = item.sentences?.length ? item.sentences.map(sentence => sentence.text) : [item.text ?? ''];
-                    return texts.filter(text => text.trim()).map(text => ({
-                        text,
-                        ...(result.content_kind === 'epub' ? { section_href: section.rawHref, section_ordinal: section.index + 1 } : {}),
-                        ...(item.anchorId ? { anchor_id: item.anchorId } : {}),
-                    }));
+    const includeLocations = args.include_annotation_locations === true;
+    const isDom = result.content_kind === 'epub' || result.content_kind === 'snapshot';
+    const attachmentId = response.resolved_attachment
+        ? modelObjectIdFromReference(response.resolved_attachment)
+        : args.attachment_id;
+    let document: { pageCount: number; pages: AttachmentReadPage[] } | null = null;
+    if (result.content_kind === 'epub' || result.content_kind === 'snapshot') {
+        document = domDocumentToPages(result, includeLocations);
+    } else if (result.content_kind !== 'text') {
+        if (result.mode === 'markdown' && !includeLocations) {
+            document = {
+                pageCount: result.document.pageCount,
+                pages: result.document.pages.map(page => ({ pageNumber: page.index + 1, markdown: page.markdown ?? '' })),
+            };
+        } else if (result.mode === 'structured' && includeLocations) {
+            document = {
+                pageCount: result.document.pageCount,
+                pages: result.document.pages.map(page => ({
+                    pageNumber: page.index + 1,
+                    passages: page.items.flatMap(item => {
+                        const parts = 'sentences' in item && item.sentences?.length
+                            ? item.sentences.map(sentence => ({ text: sentence.text, boxes: sentence.bboxes }))
+                            : 'text' in item ? [{ text: item.text, boxes: [item.bbox] }] : [];
+                        return parts.filter(part => part.boxes.length > 0).map(part => ({
+                            text: part.text,
+                            page_locations: [{
+                                page_idx: page.index,
+                                ...(page.label ? { page_label: page.label } : {}),
+                                boxes: part.boxes.map(([l, t, r, b]) => ({ l, t, r, b, coord_origin: 't' })),
+                            }],
+                            note_position: {
+                                page_index: page.index, side: 'right', coord_origin: 't',
+                                x: part.boxes[0][2], y: (part.boxes[0][1] + part.boxes[0][3]) / 2,
+                            },
+                        }));
+                    }),
                 })),
-        };
+            };
+        }
     }
-    if (result.content_kind !== 'epub' && result.content_kind !== 'snapshot' && result.content_kind !== 'text'
-        && result.mode === 'structured' && args.include_annotation_locations) {
-        if (startPage > result.document.pageCount) return mcpError('start_page is out of range.');
-        return {
-            attachment_id: response.resolved_attachment ? modelObjectIdFromReference(response.resolved_attachment) : args.attachment_id,
-            total_pages: result.document.pageCount,
-            pages: result.document.pages.filter(page => page.index + 1 >= startPage && page.index + 1 <= endPage).map(page => ({
-                page: page.index + 1,
-                passages: page.items.flatMap(item => {
-                    const parts = 'sentences' in item && item.sentences?.length
-                        ? item.sentences.map(sentence => ({ text: sentence.text, boxes: sentence.bboxes }))
-                        : 'text' in item ? [{ text: item.text, boxes: [item.bbox] }] : [];
-                    return parts.filter(part => part.boxes.length > 0).map(part => ({
-                        text: part.text,
-                        page_locations: [{
-                            page_idx: page.index,
-                            ...(page.label ? { page_label: page.label } : {}),
-                            boxes: part.boxes.map(([l, t, r, b]) => ({ l, t, r, b, coord_origin: 't' })),
-                        }],
-                        note_position: {
-                            page_index: page.index, side: 'right', coord_origin: 't',
-                            x: part.boxes[0][2], y: (part.boxes[0][1] + part.boxes[0][3]) / 2,
-                        },
-                    }));
-                }),
-            })),
-        };
-    }
-    const markdownDocument = result.content_kind === 'epub' || result.content_kind === 'snapshot'
-        ? domDocumentToMarkdownPages(result)
-        : result.content_kind === 'text'
-            ? null
-            : result.mode === 'markdown'
-                ? {
-                    pageCount: result.document.pageCount,
-                    pages: result.document.pages.map((page) => ({
-                        pageNumber: page.index + 1,
-                        markdown: page.markdown ?? '',
-                    })),
-                }
-                : null;
-    if (!markdownDocument) {
+    if (!document) {
         return mcpError('Attachment read returned an unsupported document format.');
     }
 
-    const totalPages = markdownDocument.pageCount;
+    const totalPages = document.pageCount;
     if (Number.isInteger(totalPages) && totalPages >= 0 && startPage > totalPages) {
         return mcpError(`Requested start_page ${startPage} is out of range; attachment has ${totalPages} pages.`);
     }
 
-    const requestedPages = markdownDocument.pages.filter(
+    const requestedPages = document.pages.filter(
         (page) => page.pageNumber >= startPage && page.pageNumber <= endPage,
     );
     if (requestedPages.length === 0) {
         return mcpError(`Requested page window ${startPage}-${endPage} is out of range or contains no extractable pages.`);
     }
 
+    if (includeLocations) {
+        return {
+            attachment_id: attachmentId,
+            total_pages: totalPages,
+            ...(isDom
+                ? { content_kind: result.content_kind, passages: requestedPages.flatMap(page => page.passages ?? []) }
+                : { pages: requestedPages.map(page => ({ page: page.pageNumber, passages: page.passages ?? [] })) }),
+        };
+    }
+
     // Build plain text response with <pageN> tags
     const actualEnd = requestedPages.length > 0
         ? requestedPages[requestedPages.length - 1].pageNumber
         : startPage;
-    const header = `Attachment: ${args.attachment_id} | Total pages: ${markdownDocument.pageCount ?? 'unknown'} | Showing pages ${startPage}-${actualEnd}`;
+    const header = `Attachment: ${attachmentId} | Total pages: ${document.pageCount ?? 'unknown'} | Showing pages ${startPage}-${actualEnd}`;
     const pageTexts = requestedPages.map(
         (p) => `<page${p.pageNumber}>\n${p.markdown}\n</page${p.pageNumber}>`,
     );
@@ -1033,9 +1008,10 @@ export async function handleReadAttachment(args: any): Promise<any> {
     return [header, '', ...pageTexts].join('\n');
 }
 
-interface AttachmentMarkdownPage {
+interface AttachmentReadPage {
     pageNumber: number;
-    markdown: string;
+    markdown?: string;
+    passages?: Record<string, unknown>[];
 }
 
 type DomReadItem = {
@@ -1046,13 +1022,16 @@ type DomReadItem = {
     level?: number;
     sentences?: Array<{ text: string }>;
     pageNumber?: number;
+    sectionHref?: string;
+    anchorId?: string;
 };
 
 // EPUB and snapshot both carry stamped per-item page numbers. Grouping items by
 // that coordinate keeps MCP reads aligned with backend read pagination.
-function domDocumentToMarkdownPages(
+function domDocumentToPages(
     document: Extract<NonNullable<WSZoteroDocumentResponse['result']>, { content_kind: 'epub' | 'snapshot' }>,
-): { pageCount: number; pages: AttachmentMarkdownPage[] } {
+    includeLocations: boolean,
+): { pageCount: number; pages: AttachmentReadPage[] } {
     const pagesByNumber = new Map<number, DomReadItem[]>();
     const orderedItems = document.sections
         .slice()
@@ -1062,6 +1041,8 @@ function domDocumentToMarkdownPages(
             .sort((a, b) => a.order - b.order)
             .map((item) => ({
                 ...item,
+                sectionHref: section.rawHref,
+                sectionIndex: section.index,
                 pageNumber: item.pageNumber ?? section.index + 1,
             })));
 
@@ -1080,15 +1061,23 @@ function domDocumentToMarkdownPages(
     // table) spans interior pages that no item is stamped to.
     const observedPageCount = Math.max(0, ...Array.from(pagesByNumber.keys()));
     const pageCount = Math.max(document.pageCount ?? observedPageCount, observedPageCount);
-    const pages: AttachmentMarkdownPage[] = [];
+    const pages: AttachmentReadPage[] = [];
     for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
         const items = pagesByNumber.get(pageNumber) ?? [];
         pages.push({
             pageNumber,
-            markdown: items
-                .map(domItemToMarkdown)
-                .filter((text) => text.length > 0)
-                .join('\n\n'),
+            ...(includeLocations ? {
+                passages: items.filter(item => item.kind !== 'picture').flatMap(item => {
+                    const texts = item.sentences?.length ? item.sentences.map(sentence => sentence.text) : [item.text ?? ''];
+                    return texts.filter(text => text.trim()).map(text => ({
+                        text,
+                        ...(document.content_kind === 'epub' ? { section_href: item.sectionHref, section_ordinal: item.sectionIndex + 1 } : {}),
+                        ...(item.anchorId ? { anchor_id: item.anchorId } : {}),
+                    }));
+                }),
+            } : {
+                markdown: items.map(domItemToMarkdown).filter(text => text.length > 0).join('\n\n'),
+            }),
         });
     }
     return { pageCount, pages };
@@ -1161,14 +1150,6 @@ export async function handleReadNote(args: any): Promise<any> {
             item_type: item.item_type,
             title: item.title ?? null,
         })),
-    };
-}
-
-function buildNoopTimeoutContext(): TimeoutContext {
-    return {
-        signal: new AbortController().signal,
-        timeoutSeconds: 120,
-        startTime: Date.now(),
     };
 }
 
