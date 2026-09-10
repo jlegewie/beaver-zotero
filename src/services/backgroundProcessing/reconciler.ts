@@ -83,6 +83,7 @@ export class ReconcilerService {
     private generation = 0;
     private timer: ReturnType<typeof setTimeout> | null = null;
     private prefObservers: symbol[] = [];
+    private idleWaiters: Array<() => void> = [];
     private forceWaiters: Array<() => void> = [];
 
     start(): void {
@@ -115,6 +116,16 @@ export class ReconcilerService {
             try { Zotero.Prefs.unregisterObserver(observer); } catch { /* best effort */ }
         }
         this.prefObservers = [];
+    }
+
+    /** Stop producing work and await the current pass before storage maintenance. */
+    async suspendForMaintenance(): Promise<() => void> {
+        const wasStarted = !this.stopped;
+        this.stop();
+        if (this.running) await new Promise<void>((resolve) => this.idleWaiters.push(resolve));
+        return () => {
+            if (wasStarted && !Zotero.__beaverShuttingDown) this.start();
+        };
     }
 
     notify(): void {
@@ -299,6 +310,7 @@ export class ReconcilerService {
             logger(`ReconcilerService: reconcile failed: ${error}`, 1);
         } finally {
             this.running = false;
+            for (const resolve of this.idleWaiters.splice(0)) resolve();
             this.activeForce = false;
             if (force) {
                 for (const resolve of this.forceWaiters.splice(0)) resolve();

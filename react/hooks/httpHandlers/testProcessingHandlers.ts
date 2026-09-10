@@ -135,6 +135,7 @@ export async function handleTestProcessingResetHttpRequest(
     try {
         const { libraryIds } = await resetLocalProcessingState(
             typeof request?.libraryId === 'number' ? request.libraryId : undefined,
+            { discardRemoteState: true },
         );
         return { ok: true, library_ids: libraryIds, libraries_reset: libraryIds.length };
     } catch (error) {

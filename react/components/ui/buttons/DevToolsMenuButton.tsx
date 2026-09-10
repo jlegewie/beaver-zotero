@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import PdfIcon from '@beaver/agent-ui/icons/PdfIcon';
@@ -27,7 +27,7 @@ import { zoteroContextAtom } from '../../../atoms/zoteroContext';
 import { firstRunReturnRequestedAtom } from '../../../atoms/firstRun';
 import { whereToStartVisibleAtom } from '../../../atoms/whereToStart';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { resetLocalProcessingState } from '../../../../src/services/backgroundProcessing/resetLocalState';
+import { clearDocumentCache } from '../../../../src/services/backgroundProcessing/resetLocalState';
 
 interface DevToolsMenuButtonProps {
     className?: string;
@@ -45,6 +45,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
     currentMessageContent = '',
 }) => {
     const zoteroContext = useAtomValue(zoteroContextAtom);
+    const [isResettingCache, setIsResettingCache] = useState(false);
     const setFirstRunReturnRequested = useSetAtom(firstRunReturnRequestedAtom);
     const setWhereToStartVisible = useSetAtom(whereToStartVisibleAtom);
 
@@ -363,24 +364,17 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         }
     };
 
-    // Wipe extracted text and the processing ledger together so preferences
-    // no longer report files as processed after a cache clear.
+    // Clear cached text and reset local progress while retaining remote cleanup state.
     const handleClearDocumentCache = async () => {
+        setIsResettingCache(true);
         console.log("[Document Cache Reset] Starting...");
         try {
-            const documentCache = Zotero.Beaver?.documentCache;
-            if (documentCache) {
-                const { metadataRows, payloadRows } = await documentCache.clearAll();
-                console.log(`[Document Cache Reset] Cache: ${metadataRows} metadata rows, ${payloadRows} payload rows`);
-            } else {
-                console.warn("[Document Cache Reset] DocumentCache not available");
-            }
-            const { libraryIds } = await resetLocalProcessingState();
-            Zotero.Beaver?.processingReconciler?.notify();
-            Zotero.Beaver?.backgroundExtractor?.notify();
-            console.log(`[Document Cache Reset] Processing ledger reset for ${libraryIds.length} libraries`);
+            await clearDocumentCache(true);
+            console.log('[Document Cache Reset] Cache and local processing progress reset');
         } catch (error) {
             console.error("[Document Cache Reset] Failed:", error);
+        } finally {
+            setIsResettingCache(false);
         }
     };
 
@@ -806,10 +800,10 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             disabled: false,
         },
         {
-            label: "Reset Document Cache & Processing",
+            label: isResettingCache ? "Resetting Document Cache…" : "Reset Document Cache & Processing",
             onClick: handleClearDocumentCache,
             icon: PdfIcon,
-            disabled: false,
+            disabled: isResettingCache,
         },
         {
             label: "Reset Embedding Index",

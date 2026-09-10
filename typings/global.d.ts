@@ -539,6 +539,7 @@ declare namespace Zotero {
                 state: import("../src/services/database").ProcessingIndexStateRecord,
             ): Promise<void>;
             deleteProcessingIndexState(libraryId: number): Promise<void>;
+            resetLocalProcessingState(libraryId?: number, discardRemoteState?: boolean): Promise<void>;
         }
 
         const backgroundExtractor:

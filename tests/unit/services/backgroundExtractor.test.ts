@@ -224,6 +224,26 @@ describe('BackgroundExtractor', () => {
         expect(mockState.extractCalls).toHaveLength(0);
     });
 
+    it('waits for a dispatcher pass to finish before allowing cache maintenance', async () => {
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        let release!: () => void;
+        const barrier = new Promise<void>((resolve) => { release = resolve; });
+        vi.spyOn(proc, 'processOnce').mockImplementation(async () => {
+            await barrier;
+            return { processed: false, reason: 'empty' };
+        });
+        const tick = (proc as any).tick();
+        let suspended = false;
+        const suspension = proc.suspendForMaintenance().then(() => { suspended = true; });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(suspended).toBe(false);
+        release();
+        await tick;
+        await suspension;
+        expect(suspended).toBe(true);
+    });
+
     describe('searchable-library boundary', () => {
         const enqueueJob = async (libraryId: number) => {
             await db.enqueueBackgroundJob({

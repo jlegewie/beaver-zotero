@@ -1,36 +1,36 @@
-/**
- * Drop local background-processing state so the next reconcile rebuilds from
- * scratch. Does not touch the document cache: tests reuse cached extractions,
- * and a cache wipe is a separate, explicit action.
- *
- * Queued jobs go too — leaving them would let the previous run's work land on
- * a ledger that no longer expects it. Untag jobs are included here (unlike
- * `deleteBackgroundJobsByLibrary`) because a reset promises an empty queue.
- */
+/** Reset processing progress; only isolated tests may discard remote-cleanup state. */
 export async function resetLocalProcessingState(
     libraryId?: number,
+    options: { discardRemoteState?: boolean } = {},
 ): Promise<{ libraryIds: number[] }> {
     const db = Zotero.Beaver?.db;
     if (!db) throw new Error('db not available');
-    const conn = (db as unknown as {
-        conn: { queryAsync: (sql: string, params?: unknown[]) => Promise<unknown> };
-    }).conn;
-    if (!conn?.queryAsync) throw new Error('db connection unavailable');
-
     const libraryIds = typeof libraryId === 'number'
         ? [libraryId]
         : Zotero.Libraries.getAll()
             .filter((library) => library.libraryType === 'user' || library.libraryType === 'group')
             .map((library) => library.libraryID);
 
-    for (const id of libraryIds) {
-        await conn.queryAsync(`DELETE FROM background_jobs WHERE library_id = ?`, [id]);
-        await conn.queryAsync(`DELETE FROM background_jobs_dead WHERE library_id = ?`, [id]);
-        await db.deleteAttachmentProcessingStatesByLibrary(id);
-        await db.deleteProcessingIndexState(id);
-    }
-    if (typeof libraryId !== 'number') {
-        await conn.queryAsync(`DELETE FROM document_processing_failures`);
-    }
+    await db.resetLocalProcessingState(libraryId, options.discardRemoteState === true);
     return { libraryIds };
+}
+
+/** Clear local storage while its background consumers are suspended. */
+export async function clearDocumentCache(resetProcessing = false): Promise<void> {
+    const beaver = Zotero.Beaver;
+    const cache = beaver?.documentCache;
+    if (!cache) throw new Error('Document cache unavailable');
+    await cache.runMaintenance(async () => {
+        let resumeReconciler: (() => void) | undefined;
+        let resumeExtractor: (() => void) | undefined;
+        try {
+            resumeReconciler = await beaver.processingReconciler?.suspendForMaintenance();
+            resumeExtractor = await beaver.backgroundExtractor?.suspendForMaintenance();
+            await cache.clearAll();
+            if (resetProcessing) await resetLocalProcessingState();
+        } finally {
+            resumeExtractor?.();
+            resumeReconciler?.();
+        }
+    });
 }

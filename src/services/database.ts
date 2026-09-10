@@ -2416,6 +2416,57 @@ export class BeaverDB {
         );
     }
 
+    /** Reset local progress while retaining the identities needed for remote cleanup. */
+    public async resetLocalProcessingState(libraryId?: number, discardRemoteState = false): Promise<void> {
+        const where = libraryId === undefined ? '' : ' WHERE library_id = ?';
+        const params = libraryId === undefined ? [] : [libraryId];
+        await this.conn.executeTransaction(async () => {
+            if (!discardRemoteState) {
+                // Upserts may be the only remaining record of a replaced document hash.
+                const cleanup: BackgroundJobInput[] = [];
+                for (const table of ['background_jobs', 'background_jobs_dead']) {
+                    await this.queryAsync(
+                        `SELECT library_id, zotero_key, content_kind, payload_json FROM ${table}
+                         ${where} ${where ? 'AND' : 'WHERE'} job_type = 'fulltext_upsert'`,
+                        params,
+                        { onRow: (row: any) => {
+                            const payload = JSON.parse(row.getResultByIndex(3)) as BackgroundJobPayload;
+                            if (!payload?.previous_doc_hash || payload.previous_doc_hash === payload.doc_hash) return;
+                            cleanup.push({
+                                jobType: 'fulltext_untag', libraryId: row.getResultByIndex(0),
+                                zoteroKey: row.getResultByIndex(1), contentKind: row.getResultByIndex(2),
+                                payloadKind: 'structured', priority: BACKGROUND_UNTAG_PRIORITY, now: Date.now(),
+                                payload: { ...payload, index_action: 'untag', doc_hash: payload.previous_doc_hash,
+                                    previous_doc_hash: undefined },
+                            });
+                        } },
+                    );
+                }
+                for (const job of cleanup) await this.enqueueBackgroundJobInTransaction(job);
+            }
+            for (const table of ['background_jobs', 'background_jobs_dead']) {
+                await this.queryAsync(
+                    `DELETE FROM ${table}${where}${discardRemoteState ? '' :
+                        ` ${where ? 'AND' : 'WHERE'} job_type != 'fulltext_untag'`}`, params,
+                );
+            }
+            if (discardRemoteState) {
+                await this.queryAsync(`DELETE FROM attachment_processing_state${where}`, params);
+            } else {
+                // Keep hash and membership facts until a replacement extraction can
+                // retire the old remote reference, including after an offline reset.
+                await this.queryAsync(`UPDATE attachment_processing_state SET
+                    extract_status = NULL, ocr_status = CASE WHEN ocr_status = 'na' THEN 'na' ELSE NULL END,
+                    file_mtime_ms = NULL,
+                    file_size_bytes = NULL, ocr_engine_version = NULL,
+                    upsert_status = CASE WHEN upsert_status = 'done' THEN 'done' ELSE NULL END,
+                    last_error = NULL, updated_at = datetime('now')${where}`, params);
+            }
+            await this.queryAsync(`DELETE FROM processing_index_state${where}`, params);
+            if (libraryId === undefined) await this.queryAsync('DELETE FROM document_processing_failures');
+        });
+    }
+
     /** Drop content-reading work when a library leaves Beaver's scope. */
     public async deleteBackgroundJobsByLibrary(libraryId: number): Promise<void> {
         await this.queryAsync(

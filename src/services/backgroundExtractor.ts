@@ -94,6 +94,7 @@ export class BackgroundExtractor {
     private started = false;
     private currentTickId: ReturnType<typeof setTimeout> | undefined;
     private tickRunning = false;
+    private tickIdleWaiters: Array<() => void> = [];
     private pendingWake = false;
     private dbWritesPermanentlyDisabled = false;
     private prefEnabled = true;
@@ -336,6 +337,16 @@ export class BackgroundExtractor {
         }
 
         this.scheduleTick(STARTUP_DELAY_MS);
+    }
+
+    /** Suspend background work for local storage maintenance, preserving startup state. */
+    async suspendForMaintenance(): Promise<() => void> {
+        const wasStarted = this.started;
+        await this.stop();
+        if (this.tickRunning) await new Promise<void>((resolve) => this.tickIdleWaiters.push(resolve));
+        return () => {
+            if (wasStarted && !Zotero.__beaverShuttingDown) this.start();
+        };
     }
 
     /**
@@ -865,6 +876,7 @@ export class BackgroundExtractor {
             );
         } finally {
             this.tickRunning = false;
+            for (const resolve of this.tickIdleWaiters.splice(0)) resolve();
         }
     }
 

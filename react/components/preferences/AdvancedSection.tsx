@@ -12,6 +12,7 @@ import { getPref, setPref } from "../../../src/utils/prefs";
 import { TickIcon, CopyIcon } from "../icons/icons";
 import { normalizeVoiceLanguage, voiceLanguages } from "../../voice/languages";
 import CustomInstructionsSection from "./CustomInstructionsSection";
+import { clearDocumentCache } from "../../../src/services/backgroundProcessing/resetLocalState";
 import {
     deleteAllExternalFiles,
     getExternalFilesStats,
@@ -38,6 +39,7 @@ const AdvancedSection: React.FC = () => {
     const [isDeletingExternalFiles, setIsDeletingExternalFiles] = useState(false);
     const [isDeletingCache, setIsDeletingCache] = useState(false);
     const [cacheDeleted, setCacheDeleted] = useState(false);
+    const [cacheError, setCacheError] = useState<string | null>(null);
 
     const refreshExternalFileStats = useCallback(async () => {
         try {
@@ -88,12 +90,15 @@ const AdvancedSection: React.FC = () => {
 
     const handleDeleteDocumentCache = useCallback(async () => {
         setIsDeletingCache(true);
+        setCacheDeleted(false);
+        setCacheError(null);
         try {
-            await Zotero.Beaver?.documentCache?.clearAll();
+            await clearDocumentCache();
             setCacheDeleted(true);
             setTimeout(() => setCacheDeleted(false), 2000);
         } catch (error) {
             logger(`AdvancedSection: failed to clear document cache: ${error}`, 1);
+            setCacheError("Could not delete the cache. Please try again.");
         } finally {
             setIsDeletingCache(false);
         }
@@ -239,7 +244,7 @@ const AdvancedSection: React.FC = () => {
                 />
                 <SettingsRow
                     title="Document Cache"
-                    description="Text extracted from PDFs and other documents, stored to avoid re-processing files"
+                    description={cacheError ?? "Locally cached text from PDFs and other documents. Deleted text is recreated when needed; cloud search data is retained."}
                     hasBorder
                     control={
                         <Button
