@@ -38,7 +38,7 @@ describe('showFeatureTipAtom', () => {
         vi.useFakeTimers();
         const now = Date.UTC(2026, 8, 9);
         vi.setSystemTime(now);
-        const delays = getVersionUpdateMessageConfig('0.25.0')!.deferFeatureTips!;
+        const delays = getVersionUpdateMessageConfig('0.25.0-beta.1')!.deferFeatureTips!;
         deferFeatureTips(delays, now);
         expect(readFeatureTipState().shown).toEqual({});
         expect(readFeatureTipState().lastShownAt).toBeUndefined();
