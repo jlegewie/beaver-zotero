@@ -20,6 +20,7 @@ This is a **stateless POST-only subset** of Streamable HTTP. Each request gets a
 |------|--------|---------|
 | `src/services/mcpService.ts` | esbuild (imported by webpack) | MCP protocol engine: JSON-RPC 2.0 dispatch, tool registry, Zotero endpoint registration |
 | `react/hooks/useMcpServer.ts` | webpack | React hook: reads pref, registers tools with handlers, manages lifecycle |
+| `react/hooks/mcp/libraryAnnotationTools.ts` | webpack | Library and annotation tool schemas, validation, and adapters |
 | `react/index.tsx` | webpack | Mounts `useMcpServer()` in `GlobalContextInitializer` |
 | `addon/prefs.js` | N/A | `mcpServerEnabled` preference (default: `false`) |
 
@@ -167,7 +168,7 @@ curl -X POST http://localhost:PORT/beaver/mcp \
 
 ## Available Tools
 
-All tools that accept or return item/attachment IDs use the `<library_id>-<zotero_key>` format (e.g., `1-ABC12345`).
+Item and attachment IDs use portable library references (e.g. `u-ABC12345` or `g12345-ABC12345`). Legacy numeric IDs such as `1-ABC12345` are also accepted.
 
 ### `search_by_topic`
 
@@ -337,6 +338,63 @@ Browse items in the library, optionally filtered by collection or tag.
 **Response**: JSON with `total_count`, `has_more`, `next_offset`, and `items[]`. Item shape depends on `item_category`: regular items have `item_id`, `item_type`, `title`, `authors`, `year`, `date_added`, `date_modified` (no attachment IDs — use `get_item_details` to get those); notes have `parent_item_id`, `parent_title`, `date_modified`; attachments have `filename`, `content_type`, `parent_item_id`, `parent_title`, `annotations_count`, `date_modified`.
 
 **Underlying handler**: `handleListItemsRequest` from `src/services/agentDataProvider/`.
+
+---
+
+### `list_libraries`
+
+Lists only libraries available to Beaver. Returns `libraries` and `total_count`;
+rows include `library_ref` (`u` or `g<groupID>`), the local `library_id`, name,
+read-only status, and item/note/collection/tag counts. Takes no arguments.
+Use `library_ref` in the `library` argument of library-scoped tools.
+
+### `find_annotations`
+
+Searches annotation text and comments, with optional `tag`, `color`,
+`annotation_type` (`highlight`, `underline`, `note`), `author`, `attachment_id`,
+`collection`, `library`, and `modified_in_last` (e.g. `7 days`) filters.
+Supply at least one narrowing filter besides `library`. Filters combine with AND.
+The personal library is the default. Collection searches recurse by default.
+
+Results include annotation IDs, text, comments, source IDs, tags, and Zotero links.
+`limit` defaults to 25 (maximum 50); `offset` defaults to zero. Responses include
+`total_count`, `has_more`, `next_offset`, and any scan-limit note from the search.
+Sort with `sort_by` (`date_modified`, `date_added`, `reading_order`) and
+`sort_order` (`asc`, `desc`).
+
+### `create_highlight_annotations` and `create_note_annotations`
+
+Enable **Annotation Tools** in Beaver's advanced preferences
+(`extensions.zotero.beaver.mcpAnnotationToolsEnabled`, default `false`) and refresh
+the MCP client's tool list. This setting is independent of the Create Note tool.
+The tools create reader annotations on a single local PDF, EPUB, or HTML snapshot;
+`create_note_annotations` creates sticky notes on the attachment.
+
+Both accept `attachment_id`, an `items` array (1–50 entries), and optional `tags`
+applied to every annotation. Each item accepts an optional `color` (one of Zotero's
+eight palette names; default yellow). Highlights require `text`; notes require
+`comment`. Highlight comments are optional.
+
+For PDFs, call `read_attachment` with `include_annotation_locations: true` and a
+page range. Its structured `pages[].passages[]` output includes exact source
+`text`, `page_locations`, and `note_position`. Copy these locations into the
+creation request; do not invent coordinates. Page indices in locations are
+zero-based; the read tool's page range is one-based. Highlight boxes are PDF
+points in Beaver's extraction frame with an explicit `coord_origin` (`t` for
+top-left, `b` for bottom-left). Multi-page highlights produce one annotation per
+page. Note positions use `page_index`, `x`, `y`, `side`, and `coord_origin`.
+
+For EPUBs, provide `section_href` or a one-based `section_ordinal`, plus `text` or
+`anchor_id` to locate the passage. Snapshots use `text` or `anchor_id`. The same
+`read_attachment` option returns these as copyable `passages` for EPUBs and
+snapshots; section ordinals are separate from the read tool’s page window.
+
+The MCP client owns approval. Beaver validates library access, editability, and
+attachment availability, then executes directly. Responses include `created`
+(with `annotation_id` and `zotero_uri`), `failed`, `total_created`, and
+`total_failed`. Failed batches, including partial failures, set MCP `isError`;
+any successful writes are still returned. Retry only failed entries to avoid
+duplicates. Each result's zero-based `index` identifies the original input item.
 
 ---
 

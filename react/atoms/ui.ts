@@ -102,6 +102,7 @@ export interface PendingActionEditRequest {
 export const pendingActionEditRequestAtom = atom<PendingActionEditRequest | null>(null);
 export const mcpServerEnabledAtom = atom(getPref('mcpServerEnabled'));
 export const mcpCreateNoteToolEnabledAtom = atom(getPref('mcpCreateNoteToolEnabled'));
+export const mcpAnnotationToolsEnabledAtom = atom(getPref('mcpAnnotationToolsEnabled'));
 export const dataProviderEnabledAtom = atom(getPref('dataProviderEnabled'));
 export const requestPlusToolsAtom = atom(getPref('requestPlusTools'));
 export const isWebSearchAllowedAtom = atom((get) => Boolean(get(isUsingBeaverCreditsAtom) || get(requestPlusToolsAtom)));

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Button from "@beaver/agent-ui/primitives/Button";
 import {SettingsGroup, SettingsRow, DocLink} from "./components/SettingsElements";
-import { dataProviderEnabledAtom, mcpCreateNoteToolEnabledAtom, mcpServerEnabledAtom } from "../../atoms/ui";
+import { dataProviderEnabledAtom, mcpAnnotationToolsEnabledAtom, mcpCreateNoteToolEnabledAtom, mcpServerEnabledAtom } from "../../atoms/ui";
 import { isMcpServerSupportedAtom } from "../../atoms/profile";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { currentMessageExternalFilesAtom } from "../../atoms/messageComposition";
@@ -101,6 +101,7 @@ const AdvancedSection: React.FC = () => {
 
     // --- Atoms: MCP Server enabled ---
     const [mcpServerEnabled, setMcpServerEnabled] = useAtom(mcpServerEnabledAtom);
+    const [mcpAnnotationToolsEnabled, setMcpAnnotationToolsEnabled] = useAtom(mcpAnnotationToolsEnabledAtom);
     const [mcpCreateNoteToolEnabled, setMcpCreateNoteToolEnabled] = useAtom(mcpCreateNoteToolEnabledAtom);
     const [mcpCopied, setMcpCopied] = useState(false);
     const [mcpHttpCopied, setMcpHttpCopied] = useState(false);
@@ -170,6 +171,13 @@ const AdvancedSection: React.FC = () => {
         setPref('mcpCreateNoteToolEnabled', newValue);
         setMcpCreateNoteToolEnabled(newValue);
     }, [mcpCreateNoteToolEnabled, isMcpServerSupported, setMcpCreateNoteToolEnabled]);
+
+    const handleMcpAnnotationToolsToggle = useCallback(() => {
+        if (!isMcpServerSupported) return;
+        const value = !mcpAnnotationToolsEnabled;
+        setPref('mcpAnnotationToolsEnabled', value);
+        setMcpAnnotationToolsEnabled(value);
+    }, [mcpAnnotationToolsEnabled, isMcpServerSupported, setMcpAnnotationToolsEnabled]);
 
     // --- Data provider (library access for other Beaver clients) ---
     const [dataProviderEnabled, setDataProviderEnabled] = useAtom(dataProviderEnabledAtom);
@@ -336,6 +344,29 @@ const AdvancedSection: React.FC = () => {
                                 aria-label="Enable Create Note Tool"
                                 checked={mcpCreateNoteToolEnabled}
                                 onChange={handleMcpCreateNoteToolToggle}
+                                onClick={(e) => e.stopPropagation()}
+                                disabled={!isMcpServerSupported}
+                                style={{ cursor: isMcpServerSupported ? 'pointer' : 'not-allowed', margin: 0 }}
+                            />
+                        </div>
+                    }
+                />
+                <SettingsRow
+                    title="Enable Annotation Tools"
+                    description="Allow MCP clients to create highlights and sticky-note annotations. Changing setting requires reloading of the MCP server."
+                    onClick={handleMcpAnnotationToolsToggle}
+                    hasBorder
+                    disabled={!isMcpServerSupported}
+                    tooltip={isMcpServerSupported
+                        ? 'Advertise and allow the annotation creation MCP tools'
+                        : 'Only available with Beaver Pro'}
+                    control={
+                        <div className="display-flex flex-row items-center gap-2">
+                            <input
+                                type="checkbox"
+                                aria-label="Enable Annotation Tools"
+                                checked={mcpAnnotationToolsEnabled}
+                                onChange={handleMcpAnnotationToolsToggle}
                                 onClick={(e) => e.stopPropagation()}
                                 disabled={!isMcpServerSupported}
                                 style={{ cursor: isMcpServerSupported ? 'pointer' : 'not-allowed', margin: 0 }}

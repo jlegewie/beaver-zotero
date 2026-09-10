@@ -9,10 +9,15 @@ import { tryGetWindowRuntime } from '../runtime/windowRuntime';
  *
  * Tools: search_by_topic, search_by_metadata, read_attachment, read_note,
  *        get_item_details, list_collections, list_tags, list_items
- * Optional tool: create_note
+ *        list_libraries, find_annotations
+ * Optional tools: create_note, create_highlight_annotations, create_note_annotations
  */
 
 import { useEffect } from 'react';
+import {
+    LIST_LIBRARIES_TOOL, FIND_ANNOTATIONS_TOOL, CREATE_HIGHLIGHT_ANNOTATIONS_TOOL, CREATE_NOTE_ANNOTATIONS_TOOL,
+    handleListLibraries, handleFindAnnotations, handleCreateHighlightAnnotations, handleCreateNoteAnnotations,
+} from './mcp/libraryAnnotationTools';
 import { useAtomValue } from 'jotai';
 import { MCPService } from '../../src/services/mcpService';
 import {
@@ -38,7 +43,7 @@ import {
 } from '../../src/utils/libraryIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isAuthenticatedAtom } from '../atoms/auth';
-import { mcpCreateNoteToolEnabledAtom, mcpServerEnabledAtom } from '../atoms/ui';
+import { mcpAnnotationToolsEnabledAtom, mcpCreateNoteToolEnabledAtom, mcpServerEnabledAtom } from '../atoms/ui';
 import { store } from '../store';
 import type {
     WSItemSearchByTopicRequest,
@@ -331,6 +336,10 @@ const READ_ATTACHMENT_TOOL = {
                 type: 'string',
                 description:
                     'The attachment ID as returned by other tools, in the form `<library>-<zotero_key>` (e.g., "u-ABC12345"; legacy numeric ids like "1-ABC12345" are also accepted). Obtain this from search results.',
+            },
+            include_annotation_locations: {
+                type: 'boolean', default: false,
+                description: 'Return structured passages with exact annotation locators: PDF page_locations and note_position, or EPUB/snapshot text and section/anchor identifiers.',
             },
             start_page: {
                 type: 'integer',
@@ -885,6 +894,9 @@ async function handleSearchByMetadata(args: any): Promise<any> {
  */
 export async function handleReadAttachment(args: any): Promise<any> {
     const MAX_PAGES = 30;
+    if (args.include_annotation_locations !== undefined && typeof args.include_annotation_locations !== 'boolean') {
+        return mcpError('include_annotation_locations must be a boolean.');
+    }
 
     const parsed = parseItemId(args.attachment_id);
     if (!parsed) {
@@ -923,7 +935,7 @@ export async function handleReadAttachment(args: any): Promise<any> {
             zotero_key: parsed.key,
             library_ref: parsed.libraryRef ?? libraryRefForLibraryID(parsed.libraryId) ?? undefined,
         },
-        mode: 'markdown',
+        mode: args.include_annotation_locations ? 'structured' : 'markdown',
     };
 
     const response: WSZoteroDocumentResponse = await handleZoteroDocumentRequest(wsRequest);
@@ -932,6 +944,54 @@ export async function handleReadAttachment(args: any): Promise<any> {
         return mcpError(response.error ?? 'Failed to read attachment');
     }
     const result = response.result;
+    if (args.include_annotation_locations && (result.content_kind === 'epub' || result.content_kind === 'snapshot')) {
+        const document = domDocumentToMarkdownPages(result);
+        if (startPage > document.pageCount) return mcpError('start_page is out of range.');
+        return {
+            attachment_id: response.resolved_attachment ? modelObjectIdFromReference(response.resolved_attachment) : args.attachment_id,
+            content_kind: result.content_kind,
+            total_pages: document.pageCount,
+            passages: result.sections.flatMap(section => section.items
+                .filter(item => item.kind !== 'picture')
+                .filter(item => (item.pageNumber ?? section.index + 1) >= startPage && (item.pageNumber ?? section.index + 1) <= endPage)
+                .flatMap(item => {
+                    const texts = item.sentences?.length ? item.sentences.map(sentence => sentence.text) : [item.text ?? ''];
+                    return texts.filter(text => text.trim()).map(text => ({
+                        text,
+                        ...(result.content_kind === 'epub' ? { section_href: section.rawHref, section_ordinal: section.index + 1 } : {}),
+                        ...(item.anchorId ? { anchor_id: item.anchorId } : {}),
+                    }));
+                })),
+        };
+    }
+    if (result.content_kind !== 'epub' && result.content_kind !== 'snapshot' && result.content_kind !== 'text'
+        && result.mode === 'structured' && args.include_annotation_locations) {
+        if (startPage > result.document.pageCount) return mcpError('start_page is out of range.');
+        return {
+            attachment_id: response.resolved_attachment ? modelObjectIdFromReference(response.resolved_attachment) : args.attachment_id,
+            total_pages: result.document.pageCount,
+            pages: result.document.pages.filter(page => page.index + 1 >= startPage && page.index + 1 <= endPage).map(page => ({
+                page: page.index + 1,
+                passages: page.items.flatMap(item => {
+                    const parts = 'sentences' in item && item.sentences?.length
+                        ? item.sentences.map(sentence => ({ text: sentence.text, boxes: sentence.bboxes }))
+                        : 'text' in item ? [{ text: item.text, boxes: [item.bbox] }] : [];
+                    return parts.filter(part => part.boxes.length > 0).map(part => ({
+                        text: part.text,
+                        page_locations: [{
+                            page_idx: page.index,
+                            ...(page.label ? { page_label: page.label } : {}),
+                            boxes: part.boxes.map(([l, t, r, b]) => ({ l, t, r, b, coord_origin: 't' })),
+                        }],
+                        note_position: {
+                            page_index: page.index, side: 'right', coord_origin: 't',
+                            x: part.boxes[0][2], y: (part.boxes[0][1] + part.boxes[0][3]) / 2,
+                        },
+                    }));
+                }),
+            })),
+        };
+    }
     const markdownDocument = result.content_kind === 'epub' || result.content_kind === 'snapshot'
         ? domDocumentToMarkdownPages(result)
         : result.content_kind === 'text'
@@ -1489,6 +1549,7 @@ async function handleListItems(args: any): Promise<any> {
 export function useMcpServer() {
     const enabled = useAtomValue(mcpServerEnabledAtom);
     const createNoteToolEnabled = useAtomValue(mcpCreateNoteToolEnabledAtom);
+    const annotationToolsEnabled = useAtomValue(mcpAnnotationToolsEnabledAtom);
 
     useEffect(() => {
         if (!enabled) {
@@ -1514,9 +1575,18 @@ export function useMcpServer() {
             { def: LIST_COLLECTIONS_TOOL, handler: handleListCollections },
             { def: LIST_TAGS_TOOL, handler: handleListTags },
             { def: LIST_ITEMS_TOOL, handler: handleListItems },
+            { def: LIST_LIBRARIES_TOOL, handler: handleListLibraries },
+            { def: FIND_ANNOTATIONS_TOOL, handler: handleFindAnnotations },
         ];
         if (createNoteToolEnabled) {
             tools.push({ def: CREATE_NOTE_TOOL, handler: handleCreateNote });
+        }
+
+        if (annotationToolsEnabled) {
+            tools.push(
+                { def: CREATE_HIGHLIGHT_ANNOTATIONS_TOOL, handler: handleCreateHighlightAnnotations },
+                { def: CREATE_NOTE_ANNOTATIONS_TOOL, handler: handleCreateNoteAnnotations },
+            );
         }
 
         for (const { def, handler } of tools) {
@@ -1531,5 +1601,5 @@ export function useMcpServer() {
                 service.unregister();
             }
         };
-    }, [enabled, createNoteToolEnabled]);
+    }, [enabled, createNoteToolEnabled, annotationToolsEnabled]);
 }
