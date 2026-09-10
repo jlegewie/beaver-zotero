@@ -237,8 +237,11 @@ export const ProcessingIssueGroupRow: React.FC<{
                     <div className="font-color-secondary text-base">{copy.description}</div>
                 </div>
                 {copy.plansLink && (
-                    <Button variant="outline" onClick={() => setActiveTab('billing')}>
-                        See plans
+                    // <Button variant="outline" onClick={() => setActiveTab('billing')}>
+                    //     See plans
+                    // </Button>
+                    <Button variant="outline" onClick={() => setActiveTab('billing')} disabled>
+                        Soon
                     </Button>
                 )}
                 {retryable && (
