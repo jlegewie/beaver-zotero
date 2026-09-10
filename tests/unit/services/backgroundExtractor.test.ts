@@ -1274,6 +1274,38 @@ describe('BackgroundExtractor', () => {
         expect(proc.getLaneStatus().document_ocr?.inFlight).toBe(0);
     });
 
+    it.each([false, true])('retires budget-limited preparation only if it was not promoted (%s)', async (promoted) => {
+        await db.enqueueBackgroundJob({
+            jobType: 'document_ocr', libraryId: 1, zoteroKey: 'BBBBBBBB',
+            contentKind: 'pdf', payloadKind: 'structured', priority: 105,
+            payload: payload({ prepare_cache: true }), now: 0,
+        });
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        const claimedPriorities: number[] = [];
+        proc.registerExecutor(ocrExecutor(async (record) => {
+            claimedPriorities.push(record.priority);
+            if (record.priority < 100) return { kind: 'complete', reason: 'ocr_ok' };
+            // The claimed record stays at 105 while a user request changes the
+            // persisted priority during the executor's asynchronous work.
+            if (promoted) await db.promotePendingBackgroundJob('document_ocr', 1, 'BBBBBBBB', 'structured', 90);
+            return { kind: 'complete', reason: 'cache_budget_reached' };
+        }), { maxInFlight: 1 });
+
+        expect((await proc.processOnce({ awaitLaunchedJobs: true })).processed).toBe(true);
+        const remaining = await db.peekBackgroundJobs();
+        if (promoted) {
+            expect(remaining).toHaveLength(1);
+            expect(remaining[0].priority).toBe(90);
+            expect(remaining[0].availableAt).toBeLessThanOrEqual(Date.now());
+            expect((await proc.processOnce({ awaitLaunchedJobs: true })).processed).toBe(true);
+            expect(claimedPriorities).toEqual([105, 90]);
+        } else {
+            expect(claimedPriorities).toEqual([105]);
+        }
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+    });
+
     it('parks the row and frees the slot on a defer outcome', async () => {
         await db.enqueueBackgroundJob({
             jobType: 'document_ocr',

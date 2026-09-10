@@ -36,6 +36,8 @@ export interface MaybeEnqueueOcrArgs {
      * and master-toggle gate and yields to on-demand work.
      */
     priority?: number;
+    /** Keep OCR continuations within the explicit preparation storage limit. */
+    prepareCache?: boolean;
 }
 
 /**
@@ -84,6 +86,9 @@ export async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
     }
 
     const priority = args.priority ?? OCR_PRIORITY_ON_DEMAND;
+    const payload = args.prepareCache && priority >= 100
+        ? { content_kind: 'pdf' as const, maxPages: null, timeoutSeconds: 120, prepare_cache: true }
+        : null;
 
     // Hash-free fast path: if a ticket is already queued for this attachment,
     // the work is already tracked — return before reading + MD5-hashing the
@@ -94,6 +99,7 @@ export async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
     // dispatcher only when a promotion actually happened.
     const pending = await db.promotePendingBackgroundJob(
         'document_ocr', args.libraryId, args.zoteroKey, OCR_JOB_PAYLOAD_KIND, priority,
+        payload ?? undefined,
     );
     if (pending.exists) {
         // An exclusion during the probe cannot un-promote the row, but it must
@@ -148,7 +154,7 @@ export async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
         contentKind: 'pdf',
         payloadKind: OCR_JOB_PAYLOAD_KIND,
         priority,
-        payload: null,
+        payload,
         now: Date.now(),
     });
     // An exclusion landing inside the insert leaves an inert row that the

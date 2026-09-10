@@ -835,6 +835,7 @@ export class BeaverDB {
         `);
 
         await this.queryAsync(`DROP TABLE IF EXISTS attachment_file_cache`);
+        await this.queryAsync(`DROP TABLE IF EXISTS document_cache_recovery`);
 
         // Drop and recreate the document cache tables when their schema version
         // changes. The cache re-warms on demand, so resetting is safe. Bump
@@ -4135,6 +4136,35 @@ export class BeaverDB {
         });
     }
 
+    /** Processed files missing local content, ordered by recent use or addition. */
+    public async getUncachedProcessingCandidates(options: {
+        libraryIds: number[]; hasOcrAccess: boolean; firstOnly?: boolean;
+    }): Promise<Array<{ libraryId: number; zoteroKey: string }>> {
+        const result: Array<{ libraryId: number; zoteroKey: string }> = [];
+        if (options.libraryIds.length === 0) return result;
+        await this.queryAsync(`SELECT S.library_id, S.zotero_key
+            FROM attachment_processing_state S
+            LEFT JOIN document_cache_metadata M
+                ON M.library_id = S.library_id AND M.zotero_key = S.zotero_key
+            WHERE S.library_id IN (${options.libraryIds.map(() => '?').join(',')})
+                AND S.extract_status = 'done'
+                AND (S.ocr_status = 'na' ${options.hasOcrAccess ? "OR S.ocr_status = 'done'" : ''})
+                AND NOT EXISTS (SELECT 1 FROM document_cache_payloads P
+                    WHERE P.library_id = S.library_id AND P.zotero_key = S.zotero_key
+                        AND P.payload_kind = 'structured')
+                AND NOT EXISTS (SELECT 1 FROM background_jobs J
+                    WHERE J.library_id = S.library_id AND J.zotero_key = S.zotero_key)
+                AND NOT EXISTS (SELECT 1 FROM background_jobs
+                    WHERE json_extract(payload_json, '$.prepare_cache') = 1)
+            ORDER BY COALESCE(M.last_accessed_at, S.created_at) DESC, S.library_id, S.zotero_key
+            ${options.firstOnly ? 'LIMIT 1' : ''}`, options.libraryIds, {
+            onRow: (row: any) => result.push({
+                libraryId: row.getResultByIndex(0), zoteroKey: row.getResultByIndex(1),
+            }),
+        });
+        return result;
+    }
+
     // =====================================================================
     // External files (user-attached files behind `ext-<KEY>` ids)
     // =====================================================================
@@ -4478,7 +4508,9 @@ export class BeaverDB {
                     available_at  = CASE WHEN content_kind != ? OR ? < priority
                                          THEN MIN(available_at, ?) ELSE available_at END,
                     content_kind  = ?,
-                    payload_json  = CASE WHEN content_kind != ? OR ? < priority OR ? = 'fulltext_upsert'
+                    payload_json  = CASE WHEN priority >= 100 AND ? >= 100
+                                              AND json_extract(?, '$.prepare_cache') = 1 THEN ?
+                                         WHEN content_kind != ? OR ? < priority OR ? = 'fulltext_upsert'
                                          THEN ? ELSE payload_json END,
                     attempt_count = CASE WHEN content_kind != ? OR ? < priority
                                          THEN 0 ELSE attempt_count END,
@@ -4492,6 +4524,7 @@ export class BeaverDB {
                     priority,
                     input.now,
                     input.contentKind,
+                    priority, payloadJson, payloadJson,
                     input.contentKind, priority,
                     input.jobType,
                     payloadJson,
@@ -4545,6 +4578,7 @@ export class BeaverDB {
         zoteroKey: string,
         payloadKind: DocumentCachePayloadKind,
         priority: number,
+        preparationPayload?: BackgroundJobPayload,
     ): Promise<{ exists: boolean; promoted: boolean }> {
         // Current priority doubles as the existence check (dedup key is UNIQUE).
         const current: number[] = [];
@@ -4557,6 +4591,14 @@ export class BeaverDB {
             { onRow: (row: any) => current.push(row.getResultByIndex(0)) },
         );
         if (current.length === 0) return { exists: false, promoted: false };
+        // Fresh detection and its extraction continuation can ticket the same
+        // scan. Preserve the budget marker even when priority does not change.
+        if (preparationPayload?.prepare_cache && priority >= 100) {
+            await this.queryAsync(`UPDATE background_jobs SET payload_json = ?
+                WHERE job_type = ? AND library_id = ? AND zotero_key = ? AND payload_kind = ?
+                    AND dedupe_key = '' AND priority >= 100`,
+            [JSON.stringify(preparationPayload), jobType, libraryId, zoteroKey, payloadKind]);
+        }
         if ((current[0] ?? 0) <= priority) return { exists: true, promoted: false };
 
         // Lower priority only. The `priority > ?` guard keeps the value
@@ -4650,6 +4692,20 @@ export class BeaverDB {
             `DELETE FROM background_jobs WHERE id = ?`,
             [id],
         );
+    }
+
+    /** Retire budget-limited work only while it is still background priority. */
+    public async completeBackgroundPreparationJob(id: number, now: number): Promise<boolean> {
+        let retired = true;
+        await this.conn.executeTransaction(async () => {
+            await this.queryAsync(`DELETE FROM background_jobs WHERE id = ? AND priority >= 100`, [id]);
+            if (await this.lastStatementChangedRow()) return;
+            // A foreground request may have promoted the claimed ticket while
+            // its executor was waiting. Make that work immediately claimable.
+            await this.queryAsync(`UPDATE background_jobs SET available_at = ? WHERE id = ? AND priority < 100`, [now, id]);
+            retired = !(await this.lastStatementChangedRow());
+        });
+        return retired;
     }
 
     /**

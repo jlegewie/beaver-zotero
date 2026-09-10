@@ -83,16 +83,19 @@ describe('DocumentExtractExecutor OCR continuation', () => {
         delete (globalThis as any).Zotero.Beaver;
     });
 
-    async function runExtractJob(priority: number) {
+    async function runExtractJob(priority: number, prepareCache?: boolean, beforeWorker?: () => Promise<void>) {
         await db.enqueueBackgroundJob({
             jobType: 'document_extract', libraryId: 1, itemId: 7, zoteroKey: 'SCANNED1',
             contentKind: 'pdf', payloadKind: 'structured', priority,
-            payload: { content_kind: 'pdf', maxPages: 200, timeoutSeconds: 120 }, now: 0,
+            payload: { content_kind: 'pdf', maxPages: 200, timeoutSeconds: 120, prepare_cache: prepareCache }, now: 0,
         });
         const record = await db.claimNextBackgroundJob(Date.now(), 60_000);
         return new DocumentExtractExecutor().execute(record!, {
             db: db as any,
-            runOnMuPDFWorker: async (fn) => fn(),
+            runOnMuPDFWorker: async (fn) => {
+                await beforeWorker?.();
+                return fn();
+            },
             externalAbortSignal: new AbortController().signal,
             shouldSkipDbWrites: () => false,
             enqueue: async () => {},
@@ -118,6 +121,50 @@ describe('DocumentExtractExecutor OCR continuation', () => {
         const args = mocks.enqueueOcrJob.mock.calls[0]?.[0] as { priority?: number } | undefined;
         expect(args).toBeDefined();
         expect(args!.priority ?? OCR_PRIORITY_ON_DEMAND).toBe(OCR_PRIORITY_ON_DEMAND);
+    });
+
+    it('preserves indexed OCR identity while restoring the same scanned file', async () => {
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'SCANNED1', itemId: 7, contentKind: 'pdf' });
+        await connection.queryAsync(`UPDATE attachment_processing_state SET
+            extract_status = 'done', ocr_status = 'done', ocr_engine_version = 'ocrmypdf-1',
+            file_mtime_ms = 1, file_size_bytes = 2, file_hash = ?,
+            structured_document_hash = 'indexed-hash', upsert_status = 'done', upsert_index_version = '2'`, ['a'.repeat(32)]);
+        const before = await db.getAttachmentProcessingState(1, 'SCANNED1');
+        await runExtractJob(110, true);
+        expect(await db.getAttachmentProcessingState(1, 'SCANNED1')).toEqual(before);
+        expect(mocks.enqueueOcrJob).toHaveBeenCalledOnce();
+        expect(mocks.enqueueOcrJob).toHaveBeenCalledWith(expect.objectContaining({ prepareCache: true }));
+        expect(mocks.extractAndCacheDocument).toHaveBeenCalledWith(expect.objectContaining({ prepareCache: true }));
+    });
+
+    it('stops cache restoration before extraction when the cache has filled', async () => {
+        (Zotero.Beaver as any).documentCache = {
+            getStats: async () => ({ payload_budget_bytes: 1000, payload_total_bytes: 900 }),
+        };
+        expect(await runExtractJob(110, true)).toEqual({ kind: 'complete', reason: 'cache_budget_reached' });
+        expect(mocks.extractAndCacheDocument).not.toHaveBeenCalled();
+        expect(mocks.enqueueOcrJob).not.toHaveBeenCalled();
+    });
+
+    it.each([110, 50])('rechecks cache growth at worker entry while preserving on-demand work (priority %s)', async (priority) => {
+        let usedBytes = 0;
+        const getStats = vi.fn(async () => ({ payload_budget_bytes: 1000, payload_total_bytes: usedBytes }));
+        (Zotero.Beaver as any).documentCache = { getStats };
+        const outcome = await runExtractJob(priority, true, async () => {
+            // Another task fills the cache before this callback owns the worker.
+            usedBytes = 950;
+        });
+        if (priority >= 100) {
+            expect(getStats).toHaveBeenCalledTimes(2);
+            expect(outcome).toEqual({ kind: 'complete', reason: 'cache_budget_reached' });
+            expect(mocks.extractAndCacheDocument).not.toHaveBeenCalled();
+            expect(mocks.enqueueOcrJob).not.toHaveBeenCalled();
+            expect(await db.getAttachmentProcessingState(1, 'SCANNED1')).toMatchObject({ extractStatus: null });
+        } else {
+            expect(outcome).toEqual({ kind: 'complete', reason: 'needs_ocr' });
+            expect(mocks.extractAndCacheDocument).toHaveBeenCalledOnce();
+            expect(mocks.enqueueOcrJob).toHaveBeenCalledOnce();
+        }
     });
 
     it.each(['cached_error', 'response_error'])('does not overwrite a newer successful read when an older %s finishes', async (kind) => {

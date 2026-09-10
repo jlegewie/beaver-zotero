@@ -187,6 +187,8 @@ export interface ExtractAndCacheArgs {
     onRemoteDownloadFailure?: (error: unknown) => void;
     /** Queue priority forwarded to the existing no-text-layer OCR producer. */
     ocrPriority?: number;
+    /** Carry explicit cache preparation through fresh no-text-layer detection. */
+    prepareCache?: boolean;
 }
 
 export interface ExtractAndCacheResolvedPdfArgs
@@ -1480,6 +1482,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                         itemId: zoteroItem.id,
                         pageCount: extractionError.pageCount ?? totalPages,
                         priority: args.ocrPriority,
+                        prepareCache: args.prepareCache,
                     });
                 }
 

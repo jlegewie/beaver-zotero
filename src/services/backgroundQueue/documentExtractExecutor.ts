@@ -22,6 +22,7 @@ import { UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
 import { OCR_PRIORITY_BACKFILL } from '../ocr/constants';
 import { enqueueOcrJob } from '../ocr/enqueueOcr';
+import { shouldStopCachePreparation } from '../backgroundProcessing/cachePreparationBudget';
 import {
     BACKGROUND_UPSERT_PRIORITY,
 } from '../backgroundProcessing/constants';
@@ -97,6 +98,10 @@ export class DocumentExtractExecutor implements JobExecutor {
             return { kind: 'complete', reason: 'library_excluded' };
         }
 
+        if (await shouldStopCachePreparation(record)) {
+            return { kind: 'complete', reason: 'cache_budget_reached' };
+        }
+
         const previous = await ctx.db.ensureAttachmentProcessingState({
             libraryId: item.libraryID,
             zoteroKey: item.key,
@@ -122,7 +127,12 @@ export class DocumentExtractExecutor implements JobExecutor {
         let extracted: ExtractSuccess | JobOutcome;
         try {
             extracted = kind === 'pdf'
-                ? await ctx.runOnMuPDFWorker(() => this.extractPdf(record, ctx, attemptedAt))
+                ? await ctx.runOnMuPDFWorker(async (): Promise<ExtractSuccess | JobOutcome> => {
+                    if (await shouldStopCachePreparation(record)) {
+                        return { kind: 'complete', reason: 'cache_budget_reached' };
+                    }
+                    return this.extractPdf(record, ctx, attemptedAt);
+                })
                 : await this.extractDom(record, item, kind, source.source, ctx, attemptedAt);
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -161,7 +171,14 @@ export class DocumentExtractExecutor implements JobExecutor {
             return { kind: 'complete', reason: 'unsupported_schema_version' };
         }
 
-        const applied = await ctx.db.markAttachmentExtracted({
+        // Detecting the original scan again must not discard its indexed OCR hash.
+        // The OCR completion compares the restored content with that retained hash.
+        const restoringOcr = record.payload?.prepare_cache === true
+            && previous.ocrStatus === 'done' && extracted.ocrStatus === 'needed'
+            && previous.fileMtimeMs === afterSignature.mtime_ms
+            && previous.fileSizeBytes === afterSignature.size_bytes
+            && previous.fileHash === fileHash;
+        const applied = restoringOcr || await ctx.db.markAttachmentExtracted({
             libraryId: item.libraryID,
             zoteroKey: item.key,
             expectedFileMtimeMs: previous.fileMtimeMs,
@@ -194,6 +211,7 @@ export class DocumentExtractExecutor implements JobExecutor {
                     itemId: item.id,
                     pageCount: null,
                     priority: record.priority >= 100 ? OCR_PRIORITY_BACKFILL : undefined,
+                    prepareCache: record.payload?.prepare_cache === true,
                 });
             } catch (error) {
                 logger(`DocumentExtractExecutor: OCR enqueue failed for ${item.libraryID}-${item.key}: ${error}`, 2);
@@ -388,6 +406,7 @@ export class DocumentExtractExecutor implements JobExecutor {
             workerName: 'background',
             externalAbortSignal: ctx.externalAbortSignal,
             ocrPriority: record.priority >= 100 ? OCR_PRIORITY_BACKFILL : undefined,
+            prepareCache: payload.prepare_cache === true,
         });
         switch (result.kind) {
             case 'ok':

@@ -403,9 +403,11 @@ declare namespace Zotero {
                 zoteroKey: string,
                 payloadKind: import("../src/services/database").DocumentCachePayloadKind,
                 priority: number,
+                preparationPayload?: import("../src/services/database").BackgroundJobPayload,
             ): Promise<{ exists: boolean; promoted: boolean }>;
 
             completeBackgroundJob(id: number): Promise<void>;
+            completeBackgroundPreparationJob(id: number, now: number): Promise<boolean>;
 
             failBackgroundJob(
                 id: number,
@@ -548,6 +550,7 @@ declare namespace Zotero {
             getAttachmentReadingKeysByLibrary(libraryId: number): Promise<string[]>;
             deleteAttachmentReadingState(libraryId: number, zoteroKey: string): Promise<void>;
             resetLocalProcessingState(libraryId?: number, discardRemoteState?: boolean): Promise<void>;
+            getUncachedProcessingCandidates: import('../src/services/database').BeaverDB['getUncachedProcessingCandidates'];
         }
 
         const backgroundExtractor:

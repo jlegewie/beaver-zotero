@@ -710,17 +710,27 @@ export class BackgroundExtractor {
         if (this.shouldSkipDbWrites()) return;
 
         switch (outcome.kind) {
-            case 'complete':
-                await db.completeBackgroundJob(record.id);
+            case 'complete': {
+                let reason = outcome.reason;
+                if (reason === 'cache_budget_reached') {
+                    const retired = await db.completeBackgroundPreparationJob(record.id, Date.now());
+                    if (!retired) {
+                        reason = 'promoted_to_on_demand';
+                        this.notify();
+                    }
+                } else {
+                    await db.completeBackgroundJob(record.id);
+                }
                 logger(
-                    `BackgroundExtractor: job id=${record.id} done (${outcome.reason})`,
+                    `BackgroundExtractor: job id=${record.id} settled (${reason})`,
                     3,
                 );
                 dispatchBackgroundEvent('background-job:done', {
                     id: record.id,
-                    reason: outcome.reason,
+                    reason,
                 });
                 return;
+            }
             case 'release':
                 await db.releaseBackgroundJob(record.id, Date.now());
                 logger(

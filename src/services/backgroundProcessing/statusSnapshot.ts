@@ -8,6 +8,7 @@ import type { ProcessingIssueSummary } from './issues';
 import type { IndexStatusResponse } from '../searchIndex/searchIndexApiClient';
 import { searchIndexApiClient } from '../searchIndex/searchIndexApiClient';
 import { getZoteroUserIdentifier } from '../../utils/zoteroUtils';
+import { getUncachedCandidates } from './cachePreparation';
 
 /** Entitlements the snapshot's shape depends on. */
 export interface ProcessingStatusEntitlements {
@@ -86,6 +87,9 @@ export async function collectProcessingStatus(
         Zotero.Beaver?.documentCache?.getStats().catch(() => null)
             ?? Promise.resolve(null),
     ]);
+    if (documentCache) {
+        documentCache.can_prepare_uncached_files = (await getUncachedCandidates(documentCache, true)).length > 0;
+    }
     const extractor = Zotero.Beaver?.backgroundExtractor;
     const lanes = extractor?.getLaneStatus?.() ?? {};
     const activeTypes = Object.keys(lanes).filter((type) =>

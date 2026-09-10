@@ -85,6 +85,36 @@ describe('BeaverDB document cache methods', () => {
         await conn.closeDatabase();
     });
 
+    const candidates = () => db.getUncachedProcessingCandidates({ libraryIds: [1], hasOcrAccess: false });
+
+    it('finds previously processed missing content without a recorded clear, preserving server membership', async () => {
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'ABCD1234', contentKind: 'pdf' });
+        await conn.queryAsync(`UPDATE attachment_processing_state SET extract_status = 'done',
+            ocr_status = 'na', structured_document_hash = 'indexed', upsert_status = 'done', upsert_index_version = '2'`);
+        const before = await db.getAttachmentProcessingState(1, 'ABCD1234');
+        expect(await candidates()).toEqual([{ libraryId: 1, zoteroKey: 'ABCD1234' }]);
+        await db.initDatabase('0.99.0');
+        expect(await candidates()).toHaveLength(1);
+        expect(await db.getAttachmentProcessingState(1, 'ABCD1234')).toEqual(before);
+        expect((await db.getBackgroundQueueStats(Date.now())).pending).toBe(0);
+    });
+
+    it('offers preparation after cache loss and hides it once content is cached again', async () => {
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'ABCD1234', contentKind: 'pdf' });
+        await conn.queryAsync("UPDATE attachment_processing_state SET extract_status = 'done', ocr_status = 'na'");
+        const seed = async () => {
+            const { metadata } = await db.upsertDocumentCacheMetadata(makeMetadata());
+            await db.upsertDocumentCachePayload(makePayload({ metadataId: metadata.id }));
+        };
+        await seed();
+        expect(await candidates()).toEqual([]);
+        await db.deleteAllDocumentCache();
+        expect(await candidates()).toHaveLength(1);
+        expect((await db.getBackgroundQueueStats(Date.now())).pending).toBe(0);
+        await seed();
+        expect(await candidates()).toEqual([]);
+    });
+
     it('upserts and reads metadata by library/key', async () => {
         await db.upsertDocumentCacheMetadata(makeMetadata());
 

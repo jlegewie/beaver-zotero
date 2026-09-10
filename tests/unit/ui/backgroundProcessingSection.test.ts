@@ -7,12 +7,14 @@ import { backgroundProcessingStatusAtom } from '../../../react/atoms/backgroundP
 import { hasSearchIndexAccessAtom } from '../../../react/atoms/profile';
 import BackgroundProcessingSection from '../../../react/components/preferences/BackgroundProcessingSection';
 
-const { refresh, prefs, clearCache } = vi.hoisted(() => ({
+const { refresh, prefs, clearCache, prepareCache } = vi.hoisted(() => ({
     refresh: vi.fn().mockResolvedValue(undefined),
     clearCache: vi.fn().mockResolvedValue(undefined),
+    prepareCache: vi.fn().mockResolvedValue(1),
     prefs: { backgroundProcessingEnabled: true, backgroundProcessingContinuous: false },
 }));
 vi.mock('../../../src/services/backgroundProcessing/resetLocalState', () => ({ clearDocumentCache: clearCache }));
+vi.mock('../../../src/services/backgroundProcessing/cachePreparation', () => ({ prepareUncachedFiles: prepareCache }));
 vi.mock('../../../react/atoms/profile', async () => {
     const { atom } = await import('jotai');
     return {
@@ -295,4 +297,33 @@ it('reports a cache deletion failure and retains the action for another attempt'
         expect(container.querySelector('[role="alert"]')?.textContent).toContain('could not be deleted');
         expect(button.disabled).toBe(false);
     });
+});
+
+it.each([false, true])('offers contextual cache recovery with search access %s', async (searchAccess) => {
+    const store = createStore();
+    store.set(hasSearchIndexAccessAtom, searchAccess);
+    store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
+        documentCache: { ...cacheStats, can_prepare_uncached_files: true },
+    });
+    await withView(store, async (container) => {
+        const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Process uncached files')!;
+        expect(button).toBeDefined();
+        expect(container.textContent?.includes('Your server search index is unaffected')).toBe(searchAccess);
+        await act(async () => button.click());
+        expect(prepareCache).toHaveBeenCalledOnce();
+        expect(refresh).toHaveBeenCalledOnce();
+        await act(async () => store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
+            documentCache: { ...cacheStats, can_prepare_uncached_files: false },
+        }));
+        expect(container.textContent).not.toContain('Process uncached files');
+    });
+});
+
+it('hides cache recovery while background processing is off', async () => {
+    prefs.backgroundProcessingEnabled = false;
+    const store = createStore();
+    store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
+        documentCache: { ...cacheStats, can_prepare_uncached_files: true },
+    });
+    await withView(store, (container) => expect(container.textContent).not.toContain('Process uncached files'));
 });

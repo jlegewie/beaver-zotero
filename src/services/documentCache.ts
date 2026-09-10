@@ -69,6 +69,8 @@ export interface DocumentPreflightMetadata {
 }
 
 export interface DocumentCacheStats {
+    /** Processed files are missing cached content and space is available. */
+    can_prepare_uncached_files?: boolean;
     /** Distinct registered documents with compatible payloads, excluding error metadata. */
     cached_document_count: number;
     metadata_count: number;

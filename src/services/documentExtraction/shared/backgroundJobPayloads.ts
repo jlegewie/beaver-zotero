@@ -4,6 +4,8 @@ import {
 } from "@beaver/agent-core/extract/document/shared/contentKinds";
 
 export interface IndexBackgroundJobMetadata {
+  /** Explicit local preparation stops claiming files when the cache fills. */
+  prepare_cache?: boolean;
   index_action?: "upsert" | "untag";
   /** Hash to untag for a delete/replacement operation. */
   doc_hash?: string;

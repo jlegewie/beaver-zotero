@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
-import { maybeEnqueueOcrJob } from '../../../src/services/ocr/enqueueOcr';
+import { enqueueOcrJob, maybeEnqueueOcrJob } from '../../../src/services/ocr/enqueueOcr';
+import { BeaverDB } from '../../../src/services/database';
+import { MockDBConnection } from '../../mocks/mockDBConnection';
 import {
     OCR_ENGINE_VERSION,
     OCR_PRIORITY_BACKFILL,
@@ -237,7 +239,7 @@ describe('maybeEnqueueOcrJob', () => {
         await flush();
 
         expect(promote).toHaveBeenCalledWith(
-            'document_ocr', 1, 'AAAAAAAA', 'structured', OCR_PRIORITY_ON_DEMAND,
+            'document_ocr', 1, 'AAAAAAAA', 'structured', OCR_PRIORITY_ON_DEMAND, undefined,
         );
         expect(hashAccessed).not.toHaveBeenCalled();
         expect(isPermFailed).not.toHaveBeenCalled();
@@ -255,7 +257,7 @@ describe('maybeEnqueueOcrJob', () => {
         await flush();
 
         expect(promote).toHaveBeenCalledWith(
-            'document_ocr', 1, 'AAAAAAAA', 'structured', OCR_PRIORITY_ON_DEMAND,
+            'document_ocr', 1, 'AAAAAAAA', 'structured', OCR_PRIORITY_ON_DEMAND, undefined,
         );
         expect(hashAccessed).not.toHaveBeenCalled();
         expect(enqueueBackgroundJob).not.toHaveBeenCalled();
@@ -306,4 +308,49 @@ describe('maybeEnqueueOcrJob', () => {
 
         expect(enqueueBackgroundJob).not.toHaveBeenCalled();
     });
+});
+
+it.each(['new', 'existing', 'insert-race'])('persists the preparation marker on %s OCR tickets', async (scenario) => {
+    setupBeaver(true);
+    const connection = new MockDBConnection();
+    const db = new BeaverDB(connection);
+    try {
+        await db.initDatabase('0.99.0');
+        (Zotero.Beaver as any).db = db;
+        const seed = () => db.enqueueBackgroundJob({
+            jobType: 'document_ocr', libraryId: 1, zoteroKey: 'AAAAAAAA',
+            contentKind: 'pdf', payloadKind: 'structured', priority: OCR_PRIORITY_BACKFILL,
+            payload: null, now: Date.now(),
+        });
+        if (scenario === 'existing') await seed();
+        if (scenario === 'insert-race') {
+            vi.spyOn(db, 'promotePendingBackgroundJob').mockImplementationOnce(async () => {
+                await seed();
+                return { exists: false, promoted: false };
+            });
+        }
+        await enqueueOcrJob({ ...args(), priority: OCR_PRIORITY_BACKFILL, prepareCache: true });
+        const jobs = await db.peekBackgroundJobs();
+        expect(jobs).toHaveLength(1);
+        expect(jobs[0]).toMatchObject({ priority: OCR_PRIORITY_BACKFILL, payload: { content_kind: 'pdf', prepare_cache: true } });
+        await enqueueOcrJob(args());
+        expect((await db.peekBackgroundJobs())[0].priority).toBe(OCR_PRIORITY_ON_DEMAND);
+    } finally {
+        await connection.closeDatabase();
+    }
+});
+
+it('does not apply preparation limits to an existing on-demand OCR ticket', async () => {
+    setupBeaver(true);
+    const connection = new MockDBConnection();
+    const db = new BeaverDB(connection);
+    try {
+        await db.initDatabase('0.99.0');
+        (Zotero.Beaver as any).db = db;
+        await enqueueOcrJob(args());
+        await enqueueOcrJob({ ...args(), priority: OCR_PRIORITY_BACKFILL, prepareCache: true });
+        expect((await db.peekBackgroundJobs())[0]).toMatchObject({ priority: OCR_PRIORITY_ON_DEMAND, payload: null });
+    } finally {
+        await connection.closeDatabase();
+    }
 });

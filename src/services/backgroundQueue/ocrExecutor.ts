@@ -33,6 +33,7 @@ import {
     buildIndexJobPayload,
 } from '../backgroundProcessing/utils';
 import { BACKGROUND_UPSERT_PRIORITY } from '../backgroundProcessing/constants';
+import { shouldStopCachePreparation } from '../backgroundProcessing/cachePreparationBudget';
 import {
     ocrApiClient,
     type OcrError,
@@ -201,6 +202,9 @@ export class OcrExecutor implements JobExecutor {
         record: BackgroundJobRecord,
         ctx: JobExecutionContext,
     ): Promise<JobOutcome> {
+        if (await shouldStopCachePreparation(record)) {
+            return { kind: 'complete', reason: 'cache_budget_reached' };
+        }
         const resolved = await this.resolveJob(record, ctx);
         if ('outcome' in resolved) return resolved.outcome;
         const job = resolved.job;
@@ -240,9 +244,12 @@ export class OcrExecutor implements JobExecutor {
             return ready.outcome;
         }
 
+        if (await shouldStopCachePreparation(record)) {
+            return { kind: 'complete', reason: 'cache_budget_reached' };
+        }
         const ocrBytes = await this.download(ready.getUrl, job, ctx);
 
-        const outcome = await this.reextractAndCache(job, ocrBytes, ctx, ledgerGuard);
+        const outcome = await this.reextractAndCache(job, ocrBytes, ctx, ledgerGuard, record);
         await this.persistFailedOutcome(job, outcome, ctx);
         return outcome;
     }
@@ -661,12 +668,14 @@ export class OcrExecutor implements JobExecutor {
         ocrBytes: Uint8Array,
         ctx: JobExecutionContext,
         ledgerGuard: AttachmentProcessingStateRecord | null,
+        record: BackgroundJobRecord,
     ): Promise<JobOutcome> {
         this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
         // Hand the MuPDF extraction to the serialized background lane.
         logger(`OcrExecutor: ${job.sourceKey} re-extracting OCR searchable PDF`, 3);
-        const result = await ctx.runOnMuPDFWorker(() =>
-            extractPdfBytesAndCacheAsOriginalAttachment({
+        const result = await ctx.runOnMuPDFWorker(async () => {
+            if (await shouldStopCachePreparation(record)) return null;
+            return extractPdfBytesAndCacheAsOriginalAttachment({
                 item: job.item,
                 filePath: job.filePath,
                 ocrBytes,
@@ -675,8 +684,9 @@ export class OcrExecutor implements JobExecutor {
                 sourceSizeBytes: job.sourceSizeBytes,
                 workerName: 'background',
                 abortSignal: ctx.externalAbortSignal,
-            }),
-        );
+            });
+        });
+        if (!result) return { kind: 'complete', reason: 'cache_budget_reached' };
         this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
 
         switch (result.kind) {

@@ -191,6 +191,82 @@ describe('OcrExecutor', () => {
         expect(executor.jobType).toBe('document_ocr');
     });
 
+    const preparation = { ...record, priority: OCR_PRIORITY_BACKFILL, payload: {
+        content_kind: 'pdf', maxPages: null, timeoutSeconds: 120, prepare_cache: true,
+    } };
+
+    it('stops queued preparation OCR after an earlier continuation fills the cache', async () => {
+        let usedBytes = 0;
+        (Zotero.Beaver!.documentCache as any).getStats = vi.fn(async () => ({
+            payload_budget_bytes: 1000, payload_total_bytes: usedBytes,
+        }));
+        api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
+        mockedReextract.mockImplementationOnce(async () => {
+            usedBytes = 950;
+            return { kind: 'ok', pageCount: 5 } as any;
+        });
+        expect(await executor.execute(preparation, makeCtx())).toEqual({ kind: 'complete', reason: 'ocr_ok' });
+        expect(await executor.execute({ ...preparation, id: 8, zoteroKey: 'BBBBBBBB' }, makeCtx()))
+            .toEqual({ kind: 'complete', reason: 'cache_budget_reached' });
+        expect(api.requestOcr).toHaveBeenCalledOnce();
+        expect(mockedGet).toHaveBeenCalledOnce();
+        expect(mockedReextract).toHaveBeenCalledOnce();
+        expect(dbStub.markAttachmentOcrFailed).not.toHaveBeenCalled();
+    });
+
+    it('rechecks space after the backend responds, before downloading OCR output', async () => {
+        const getStats = vi.fn()
+            .mockResolvedValueOnce({ payload_budget_bytes: 1000, payload_total_bytes: 0 })
+            .mockResolvedValue({ payload_budget_bytes: 1000, payload_total_bytes: 950 });
+        (Zotero.Beaver!.documentCache as any).getStats = getStats;
+        api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
+        expect(await executor.execute(preparation, makeCtx()))
+            .toEqual({ kind: 'complete', reason: 'cache_budget_reached' });
+        expect(mockedGet).not.toHaveBeenCalled();
+        expect(mockedReextract).not.toHaveBeenCalled();
+    });
+
+    it('retires a parked preparation ticket when the cache fills before its next claim', async () => {
+        let usedBytes = 0;
+        (Zotero.Beaver!.documentCache as any).getStats = vi.fn(async () => ({
+            payload_budget_bytes: 1000, payload_total_bytes: usedBytes,
+        }));
+        api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'preparation-job' });
+        fakePoller.poll.mockResolvedValue({ kind: 'completed', getUrl: 'https://gcs/get' });
+        expect(await executor.execute(preparation, makeCtx())).toEqual({ kind: 'defer', reason: 'ocr_polling' });
+        await executor.drainTracks();
+        usedBytes = 950;
+        expect(await executor.execute(preparation, makeCtx()))
+            .toEqual({ kind: 'complete', reason: 'cache_budget_reached' });
+        expect(api.requestOcr).toHaveBeenCalledOnce();
+        expect(mockedGet).not.toHaveBeenCalled();
+        expect(mockedReextract).not.toHaveBeenCalled();
+    });
+
+    it('rechecks space when the serialized worker becomes available', async () => {
+        let usedBytes = 0;
+        (Zotero.Beaver!.documentCache as any).getStats = vi.fn(async () => ({
+            payload_budget_bytes: 1000, payload_total_bytes: usedBytes,
+        }));
+        api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
+        const ctx = makeCtx({ runOnMuPDFWorker: async (fn) => { usedBytes = 950; return fn(); } });
+        expect(await executor.execute(preparation, ctx))
+            .toEqual({ kind: 'complete', reason: 'cache_budget_reached' });
+        expect(mockedGet).toHaveBeenCalledOnce();
+        expect(mockedReextract).not.toHaveBeenCalled();
+        expect(dbStub.markAttachmentOcrDone).not.toHaveBeenCalled();
+    });
+
+    it('allows a preparation ticket promoted to on-demand OCR to run with a full cache', async () => {
+        (Zotero.Beaver!.documentCache as any).getStats = vi.fn(async () => ({
+            payload_budget_bytes: 1000, payload_total_bytes: 1000,
+        }));
+        api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
+        expect(await executor.execute({ ...preparation, priority: 90 }, makeCtx()))
+            .toEqual({ kind: 'complete', reason: 'ocr_ok' });
+        expect(mockedReextract).toHaveBeenCalledOnce();
+    });
+
     it('downloads, re-extracts, and completes on a cache hit (ready)', async () => {
         api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
         const ctx = makeCtx();

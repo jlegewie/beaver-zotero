@@ -17,6 +17,7 @@ import { describeStatus, plural, type StatusTone } from './processingStatusSente
 import PlayIcon from '@beaver/agent-ui/icons/PlayIcon';
 import StopIcon from '@beaver/agent-ui/icons/StopIcon';
 import { clearDocumentCache } from '../../../src/services/backgroundProcessing/resetLocalState';
+import { prepareUncachedFiles } from '../../../src/services/backgroundProcessing/cachePreparation';
 
 /** Format a byte count with one decimal in the largest fitting binary unit. */
 function formatBytes(bytes: number): string {
@@ -211,6 +212,19 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
 
     const cache = status.documentCache;
     const [clearingCache, setClearingCache] = useState(false);
+    const [preparingCache, setPreparingCache] = useState(false);
+    const prepareCache = async () => {
+        setPreparingCache(true);
+        setActionError(null);
+        try {
+            await prepareUncachedFiles();
+        } catch (error) {
+            setActionError(error instanceof Error ? error.message : 'Could not prepare files.');
+        } finally {
+            await refresh();
+            setPreparingCache(false);
+        }
+    };
     const [actionError, setActionError] = useState<string | null>(null);
     const readingIssues = status.issues.filter((group) => group.reason !== 'index_failed');
     const indexIssues = status.issues.filter((group) => group.reason === 'index_failed');
@@ -316,11 +330,22 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                             + formatBytes(cache.payload_total_bytes)
                             + (cache.payload_budget_bytes > 0 ? ` of ${formatBytes(cache.payload_budget_bytes)}` : '')
                         : status.updatedAt === null ? 'Checking local storage…' : 'Local cache status unavailable'}
-                    description="Cached text helps Beaver respond faster. Older cached text is removed as needed to stay within the storage limit. Clearing this cache leaves your original files and server search index intact."
-                    control={<Button variant="outline" onClick={clearCache} disabled={clearingCache || !cache} loading={clearingCache}>
+                    description="Cached text helps Beaver respond faster. Clearing cached text frees local storage and leaves your original files intact."
+                    control={<Button variant="outline" onClick={clearCache} disabled={clearingCache || preparingCache || !cache} loading={clearingCache}>
                         Clear local cache
                     </Button>}
                 />
+                {enabled && cache?.can_prepare_uncached_files && <SettingsRow
+                    title="Process uncached files"
+                    description="Process missing cached text now for faster responses, staying within the storage limit."
+                    hasBorder
+                    control={<Button variant="outline" onClick={prepareCache} disabled={clearingCache || preparingCache} loading={preparingCache}>
+                        Process uncached files
+                    </Button>}
+                />}
+                {hasSearchAccess && <div className="font-color-secondary text-base" style={{ padding: '8px 12px' }}>
+                    Your server search index is unaffected by clearing or restoring the local cache.
+                </div>}
                 {hasOcrAccess && <div className="font-color-secondary text-base" style={{ padding: '8px 12px' }}>
                     Scanned files may need preparation again after their cached text is removed.
                 </div>}
