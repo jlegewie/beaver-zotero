@@ -33,6 +33,7 @@ describe('versionUpdatePopupMessage', () => {
             learnMoreLabel: 'More',
             steps: [{ title: 'Step', showcase: 'quick-prompt' }],
             showcase: 'quick-prompt',
+            primaryAction: { type: 'quick-prompt', label: 'Try now' },
         };
         expect(versionUpdatePopupMessage(config)).toEqual({
             type: 'version_update',
@@ -46,6 +47,7 @@ describe('versionUpdatePopupMessage', () => {
             featureList: undefined,
             steps: config.steps,
             showcase: 'quick-prompt',
+            primaryAction: config.primaryAction,
             expire: false,
         });
     });
@@ -68,7 +70,7 @@ describe('versionUpdatePopupMessage', () => {
 
 describe('the quick prompt release note', () => {
     it('floats in the corner the feature lives in, with its showcase', () => {
-        const config = getVersionUpdateMessageConfig('0.25.0');
+        const config = getVersionUpdateMessageConfig('0.25.0-beta.1');
         expect(config?.inPanel).toBe(false);
         expect(config?.showcase).toBe('quick-prompt');
         expect(getVersionShowcase(config?.showcase)).toEqual(expect.any(Function));

@@ -9,6 +9,12 @@ import type { FeatureTipId } from './featureTips';
  */
 export type VersionShowcaseId = 'quick-prompt';
 
+/** Declarative actions keep release configuration safe for the plugin bundle. */
+export type VersionUpdateAction =
+    | { type: 'open-beaver'; label: string }
+    | { type: 'quick-prompt'; label: string }
+    | { type: 'open-url'; label: string; url: string };
+
 /**
  * Example prompt shown as a chat bubble in the feature tour
  */
@@ -62,6 +68,8 @@ export interface VersionUpdateMessageConfig {
     footer?: string;
     /** When true, display inside the sidebar panel instead of as a floating popup */
     inPanel?: boolean;
+    /** Primary button on the floating release card; defaults to Open Beaver. */
+    primaryAction?: VersionUpdateAction;
 }
 
 const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
@@ -591,6 +599,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         title: "Introducing Quick Prompt",
         text: "Press {{quickPromptShortcut}} to open a composer in the corner. Beaver works while you stay in Zotero: the card shows progress, asks for approvals, and reports the result.",
         showcase: 'quick-prompt',
+        primaryAction: { type: 'quick-prompt', label: 'Try now' },
         inPanel: false,
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.25.0-beta.1" target='_blank'>Full changelog</a>`,
     },

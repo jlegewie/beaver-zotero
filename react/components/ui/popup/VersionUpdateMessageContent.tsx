@@ -1,4 +1,7 @@
 import React from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { chatAccessGateAtom } from '../../../atoms/chatAccess';
+import { openQuickPromptAtom } from '../../../atoms/quickPrompt';
 import { TickIcon, CancelIcon } from '../../icons/icons';
 import Icon from '@beaver/agent-ui/icons/Icon';
 import { PopupMessage, PopupMessageFeature } from '../../../types/popupMessage';
@@ -96,11 +99,24 @@ const FloatingVersionCard: React.FC<{
     learnMoreUrl?: string;
     learnMoreLabel?: string;
     Showcase?: React.ComponentType;
+    primaryAction?: PopupMessage['primaryAction'];
     onDismiss: () => void;
-}> = ({ version, title, text, subtitle, features, footer, learnMoreUrl, learnMoreLabel, Showcase, onDismiss }) => {
-    const handleOpenBeaver = () => {
-        eventManager.dispatch('toggleChat', { forceOpen: true });
+}> = ({ version, title, text, subtitle, features, footer, learnMoreUrl, learnMoreLabel, Showcase, primaryAction, onDismiss }) => {
+    const gate = useAtomValue(chatAccessGateAtom);
+    const openQuickPrompt = useSetAtom(openQuickPromptAtom);
+    const action = primaryAction ?? { type: 'open-beaver', label: 'Open Beaver' };
+    const buttonLabel = action.type === 'quick-prompt' && gate
+        ? (gate === 'signed-out' ? 'Sign in to try' : 'Open Beaver')
+        : action.label;
+    const handlePrimaryAction = () => {
         onDismiss();
+        if (action.type === 'open-url') {
+            Zotero.launchURL(action.url);
+        } else if (action.type === 'quick-prompt' && !gate) {
+            void openQuickPrompt();
+        } else {
+            eventManager.dispatch('toggleChat', { forceOpen: true });
+        }
     };
 
     const handleLearnMore = () => {
@@ -204,8 +220,8 @@ const FloatingVersionCard: React.FC<{
                     </div>
                 )}
                 {!footer && !learnMoreUrl && <div />}
-                <Button onClick={handleOpenBeaver} variant="solid">
-                    Open Beaver
+                <Button onClick={handlePrimaryAction} variant="solid">
+                    {buttonLabel}
                 </Button>
             </div>
         </div>
@@ -244,6 +260,7 @@ const VersionUpdateMessageContent: React.FC<VersionUpdateMessageContentProps> = 
                 learnMoreUrl={learnMoreUrl}
                 learnMoreLabel={learnMoreLabel}
                 Showcase={Showcase}
+                primaryAction={message.primaryAction}
                 onDismiss={onDismiss || (() => {})}
             />
         );

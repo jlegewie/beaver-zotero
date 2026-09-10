@@ -33,6 +33,7 @@ export function versionUpdatePopupMessage(config: VersionUpdateMessageConfig): O
         steps: config.steps?.map((step) => ({ ...step, description: fillPlaceholders(step.description) })),
         subtitle: fillPlaceholders(config.subtitle),
         showcase: config.showcase,
+        primaryAction: config.primaryAction,
         expire: false,
     };
 }
