@@ -54,6 +54,7 @@ import {
     handleReadNoteRequest,
 } from '../../src/services/agentDataProvider';
 import { handleTestVoiceHttpRequest } from './httpHandlers/testVoiceHandlers';
+import { handleTestVersionPopupHttpRequest } from './httpHandlers/testVersionPopupHandlers';
 import {
     handleTestPingHttpRequest,
     handleTestCacheMetadataHttpRequest,
@@ -202,6 +203,7 @@ import {
     handleTestTableVersionsHttpRequest,
     handleTestTableRevertHttpRequest,
     handleTestTableDeleteHttpRequest,
+    handleTestTableTrimHttpRequest,
     handleTestTableOpenHttpRequest,
     handleTestTableCorruptHttpRequest,
     handleTestTableShadowHttpRequest,
@@ -1287,6 +1289,9 @@ function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/table-revert'] =
             createEndpoint(handleTestTableRevertHttpRequest);
 
+        endpoints['/beaver/test/table-trim'] =
+            createEndpoint(handleTestTableTrimHttpRequest);
+
         endpoints['/beaver/test/table-delete'] =
             createEndpoint(handleTestTableDeleteHttpRequest);
 
@@ -1330,6 +1335,9 @@ function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/quick-prompt'] =
             createEndpoint(handleTestQuickPromptHttpRequest);
+
+        endpoints['/beaver/test/version-popup'] =
+            createEndpoint(handleTestVersionPopupHttpRequest);
 
         endpoints['/beaver/test/saved-actions'] =
             createEndpoint(handleTestListSavedActionsHttpRequest);

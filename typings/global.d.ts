@@ -707,6 +707,11 @@ declare namespace Zotero {
         function registerMenu(options: any): string | false;
         function unregisterMenu(menuID: string): boolean;
     }
+
+    /** Full-text indexing. `queueItem` is missing from zotero-types. */
+    namespace FullText {
+        function queueItem(item: Zotero.Item): Promise<void>;
+    }
 }
 
 declare namespace _ZoteroTypes {
@@ -715,6 +720,10 @@ declare namespace _ZoteroTypes {
         BrowserOfflineException: new (...args: any[]) => Error;
         TimeoutException: new (...args: any[]) => Error;
         SecurityException: new (...args: any[]) => Error;
+    }
+
+    interface FullText {
+        queueItem(item: Zotero.Item): Promise<void>;
     }
 
     interface Zotero {

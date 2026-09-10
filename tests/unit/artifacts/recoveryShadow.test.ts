@@ -64,6 +64,7 @@ import {
     openTable,
     restoreShadowVersion,
     writeTable,
+    trimTable,
     type TableHistory,
     type TableWriteResult,
 } from '../../../src/services/artifacts/tableStore';
@@ -241,7 +242,7 @@ async function resolveConflictTowardRemote(
     spec: TableSpec,
     version: number
 ): Promise<void> {
-    const stored = { ...spec, key: KEY, version };
+    const stored = { ...spec, spec_version: 1, key: KEY, version };
     const serialized = JSON.stringify(stored);
 
     await mkdir(sidecar(), { recursive: true });
@@ -748,4 +749,71 @@ describe('what the item-pane section reports', () => {
         // every selection is the cost this screen exists to avoid.
         expect(reads).not.toContain(htmlPath);
     });
+});
+
+
+it('keeps the table intact when trim cannot retire the discarded recovery shadow', async () => {
+    await createTable({ spec: demoSpec('One'), actor: 'user' });
+    await writeTable(ref, demoSpec('Two'), {
+        actor: 'agent',
+        run_id: 'discard',
+        thread_id: 'thread',
+    });
+    const before = await readFile(htmlPath, 'utf8');
+    vi.spyOn(db, 'deleteTableShadows').mockRejectedValueOnce(new Error('database unavailable'));
+    await expect(trimTable(ref, { thread_id: 'thread', run_ids: ['discard'] })).rejects.toThrow(
+        'database unavailable'
+    );
+    expect(await readFile(htmlPath, 'utf8')).toBe(before);
+    expect((await openTable(ref)).conflict).toBeNull();
+});
+
+
+it('reports failed shadow cleanup after trash and retries it on the trashed table', async () => {
+    await createTable({ spec: demoSpec('One'), actor: 'agent', run_id: 'discard', thread_id: 'thread' });
+    const request = { thread_id: 'thread', run_ids: ['discard'] };
+    const deletion = vi.spyOn(db, 'deleteTableShadows')
+        .mockRejectedValueOnce(new Error('database unavailable'))
+        .mockRejectedValueOnce(new Error('still unavailable'));
+    expect(await trimTable(ref, request)).toMatchObject({ outcome: 'trashed', saved: false });
+    expect(item.deleted).toBe(true);
+    expect(await lastTableShadow(ref)).not.toBeNull();
+    expect(await trimTable(ref, request)).toMatchObject({ outcome: 'unchanged', saved: false });
+    expect(await lastTableShadow(ref)).not.toBeNull();
+    expect(await trimTable(ref, request)).toMatchObject({ outcome: 'unchanged', saved: true });
+    expect(await lastTableShadow(ref)).toBeNull();
+    expect(deletion).toHaveBeenCalledTimes(3);
+});
+
+it.each(['history', 'save'])('repairs the recovery shadow when creation retries a failed %s step', async (step) => {
+    let imported = false;
+    (Zotero as any).DB = { queryAsync: vi.fn(async (_sql: string, _params: unknown, options: any) => {
+        if (imported) options.onRow({ getResultByIndex: () => item.id });
+    }) };
+    (Zotero as any).ItemFields = { getID: () => 13 };
+    (Zotero.Items as any).getAsync = vi.fn(async () => item);
+    (Zotero.Attachments.importFromSnapshotContent as any).mockImplementation(async ({ snapshotContent }: any) => {
+        await writeFile(htmlPath, snapshotContent, 'utf8');
+        imported = true;
+        return item;
+    });
+    const options = { spec: demoSpec('One'), actor: 'agent' as const, operation_id: 'recover-create', run_id: 'run', thread_id: 'thread' };
+    if (step === 'save') item.saveTx.mockRejectedValueOnce(new Error('interrupted'));
+    else (globalThis as any).IOUtils = { ...realIOUtils, move: async (from: string, to: string) => {
+        if (to.endsWith('history.json')) throw new Error('interrupted');
+        await realIOUtils.move(from, to);
+    } };
+    await expect(createTable(options)).rejects.toThrow('interrupted');
+    expect(await lastTableShadow(ref)).toBeNull();
+    (globalThis as any).IOUtils = realIOUtils;
+    const replay = await createTable(options);
+    expect(replay.replayed).toBe(true);
+    const shadow = await lastTableShadow(ref);
+    expect(shadow).toMatchObject({ version: 1, sha256: replay.sha256 });
+    expect(existsSync(shadow!.payloadPath!)).toBe(true);
+    await writeTable(ref, demoSpec('Two'), { actor: 'user' });
+    const newer = await lastTableShadow(ref);
+    await createTable(options);
+    expect(await lastTableShadow(ref)).toEqual(newer);
+    expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
 });

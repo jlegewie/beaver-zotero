@@ -1,4 +1,7 @@
 import React from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { chatAccessGateAtom } from '../../../atoms/chatAccess';
+import { openQuickPromptAtom } from '../../../atoms/quickPrompt';
 import { TickIcon, CancelIcon } from '../../icons/icons';
 import Icon from '@beaver/agent-ui/icons/Icon';
 import { PopupMessage, PopupMessageFeature } from '../../../types/popupMessage';
@@ -8,6 +11,7 @@ import { parseTextWithLinksAndNewlines } from '../../../utils/parseTextWithLinks
 import FeatureTourContent from './FeatureTourContent';
 import { FeatureStep } from '../../../constants/versionUpdateMessages';
 import { eventManager } from '../../../events/eventManager';
+import { getVersionShowcase } from '../../../constants/versionShowcases';
 
 interface VersionUpdateMessageContentProps {
     message: PopupMessage;
@@ -24,7 +28,8 @@ const LegacyVersionContent: React.FC<{
     learnMoreUrl?: string;
     learnMoreLabel?: string;
     footer?: string;
-}> = ({ text, featureList, learnMoreUrl, learnMoreLabel, footer }) => {
+    Showcase?: React.ComponentType;
+}> = ({ text, featureList, learnMoreUrl, learnMoreLabel, footer, Showcase }) => {
     const handleLearnMore = () => {
         if (learnMoreUrl) {
             Zotero.launchURL(learnMoreUrl);
@@ -38,6 +43,8 @@ const LegacyVersionContent: React.FC<{
                     {parseTextWithLinksAndNewlines(text)}
                 </div>
             )}
+
+            {Showcase && <Showcase />}
 
             {featureList && featureList.length > 0 && (
                 <div className="display-flex flex-col gap-4">
@@ -91,11 +98,25 @@ const FloatingVersionCard: React.FC<{
     footer?: string;
     learnMoreUrl?: string;
     learnMoreLabel?: string;
+    Showcase?: React.ComponentType;
+    primaryAction?: PopupMessage['primaryAction'];
     onDismiss: () => void;
-}> = ({ version, title, text, subtitle, features, footer, learnMoreUrl, learnMoreLabel, onDismiss }) => {
-    const handleOpenBeaver = () => {
-        eventManager.dispatch('toggleChat', { forceOpen: true });
+}> = ({ version, title, text, subtitle, features, footer, learnMoreUrl, learnMoreLabel, Showcase, primaryAction, onDismiss }) => {
+    const gate = useAtomValue(chatAccessGateAtom);
+    const openQuickPrompt = useSetAtom(openQuickPromptAtom);
+    const action = primaryAction ?? { type: 'open-beaver', label: 'Open Beaver' };
+    const buttonLabel = action.type === 'quick-prompt' && gate
+        ? (gate === 'signed-out' ? 'Sign in to try' : 'Open Beaver')
+        : action.label;
+    const handlePrimaryAction = () => {
         onDismiss();
+        if (action.type === 'open-url') {
+            Zotero.launchURL(action.url);
+        } else if (action.type === 'quick-prompt' && !gate) {
+            void openQuickPrompt();
+        } else {
+            eventManager.dispatch('toggleChat', { forceOpen: true });
+        }
     };
 
     const handleLearnMore = () => {
@@ -152,6 +173,9 @@ const FloatingVersionCard: React.FC<{
                 </div>
             )}
 
+            {/* The feature itself, where the note has one to show */}
+            {Showcase && <Showcase />}
+
             {/* Feature list */}
             {features.length > 0 && (
                 <div className="display-flex flex-col gap-3">
@@ -196,8 +220,8 @@ const FloatingVersionCard: React.FC<{
                     </div>
                 )}
                 {!footer && !learnMoreUrl && <div />}
-                <Button onClick={handleOpenBeaver} variant="solid">
-                    Open Beaver
+                <Button onClick={handlePrimaryAction} variant="solid">
+                    {buttonLabel}
                 </Button>
             </div>
         </div>
@@ -221,6 +245,7 @@ function buildFeatureList(message: PopupMessage): PopupMessageFeature[] {
 
 const VersionUpdateMessageContent: React.FC<VersionUpdateMessageContentProps> = ({ message, onDismiss, isFloating }) => {
     const { version, text, featureList, learnMoreUrl, learnMoreLabel, footer, steps, subtitle } = message;
+    const Showcase = getVersionShowcase(message.showcase);
 
     // Floating mode: render the card layout
     if (isFloating) {
@@ -234,6 +259,8 @@ const VersionUpdateMessageContent: React.FC<VersionUpdateMessageContentProps> = 
                 footer={footer}
                 learnMoreUrl={learnMoreUrl}
                 learnMoreLabel={learnMoreLabel}
+                Showcase={Showcase}
+                primaryAction={message.primaryAction}
                 onDismiss={onDismiss || (() => {})}
             />
         );
@@ -250,6 +277,7 @@ const VersionUpdateMessageContent: React.FC<VersionUpdateMessageContentProps> = 
                         {parseTextWithLinksAndNewlines(subtitle)}
                     </p>
                 )}
+                {Showcase && <Showcase />}
                 <FeatureTourContent
                     steps={steps as FeatureStep[]}
                     onComplete={onDismiss || (() => {})}
@@ -260,7 +288,7 @@ const VersionUpdateMessageContent: React.FC<VersionUpdateMessageContentProps> = 
     }
 
     // Legacy format
-    if (!text && (!featureList || featureList.length === 0) && !learnMoreUrl) {
+    if (!text && (!featureList || featureList.length === 0) && !learnMoreUrl && !Showcase) {
         return null;
     }
 
@@ -271,6 +299,7 @@ const VersionUpdateMessageContent: React.FC<VersionUpdateMessageContentProps> = 
             learnMoreUrl={learnMoreUrl}
             learnMoreLabel={learnMoreLabel}
             footer={footer}
+            Showcase={Showcase}
         />
     );
 };

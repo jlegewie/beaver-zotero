@@ -26,7 +26,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isZoteroAvailable, skipIfNoZotero } from '../../helpers/zoteroAvailability';
 import { post } from '../../helpers/zoteroHttpClient';
@@ -381,5 +381,378 @@ describe('the trash', () => {
         });
         expect(read.ok).toBe(true);
         expect(read.version).toBe(1);
+    });
+});
+
+describe('remote retry and conversation rewind', () => {
+    const tables: Table[] = [];
+    beforeEach((ctx) => skipIfNoZotero(ctx, available));
+    afterAll(async () => {
+        for (const table of tables) await dropTable(table);
+    });
+
+    it('deduplicates creates, guards collapsed content, replays writes and preserves a user boundary', async () => {
+        const operationId = `live-create-${Date.now()}`;
+        const createRequest = {
+            spec: spec('Live remote contract', 'One'),
+            actor: 'agent',
+            run_id: 'origin',
+            thread_id: 'thread',
+            operation_id: operationId,
+        };
+        const created = await post<any>('/beaver/test/table-create', createRequest);
+        expect(created.ok, created.error).toBe(true);
+        const table: Table = {
+            key: created.key,
+            libraryID: created.library_id,
+            storageDir: created.storage_directory,
+            created,
+        };
+        tables.push(table);
+        const replayedCreate = await post<any>('/beaver/test/table-create', createRequest);
+        expect(replayedCreate).toMatchObject({ ok: true, key: table.key, replayed: true });
+        expect(created.filename).toBe('live-remote-contract.html');
+        expect(replayedCreate.filename).toBe(created.filename);
+        expect(replayedCreate.operation).toEqual(created.operation);
+        expect(
+            await post<any>('/beaver/test/table-create', {
+                ...createRequest,
+                spec: spec('Changed request', 'One'),
+            })
+        ).toMatchObject({ ok: false, code: 'operation_mismatch' });
+
+        const at = { key: table.key, libraryID: table.libraryID };
+        const owner = { actor: 'agent', run_id: 'discard', thread_id: 'thread' };
+        await post('/beaver/test/table-write', {
+            ...at,
+            ...owner,
+            spec: spec('Live remote contract', 'Base'),
+        });
+        const base = await post<any>('/beaver/test/table-open', at);
+        expect(base.sha256).toMatch(/^[a-f0-9]{64}$/);
+        const request = {
+            ...at,
+            ...owner,
+            expectedVersion: base.version,
+            expected_sha256: base.sha256,
+            spec: spec('Live remote contract', 'Winner'),
+            operation_id: 'first',
+        };
+        const [first, second] = await Promise.all([
+            post<any>('/beaver/test/table-write', request),
+            post<any>('/beaver/test/table-write', {
+                ...request,
+                operation_id: 'second',
+                spec: spec('Live remote contract', 'Loser'),
+            }),
+        ]);
+        const winner = first.ok ? first : second;
+        const loser = first.ok ? second : first;
+        expect(winner).toMatchObject({ ok: true, collapsed: true, version: base.version });
+        expect(loser).toMatchObject({ ok: false, conflict: true, version: base.version });
+        const winningRequest = first.ok
+            ? request
+            : { ...request, operation_id: 'second', spec: spec('Live remote contract', 'Loser') };
+        const replay = await post<any>('/beaver/test/table-write', winningRequest);
+        expect(replay).toMatchObject({ ok: true, replayed: true });
+        expect(replay.operation).toEqual(winner.operation);
+
+        await post('/beaver/test/table-write', {
+            ...at,
+            ...owner,
+            actor: 'user',
+            spec: spec('Live remote contract', 'User boundary'),
+        });
+        await post('/beaver/test/table-write', {
+            ...at,
+            ...owner,
+            spec: spec('Live remote contract', 'Discard this'),
+        });
+        const trimmed = await post<any>('/beaver/test/table-trim', {
+            ...at,
+            thread_id: 'thread',
+            run_ids: ['discard'],
+        });
+        expect(trimmed).toMatchObject({ ok: true, outcome: 'trimmed', trimmed_to: 3, saved: true });
+        const opened = await post<any>('/beaver/test/table-open', at);
+        expect(opened.spec.rows[0].cells.note.value.text).toBe('User boundary');
+        expect(opened.conflict).toBeNull();
+        expect(opened.recovered).toEqual([]);
+        expect(existsSync(sidecar(table, 'v4.json'))).toBe(false);
+        expect(await post<any>('/beaver/test/table-write', winningRequest)).toMatchObject({
+            ok: true,
+            replayed: true,
+            version: 3,
+            operation: winner.operation,
+        });
+    });
+
+    it('finishes creation bookkeeping when the stamped import has no history seed', async () => {
+        const request = { operation_id: `live-create-repair-${Date.now()}`, actor: 'agent',
+            thread_id: 'thread', run_id: 'run', spec: spec('Live creation repair', 'One') };
+        const created = await post<any>('/beaver/test/table-create', request);
+        expect(created.ok, created.error).toBe(true);
+        const table: Table = { key: created.key, libraryID: created.library_id,
+            storageDir: created.storage_directory, created };
+        tables.push(table);
+        await rm(sidecar(table, 'history.json'));
+        await rm(sidecar(table, 'v1.json'));
+        const replay = await post<any>('/beaver/test/table-create', request);
+        expect(replay).toMatchObject({ ok: true, key: created.key, replayed: true,
+            entry: { version: 1, creation: true, sealed: true, actor: 'agent', run_id: 'run' } });
+        expect(existsSync(sidecar(table, 'v1.json'))).toBe(true);
+        const at = { key: table.key, libraryID: table.libraryID };
+        expect((await post<any>('/beaver/test/table-versions', at)).versions).toHaveLength(1);
+        expect((await post<any>('/beaver/test/table-read', at)).sync_state).toBe(TO_UPLOAD);
+    });
+
+    it('trashes the discarded creation despite its seal and does not resurrect it on create replay', async () => {
+        const operation_id = `live-discard-create-${Date.now()}`;
+        const request = {
+            operation_id,
+            actor: 'agent',
+            thread_id: 'thread',
+            run_id: 'discard',
+            spec: spec('Live discarded creation', 'One'),
+        };
+        const created = await post<any>('/beaver/test/table-create', request);
+        expect(created.ok, created.error).toBe(true);
+        tables.push({
+            key: created.key,
+            libraryID: created.library_id,
+            storageDir: created.storage_directory,
+            created,
+        });
+        const at = { key: created.key, libraryID: created.library_id };
+        expect(
+            await post<any>('/beaver/test/table-trim', {
+                ...at,
+                thread_id: 'thread',
+                run_ids: ['discard'],
+            })
+        ).toMatchObject({ outcome: 'trashed', trimmed_versions: [1], trimmed_to: null });
+        expect(await post<any>('/beaver/test/table-create', request)).toMatchObject({
+            ok: false,
+            code: 'operation_pending',
+        });
+        expect(
+            await post<any>('/beaver/test/table-trim', {
+                ...at,
+                thread_id: 'thread',
+                run_ids: ['discard'],
+            })
+        ).toMatchObject({ outcome: 'unchanged' });
+    });
+});
+
+describe('trim boundaries and stored citation cleanup', () => {
+    const tables: Table[] = [];
+    beforeEach((ctx) => skipIfNoZotero(ctx, available));
+    afterAll(async () => {
+        for (const table of tables) await dropTable(table);
+    });
+
+    it.each(['system', 'other-thread'])(
+        'preserves the %s boundary in real history files',
+        async (boundary) => {
+            const table = await makeTable(`Live trim ${boundary}`);
+            tables.push(table);
+            const at = { key: table.key, libraryID: table.libraryID };
+            const owner = { actor: 'agent', thread_id: 'thread', run_id: 'discard' };
+            await post('/beaver/test/table-write', {
+                ...at,
+                ...owner,
+                actor: boundary === 'system' ? 'system' : 'agent',
+                thread_id: boundary === 'other-thread' ? 'other' : 'thread',
+                spec: spec('Boundary', 'Keep'),
+            });
+            await post('/beaver/test/table-write', {
+                ...at,
+                ...owner,
+                spec: spec('Discard', 'Remove'),
+            });
+            expect(
+                await post<any>('/beaver/test/table-trim', {
+                    ...at,
+                    thread_id: 'thread',
+                    run_ids: ['discard'],
+                })
+            ).toMatchObject({
+                outcome: 'trimmed',
+                trimmed_to: 2,
+                trimmed_versions: [3],
+                saved: true,
+            });
+            const opened = await post<any>('/beaver/test/table-open', at);
+            expect(opened.spec.title).toBe('Boundary');
+            expect(opened.conflict).toBeNull();
+        }
+    );
+
+    it('adopts a surviving version file before trimming across a lost log entry', async () => {
+        const owner = { actor: 'agent', thread_id: 'thread', run_id: 'discard' };
+        const table = await makeTable('Live lost history boundary', owner);
+        tables.push(table);
+        const at = { key: table.key, libraryID: table.libraryID };
+        expect(await post<any>('/beaver/test/table-write', {
+            ...at, actor: 'user', spec: spec('Protected boundary', 'Keep'),
+        })).toMatchObject({ ok: true, version: 2 });
+        expect(await post<any>('/beaver/test/table-write', {
+            ...at, ...owner, spec: spec('Discarded suffix', 'Remove'),
+        })).toMatchObject({ ok: true, version: 3 });
+        const path = sidecar(table, 'history.json');
+        const history = JSON.parse(await readFile(path, 'utf8'));
+        history.versions = history.versions.filter((entry: { version: number }) => entry.version !== 2);
+        await writeFile(path, JSON.stringify(history));
+
+        expect(await post<any>('/beaver/test/table-trim', {
+            ...at, thread_id: 'thread', run_ids: ['discard'],
+        })).toMatchObject({ outcome: 'trimmed', trimmed_to: 2, trimmed_versions: [3], saved: true });
+        const opened = await post<any>('/beaver/test/table-open', at);
+        expect(opened.spec.title).toBe('Protected boundary');
+        expect(opened.history.find((entry: { version: number }) => entry.version === 2))
+            .toMatchObject({ actor: 'system', sealed: true });
+        expect(opened.conflict).toBeNull();
+        expect(existsSync(sidecar(table, 'v2.json'))).toBe(true);
+        expect(existsSync(sidecar(table, 'v3.json'))).toBe(false);
+    });
+
+    it.each([2, 3])('persists repaired v%i history even when trim leaves the table unchanged', async (missingVersion) => {
+        const table = await makeTable('Live unchanged trim recovery', { actor: 'user' });
+        tables.push(table);
+        const at = { key: table.key, libraryID: table.libraryID };
+        for (const version of [2, 3]) {
+            expect(await post<any>('/beaver/test/table-write', {
+                ...at, actor: 'user', spec: spec('Live unchanged trim recovery', String(version)),
+            })).toMatchObject({ ok: true, version });
+        }
+        const path = sidecar(table, 'history.json');
+        const history = JSON.parse(await readFile(path, 'utf8'));
+        history.versions = history.versions.filter((entry: { version: number }) => entry.version !== missingVersion);
+        history.tip = history.versions[history.versions.length - 1].version;
+        await writeFile(path, JSON.stringify(history));
+
+        expect(await post<any>('/beaver/test/table-trim', {
+            ...at, thread_id: 'thread', run_ids: ['discard'],
+        })).toMatchObject({ outcome: 'unchanged', trimmed_to: 3, saved: true });
+        const listed = await post<any>('/beaver/test/table-versions', at);
+        expect(listed.versions.map((entry: { version: number }) => entry.version)).toEqual([1, 2, 3]);
+        expect(JSON.parse(await readFile(path, 'utf8')).tip).toBe(3);
+        expect((await post<any>('/beaver/test/table-open', at)).recovered).toEqual([]);
+    });
+
+    it('reports versions pruned while replay repairs history left behind its receipt', async () => {
+        const table = await makeTable('Live replay retention');
+        tables.push(table);
+        const at = { key: table.key, libraryID: table.libraryID };
+        for (let version = 2; version <= 20; version++) {
+            expect(await post<any>('/beaver/test/table-write', {
+                ...at, actor: 'user', spec: spec('Live replay retention', String(version)),
+            })).toMatchObject({ ok: true, version });
+        }
+        const historyPath = sidecar(table, 'history.json');
+        const historyBefore = await readFile(historyPath, 'utf8');
+        const oldestPath = sidecar(table, 'v1.json');
+        const oldestBefore = await readFile(oldestPath, 'utf8');
+        const base = await post<any>('/beaver/test/table-open', at);
+        const request = {
+            ...at, actor: 'agent', run_id: 'retention-run', thread_id: 'thread',
+            operation_id: 'retention-replay', expectedVersion: base.version,
+            expected_sha256: base.sha256, spec: spec('Live replay retention', 'New'),
+        };
+        expect(await post<any>('/beaver/test/table-write', request))
+            .toMatchObject({ ok: true, version: 21, pruned: [1] });
+        // Restore the sidecars an interruption before history commit would leave.
+        await writeFile(historyPath, historyBefore);
+        await writeFile(oldestPath, oldestBefore);
+        expect(await post<any>('/beaver/test/table-write', request))
+            .toMatchObject({ ok: true, replayed: true, saved: true, pruned: [1] });
+        expect(existsSync(oldestPath)).toBe(false);
+        const listed = await post<any>('/beaver/test/table-versions', at);
+        expect(listed.versions.map((entry: { version: number }) => entry.version))
+            .toEqual(Array.from({ length: 20 }, (_, i) => i + 2));
+        expect(await post<any>('/beaver/test/table-write', request))
+            .toMatchObject({ ok: true, replayed: true, pruned: [] });
+    });
+
+    it('reports retention exhaustion while preserving the oldest retained version', async () => {
+        const table = await makeTable('Live retention exhaustion');
+        tables.push(table);
+        const at = { key: table.key, libraryID: table.libraryID };
+        const runs: string[] = [];
+        for (let i = 0; i < 22; i++) {
+            const run = `discard-${i}`;
+            runs.push(run);
+            const written = await post<any>('/beaver/test/table-write', {
+                ...at,
+                actor: 'agent',
+                thread_id: 'thread',
+                run_id: run,
+                spec: spec('Live retention exhaustion', String(i)),
+            });
+            expect(written.ok, written.error).toBe(true);
+        }
+        const history = await post<any>('/beaver/test/table-versions', at);
+        const oldest = history.versions[0].version;
+        expect(oldest).toBeGreaterThan(1);
+        expect(
+            await post<any>('/beaver/test/table-trim', {
+                ...at,
+                thread_id: 'thread',
+                run_ids: runs,
+            })
+        ).toMatchObject({
+            outcome: 'trimmed',
+            retention_exhausted: true,
+            trimmed_to: oldest,
+            saved: true,
+        });
+        const opened = await post<any>('/beaver/test/table-open', at);
+        expect(opened.version).toBe(oldest);
+        expect(opened.conflict).toBeNull();
+        expect(opened.history).toHaveLength(1);
+    });
+
+    it('prunes a cleared stored citation while retaining a shared citation and its parent metadata', async () => {
+        const table = await makeTable('Live citation pruning');
+        tables.push(table);
+        const at = { key: table.key, libraryID: table.libraryID };
+        const tag = '<citation id="1-CHILD001"/>';
+        const cited = spec('Live citation pruning', `Evidence ${tag}`);
+        cited.rows.push({ ...cited.rows[0], id: 'r2' });
+        const parent_ref = { kind: 'zotero', library_id: 1, zotero_key: 'PARENT01' };
+        await post('/beaver/test/table-write', {
+            ...at,
+            actor: 'user',
+            spec: {
+                ...cited,
+                citations: [
+                    { citation_id: 'live-citation', raw_tag: tag, parent_ref },
+                    { citation_id: 'unused', raw_tag: '<citation id="1-UNUSED01"/>' },
+                ],
+            },
+        });
+        const edit = (rows: string[]) =>
+            post('/beaver/test/table-edit', {
+                ...at,
+                actor: 'user',
+                mutations: [
+                    {
+                        op: 'set_cells',
+                        cells: rows.map((row) => ({ row, column: 'note', cell: {} })),
+                    },
+                ],
+            });
+        await edit(['r1']);
+        const shared = await post<any>('/beaver/test/table-open', at);
+        expect(shared.spec.citations).toEqual([
+            { citation_id: 'live-citation', raw_tag: tag, parent_ref },
+        ]);
+        await edit(['r2']);
+        const cleared = await post<any>('/beaver/test/table-open', at);
+        expect(cleared.spec.citations).toEqual([]);
+        expect(
+            JSON.parse(await readFile(sidecar(table, `v${cleared.version}.json`), 'utf8')).citations
+        ).toEqual([]);
     });
 });

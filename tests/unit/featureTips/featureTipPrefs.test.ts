@@ -21,6 +21,8 @@ describe('parseFeatureTipState', () => {
         expect(parseFeatureTipState('')).toEqual({ shown: {} });
         expect(parseFeatureTipState('not json')).toEqual({ shown: {} });
         expect(parseFeatureTipState(undefined)).toEqual({ shown: {} });
+        expect(parseFeatureTipState(JSON.stringify({ deferredUntil: { a: '2026-01-01T00:00:00.000Z', b: 5, c: 'bad' } })))
+            .toEqual({ shown: {}, deferredUntil: { a: '2026-01-01T00:00:00.000Z' } });
         expect(parseFeatureTipState('{"shown":{"a":"2026-01-01T00:00:00.000Z","b":5},"lastShownAt":"2026-01-01T00:00:00.000Z"}'))
             .toEqual({ shown: { a: '2026-01-01T00:00:00.000Z' }, lastShownAt: '2026-01-01T00:00:00.000Z' });
     });

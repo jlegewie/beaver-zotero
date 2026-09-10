@@ -9,6 +9,19 @@ export interface WindowRuntime {
     status: 'attaching' | 'ready' | 'closing';
 }
 
+/**
+ * The chrome window embedding `win`, or undefined when there is none reachable.
+ * Chrome-privileged frames (a reader tab's `reader.html`) expose
+ * `browsingContext`; content frames do not, and end the walk.
+ */
+function embedderWindow(win: Window): Window | undefined {
+    try {
+        return (win as any).browsingContext?.embedderElement?.ownerGlobal ?? undefined;
+    } catch {
+        return undefined;
+    }
+}
+
 export class BeaverInstance {
     private windows = new Map<Window, WindowRuntime>();
     private nextId = 0;
@@ -47,6 +60,26 @@ export class BeaverInstance {
             : this.windows.get(Zotero.getMainWindow());
         return runtime?.status === 'ready' && !runtime.hostWindow.closed ? runtime : undefined;
     }
+    /**
+     * The ready runtime owning `win`, which may be a frame inside a main window
+     * rather than the main window itself: keyboard shortcuts are installed on
+     * each reader tab's own window, and those have neither `Zotero_Tabs` nor an
+     * event bus. Returns undefined for a window Beaver has not attached to,
+     * such as a standalone reader window.
+     */
+    resolveWindowFrom(win: Window | null | undefined): WindowRuntime | undefined {
+        let current = win ?? undefined;
+        // Bounded: a frame chain is short, and a cycle must never hang a keystroke.
+        for (let depth = 0; current && depth < 8; depth++) {
+            const runtime = this.windows.get(current);
+            if (runtime) {
+                return runtime.status === 'ready' && !runtime.hostWindow.closed ? runtime : undefined;
+            }
+            current = embedderWindow(current);
+        }
+        return undefined;
+    }
+
     getSnapshot(): Array<{ id: string; status: WindowRuntime['status'] }> {
         return Array.from(this.windows.values(), ({ id, status }) => ({ id, status }));
     }

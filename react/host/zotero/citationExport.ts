@@ -1,3 +1,8 @@
+import {
+    firstPageNumber,
+    formatCitationPages,
+    translatePageNumberToLabel,
+} from '../../../src/utils/pageLabelTranslation';
 import { formatExternalFileCitationHTML } from '../../../src/utils/externalFileCitation';
 import { getPageLabelsForItem } from './itemData';
 import { getPageLocator } from '@beaver/agent-core/citations/citationGrammar';
@@ -35,7 +40,22 @@ function renderCitation(request: CitationExportRequest): CitationExportRender | 
         const item = Zotero.Items.getByLibraryAndKey(libraryID, effectiveItemKey);
         if (!item) return null;
         if (isLinkCitationItem(item)) {
-            return { kind: 'html', html: buildZoteroCitationLinkHTML(item) };
+            const labels = getPageLabelsForItem(item, pageLabelsByAttachmentId) ?? metadata?.page_labels;
+            const requestedPage = requestedRef ? getPageLocator(requestedRef) : undefined;
+            const page = requestedPage
+                ? translatePageNumberToLabel(labels, requestedPage)
+                : formatCitationPages(pages, labels, {
+                    inclusiveRange: requestedRef?.loc?.kind !== 'page'
+                        && /^\d+-\d+$/.test(requestedRef?.loc?.value ?? ''),
+                });
+            // The visible locator is a display label; the link navigates by
+            // physical page, which is what the cited pages already are.
+            const navPage = requestedPage
+                ? firstPageNumber(requestedPage)
+                : (pages.length > 0 ? Math.min(...pages) : undefined);
+            return { kind: 'html', html: buildZoteroCitationLinkHTML(item, page
+                ? { kind: 'page', value: page, raw: `page${page}` }
+                : undefined, navPage) };
         }
         const itemData = Zotero.Utilities.Item.itemToCSLJSON(item.parentItem || item);
         const startPage = pages.length > 0 ? pages[0] : undefined;

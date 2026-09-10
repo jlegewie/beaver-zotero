@@ -60,8 +60,11 @@ import {
 import {
     expandToRawHtml,
     translatePageNumberToLabel,
+    preloadPageLabelsForNewCitations,
+    preloadStructuralLocatorPages,
     buildUnresolvedLocatorWarning,
 } from '../../../src/utils/noteCitationExpand';
+import { checkLibraryExcluded } from '../../../src/services/agentDataProvider/utils';
 import { translatePageLabelToNumber } from '../../../src/utils/pageLabelTranslation';
 import {
     isNoteInEditor,
@@ -321,6 +324,32 @@ describe('simplifyNoteHtml', () => {
 
         expect(expanded).toContain(
             '<a href="zotero://select/library/items/NOTE1234" rel="noopener noreferrer nofollow">Note: Project note</a>'
+        );
+    });
+
+    it('absorbs the parentheses Beaver writes around a link citation', () => {
+        const html = wrap('<p>Source (<a href="zotero://select/library/items/NOTE1234">Note: Project note</a>)</p>');
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        expect(simplified).toContain('<p>Source <citation id="u-NOTE1234" ref="c_NOTE1234_0"/></p>');
+        expect(expandToRawHtml(simplified, metadata, 'old')).toContain(
+            'Source (<a href="zotero://select/library/items/NOTE1234" rel="noopener noreferrer nofollow">Note: Project note</a>)'
+        );
+    });
+
+    it.each([
+        ['a parenthesis that is not part of the citation', 'Text (see LINK) after.'],
+        ['prose that is not a page locator', 'Text (LINK, see also the appendix) after.'],
+        ['a locator the agent may still edit as text', 'Text LINK, p. 6 after.'],
+    ])('leaves %s outside the citation token', (_label, template) => {
+        const link = '<a href="zotero://select/library/items/NOTE1234">Note: Project note</a>';
+        const text = template.replace('LINK', link);
+        const { simplified, metadata } = simplifyNoteHtml(wrap(`<p>${text}</p>`), 1);
+
+        expect(simplified).toContain('<citation id="u-NOTE1234" ref="c_NOTE1234_0"/>');
+        expect(simplified).toContain(template.replace('LINK', '<citation id="u-NOTE1234" ref="c_NOTE1234_0"/>'));
+        expect(expandToRawHtml(simplified, metadata, 'old')).toContain(
+            text.replace('">Note', '" rel="noopener noreferrer nofollow">Note')
         );
     });
 
@@ -626,7 +655,7 @@ describe('expandToRawHtml', () => {
         const { metadata } = makeMetadata();
         // Sentence locator s4 was pre-resolved to page "9".
         const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024)" ref="c_EX1_new"/>';
-        const resolvedLocatorPages = { 'zotero:u-EX1:s4': '9' };
+        const resolvedLocatorPages = { 'zotero:u-EX1:s4': { label: '9', page: 9 } };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
@@ -651,7 +680,7 @@ describe('expandToRawHtml', () => {
         // page is already a final label and must be stored verbatim.
         const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024)" ref="c_EX1_new"/>';
         const pageLabels = { '1-EX1': { 8: 'ix' } };
-        const resolvedLocatorPages = { 'zotero:u-EX1:s4': '9' };
+        const resolvedLocatorPages = { 'zotero:u-EX1:s4': { label: '9', page: 9 } };
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels as any, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
@@ -663,7 +692,7 @@ describe('expandToRawHtml', () => {
         const { metadata } = makeMetadata();
         // c_EX1_1 originally has page="10"; change its locator to sentence s4.
         const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024, p. 10)" ref="c_EX1_1"/>';
-        const resolvedLocatorPages = { 'zotero:u-EX1:s4': '3' };
+        const resolvedLocatorPages = { 'zotero:u-EX1:s4': { label: '3', page: 3 } };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
@@ -674,7 +703,7 @@ describe('expandToRawHtml', () => {
     it('substitutes a resolved page for a legacy att_id structural locator', () => {
         const { metadata } = makeMetadata();
         const input = '<citation att_id="1-ATT1" loc="s4" label="(Author, 2024)"/>';
-        const resolvedLocatorPages = { 'zotero:u-ATT1:s4': '9' };
+        const resolvedLocatorPages = { 'zotero:u-ATT1:s4': { label: '9', page: 9 } };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
@@ -686,7 +715,7 @@ describe('expandToRawHtml', () => {
         const { metadata } = makeMetadata();
         // The `sid` attribute is the legacy alias for a structural locator.
         const input = '<citation att_id="1-ATT1" sid="s4" label="(Author, 2024)"/>';
-        const resolvedLocatorPages = { 'zotero:u-ATT1:s4': '9' };
+        const resolvedLocatorPages = { 'zotero:u-ATT1:s4': { label: '9', page: 9 } };
         expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'ATT1' }),
@@ -746,7 +775,7 @@ describe('expandToRawHtml', () => {
         );
     });
 
-    it('creates note and annotation citation links from item_id in new context', () => {
+    it.each(['id', 'att_id'])('creates note and annotation citation links from %s in new context', (attrName) => {
         const metadata: SimplificationMetadata = { elements: new Map() };
         const note = {
             key: 'NOTE1234',
@@ -779,18 +808,119 @@ describe('expandToRawHtml', () => {
         (globalThis as any).Zotero.Libraries.get = vi.fn(() => ({ isGroup: false }));
 
         const result = expandToRawHtml(
-            '<citation id="1-NOTE1234"/> <citation id="1-ANNOT123"/>',
+            `<citation ${attrName}="1-NOTE1234"/> <citation ${attrName}="1-ANNOT123"/>`,
             metadata,
             'new'
         );
 
         expect(result).toContain(
-            '(<a href="zotero://select/library/items/NOTE1234" rel="noopener noreferrer">Note: Project note</a>)'
+            '(<a href="zotero://select/library/items/NOTE1234" rel="noopener noreferrer nofollow">Note: Project note</a>)'
         );
         expect(result).toContain(
-            '(<a href="zotero://open-pdf/library/items/ATTACH12?annotation=ANNOT123" rel="noopener noreferrer">Annotation in Smith 2019, page 12</a>)'
+            '(<a href="zotero://open-pdf/library/items/ATTACH12?annotation=ANNOT123" rel="noopener noreferrer nofollow">Annotation in Smith 2019, page 12</a>)'
         );
         expect(createCitationHTML).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ['id="u-ATTACH12" loc="page6-8"', ', p. 6-8', '?page=6', ' loc="page6-8"'],
+        ['att_id="1-ATTACH12" page="6"', ', p. 6', '?page=6', ' loc="page6"'],
+        ['attachment_id="1-ATTACH12" loc="s4"', '', '', ''],
+        ['item_id="1-ATTACH12"', '', '', ''],
+    ])('stores standalone attachment %s as an editable link', (attrs, suffix, pageQuery, loc) => {
+        const item = {
+            key: 'ATTACH12', libraryID: 1, parentID: false,
+            isAttachment: () => true, isFileAttachment: () => true, isPDFAttachment: () => true,
+            getField: () => 'Report & findings.pdf',
+        };
+        vi.mocked(Zotero.Items.getByLibraryAndKey).mockReturnValue(item as any);
+        (Zotero.Libraries as any).get = vi.fn(() => ({ isGroup: false }));
+        const html = expandToRawHtml(`<citation ${attrs}/>`, { elements: new Map() }, 'new');
+        expect(html).toBe(`(<a href="zotero://open/library/items/ATTACH12${pageQuery}" rel="noopener noreferrer nofollow">Report &amp; findings.pdf</a>${suffix})`);
+        expect(createCitationHTML).not.toHaveBeenCalled();
+        const { simplified, metadata } = simplifyNoteHtml(wrap(`<p>${html}</p>`), 1);
+        // The locator lives in the token, not as text the agent can edit apart
+        // from the link, and the parentheses come back with it.
+        expect(simplified).toContain(`<p><citation id="u-ATTACH12"${loc} ref="c_ATTACH12_0"/></p>`);
+        const saved = expandToRawHtml(simplified, metadata, 'new');
+        expect(saved).toContain(`Report &amp; findings.pdf</a>${suffix})`);
+        expect(expandToRawHtml(simplified, metadata, 'old')).toBe(saved);
+    });
+
+    it('keeps the physical-page convention for a link citation whose labels are offset', () => {
+        // Front matter puts printed page 3 on physical page 5. The agent works
+        // in physical pages, so that is what the simplified locator must show,
+        // and an edit to it must land on the physical page it names.
+        const labels = { 4: '3', 5: '4' };
+        const item = {
+            id: 42, key: 'ATTACH12', libraryID: 1, parentID: false,
+            isAttachment: () => true, isFileAttachment: () => true, isPDFAttachment: () => true,
+            getField: () => 'Report.pdf',
+        };
+        vi.mocked(Zotero.Items.getByLibraryAndKey).mockReturnValue(item as any);
+        (Zotero.Libraries as any).get = vi.fn(() => ({ isGroup: false }));
+        const saved = '(<a href="zotero://open/library/items/ATTACH12?page=5"'
+            + ' rel="noopener noreferrer nofollow">Report.pdf</a>, p. 3)';
+
+        const { simplified, metadata } = simplifyNoteHtml(wrap(`<p>${saved}</p>`), 1, { 'u-ATTACH12': labels });
+        expect(simplified).toContain('<citation id="u-ATTACH12" loc="page5" ref="c_ATTACH12_0"/>');
+
+        const edited = expandToRawHtml(
+            simplified.replace('loc="page5"', 'loc="page6"'), metadata, 'new', undefined, { 42: labels },
+        );
+        expect(edited).toContain('<a href="zotero://open/library/items/ATTACH12?page=6"'
+            + ' rel="noopener noreferrer nofollow">Report.pdf</a>, p. 4)');
+    });
+
+    it.each(['id', 'att_id'])('rejects excluded attachment %s before looking up its metadata', (attribute) => {
+        vi.mocked(checkLibraryExcluded).mockReturnValueOnce({ message: 'Library excluded' });
+        expect(() => expandToRawHtml(`<citation ${attribute}="1-ATTACH12" loc="page6"/>`,
+            { elements: new Map() }, 'new')).toThrow('Library excluded');
+        expect(Zotero.Items.getByLibraryAndKey).not.toHaveBeenCalled();
+    });
+
+    it.each([true, false])('resolves standalone spans across three pages (labels: %s) for both ID spellings', async (withLabels) => {
+        const previousBeaver = Zotero.Beaver;
+        vi.mocked(Zotero.Items.getByLibraryAndKey).mockReturnValue({
+            id: 42, key: 'ATTACH12', libraryID: 1, parentID: false,
+            isAttachment: () => true, isFileAttachment: () => true, isPDFAttachment: () => true,
+            getField: () => 'Report.pdf',
+            getFilePathAsync: async () => '/report.pdf',
+        } as any);
+        (Zotero.Libraries as any).get = vi.fn(() => ({ isGroup: false }));
+        (Zotero as any).Beaver = { documentCache: {
+            getMetadata: async () => ({ pageLabels: { 1: 'iv', 2: 'v' } }),
+            getResult: async () => ({ mode: 'structured', document: { citationIndex: {
+                s1: { pageIndex: 1, ...(withLabels ? { pageLabel: 'iv' } : {}) },
+                s2: { pageIndex: 1, pageLabel: 'iv' },
+                s3: { pageIndex: 2, pageLabel: 'v' },
+                s4: { pageIndex: 2, pageLabel: 'v' },
+                s5: { pageIndex: 3, ...(withLabels ? { pageLabel: 'vi' } : {}) },
+            } } }),
+        } };
+        try {
+            for (const attribute of ['id', 'att_id']) {
+                const input = `<citation ${attribute}="1-ATTACH12" loc="s1-s5"/>`;
+                const resolved = await preloadStructuralLocatorPages(input);
+                expect(resolved.unresolved).toEqual([]);
+                const html = expandToRawHtml(input, { elements: new Map() }, 'new', undefined, undefined, resolved.pages);
+                expect(html).toContain(`Report.pdf</a>, p. ${withLabels ? 'iv-vi' : '2-4'})`);
+                // The span displays labels but opens the first physical page.
+                expect(html).toContain('href="zotero://open/library/items/ATTACH12?page=2"');
+                expect(html).not.toContain('sentence');
+                // A non-numeric label survives the round trip as the tag's locator.
+                const { simplified, metadata } = simplifyNoteHtml(wrap(`<p>${html}</p>`), 1);
+                expect(simplified).toContain(`loc="page${withLabels ? 'iv-vi' : '2-4'}"`);
+                expect(expandToRawHtml(simplified, metadata, 'old')).toContain(html);
+            }
+            const input = '<citation id="1-ATTACH12" loc="page2-3"/>';
+            const labels = await preloadPageLabelsForNewCitations(input);
+            const pageHtml = expandToRawHtml(input, { elements: new Map() }, 'new', undefined, labels);
+            expect(pageHtml).toContain('Report.pdf</a>, p. iv-v)');
+            expect(pageHtml).toContain('href="zotero://open/library/items/ATTACH12?page=2"');
+        } finally {
+            (Zotero as any).Beaver = previousBeaver;
+        }
     });
 
     it('throws for new citation with item_id in old context', () => {
@@ -933,7 +1063,7 @@ describe('expandToRawHtml', () => {
             },
         };
         const result = expandToRawHtml(input, metadata, 'new', externalRefContext);
-        // Auto-resolve goes through buildCitationFromSimplifiedAttrs → real Zotero citation
+        // Auto-resolve goes through buildCitation → real Zotero citation
         expect(createCitationHTML).toHaveBeenCalled();
         expect(result).toContain('data-citation=');
         // Confirm Items.getByLibraryAndKey was called with the mapped key

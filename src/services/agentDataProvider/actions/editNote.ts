@@ -1,3 +1,4 @@
+import { preloadStandaloneAttachmentLinks } from '../../../utils/zoteroLinkCitation';
 import { preloadExternalFileCitations } from '../../../utils/externalFileCitation';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
@@ -177,9 +178,12 @@ async function findMarkdownRenderFallbackMatch(
     return findMarkdownRenderMatch({ ...matchInput, ...rendered });
 }
 
-/** Load external-file labels/links and snapshot external-work mappings for note expansion. */
+/** Preload citation labels and files, and snapshot external-work mappings. */
 export async function getExternalRefContext(content: string): Promise<ExternalRefContext> {
-    const { files, warnings } = await preloadExternalFileCitations(content);
+    const [{ files, warnings }] = await Promise.all([
+        preloadExternalFileCitations(content),
+        preloadStandaloneAttachmentLinks(content, libraryID => !checkLibraryExcluded(libraryID)),
+    ]);
     return {
         externalFiles: files,
         externalFileWarnings: warnings,

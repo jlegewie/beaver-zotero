@@ -3,7 +3,6 @@ import type { ActionTargetType } from '@beaver/agent-core/types/actions';
 
 export interface BeaverEvents {
     toggleChat: {
-        location?: 'library' | 'reader';
         forceOpen?: boolean;
         skipAutoPopulate?: boolean;
     };

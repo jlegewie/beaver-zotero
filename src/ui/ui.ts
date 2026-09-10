@@ -10,6 +10,17 @@ import { contextMainWindow, resolveChatWindow } from "../runtime/navigation";
 
 let keyboardManager: KeyboardManager | null = null;
 
+/**
+ * The main window a keyboard shortcut acts on. Shortcut listeners are installed
+ * on every reader tab's own window as well as on main windows, so the event's
+ * own window is frequently a frame that is not a main window at all. Resolve it
+ * through the window registry and fall back to the active main window.
+ */
+function resolveShortcutWindow(ev: KeyboardEvent): Window | null {
+    const origin = (ev.target as HTMLElement | null)?.ownerDocument?.defaultView;
+    return Zotero.Beaver?.runtime.resolveWindowFrom(origin)?.hostWindow ?? Zotero.getMainWindow() ?? null;
+}
+
 function getKeyboardManager(): KeyboardManager {
     if (!keyboardManager) {
         keyboardManager = new KeyboardManager();
@@ -526,20 +537,9 @@ export class BeaverUIFactory {
                     
                     ev.preventDefault();
                     lastToggleTime = now;
-                    
-                    let win;
-                    if (ev.target && (ev.target as HTMLElement).ownerDocument) {
-                        const doc = (ev.target as HTMLElement).ownerDocument;
-                        if (doc.defaultView) {
-                            win = doc.defaultView;
-                        }
-                    }
-                    
-                    if (!win) {
-                        win = Zotero.getMainWindow();
-                    }
-                    
-                    triggerToggleChat(win);
+
+                    const win = resolveShortcutWindow(ev);
+                    if (win) triggerToggleChat(win);
                 }
             }
         );
@@ -563,20 +563,15 @@ export class BeaverUIFactory {
         // corner while the sidebar is closed).
         // Mac: Cmd+Option+J, Windows/Linux: Ctrl+Alt+J
         manager.register(
-            (ev) => {
+            (ev, keyOptions) => {
+                // Keyup can still carry the full chord when the letter is
+                // released first. Only the initial keydown toggles the popup.
+                if (keyOptions.type !== 'keydown') return;
                 if (isQuickPromptShortcut(ev, keyboardShortcut, Zotero.isMac)) {
                     ev.preventDefault();
-                    let win;
-                    if (ev.target && (ev.target as HTMLElement).ownerDocument) {
-                        const doc = (ev.target as HTMLElement).ownerDocument;
-                        if (doc.defaultView) {
-                            win = doc.defaultView;
-                        }
-                    }
-                    if (!win) {
-                        win = Zotero.getMainWindow();
-                    }
-                    triggerToggleQuickPrompt(win);
+                    if (ev.repeat) return;
+                    const win = resolveShortcutWindow(ev);
+                    if (win) triggerToggleQuickPrompt(win);
                 }
             }
         );

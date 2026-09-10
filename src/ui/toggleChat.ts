@@ -1,9 +1,12 @@
-/** Toggle the sidebar in the originating main window. */
+/**
+ * Toggle the sidebar in the originating main window. The receiving runtime
+ * decides library versus reader presentation from its own context window, so
+ * nothing about the tab state is read or sent here.
+ */
 export function triggerToggleChat(win: Window) {
     if (win.closed || win.__beaverRuntime?.status === 'closing') return;
-    const location = win.Zotero_Tabs.selectedType === 'library' ? 'library' : 'reader';
     win.__beaverEventBus?.dispatchEvent(new win.CustomEvent('toggleChat', {
-        detail: { location },
+        detail: {},
     }));
 }
 

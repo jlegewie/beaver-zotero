@@ -25,6 +25,7 @@
  * disagree about where they live.
  */
 
+import { tableSpecHash } from './recoveryShadow';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     TABLE_SPEC_VERSION,
@@ -34,10 +35,11 @@ import { getZoteroOpenURI, getZoteroSelectURI } from '../../utils/zoteroUtils';
 import { safeAttachmentFilename } from '../../utils/attachmentFiles';
 import { getPref } from '../../utils/prefs';
 import { checkLibraryExcluded } from '../agentDataProvider/utils';
-import { CSS_RULE_BUDGET } from '../../utils/html';
+import { CSS_RULE_BUDGET, countTopLevelCssRules } from '../../utils/html';
 import {
     buildTableDocument,
     type TableHtmlOptions,
+    type TableDocumentState,
 } from './tableDocument';
 // Only Zotero knows whether a library id is the user library or a group, so the
 // row action links are built there. Imported rather than reimplemented: the
@@ -65,6 +67,7 @@ export {
     readTable,
     readTableHistory,
     readTableItemSpec,
+    readTableItemDocument,
     resolveTableItem,
     tableHistoryPath,
     tableReadError,
@@ -186,6 +189,13 @@ const TABLE_LIBRARY_REFUSALS: Record<
 
 export interface CreateTableItemOptions {
     spec: TableSpec;
+    /** Store-owned identity for a retriable import. */
+    creationOperation?: {
+        operation_id: string;
+        request_sha256: string;
+        url: string;
+        meta: NonNullable<TableDocumentState['creation']>['meta'];
+    };
     /** Where to file it. Resolved by {@link resolveTableLibrary} when absent. */
     libraryID?: number;
     /** File the table as a top-level item in this collection. */
@@ -282,7 +292,22 @@ export async function createTableItem(
     const named: TableSpec = spec.title === title ? spec : { ...spec, title };
     const linksFor = options.linksFor ?? zoteroLinksFor;
 
-    const first = buildTableDocument(named, { linksFor, citationScopeFor: zoteroLinkScope });
+    const creation = options.creationOperation;
+    const storeState = creation
+        ? {
+              creation: {
+                  operation_id: creation.operation_id,
+                  request_sha256: creation.request_sha256,
+                  complete: false,
+                  meta: creation.meta,
+              },
+          }
+        : undefined;
+    const first = buildTableDocument(named, {
+        linksFor,
+        citationScopeFor: zoteroLinkScope,
+        storeState,
+    });
     if (first.cssRuleCount > CSS_RULE_BUDGET) {
         // Above the reader's threshold the snapshot loses its palette in dark mode.
         logger(
@@ -299,7 +324,7 @@ export async function createTableItem(
     }
 
     const importOptions: Record<string, unknown> = {
-        url: buildTableUrl(title),
+        url: creation?.url ?? buildTableUrl(title),
         snapshotContent: first.html,
         title,
     };
@@ -322,7 +347,23 @@ export async function createTableItem(
         // copied from an existing table starts its own history here.
         version: 1,
     };
-    const second = buildTableDocument(stored, { linksFor, citationScopeFor: zoteroLinkScope });
+    const second = buildTableDocument(stored, {
+        linksFor,
+        citationScopeFor: zoteroLinkScope,
+        storeState: creation
+            ? {
+                  creation: { ...storeState!.creation, complete: true },
+                  operations: [
+                      {
+                          operation_id: creation.operation_id,
+                          request_sha256: creation.request_sha256,
+                          version: 1,
+                          sha256: await tableSpecHash(stored),
+                      },
+                  ],
+              }
+            : undefined,
+    });
 
     const path = await item.getFilePathAsync();
     if (!path) {
@@ -337,37 +378,45 @@ export async function createTableItem(
     item.addTag(TABLE_EMOJI_TAG, 1);
 
     // The index was queued against the first write; the file has changed since.
-    await queueTableFullText(item);
+    await queueTableFullText(item, !!creation);
     // Load-bearing, not bookkeeping: Zotero schedules its auto-sync off data
     // object saves, not off file writes. Without a save a new or changed table
     // sits unsynced until some unrelated change triggers the next sync.
     await item.saveTx();
 
+    return describeTableItem(item, stored, second.html, second.cssRuleCount);
+}
+
+/** Describe the stored attachment consistently for imports and replays. */
+export function describeTableItem(
+    item: Zotero.Item,
+    spec: TableSpec,
+    html: string,
+    cssRuleCount = Array.from(html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi))
+        .reduce((total, match) => total + countTopLevelCssRules(match[1]), 0)
+): CreatedTableItem {
     return {
         item,
         itemID: item.id,
         key: item.key,
         libraryID: item.libraryID,
-        title,
+        title: spec.title ?? 'Table',
         filename: safeAttachmentFilename(item),
         storageDirectory: tableStorageDirectory(item),
-        byteLength: new TextEncoder().encode(second.html).length,
-        cssRuleCount: second.cssRuleCount,
-        spec: stored,
+        byteLength: new TextEncoder().encode(html).length,
+        cssRuleCount,
+        spec,
         selectUri: getZoteroSelectURI(item.libraryID, item.key),
         openUri: getZoteroOpenURI(item.libraryID, item.key),
     };
 }
 
-/** Full-text indexing is best-effort: a failure must not lose the table. */
-export async function queueTableFullText(item: Zotero.Item): Promise<void> {
+/** Retriable creation uses strict indexing; other callers retain best-effort behavior. */
+export async function queueTableFullText(item: Zotero.Item, strict = false): Promise<void> {
     try {
-        await (
-            Zotero as unknown as {
-                FullText?: { queueItem?: (item: Zotero.Item) => Promise<void> };
-            }
-        ).FullText?.queueItem?.(item);
+        await Zotero.FullText?.queueItem?.(item);
     } catch (error) {
+        if (strict) throw error;
         logger(`queueTableFullText: ${String(error)}`, 2);
     }
 }

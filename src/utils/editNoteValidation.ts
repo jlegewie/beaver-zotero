@@ -198,7 +198,7 @@ function findUniqueCitationRef(
  * Resolve an `att_id="LIB-KEY"` (attachment reference) to the parent item's
  * `item_id="LIB-PARENT_KEY"`. Returns the resolved parent id and the
  * attachment item (so callers can translate page numbers the same way
- * `buildCitationFromAttId` did at insert time), or `null` when:
+ * `buildCitation` did at insert time), or `null` when:
  *   - the id is malformed
  *   - the item doesn't exist
  *   - the item isn't an attachment
@@ -221,7 +221,7 @@ function resolveAttIdToParent(
 }
 
 /**
- * Normalize a citation page locator the way `buildCitationFromAttId` did at
+ * Normalize a citation page locator the way `buildCitation` did at
  * insert time: strip whitespace, then translate pure-numeric locators from
  * 1-based page numbers to the attachment's page labels. Mirrors
  * `resolvePageForCitation(item, page, true)` in noteCitationExpand. Returns

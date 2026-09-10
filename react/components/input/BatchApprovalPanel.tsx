@@ -10,6 +10,25 @@ interface BatchApprovalPanelProps {
 }
 
 /**
+ * Sends a batch approval decision over the run's connection, correlated on
+ * the approval id. Shared by every surface that draws the card — this panel
+ * and the closed-sidebar status popup — so the wire binding exists once.
+ * A no-op without an id, for a surface whose card may not be up.
+ */
+export function useBatchApprovalSubmit(approvalId: string | null): (decision: BatchApprovalDecision) => void {
+    const sendResponse = useSetAtom(sendBatchApprovalResponseAtom);
+    return useCallback((decision: BatchApprovalDecision) => {
+        if (!approvalId) return;
+        sendResponse({
+            approvalId,
+            approved: decision.approved,
+            mode: decision.mode,
+            userInstructions: decision.user_instructions,
+        });
+    }, [sendResponse, approvalId]);
+}
+
+/**
  * Composer takeover for a pending batch approval.
  *
  * Rendered by Sidebar INSTEAD of InputArea while the run blocks on the user's
@@ -27,16 +46,7 @@ interface BatchApprovalPanelProps {
  * panel only binds send.
  */
 export const BatchApprovalPanel: React.FC<BatchApprovalPanelProps> = ({ approval }) => {
-    const sendResponse = useSetAtom(sendBatchApprovalResponseAtom);
-
-    const handleSubmit = useCallback((decision: BatchApprovalDecision) => {
-        sendResponse({
-            approvalId: approval.approvalId,
-            approved: decision.approved,
-            mode: decision.mode,
-            userInstructions: decision.user_instructions,
-        });
-    }, [sendResponse, approval.approvalId]);
+    const handleSubmit = useBatchApprovalSubmit(approval.approvalId);
 
     return (
         <BatchApprovalCard

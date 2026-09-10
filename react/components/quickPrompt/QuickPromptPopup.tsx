@@ -6,7 +6,7 @@ import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import { AlertIcon, ArrowUpRightIcon, CancelIcon, Icon, Spinner } from '../icons/icons';
+import { AlertIcon, ArrowRightIcon, CancelIcon, Icon, Spinner } from '../icons/icons';
 import { isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { chatAccessGateAtom, type ChatAccessGate } from '../../atoms/chatAccess';
 import {
@@ -69,7 +69,7 @@ const NoticeCard: React.FC<{
         </div>
         <div className="beaver-quick-prompt__footer">
             <div className="flex-1" />
-            <Button variant="outline" style={FOOTER_BUTTON_STYLE} rightIcon={ArrowUpRightIcon} onClick={openBeaver}>
+            <Button variant="outline" style={FOOTER_BUTTON_STYLE} rightIcon={ArrowRightIcon} onClick={openBeaver}>
                 Open Beaver
             </Button>
         </div>
@@ -198,10 +198,18 @@ const QuickPromptPopup: React.FC = () => {
     }, [close]);
 
     useEventSubscription('toggleQuickPrompt', () => {
-        const doc = surfaceWindow?.document;
-        const active = doc?.activeElement as HTMLElement | null;
+        const doc = surfaceWindow.document;
+        const runCard = !isSidebarVisible && hasActiveWork
+            ? doc.querySelector<HTMLElement>('#beaver-pane-floating-popup .beaver-run-status-popup__card')
+            : null;
+        if (runCard) {
+            close();
+            (runCard.querySelector<HTMLElement>('[data-run-status-approve]:not(:disabled)') ?? runCard).focus();
+            return;
+        }
+        const active = doc.activeElement as HTMLElement | null;
         // The document itself is not a place to send focus back to.
-        const focused = active && active !== doc?.body && active !== doc?.documentElement ? active : null;
+        const focused = active && active !== doc.body && active !== doc.documentElement ? active : null;
         void toggle().then((outcome) => {
             switch (outcome) {
                 case 'focus-sidebar':
@@ -215,7 +223,7 @@ const QuickPromptPopup: React.FC = () => {
                     break;
             }
         });
-    }, [toggle, dismiss]);
+    }, [toggle, dismiss, isSidebarVisible, hasActiveWork, close, surfaceWindow]);
 
     // The popup steps aside on its own: when the sidebar opens (it now shows
     // the same draft and thread), when the message it composed has been sent

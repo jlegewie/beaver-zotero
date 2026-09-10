@@ -31,6 +31,10 @@ import {
 import {
     buildZoteroCitationLinkHTML,
     isLinkCitationItem,
+    isStandaloneAttachment,
+    parseLinkCitationPageSuffix,
+    parseZoteroCitationLinkHref,
+    zoteroLinkCitationPattern,
 } from './zoteroLinkCitation';
 import type { SimplificationMetadata } from './noteHtmlSimplifier';
 import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
@@ -47,7 +51,12 @@ import {
 } from '@beaver/agent-core/citations/citationGrammar';
 import type { PageLabels } from '../services/documentCache';
 import type { StructuredExtractResult } from '@beaver/agent-core/extract/schema';
-import { translatePageNumberToLabel } from './pageLabelTranslation';
+import {
+    firstPageNumber,
+    formatCitationPages,
+    translatePageLabelToNumber,
+    translatePageNumberToLabel,
+} from './pageLabelTranslation';
 import { extractItemKeyFromUri } from './zoteroUri';
 import {
     modelObjectId,
@@ -58,15 +67,23 @@ import {
 
 export { translatePageNumberToLabel } from './pageLabelTranslation';
 
+/** The page a structural locator was resolved to, for display and navigation. */
+export interface ResolvedLocatorPage {
+    /** Display page label stored as the citation's locator; may be a range. */
+    label: string;
+    /** First physical 1-based page, for links that navigate the reader. */
+    page?: number;
+}
+
 /**
- * Map of `requestedCitationKey` (e.g. `zotero:1-KEY:s4`) → resolved page string
- * for citations whose locator is a non-page structural locator (sentence,
+ * Map of `requestedCitationKey` (e.g. `zotero:1-KEY:s4`) → resolved page for
+ * citations whose locator is a non-page structural locator (sentence,
  * paragraph, heading, …). Native Zotero citations only store page locators, so
  * structural locators are resolved to the page they appear on (via the
  * structured extraction cache) before being stored. Resolve up-front with
  * `preloadStructuralLocatorPages`.
  */
-export type ResolvedLocatorPages = Record<string, string>;
+export type ResolvedLocatorPages = Record<string, ResolvedLocatorPage>;
 
 export interface StructuralLocatorPreload {
     pages: ResolvedLocatorPages;
@@ -151,7 +168,8 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
 }
 
 /**
- * Load cached page labels for citations already stored in a raw Zotero note.
+ * Load cached page labels for citations already stored in a raw Zotero note,
+ * both native ones and the plain links used for standalone attachments.
  *
  * This path is cache-first. Warm-cache reads only consult `documentCache`
  * metadata; callers can opt into local metadata seeding on a cache miss when
@@ -174,6 +192,42 @@ export async function preloadNotePageLabels(
     if (!cache) return labelsByItemId;
 
     const seen = new Set<string>();
+    // Keyed with the simplifier's portable item id so lookups in
+    // `simplifyNoteHtml` (which builds the same id via `modelObjectId`)
+    // resolve to the labels seeded here.
+    const loadLabels = async (targetLibraryID: number, itemKey: string): Promise<void> => {
+        const itemId = modelObjectId(targetLibraryID, itemKey);
+        if (seen.has(itemId)) return;
+        seen.add(itemId);
+        try {
+            const item = Zotero.Items.getByLibraryAndKey(targetLibraryID, itemKey);
+            const attachmentItem = item && typeof item !== 'boolean'
+                ? (item.isAttachment() ? item : await getBestPDFAttachmentAsync(item))
+                : null;
+            if (!attachmentItem) return;
+
+            const localFilePath = await attachmentItem.getFilePathAsync();
+            const filePath = localFilePath || makeRemoteFilePath(attachmentItem);
+            const isRemoteOnly = !localFilePath || isRemoteFilePath(filePath);
+            let record = await cache.getMetadata({
+                libraryId: attachmentItem.libraryID,
+                zoteroKey: attachmentItem.key,
+            }, filePath);
+            if (!record && extractOnCacheMiss && (!isRemoteOnly || allowRemoteDownloads)) {
+                await getAttachmentFileStatus(attachmentItem, false);
+                record = await cache.getMetadata({
+                    libraryId: attachmentItem.libraryID,
+                    zoteroKey: attachmentItem.key,
+                }, filePath);
+            }
+            if (record?.pageLabels && Object.keys(record.pageLabels).length > 0) {
+                labelsByItemId[itemId] = { ...record.pageLabels };
+            }
+        } catch {
+            // Skip attachments whose file or metadata cannot be read.
+        }
+    };
+
     const regex = /data-citation="([^"]*)"/g;
     let match: RegExpExecArray | null;
 
@@ -188,40 +242,28 @@ export async function preloadNotePageLabels(
                 const uri = ci?.uris?.[0] || '';
                 const itemKey = extractItemKeyFromUri(uri);
                 if (!itemKey) continue;
-                // Keyed with the simplifier's portable item id so lookups in
-                // `simplifyNoteHtml` (which builds the same id via `modelObjectId`)
-                // resolve to the labels seeded here.
-                const itemId = modelObjectId(libraryID, itemKey);
-                if (seen.has(itemId)) continue;
-                seen.add(itemId);
-
-                const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
-                const attachmentItem = item && typeof item !== 'boolean'
-                    ? (item.isAttachment() ? item : await getBestPDFAttachmentAsync(item))
-                    : null;
-                if (!attachmentItem) continue;
-
-                const localFilePath = await attachmentItem.getFilePathAsync();
-                const filePath = localFilePath || makeRemoteFilePath(attachmentItem);
-                const isRemoteOnly = !localFilePath || isRemoteFilePath(filePath);
-                let record = await cache.getMetadata({
-                    libraryId: attachmentItem.libraryID,
-                    zoteroKey: attachmentItem.key,
-                }, filePath);
-                if (!record && extractOnCacheMiss && (!isRemoteOnly || allowRemoteDownloads)) {
-                    await getAttachmentFileStatus(attachmentItem, false);
-                    record = await cache.getMetadata({
-                        libraryId: attachmentItem.libraryID,
-                        zoteroKey: attachmentItem.key,
-                    }, filePath);
-                }
-                if (record?.pageLabels && Object.keys(record.pageLabels).length > 0) {
-                    labelsByItemId[itemId] = { ...record.pageLabels };
-                }
+                await loadLabels(libraryID, itemKey);
             }
         } catch {
             // Skip malformed citation metadata or attachments that can't load.
         }
+    }
+
+    // Link citations (standalone attachments) carry no `data-citation`, so their
+    // labels have to come from the link itself. Without them the simplifier
+    // cannot translate the stored label into the physical page number the agent
+    // writes, and a later locator edit would be read in the wrong convention.
+    // The link names its own library, which need not be the note's.
+    for (const link of rawHtml.matchAll(zoteroLinkCitationPattern())) {
+        const [, openParen, , rawHref, rawSuffix, closeParen] = link;
+        // Only the wrapped form carries a locator into the simplified citation.
+        if (!openParen || !closeParen) continue;
+        if (parseLinkCitationPageSuffix(rawSuffix) === null) continue;
+        const parsed = parseZoteroCitationLinkHref(rawHref);
+        // Reading an excluded library's cached extraction is off limits; the
+        // citation still renders, only its locator convention is left as stored.
+        if (!parsed || checkLibraryExcluded(parsed.libraryId)) continue;
+        await loadLabels(parsed.libraryId, parsed.itemKey);
     }
 
     return labelsByItemId;
@@ -229,23 +271,30 @@ export async function preloadNotePageLabels(
 
 /**
  * Map a non-page (structural) locator to the page it appears on, using the
- * document's structured citation index. Returns the page's display label when
- * available, otherwise the 1-based page number; null when the locator is not
- * indexed.
+ * document's structured citation index. The label is the page's display label
+ * when available, otherwise the 1-based page number; null when the locator is
+ * not indexed.
  */
 function resolvePageFromStructuredResult(
     result: StructuredExtractResult,
     locator: Locator,
-): string | null {
+    includeRange = false,
+): ResolvedLocatorPage | null {
     const index = result.document.citationIndex ?? {};
+    const pages: number[] = [];
+    const labels: PageLabels = {};
     for (const id of citationIndexCandidateIdsForLocator(locator)) {
         const entry = index[id];
         if (!entry || !Number.isInteger(entry.pageIndex) || entry.pageIndex < 0) continue;
-        return entry.pageLabel && entry.pageLabel.trim() !== ''
-            ? entry.pageLabel
-            : String(entry.pageIndex + 1);
+        pages.push(entry.pageIndex + 1);
+        if (entry.pageLabel) labels[entry.pageIndex] = entry.pageLabel;
+        if (!includeRange) break;
     }
-    return null;
+    const label = formatCitationPages(pages, labels, { inclusiveRange: includeRange });
+    // The physical page is kept alongside the label: a label cannot be
+    // translated back once the extraction result is out of scope, and link
+    // citations navigate the reader by physical page.
+    return label ? { label, page: Math.min(...pages) } : null;
 }
 
 /**
@@ -321,9 +370,9 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
             const result = await resultPromise;
             if (!result) { unresolved.push(describe); continue; }
 
-            const page = resolvePageFromStructuredResult(result, loc);
-            if (page == null) { unresolved.push(describe); continue; }
-            pages[citationKey] = page;
+            const resolved = resolvePageFromStructuredResult(result, loc, isStandaloneAttachment(item));
+            if (resolved == null) { unresolved.push(describe); continue; }
+            pages[citationKey] = resolved;
         } catch {
             unresolved.push(describe);
         }
@@ -422,10 +471,15 @@ interface SimplifiedCitationAttrs {
     cslLabel?: string;
     /**
      * True when `page` was resolved from a structural locator and is already a
-     * final page label — `buildCitationFromSimplifiedAttrs` must store it
+     * final page label — `buildCitation` must store it
      * verbatim and skip the 1-based-page-number → label translation.
      */
     pageIsResolvedLabel?: boolean;
+    /**
+     * Physical 1-based page behind `page`, carried alongside a resolved label
+     * so link citations can still navigate the reader to it.
+     */
+    navPage?: number;
 }
 
 /**
@@ -438,13 +492,13 @@ interface SimplifiedCitationAttrs {
 function resolveLocatorPageAttr(
     ref: CitationRef,
     resolvedLocatorPages?: ResolvedLocatorPages,
-): { page?: string; pageIsResolvedLabel?: boolean } {
+): { page?: string; pageIsResolvedLabel?: boolean; navPage?: number } {
     const page = getPageLocator(ref);
     if (page) return { page };
 
     if (ref.loc && ref.loc.kind !== 'page' && resolvedLocatorPages) {
         const resolved = resolvedLocatorPages[requestedCitationKey(ref)];
-        if (resolved) return { page: resolved, pageIsResolvedLabel: true };
+        if (resolved) return { page: resolved.label, pageIsResolvedLabel: true, navPage: resolved.page };
     }
     return {};
 }
@@ -461,8 +515,8 @@ function parseSimplifiedCitationAttrs(
         throw new Error('Citation must have an "id" attribute. Legacy "item_id" / "att_id" are also accepted.');
     }
     const item_id = modelObjectIdFromReference(normalized.ref);
-    const { page, pageIsResolvedLabel } = resolveLocatorPageAttr(normalized.ref, resolvedLocatorPages);
-    return { item_id, ...(page ? { page, pageIsResolvedLabel } : {}) };
+    const { page, pageIsResolvedLabel, navPage } = resolveLocatorPageAttr(normalized.ref, resolvedLocatorPages);
+    return { item_id, ...(page ? { page, pageIsResolvedLabel, navPage } : {}) };
 }
 
 /** Check if citation attributes have changed */
@@ -502,71 +556,60 @@ function resolvePageForCitation(
     return resolved;
 }
 
-/** Build a new citation from simplified attributes (item_id: portable "u-KEY" / "gGROUP-KEY", or legacy "LIB-KEY") */
-function buildCitationFromSimplifiedAttrs(
-    attrs: SimplifiedCitationAttrs,
-    shouldTranslatePage: boolean,
-    pageLabels?: PageLabelsByAttachmentId,
-): string {
-    const ref = resolveObjectId(attrs.item_id);
+/** Build a citation or item link, preserving the source attribute in errors. */
+function buildCitation({
+    item_id,
+    page,
+    pageIsResolvedLabel,
+    navPage,
+    attrName = 'item_id',
+    shouldTranslatePage = true,
+    pageLabels,
+}: SimplifiedCitationAttrs & {
+    attrName?: 'item_id' | 'att_id';
+    shouldTranslatePage?: boolean;
+    pageLabels?: PageLabelsByAttachmentId;
+}): string {
+    const ref = resolveObjectId(item_id);
     if (!ref) {
-        throw new Error(`Invalid item_id format: "${attrs.item_id}". Expected "libraryID-itemKey".`);
+        throw new Error(`Invalid ${attrName} format: "${item_id}". Expected "libraryID-itemKey".`);
     }
     if (ref.library_id === UNRESOLVED_LIBRARY_ID) {
-        throw new Error(`Cannot cite item_id="${attrs.item_id}": its library is not available on this computer.`);
+        throw new Error(`Cannot cite ${attrName}="${item_id}": its library is not available on this computer.`);
     }
-    // Never resolve a citation target in a library the user excluded from
-    // Beaver — building the citation would embed the item's metadata.
+    // Reject excluded targets before reading metadata to embed in the note.
     const excluded = checkLibraryExcluded(ref.library_id);
     if (excluded) {
-        throw new Error(`Cannot cite item_id="${attrs.item_id}": ${excluded.message}`);
+        throw new Error(`Cannot cite ${attrName}="${item_id}": ${excluded.message}`);
     }
     const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
     if (!item) {
-        throw new Error(`Item not found: ${attrs.item_id}`);
+        throw new Error(`${attrName === 'att_id' ? 'Attachment' : 'Item'} not found: ${item_id}`);
     }
     if (isLinkCitationItem(item)) {
-        return buildZoteroCitationLinkHTML(item);
+        // Item links can display full ranges; native CSL navigation needs a single page.
+        const labels = pageLabels?.[item.id];
+        // `page` is a physical page number from the model, but a page already
+        // resolved from a structural locator — or read back from a note, where
+        // locators are stored as labels — is a display label.
+        const pageIsLabel = pageIsResolvedLabel === true || !shouldTranslatePage;
+        const displayPage = isStandaloneAttachment(item) && page
+            ? pageIsLabel ? page : translatePageNumberToLabel(labels, page)
+            : undefined;
+        // The link navigates by physical page, so a label has to be translated
+        // back. Without labels the translation is a no-op and the displayed
+        // number is the best available guess.
+        const linkPage = displayPage
+            ? navPage ?? firstPageNumber(pageIsLabel ? translatePageLabelToNumber(labels, displayPage) : page)
+            : undefined;
+        return buildZoteroCitationLinkHTML(item, displayPage
+            ? { kind: 'page', value: displayPage, raw: `page${displayPage}` }
+            : undefined, linkPage);
     }
-    // A page resolved from a structural locator is already a final label;
-    // translating it again would mangle a numeric label into the wrong page.
-    const resolvedPage = attrs.pageIsResolvedLabel
-        ? attrs.page
-        : resolvePageForCitation(item, attrs.page, shouldTranslatePage, pageLabels);
-    return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
-}
-
-/** Build a new citation from an attachment ID (att_id: portable "u-KEY" / "gGROUP-KEY", or legacy "LIB-KEY") */
-function buildCitationFromAttId(
-    attId: string,
-    page?: string,
-    shouldTranslatePage = true,
-    pageLabels?: PageLabelsByAttachmentId,
-    pageIsResolvedLabel = false,
-): string {
-    const ref = resolveObjectId(attId);
-    if (!ref) {
-        throw new Error(`Invalid att_id format: "${attId}". Expected "libraryID-itemKey".`);
-    }
-    if (ref.library_id === UNRESOLVED_LIBRARY_ID) {
-        throw new Error(`Cannot cite att_id="${attId}": its library is not available on this computer.`);
-    }
-    // Never resolve a citation target in a library the user excluded from
-    // Beaver — building the citation would embed the item's metadata.
-    const excluded = checkLibraryExcluded(ref.library_id);
-    if (excluded) {
-        throw new Error(`Cannot cite att_id="${attId}": ${excluded.message}`);
-    }
-    const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
-    if (!item) {
-        throw new Error(`Attachment not found: ${attId}`);
-    }
-    // A page resolved from a structural locator is already a final label and
-    // must be stored verbatim rather than re-translated.
+    // Structural locators already resolve to final labels; do not translate twice.
     const resolvedPage = pageIsResolvedLabel
         ? page
         : resolvePageForCitation(item, page, shouldTranslatePage, pageLabels);
-    // createCitationHTML handles attachment-to-parent resolution internally
     return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
 }
 
@@ -763,11 +806,7 @@ export function expandToRawHtml(
                             // like a newly inserted citation.
                             const shouldTranslatePage = stored.originalAttrs?.pageConvention === 'number'
                                 && (stored.originalAttrs.cslLabel == null || stored.originalAttrs.cslLabel === 'page');
-                            return buildCitationFromSimplifiedAttrs(
-                                newAttrs,
-                                shouldTranslatePage,
-                                pageLabels,
-                            );
+                            return buildCitation({ ...newAttrs, shouldTranslatePage, pageLabels });
                         }
                     }
                     return stored.rawHtml; // exact original
@@ -820,19 +859,26 @@ export function expandToRawHtml(
             // New citations from the model always use 1-based page numbers → translate
             if (itemId) {
                 const attrs = parseSimplifiedCitationAttrs(attrStr, resolvedLocatorPages);
-                return buildCitationFromSimplifiedAttrs(attrs, true, pageLabels);
+                return buildCitation({ ...attrs, pageLabels });
             }
             if (attId) {
                 // Resolve structural locators on legacy att_id/attachment_id
                 // citations the same way as the unified id path.
-                const { page, pageIsResolvedLabel } = normalizedCitation.ok
+                const { page, pageIsResolvedLabel, navPage } = normalizedCitation.ok
                     ? resolveLocatorPageAttr(normalizedCitation.ref, resolvedLocatorPages)
-                    : { page: extractAttr(attrStr, 'page'), pageIsResolvedLabel: false };
-                return buildCitationFromAttId(attId, page, true, pageLabels, pageIsResolvedLabel);
+                    : { page: extractAttr(attrStr, 'page'), pageIsResolvedLabel: false, navPage: undefined };
+                return buildCitation({
+                    item_id: attId,
+                    attrName: 'att_id',
+                    page,
+                    pageLabels,
+                    pageIsResolvedLabel,
+                    navPage,
+                });
             }
             if (normalizedCitation.ok && normalizedCitation.ref.kind === 'zotero') {
                 const attrs = parseSimplifiedCitationAttrs(attrStr, resolvedLocatorPages);
-                return buildCitationFromSimplifiedAttrs(attrs, true, pageLabels);
+                return buildCitation({ ...attrs, pageLabels });
             }
             // external_id: chat-side external work ID (e.g. OpenAlex W-id). Two-tier
             // fallback so the model's research effort isn't lost when it tries to
@@ -845,7 +891,11 @@ export function expandToRawHtml(
                 const mappedItemRef = externalRefContext?.externalItemMapping?.[externalId];
                 if (mappedItemRef) {
                     const itemIdStr = modelObjectIdFromReference(mappedItemRef);
-                    return buildCitationFromSimplifiedAttrs({ item_id: itemIdStr, page }, true, pageLabels);
+                    return buildCitation({
+                        item_id: itemIdStr,
+                        page,
+                        pageLabels,
+                        });
                 }
 
                 // Tier 2: emit an inline hyperlink from the ExternalReference
