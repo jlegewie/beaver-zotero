@@ -88,6 +88,17 @@ describe("searchItemsByMetadata", () => {
         expect(items).toEqual([{ id: 1 }, { id: 3 }, { id: 7 }]);
     });
 
+    it('filters years and full creator names before applying the result limit', async () => {
+        const fixtures = [
+            { id: 1, date: '2016', firstName: 'Joscha', lastName: 'Legewie' },
+            { id: 3, date: '', firstName: 'Joscha', lastName: 'Legewie' },
+            { id: 9, date: '2015-00-00', firstName: 'Joscha', lastName: 'Legewie' },
+        ].map(({ date, firstName, lastName, ...item }) => ({ ...item, getField: () => date, getCreators: () => [{ firstName, lastName }] }));
+        vi.mocked(Zotero.Items.getAsync).mockImplementation(async () => fixtures as any);
+        const items = await searchItemsByMetadata(4, { tags: ['education'], author_query: 'Joscha Legewie', year_max: 2015, limit: 1 });
+        expect(items.map(item => item.id)).toEqual([9]);
+    });
+
     it("unions one recursive search per collection key", async () => {
         const items = await searchItemsByMetadata(4, {
             title_query: "schools",

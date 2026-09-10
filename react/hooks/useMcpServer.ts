@@ -194,7 +194,7 @@ const SEARCH_BY_TOPIC_TOOL = {
             author_filter: {
                 type: 'array',
                 items: { type: 'string' },
-                description: 'Author last names to filter results (OR logic). Example: ["Acemoglu", "Robinson"].',
+                description: 'Creator name tokens (first, last, full, or institutional), matched case-insensitively within one creator (OR across filters). Example: ["Acemoglu", "Robinson"].',
             },
             min_year: {
                 type: 'integer',
@@ -260,7 +260,7 @@ const SEARCH_BY_METADATA_TOOL = {
         properties: {
             author_query: {
                 type: 'string',
-                description: 'Author\'s last name to search for (e.g., "Acemoglu").',
+                description: 'Creator name tokens (first, last, full, or institutional), matched case-insensitively within one creator.',
             },
             title_query: {
                 type: 'string',
@@ -550,7 +550,7 @@ const LIST_TAGS_TOOL = {
         'Each tag reports a `tag_type`: "manual" when the user added it, "automatic" when it was imported ' +
         'with an item\'s metadata (publisher keywords, MeSH terms). `tag_type` selects which kind to list: ' +
         '"manual" (default, the user\'s own vocabulary), "automatic" (imported keywords only) or "all". ' +
-        'The response always reports `manual_count` and `automatic_count` for the whole scope.',
+        'The response always reports `manual_count` and `automatic_count` after name_query and min_item_count, before tag_type and pagination.',
     inputSchema: {
         type: 'object' as const,
         properties: {
@@ -960,6 +960,7 @@ export async function handleReadAttachment(args: any): Promise<any> {
                                 ...(page.label ? { page_label: page.label } : {}),
                                 boxes: part.boxes.map(([l, t, r, b]) => ({ l, t, r, b, coord_origin: 't' })),
                             }],
+                            ...(page.label ? { page_label: page.label } : {}),
                             note_position: {
                                 page_index: page.index, side: 'right', coord_origin: 't',
                                 x: part.boxes[0][2], y: (part.boxes[0][1] + part.boxes[0][3]) / 2,
@@ -992,7 +993,7 @@ export async function handleReadAttachment(args: any): Promise<any> {
             total_pages: totalPages,
             ...(isDom
                 ? { content_kind: result.content_kind, passages: requestedPages.flatMap(page => page.passages ?? []) }
-                : { pages: requestedPages.map(page => ({ page: page.pageNumber, passages: page.passages ?? [] })) }),
+                : { content_kind: 'pdf', pages: requestedPages.map(page => ({ page: page.pageNumber, passages: page.passages ?? [] })) }),
         };
     }
 
@@ -1284,7 +1285,7 @@ async function handleGetItemDetails(args: any): Promise<any> {
                 return {
                     attachment_id: getMcpAttachmentId(a),
                     filename: a.filename || null,
-                    content_type: a.content_type ?? a.contentType ?? null,
+                    content_type: a.mime_type ?? a.content_type ?? a.contentType ?? null,
                     content_kind: a.content_kind ?? null,
                     page_count: a.page_count ?? null,
                     annotations_count: a.annotations_count,
@@ -1432,9 +1433,8 @@ async function handleListItems(args: any): Promise<any> {
     const sortOrder = args.sort_order === 'asc' ? 'asc' : 'desc';
 
     const validCategories: ZoteroItemCategory[] = ['regular', 'note', 'attachment', 'all'];
-    const itemCategory: ZoteroItemCategory = validCategories.includes(args.item_category)
-        ? args.item_category
-        : 'regular';
+    if (args.item_category !== undefined && !validCategories.includes(args.item_category)) return mcpError('Invalid item_category. Use regular, note, attachment, or all; use find_annotations for annotations.');
+    const itemCategory: ZoteroItemCategory = args.item_category ?? 'regular';
 
     const wsRequest: WSListItemsRequest = {
         event: 'list_items_request',
@@ -1497,7 +1497,7 @@ async function handleListItems(args: any): Promise<any> {
                     title: attachment.title ?? null,
                     filename: attachment.filename ?? null,
                     content_kind: attachment.content_kind,
-                    content_type: (attachment as any).content_type ?? null,
+                    content_type: (attachment as any).mime_type ?? (attachment as any).content_type ?? null,
                     status: getMcpAttachmentStatus(attachment),
                     status_reason: attachment.status_reason ?? null,
                     parent_item_id: attachment.parent_item_id ?? null,

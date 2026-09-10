@@ -1,3 +1,4 @@
+import { validateInput } from './mcpInputValidation';
 import type { WindowRuntime } from "../runtime/instance";
 /**
  * MCP (Model Context Protocol) Service
@@ -85,7 +86,7 @@ export class MCPService {
         definition: McpToolDefinition,
         handler: (args: any) => Promise<any>,
     ): void {
-        this.tools.set(name, { definition, handler });
+        this.tools.set(name, { definition: { ...definition, inputSchema: { ...definition.inputSchema, additionalProperties: false } }, handler });
     }
 
     /**
@@ -264,7 +265,12 @@ export class MCPService {
             throw new Error(`Unknown tool: ${params.name}`);
         }
 
-        const args = params.arguments ?? {};
+        const args = Object.prototype.hasOwnProperty.call(params, 'arguments') ? params.arguments : {};
+        try {
+            validateInput(args, entry.definition.inputSchema);
+        } catch (error) {
+            return { content: [{ type: 'text', text: `Invalid arguments for ${params.name}: ${String(error)}` }], isError: true };
+        }
         const result = await entry.handler(args);
 
         // MCP tools/call must return { content: [...] }

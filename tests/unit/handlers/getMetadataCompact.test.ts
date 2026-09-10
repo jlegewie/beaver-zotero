@@ -128,6 +128,15 @@ beforeEach(() => {
     };
 });
 
+describe('metadata identity and field quality', () => {
+    it('normalizes a legacy ID and removes escaped control-only URLs', async () => {
+        const item = regularItem('AAAAAAAA', { toJSON: () => ({ itemType: 'journalArticle', title: 'Source', url: String.raw`\u0000\u0000` }) });
+        mocks.resolveItemReference.mockResolvedValue({ status: 'found', item });
+        const result = await handleGetMetadataRequest(request({ item_ids: ['1-AAAAAAAA'] }));
+        expect(result.items[0]).toMatchObject({ item_id: 'u-AAAAAAAA', url: null });
+    });
+});
+
 describe('handleGetMetadataRequest compact projection', () => {
     it('returns one chip-sized row per item, keyed back to the requested id', async () => {
         const res = await handleGetMetadataRequest(request({ detail: 'compact' }));

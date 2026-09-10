@@ -626,6 +626,7 @@ export interface WSItemSearchByMetadataRequest extends WSBaseEvent {
 
 /** Error codes for item search failures */
 export type ItemSearchErrorCode =
+    | 'ambiguous_collection'
     | 'internal_error'         // General internal error
     | 'database_error'         // Database/indexing error
     | 'invalid_request'        // Invalid request parameters
@@ -1822,7 +1823,7 @@ export interface CollectionInfo {
      * Top-level regular items directly in this collection, excluding
      * attachments, notes and annotations.
      */
-    item_count: number;
+    item_count?: number;
     /**
      * Attachments sitting directly in this collection rather than under a
      * parent item.

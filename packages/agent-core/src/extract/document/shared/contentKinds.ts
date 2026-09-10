@@ -30,6 +30,8 @@ export interface AttachmentStub {
 }
 
 export interface AttachmentInfo extends AttachmentStub {
+    /** MIME type reported by the attachment host. */
+    mime_type?: string | null;
     status: ContentInfoStatus;
     status_code?: string | null;
     status_reason?: string | null;

@@ -1,3 +1,4 @@
+import { matchesPublicationYear, matchesCreatorName } from '../../src/utils/searchFilters';
 /**
  * Search tools for AI agent to query Zotero library using native search capabilities
  */
@@ -92,7 +93,9 @@ export const searchItemsByMetadata = async (
 
         // Author/Creator search
         if (author_query) {
-            search.addCondition('creator', 'contains', author_query);
+            for (const token of author_query.trim().split(/[\s,]+/).filter(Boolean)) {
+                search.addCondition('creator', 'contains', token);
+            }
         }
 
         // Publication search
@@ -108,7 +111,7 @@ export const searchItemsByMetadata = async (
                 search.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
             }
             if (year_max && year_max > 0) {
-                search.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
+                search.addCondition('date', 'isBefore', `${year_max + 1}`);
             }
         }
 
@@ -175,7 +178,8 @@ export const searchItemsByMetadata = async (
     const itemIDs = Array.from(itemIDSet).sort((a, b) => a - b);
 
     // Apply limit
-    const limitedIDs = limit > 0 ? itemIDs.slice(0, limit) : itemIDs;
+    const needsFiltering = year_min != null || year_max != null || year_exact != null || !!author_query;
+    const limitedIDs = limit > 0 && !needsFiltering ? itemIDs.slice(0, limit) : itemIDs;
 
     if (limitedIDs.length === 0) {
         return [];
@@ -190,7 +194,11 @@ export const searchItemsByMetadata = async (
         await Zotero.Items.loadDataTypes(items, ["itemData", "creators"]);
     }
 
-    return items;
+    const filtered = needsFiltering ? items.filter(item =>
+        matchesPublicationYear(item.getField('date', false, true), year_exact ?? year_min, year_exact ?? year_max)
+        && (!author_query || matchesCreatorName(item.getCreators(), author_query))
+    ) : items;
+    return limit > 0 ? filtered.slice(0, limit) : filtered;
 };
 
 
@@ -320,7 +328,7 @@ export const resolveItemsByFilters = async (
                     search.addCondition('date', 'isAfter', `${year!.min - 1}-12-31`);
                 }
                 if (year!.max && year!.max > 0) {
-                    search.addCondition('date', 'isBefore', `${year!.max + 1}-01-01`);
+                    search.addCondition('date', 'isBefore', `${year!.max + 1}`);
                 }
             }
         });

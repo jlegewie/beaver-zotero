@@ -1,3 +1,4 @@
+import { validateInput } from '../../../src/services/mcpInputValidation';
 import { mcpError, generateRequestId, buildNoopTimeoutContext } from './utils';
 import {
     handleListLibrariesRequest,
@@ -46,7 +47,7 @@ export const LIST_LIBRARIES_TOOL = {
 
 export const FIND_ANNOTATIONS_TOOL = {
     name: 'find_annotations', annotations: { title: 'Find Annotations', ...readHints },
-    description: 'Find highlights, underlines, and note annotations in a Zotero library. Filters are combined with AND; supply at least one filter besides library. Returns annotation text, comments, tags, source IDs, and pagination. Defaults to the personal library; use list_libraries for other libraries.',
+    description: 'Find highlights, underlines, and note annotations in a Zotero library. Filters are combined with AND. Omit filters to browse all annotations with pagination. Returns annotation text, comments, tags, source IDs, and pagination. Defaults to the personal library; use list_libraries for other libraries.',
     inputSchema: {
         type: 'object', additionalProperties: false,
         properties: {
@@ -54,8 +55,8 @@ export const FIND_ANNOTATIONS_TOOL = {
             comment_contains: { ...string, description: 'Substring in annotation comments.' },
             tag: string, color: { ...string, description: 'Zotero color name or hex color (matched to nearest palette color).' },
             annotation_type: { type: 'string', enum: ['highlight', 'underline', 'note'] },
-            author: string,
-            attachment_id: { ...string, description: 'Attachment or parent item ID from another tool.' },
+            author: { ...string, description: 'Annotation creator name substring, not the paper author. Beaver-created annotations have creator "Beaver".' },
+            attachment_id: { ...string, description: 'File attachment ID from another tool. Parent item IDs are not supported; use get_item_details with include_attachments=true to find attachment IDs.' },
             collection: { ...string, description: 'Collection ID or name.' },
             library: { type: ['string', 'integer'], description: 'Library ref (u or g<groupID>), numeric ID, or name.' },
             recursive: { type: 'boolean', default: true },
@@ -105,32 +106,6 @@ function creationTool(highlight: boolean) {
 }
 export const CREATE_HIGHLIGHT_ANNOTATIONS_TOOL = creationTool(true);
 export const CREATE_NOTE_ANNOTATIONS_TOOL = creationTool(false);
-
-/** Validate the JSON Schema subset used by these tools, including direct HTTP calls. */
-function validateInput(value: any, schema: any, path = 'arguments'): void {
-    const types = Array.isArray(schema.type) ? schema.type : [schema.type];
-    const matches = types.some((type: string) => type === 'integer' ? Number.isSafeInteger(value)
-        : type === 'number' ? typeof value === 'number' && Number.isFinite(value)
-            : type === 'array' ? Array.isArray(value)
-                : type === 'object' ? value !== null && typeof value === 'object' && !Array.isArray(value)
-                    : typeof value === type);
-    if (!matches) throw new Error(`${path} must be ${types.join(' or ')}.`);
-    if (schema.enum && !schema.enum.includes(value)) throw new Error(`${path} must be one of: ${schema.enum.join(', ')}.`);
-    if (typeof value === 'number' && (value < (schema.minimum ?? -Infinity) || value > (schema.maximum ?? Infinity))) {
-        throw new Error(`${path} is outside the allowed range (${schema.minimum ?? '-infinity'}–${schema.maximum ?? 'infinity'}).`);
-    }
-    if (typeof value === 'string' && schema.minLength && value.trim().length < schema.minLength) throw new Error(`${path} cannot be empty.`);
-    if (Array.isArray(value)) {
-        if (value.length < (schema.minItems ?? 0) || value.length > (schema.maxItems ?? Infinity)) throw new Error(`${path} has an invalid number of items.`);
-        value.forEach((item, index) => validateInput(item, schema.items, `${path}[${index}]`));
-    } else if (value !== null && typeof value === 'object') {
-        for (const key of schema.required ?? []) if (!(key in value)) throw new Error(`${path}.${key} is required.`);
-        for (const [key, item] of Object.entries(value)) {
-            if (!Object.prototype.hasOwnProperty.call(schema.properties, key)) throw new Error(`Unknown argument: ${path}.${key}.`);
-            validateInput(item, schema.properties[key], `${path}.${key}`);
-        }
-    }
-}
 
 export async function handleListLibraries(args: unknown = {}): Promise<any> {
     try {
@@ -214,10 +189,10 @@ async function createAnnotations(args: any, highlight: boolean): Promise<any> {
         const output = {
             attachment_id: modelObjectIdFromReference(ref),
             created: (result.created ?? []).map((annotation: any) => ({
-                ...annotation, annotation_id: modelObjectIdFromReference(annotation),
+                ...Object.fromEntries(Object.entries(annotation).filter(([key, value]) => key !== 'loc_raw' || value !== '')), annotation_id: modelObjectIdFromReference(annotation),
                 zotero_uri: getZoteroSelectURI(annotation.library_id, annotation.zotero_key),
             })),
-            failed: result.failed ?? [], total_created: result.total_created ?? 0, total_failed: result.total_failed ?? 0,
+            failed: (result.failed ?? []).map((failure: any) => Object.fromEntries(Object.entries(failure).filter(([key, value]) => key !== 'loc_raw' || value !== ''))), total_created: result.total_created ?? 0, total_failed: result.total_failed ?? 0,
         };
         return { content: [{ type: 'text', text: JSON.stringify(output) }], ...(output.total_failed > 0 ? { isError: true } : {}) };
     } catch (error) { return mcpError(error); }
