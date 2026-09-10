@@ -1,0 +1,51 @@
+// @vitest-environment jsdom
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { createStore, Provider } from 'jotai';
+import { expect, it, vi } from 'vitest';
+import { backgroundProcessingStatusAtom } from '../../../react/atoms/backgroundProcessing';
+import { useBackgroundProcessingStatus } from '../../../react/hooks/useBackgroundProcessingStatus';
+const collect = vi.hoisted(() => vi.fn());
+vi.mock('../../../src/services/backgroundProcessing/statusSnapshot', () => ({ collectProcessingStatus: collect }));
+vi.mock('../../../react/atoms/profile', async () => {
+    const { atom } = await import('jotai');
+    return { hasOcrAccessAtom: atom(false), hasSearchIndexAccessAtom: atom(true) };
+});
+function Consumer() {
+    useBackgroundProcessingStatus({ includeCoverage: true, includeFailures: true, pollIntervalMs: 1000 });
+    return null;
+}
+it('finishes slow polls and preserves separately dated server status after a failed refresh', async () => {
+    vi.useFakeTimers();
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const previous = Zotero.Beaver;
+    (Zotero as any).Beaver = { db: {} };
+    const store = createStore();
+    const initial = store.get(backgroundProcessingStatusAtom);
+    const snapshot = { ...initial,
+        coverage: { namespace_exists: true, approx_row_count: 100, documents: [] },
+        documentCache: null,
+    };
+    let resolve!: (value: typeof snapshot) => void;
+    collect.mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    collect.mockResolvedValue({ ...snapshot, coverage: null });
+    const root = createRoot(document.createElement('div'));
+    try {
+        await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(Consumer))));
+        await act(async () => vi.advanceTimersByTimeAsync(5000));
+        expect(collect).toHaveBeenCalledTimes(1);
+        await act(async () => resolve(snapshot));
+        const confirmedAt = store.get(backgroundProcessingStatusAtom).coverageUpdatedAt;
+        expect(confirmedAt).not.toBeNull();
+        await act(async () => vi.advanceTimersByTimeAsync(1000));
+        expect(collect).toHaveBeenCalledTimes(2);
+        expect(store.get(backgroundProcessingStatusAtom)).toMatchObject({
+            coverage: snapshot.coverage, coverageUpdatedAt: confirmedAt,
+            coverageError: 'Could not check search coverage.', error: null,
+        });
+    } finally {
+        act(() => root.unmount());
+        Zotero.Beaver = previous;
+        vi.useRealTimers();
+    }
+});

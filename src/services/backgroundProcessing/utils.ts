@@ -13,40 +13,14 @@ export function backgroundProcessingEnabled(): boolean {
     return getPref('backgroundProcessingEnabled') === true;
 }
 
-export function getBackgroundProcessingSkipTokens(): Set<string> {
-    const raw = getPref('backgroundProcessingLibrariesToSkip');
-    if (typeof raw !== 'string' || raw.length === 0) return new Set();
-    try {
-        const parsed = JSON.parse(raw);
-        return new Set(
-            Array.isArray(parsed)
-                ? parsed.filter((entry): entry is string => typeof entry === 'string')
-                : [],
-        );
-    } catch {
-        return new Set();
-    }
-}
-
-export function backgroundProcessingLibraryToken(libraryId: number): string | null {
-    const library = Zotero.Libraries.get(libraryId);
-    if (!library) return null;
-    if (library.libraryType === 'group') {
-        const groupId = Zotero.Groups.getGroupIDFromLibraryID(libraryId);
-        return groupId ? `G${groupId}` : null;
-    }
-    return library.libraryType === 'user' ? `L${libraryId}` : null;
-}
-
 /**
- * True when background producers may touch this library: searchable-library
- * scope is known and includes it, and the per-library skip pref does not.
- * Fail-closed while the mirror is unpublished.
+ * True when background producers may touch this library: the searchable-library
+ * scope is known and includes it. Library exclusion in Beaver's preferences is
+ * the only opt-out; there is no separate per-library processing list. Fails
+ * closed while the mirror is unpublished.
  */
 export function isBackgroundProcessingLibraryEnabled(libraryId: number): boolean {
-    if (!isLibraryInScope(libraryId)) return false;
-    const token = backgroundProcessingLibraryToken(libraryId);
-    return token !== null && !getBackgroundProcessingSkipTokens().has(token);
+    return isLibraryInScope(libraryId);
 }
 
 export function buildBackgroundExtractPayload(kind: ProcessableKind): BackgroundJobPayload {

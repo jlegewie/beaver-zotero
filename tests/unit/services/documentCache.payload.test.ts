@@ -316,6 +316,72 @@ describe('DocumentCache payloads', () => {
         },
     );
 
+    it('serializes maintenance and allows a retry after a failed operation', async () => {
+        const calls: string[] = [];
+        let release!: () => void;
+        const barrier = new Promise<void>((resolve) => { release = resolve; });
+        const first = cache.runMaintenance(async () => {
+            calls.push('first');
+            await barrier;
+            throw new Error('failed');
+        });
+        const rejected = expect(first).rejects.toThrow('failed');
+        const second = cache.runMaintenance(async () => { calls.push('second'); });
+        await vi.waitFor(() => expect(calls).toEqual(['first']));
+        release();
+        await rejected;
+        await second;
+        expect(calls).toEqual(['first', 'second']);
+    });
+
+    it('does not let an extraction that ignores cancellation repopulate a cleared cache', async () => {
+        let release!: () => void;
+        const barrier = new Promise<void>((resolve) => { release = resolve; });
+        const create = vi.fn(async () => { await barrier; return structuredResult; });
+        const extraction = cache.getOrCreateResult({
+            item: createCacheAttachment(), filePath: sourcePath, mode: 'structured',
+            sourceSizeBytes: 3, contentType: 'application/pdf', create,
+            metadata: () => ({ pageCount: 1, pageLabels: null, pages: onePageGeometry }),
+        });
+        while (!create.mock.calls.length) await Promise.resolve();
+        (globalThis as any).IOUtils.getChildren.mockResolvedValue([]);
+        await cache.clearAll();
+        release();
+        expect(await extraction).toBeNull();
+        expect(await db.getDocumentCacheMetadataCount()).toBe(0);
+        expect(await db.getDocumentCachePayloadCount()).toBe(0);
+    });
+
+    it('waits for an active payload write before deleting cache rows and files', async () => {
+        let release!: () => void;
+        const barrier = new Promise<void>((resolve) => { release = resolve; });
+        const write = mockIOUtils.write.mockImplementationOnce(async (path: string, bytes: Uint8Array) => {
+            await barrier;
+            files.set(path, bytes);
+        });
+        const pending = cache.putResult({
+            item: createCacheAttachment(), filePath: sourcePath, mode: 'structured',
+            sourceSizeBytes: 3, contentType: 'application/pdf', result: structuredResult,
+            metadata: { pageCount: 1, pageLabels: null, pages: onePageGeometry },
+        });
+        await vi.waitFor(() => expect(write).toHaveBeenCalled());
+        (globalThis as any).IOUtils.getChildren.mockImplementation(async () => [...files.keys()].filter((path) => path !== sourcePath));
+        const clear = cache.clearAll();
+        release();
+        await pending;
+        await clear;
+        expect(await db.getDocumentCacheMetadataCount()).toBe(0);
+        expect(await db.getDocumentCachePayloadCount()).toBe(0);
+        expect([...files.keys()]).toEqual([sourcePath]);
+    });
+
+    it('reports disk deletion failures so cache deletion can be retried', async () => {
+        (globalThis as any).IOUtils.getChildren.mockResolvedValue(['/cache/payload']);
+        mockIOUtils.remove.mockRejectedValueOnce(new Error('permission denied'));
+        await expect(cache.clearAll()).rejects.toThrow('permission denied');
+        await expect(cache.clearAll()).resolves.toMatchObject({ metadataRows: 0, payloadRows: 0 });
+    });
+
     it('coalesces concurrent cold result creation for the same source identity', async () => {
         const item = createCacheAttachment();
         let createCalls = 0;

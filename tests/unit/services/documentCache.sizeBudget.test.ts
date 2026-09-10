@@ -229,10 +229,55 @@ describe('DocumentCache size budget', () => {
         await conn.closeDatabase();
     });
 
+    it('counts distinct compatible cached documents, excluding errors and stale identities or schemas', async () => {
+        await seedPayload({ key: 'VALID001', sizeBytes: 10 });
+        await seedPayload({ key: 'STALE001', sizeBytes: 10 });
+        await seedPayload({ key: 'SCHEMA01', sizeBytes: 10 });
+        await seedPayload({ key: 'ERROR001', sizeBytes: 10 });
+        await conn.queryAsync("UPDATE document_cache_payloads SET source_file_mtime_ms=11 WHERE zotero_key='STALE001'");
+        await conn.queryAsync("UPDATE document_cache_metadata SET extraction_schema_version='obsolete' WHERE zotero_key='SCHEMA01'");
+        await conn.queryAsync("UPDATE document_cache_payloads SET extraction_schema_version='obsolete' WHERE zotero_key='SCHEMA01'");
+        await conn.queryAsync("UPDATE document_cache_metadata SET error_code='encrypted' WHERE zotero_key='ERROR001'");
+        const payload = (await db.getDocumentCachePayload(1, 'VALID001', 'structured'))!;
+        await db.upsertDocumentCachePayload({ ...payload, payloadKind: 'markdown',
+            sourceFileSignature: payload.sourceFileSignature });
+        expect((await cache.getStats()).cached_document_count).toBe(1);
+        await cache.clearAll();
+        expect((await cache.getStats()).cached_document_count).toBe(0);
+    });
+
+    it('does not probe source files or payloads during repeated status polling', async () => {
+        await seedPayload({ key: 'VALID001', sizeBytes: 10 });
+        vi.mocked(IOUtils.stat).mockClear();
+        vi.mocked(IOUtils.exists).mockClear();
+        const stats = await Promise.all([cache.getStats(), cache.getStats(), cache.getStats()]);
+        expect(stats.map((value) => value.cached_document_count)).toEqual([1, 1, 1]);
+        expect(IOUtils.stat).not.toHaveBeenCalled();
+        expect(IOUtils.exists).not.toHaveBeenCalled();
+    });
+
+    it.each(['missing payload', 'missing source', 'changed source'])('updates counts when a cache read discovers a %s', async (change) => {
+        const payloadPath = await seedPayload({ key: 'VALID001', sizeBytes: 10 });
+        const sourcePath = '/tmp/VALID001.pdf';
+        files.add(sourcePath);
+        vi.mocked(IOUtils.stat).mockResolvedValue({ size: 3, lastModified: 10 } as any);
+        expect((await cache.getStats()).cached_document_count).toBe(1);
+        if (change === 'missing payload') files.delete(payloadPath);
+        if (change === 'missing source') files.delete(sourcePath);
+        if (change === 'changed source') {
+            vi.mocked(IOUtils.stat).mockResolvedValue({ size: 3, lastModified: 11 } as any);
+        }
+        // Polling does not discover external file changes; ordinary reads validate them.
+        expect((await cache.getStats()).cached_document_count).toBe(1);
+        expect(await cache.getResult({ libraryId: 1, zoteroKey: 'VALID001' }, 'structured', sourcePath)).toBeNull();
+        expect((await cache.getStats()).cached_document_count).toBe(0);
+    });
+
     it('evicts payloads until the cache is within 90% of the budget', async () => {
         await seedPayload({ key: 'AAAA1111', sizeBytes: 400, lastAccessedAt: '2024-01-01 00:00:01' });
         await seedPayload({ key: 'BBBB2222', sizeBytes: 400, lastAccessedAt: '2024-01-01 00:00:02' });
         await seedPayload({ key: 'CCCC3333', sizeBytes: 400, lastAccessedAt: '2024-01-01 00:00:03' });
+        expect((await cache.getStats()).cached_document_count).toBe(3);
 
         const result = await cache.enforceSizeBudget();
 
@@ -240,6 +285,7 @@ describe('DocumentCache size budget', () => {
         expect(result).toEqual({ evicted: 1, bytesFreed: 400 });
         expect(await db.getDocumentCachePayloadTotalBytes()).toBe(800);
         expect(await db.getDocumentCachePayloadTotalBytes()).toBeLessThanOrEqual(1000);
+        expect((await cache.getStats()).cached_document_count).toBe(2);
     });
 
     it('evicts the oldest COALESCE(last_accessed_at, created_at) first', async () => {

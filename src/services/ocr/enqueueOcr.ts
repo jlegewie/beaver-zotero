@@ -48,7 +48,13 @@ export function maybeEnqueueOcrJob(args: MaybeEnqueueOcrArgs): void {
     });
 }
 
-async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
+/**
+ * Awaitable form of {@link maybeEnqueueOcrJob}, for callers that must know the
+ * ticket exists before acting on it (the extract executor before it retires
+ * its own job, the retry path before it requests an immediate drain). Still
+ * subject to every gate above; rejects only on unexpected errors.
+ */
+export async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
     // Library exclusion is an access boundary, so it gates the enqueue as well
     // as the executor: an excluded scan must not be hashed or ticketed at all.
     // Fails closed while the scope is unknown; detection re-fires on later

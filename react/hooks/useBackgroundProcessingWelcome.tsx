@@ -19,7 +19,7 @@ export function useBackgroundProcessingWelcome(): void {
     const shown = useRef(false);
 
     useEffect(() => {
-        if (shown.current || (!hasOcr && !hasSearch)) return;
+        if (shown.current || hasSearch || !hasOcr) return;
         if (getPref('backgroundProcessingEnabled') === true) return;
         if (getPref('backgroundProcessingWelcomeAck') === true) return;
         shown.current = true;

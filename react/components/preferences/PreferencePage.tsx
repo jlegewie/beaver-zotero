@@ -223,7 +223,7 @@ const PreferencePage: React.FC = () => {
     }
     const tabs = useMemo<PreferenceTabDefinition[]>(() => [
         { id: 'general', label: 'General', icon: SettingsIcon },
-        { id: 'sync', label: 'Search & Processing', icon: SearchIcon },
+        { id: 'sync', label: 'Search & Files', icon: SearchIcon },
         { id: 'permissions', label: 'Permissions', icon: LockIcon },
         { id: 'billing', label: 'Plan & Usage', icon: DollarCircleIcon },
         { id: 'models', label: 'API Keys', icon: KeyIcon },
@@ -580,16 +580,16 @@ const PreferencePage: React.FC = () => {
                     </>
                 )}
 
-                {/* ===== SEARCH TAB ===== */}
+                {/* ===== SEARCH & FILES TAB ===== */}
                 {effectiveActiveTab === 'sync' && (
                     <>
-                        <SectionLabel>Libraries</SectionLabel>
+                        <SectionLabel>Library Access</SectionLabel>
                         <ExcludedLibrariesList />
 
-                                                <SectionLabel>Search Index</SectionLabel>
+                        <SectionLabel>Metadata Search</SectionLabel>
                         <SettingsGroup>
                             <SettingsRow
-                                title="Search Index"
+                                title="Local search index"
                                 description={
                                     <>
                                         Check that the local search index matches your Zotero libraries.

@@ -7,7 +7,15 @@
 
 import { useEffect } from 'react';
 import { useAtomValue } from 'jotai';
+import { getPref, setPref } from '../../src/utils/prefs';
 import { hasSearchIndexAccessAtom } from '../atoms/profile';
+
+/** Enable maintenance once when search becomes available, preserving subsequent user pauses. */
+export function initializeSearchProcessing(hasAccess: boolean): void {
+    if (!hasAccess || getPref('backgroundProcessingSearchInitialized') === true) return;
+    setPref('backgroundProcessingEnabled', true);
+    setPref('backgroundProcessingSearchInitialized', true);
+}
 
 export function useSearchIndexAccess(): void {
     const hasSearchIndexAccess = useAtomValue(hasSearchIndexAccessAtom);
@@ -19,6 +27,8 @@ export function useSearchIndexAccess(): void {
             (Zotero.Beaver as { hasSearchIndexAccess?: boolean }).hasSearchIndexAccess =
                 hasSearchIndexAccess;
         }
+        initializeSearchProcessing(hasSearchIndexAccess);
         Zotero.Beaver?.processingReconciler?.notify();
+        Zotero.Beaver?.backgroundExtractor?.notify();
     }, [hasSearchIndexAccess]);
 }

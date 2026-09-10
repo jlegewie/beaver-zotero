@@ -223,7 +223,7 @@ const ExcludedLibrariesList: React.FC = () => {
                         role="heading"
                         aria-level={3}
                         className="text-base font-color-primary font-medium"
-                        style={{ paddingLeft: '2px', fontSize: '1.05rem' }}
+                        style={{ paddingLeft: '2px' }}
                     >
                         Excluded Libraries
                     </div>
