@@ -101,6 +101,7 @@ export class BackgroundExtractor {
     private startupDelayUntil = 0;
     private prefObserverSymbol: symbol | null = null;
     private processingPrefObserverSymbol: symbol | null = null;
+    private continuousPrefObserverSymbol: symbol | null = null;
     private syncObserverId: string | null = null;
     private unregisterIdleObserver: (() => void) | null = null;
     private workerRunning = false;
@@ -127,9 +128,22 @@ export class BackgroundExtractor {
      * User-facing "process now": run the queued backlog without waiting for
      * Zotero to be idle. One-off — the bypass clears itself once a dispatch
      * pass finds the queue empty, so the idle gate governs again afterwards.
+     * A no-op for the bypass flag while continuous processing is on: that pref
+     * already keeps the gate open. Still wakes the dispatcher.
      */
     requestImmediateDrain(): void {
-        this.drainNowRequested = getPref(PREF_PROCESSING_ENABLED) === true;
+        if (getPref(PREF_PROCESSING_ENABLED) !== true) return;
+        if (getPref(PREF_CONTINUOUS) !== true) this.drainNowRequested = true;
+        this.notify();
+    }
+
+    /**
+     * Cancel a {@link requestImmediateDrain} session. In-flight work finishes;
+     * the idle gate governs the next claim. No-op when no drain is active.
+     */
+    cancelImmediateDrain(): void {
+        if (!this.drainNowRequested) return;
+        this.drainNowRequested = false;
         this.notify();
     }
 
@@ -298,6 +312,21 @@ export class BackgroundExtractor {
         }
 
         try {
+            this.continuousPrefObserverSymbol = Zotero.Prefs.registerObserver(
+                'extensions.zotero.beaver.backgroundProcessingContinuous',
+                (value: unknown) => {
+                    // Continuous already bypasses idle; a leftover drain would
+                    // keep running after the user turns continuous back off.
+                    if (value === true) this.drainNowRequested = false;
+                    this.notify();
+                },
+                true,
+            );
+        } catch (e) {
+            logger(`BackgroundExtractor: registerObserver(continuous pref) failed: ${e}`, 1);
+        }
+
+        try {
             this.unregisterIdleObserver = registerIdleObserver(
                 { onIdle: () => this.notify() },
                 IDLE_THRESHOLD_SEC,
@@ -335,6 +364,14 @@ export class BackgroundExtractor {
                 // best-effort
             }
             this.processingPrefObserverSymbol = null;
+        }
+        if (this.continuousPrefObserverSymbol) {
+            try {
+                Zotero.Prefs.unregisterObserver(this.continuousPrefObserverSymbol);
+            } catch {
+                // best-effort
+            }
+            this.continuousPrefObserverSymbol = null;
         }
         if (this.syncObserverId) {
             try {
@@ -466,7 +503,9 @@ export class BackgroundExtractor {
             awaitLaunchedJobs?: boolean;
         } = {},
     ): Promise<ProcessOnceResult> {
-        if (getPref(PREF_PROCESSING_ENABLED) !== true) this.drainNowRequested = false;
+        if (getPref(PREF_PROCESSING_ENABLED) !== true || getPref(PREF_CONTINUOUS) === true) {
+            this.drainNowRequested = false;
+        }
         const inactive = (reason: ProcessOnceReason): ProcessOnceResult => {
             if (this.totalInFlight() === 0) this.setWorkerRunning(false);
             return { processed: false, reason };

@@ -21,11 +21,40 @@ describe('processing status sentence', () => {
         });
     });
 
-    it('shows dispatcher-blocked work as waiting without offering an idle bypass', () => {
+    it('shows dispatcher-blocked work as waiting with Process now disabled', () => {
         const snapshot = status(0);
         snapshot.worker.available = 4;
         snapshot.worker.dispatchBlocker = 'sync_in_progress';
-        expect(describeStatus(snapshot, true)).toMatchObject({ tone: 'waiting', processNow: false });
+        expect(describeStatus(snapshot, false)).toMatchObject({
+            tone: 'waiting', processNow: true, processNowBlocked: true, stopDrain: false,
+        });
+    });
+
+    it('hides Process now and Stop while continuous processing is on', () => {
+        const snapshot = status(0);
+        snapshot.worker.available = 4;
+        snapshot.worker.dispatchBlocker = 'sync_in_progress';
+        snapshot.worker.drainNow = true;
+        expect(describeStatus(snapshot, true)).toMatchObject({
+            tone: 'waiting', processNow: false, stopDrain: false,
+        });
+        snapshot.worker.dispatchBlocker = null;
+        snapshot.worker.inFlight = 1;
+        snapshot.worker.backlogGateOpen = true;
+        expect(describeStatus(snapshot, true)).toMatchObject({
+            tone: 'busy', processNow: false, stopDrain: false,
+        });
+    });
+
+    it('offers Stop during a Process now drain and not Process now', () => {
+        const snapshot = status(0);
+        snapshot.worker.available = 3;
+        snapshot.worker.inFlight = 1;
+        snapshot.worker.drainNow = true;
+        snapshot.worker.backlogGateOpen = true;
+        expect(describeStatus(snapshot, false)).toMatchObject({
+            tone: 'busy', processNow: false, stopDrain: true,
+        });
     });
     it.each(['failed', 'skipped'] as const)('treats a terminal %s extraction as settled, leaving it to the legend and issue list', (outcome) => {
         const snapshot = status(0);
@@ -61,7 +90,7 @@ describe('processing status sentence', () => {
         const snapshot = status(3);
         snapshot.worker.drainNow = drainNow;
         expect(describeStatus(snapshot, false)).toMatchObject({
-            tone: 'waiting', headline: '3 files waiting to finish', processNow: false,
+            tone: 'waiting', headline: '3 files waiting to finish', processNow: false, stopDrain: drainNow,
         });
     });
 

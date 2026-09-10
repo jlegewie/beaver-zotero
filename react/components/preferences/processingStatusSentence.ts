@@ -9,9 +9,13 @@ export type StatusTone = 'idle' | 'busy' | 'waiting' | 'error';
 interface StatusSentence {
     tone: StatusTone;
     headline: string;
-    /** Second line; `processNow` appends the reconciliation and immediate-drain action. */
     caption: string;
+    /** Show Process now: queued work can start without waiting for idle. */
     processNow: boolean;
+    /** Disable Process now: a dispatcher blocker, not the idle gate. */
+    processNowBlocked?: boolean;
+    /** Show Stop: a Process now drain is active and can be cancelled. */
+    stopDrain: boolean;
 }
 
 /**
@@ -33,6 +37,7 @@ export function describeStatus(
             headline: 'Could not read the processing status',
             caption: 'Beaver will try again in a few seconds.',
             processNow: false,
+            stopDrain: false,
         };
     }
     const inFlight = status.worker?.inFlight ?? 0;
@@ -41,6 +46,9 @@ export function describeStatus(
     const blocker = status.worker?.dispatchBlocker;
     const gateOpen = !blocker && (status.worker?.backlogGateOpen ?? continuous);
     const runnable = status.worker?.available ?? 0;
+    // Process now is the idle-gate bypass. Continuous already keeps that gate
+    // open, so neither the bypass nor its Stop control belongs there.
+    const draining = !continuous && status.worker?.drainNow === true;
     if (inFlight > 0 || (runnable > 0 && gateOpen)) {
         const remaining = Math.max(inFlight + runnable, 1);
         return {
@@ -50,6 +58,7 @@ export function describeStatus(
                 ? `${plural(inFlight, 'file')} running · ${plural(runnable, 'file')} queued`
                 : 'Starting…',
             processNow: false,
+            stopDrain: draining,
         };
     }
     if (runnable > 0) {
@@ -59,7 +68,9 @@ export function describeStatus(
             caption: blocker
                 ? 'Processing is waiting for Zotero to be ready.'
                 : 'Processing starts once Zotero has been idle for a moment.',
-            processNow: !blocker,
+            processNow: !continuous && !draining,
+            processNowBlocked: Boolean(blocker),
+            stopDrain: draining,
         };
     }
     const deferred = status.worker?.deferred ?? 0;
@@ -69,6 +80,7 @@ export function describeStatus(
             headline: `${plural(deferred, 'file')} waiting to finish`,
             caption: 'Waiting for remote processing or a scheduled retry.',
             processNow: false,
+            stopDrain: draining,
         };
     }
     const { total, readable, unreadable, awaitingOcr, oldestPendingAt } = status.ledger;
@@ -79,6 +91,7 @@ export function describeStatus(
             headline: 'Files are waiting to be processed',
             caption: 'Beaver checks for unfinished work automatically.',
             processNow: false,
+            stopDrain: false,
         };
     }
     if (status.ledger.total === 0) {
@@ -87,6 +100,7 @@ export function describeStatus(
             headline: 'No attachments to process yet',
             caption: 'Beaver checks your libraries for new files automatically.',
             processNow: false,
+            stopDrain: false,
         };
     }
     return {
@@ -94,5 +108,6 @@ export function describeStatus(
         headline: 'All files are processed',
         caption: attachments,
         processNow: false,
+        stopDrain: false,
     };
 }

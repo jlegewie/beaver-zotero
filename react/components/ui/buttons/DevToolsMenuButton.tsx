@@ -27,6 +27,7 @@ import { zoteroContextAtom } from '../../../atoms/zoteroContext';
 import { firstRunReturnRequestedAtom } from '../../../atoms/firstRun';
 import { whereToStartVisibleAtom } from '../../../atoms/whereToStart';
 import { logger } from '@beaver/agent-core/platform/logger';
+import { resetLocalProcessingState } from '../../../../src/services/backgroundProcessing/resetLocalState';
 
 interface DevToolsMenuButtonProps {
     className?: string;
@@ -362,17 +363,22 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         }
     };
 
-    // Clear the document cache (metadata + payload files on disk)
+    // Wipe extracted text and the processing ledger together so preferences
+    // no longer report files as processed after a cache clear.
     const handleClearDocumentCache = async () => {
         console.log("[Document Cache Reset] Starting...");
         try {
             const documentCache = Zotero.Beaver?.documentCache;
             if (documentCache) {
                 const { metadataRows, payloadRows } = await documentCache.clearAll();
-                console.log(`[Document Cache Reset] Done: ${metadataRows} metadata rows, ${payloadRows} payload rows`);
+                console.log(`[Document Cache Reset] Cache: ${metadataRows} metadata rows, ${payloadRows} payload rows`);
             } else {
                 console.warn("[Document Cache Reset] DocumentCache not available");
             }
+            const { libraryIds } = await resetLocalProcessingState();
+            Zotero.Beaver?.processingReconciler?.notify();
+            Zotero.Beaver?.backgroundExtractor?.notify();
+            console.log(`[Document Cache Reset] Processing ledger reset for ${libraryIds.length} libraries`);
         } catch (error) {
             console.error("[Document Cache Reset] Failed:", error);
         }
@@ -800,7 +806,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             disabled: false,
         },
         {
-            label: "Clear Document Cache",
+            label: "Reset Document Cache & Processing",
             onClick: handleClearDocumentCache,
             icon: PdfIcon,
             disabled: false,

@@ -9,9 +9,13 @@ import { useBackgroundProcessingStatus } from '../../hooks/useBackgroundProcessi
 import { getPref, setPref } from '../../../src/utils/prefs';
 import type { AttachmentRef, ProcessingIssueReason } from '../../../src/services/backgroundProcessing/issues';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
+import Button from '@beaver/agent-ui/primitives/Button';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { SettingsGroup, SettingsRow, SectionLabel } from './components/SettingsElements';
 import ProcessingIssueGroupRow from './ProcessingIssueList';
 import { describeStatus, plural, type StatusTone } from './processingStatusSentence';
+import PlayIcon from '@beaver/agent-ui/icons/PlayIcon';
+import StopIcon from '@beaver/agent-ui/icons/StopIcon';
 
 /** Format a byte count with one decimal in the largest fitting binary unit. */
 function formatBytes(bytes: number): string {
@@ -43,7 +47,8 @@ const ProcessingStatusRow: React.FC<{
     continuous: boolean;
     hasSearchAccess: boolean;
     onProcessNow: () => void;
-}> = ({ status, continuous, hasSearchAccess, onProcessNow }) => {
+    onStopDrain: () => void;
+}> = ({ status, continuous, hasSearchAccess, onProcessNow, onStopDrain }) => {
     const sentence = describeStatus(status, continuous);
     const { total, readable, unreadable, awaitingOcr, upserted } = status.ledger;
     const pending = Math.max(0, total - readable - unreadable);
@@ -51,36 +56,71 @@ const ProcessingStatusRow: React.FC<{
 
     return (
         <div className="display-flex flex-col gap-2 border-top-quinary" style={{ padding: '10px 12px 12px' }}>
-            <div className="display-flex flex-col gap-05">
-                <div className="display-flex flex-row items-center gap-2">
-                    {sentence.tone === 'busy'
-                        ? <Spinner size={14} className="font-color-accent-blue flex-shrink-0" />
-                        : <span
-                            aria-hidden="true"
-                            className="flex-shrink-0"
-                            style={{ width: '8px', height: '8px', borderRadius: '50%', background: TONE_COLOR[sentence.tone] }}
-                        />}
-                    <span
-                        role="status"
-                        className={`text-base font-medium ${sentence.tone === 'error' ? 'font-color-red' : 'font-color-primary'}`}
+            <div className="display-flex flex-row items-center gap-3">
+                <div className="display-flex flex-row items-start gap-2 flex-1 min-w-0">
+                    <div
+                        className="display-flex items-center justify-center flex-shrink-0"
+                        style={{ width: '14px', height: '1.25em' }}
                     >
-                        {sentence.headline}
-                    </span>
+                        {sentence.tone === 'busy'
+                            ? <Spinner size={14} className="font-color-accent-blue" />
+                            : <span
+                                aria-hidden="true"
+                                style={{ width: '10px', height: '10px', borderRadius: '50%', background: TONE_COLOR[sentence.tone] }}
+                            />
+                        }
+                    </div>
+                    <div className="display-flex flex-col gap-05 min-w-0 flex-1">
+                        <div
+                            role="status"
+                            className={`text-base font-medium ${sentence.tone === 'error' ? 'font-color-red' : 'font-color-primary'}`}
+                        >
+                            {sentence.headline}
+                        </div>
+                        <div className="text-base font-color-secondary">
+                            {sentence.caption}
+                            {sentence.tone === 'error' && status.error && (
+                                <span className="font-color-tertiary"> ({status.error})</span>
+                            )}
+                        </div>
+                    </div>
                 </div>
-                <div className="text-sm font-color-secondary" style={{ paddingLeft: '16px' }}>
-                    {sentence.caption}
-                    {sentence.processNow && (
-                        <>
-                            {' '}
-                            <button type="button" className="text-link" onClick={onProcessNow}>
-                                Process now
-                            </button>
-                        </>
-                    )}
-                    {sentence.tone === 'error' && status.error && (
-                        <span className="font-color-tertiary"> ({status.error})</span>
-                    )}
-                </div>
+                {sentence.stopDrain ? (
+                    <Tooltip
+                        content="The current file will finish. Processing resumes when Zotero is idle."
+                        usePortal
+                        placement="top"
+                    >
+                        <Button
+                            variant="outline"
+                            className="flex-shrink-0"
+                            rightIcon={StopIcon}
+                            onClick={onStopDrain}
+                        >
+                            Stop
+                        </Button>
+                    </Tooltip>
+                ) : sentence.processNow ? (
+                    <Tooltip
+                        content="Processing will start once Zotero is ready."
+                        disabled={!sentence.processNowBlocked}
+                        usePortal
+                        placement="top"
+                    >
+                        <Button
+                            variant="outline"
+                            className="flex-shrink-0"
+                            rightIcon={PlayIcon}
+                            disabled={sentence.processNowBlocked}
+                            ariaLabel={sentence.processNowBlocked
+                                ? 'Process now. Waiting for Zotero to be ready.'
+                                : undefined}
+                            onClick={onProcessNow}
+                        >
+                            Process now
+                        </Button>
+                    </Tooltip>
+                ) : null}
             </div>
 
             {total > 0 && (
@@ -181,12 +221,21 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
     const updateContinuous = (next: boolean) => {
         setContinuous(next);
         setPref('backgroundProcessingContinuous', next);
+        // Continuous already keeps the idle gate open; a leftover Process now
+        // drain would keep running after the user turns this back off.
+        if (next) Zotero.Beaver?.backgroundExtractor?.cancelImmediateDrain();
         Zotero.Beaver?.backgroundExtractor?.notify();
+        void refresh();
     };
 
     const processNow = async () => {
         await Zotero.Beaver?.processingReconciler?.reconcileNow();
         Zotero.Beaver?.backgroundExtractor?.requestImmediateDrain();
+        await refresh();
+    };
+
+    const stopDrain = async () => {
+        Zotero.Beaver?.backgroundExtractor?.cancelImmediateDrain();
         await refresh();
     };
 
@@ -230,6 +279,7 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                         continuous={continuous}
                         hasSearchAccess={hasSearchAccess}
                         onProcessNow={processNow}
+                        onStopDrain={stopDrain}
                     />
                 )}
                 <SettingsRow
