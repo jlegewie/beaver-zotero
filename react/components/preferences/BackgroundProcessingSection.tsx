@@ -16,6 +16,7 @@ import ProcessingIssueGroupRow from './ProcessingIssueList';
 import { describeStatus, plural, type StatusTone } from './processingStatusSentence';
 import PlayIcon from '@beaver/agent-ui/icons/PlayIcon';
 import StopIcon from '@beaver/agent-ui/icons/StopIcon';
+import { clearDocumentCache } from '../../../src/services/backgroundProcessing/resetLocalState';
 
 /** Format a byte count with one decimal in the largest fitting binary unit. */
 function formatBytes(bytes: number): string {
@@ -37,22 +38,14 @@ const TONE_COLOR: Record<StatusTone, string> = {
     error: 'var(--tag-red)',
 };
 
-/**
- * Status row: one sentence, a segmented progress bar and its legend. Counts
- * come from disjoint ledger text-readiness categories. Index failures do not
- * change readability; scans awaiting an available OCR stage remain pending.
- */
+/** Background worker activity, independent of cache occupancy and search coverage. */
 const ProcessingStatusRow: React.FC<{
     status: BackgroundProcessingStatus;
     continuous: boolean;
-    hasSearchAccess: boolean;
     onProcessNow: () => void;
     onStopDrain: () => void;
-}> = ({ status, continuous, hasSearchAccess, onProcessNow, onStopDrain }) => {
+}> = ({ status, continuous, onProcessNow, onStopDrain }) => {
     const sentence = describeStatus(status, continuous);
-    const { total, readable, unreadable, awaitingOcr, upserted } = status.ledger;
-    const pending = Math.max(0, total - readable - unreadable);
-    const pct = (count: number) => (total > 0 ? `${(count / total) * 100}%` : '0%');
 
     return (
         <div className="display-flex flex-col gap-2 border-top-quinary" style={{ padding: '10px 12px 12px' }}>
@@ -123,53 +116,10 @@ const ProcessingStatusRow: React.FC<{
                 ) : null}
             </div>
 
-            {total > 0 && (
-                <>
-                    <div
-                        aria-hidden="true"
-                        className="display-flex flex-row overflow-hidden"
-                        style={{ height: '6px', borderRadius: '3px', background: 'var(--fill-quinary)' }}
-                    >
-                        <div style={{ width: pct(readable), background: 'var(--accent-blue)' }} />
-                        <div style={{ width: pct(unreadable), background: 'var(--tag-red)', opacity: 0.7 }} />
-                    </div>
-                    <div className="display-flex flex-row items-center flex-wrap gap-4 text-sm font-color-secondary">
-                        <Legend color="var(--accent-blue)" label={`${readable.toLocaleString()} readable`} />
-                        {hasSearchAccess && (
-                            <Legend color="var(--accent-blue)" hollow label={`${upserted.toLocaleString()} in the search index`} />
-                        )}
-                        {unreadable > 0 && (
-                            <Legend color="var(--tag-red)" label={`${unreadable.toLocaleString()} could not be read`} />
-                        )}
-                        {awaitingOcr > 0 && (
-                            <Legend color="var(--fill-quinary)" label={`${awaitingOcr.toLocaleString()} waiting for OCR`} />
-                        )}
-                        {pending - awaitingOcr > 0 && (
-                            <Legend color="var(--fill-quinary)" label={`${(pending - awaitingOcr).toLocaleString()} not processed yet`} />
-                        )}
-                    </div>
-                </>
-            )}
+
         </div>
     );
 };
-
-const Legend: React.FC<{ color: string; label: string; hollow?: boolean }> = ({ color, label, hollow }) => (
-    <span className="display-flex flex-row items-center gap-1">
-        <span
-            aria-hidden="true"
-            style={{
-                width: '7px',
-                height: '7px',
-                borderRadius: '50%',
-                background: hollow ? 'transparent' : color,
-                border: hollow ? `1.5px solid ${color}` : 'none',
-                boxSizing: 'border-box',
-            }}
-        />
-        {label}
-    </span>
-);
 
 export default function BackgroundProcessingSection(): React.ReactElement | null {
     const hasOcrAccess = useAtomValue(hasOcrAccessAtom);
@@ -214,6 +164,7 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
     const updateEnabled = (next: boolean) => {
         setEnabled(next);
         setPref('backgroundProcessingEnabled', next);
+        if (!next) Zotero.Beaver?.backgroundExtractor?.cancelImmediateDrain();
         Zotero.Beaver?.processingReconciler?.notify();
         Zotero.Beaver?.backgroundExtractor?.notify();
     };
@@ -248,43 +199,76 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
         const reconciler = Zotero.Beaver?.processingReconciler;
         const db = Zotero.Beaver?.db;
         if (!reconciler || !db) return;
-        const targets = refs ?? await db.getProcessingIssueRefs(
-            { hasOcrAccess, hasSearchIndexAccess: hasSearchAccess }, reason,
-        );
-        if (targets.length > 0) await reconciler.retryAttachments(targets);
+        setActionError(null);
+        try {
+            const targets = refs ?? await db.getProcessingIssueRefs(
+                { hasOcrAccess, hasSearchIndexAccess: hasSearchAccess }, reason,
+            );
+            if (targets.length > 0) await reconciler.retryAttachments(targets);
+        } catch (error) {
+            setActionError(error instanceof Error ? error.message : 'Could not retry these files.');
+        }
         await refresh();
     };
 
     const cache = status.documentCache;
+    const [clearingCache, setClearingCache] = useState(false);
+    const [actionError, setActionError] = useState<string | null>(null);
+    const readingIssues = status.issues.filter((group) => group.reason !== 'index_failed');
+    const indexIssues = status.issues.filter((group) => group.reason === 'index_failed');
+    const clearCache = async () => {
+        setClearingCache(true);
+        setActionError(null);
+        try {
+            await clearDocumentCache();
+        } catch (error) {
+            setActionError(error instanceof Error ? error.message : 'Could not clear the local cache.');
+        } finally {
+            await refresh();
+            setClearingCache(false);
+        }
+    };
+    const issueRow = (group: typeof status.issues[number]) => (
+        <ProcessingIssueGroupRow
+            key={group.reason}
+            group={group}
+            hasOcrAccess={hasOcrAccess}
+            hasSearchAccess={hasSearchAccess}
+            updatedAt={status.updatedAt}
+            hasBorder
+            onRetry={retryIssues}
+        />
+    );
 
     return (
         <>
-            <SectionLabel>Background Processing</SectionLabel>
+            <SectionLabel>Processing</SectionLabel>
             <SettingsGroup>
                 <SettingsRow
-                    title="Process files in the background"
-                    description="Beaver reads the PDFs and other attachments in your library ahead of time, so it can answer questions about them without opening each file first."
+                    title={hasSearchAccess ? 'Keep full-text search up to date' : 'Process files in the background'}
+                    description={hasSearchAccess
+                        ? 'Background processing is required to keep full-text search up to date. Turn it off to pause updates; existing search results are retained.'
+                        : 'By default, Beaver processes files when you use them. Enable background processing to prepare files ahead of time for faster responses.'}
                     onClick={() => updateEnabled(!enabled)}
                     control={<input
                         type="checkbox"
-                        aria-label="Process files in the background"
+                        aria-label={hasSearchAccess ? 'Keep full-text search up to date' : 'Process files in the background'}
                         checked={enabled}
                         onChange={(event) => updateEnabled(event.target.checked)}
                         onClick={(event) => event.stopPropagation()}
                     />}
                 />
-                {enabled && (
+                {(enabled || (status.worker?.inFlight ?? 0) > 0) && (
                     <ProcessingStatusRow
                         status={status}
                         continuous={continuous}
-                        hasSearchAccess={hasSearchAccess}
                         onProcessNow={processNow}
                         onStopDrain={stopDrain}
                     />
                 )}
                 <SettingsRow
                     title="Also run while Zotero is in use"
-                    description="When off, Beaver only processes files while Zotero is idle, so it never slows you down."
+                    description="When off, background preparation waits until Zotero is idle. Files you request are still processed when needed."
                     disabled={!enabled}
                     hasBorder
                     onClick={() => {
@@ -300,40 +284,64 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                         onClick={(event) => event.stopPropagation()}
                     />}
                 />
-                <SettingsRow
-                    title="Storage on this computer"
-                    hasBorder
-                    description={cache
-                        ? `${formatBytes(cache.payload_total_bytes)} used for ${plural(cache.payload_count, 'document')}`
-                            + (cache.payload_budget_bytes > 0
-                                ? ` · ${formatBytes(cache.payload_budget_bytes)} limit`
-                                : '')
-                        : 'Extracted text is kept on disk so files are not read twice.'}
-                />
             </SettingsGroup>
 
-            {enabled && status.issues.length > 0 && (
+            {hasSearchAccess && (
                 <>
-                    <SectionLabel>Files Beaver Could Not Read</SectionLabel>
+                    <SectionLabel>Full-text Search</SectionLabel>
                     <SettingsGroup>
-                        <div className="font-color-secondary text-base" style={{ padding: '8px 12px' }}>
-                            {plural(status.issues.reduce((sum, group) => sum + group.count, 0), 'attachment')} could
-                            not be processed.
-                        </div>
-                        {status.issues.map((group) => (
-                            <ProcessingIssueGroupRow
-                                key={group.reason}
-                                group={group}
-                                hasOcrAccess={hasOcrAccess}
-                                hasSearchAccess={hasSearchAccess}
-                                updatedAt={status.updatedAt}
-                                hasBorder
-                                onRetry={retryIssues}
-                            />
-                        ))}
+                        <SettingsRow
+                            title={status.coverage === null
+                                ? status.coverageError ? 'Server search status unavailable' : 'Checking the server search index…'
+                                : status.coverage.namespace_exists ? 'Server search index available' : 'Server search index not available yet'}
+                            description={<>
+                                {!enabled && <span>Updates paused. </span>}
+                                {status.coverageError
+                                    ? 'Could not check the server search index. Showing its last known status when available.'
+                                    : 'Full-text search finds content inside indexed attachments. Detailed attachment coverage is not available yet.'}
+                                {status.coverageUpdatedAt && <span> Last checked {new Date(status.coverageUpdatedAt).toLocaleString()}.</span>}
+                            </>}
+                        />
+                        {indexIssues.map(issueRow)}
+                        {readingIssues.length > 0 && <div className="font-color-secondary text-base" style={{ padding: '8px 12px' }}>
+                            Some attachments may be missing from search because they could not be read. See the reading problems below.
+                        </div>}
                     </SettingsGroup>
                 </>
             )}
+
+            <SectionLabel>Local Document Cache</SectionLabel>
+            <SettingsGroup>
+                <SettingsRow
+                    title={cache
+                        ? (typeof cache.cached_document_count === 'number' ? `${plural(cache.cached_document_count, 'document')} cached · ` : '')
+                            + formatBytes(cache.payload_total_bytes)
+                            + (cache.payload_budget_bytes > 0 ? ` of ${formatBytes(cache.payload_budget_bytes)}` : '')
+                        : status.updatedAt === null ? 'Checking local storage…' : 'Local cache status unavailable'}
+                    description="Cached text helps Beaver respond faster. Older cached text is removed as needed to stay within the storage limit. Clearing this cache leaves your original files and server search index intact."
+                    control={<Button variant="outline" onClick={clearCache} disabled={clearingCache || !cache} loading={clearingCache}>
+                        Clear local cache
+                    </Button>}
+                />
+                {hasOcrAccess && <div className="font-color-secondary text-base" style={{ padding: '8px 12px' }}>
+                    Scanned files may need preparation again after their cached text is removed.
+                </div>}
+                {actionError && <div role="alert" className="font-color-red text-base" style={{ padding: '8px 12px' }}>{actionError}</div>}
+            </SettingsGroup>
+
+            <SectionLabel>Files Beaver Can’t Read</SectionLabel>
+            <SettingsGroup>
+                <div className="font-color-secondary text-base" style={{ padding: '8px 12px' }}>
+                    {status.error
+                        ? 'Could not update reading problems. Previously reported problems are shown below.'
+                        : status.updatedAt === null
+                            ? 'Checking known reading problems…'
+                            : readingIssues.length > 0
+                                ? `${plural(readingIssues.reduce((sum, group) => sum + group.count, 0), 'attachment')} could not be read. Includes files Beaver has attempted to process.`
+                                : 'No reading problems found in files checked so far.'}
+                </div>
+                {readingIssues.map(issueRow)}
+            </SettingsGroup>
         </>
     );
 }

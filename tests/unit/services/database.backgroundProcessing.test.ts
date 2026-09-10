@@ -482,7 +482,7 @@ describe('BeaverDB background processing state', () => {
         await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'RETRY000', contentKind: 'pdf' });
         await connection.queryAsync("UPDATE attachment_processing_state SET extract_status = 'done', ocr_status = 'failed', upsert_status = 'failed'");
         await db.resetAttachmentExtraction(1, 'RETRY000');
-        await db.markAttachmentExtractFailure({ libraryId: 1, zoteroKey: 'RETRY000', status, error: 'encrypted' });
+        await db.markAttachmentExtractFailure({ attemptedAt: Date.now(), libraryId: 1, zoteroKey: 'RETRY000', status, error: 'encrypted' });
         const entitlements = { hasOcrAccess: true, hasSearchIndexAccess: true };
         expect(await db.getProcessingIssueCounts(entitlements)).toEqual([{ reason: 'encrypted', count: 1 }]);
         expect((await db.getProcessingIssuePage(entitlements, 'encrypted')).map((item) => item.zoteroKey))
@@ -510,7 +510,7 @@ describe('BeaverDB background processing state', () => {
     it('keeps text-empty EPUBs and snapshots out of the PDF OCR group', async () => {
         for (const contentKind of ['pdf', 'epub', 'snapshot'] as const) {
             await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: contentKind, contentKind });
-            await db.markAttachmentExtractFailure({ libraryId: 1, zoteroKey: contentKind, status: 'failed', error: 'no_text_layer' });
+            await db.markAttachmentExtractFailure({ attemptedAt: Date.now(), libraryId: 1, zoteroKey: contentKind, status: 'failed', error: 'no_text_layer' });
         }
         for (const hasOcrAccess of [true, false]) {
             const entitlements = { hasOcrAccess, hasSearchIndexAccess: true };
@@ -578,10 +578,10 @@ describe('BeaverDB background processing state', () => {
         const entitlements = { hasOcrAccess: true, hasSearchIndexAccess: true };
         for (const key of ['MISSING1', 'MISSING2']) {
             await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: key, contentKind: 'pdf' });
-            await db.markAttachmentExtractFailure({ libraryId: 1, zoteroKey: key, status: 'skipped', error: 'file_missing' });
+            await db.markAttachmentExtractFailure({ attemptedAt: Date.now(), libraryId: 1, zoteroKey: key, status: 'skipped', error: 'file_missing' });
         }
         await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'LOCKED00', contentKind: 'pdf' });
-        await db.markAttachmentExtractFailure({ libraryId: 1, zoteroKey: 'LOCKED00', status: 'failed', error: 'encrypted' });
+        await db.markAttachmentExtractFailure({ attemptedAt: Date.now(), libraryId: 1, zoteroKey: 'LOCKED00', status: 'failed', error: 'encrypted' });
 
         const refs = await db.getProcessingIssueRefs(entitlements, 'file_unavailable');
         expect(refs.map((ref) => ref.zoteroKey).sort()).toEqual(['MISSING1', 'MISSING2']);

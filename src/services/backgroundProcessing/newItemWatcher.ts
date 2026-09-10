@@ -81,7 +81,7 @@ export class NewItemWatcher {
     private async flush(): Promise<void> {
         const events = [...this.pending.values()];
         this.pending.clear();
-        if (!backgroundProcessingEnabled() || Zotero.Beaver?.libraryScopeInitialized !== true) {
+        if (Zotero.Beaver?.libraryScopeInitialized !== true) {
             return;
         }
         const db = Zotero.Beaver?.db;
@@ -134,10 +134,12 @@ export class NewItemWatcher {
             return null;
         }
         const kind = getReadableContentKind(item);
+        if (kind === 'text') return null;
         if (kind !== 'pdf' && kind !== 'epub' && kind !== 'snapshot') {
             await this.removeLocalState(db, ref.libraryId, ref.key);
             return null;
         }
+        if (!backgroundProcessingEnabled()) return null;
         const existing = await db.getAttachmentProcessingState(ref.libraryId, ref.key);
         await db.ensureAttachmentProcessingState({
             libraryId: ref.libraryId,
@@ -149,6 +151,7 @@ export class NewItemWatcher {
             await db.resetAttachmentExtraction(ref.libraryId, ref.key, 'item_modified');
             await Zotero.Beaver?.documentCache?.invalidate(ref.libraryId, ref.key);
         }
+        const attemptedAt = Date.now();
         const source = await resolveAttachmentFileSource({
             item,
             localSizeStrategy: 'stat',
@@ -159,6 +162,7 @@ export class NewItemWatcher {
                 zoteroKey: ref.key,
                 status: 'skipped',
                 error: source.code,
+                attemptedAt,
             });
             return null;
         }

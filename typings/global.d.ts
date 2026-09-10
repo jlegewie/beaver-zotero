@@ -484,6 +484,7 @@ declare namespace Zotero {
             }): Promise<boolean>;
             markAttachmentExtractFailure(input: {
                 libraryId: number; zoteroKey: string; status: 'failed' | 'skipped'; error: string;
+                attemptedAt: number;
             }): Promise<void>;
             ensureAttachmentFileHash(libraryId: number, zoteroKey: string, fileHash: string): Promise<void>;
             markAttachmentOcrDone(input: {
@@ -539,6 +540,13 @@ declare namespace Zotero {
                 state: import("../src/services/database").ProcessingIndexStateRecord,
             ): Promise<void>;
             deleteProcessingIndexState(libraryId: number): Promise<void>;
+            recordAttachmentReadingOutcome(input: {
+                libraryId: number; zoteroKey: string; contentKind: string;
+                errorCode: string | null; attemptedAt: number;
+            }): Promise<void>;
+            getAttachmentReadingError(libraryId: number, zoteroKey: string): Promise<string | null>;
+            getAttachmentReadingKeysByLibrary(libraryId: number): Promise<string[]>;
+            deleteAttachmentReadingState(libraryId: number, zoteroKey: string): Promise<void>;
             resetLocalProcessingState(libraryId?: number, discardRemoteState?: boolean): Promise<void>;
         }
 

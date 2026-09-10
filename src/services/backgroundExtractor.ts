@@ -612,6 +612,7 @@ export class BackgroundExtractor {
                         registration.executor,
                         { kind: 'complete', reason: 'library_excluded' },
                         options.db,
+                        Date.now(),
                     );
                     continue;
                 }
@@ -672,6 +673,7 @@ export class BackgroundExtractor {
         executor: JobExecutor,
         externalAbortSignal: AbortSignal,
     ): Promise<void> {
+        const attemptedAt = Date.now();
         dispatchBackgroundEvent('background-job:start', { id: record.id, record });
         const db = Zotero.Beaver?.db;
         if (!db) return;
@@ -695,7 +697,7 @@ export class BackgroundExtractor {
             outcome = { kind: 'retry', error: `unexpected: ${message}` };
         }
 
-        await this.persistOutcome(record, executor, outcome, db);
+        await this.persistOutcome(record, executor, outcome, db, attemptedAt);
     }
 
     private async persistOutcome(
@@ -703,6 +705,7 @@ export class BackgroundExtractor {
         executor: JobExecutor,
         outcome: JobOutcome,
         db: QueueDB,
+        attemptedAt: number,
     ): Promise<void> {
         if (this.shouldSkipDbWrites()) return;
 
@@ -730,7 +733,7 @@ export class BackgroundExtractor {
                 });
                 return;
             case 'retry':
-                await this.recordRetryFailure(record, executor, outcome, db);
+                await this.recordRetryFailure(record, executor, outcome, db, attemptedAt);
                 return;
             case 'failPermanent':
                 await db.recordDocumentProcessingFailure(outcome.failure);
@@ -769,6 +772,7 @@ export class BackgroundExtractor {
         executor: JobExecutor,
         outcome: Extract<JobOutcome, { kind: 'retry' }>,
         db: QueueDB,
+        attemptedAt: number,
     ): Promise<void> {
         const result = await db.failBackgroundJob(record.id, outcome.error, {
             maxAttempts: MAX_ATTEMPTS,
@@ -782,6 +786,7 @@ export class BackgroundExtractor {
                     zoteroKey: record.zoteroKey,
                     status: 'failed',
                     error: outcome.error,
+                    attemptedAt,
                 });
             } else if (record.jobType === 'fulltext_upsert' && record.payload?.doc_hash) {
                 await db.markAttachmentUpsertFailed(

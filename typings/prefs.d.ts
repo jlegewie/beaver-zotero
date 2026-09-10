@@ -79,6 +79,7 @@ declare namespace _ZoteroTypes {
       "mcpCreateNoteToolEnabled": boolean;
       "backgroundExtractorEnabled": boolean;
       "backgroundProcessingEnabled": boolean;
+      "backgroundProcessingSearchInitialized": boolean;
       "backgroundProcessingContinuous": boolean;
       "backgroundProcessingWelcomeAck": boolean;
       "backgroundProcessingWelcomeDeferred": boolean;

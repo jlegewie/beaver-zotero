@@ -151,6 +151,7 @@ pref("backgroundExtractorEnabled", true);
 // Whole-library producers are an explicit opt-in. The dispatcher above remains
 // enabled so user-initiated extraction jobs still work when this is off.
 pref("backgroundProcessingEnabled", false);
+pref("backgroundProcessingSearchInitialized", false);
 pref("backgroundProcessingContinuous", false);
 pref("backgroundProcessingWelcomeAck", false);
 pref("backgroundProcessingWelcomeDeferred", false);

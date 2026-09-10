@@ -22,15 +22,17 @@ interface StatusSentence {
  * Reduce the status snapshot to the one sentence the status row shows.
  *
  * Order matters: an unreadable status wins, then running work, then work
- * queued behind the idle gate, then the settled summary. Files that could not
- * be read are not an error state here: the bar's red segment and the issue
- * list below the row carry them, with per-group retries where one can help.
+ * queued behind the idle gate, then the settled summary. Reading and indexing
+ * problems have their own sections; idle does not imply every file succeeded.
  */
 export function describeStatus(
     status: BackgroundProcessingStatus,
     continuous: boolean,
 ): StatusSentence {
-    const attachments = plural(status.ledger.total, 'attachment');
+    if (status.updatedAt === null && !status.worker && !status.error) return {
+        tone: 'waiting', headline: 'Checking background activity…',
+        caption: 'Reading the current processing status.', processNow: false, stopDrain: false,
+    };
     if (status.error) {
         return {
             tone: 'error',
@@ -50,12 +52,11 @@ export function describeStatus(
     // open, so neither the bypass nor its Stop control belongs there.
     const draining = !continuous && status.worker?.drainNow === true;
     if (inFlight > 0 || (runnable > 0 && gateOpen)) {
-        const remaining = Math.max(inFlight + runnable, 1);
         return {
             tone: 'busy',
-            headline: `Processing ${plural(remaining, 'file')}…`,
+            headline: 'Processing files…',
             caption: inFlight > 0
-                ? `${plural(inFlight, 'file')} running · ${plural(runnable, 'file')} queued`
+                ? 'Preparing document text and updating enabled services.'
                 : 'Starting…',
             processNow: false,
             stopDrain: draining,
@@ -64,7 +65,7 @@ export function describeStatus(
     if (runnable > 0) {
         return {
             tone: 'waiting',
-            headline: `${plural(runnable, 'file')} waiting`,
+            headline: 'Background processing is waiting',
             caption: blocker
                 ? 'Processing is waiting for Zotero to be ready.'
                 : 'Processing starts once Zotero has been idle for a moment.',
@@ -77,7 +78,7 @@ export function describeStatus(
     if (deferred > 0) {
         return {
             tone: 'waiting',
-            headline: `${plural(deferred, 'file')} waiting to finish`,
+            headline: 'Waiting for processing to finish',
             caption: 'Waiting for remote processing or a scheduled retry.',
             processNow: false,
             stopDrain: draining,
@@ -105,8 +106,10 @@ export function describeStatus(
     }
     return {
         tone: 'idle',
-        headline: 'All files are processed',
-        caption: attachments,
+        headline: 'Background processing is idle',
+        caption: status.issues.length > 0
+            ? 'Some attachments need attention. See the problems below.'
+            : 'Beaver checks for new and changed files automatically.',
         processNow: false,
         stopDrain: false,
     };

@@ -13,6 +13,8 @@ export interface BackgroundProcessingStatus {
     queue: BackgroundQueueStats;
     ledger: AttachmentProcessingAggregates;
     coverage: IndexStatusResponse | null;
+    coverageUpdatedAt: number | null;
+    coverageError: string | null;
     failures: BackgroundProcessingFailureSummary[];
     /** Attachments that could not be processed, grouped by user-facing reason. */
     issues: ProcessingIssueSummary[];
@@ -50,6 +52,8 @@ export const backgroundProcessingStatusAtom = atom<BackgroundProcessingStatus>({
     queue: EMPTY_BACKGROUND_QUEUE_STATS,
     ledger: EMPTY_ATTACHMENT_PROCESSING_AGGREGATES,
     coverage: null,
+    coverageUpdatedAt: null,
+    coverageError: null,
     failures: [],
     issues: [],
     worker: null,

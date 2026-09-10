@@ -69,6 +69,8 @@ export interface DocumentPreflightMetadata {
 }
 
 export interface DocumentCacheStats {
+    /** Distinct registered documents with compatible payloads, excluding error metadata. */
+    cached_document_count: number;
     metadata_count: number;
     payload_count: number;
     payload_cache_dir: string;
@@ -1032,7 +1034,16 @@ export class DocumentCache {
 
     /** Return compact document-cache counts and directory information. */
     async getStats(): Promise<DocumentCacheStats> {
+        // Polling uses registered cache state. Reads and startup GC reconcile external
+        // file changes; cache writes, eviction, and clearing update these rows directly.
         return {
+            cached_document_count: await this.db.getCachedDocumentCount({
+                metadata: DOCUMENT_METADATA_FORMAT_VERSION,
+                payload: DOCUMENT_PAYLOAD_FORMAT_VERSION,
+                pdf: expectedExtractionSchemaVersion('pdf'),
+                epub: expectedExtractionSchemaVersion('epub'),
+                snapshot: expectedExtractionSchemaVersion('snapshot'),
+            }),
             metadata_count: await this.db.getDocumentCacheMetadataCount(),
             payload_count: await this.db.getDocumentCachePayloadCount(),
             payload_cache_dir: this.payloadCacheDir,

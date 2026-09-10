@@ -17,7 +17,7 @@ describe('processing status sentence', () => {
         snapshot.ledger.unreadable = 1;
         snapshot.issues = [{ reason: 'file_unavailable', count: 1 }];
         expect(describeStatus(snapshot, continuous)).toMatchObject({
-            tone: 'idle', headline: 'All files are processed', processNow: false,
+            tone: 'idle', headline: 'Background processing is idle', processNow: false,
         });
     });
 
@@ -62,14 +62,14 @@ describe('processing status sentence', () => {
         snapshot.ledger.unreadable = 1;
         snapshot.ledger[outcome] = 1;
         expect(describeStatus(snapshot, false)).toMatchObject({
-            tone: 'idle', headline: 'All files are processed', processNow: false,
+            tone: 'idle', headline: 'Background processing is idle', processNow: false,
         });
     });
 
     it('keeps the settled headline for readable files with unresolved index issues', () => {
         const snapshot = status(0);
         snapshot.issues = [{ reason: 'index_failed', count: 1 }];
-        expect(describeStatus(snapshot, false)).toMatchObject({ tone: 'idle', headline: 'All files are processed' });
+        expect(describeStatus(snapshot, false)).toMatchObject({ tone: 'idle', headline: 'Background processing is idle' });
     });
 
     it.each(['extraction', 'ocr', 'index'])('reports unfinished %s ledger work without a queued job as waiting', (stage) => {
@@ -90,19 +90,19 @@ describe('processing status sentence', () => {
         const snapshot = status(3);
         snapshot.worker.drainNow = drainNow;
         expect(describeStatus(snapshot, false)).toMatchObject({
-            tone: 'waiting', headline: '3 files waiting to finish', processNow: false, stopDrain: drainNow,
+            tone: 'waiting', headline: 'Waiting for processing to finish', processNow: false, stopDrain: drainNow,
         });
     });
 
     it('shows delayed retries as waiting even before a ledger row exists', () => {
         expect(describeStatus(status(1, 0), true)).toMatchObject({
-            tone: 'waiting', headline: '1 file waiting to finish', processNow: false,
+            tone: 'waiting', headline: 'Waiting for processing to finish', processNow: false,
         });
     });
 
     it('reports completion only after deferred work finishes', () => {
         expect(describeStatus(status(0), false)).toMatchObject({
-            tone: 'idle', headline: 'All files are processed',
+            tone: 'idle', headline: 'Background processing is idle',
         });
     });
 

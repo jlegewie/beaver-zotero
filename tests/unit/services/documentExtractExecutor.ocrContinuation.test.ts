@@ -120,6 +120,27 @@ describe('DocumentExtractExecutor OCR continuation', () => {
         expect(args!.priority ?? OCR_PRIORITY_ON_DEMAND).toBe(OCR_PRIORITY_ON_DEMAND);
     });
 
+    it.each(['cached_error', 'response_error'])('does not overwrite a newer successful read when an older %s finishes', async (kind) => {
+        const clock = vi.spyOn(Date, 'now').mockReturnValue(100);
+        try {
+            mocks.extractAndCacheDocument.mockImplementationOnce(async () => {
+                await db.recordAttachmentReadingOutcome({
+                    libraryId: 1, zoteroKey: 'SCANNED1', contentKind: 'pdf',
+                    errorCode: null, attemptedAt: 200,
+                });
+                clock.mockReturnValue(300);
+                return { kind, code: 'invalid_pdf', permanent: true, message: 'invalid PDF' };
+            });
+            expect((await runExtractJob(110)).kind).toBe('complete');
+            expect(await db.getAttachmentProcessingState(1, 'SCANNED1')).toMatchObject({
+                extractStatus: kind === 'cached_error' ? 'skipped' : 'failed',
+            });
+            expect(await db.getProcessingIssueCounts({ hasOcrAccess: true, hasSearchIndexAccess: true })).toEqual([]);
+        } finally {
+            clock.mockRestore();
+        }
+    });
+
     it('does not ticket OCR when extraction found a text layer', async () => {
         mocks.extractAndCacheDocument.mockResolvedValue({
             kind: 'ok', cached: false, totalPages: 1, contentType: 'application/pdf',

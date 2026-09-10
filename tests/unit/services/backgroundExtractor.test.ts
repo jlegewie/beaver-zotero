@@ -1646,6 +1646,7 @@ describe('BackgroundExtractor', () => {
             executor,
             { kind: 'retry', error: 'final extraction error' },
             db,
+            Date.now(),
         );
 
         expect((await db.getAttachmentProcessingState(1, 'AAAAAAAA'))?.extractStatus)

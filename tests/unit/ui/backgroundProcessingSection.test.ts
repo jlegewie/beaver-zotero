@@ -4,12 +4,15 @@ import { createRoot } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { afterEach, expect, it, vi } from 'vitest';
 import { backgroundProcessingStatusAtom } from '../../../react/atoms/backgroundProcessing';
+import { hasSearchIndexAccessAtom } from '../../../react/atoms/profile';
 import BackgroundProcessingSection from '../../../react/components/preferences/BackgroundProcessingSection';
 
-const { refresh, prefs } = vi.hoisted(() => ({
+const { refresh, prefs, clearCache } = vi.hoisted(() => ({
     refresh: vi.fn().mockResolvedValue(undefined),
+    clearCache: vi.fn().mockResolvedValue(undefined),
     prefs: { backgroundProcessingEnabled: true, backgroundProcessingContinuous: false },
 }));
+vi.mock('../../../src/services/backgroundProcessing/resetLocalState', () => ({ clearDocumentCache: clearCache }));
 vi.mock('../../../react/atoms/profile', async () => {
     const { atom } = await import('jotai');
     return {
@@ -28,7 +31,7 @@ vi.mock('../../../react/components/preferences/ProcessingIssueList', async () =>
     return {
         default: ({ group, onRetry }: any) => React.createElement(
             'div',
-            null,
+            { 'data-issue-reason': group.reason },
             React.createElement('button', { 'data-retry': 'group', onClick: () => onRetry?.(group.reason, null) }, 'Retry all'),
             React.createElement('button', {
                 'data-retry': 'row',
@@ -160,15 +163,16 @@ it('leaves unreadable files to the issue list instead of a red status headline',
         ...store.get(backgroundProcessingStatusAtom),
         ledger: { ...store.get(backgroundProcessingStatusAtom).ledger, total: 3, readable: 2, unreadable: 1 },
         issues: [{ reason: 'file_unavailable', count: 1 }],
+        updatedAt: Date.now(),
         worker: { available: 0, deferred: 0, inFlight: 0, dispatchBlocker: null, drainNow: false, backlogGateOpen: false },
     });
     const container = document.createElement('div');
     const root = createRoot(container);
     try {
         await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(BackgroundProcessingSection))));
-        expect(container.querySelector('[role="status"]')?.textContent).toBe('All files are processed');
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Background processing is idle');
         expect(Array.from(container.querySelectorAll('button')).some((node) => node.textContent === 'Process now')).toBe(false);
-        expect(container.textContent).toContain('1 could not be read');
+        expect(container.textContent).toContain('1 attachment could not be read');
         expect(container.textContent).not.toContain('Libraries to Process');
     } finally {
         act(() => root.unmount());
@@ -213,4 +217,82 @@ it.each(['group', 'row'])('routes a %s retry through the reconciler and refreshe
         act(() => root.unmount());
         Zotero.Beaver = previousBeaver;
     }
+});
+
+async function withView(store: ReturnType<typeof createStore>, check: (container: HTMLDivElement) => Promise<void> | void) {
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    try {
+        await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(BackgroundProcessingSection))));
+        await check(container);
+    } finally {
+        act(() => root.unmount());
+    }
+}
+const cacheStats = {
+    cached_document_count: 2, metadata_count: 4, payload_count: 3,
+    payload_total_bytes: 1024 * 1024, payload_budget_bytes: 2 * 1024 * 1024,
+    payload_cache_dir: '/cache',
+};
+it('keeps cache and known reading problems visible with background processing off, with no progress bar', async () => {
+    prefs.backgroundProcessingEnabled = false;
+    const store = createStore();
+    store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
+        documentCache: cacheStats, updatedAt: Date.now(), issues: [{ reason: 'file_unavailable', count: 1 }],
+    });
+    await withView(store, (container) => {
+        expect(container.textContent).toContain('By default, Beaver processes files when you use them.');
+        expect(container.textContent).toContain('2 documents cached');
+        expect(container.textContent).toContain('1 attachment could not be read');
+        expect(container.textContent).toContain('Includes files Beaver has attempted to process.');
+        expect(container.textContent).not.toContain('Full-text Search');
+        expect(container.querySelector('[role="progressbar"]')).toBeNull();
+        expect(container.querySelector('[aria-label="Also run while Zotero is in use"]')).toHaveProperty('disabled', true);
+        expect(container.querySelector('[data-retry="group"]')).not.toBeNull();
+    });
+});
+it('separates server indexing problems from reading problems and preserves search status while paused', async () => {
+    prefs.backgroundProcessingEnabled = false;
+    const store = createStore();
+    store.set(hasSearchIndexAccessAtom, true);
+    store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
+        updatedAt: Date.now(), issues: [{ reason: 'index_failed', count: 2 }],
+        coverage: { namespace_exists: true, approx_row_count: 1000, documents: [] },
+        coverageUpdatedAt: Date.now(),
+    });
+    await withView(store, (container) => {
+        expect(container.textContent).toContain('Full-text Search');
+        expect(container.textContent).toContain('Updates paused.');
+        expect(container.textContent).toContain('Server search index available');
+        expect(container.textContent).toContain('Detailed attachment coverage is not available yet.');
+        expect(container.textContent).toContain('No reading problems found in files checked so far.');
+        expect(container.querySelector('[data-issue-reason="index_failed"]')).not.toBeNull();
+    });
+});
+it('clears local cache and refreshes its count without changing processing or search state', async () => {
+    prefs.backgroundProcessingEnabled = false;
+    const store = createStore();
+    store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom), documentCache: cacheStats });
+    await withView(store, async (container) => {
+        const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Clear local cache')!;
+        await act(async () => button.click());
+        expect(clearCache).toHaveBeenCalledWith();
+        expect(refresh).toHaveBeenCalledOnce();
+        expect(prefs.backgroundProcessingEnabled).toBe(false);
+        await act(async () => store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
+            documentCache: { ...cacheStats, cached_document_count: 0, payload_count: 0, payload_total_bytes: 0 },
+        }));
+        expect(container.textContent).toContain('0 documents cached');
+    });
+});
+it('reports a cache deletion failure and retains the action for another attempt', async () => {
+    clearCache.mockRejectedValueOnce(new Error('A cache file could not be deleted.'));
+    const store = createStore();
+    store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom), documentCache: cacheStats });
+    await withView(store, async (container) => {
+        const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Clear local cache')!;
+        await act(async () => button.click());
+        expect(container.querySelector('[role="alert"]')?.textContent).toContain('could not be deleted');
+        expect(button.disabled).toBe(false);
+    });
 });

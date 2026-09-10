@@ -716,6 +716,16 @@ export class BeaverDB {
             );
         `);
         await this.queryAsync(`
+            CREATE TABLE IF NOT EXISTS attachment_reading_state (
+                library_id INTEGER NOT NULL,
+                zotero_key TEXT NOT NULL,
+                content_kind TEXT NOT NULL,
+                error_code TEXT,
+                attempted_at INTEGER NOT NULL,
+                PRIMARY KEY (library_id, zotero_key)
+            );
+        `);
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_attachment_processing_extract
             ON attachment_processing_state(library_id, extract_status);
         `);
@@ -930,6 +940,17 @@ export class BeaverDB {
         await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_dcp_lru
             ON document_cache_payloads(COALESCE(last_accessed_at, created_at));
+        `);
+
+        // Retain reading failures discovered before the shared outcome inventory existed.
+        await this.queryAsync(`
+            INSERT OR IGNORE INTO attachment_reading_state
+                (library_id, zotero_key, content_kind, error_code, attempted_at)
+            SELECT library_id, zotero_key, content_kind,
+                CASE WHEN content_kind = 'pdf' AND error_code = 'no_text_layer'
+                    THEN 'ocr_required' ELSE error_code END,
+                CAST(strftime('%s', updated_at) AS INTEGER) * 1000
+            FROM document_cache_metadata WHERE error_code IS NOT NULL AND library_id > 0;
         `);
 
         // User-attached external files (registry behind the `ext-<KEY>` ids).
@@ -2395,11 +2416,58 @@ export class BeaverDB {
         );
     }
 
+    /** Latest observed reading outcome, independent of cache retention and indexing history. */
+    public async recordAttachmentReadingOutcome(input: {
+        libraryId: number;
+        zoteroKey: string;
+        contentKind: string;
+        errorCode: string | null;
+        attemptedAt: number;
+    }): Promise<void> {
+        await this.queryAsync(
+            `INSERT INTO attachment_reading_state (library_id, zotero_key, content_kind, error_code, attempted_at)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(library_id, zotero_key) DO UPDATE SET
+                content_kind = excluded.content_kind, error_code = excluded.error_code,
+                attempted_at = excluded.attempted_at
+             WHERE excluded.attempted_at >= attachment_reading_state.attempted_at`,
+            [input.libraryId, input.zoteroKey, input.contentKind, input.errorCode, input.attemptedAt],
+        );
+    }
+
+    public async getAttachmentReadingError(libraryId: number, zoteroKey: string): Promise<string | null> {
+        let code: string | null = null;
+        await this.queryAsync(
+            `SELECT error_code FROM attachment_reading_state WHERE library_id = ? AND zotero_key = ?`,
+            [libraryId, zoteroKey],
+            { onRow: (row: any) => { code = row.getResultByIndex(0) ?? null; } },
+        );
+        return code;
+    }
+
+    public async getAttachmentReadingKeysByLibrary(libraryId: number): Promise<string[]> {
+        const keys: string[] = [];
+        await this.queryAsync(
+            `SELECT zotero_key FROM attachment_reading_state WHERE library_id = ?`,
+            [libraryId],
+            { onRow: (row: any) => keys.push(row.getResultByIndex(0)) },
+        );
+        return keys;
+    }
+
+    public async deleteAttachmentReadingState(libraryId: number, zoteroKey: string): Promise<void> {
+        await this.queryAsync(
+            `DELETE FROM attachment_reading_state WHERE library_id = ? AND zotero_key = ?`,
+            [libraryId, zoteroKey],
+        );
+    }
+
     public async deleteAttachmentProcessingState(
         libraryId: number,
         zoteroKey: string,
     ): Promise<AttachmentProcessingStateRecord | null> {
         const existing = await this.getAttachmentProcessingState(libraryId, zoteroKey);
+        await this.deleteAttachmentReadingState(libraryId, zoteroKey);
         if (!existing) return null;
         await this.queryAsync(
             `DELETE FROM attachment_processing_state
@@ -2410,6 +2478,7 @@ export class BeaverDB {
     }
 
     public async deleteAttachmentProcessingStatesByLibrary(libraryId: number): Promise<void> {
+        await this.queryAsync(`DELETE FROM attachment_reading_state WHERE library_id = ?`, [libraryId]);
         await this.queryAsync(
             `DELETE FROM attachment_processing_state WHERE library_id = ?`,
             [libraryId],
@@ -2421,6 +2490,7 @@ export class BeaverDB {
         const where = libraryId === undefined ? '' : ' WHERE library_id = ?';
         const params = libraryId === undefined ? [] : [libraryId];
         await this.conn.executeTransaction(async () => {
+            await this.queryAsync(`DELETE FROM attachment_reading_state${where}`, params);
             if (!discardRemoteState) {
                 // Upserts may be the only remaining record of a replaced document hash.
                 const cleanup: BackgroundJobInput[] = [];
@@ -2563,6 +2633,10 @@ export class BeaverDB {
         reason: string | null = null,
     ): Promise<void> {
         await this.resetAttachmentStatusColumn('extract_status', libraryId, zoteroKey, reason);
+        if (reason !== 'user_retry') await this.queryAsync(
+            `DELETE FROM attachment_reading_state WHERE library_id = ? AND zotero_key = ?`,
+            [libraryId, zoteroKey],
+        );
     }
 
     public async resetAttachmentOcr(
@@ -2660,6 +2734,7 @@ export class BeaverDB {
         zoteroKey: string;
         status: Extract<AttachmentExtractStatus, 'failed' | 'skipped'>;
         error: string;
+        attemptedAt: number;
     }): Promise<void> {
         await this.queryAsync(
             `UPDATE attachment_processing_state SET
@@ -2667,6 +2742,13 @@ export class BeaverDB {
              WHERE library_id = ? AND zotero_key = ? AND extract_status IS NULL`,
             [input.status, input.error, input.libraryId, input.zoteroKey],
         );
+        if (await this.lastStatementChangedRow()) {
+            const row = await this.getAttachmentProcessingState(input.libraryId, input.zoteroKey);
+            if (row) await this.recordAttachmentReadingOutcome({
+                libraryId: input.libraryId, zoteroKey: input.zoteroKey,
+                contentKind: row.contentKind, errorCode: input.error, attemptedAt: input.attemptedAt,
+            });
+        }
     }
 
     /** OCR completion is guarded by the exact bytes hash the executor consumed. */
@@ -4002,6 +4084,35 @@ export class BeaverDB {
             onRow: (row: any) => rows.push({ count: row.getResultByIndex(0) }),
         });
         return rows[0]?.count ?? 0;
+    }
+
+    /** Count registered, compatible documents without probing source or payload files. */
+    public async getCachedDocumentCount(versions: {
+        metadata: number;
+        payload: number;
+        pdf: string | null;
+        epub: string | null;
+        snapshot: string | null;
+    }): Promise<number> {
+        let count = 0;
+        await this.queryAsync(
+            `SELECT COUNT(*) FROM (
+                SELECT DISTINCT m.library_id, m.zotero_key
+                FROM document_cache_metadata m JOIN document_cache_payloads p ON p.metadata_id = m.id
+                WHERE m.error_code IS NULL AND m.document_metadata_json != 'null'
+                    AND m.metadata_format_version = ? AND p.cache_format_version = ?
+                    AND ((m.content_kind = 'pdf' AND m.extraction_schema_version = ?)
+                        OR (m.content_kind = 'epub' AND m.extraction_schema_version = ?)
+                        OR (m.content_kind = 'snapshot' AND m.extraction_schema_version = ?))
+                    AND p.extraction_schema_version = m.extraction_schema_version
+                    AND p.content_kind = m.content_kind AND p.source_file_path = m.file_path
+                    AND p.source_file_mtime_ms = m.file_mtime_ms AND p.source_file_size_bytes = m.file_size_bytes
+                    AND p.source_size_bytes = m.source_size_bytes
+            )`,
+            [versions.metadata, versions.payload, versions.pdf, versions.epub, versions.snapshot],
+            { onRow: (row: any) => { count = row.getResultByIndex(0); } },
+        );
+        return count;
     }
 
     /** Count document-cache payload rows. */

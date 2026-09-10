@@ -13,7 +13,6 @@ import { getPref, setPref } from "../../../src/utils/prefs";
 import { TickIcon, CopyIcon } from "../icons/icons";
 import { normalizeVoiceLanguage, voiceLanguages } from "../../voice/languages";
 import CustomInstructionsSection from "./CustomInstructionsSection";
-import { clearDocumentCache } from "../../../src/services/backgroundProcessing/resetLocalState";
 import {
     deleteAllExternalFiles,
     getExternalFilesStats,
@@ -39,9 +38,6 @@ const AdvancedSection: React.FC = () => {
     const setCurrentMessageExternalFiles = useSetAtom(currentMessageExternalFilesAtom);
     const [externalFileStats, setExternalFileStats] = useState<{ count: number; totalBytes: number } | null>(null);
     const [isDeletingExternalFiles, setIsDeletingExternalFiles] = useState(false);
-    const [isDeletingCache, setIsDeletingCache] = useState(false);
-    const [cacheDeleted, setCacheDeleted] = useState(false);
-    const [cacheError, setCacheError] = useState<string | null>(null);
 
     const refreshExternalFileStats = useCallback(async () => {
         try {
@@ -89,22 +85,6 @@ const AdvancedSection: React.FC = () => {
             refreshExternalFileStats();
         }
     }, [externalFileStats, refreshExternalFileStats, setCurrentMessageExternalFiles]);
-
-    const handleDeleteDocumentCache = useCallback(async () => {
-        setIsDeletingCache(true);
-        setCacheDeleted(false);
-        setCacheError(null);
-        try {
-            await clearDocumentCache();
-            setCacheDeleted(true);
-            setTimeout(() => setCacheDeleted(false), 2000);
-        } catch (error) {
-            logger(`AdvancedSection: failed to clear document cache: ${error}`, 1);
-            setCacheError("Could not delete the cache. Please try again.");
-        } finally {
-            setIsDeletingCache(false);
-        }
-    }, []);
 
     // --- Atoms: MCP Server enabled ---
     const [mcpServerEnabled, setMcpServerEnabled] = useAtom(mcpServerEnabledAtom);
@@ -244,23 +224,7 @@ const AdvancedSection: React.FC = () => {
                         </div>
                     }
                 />
-                <SettingsRow
-                    title="Document Cache"
-                    description={cacheError ?? "Locally cached text from PDFs and other documents. Deleted text is recreated when needed; cloud search data is retained."}
-                    hasBorder
-                    control={
-                        <Button
-                            variant="outline"
-                            icon={cacheDeleted ? TickIcon : undefined}
-                            onClick={handleDeleteDocumentCache}
-                            disabled={isDeletingCache}
-                            loading={isDeletingCache}
-                            style={{ padding: '4px 6px' }}
-                        >
-                            {cacheDeleted ? 'Deleted' : 'Delete Cache'}
-                        </Button>
-                    }
-                />
+
             </SettingsGroup>
 
             {/* ===== CONNECTED APPS (DATA PROVIDER) ===== */}

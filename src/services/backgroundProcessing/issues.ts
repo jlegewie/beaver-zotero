@@ -73,9 +73,31 @@ export function processingIssuesSql(entitlements: IssueEntitlements): string {
     const hasCodeSql = (code: string) => `(last_error = '${code}'
         OR instr(last_error, '${code}:') = 1 OR instr(last_error, ': ${code}') > 0)`;
     const anyCodeSql = (codes: string[]) => codes.map(hasCodeSql).join(' OR ');
-    return `WITH ledger AS (
+    return `WITH observed AS (
+        SELECT s.library_id, s.zotero_key, COALESCE(r.content_kind, s.content_kind) AS content_kind,
+            CASE WHEN r.library_id IS NULL THEN s.extract_status
+                WHEN r.error_code = 'retry_pending' THEN NULL
+                WHEN r.error_code IS NULL OR (r.content_kind = 'pdf' AND r.error_code = 'ocr_required') THEN 'done' ELSE 'failed' END AS extract_status,
+            CASE WHEN r.library_id IS NULL THEN s.ocr_status
+                WHEN r.content_kind = 'pdf' AND r.error_code = 'ocr_required' THEN CASE WHEN s.ocr_status IN ('done', 'failed') THEN s.ocr_status ELSE 'needed' END
+                WHEN r.error_code IS NULL THEN 'na' ELSE NULL END AS ocr_status,
+            s.upsert_status, CASE WHEN r.error_code = 'ocr_required' AND s.ocr_status = 'failed' THEN s.last_error ELSE COALESCE(r.error_code, s.last_error) END AS last_error,
+            s.updated_at, r.attempted_at,
+            CASE WHEN r.library_id IS NOT NULL AND r.error_code IS NULL THEN 1 ELSE 0 END AS read_succeeded
+        FROM attachment_processing_state s
+        LEFT JOIN attachment_reading_state r USING (library_id, zotero_key)
+        UNION ALL
+        SELECT r.library_id, r.zotero_key, r.content_kind,
+            CASE WHEN r.error_code = 'retry_pending' THEN NULL
+                WHEN r.error_code IS NULL OR (r.content_kind = 'pdf' AND r.error_code = 'ocr_required') THEN 'done' ELSE 'failed' END,
+            CASE WHEN r.content_kind = 'pdf' AND r.error_code = 'ocr_required' THEN 'needed' WHEN r.error_code IS NULL THEN 'na' ELSE NULL END,
+            NULL, r.error_code, NULL, r.attempted_at, CASE WHEN r.error_code IS NULL THEN 1 ELSE 0 END
+        FROM attachment_reading_state r
+        WHERE NOT EXISTS (SELECT 1 FROM attachment_processing_state s
+            WHERE s.library_id = r.library_id AND s.zotero_key = r.zotero_key)
+    ), ledger AS (
         SELECT library_id, zotero_key, extract_status, ocr_status, upsert_status, last_error,
-            CAST(strftime('%s', updated_at) AS INTEGER) * 1000 AS timestamp,
+            COALESCE(attempted_at, CAST(strftime('%s', updated_at) AS INTEGER) * 1000) AS timestamp, read_succeeded,
             CASE
                 WHEN extract_status IN ('failed', 'skipped') THEN CASE
                     WHEN ${anyCodeSql(FILE_UNAVAILABLE_CODES)} THEN 'file_unavailable'
@@ -86,13 +108,13 @@ export function processingIssuesSql(entitlements: IssueEntitlements): string {
                         WHEN content_kind = 'pdf' AND ${entitlements.hasOcrAccess ? 0 : 1} THEN 'scanned'
                         ELSE 'no_text' END
                     ELSE 'extract_failed' END
-                WHEN upsert_status = 'failed' AND ${entitlements.hasSearchIndexAccess ? 1 : 0} THEN 'index_failed'
                 WHEN ocr_status = 'failed' THEN CASE
                     WHEN ${anyCodeSql(FILE_UNAVAILABLE_CODES)} THEN 'file_unavailable'
                     ELSE 'ocr_failed' END
                 WHEN ocr_status = 'needed' AND ${entitlements.hasOcrAccess ? 0 : 1} THEN 'scanned'
+                WHEN upsert_status = 'failed' AND ${entitlements.hasSearchIndexAccess ? 1 : 0} THEN 'index_failed'
             END AS reason
-        FROM attachment_processing_state
+        FROM observed
     ), dead AS (
         SELECT d.library_id, d.zotero_key, d.last_error, d.died_at AS timestamp,
             CASE d.job_type WHEN 'document_extract' THEN 'extract_failed'
@@ -101,8 +123,8 @@ export function processingIssuesSql(entitlements: IssueEntitlements): string {
         FROM background_jobs_dead d
         JOIN ledger s ON s.library_id = d.library_id AND s.zotero_key = d.zotero_key
         WHERE s.reason IS NULL AND (
-            (d.job_type = 'document_extract' AND coalesce(s.extract_status, '') != 'done')
-            OR (d.job_type = 'document_ocr' AND NOT (s.extract_status IS 'done' AND coalesce(s.ocr_status, '') IN ('done', 'na')))
+            (d.job_type = 'document_extract' AND s.read_succeeded = 0 AND coalesce(s.extract_status, '') != 'done')
+            OR (d.job_type = 'document_ocr' AND s.read_succeeded = 0 AND NOT (s.extract_status IS 'done' AND coalesce(s.ocr_status, '') IN ('done', 'na')))
             OR (d.job_type = 'fulltext_upsert' AND ${entitlements.hasSearchIndexAccess ? 1 : 0} AND coalesce(s.upsert_status, '') != 'done')
         )
     ), issues AS (
@@ -188,11 +210,11 @@ export function classifyProcessingIssue(
         return 'extract_failed';
     }
 
-    if (row.upsertStatus === 'failed' && entitlements.hasSearchIndexAccess) return 'index_failed';
     if (row.ocrStatus === 'failed') {
         return hasAnyCode(row.lastError, FILE_UNAVAILABLE_CODES) ? 'file_unavailable' : 'ocr_failed';
     }
     if (row.ocrStatus === 'needed' && !entitlements.hasOcrAccess) return 'scanned';
+    if (row.upsertStatus === 'failed' && entitlements.hasSearchIndexAccess) return 'index_failed';
     return null;
 }
 
