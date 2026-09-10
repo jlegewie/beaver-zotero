@@ -315,14 +315,19 @@ const Tooltip: React.FC<TooltipProps> = ({
         // Portal into the document the anchor lives in. While the anchor is not
         // attached there is no document to portal into, so render inline rather
         // than guess a window and land the tooltip in the wrong one.
-        const doc = getDocumentFromElement(anchorRef.current);
-        if (doc) {
+        //
+        // A host document need not have a `body` at all — a XUL chrome window is
+        // rooted at `<window>` — and `createPortal` throws on a null container,
+        // which takes down the whole tree. Fall back to rendering in place; the
+        // tooltip is `position: fixed`, so it is only containment that is lost.
+        const container = getDocumentFromElement(anchorRef.current)?.body;
+        if (container) {
             return (
                 <>
                 {wrappedChildren}
                 {ReactDOM.createPortal(
                     tooltipElement,
-                    doc.body
+                    container
                 )}
                 </>
             );

@@ -81,7 +81,6 @@ const ProcessingStatusRow: React.FC<{
                 {sentence.stopDrain ? (
                     <Tooltip
                         content="The current file will finish. Processing resumes when Zotero is idle."
-                        usePortal
                         placement="top"
                     >
                         <Button
@@ -97,7 +96,6 @@ const ProcessingStatusRow: React.FC<{
                     <Tooltip
                         content="Processing will start once Zotero is ready."
                         disabled={!sentence.processNowBlocked}
-                        usePortal
                         placement="top"
                     >
                         <Button
