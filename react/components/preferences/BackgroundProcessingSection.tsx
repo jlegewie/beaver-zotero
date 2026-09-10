@@ -242,7 +242,31 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
 
     return (
         <>
-            <SectionLabel>Processing</SectionLabel>
+            {hasSearchAccess && (
+                <>
+                    <SectionLabel>Full-text Search</SectionLabel>
+                    <SettingsGroup>
+                        <SettingsRow
+                            title={status.coverage === null
+                                ? status.coverageError ? 'Server search status unavailable' : 'Checking the server search index…'
+                                : status.coverage.namespace_exists ? 'Server search index available' : 'Server search index not available yet'}
+                            description={<>
+                                {!enabled && <span>Updates paused. </span>}
+                                {status.coverageError
+                                    ? 'Could not check the server search index. Showing its last known status when available.'
+                                    : 'Full-text search finds content inside indexed attachments. Detailed attachment coverage is not available yet.'}
+                                {status.coverageUpdatedAt && <span> Last checked {new Date(status.coverageUpdatedAt).toLocaleString()}.</span>}
+                            </>}
+                        />
+                        {indexIssues.map(issueRow)}
+                        {readingIssues.length > 0 && <div className="font-color-secondary text-base" style={{ padding: '8px 12px' }}>
+                            Some attachments may be missing from search because they could not be read. See the reading problems below.
+                        </div>}
+                    </SettingsGroup>
+                </>
+            )}
+
+            <SectionLabel>Background Processing</SectionLabel>
             <SettingsGroup>
                 <SettingsRow
                     title={hasSearchAccess ? 'Keep full-text search up to date' : 'Process files in the background'}
@@ -285,30 +309,6 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                     />}
                 />
             </SettingsGroup>
-
-            {hasSearchAccess && (
-                <>
-                    <SectionLabel>Full-text Search</SectionLabel>
-                    <SettingsGroup>
-                        <SettingsRow
-                            title={status.coverage === null
-                                ? status.coverageError ? 'Server search status unavailable' : 'Checking the server search index…'
-                                : status.coverage.namespace_exists ? 'Server search index available' : 'Server search index not available yet'}
-                            description={<>
-                                {!enabled && <span>Updates paused. </span>}
-                                {status.coverageError
-                                    ? 'Could not check the server search index. Showing its last known status when available.'
-                                    : 'Full-text search finds content inside indexed attachments. Detailed attachment coverage is not available yet.'}
-                                {status.coverageUpdatedAt && <span> Last checked {new Date(status.coverageUpdatedAt).toLocaleString()}.</span>}
-                            </>}
-                        />
-                        {indexIssues.map(issueRow)}
-                        {readingIssues.length > 0 && <div className="font-color-secondary text-base" style={{ padding: '8px 12px' }}>
-                            Some attachments may be missing from search because they could not be read. See the reading problems below.
-                        </div>}
-                    </SettingsGroup>
-                </>
-            )}
 
             <SectionLabel>Local Document Cache</SectionLabel>
             <SettingsGroup>
