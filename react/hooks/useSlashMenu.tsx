@@ -5,7 +5,7 @@ import { CSSIcon, CSSItemTypeIcon } from '../components/icons/zotero';
 import { currentMessageContentAtom } from '../atoms/messageComposition';
 import { actionsAtom, actionContextAtom, resolveActionForStagingAtom } from '../atoms/actions';
 import { computeActionGroups } from '../utils/actionVisibility';
-import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
+import { openPreferencesWindow } from '../ui/openPreferencesWindow';
 import { Action, ActionCategory, ActionTargetType, KnownActionCategory } from '@beaver/agent-core/types/actions';
 import { SlashCommandDescriptor, getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
 import { MenuPosition, SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';

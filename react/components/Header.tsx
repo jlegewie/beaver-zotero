@@ -4,7 +4,7 @@ import { CancelIcon, PlusSignIcon, PictureInPictureIcon, ChattingIcon } from './
 import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
 import EmbeddingIndexStatusButton from './ui/buttons/EmbeddingIndexStatusButton';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
-import { openBeaverWindow } from '../../src/ui/openBeaverWindow';
+import { openBeaverWindow } from '../ui/openBeaverWindow';
 import { newThreadAtom } from '../atoms/threads';
 import { currentThreadIdAtom, runsCountAtom } from '@beaver/agent-core/run-state/atoms';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';

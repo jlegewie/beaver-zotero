@@ -1,5 +1,5 @@
 import { viewAttachment } from '../../../runtime/navigation';
-import { getContextWindow } from '../../../runtime/windowRuntime';
+import { tryGetWindowRuntime } from '../../../runtime/windowRuntime';
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
@@ -196,7 +196,8 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
             }
 
             // Select the new item in Zotero
-            const ZoteroPane = getContextWindow()?.ZoteroPane;
+            const contextWindow = tryGetWindowRuntime()?.contextWindow;
+            const ZoteroPane = contextWindow && !contextWindow.closed ? contextWindow.ZoteroPane : undefined;
             if (ZoteroPane) {
                 ZoteroPane.selectItem(newItem.id);
             }

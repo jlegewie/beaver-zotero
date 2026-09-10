@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   isLibraryEditable: vi.fn(),
   selectItem: vi.fn(),
   selectItemById: vi.fn(),
+  saveTx: vi.fn(),
 }));
 
 vi.mock("../../../src/utils/zoteroUtils", () => ({
@@ -40,6 +41,7 @@ import { zoteroNoteWriter } from "../../../react/host/zotero/noteWriter";
 describe("zoteroNoteWriter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.saveTx.mockReset().mockResolvedValue(undefined);
 
     class MockNote {
       libraryID = 0;
@@ -47,7 +49,7 @@ describe("zoteroNoteWriter", () => {
       parentKey: string | false = false;
 
       setNote = vi.fn();
-      saveTx = vi.fn().mockResolvedValue(undefined);
+      saveTx = mocks.saveTx;
     }
 
     (globalThis as any).Zotero = {
@@ -90,6 +92,38 @@ describe("zoteroNoteWriter", () => {
       zotero_key: "NOTE1234",
     });
   });
+
+  it.each([false, true])("returns the saved note when its owner starts closing before reveal (child: %s)", async asChild => {
+    const win: any = { closed: false, Zotero_Tabs: { selectedType: "library" }, ZoteroPane: {} };
+    vi.mocked(Zotero.getMainWindow).mockReturnValue(win);
+    mocks.getZoteroTargetContextSync.mockReturnValue({
+      targetLibraryId: 7,
+      parentReference: asChild ? { library_id: 7, zotero_key: "PARENT01" } : null,
+    });
+    mocks.saveTx.mockImplementationOnce(async () => { win.__beaverRuntime = { status: "closing" }; });
+    const select = asChild ? mocks.selectItem : mocks.selectItemById;
+    select.mockImplementationOnce(async () => {
+      expect(mocks.saveTx).toHaveBeenCalledOnce();
+      expect(win.__beaverRuntime.status).toBe("closing");
+      win.closed = true;
+      throw new Error("destination window unavailable");
+    });
+    await expect(zoteroNoteWriter.saveNote({
+      contentHtml: "<p>Saved response</p>", asChild, format: { kind: "streaming-note" },
+    })).resolves.toMatchObject({ library_id: 7, zotero_key: "NOTE1234", library_ref: "g42" });
+    expect(select).toHaveBeenCalledOnce();
+    expect(mocks.saveTx).toHaveBeenCalledOnce();
+  });
+
+  it("still rejects an actual persistence failure", async () => {
+    mocks.saveTx.mockRejectedValueOnce(new Error("write failed"));
+    await expect(zoteroNoteWriter.saveNote({
+      contentHtml: "<p>Unsaved</p>", asChild: false, format: { kind: "streaming-note" },
+    })).rejects.toThrow("write failed");
+    expect(mocks.selectItem).not.toHaveBeenCalled();
+    expect(mocks.selectItemById).not.toHaveBeenCalled();
+  });
+
 });
 
 // Bind this suite's single-window fixture as the originating renderer.

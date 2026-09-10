@@ -2,10 +2,23 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveNavigationWindow, WindowUnavailableError } from '../../src/runtime/navigation';
 import { getContextWindow } from './windowRuntime';
 
-/** Legacy APIs cannot accept a target; never silently open in a different window. */
-function focusLegacyTarget(win: ReturnType<typeof Zotero.getMainWindow>): void {
+/** Legacy APIs read the active main window synchronously when opening a tab. */
+function assertLegacyTarget(win: ReturnType<typeof Zotero.getMainWindow>): void {
+    if (!win.closed && win.__beaverRuntime?.status !== 'closing' && Zotero.getMainWindow() === win) return;
+    void import(/* webpackMode: 'eager' */ '../utils/navigationNotice').then(({ notifyNavigationUnavailable }) => {
+        notifyNavigationUnavailable(win);
+    }).catch(error => logger(`Navigation notice: ${error}`, 2));
+    throw new WindowUnavailableError();
+}
+
+async function focusLegacyTarget(win: ReturnType<typeof Zotero.getMainWindow>): Promise<void> {
     win.focus();
-    if (Zotero.getMainWindow() !== win) throw new WindowUnavailableError();
+    // Native activation can update the window mediator after focus() returns.
+    for (let attempt = 0; attempt < 40 && !win.closed
+        && win.__beaverRuntime?.status !== 'closing' && Zotero.getMainWindow() !== win; attempt++) {
+        await Zotero.Promise.delay(25);
+    }
+    assertLegacyTarget(win);
 }
 
 /** Pin a real main window before any reader initialization awaits. */
@@ -15,7 +28,7 @@ export async function openReader(
 ): Promise<any> {
     const win = await resolveNavigationWindow(origin);
     // Older Zotero releases ignore the window option and use the focused main window.
-    // Focus immediately before invoking the native method (no intervening await).
+    // Recheck activation immediately before each native call that uses global focus.
     const legacy = typeof (win.Zotero_Tabs as any).isOwnTabEvent !== 'function';
     if (legacy && !options.openInWindow && !options.allowDuplicate) {
         const tab = win.Zotero_Tabs._tabs?.find((tab: any) => tab.data?.itemID === itemID);
@@ -36,7 +49,8 @@ export async function openReader(
             // Selecting an unloaded local tab invokes Zotero's restore hook.
             // That hook uses the active main window on legacy releases.
             const restoring = tab.type === 'reader-unloaded';
-            focusLegacyTarget(win);
+            await focusLegacyTarget(win);
+            assertLegacyTarget(win);
             win.Zotero_Tabs.select(tab.id, false, { location });
             const deadline = Date.now() + 15000;
             let restored: any;
@@ -62,7 +76,10 @@ export async function openReader(
         // different window's instance of the same attachment.
         options = { ...options, allowDuplicate: true };
     }
-    if (legacy) focusLegacyTarget(win);
+    if (legacy) {
+        await focusLegacyTarget(win);
+        assertLegacyTarget(win);
+    }
     const opened = await Zotero.Reader.open(itemID, location, { ...options, window: win } as any);
     if (win.closed) throw new WindowUnavailableError();
     const reader = opened ?? Zotero.Reader.getByTabID(win.Zotero_Tabs.selectedID);
@@ -93,7 +110,8 @@ export async function openNote(itemID: number, origin: Window = getContextWindow
                 return readyLocalEditor(existing);
             }
             const tab = win.Zotero_Tabs._tabs?.find(candidate => candidate.data?.itemID === itemID);
-            focusLegacyTarget(win);
+            await focusLegacyTarget(win);
+            assertLegacyTarget(win);
             if (tab) {
                 // Restore the destination's unloaded note through its native tab hook.
                 win.Zotero_Tabs.select(tab.id);
@@ -123,7 +141,10 @@ export async function openNote(itemID: number, origin: Window = getContextWindow
 export async function viewAttachment(itemID: number, origin?: Window): Promise<void> {
     try {
         const win = await resolveNavigationWindow(origin ?? getContextWindow());
-        if (typeof (win.Zotero_Tabs as any).isOwnTabEvent !== 'function') focusLegacyTarget(win);
+        if (typeof (win.Zotero_Tabs as any).isOwnTabEvent !== 'function') {
+            await focusLegacyTarget(win);
+            assertLegacyTarget(win);
+        }
         await win.ZoteroPane.viewAttachment(itemID);
     } catch (error) {
         logger(`viewAttachment: ${error}`, 2);

@@ -1,5 +1,5 @@
 import { openNote, viewAttachment } from '../runtime/navigation';
-import { getContextWindow } from '../runtime/windowRuntime';
+import { getContextWindow, tryGetWindowRuntime } from '../runtime/windowRuntime';
 import { getItemDisplayName, MAX_NOTE_TITLE_LENGTH } from '../../src/utils/itemDisplayName';
 import { stripHtmlTags, computeDiff } from '../components/agentRuns/EditNotePreview';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -228,7 +228,8 @@ export function revealSource(source: ZoteroItemReference | SourceAttachment, col
         notifyReferenceUnavailable('item');
         return;
     }
-    if (getContextWindow()?.ZoteroPane) {
+    const win = tryGetWindowRuntime()?.contextWindow;
+    if (win && !win.closed) {
         // Convert collection key to collection ID if provided
         let collectionId: number | undefined;
         if (collectionKey) {
@@ -237,7 +238,7 @@ export function revealSource(source: ZoteroItemReference | SourceAttachment, col
                 collectionId = id;
             }
         }
-        selectItemById(itemID, true, collectionId);
+        selectItemById(itemID, true, collectionId, getContextWindow());
     }
 }
 

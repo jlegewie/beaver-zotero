@@ -7,7 +7,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { hasCompletedOnboardingAtom, updateRequiredAtom, profileWithPlanAtom } from '../../../atoms/profile';
 import { logoutAtom, userAtom } from '../../../atoms/auth';
 import { firstRunReturnRequestedAtom, firstRunSuggestionsModeAtom } from '../../../atoms/firstRun';
-import { openPreferencesWindow } from '../../../../src/ui/openPreferencesWindow';
+import { openPreferencesWindow } from '../../../ui/openPreferencesWindow';
 
 interface UserAccountMenuButtonProps {
     className?: string;

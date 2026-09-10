@@ -3,7 +3,7 @@ import { useSetAtom } from 'jotai';
 import Button from '@beaver/agent-ui/primitives/Button';
 import { removeFloatingPopupMessageAtom } from '../../../atoms/floatingPopup';
 import { setPref } from '../../../../src/utils/prefs';
-import { openPreferencesWindow } from '../../../../src/ui/openPreferencesWindow';
+import { openPreferencesWindow } from '../../../ui/openPreferencesWindow';
 
 export default function BackgroundProcessingWelcomeContent(props: {
     messageId: string;

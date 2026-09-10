@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import PermissionMenu, { PermissionMenuOption } from '@beaver/agent-ui/primitives/PermissionMenu';
 import HandIcon from '@beaver/agent-ui/icons/HandIcon';
 import SecurityWarningIcon from '@beaver/agent-ui/icons/SecurityWarningIcon';
-import { openPreferencesWindow } from '../../../../src/ui/openPreferencesWindow';
+import { openPreferencesWindow } from '../../../ui/openPreferencesWindow';
 
 /** How much Beaver may change in the library for the rest of the current run. */
 export type RunPermissionMode = 'ask' | 'full_access';

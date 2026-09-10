@@ -7,7 +7,7 @@ import InputArea from "../input/InputArea";
 import DragDropWrapper from "../input/DragDropWrapper";
 import PopupOverlayContainer from "../PopupOverlayContainer";
 import { SettingsIcon }  from "../icons/icons";
-import { openPreferencesWindow } from "../../../src/ui/openPreferencesWindow";
+import { openPreferencesWindow } from "../../ui/openPreferencesWindow";
 import Button from "@beaver/agent-ui/primitives/Button";
 
 interface HomePageProps {

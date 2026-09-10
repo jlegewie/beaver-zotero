@@ -24,6 +24,8 @@
  * Wired to their paths in `useHttpEndpoints.ts`.
  */
 
+import { openBeaverWindow } from '../../ui/openBeaverWindow';
+import { borrowedWindowCommandError } from './borrowedWindowCommand';
 import { getContextWindow } from '../../runtime/windowRuntime';
 
 import { BeaverUIFactory } from '../../../src/ui/ui';
@@ -136,10 +138,12 @@ async function waitForReaderContext(timeoutMs: number): Promise<boolean> {
  * catch up so callers can assert on `application_state` immediately after.
  */
 export async function handleTestBeaverWindowHttpRequest(request: any): Promise<any> {
+    const ownerError = borrowedWindowCommandError();
+    if (ownerError) return ownerError;
     const open = request?.open !== false;
 
     if (open) {
-        BeaverUIFactory.openBeaverWindow();
+        openBeaverWindow();
     } else {
         BeaverUIFactory.closeBeaverWindow();
     }

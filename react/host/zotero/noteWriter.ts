@@ -1,3 +1,4 @@
+import { logger } from '@beaver/agent-core/platform/logger';
 import { getContextWindow } from '../../runtime/windowRuntime';
 import type { NoteWriterHost, SaveNoteRequest, SavedNoteReference } from '@beaver/agent-ui/host/types';
 import {
@@ -89,12 +90,17 @@ export const zoteroNoteWriter: NoteWriterHost = {
             });
         }
 
-        if (!inReader && !win.closed) {
-            if (parentReference) {
-                await selectItem(newNote, true, win);
-            } else {
-                await selectItemById(newNote.id, true, selectedCollection?.id, win);
+        // The note is already saved; a failed reveal must not invite a duplicate retry.
+        try {
+            if (!inReader && !win.closed) {
+                if (parentReference) {
+                    await selectItem(newNote, true, win);
+                } else {
+                    await selectItemById(newNote.id, true, selectedCollection?.id, win);
+                }
             }
+        } catch (error) {
+            logger(`saveNote: saved note could not be revealed: ${error}`, 2);
         }
 
         return {

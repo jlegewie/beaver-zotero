@@ -402,8 +402,8 @@ function buildItemMenuItems(itemActions: Action[]): any[] {
     menus.push({
         menuType: 'menuitem' as const,
         l10nID: 'beaver-context-menu-add-action',
-        onCommand: () => {
-            openPreferencesWindow('actions');
+        onCommand: (event: any) => {
+            openPreferencesWindow('actions', undefined, undefined, event?.target?.ownerDocument?.defaultView);
         },
     });
 
@@ -430,8 +430,8 @@ function buildCollectionMenuItems(collectionActions: Action[]): any[] {
     items.push({
         menuType: 'menuitem' as const,
         l10nID: 'beaver-context-menu-add-action',
-        onCommand: () => {
-            openPreferencesWindow('actions');
+        onCommand: (event: any) => {
+            openPreferencesWindow('actions', undefined, undefined, event?.target?.ownerDocument?.defaultView);
         },
     });
 

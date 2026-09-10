@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { openReader, openNote, viewAttachment } from '../../../react/runtime/navigation';
+vi.mock('../../../react/utils/navigationNotice', () => ({ notifyNavigationUnavailable: vi.fn() }));
 let a: any, b: any;
 beforeEach(() => {
     const main = () => ({ closed: false, focus: vi.fn(), ZoteroPane: {}, Zotero_Tabs: { _tabs: [], select: vi.fn(), isOwnTabEvent: vi.fn() } });
@@ -8,6 +9,7 @@ beforeEach(() => {
     a.focus.mockImplementation(() => { active = a; });
     vi.stubGlobal('Zotero', {
         getMainWindow: vi.fn(() => active),
+        Promise: { delay: vi.fn(async () => {}) },
         Reader: { open: vi.fn(async (itemID, _location, options) => ({ itemID, _window: options.window })), getByTabID: vi.fn() },
         Notes: { open: vi.fn(async () => undefined), _editorInstances: [] },
     });
@@ -171,4 +173,37 @@ it.each([false, true])('rejects a reader closed during initialization (registrat
     initialize();
     await expect(pending).rejects.toMatchObject({ code: 'window_unavailable' });
     expect(reader.navigate).not.toHaveBeenCalled();
+});
+
+
+it.each(['reader', 'note', 'attachment'])('waits for delayed native activation before opening a %s', async kind => {
+    delete a.Zotero_Tabs.isOwnTabEvent;
+    a.focus.mockImplementation(() => {});
+    a.ZoteroPane.viewAttachment = vi.fn();
+    let ticks = 0;
+    Zotero.Promise.delay = vi.fn(async () => {
+        if (++ticks === 3) vi.mocked(Zotero.getMainWindow).mockReturnValue(a);
+    });
+    if (kind === 'reader') await openReader(42, undefined, {}, a);
+    if (kind === 'note') await openNote(17, a);
+    if (kind === 'attachment') await viewAttachment(42, a);
+    expect(ticks).toBe(3);
+    expect(a.focus).toHaveBeenCalledOnce();
+    expect(kind === 'reader' ? Zotero.Reader.open : kind === 'note' ? (Zotero as any).Notes.open : a.ZoteroPane.viewAttachment).toHaveBeenCalledOnce();
+});
+
+it('aborts activation when the target closes during the wait', async () => {
+    delete a.Zotero_Tabs.isOwnTabEvent;
+    a.focus.mockImplementation(() => {});
+    Zotero.Promise.delay = vi.fn(async () => { a.closed = true; });
+    await expect(openReader(42, undefined, {}, a)).rejects.toMatchObject({ code: 'window_unavailable' });
+    expect(Zotero.Reader.open).not.toHaveBeenCalled();
+});
+
+it('rechecks activation after the wait resolves and before invoking the native API', async () => {
+    delete a.Zotero_Tabs.isOwnTabEvent;
+    let reads = 0;
+    vi.mocked(Zotero.getMainWindow).mockImplementation(() => ++reads <= 2 ? a : b);
+    await expect(openReader(42, undefined, {}, a)).rejects.toMatchObject({ code: 'window_unavailable' });
+    expect(Zotero.Reader.open).not.toHaveBeenCalled();
 });

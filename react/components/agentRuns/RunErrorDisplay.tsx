@@ -10,7 +10,7 @@ import { regenerateFromRunAtom, resumeFromRunAtom, retryPendingRunIdAtom } from 
 import { runErrorVisibilityAtom, setRunErrorVisibilityAtom } from '../../atoms/messageUIState';
 import { remainingBeaverCreditsAtom, errorCreditCheckAtom } from '../../atoms/profile';
 import { beaverDefaultModelAtom, updateSelectedModelAtom, type ModelConfig } from '../../atoms/models';
-import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
+import { openPreferencesWindow } from '../../ui/openPreferencesWindow';
 import { getRunErrorTitle, stripRunErrorTypePrefix } from '@beaver/agent-core/run-state/runErrorCopy';
 
 interface RunError {

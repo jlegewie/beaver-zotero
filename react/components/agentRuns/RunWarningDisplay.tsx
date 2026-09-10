@@ -7,7 +7,7 @@ import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAnd
 import { RunWarning, dismissWarningAtom } from '../../atoms/warnings';
 import { setPref } from '../../../src/utils/prefs';
 import { requestPlusToolsAtom } from '../../atoms/ui';
-import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
+import { openPreferencesWindow } from '../../ui/openPreferencesWindow';
 
 interface RunWarningDisplayProps {
     warning: RunWarning;

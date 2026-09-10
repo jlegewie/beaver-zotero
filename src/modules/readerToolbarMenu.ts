@@ -261,7 +261,8 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
     const addItem = xulDoc.createXULElement('menuitem');
     addItem.setAttribute('label', 'Add custom action\u2026');
     addItem.addEventListener('command', () => {
-        openPreferencesWindow('actions');
+        void resolveChatWindow(reader._window).then(mainWin =>
+            openPreferencesWindow('actions', undefined, undefined, mainWin)).catch(Zotero.logError);
     });
     popup.appendChild(addItem);
 

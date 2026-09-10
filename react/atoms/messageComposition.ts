@@ -1,5 +1,5 @@
 import type { ReaderActionLocation } from '../../src/runtime/readerActionLocation';
-import { getContextWindow } from '../runtime/windowRuntime';
+import { getContextWindow, tryGetWindowRuntime } from '../runtime/windowRuntime';
 import { getSelectedCollections } from '../../src/utils/zoteroSelection';
 import { collectionToReference } from '../utils/zoteroReferences';
 import { atom } from "jotai";
@@ -633,7 +633,10 @@ export const updateMessageCollectionsFromZoteroSelectionAtom = atom(null, (get, 
 export const updateMessageItemsFromZoteroSelectionAtom = atom(
     null,
     async (get, set, limit?: number) => {
-        const items = getContextWindow()?.ZoteroPane?.getSelectedItems() ?? [];
+        // Auto-population callbacks may arrive after their renderer starts teardown.
+        const win = tryGetWindowRuntime()?.contextWindow;
+        if (!win || win.closed) return;
+        const items: Zotero.Item[] = win.ZoteroPane?.getSelectedItems() ?? [];
         // Never stage items from libraries the user excluded from Beaver.
         const searchableLibraryIds = get(searchableLibraryIdsAtom);
         const supportedItems = items.filter((item) =>

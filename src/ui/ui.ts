@@ -6,6 +6,8 @@ import { getPref } from "../utils/prefs";
 import { PreferencePageTab } from "../../react/atoms/ui";
 import { ActionCategoryFilter } from "@beaver/agent-core/types/actions";
 
+import { contextMainWindow, resolveChatWindow } from "../runtime/navigation";
+
 let keyboardManager: KeyboardManager | null = null;
 
 function getKeyboardManager(): KeyboardManager {
@@ -551,7 +553,8 @@ export class BeaverUIFactory {
                 
                 if (isMacShortcut || isWindowsShortcut) {
                     ev.preventDefault();
-                    this.openBeaverWindow();
+                    const origin = (ev.target as HTMLElement)?.ownerDocument?.defaultView;
+                    void resolveChatWindow(origin).then(win => this.openBeaverWindow(undefined, win)).catch(Zotero.logError);
                 }
             }
         );
@@ -621,7 +624,7 @@ export class BeaverUIFactory {
      * this window keeps their size unless it is too small for what is about to
      * be shown.
      */
-    static openBeaverWindow(minSize?: { width?: number; height?: number }): void {
+    static openBeaverWindow(minSize?: { width?: number; height?: number }, origin?: Window): void {
         const existingWindow = this.findBeaverWindow();
         if (existingWindow) {
             this.growWindowTo(existingWindow, minSize);
@@ -630,7 +633,9 @@ export class BeaverUIFactory {
             return;
         }
 
-        const mainWindow = Zotero.getMainWindow();
+        const mainWindow = contextMainWindow(origin ?? Zotero.getMainWindow());
+        if (!mainWindow) return;
+        const ownerWindowRef = new WeakRef(mainWindow);
         const features = [
             'chrome',
             'resizable',
@@ -646,8 +651,9 @@ export class BeaverUIFactory {
             'chrome://beaver/content/beaverWindow.xhtml',
             BEAVER_WINDOW_NAME,
             features,
-            {}
+            { ownerWindowRef }
         );
+        if (opened) opened.__beaverOwnerWindowRef = ownerWindowRef;
         // A persisted width smaller than the feature string's is reapplied once
         // the window's attributes load, so grow it again after that.
         if (opened && minSize) {
@@ -742,15 +748,17 @@ export class BeaverUIFactory {
             return;
         }
 
-        const mainWindow = window ?? Zotero.getMainWindow();
-        if (!mainWindow || mainWindow.closed) return;
-        mainWindow.openDialog(
+        const mainWindow = contextMainWindow(window ?? Zotero.getMainWindow());
+        if (!mainWindow) return;
+        const ownerWindowRef = new WeakRef(mainWindow);
+        const opened = mainWindow.openDialog(
             'chrome://beaver/content/beaverPreferences.xhtml',
             BEAVER_PREFERENCES_WINDOW_NAME,
             'chrome,resizable,centerscreen,dialog=false',
             // `??` so the uncategorized filter (`""`) is not dropped as falsy.
-            { tab: tab || null, actionsCategoryFilter: actionsCategoryFilter ?? null, actionId: actionId || null }
+            { tab: tab || null, actionsCategoryFilter: actionsCategoryFilter ?? null, actionId: actionId || null, ownerWindowRef }
         );
+        if (opened) opened.__beaverOwnerWindowRef = ownerWindowRef;
         Zotero.debug("Beaver: Opened preferences window");
     }
 
