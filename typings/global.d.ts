@@ -34,13 +34,6 @@ interface Window {
     __beaverOwnerWindowRef?: WeakRef<Window>;
     /** Stops the busy-context event-loop-lag heartbeat (registered by busyContext.ts) */
     __beaverStopBusyHeartbeat?: () => void;
-    /**
-     * Resumes Zotero sync suppression held during mutating agent runs.
-     * Pass `true` to also schedule a single auto-sync so the run's edits are
-     * pushed promptly (omit/`false` to just restore normal auto-sync).
-     */
-    __beaverResumeSyncAfterRun?: (reschedule?: boolean) => void;
-
 }
 
 interface ZoteroSearchWritable extends Zotero.Search {

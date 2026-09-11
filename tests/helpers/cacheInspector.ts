@@ -903,7 +903,7 @@ export interface SyncPauseResponse {
     paused: boolean;
     releaseDebounceMs: number;
     safetyIdleMs: number;
-    resumeHookRegistered: boolean;
+    instanceServiceRegistered: boolean;
     probe?: {
         delayIndefiniteAvailable: boolean;
         resolveType: string | null;

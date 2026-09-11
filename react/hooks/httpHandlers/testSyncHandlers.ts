@@ -10,12 +10,9 @@
  *
  * Registered in `useHttpEndpoints.ts` under `/beaver/test/sync-pause`.
  *
- * NOTE: This shares the same module instance the production webpack path uses
- * (the `agent_action_execute` dispatch wrapper and `useSyncSuppression`), so
- * callers must always release the pause (`action: 'resume'`) to avoid leaving
- * Zotero auto-sync suppressed; the module's idle safety timer is only a
- * backstop. `resume` here intentionally does NOT reschedule a sync (no real
- * edits were made), so running the suite never triggers a sync of the library.
+ * Calls the plugin-owned service used by all renderers and library mutations.
+ * Callers must release their diagnostic pause after testing. Explicit resume
+ * does not reschedule sync; the scheduled-resume action uses production behavior.
  */
 
 import {
@@ -39,7 +36,7 @@ type SyncPauseAction =
 /** Snapshot of the live runner API contract + current module state. */
 function snapshot() {
     const runner = typeof Zotero !== 'undefined' ? (Zotero as any).Sync?.Runner : null;
-    const mainWindow = Zotero.getMainWindow?.();
+    const service = Zotero.Beaver?.syncPause;
     return {
         runner: {
             available: !!runner,
@@ -52,7 +49,8 @@ function snapshot() {
         paused: isSyncPaused(),
         releaseDebounceMs: RELEASE_DEBOUNCE_MS,
         safetyIdleMs: SAFETY_IDLE_MS,
-        resumeHookRegistered: typeof mainWindow?.__beaverResumeSyncAfterRun === 'function',
+        instanceServiceRegistered: typeof service?.releaseWindow === 'function'
+            && typeof service?.resumeSyncNow === 'function',
     };
 }
 

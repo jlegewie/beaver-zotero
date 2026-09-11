@@ -18,7 +18,7 @@ const BEAVER_PROVENANCE_MARKER = 'Added by Beaver';
 /** Options for importing items */
 export interface ImportItemOptions {
     onAttachmentResolved?: (payload: AttachmentResolvedPayload) => void;
-    /** Target library ID. If not provided, uses current context */
+    /** Explicit target library ID, resolved by the caller before import */
     libraryId?: number;
     /** Collection to add the item to */
     collectionId?: number;
@@ -53,8 +53,8 @@ export interface ImportItemOptions {
 }
 
 /**
- * Resolves import options to get the target library and collection.
- * If library is not editable, falls back to user library.
+ * Validates the resolved import target against current access and editability.
+ * Explicit unavailable targets are rejected so imports cannot change libraries silently.
  */
 async function resolveImportTarget(options?: ImportItemOptions): Promise<{
     libraryId: number;

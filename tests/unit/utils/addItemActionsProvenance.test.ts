@@ -80,6 +80,22 @@ describe("stampBeaverProvenanceExtra", () => {
 
 describe("createZoteroItem import target", () => {
   it.each([
+    { target: 999999, searchable: [1], editable: true, error: 'Library is excluded or unavailable' },
+    { target: 7, searchable: [1], editable: true, error: 'Library is excluded or unavailable' },
+    { target: 7, searchable: [1, 7], editable: false, error: 'Target library is not editable' },
+  ])('rejects explicit target $target without creating in another library', async ({ target, searchable, editable, error }) => {
+    installMutationInstance();
+    (Zotero as any).Beaver.searchableLibraryIds = searchable;
+    (Zotero as any).Libraries.get = vi.fn(() => ({ editable }));
+    (Zotero as any).Item = vi.fn();
+    const { createZoteroItem: importItem } = await import('../../../src/services/itemImport');
+    await expect(importItem({ title: 'Explicit target' } as any, {
+      libraryId: target,
+    })).rejects.toThrow(error);
+    expect(Zotero.Item).not.toHaveBeenCalled();
+  });
+
+  it.each([
     { tab: "library", libraryId: 7, explicitCollection: undefined, expectedCollection: 42 },
     { tab: "reader", libraryId: 7, explicitCollection: undefined, expectedCollection: undefined },
     { tab: "reader", libraryId: 8, explicitCollection: undefined, expectedCollection: undefined },

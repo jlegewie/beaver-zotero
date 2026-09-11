@@ -16,6 +16,11 @@ plugin consumes the prepared strings. Preview restoration promises also belong t
 the plugin realm. Originless requests do not inherit a local chat's grants
 or citations. The provider bundle-closure unit test enforces this boundary.
 
+Item imports resolve an omitted target from the caller's context before admission.
+An explicit unavailable, excluded or read-only library is rejected at execution;
+imports never silently redirect that target to the personal library. This keeps
+execution within the selected library even when access changes after validation.
+
 Background PDF tasks publish their state through `addon.backgroundTasks`. Renderer hooks
 read snapshots and subscribe to that plugin-owned source, releasing subscriptions when
 unmounted. Manual imports carry guarded completion callbacks and explicit thread/action
