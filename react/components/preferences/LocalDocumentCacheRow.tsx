@@ -129,7 +129,7 @@ const LocalDocumentCacheRow: React.FC<{ hasBorder?: boolean }> = ({ hasBorder = 
                 <Button
                     variant="outline"
                     onClick={clear}
-                    disabled={clearing || !cache}
+                    disabled={clearing || !cache || (cache.metadata_count === 0 && cache.payload_count === 0)}
                     loading={clearing}
                     style={{ padding: '4px 6px' }}
                 >

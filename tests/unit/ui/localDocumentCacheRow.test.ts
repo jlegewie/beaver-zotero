@@ -58,7 +58,9 @@ const clearButton = (container: HTMLElement) =>
     Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Clear…') as HTMLButtonElement;
 
 it('shows the cache size and clears it after confirmation, then re-reads the size', async () => {
-    getStats.mockResolvedValueOnce(stats).mockResolvedValueOnce({ ...stats, cached_document_count: 0, payload_total_bytes: 0 });
+    getStats.mockResolvedValueOnce(stats).mockResolvedValueOnce({
+        ...stats, cached_document_count: 0, metadata_count: 0, payload_count: 0, payload_total_bytes: 0,
+    });
     await render(async (container) => {
         expect(container.textContent).toContain('2 documents cached · 1.0 MB of 2.0 MB');
         await act(async () => clearButton(container).click());
@@ -69,6 +71,7 @@ it('shows the cache size and clears it after confirmation, then re-reads the siz
         expect(clearCache).toHaveBeenCalledWith();
         expect(getStats).toHaveBeenCalledTimes(2);
         expect(container.textContent).toContain('0 documents cached · 0 MB of 2.0 MB');
+        expect(clearButton(container).disabled).toBe(true);
     });
 });
 
