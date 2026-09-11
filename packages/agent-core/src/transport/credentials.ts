@@ -5,6 +5,7 @@ import { supabase } from "./supabaseClient";
 export interface CredentialAdapter {
     auth: SupabaseClient["auth"];
     getGeneration(): number;
+    reportSessionRejected?(generation: number): void;
 }
 
 let adapter: CredentialAdapter | undefined;
@@ -31,3 +32,9 @@ export const credentials = new Proxy({} as SupabaseClient["auth"], {
         return typeof value === "function" ? value.bind(auth) : value;
     },
 });
+
+/** Notify the host without replacing the request's original error. */
+export function reportSessionRejected(generation: number): void {
+    if (generation !== getCredentialGeneration()) return;
+    try { adapter?.reportSessionRejected?.(generation); } catch { /* The request still reports its failure. */ }
+}

@@ -1,3 +1,5 @@
+import ChatLoadFailure from './ChatLoadFailure';
+import { useChatReconnect } from '../hooks/useChatReconnect';
 import { useSurfaceWindow } from '../runtime/SurfaceWindowContext';
 import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -231,6 +233,8 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         loadPage({ key: viewKey, query: activeQuery, scope, includeOtherCount: scope !== undefined, force: true });
         if (showPinnedGroup) loadPinned({ key: viewKey, scope, force: true });
     }, [user, filter, viewKey, activeQuery, scope, showPinnedGroup, loadPage, loadByItem, loadPinned]);
+
+    useChatReconnect(reloadView, !!fetchError);
 
     const handleSearchKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Escape') {
@@ -691,27 +695,8 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                         </div>
                     );
                 })}
-                {/* Network error state — replaces empty state when fetch failed transiently */}
-                {!isLoading && !hasVisibleRows && fetchError && (
-                    <div className="display-flex flex-col items-center justify-center gap-2 py-6 text-center px-3 mt-2">
-                        <span className="font-color-primary font-semibold text-sm">
-                            {fetchError.offline ? "You're offline" : "Couldn't load chats"}
-                        </span>
-                        <span className="font-color-tertiary text-sm">
-                            {fetchError.offline
-                                ? 'Reconnect to load your chats.'
-                                : 'Check your connection and try again.'}
-                        </span>
-                        <Button
-                            variant="outline"
-                            onClick={reloadView}
-                            disabled={isLoading}
-                            type="button"
-                            loading={isLoading}
-                        >
-                            Try again
-                        </Button>
-                    </div>
+                {!isLoading && fetchError && (
+                    <ChatLoadFailure error={fetchError} retry={reloadView} />
                 )}
 
                 {/* Empty state — prominent variant. With nothing else on screen
@@ -752,24 +737,6 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                     </div>
                 )}
 
-                {/* Inline network error — when we already have some threads but a refresh / load-more failed */}
-                {hasVisibleRows && fetchError && !isLoading && (
-                    <div className="display-flex items-center gap-2 px-3 py-2">
-                        <span className="font-color-tertiary text-sm flex-1">
-                            {fetchError.offline ? "You're offline." : "Couldn't reach the server."}
-                        </span>
-                        <Button
-                            variant="outline"
-                            onClick={reloadView}
-                            disabled={isLoading}
-                            type="button"
-                        >
-                            Try again
-                        </Button>
-                    </div>
-                )}
-
-                {/* Show more */}
                 {view.hasMore && !fetchError && (
                     <div className="display-flex justify-start p-2 ml-2 pb-3">
                         <Button

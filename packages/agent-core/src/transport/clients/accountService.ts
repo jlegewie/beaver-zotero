@@ -1,4 +1,4 @@
-import { ApiService } from '../apiService';
+import { ApiService, type RequestOptions } from '../apiService';
 import { ExcludedLibrary, OverallSyncStatus, SafeProfileWithPlan } from '../../types/profile';
 import { ModelConfig } from '../../types/models';
 import { ZoteroLibrary } from '../../types/zotero';
@@ -141,7 +141,7 @@ export class AccountService extends ApiService {
      * Fetches the user's profile including the plan name
      * @returns Promise with the profile data
      */
-    async getProfileWithPlan(): Promise<ProfileResponse> {
+    async getProfileWithPlan(options?: RequestOptions): Promise<ProfileResponse> {
         const { frontendVersion, zoteroInstance } = resolveClientIdentity();
         const { local_user_key: localUserKey = '', user_id: userID } = zoteroInstance ?? {};
         logger(`accountService.getProfileWithPlan: zotero_local_id=${localUserKey}, zotero_user_id=${userID}, version=${frontendVersion}`);
@@ -154,7 +154,7 @@ export class AccountService extends ApiService {
                 // Opt in to backend auto-registering this device. Backend guarded on
                 // `has_authorized_free_access && zotero_local_ids == []`.
                 register_first_device: true,
-            } as ProfileRequest);
+            } as ProfileRequest, options);
             logger(`accountService.getProfileWithPlan: success, plan=${result.profile?.plan?.name}, has_authorized_access=${result.profile?.has_authorized_access}, has_authorized_free_access=${result.profile?.has_authorized_free_access}`);
             return result;
         } catch (error) {

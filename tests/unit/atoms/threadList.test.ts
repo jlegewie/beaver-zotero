@@ -353,6 +353,22 @@ describe('view isolation and freshness', () => {
     });
 });
 
+describe('load failure visibility', () => {
+    it.each([
+        [{ message: 'Rejected', status: 401, statusText: 'Unauthorized', code: 'SESSION_EXPIRED' }, 'session'],
+        [new Error('Invalid response'), 'generic'],
+        [new SessionRefreshError('Unavailable'), 'transient'],
+    ])('keeps an explicit failure and clears it after a successful empty response', async (error, kind) => {
+        const store = createStore();
+        const key = nextKey();
+        getPaginatedThreadsMock.mockRejectedValueOnce(error).mockResolvedValueOnce(page([]));
+        await store.set(loadThreadPageAtom, { key, query: '', includeOtherCount: false });
+        expect(store.get(threadViewsAtom).get(key)).toMatchObject({ status: 'error', error: { kind } });
+        await store.set(loadThreadPageAtom, { key, query: '', includeOtherCount: false, force: true });
+        expect(store.get(threadViewsAtom).get(key)).toMatchObject({ status: 'ready', error: null, ids: [] });
+    });
+});
+
 describe('a failed load backs off instead of retrying on every re-run', () => {
     it('does not reissue a failed page load, however often the loader re-runs', async () => {
         const store = createStore();

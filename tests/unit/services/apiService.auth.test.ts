@@ -19,6 +19,7 @@ import {
     SessionExpiredError,
     SessionRefreshError,
 } from '@beaver/agent-core/types/apiErrors';
+import { setCredentialAdapter } from '@beaver/agent-core/transport/credentials';
 import { ApiService } from '@beaver/agent-core/transport/apiService';
 import { getRuntimeAdapter, setRuntimeAdapter, type RuntimeAdapter } from '@beaver/agent-core/platform/runtime';
 
@@ -46,7 +47,35 @@ describe('ApiService authentication recovery', () => {
     });
 
     afterEach(() => {
+        setCredentialAdapter(undefined);
         vi.unstubAllGlobals();
+    });
+
+    it('reports a repeated 401 once with the originating generation', async () => {
+        const report = vi.fn();
+        setCredentialAdapter({ auth: mockSupabase.auth as any, getGeneration: () => 7, reportSessionRejected: report });
+        mockSupabase.auth.refreshSession.mockResolvedValue({ data: { session: { access_token: 'fresh' } }, error: null });
+        fetchMock.mockImplementation(async () => new Response('{}', { status: 401 }));
+        await expect(service.get('/threads')).rejects.toBeInstanceOf(SessionExpiredError);
+        expect(report).toHaveBeenCalledExactlyOnceWith(7);
+    });
+
+    it.each([0, 429, 503])('does not report transient failure %s as a rejected session', async status => {
+        const report = vi.fn();
+        setCredentialAdapter({ auth: mockSupabase.auth as any, getGeneration: () => 7, reportSessionRejected: report });
+        if (status) fetchMock.mockResolvedValue(new Response('{}', { status }));
+        else fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+        await expect(service.get('/threads')).rejects.toBeDefined();
+        expect(report).not.toHaveBeenCalled();
+    });
+
+    it('does not report rejection from a superseded account', async () => {
+        let generation = 7;
+        const report = vi.fn();
+        setCredentialAdapter({ auth: mockSupabase.auth as any, getGeneration: () => generation, reportSessionRejected: report });
+        fetchMock.mockImplementation(async () => { generation++; return new Response('{}', { status: 401 }); });
+        await expect(service.get('/threads')).rejects.toMatchObject({ code: 'ACCOUNT_CHANGED' });
+        expect(report).not.toHaveBeenCalled();
     });
 
     it('refreshes and retries once when the backend returns 401', async () => {
