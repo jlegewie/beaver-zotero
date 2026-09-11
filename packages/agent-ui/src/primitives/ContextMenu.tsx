@@ -632,11 +632,14 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         // portal into yet. Render in place for that pass rather than guessing a
         // window; the ref lands on this pass and the portal takes over on the
         // next render, in the window the menu actually belongs to.
-        const doc = getDocumentFromElement(menuRef.current);
-        if (doc) {
+        // A host document need not have a `body` (a XUL chrome window is rooted
+        // at `<window>`), and `createPortal` throws on a null container, taking
+        // down the whole tree — render in place in that case too.
+        const container = getDocumentFromElement(menuRef.current)?.body;
+        if (container) {
             return ReactDOM.createPortal(
                 menuElement,
-                doc.body
+                container
             );
         }
     }
