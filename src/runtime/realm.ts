@@ -2,10 +2,12 @@
 export function prepareServiceRealm(): void {
     Cu.importGlobalProperties(["WebSocket", "AbortController"]);
     if (typeof console === "undefined") {
-        const log = (...values: unknown[]) =>
-            Zotero.debug(values.map(String).join(" "));
+        // Use a complete console API that survives closing every main window.
+        const { ConsoleAPI } = ChromeUtils.importESModule(
+            "resource://gre/modules/Console.sys.mjs",
+        );
         Object.assign(globalThis, {
-            console: { log, debug: log, info: log, warn: log, error: log },
+            console: new ConsoleAPI({ consoleID: "beaver" }),
         });
     }
 }
