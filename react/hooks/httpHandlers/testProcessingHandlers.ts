@@ -16,7 +16,7 @@ import { getPref } from '../../../src/utils/prefs';
 
 /**
  * Force a full reconcile pass and wait for it to finish (the same entry point
- * as the prefs "Process now" button). Returns the elapsed time so a live test
+ * as the prefs "Start now" button). Returns the elapsed time so a live test
  * or a manual backlog measurement can record it.
  */
 export async function handleTestProcessingReconcileNowHttpRequest(_request: unknown) {
@@ -65,7 +65,6 @@ export async function handleTestProcessingStatusHttpRequest(
             },
             prefs: {
                 backgroundProcessingEnabled: getPref('backgroundProcessingEnabled') === true,
-                backgroundProcessingContinuous: getPref('backgroundProcessingContinuous') === true,
                 backgroundExtractorEnabled: getPref('backgroundExtractorEnabled') === true,
                 // Changes what the producer does with a file-less attachment:
                 // remote-capable ones become a download rather than a skip.

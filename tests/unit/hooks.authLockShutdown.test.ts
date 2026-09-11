@@ -90,6 +90,7 @@ vi.mock('../../react/eventBus', () => ({
 vi.mock('../../src/utils/prefs', () => ({
     getPref: vi.fn(),
     setPref: vi.fn(),
+    clearPref: vi.fn(),
 }));
 
 vi.mock('../../src/utils/versionNotificationPrefs', () => ({
@@ -260,6 +261,8 @@ describe('hooks auth lock shutdown cleanup', () => {
         expect(Zotero.PreferencePanes.register).toHaveBeenCalledOnce();
         expect((globalThis as any).addon.voice).toBeUndefined();
         expect((globalThis as any).addon.voiceHarness).toBeUndefined();
+        const prefs = await import('../../src/utils/prefs');
+        expect(prefs.clearPref).toHaveBeenCalledWith('backgroundProcessingContinuous');
     });
 
     it('continues window cleanup after voice unload throws', async () => {

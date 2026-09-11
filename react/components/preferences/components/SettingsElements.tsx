@@ -63,6 +63,12 @@ interface SettingsRowProps {
     tooltip?: string;
     hasBorder?: boolean;
     className?: string;
+    /**
+     * Keep the description reachable by assistive tech even though the row
+     * has a control. For descriptions that carry status or an alert, which the
+     * default (hidden, to keep keyboard navigation quiet) would swallow.
+     */
+    announceDescription?: boolean;
 }
 
 function hasInteractiveContent(node: React.ReactNode): boolean {
@@ -85,7 +91,7 @@ function hasInteractiveContent(node: React.ReactNode): boolean {
 
 /** Individual setting row with title, description, and optional control */
 export const SettingsRow: React.FC<SettingsRowProps> = ({
-    title, description, control, onClick, disabled, tooltip, hasBorder = false, className = ''
+    title, description, control, onClick, disabled, tooltip, hasBorder = false, className = '', announceDescription = false,
 }) => {
     const titleId = React.useId();
     const descId = React.useId();
@@ -100,7 +106,7 @@ export const SettingsRow: React.FC<SettingsRowProps> = ({
             'aria-labelledby': titleId,
         })
         : control;
-    const hideDescriptionFromScreenReaders = !!control && !!description && !hasInteractiveContent(description);
+    const hideDescriptionFromScreenReaders = !announceDescription && !!control && !!description && !hasInteractiveContent(description);
 
     return (
         <div

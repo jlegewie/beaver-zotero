@@ -13,6 +13,8 @@ import { getPref, setPref } from "../../../src/utils/prefs";
 import { TickIcon, CopyIcon } from "../icons/icons";
 import { normalizeVoiceLanguage, voiceLanguages } from "../../voice/languages";
 import CustomInstructionsSection from "./CustomInstructionsSection";
+import LocalDocumentCacheRow from "./LocalDocumentCacheRow";
+import RebuildSearchIndexRow from "./RebuildSearchIndexRow";
 import {
     deleteAllExternalFiles,
     getExternalFilesStats,
@@ -224,7 +226,15 @@ const AdvancedSection: React.FC = () => {
                         </div>
                     }
                 />
+                <LocalDocumentCacheRow hasBorder />
+            </SettingsGroup>
 
+            {/* ===== TROUBLESHOOTING ===== */}
+            <div className="display-flex flex-row items-center gap-2" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>
+                <div className="text-lg font-color-primary font-bold">Troubleshooting</div>
+            </div>
+            <SettingsGroup>
+                <RebuildSearchIndexRow />
             </SettingsGroup>
 
             {/* ===== CONNECTED APPS (DATA PROVIDER) ===== */}

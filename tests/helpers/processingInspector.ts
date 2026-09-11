@@ -107,7 +107,6 @@ export interface ProcessingStatusResponse {
     };
     prefs?: {
         backgroundProcessingEnabled: boolean;
-        backgroundProcessingContinuous: boolean;
         backgroundExtractorEnabled: boolean;
         accessRemoteFiles: boolean;
     };
@@ -186,8 +185,8 @@ export interface JobTarget {
  *     priority 90, which is below the idle-gate ceiling and so runs on its own
  *     — advancing the very `ocr_status` the caller is about to assert;
  *   - a search-entitled account enqueues `fulltext_upsert` at priority 115,
- *     which cannot be claimed at all while continuous mode is off and the
- *     machine is in use, so waiting for an empty queue would simply time out.
+ *     which cannot be claimed at all while the machine is in use and no
+ *     drain is pending, so waiting for an empty queue would simply time out.
  *
  * `peekBackgroundJobs` lists rows irrespective of their visibility window, so a
  * claimed-but-unfinished row is still visible; a target disappears only when

@@ -62,6 +62,23 @@ describe('processing status runnable lanes', () => {
         expect(inventory).not.toHaveBeenCalled();
         expect(page).not.toHaveBeenCalled();
     });
+    it('takes the per-file queue depth and running count from the file lanes only, never from untagging', async () => {
+        const getBackgroundQueueStats = vi.fn(async (_now: number, types?: string[]) => types === undefined
+            ? { pending: 9, available: 9, deferred: 0, dead: 0, byJobType: {}, attachments: 8 }
+            : { pending: 2, available: 2, deferred: 0, dead: 0, byJobType: {}, attachments: 1 });
+        vi.stubGlobal('Zotero', { Beaver: {
+            db: { getBackgroundQueueStats, getAttachmentProcessingAggregates: vi.fn(async () => ({})) },
+            backgroundExtractor: {
+                getLaneStatus: () => ({ document_extract: { inFlight: 1 }, fulltext_untag: { inFlight: 2 } }),
+                isBacklogGateOpen: () => true,
+            },
+        } });
+        const result = await collectProcessingStatus({ hasOcrAccess: false, hasSearchIndexAccess: true });
+        expect(getBackgroundQueueStats).toHaveBeenLastCalledWith(expect.any(Number), ['document_extract']);
+        expect(result.worker).toMatchObject({ available: 2, queuedFiles: 1, inFlight: 1 });
+        expect(result.queue.attachments).toBe(8);
+    });
+
     it.each([
         [false, { document_extract: { inFlight: 0 } }, ['document_extract']],
         [false, { fulltext_upsert: { inFlight: 0 } }, []],

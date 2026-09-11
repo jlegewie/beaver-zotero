@@ -6,16 +6,31 @@ export function plural(count: number, singular: string, pluralForm = `${singular
 
 export type StatusTone = 'idle' | 'busy' | 'waiting' | 'error';
 
-interface StatusSentence {
+export interface StatusSentence {
     tone: StatusTone;
     headline: string;
     caption: string;
-    /** Show Process now: queued work can start without waiting for idle. */
+    /**
+     * Files with queued or running work, while a lane is busy. The row turns
+     * this into progress through the current run by tracking how it moves
+     * between polls.
+     */
+    outstanding?: number;
+    /** Show Start now: queued work can start without waiting for idle. */
     processNow: boolean;
-    /** Disable Process now: a dispatcher blocker, not the idle gate. */
+    /** Disable Start now: a dispatcher blocker, not the idle gate. */
     processNowBlocked?: boolean;
-    /** Show Stop: a Process now drain is active and can be cancelled. */
+    /** Show Stop: a Start now drain is active and can be cancelled. */
     stopDrain: boolean;
+}
+
+export interface StatusSentenceOptions {
+    /**
+     * Offer Start now when processed files have lost their cached text and
+     * the cache has room to restore it, even while nothing is queued yet: the
+     * restore has no other entry point.
+     */
+    canRestoreCache?: boolean;
 }
 
 /**
@@ -40,13 +55,19 @@ function blockerCaption(blocker: string): string {
 /**
  * Reduce the status snapshot to the one sentence the status row shows.
  *
- * Order matters: an unreadable status wins, then running work, then work
- * queued behind the idle gate, then the settled summary. Reading and indexing
- * problems have their own sections; idle does not imply every file succeeded.
+ * Four states: working (with a queue depth), waiting (with the reason), settled,
+ * and unreadable. Order matters: an unreadable status wins, then running
+ * work, then work queued behind the idle gate or a blocker, then unfinished
+ * ledger work, then the settled summary. Files that could not be read never
+ * turn the headline red; the problems list carries them, so a settled
+ * headline does not imply every file succeeded.
+ *
+ * The dispatcher's own gate verdict (`backlogGateOpen`) decides whether queued
+ * work counts as running or as waiting; no preference is read here.
  */
 export function describeStatus(
     status: BackgroundProcessingStatus,
-    continuous: boolean,
+    options: StatusSentenceOptions = {},
 ): StatusSentence {
     if (status.updatedAt === null && !status.worker && !status.error) return {
         tone: 'waiting', headline: 'Checking status…',
@@ -62,64 +83,100 @@ export function describeStatus(
         };
     }
     const inFlight = status.worker?.inFlight ?? 0;
-    // The dispatcher's own verdict; the continuous pref is the fallback for a
-    // snapshot taken before the worker reported.
     const blocker = status.worker?.dispatchBlocker;
-    const gateOpen = !blocker && (status.worker?.backlogGateOpen ?? continuous);
+    const gateOpen = !blocker && (status.worker?.backlogGateOpen ?? false);
     const runnable = status.worker?.available ?? 0;
-    // Process now is the idle-gate bypass. Continuous already keeps that gate
-    // open, so neither the bypass nor its Stop control belongs there.
-    const draining = !continuous && status.worker?.drainNow === true;
-    if (inFlight > 0 || (runnable > 0 && gateOpen)) {
+    const draining = status.worker?.drainNow === true;
+    const { total, readable, unreadable, awaitingOcr, oldestPendingAt } = status.ledger;
+    const done = readable + unreadable;
+    const remaining = Math.max(0, total - done);
+    // Queue depth in files. The ledger counts files with no final outcome yet;
+    // the queue also holds re-reads of settled files (a cache restore, a
+    // changed file), which the ledger does not see, so take the larger.
+    // Running jobs are still queue rows, so they are not added on top. Jobs
+    // are the fallback for a snapshot without the per-file count.
+    const deferred = status.worker?.deferred ?? 0;
+    const queued = status.worker?.queuedFiles ?? (runnable + deferred);
+    const outstanding = Math.max(remaining, queued);
+    // Stop cancels the drain but never the job already running, so until that
+    // job finishes the lane is busy while the gate is shut. Say so, or the
+    // click looks ignored for as long as a large PDF takes to read.
+    if (inFlight > 0 && !gateOpen && !draining) {
+        const waitingAfter = Math.max(0, outstanding - inFlight);
         return {
             tone: 'busy',
-            headline: 'Processing files…',
-            caption: inFlight > 0
-                ? 'Reading text from your files.'
-                : 'Starting…',
-            processNow: false,
-            stopDrain: draining,
-        };
-    }
-    if (runnable > 0) {
-        return {
-            tone: 'waiting',
-            headline: 'Waiting to start',
-            caption: blocker
-                ? blockerCaption(blocker)
-                : 'Starts after about 30 seconds without activity in Zotero.',
-            processNow: !continuous && !draining,
-            processNowBlocked: Boolean(blocker),
-            stopDrain: draining,
-        };
-    }
-    const deferred = status.worker?.deferred ?? 0;
-    if (deferred > 0) {
-        return {
-            tone: 'waiting',
-            headline: 'Finishing in the background',
-            caption: 'Some files are processing remotely or waiting to retry.',
-            processNow: false,
-            stopDrain: draining,
-        };
-    }
-    const { total, readable, unreadable, awaitingOcr, oldestPendingAt } = status.ledger;
-    // A reconcile pass may not have queued every unfinished ledger stage yet.
-    if (total > readable + unreadable || awaitingOcr > 0 || oldestPendingAt !== null) {
-        return {
-            tone: 'waiting',
-            headline: 'Files waiting to be processed',
-            caption: 'Beaver picks up unfinished work automatically.',
+            headline: 'Finishing current file…',
+            caption: (waitingAfter > 0 ? `${plural(waitingAfter, 'file')} waiting. ` : '')
+                + 'Processing continues when Zotero is idle.',
+            outstanding,
             processNow: false,
             stopDrain: false,
         };
     }
-    if (status.ledger.total === 0) {
+    if (inFlight > 0 || (runnable > 0 && gateOpen)) {
+        return {
+            tone: 'busy',
+            headline: 'Processing files…',
+            // A job can finish between the lane read and the queue read, which
+            // leaves a running lane with nothing left to count.
+            caption: inFlight === 0
+                ? 'Starting…'
+                : outstanding > 0
+                    ? `${plural(outstanding, 'file')} remaining.`
+                    : 'Reading text from your files.',
+            outstanding,
+            processNow: false,
+            stopDrain: draining,
+        };
+    }
+    const waiting = outstanding > 0 ? `${plural(outstanding, 'file')} waiting. ` : '';
+    if (runnable > 0) {
+        return {
+            tone: 'waiting',
+            headline: 'Waiting to start',
+            caption: waiting + (blocker
+                ? blockerCaption(blocker)
+                : 'Starts after about 30 seconds without activity in Zotero.'),
+            processNow: !draining,
+            processNowBlocked: Boolean(blocker),
+            stopDrain: draining,
+        };
+    }
+    const restore = options.canRestoreCache === true;
+    if (deferred > 0) {
+        return {
+            tone: 'waiting',
+            headline: 'Waiting to start',
+            caption: waiting + 'Some files are processing remotely or waiting to retry.',
+            processNow: restore && !draining,
+            stopDrain: draining,
+        };
+    }
+    // A reconcile pass may not have queued every unfinished ledger stage yet.
+    if (remaining > 0 || awaitingOcr > 0 || oldestPendingAt !== null) {
+        return {
+            tone: 'waiting',
+            headline: 'Waiting to start',
+            caption: waiting + 'Beaver picks up unfinished files automatically.',
+            processNow: restore && !draining,
+            stopDrain: draining,
+        };
+    }
+    if (total === 0) {
         return {
             tone: 'idle',
-            headline: 'Nothing to process yet',
-            caption: 'Beaver checks your libraries for new files automatically.',
+            headline: 'Up to date',
+            caption: 'No files to process yet. Beaver checks your libraries for new files automatically.',
             processNow: false,
+            stopDrain: false,
+        };
+    }
+    if (restore) {
+        return {
+            tone: 'idle',
+            headline: 'Up to date',
+            caption: 'Cached text for some files was removed to save space. Start now restores it.',
+            processNow: true,
             stopDrain: false,
         };
     }
