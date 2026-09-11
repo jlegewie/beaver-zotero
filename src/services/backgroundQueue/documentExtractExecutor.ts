@@ -16,6 +16,7 @@ import type {
     AttachmentProcessingStateRecord,
     BackgroundJobRecord,
 } from '../database';
+import { observeAttachmentSource } from '../documentExtraction/sourceObservation';
 import { getFileSignature } from '../documentFileIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
@@ -112,6 +113,10 @@ export class DocumentExtractExecutor implements JobExecutor {
             item,
             localSizeStrategy: 'stat',
         });
+        const observation = await observeAttachmentSource(item, kind, source);
+        const postObservation = this.checkScope(record);
+        if (postObservation) return postObservation;
+        const extractionSource = observation?.identity ?? null;
         if (source.kind === 'error') {
             await ctx.db.markAttachmentExtractFailure({
                 libraryId: item.libraryID,
@@ -119,6 +124,7 @@ export class DocumentExtractExecutor implements JobExecutor {
                 status: 'skipped',
                 error: source.code,
                 attemptedAt,
+                extractionSource,
             });
             return { kind: 'complete', reason: source.code };
         }
@@ -131,9 +137,9 @@ export class DocumentExtractExecutor implements JobExecutor {
                     if (await shouldStopCachePreparation(record)) {
                         return { kind: 'complete', reason: 'cache_budget_reached' };
                     }
-                    return this.extractPdf(record, ctx, attemptedAt);
+                    return this.extractPdf(record, ctx, attemptedAt, extractionSource);
                 })
-                : await this.extractDom(record, item, kind, source.source, ctx, attemptedAt);
+                : await this.extractDom(record, item, kind, source.source, ctx, attemptedAt, extractionSource);
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             return { kind: 'retry', error: `unexpected: ${message}` };
@@ -167,6 +173,7 @@ export class DocumentExtractExecutor implements JobExecutor {
                 status: 'skipped',
                 error: 'unsupported_schema_version',
                 attemptedAt,
+                extractionSource,
             });
             return { kind: 'complete', reason: 'unsupported_schema_version' };
         }
@@ -190,6 +197,7 @@ export class DocumentExtractExecutor implements JobExecutor {
             fileHash,
             structuredDocumentHash: documentHash,
             extractSchemaVersion: schemaVersion,
+            extractionSource,
             ocrStatus: extracted.ocrStatus,
         });
         if (!applied) {
@@ -392,6 +400,7 @@ export class DocumentExtractExecutor implements JobExecutor {
         record: BackgroundJobRecord,
         ctx: JobExecutionContext,
         attemptedAt: number,
+        extractionSource: string | null,
     ): Promise<ExtractSuccess | JobOutcome> {
         const payload = record.payload;
         if (!payload || payload.content_kind !== 'pdf') {
@@ -419,7 +428,7 @@ export class DocumentExtractExecutor implements JobExecutor {
                 if (result.code === 'no_text_layer') {
                     return { document: null, ocrStatus: 'needed', reason: 'needs_ocr' };
                 }
-                await this.persistTerminalExtractError(record, ctx, result.code, 'skipped', attemptedAt);
+                await this.persistTerminalExtractError(record, ctx, result.code, 'skipped', attemptedAt, extractionSource);
                 return { kind: 'complete', reason: `cached_error:${result.code}` };
             case 'external_abort':
                 return { kind: 'release', reason: 'external_abort' };
@@ -435,6 +444,7 @@ export class DocumentExtractExecutor implements JobExecutor {
                     result.code,
                     isSkippedResponse(result.code) ? 'skipped' : 'failed',
                     attemptedAt,
+                    extractionSource,
                 );
                 return { kind: 'complete', reason: `terminal:${result.code}` };
         }
@@ -447,6 +457,7 @@ export class DocumentExtractExecutor implements JobExecutor {
         source: AttachmentFileSource,
         ctx: JobExecutionContext,
         attemptedAt: number,
+        extractionSource: string | null,
     ): Promise<ExtractSuccess | JobOutcome> {
         let temporaryPath: string | null = null;
         let resolvedFile: {
@@ -470,6 +481,7 @@ export class DocumentExtractExecutor implements JobExecutor {
                     loaded.code,
                     isSkippedResponse(loaded.code) ? 'skipped' : 'failed',
                     attemptedAt,
+                    extractionSource,
                 );
                 return { kind: 'complete', reason: loaded.code };
             }
@@ -527,6 +539,7 @@ export class DocumentExtractExecutor implements JobExecutor {
             result.code,
             isSkippedResponse(result.code) ? 'skipped' : 'failed',
             attemptedAt,
+            extractionSource,
         );
         return { kind: 'complete', reason: `terminal:${result.code}` };
     }
@@ -537,6 +550,7 @@ export class DocumentExtractExecutor implements JobExecutor {
         code: string,
         status: 'failed' | 'skipped',
         attemptedAt: number,
+        extractionSource: string | null,
     ): Promise<void> {
         await ctx.db.markAttachmentExtractFailure({
             libraryId: record.libraryId,
@@ -544,6 +558,7 @@ export class DocumentExtractExecutor implements JobExecutor {
             status,
             error: code,
             attemptedAt,
+            extractionSource,
         });
     }
 }

@@ -53,6 +53,44 @@ describe('BeaverDB background processing state', () => {
         });
     });
 
+    it('changes source identity atomically with an accepted extraction completion', async () => {
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'ABCDEFGH', contentKind: 'pdf' });
+        const completion = {
+            libraryId: 1, zoteroKey: 'ABCDEFGH', expectedFileMtimeMs: null,
+            expectedFileSizeBytes: null, previousDocumentHash: null, expectedExtractStatus: null,
+            fileMtimeMs: 10, fileSizeBytes: 20, fileHash: 'old-file', structuredDocumentHash: 'old-document',
+            extractSchemaVersion: '4', ocrStatus: 'na' as const, extractionSource: 'old-source',
+        };
+        expect(await db.markAttachmentExtracted(completion)).toBe(true);
+        // A completion that lost its compare-and-set must leave identity and verdict together.
+        expect(await db.markAttachmentExtracted({ ...completion, extractionSource: 'replacement-source',
+            structuredDocumentHash: 'replacement-document' })).toBe(false);
+        expect(await db.getAttachmentProcessingState(1, 'ABCDEFGH')).toMatchObject({
+            extractionSource: 'old-source', structuredDocumentHash: 'old-document', extractStatus: 'done',
+        });
+        expect(await db.markAttachmentExtracted({ ...completion, expectedFileMtimeMs: 10,
+            expectedFileSizeBytes: 20, previousDocumentHash: 'old-document', expectedExtractStatus: 'done',
+            fileMtimeMs: 11, extractionSource: 'replacement-source', structuredDocumentHash: 'replacement-document',
+        })).toBe(true);
+        expect(await db.getAttachmentProcessingState(1, 'ABCDEFGH')).toMatchObject({
+            extractionSource: 'replacement-source', structuredDocumentHash: 'replacement-document', extractStatus: 'done',
+        });
+    });
+
+    it('only adopts a legacy source identity while the matching success is still current', async () => {
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'ABCDEFGH', contentKind: 'pdf' });
+        const adoption = { libraryId: 1, zoteroKey: 'ABCDEFGH', contentKind: 'pdf' as const,
+            source: 'legacy-source', fileMtimeMs: 10, fileSizeBytes: 20 };
+        expect(await db.adoptAttachmentExtractionSource(adoption)).toBe(false);
+        await connection.queryAsync(`UPDATE attachment_processing_state SET extract_status='done',
+            file_mtime_ms=11, file_size_bytes=20`);
+        expect(await db.adoptAttachmentExtractionSource(adoption)).toBe(false);
+        await connection.queryAsync('UPDATE attachment_processing_state SET file_mtime_ms=10');
+        expect(await db.adoptAttachmentExtractionSource(adoption)).toBe(true);
+        expect(await db.adoptAttachmentExtractionSource({ ...adoption, source: 'other-source' })).toBe(false);
+        expect((await db.getAttachmentProcessingState(1, 'ABCDEFGH'))?.extractionSource).toBe('legacy-source');
+    });
+
     it('preserves downstream membership after a benign re-extraction', async () => {
         await db.ensureAttachmentProcessingState({
             libraryId: 1,

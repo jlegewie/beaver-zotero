@@ -173,7 +173,7 @@ describe('ReconcilerService.retryAttachments', () => {
         expect(await reconciler.retryAttachments([{ libraryId: 1, zoteroKey: 'MISSING1' }])).toBe(1);
         const job = await db.claimNextBackgroundJob(Date.now(), 60_000);
         expect(job).toMatchObject({ zoteroKey: 'MISSING1', jobType: 'document_extract', priority: OCR_PRIORITY_ON_DEMAND });
-        expect(await db.getProcessingIssueCounts(ENTITLED)).toEqual([]);
+        expect(await db.getProcessingIssueCounts(ENTITLED)).toEqual([{ reason: 'file_unavailable', count: 1 }]);
         expect(mocks.backgroundEnabled).toBe(false);
     });
 
@@ -195,7 +195,7 @@ describe('ReconcilerService.retryAttachments', () => {
 
         expect(await reconciler.retryAttachments([{ libraryId: 1, zoteroKey: 'CRASHED1' }])).toBe(1);
 
-        expect(await db.getProcessingIssueCounts(ENTITLED)).toEqual([]);
+        expect(await db.getProcessingIssueCounts(ENTITLED)).toEqual([{ reason: 'extract_failed', count: 1 }]);
         expect(await db.getBackgroundDeadLetters()).toEqual([]);
         // The cache remembers terminal verdicts; a retry must not re-read one.
         expect(invalidate).toHaveBeenCalledWith(1, 'CRASHED1');
@@ -341,7 +341,7 @@ describe('ReconcilerService.retryAttachments', () => {
         expect(await reconciler.retryAttachments([{ libraryId: 1, zoteroKey: 'INDEXED1' }])).toBe(1);
 
         expect(invalidate).toHaveBeenCalledWith(1, 'INDEXED1');
-        expect(await db.getAttachmentReadingError(1, 'INDEXED1')).toBe('retry_pending');
+        expect(await db.getAttachmentReadingError(1, 'INDEXED1')).toBe('invalid_pdf');
         const stats = await db.getBackgroundQueueStats(Date.now());
         expect(stats.byJobType.document_extract ?? 0).toBe(1);
         expect(stats.byJobType.fulltext_upsert ?? 0).toBe(0);
