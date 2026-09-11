@@ -153,7 +153,7 @@ describe('processing status sentence', () => {
         else snapshot.ledger.readable = 0;
         if (stage === 'ocr') snapshot.ledger.awaitingOcr = 1;
         expect(describeStatus(snapshot)).toMatchObject({
-            tone: 'waiting', headline: 'Waiting to start', processNow: false,
+            tone: 'waiting', headline: 'Waiting to start', processNow: true,
         });
     });
 
@@ -236,23 +236,25 @@ describe('processing status sentence', () => {
         expect(describeStatus(snapshot).tone).toBe('busy');
     });
 
-    it('offers Start now on a settled status only to restore evicted cached text', () => {
+    it('offers Rebuild cache only on a settled status with missing cached text', () => {
         const snapshot = status(0);
         const sentence = describeStatus(snapshot, { canRestoreCache: true });
-        expect(sentence).toMatchObject({ tone: 'idle', headline: 'Up to date', processNow: true });
+        expect(sentence).toMatchObject({ tone: 'idle', headline: 'Up to date', processNow: false, rebuildCache: true });
         expect(sentence.processNowBlocked).toBeFalsy();
         expect(describeStatus(snapshot, { canRestoreCache: false }).processNow).toBe(false);
     });
 
-    it('keeps a cache restoration reachable while work is deferred or not yet queued', () => {
+    it('keeps cache rebuilding unavailable while work is deferred or not yet queued', () => {
         const deferred = status(2);
         expect(describeStatus(deferred).processNow).toBe(false);
-        expect(describeStatus(deferred, { canRestoreCache: true })).toMatchObject({ headline: 'Waiting to start', processNow: true });
+        expect(describeStatus(deferred, { canRestoreCache: true })).toMatchObject({ headline: 'Waiting to start', processNow: false });
+        expect(describeStatus(deferred, { canRestoreCache: true }).rebuildCache).toBeFalsy();
         deferred.worker.drainNow = true;
         expect(describeStatus(deferred, { canRestoreCache: true })).toMatchObject({ processNow: false, stopDrain: true });
         const unfinished = status(0);
         unfinished.ledger.oldestPendingAt = '2026-09-09 00:00:00';
-        expect(describeStatus(unfinished).processNow).toBe(false);
+        expect(describeStatus(unfinished).processNow).toBe(true);
+        expect(describeStatus(unfinished, { canRestoreCache: true }).rebuildCache).toBeFalsy();
         expect(describeStatus(unfinished, { canRestoreCache: true })).toMatchObject({ headline: 'Waiting to start', processNow: true });
         unfinished.worker.drainNow = true;
         expect(describeStatus(unfinished, { canRestoreCache: true })).toMatchObject({ processNow: false, stopDrain: true });

@@ -120,7 +120,7 @@ const LocalDocumentCacheRow: React.FC<{ hasBorder?: boolean }> = ({ hasBorder = 
                         {cache === undefined ? 'Checking local storage…' : cache === null ? 'Cache status unavailable' : describeCache(cache)}
                     </span>
                     {cleared && <span role="status" className="display-flex mt-1">
-                        Cache cleared. Files will be read again when needed. To prepare them ahead of time, enable Background Processing, then use Start now when it appears.
+                        Cache cleared. Files will be read again when needed. To prepare them ahead of time, enable Background Processing, then use Rebuild cache when pending processing has finished and the button appears.
                     </span>}
                     {error && <span role="alert" className="display-flex font-color-red mt-1">{error}</span>}
                 </>
