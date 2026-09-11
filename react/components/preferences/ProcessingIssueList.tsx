@@ -91,12 +91,15 @@ const ProcessingIssuePage: React.FC<{
     reason: ProcessingIssueReason;
     hasOcrAccess: boolean;
     hasSearchAccess: boolean;
-    updatedAt: number | null;
+    issuesUpdatedAt: number | null;
     /** Present only for retryable reasons; renders a per-row retry icon. */
     onRetry?: (refs: AttachmentRef[]) => Promise<void>;
-}> = ({ page, reason, hasOcrAccess, hasSearchAccess, updatedAt, onRetry }) => {
-    const [rows, setRows] = useState<ItemListRow[] | null>(null);
-    const [error, setError] = useState(false);
+}> = ({ page, reason, hasOcrAccess, hasSearchAccess, issuesUpdatedAt, onRetry }) => {
+    const queryKey = `${page}:${reason}:${Number(hasOcrAccess)}:${Number(hasSearchAccess)}`;
+    const [result, setResult] = useState<{ queryKey: string; rows: ItemListRow[] } | null>(null);
+    const [loadingKey, setLoadingKey] = useState<string | null>(null);
+    const [errorKey, setErrorKey] = useState<string | null>(null);
+    const rows = result?.queryKey === queryKey ? result.rows : null;
     const pageRef = useRef<HTMLDivElement>(null);
 
     useLayoutEffect(() => {
@@ -109,8 +112,8 @@ const ProcessingIssuePage: React.FC<{
 
     useEffect(() => {
         let cancelled = false;
-        setRows(null);
-        setError(false);
+        setLoadingKey(queryKey);
+        setErrorKey(null);
         const load = async () => {
             const db = Zotero.Beaver?.db;
             if (!db) throw new Error('db not available');
@@ -126,22 +129,25 @@ const ProcessingIssuePage: React.FC<{
         void load()
             .then((hydrated) => {
                 if (!cancelled) {
-                    setRows(hydrated);
+                    setResult({ queryKey, rows: hydrated });
+                    setLoadingKey(null);
                 }
             })
             .catch((error) => {
                 logger(`ProcessingIssueList: failed to resolve items: ${error}`, 1);
                 if (!cancelled) {
-                    setError(true);
-                    setRows([]);
+                    // A failed background refresh must not replace a page the
+                    // user was already reading with an error or loading state.
+                    setErrorKey(queryKey);
+                    setLoadingKey(null);
                 }
             });
         return () => { cancelled = true; };
-    }, [page, reason, hasOcrAccess, hasSearchAccess, updatedAt]);
+    }, [page, reason, hasOcrAccess, hasSearchAccess, issuesUpdatedAt, queryKey]);
 
     return (
-        <div ref={pageRef} aria-busy={rows === null} style={{ overflowAnchor: 'none' }}>
-            {error ? <div className="p-2 text-sm font-color-tertiary">Could not load files. Beaver will try again shortly.</div> : rows === null
+        <div ref={pageRef} aria-busy={rows === null || loadingKey === queryKey} style={{ overflowAnchor: 'none' }}>
+            {rows === null && errorKey === queryKey ? <div className="p-2 text-sm font-color-tertiary">Could not load files. Beaver will try again shortly.</div> : rows === null
                 ? <div className="p-2 text-sm font-color-tertiary">Loading…</div>
                 : <ItemListResultView
                     view={{ view_type: 'item_list', tool_name: 'background_processing', items: rows }}
@@ -174,10 +180,10 @@ export const ProcessingIssueGroupRow: React.FC<{
     group: ProcessingIssueSummary;
     hasOcrAccess: boolean;
     hasSearchAccess: boolean;
-    updatedAt: number | null;
+    issuesUpdatedAt: number | null;
     hasBorder?: boolean;
     onRetry?: (reason: ProcessingIssueReason, refs: AttachmentRef[] | null) => Promise<void>;
-}> = ({ group, hasOcrAccess, hasSearchAccess, updatedAt, hasBorder = false, onRetry }) => {
+}> = ({ group, hasOcrAccess, hasSearchAccess, issuesUpdatedAt, hasBorder = false, onRetry }) => {
     const [open, setOpen] = useState(false);
     const [page, setPage] = useState(0);
     const [retrying, setRetrying] = useState(false);
@@ -254,7 +260,7 @@ export const ProcessingIssueGroupRow: React.FC<{
                 <div id={panelId} role="region" aria-labelledby={headerId} className="display-flex flex-col bg-senary">
                     <div style={{ paddingLeft: '28px' }}>
                         <ProcessingIssuePage page={safePage} reason={group.reason}
-                            hasOcrAccess={hasOcrAccess} hasSearchAccess={hasSearchAccess} updatedAt={updatedAt}
+                            hasOcrAccess={hasOcrAccess} hasSearchAccess={hasSearchAccess} issuesUpdatedAt={issuesUpdatedAt}
                             onRetry={retryable ? (refs) => retry(refs) : undefined} />
                     </div>
                     {pageCount > 1 && (

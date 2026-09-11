@@ -18,6 +18,8 @@ export interface BackgroundProcessingStatus {
     failures: BackgroundProcessingFailureSummary[];
     /** Attachments that could not be processed, grouped by user-facing reason. */
     issues: ProcessingIssueSummary[];
+    /** Last successful refresh that included issue counts, rather than only general status. */
+    issuesUpdatedAt: number | null;
     /** Dispatcher activity at the last read; null until first read. */
     worker: BackgroundWorkerSnapshot | null;
     /** Local extraction-cache size and budget; null until first read. */
@@ -57,6 +59,7 @@ export const backgroundProcessingStatusAtom = atom<BackgroundProcessingStatus>({
     coverageError: null,
     failures: [],
     issues: [],
+    issuesUpdatedAt: null,
     worker: null,
     documentCache: null,
     error: null,

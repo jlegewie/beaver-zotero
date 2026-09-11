@@ -364,7 +364,7 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                         group={group}
                         hasOcrAccess={hasOcrAccess}
                         hasSearchAccess={hasSearchAccess}
-                        updatedAt={status.updatedAt}
+                        issuesUpdatedAt={status.issuesUpdatedAt}
                         hasBorder
                         onRetry={retryIssues}
                     />

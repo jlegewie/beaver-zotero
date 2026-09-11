@@ -33,18 +33,22 @@ export function useBackgroundProcessingStatus(options: {
                     },
                 );
             if (requestGeneration !== generation.current) return;
+            const updatedAt = Date.now();
             setStatus((previous) => ({
                 queue,
                 ledger,
                 coverage: !hasSearchAccess ? null : coverage ?? previous.coverage,
-                coverageUpdatedAt: !hasSearchAccess ? null : coverage ? Date.now() : previous.coverageUpdatedAt,
+                coverageUpdatedAt: !hasSearchAccess ? null : coverage ? updatedAt : previous.coverageUpdatedAt,
                 coverageError: !hasSearchAccess ? null : coverage === null ? 'Could not check search coverage.' : coverage ? null : previous.coverageError,
                 failures: failures ?? previous.failures,
                 issues: issues ?? previous.issues,
+                // The always-mounted poll omits issue queries. Do not let its
+                // general status timestamp invalidate an expanded issue page.
+                issuesUpdatedAt: issues === undefined ? previous.issuesUpdatedAt : updatedAt,
                 worker,
                 documentCache,
                 error: null,
-                updatedAt: Date.now(),
+                updatedAt,
             }));
         } catch (error) {
             if (requestGeneration !== generation.current) return;
