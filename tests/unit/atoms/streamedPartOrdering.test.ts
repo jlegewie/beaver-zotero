@@ -1,3 +1,4 @@
+import { setCredentialAdapter } from '@beaver/agent-core/transport/credentials';
 /**
  * Ordering between streamed parts and everything else on the socket.
  *
@@ -10,9 +11,10 @@
  * The frame is never allowed to run here: anything these tests observe in the
  * run got there because a callback flushed the queue, not because time passed.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockSupabase } = vi.hoisted(() => ({
+const { mockSupabase, processToolReturnResults } = vi.hoisted(() => ({
+    processToolReturnResults: vi.fn(),
     mockSupabase: {
         auth: {
             getSession: vi.fn(),
@@ -20,6 +22,8 @@ const { mockSupabase } = vi.hoisted(() => ({
         },
     },
 }));
+
+vi.mock('../../../react/agents/toolResultProcessing', () => ({ processToolReturnResults }));
 
 vi.mock('../../../react/runtime/windowRuntime', () => ({
     tryGetWindowRuntime: () => ({ hostWindow: frozenWindow }),
@@ -176,5 +180,37 @@ describe('streamed parts and the other WebSocket callbacks', () => {
         } as WSToolCallProgressEvent);
 
         expect(streamedText(store.get(activeRunAtom))).toBe('The whole answer.');
+    });
+});
+
+
+describe('WebSocket account lifetime', () => {
+    afterEach(() => setCredentialAdapter(undefined));
+    it('rejects a write when the account changes during an already-entered async callback', async () => {
+        let generation = 1;
+        setCredentialAdapter({auth: mockSupabase.auth as any, getGeneration: () => generation});
+        let resume!: () => void;
+        processToolReturnResults.mockImplementationOnce(async (_part, set) => {
+            await new Promise<void>(resolve => { resume = resolve; });
+            set(activeRunAtom, null);
+        });
+        const set = vi.fn();
+        const callbacks = createWSCallbacks(set as any);
+        const pending = callbacks.onToolReturn({run_id: 'run-1', part: {part_kind: 'tool-return'}} as any);
+        generation++;
+        resume();
+        await expect(pending).rejects.toMatchObject({code: 'ACCOUNT_CHANGED'});
+        expect(set).not.toHaveBeenCalled();
+    });
+    it('rejects every stale callback even if the run never emitted an error', async () => {
+        let generation = 1;
+        setCredentialAdapter({auth: mockSupabase.auth as any, getGeneration: () => generation});
+        const set = vi.fn();
+        const callbacks = createWSCallbacks(set as any);
+        generation++;
+        for (const callback of Object.values(callbacks)) {
+            if (typeof callback === 'function') await callback({});
+        }
+        expect(set).not.toHaveBeenCalled();
     });
 });

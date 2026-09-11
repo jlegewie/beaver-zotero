@@ -38,8 +38,8 @@ const REQUIRED_REGISTRATIONS = [
     'registerZoteroDataProvider',
     'registerZoteroLibraryIdentity',
     'registerZoteroClientIdentity',
-    'registerZoteroSupabaseStorage',
-    'registerZoteroSupabaseReloadBridge',
+    'setSupabaseClientProvider',
+    'setCredentialAdapter',
     'registerZoteroBusyContext',
     'registerZoteroSyncPause',
 ];

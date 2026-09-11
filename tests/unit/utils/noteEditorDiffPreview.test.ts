@@ -322,7 +322,8 @@ describe('showDiffPreview approveAll revision-guard flow', () => {
         vi.useFakeTimers();
         const h = makeHarness(NOTE);
         const previousLibraries = Zotero.Libraries;
-        vi.mocked(store.get).mockImplementation((atom: any) => atom === searchableLibraryIdsAtom ? [1] : null);
+        const previousBeaver = Zotero.Beaver;
+        (Zotero as any).Beaver = { ...previousBeaver, searchableLibraryIds: [1], libraryScopeInitialized: true };
         let titleLoaded = false;
         const attachment = {
             libraryID: 1, key: 'ATTACH12', parentID: false,
@@ -353,7 +354,7 @@ describe('showDiffPreview approveAll revision-guard flow', () => {
             expect(html).not.toContain('fallback.pdf');
         } finally {
             (Zotero as any).Libraries = previousLibraries;
-            vi.mocked(store.get).mockImplementation(() => null);
+            (Zotero as any).Beaver = previousBeaver;
         }
     });
 

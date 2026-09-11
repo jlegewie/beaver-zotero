@@ -132,11 +132,7 @@ beforeEach(() => {
     vi.clearAllMocks();
     previousZotero = (globalThis as any).Zotero;
     installZoteroMock();
-    vi.mocked(store.get).mockImplementation((atom: any) => {
-        if (atom === isLibraryAccessReadyAtom) return true;
-        if (atom === searchableLibraryIdsAtom) return [1, 100];
-        return undefined;
-    });
+    Object.assign(Zotero.Beaver ??= {} as any, {searchableLibraryIds: [1, 100], libraryScopeInitialized: true});
 });
 
 afterEach(() => {

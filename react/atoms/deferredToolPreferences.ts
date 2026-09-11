@@ -1,3 +1,4 @@
+import { preferencesRevisionAtom } from './preferences';
 /**
  * Deferred Tool Preferences
  * 
@@ -134,7 +135,10 @@ function getPreferenceForTool(data: DeferredToolPreferencesData, toolName: strin
  * Main atom for deferred tool preferences.
  * Initialized from Zotero prefs on first read.
  */
-export const deferredToolPreferencesAtom = atom<DeferredToolPreferencesData>(loadPreferences());
+export const deferredToolPreferencesAtom = atom(
+    get => { get(preferencesRevisionAtom); return loadPreferences(); },
+    (_get, _set, value: DeferredToolPreferencesData) => savePreferences(value),
+);
 
 // =============================================================================
 // Derived Atoms

@@ -1,3 +1,4 @@
+import { usePreference } from '../../hooks/usePreference';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Button from "@beaver/agent-ui/primitives/Button";
@@ -34,7 +35,7 @@ function formatStorageStats(count: number, totalBytes: number): string {
 const AdvancedSection: React.FC = () => {
     const surfaceWindow = useSurfaceWindow();
 
-    const [voiceLanguage, setVoiceLanguage] = useState(() => normalizeVoiceLanguage(getPref("voice.language")));
+    const [voiceLanguage, setVoiceLanguage] = usePreference(() => normalizeVoiceLanguage(getPref("voice.language")));
 
     // --- Storage: external files + document cache ---
     const setCurrentMessageExternalFiles = useSetAtom(currentMessageExternalFilesAtom);

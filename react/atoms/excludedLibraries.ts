@@ -1,5 +1,4 @@
 import { atom } from 'jotai';
-import { accountService } from '@beaver/agent-core/transport/clients/accountService';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { ZoteroLibrary } from '@beaver/agent-core/types/zotero';
 import {
@@ -31,19 +30,11 @@ export const toggleExcludedLibraryAtom = atom(
             ? current.filter(entry => excludedEntryKey(entry) !== toggledKey)
             : [...current, excludedEntryFromLibrary(library)];
 
-        set(profileWithPlanAtom, {
-            ...profile,
-            excluded_libraries: next,
-        });
         set(isUpdatingExcludedLibrariesAtom, true);
 
         try {
-            await accountService.updateExcludedLibraries(next);
+            await Zotero.Beaver.account!.updateExcludedLibraries(next);
         } catch (error) {
-            set(profileWithPlanAtom, latestProfile => latestProfile ? {
-                ...latestProfile,
-                excluded_libraries: current,
-            } : latestProfile);
             set(addPopupMessageAtom, {
                 type: 'error',
                 title: 'Unable to update library access',

@@ -9,7 +9,7 @@
  * <" is the same outage twice.
  */
 
-import { supabase } from './supabaseClient'
+import { credentials } from './credentials';
 import { EmailOtpType } from '@supabase/supabase-js'
 
 export interface OTPSendOptions {
@@ -26,7 +26,7 @@ export interface OTPVerifyResult {
  * Send OTP to email address
  */
 export const sendOTP = async (email: string, options: OTPSendOptions = {}): Promise<void> => {
-  const { error } = await supabase.auth.signInWithOtp({
+  const { error } = await credentials.signInWithOtp({
     email,
     options: {
       shouldCreateUser: options.shouldCreateUser || false,
@@ -41,7 +41,7 @@ export const sendOTP = async (email: string, options: OTPSendOptions = {}): Prom
  * Verify OTP code
  */
 export const verifyOTP = async (email: string, token: string, type: EmailOtpType = 'email'): Promise<void> => {
-  const { error } = await supabase.auth.verifyOtp({
+  const { error } = await credentials.verifyOtp({
     email,
     token,
     type

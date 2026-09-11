@@ -1,3 +1,4 @@
+import { preferencesRevisionAtom } from './preferences';
 import { atom } from 'jotai';
 import { getPref, setPref } from '../../src/utils/prefs';
 
@@ -108,12 +109,9 @@ export const dismissRunStatusPopupCardAtom = atom(null, (get, set, signature: st
  * change made in the preferences window without a reload. Read lazily: the
  * preference store is not there when this module loads.
  */
-const runStatusPopupEnabledOverrideAtom = atom<boolean | null>(null);
-
 export const runStatusPopupEnabledAtom = atom(
-    (get) => get(runStatusPopupEnabledOverrideAtom) ?? getPref('enableRunStatusPopup') !== false,
-    (_get, set, enabled: boolean) => {
+    (get) => { get(preferencesRevisionAtom); return getPref('enableRunStatusPopup') !== false; },
+    (_get, _set, enabled: boolean) => {
         setPref('enableRunStatusPopup', enabled);
-        set(runStatusPopupEnabledOverrideAtom, enabled);
     },
 );

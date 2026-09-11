@@ -103,15 +103,19 @@ export class BeaverInstance {
         win.__beaverEventBus = null;
     }
 
-    subscribeWindow(runtime: WindowRuntime, name: string, callback: (detail: any) => void): () => void {
-        if (runtime.status === 'closing' || this.windows.get(runtime.hostWindow) !== runtime) return () => {};
+    addWindowCleanup(runtime: WindowRuntime, cleanup: () => void): void {
+        if (runtime.status === 'closing' || this.windows.get(runtime.hostWindow) !== runtime) { cleanup(); return; }
         let subscriptions = this.subscriptions.get(runtime);
         if (!subscriptions) this.subscriptions.set(runtime, subscriptions = new Set());
+        subscriptions.add(cleanup);
+    }
+
+    subscribeWindow(runtime: WindowRuntime, name: string, callback: (detail: any) => void): () => void {
         const remove = this.subscribe(name, detail => {
             if (runtime.status !== 'closing') callback(detail);
         });
-        const unsubscribe = () => { remove(); subscriptions.delete(unsubscribe); };
-        subscriptions.add(unsubscribe);
+        const unsubscribe = () => { remove(); this.subscriptions.get(runtime)?.delete(unsubscribe); };
+        this.addWindowCleanup(runtime, unsubscribe);
         return unsubscribe;
     }
 

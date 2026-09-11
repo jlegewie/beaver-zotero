@@ -1,34 +1,12 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import webpack from 'webpack';
-import dotenv from 'dotenv';
-import process from 'process';
+import { loadBuildEnvironment } from './build-env.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Load environment variables based on build environment
-const loadEnv = (buildEnv) => {
-    const envFile = `.env.${buildEnv}`;
-    const result = dotenv.config({ path: envFile });
-
-    // If env file doesn't exist (like in CI), use process.env directly
-    if (result.error) {
-        return {
-            SUPABASE_URL: process.env.SUPABASE_URL,
-            SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,
-            API_BASE_URL: process.env.API_BASE_URL,
-            WEBAPP_BASE_URL: process.env.WEBAPP_BASE_URL
-        };
-    }
-
-    return result.parsed;
-};
-
 export default (env, argv) => {
-    const mode = argv.mode || 'development';
-    // Use custom BUILD_ENV or fall back to webpack mode
-    const buildEnv = process.env.BUILD_ENV || mode;
-    const envVars = loadEnv(buildEnv);
+    const { mode, buildEnv, definitions } = loadBuildEnvironment({ mode: argv.mode });
 
     return {
         mode,
@@ -72,10 +50,7 @@ export default (env, argv) => {
             new webpack.DefinePlugin({
                 'process.env.NODE_ENV': JSON.stringify(mode),
                 'process.env.BUILD_ENV': JSON.stringify(buildEnv),
-                'process.env.SUPABASE_URL': JSON.stringify(envVars.SUPABASE_URL),
-                'process.env.SUPABASE_ANON_KEY': JSON.stringify(envVars.SUPABASE_ANON_KEY),
-                'process.env.API_BASE_URL': JSON.stringify(envVars.API_BASE_URL),
-                'process.env.WEBAPP_BASE_URL': JSON.stringify(envVars.WEBAPP_BASE_URL)
+                ...definitions
             })
         ]
     };

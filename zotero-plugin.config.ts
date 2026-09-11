@@ -1,8 +1,11 @@
+import { loadBuildEnvironment } from './build-env.mjs';
 import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { defineConfig } from "zotero-plugin-scaffold";
 import pkg from "./package.json";
 import { checkVoicePackage } from "./native/voice/macos/check-package.mjs";
+
+const { mode, definitions } = loadBuildEnvironment();
 
 // Zotero UI locales (mirrors chrome/locale/* in the Zotero source tree)
 const ZOTERO_LOCALES = [
@@ -56,8 +59,9 @@ export default defineConfig({
       {
         entryPoints: ["src/index.ts"],
         define: {
-          __env__: `"${process.env.NODE_ENV}"`,
-          "process.env.NODE_ENV": `"${process.env.NODE_ENV ?? "production"}"`,
+          ...definitions,
+          __env__: JSON.stringify(mode),
+          "process.env.NODE_ENV": JSON.stringify(mode),
         },
         bundle: true,
         target: "firefox115",
@@ -72,7 +76,7 @@ export default defineConfig({
         // chrome-URL imports from being resolved at bundle time.
         entryPoints: ["src/beaver-extract/worker/index.ts"],
         define: {
-          "process.env.NODE_ENV": `"${process.env.NODE_ENV ?? "production"}"`,
+          "process.env.NODE_ENV": JSON.stringify(mode),
         },
         bundle: true,
         format: "esm",

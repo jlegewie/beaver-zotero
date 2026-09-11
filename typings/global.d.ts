@@ -32,7 +32,6 @@ interface Window {
      * `BeaverUIFactory.closeWindowsRenderedBy`.
      */
     __beaverOwnerWindowRef?: WeakRef<Window>;
-    __beaverDisposeSupabase?: () => Promise<void>;
     /** Stops the busy-context event-loop-lag heartbeat (registered by busyContext.ts) */
     __beaverStopBusyHeartbeat?: () => void;
     /**
@@ -41,14 +40,7 @@ interface Window {
      * pushed promptly (omit/`false` to just restore normal auto-sync).
      */
     __beaverResumeSyncAfterRun?: (reschedule?: boolean) => void;
-    /** Auth lock shared across webpack module reloads to prevent concurrent token refresh */
-    __beaverAuthLock?: {
-        locked: boolean;
-        queue: Array<{ resolve: (token: number) => void; timeoutId: ReturnType<typeof setTimeout> | null }>;
-        lockName: string | null;
-        lockToken: number | null;
-        tokenCounter: number;
-    };
+
 }
 
 interface ZoteroSearchWritable extends Zotero.Search {
@@ -88,6 +80,8 @@ declare namespace Zotero {
     let __beaverTableWriteLocks: Map<string, Promise<unknown>> | undefined;
 
     namespace Beaver {
+        const preferences: import("../src/services/instancePreferences").InstancePreferences | undefined;
+        const account: import("../src/services/instanceAccount").InstanceAccount | undefined;
         const runtime: import("../src/runtime/instance").BeaverInstance;
         const voiceNative: import("../src/services/voice/nativeVoice").NativeVoice | undefined;
         const voice: import("../src/services/voice/voiceService").VoiceService | undefined;
@@ -568,13 +562,13 @@ declare namespace Zotero {
          * OCR entitlement mirror, synced from the webpack profile hook so the
          * esbuild OCR enqueue gate can read it.
          */
-        const hasOcrAccess: boolean | undefined;
+        let hasOcrAccess: boolean | undefined;
 
         /**
          * Cloud search-index entitlement mirror, synced from the webpack profile
          * hook so the esbuild `fulltext_upsert` enqueue gate can read it.
          */
-        const hasSearchIndexAccess: boolean | undefined;
+        let hasSearchIndexAccess: boolean | undefined;
 
         /**
          * Searchable-library mirror (local libraries minus the profile's
@@ -582,13 +576,13 @@ declare namespace Zotero {
          * background code can enforce the exclusion boundary. Read it through
          * `src/services/libraryScope`, which fails closed while it is unset.
          */
-        const searchableLibraryIds: number[] | undefined;
+        let searchableLibraryIds: number[] | undefined;
 
         /**
          * True once `searchableLibraryIds` reflects a loaded profile and a
          * loaded local library list.
          */
-        const libraryScopeInitialized: boolean | undefined;
+        let libraryScopeInitialized: boolean | undefined;
 
         /**
          * Citation object for CSL formatting

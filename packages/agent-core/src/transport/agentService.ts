@@ -7,7 +7,7 @@
  * The Beaver agent is the primary agent that handles chat completions and tool execution.
  */
 
-import { supabase } from './supabaseClient';
+import { credentials, getCredentialGeneration, assertCredentialGeneration } from './credentials';
 import { getApiBaseUrl } from './config';
 import { logger } from '../platform/logger';
 import { AgentRun } from '../agents/types';
@@ -67,7 +67,9 @@ import {
  * Shared by the chat connection (AgentService) and the provider connection.
  */
 export async function getWSAuthToken(): Promise<string> {
-    const { data, error } = await supabase.auth.getSession();
+    const generation = getCredentialGeneration();
+    const { data, error } = await credentials.getSession();
+    assertCredentialGeneration(generation);
 
     if (error) {
         logger(`AgentService: Error getting session: ${error.message}`, 2);
@@ -82,7 +84,8 @@ export async function getWSAuthToken(): Promise<string> {
     const expiresAt = data.session.expires_at;
     if (expiresAt && expiresAt - Math.floor(Date.now() / 1000) < 30) {
         logger('AgentService: Access token expired or near-expiry, refreshing session');
-        const refreshResult = await supabase.auth.refreshSession();
+        const refreshResult = await credentials.refreshSession();
+        assertCredentialGeneration(generation);
         if (refreshResult.error || !refreshResult.data.session?.access_token) {
             logger(`AgentService: Session refresh failed: ${refreshResult.error?.message}`, 2);
             throw new Error('Session expired and refresh failed');

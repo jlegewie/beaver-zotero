@@ -1,3 +1,4 @@
+import { getCredentialGeneration, assertCredentialGeneration } from '@beaver/agent-core/transport/credentials';
 /**
  * WebSocket-based message generation atoms
  * 
@@ -1487,7 +1488,14 @@ export function createWSCallbacks(
     set: Setter,
     connectAttempts: () => number | null = () => null,
 ): WSCallbacks {
-    return flushPartsBeforeOtherEvents({
+    const generation = getCredentialGeneration();
+    // Callbacks also write after awaits; entry validation alone cannot protect those writes.
+    const originalSet = set;
+    set = ((...args: Parameters<Setter>) => {
+        assertCredentialGeneration(generation);
+        return originalSet(...args);
+    }) as Setter;
+    const callbacks = flushPartsBeforeOtherEvents({
         onReady: (data: WSReadyData) => {
             logger('WS onReady:', data, 1);
             set(isWSReadyAtom, true);
@@ -2113,6 +2121,15 @@ export function createWSCallbacks(
             }
         }
     });
+    const guarded: Record<string, unknown> = { ...callbacks };
+    for (const [name, callback] of Object.entries(callbacks)) {
+        if (typeof callback !== 'function') continue;
+        guarded[name] = (...args: unknown[]) => {
+            if (generation !== getCredentialGeneration()) return;
+            return (callback as (...callbackArgs: unknown[]) => unknown)(...args);
+        };
+    }
+    return guarded as unknown as WSCallbacks;
 }
 
 /**
@@ -2310,6 +2327,12 @@ export const sendWSMessageAtom = atom(
         message: string,
         options?: SendWSMessageOptions,
     ) => {
+        const accountGeneration = getCredentialGeneration();
+        const originalSet = set;
+        set = ((...args: Parameters<Setter>) => {
+            assertCredentialGeneration(accountGeneration);
+            return originalSet(...args);
+        }) as Setter;
         const { runIdOverride, permissionsOverride, origin, actions } = options ?? {};
         const isPending = get(isWSChatPendingAtom);
         logger('sendWSMessageAtom: Called at ' + Date.now() + ' with message: ' + message.substring(0, 50) + ' (isPending: ' + isPending + ')', 1);
@@ -2581,6 +2604,7 @@ export const sendWSMessageAtom = atom(
                 set(currentThreadNameAtom, message.substring(0, 35));
             }
 
+            assertCredentialGeneration(accountGeneration);
             // Get user ID for the run
             const userId = get(userIdAtom);
             if (!userId) {
@@ -2621,6 +2645,7 @@ export const sendWSMessageAtom = atom(
             // Execute the WebSocket request
             await executeWSRequest(run, request, get, set);
         } catch (error) {
+            if (accountGeneration !== getCredentialGeneration()) return;
             // Catch any unexpected errors during message preparation
             logger('sendWSMessageAtom: Unexpected error:', error, 1);
             set(wsErrorAtom, {

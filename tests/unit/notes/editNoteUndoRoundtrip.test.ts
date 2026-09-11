@@ -2212,7 +2212,7 @@ describe('external-file citations through React apply and undo', () => {
         previousLibraryGet = Zotero.Libraries.get;
         (Zotero.Libraries as any).get = vi.fn(() => ({ editable: true }));
         vi.mocked(store.get).mockImplementation((atom: any) => atom === searchableLibraryIdsAtom ? [1] : null);
-        (Zotero as any).Beaver = { db: { getExternalFileByKey: vi.fn(async () => ({
+        (Zotero as any).Beaver = { searchableLibraryIds: [1], libraryScopeInitialized: true, db: { getExternalFileByKey: vi.fn(async () => ({
             filename: 'Report.pdf', storedPath: '/stored/Report.pdf',
         })) } };
         (Zotero as any).File = { pathToFileURI: vi.fn(() => 'file:///stored/Report.pdf') };

@@ -1,3 +1,4 @@
+import { usePreference } from '../../hooks/usePreference';
 import React, { useCallback, useState } from "react";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink, SectionDescription} from "./components/SettingsElements";
 import DeferredToolPreferenceSetting from "./DeferredToolPreferenceSetting";
@@ -7,11 +8,11 @@ import { getPref, setPref } from "../../../src/utils/prefs";
 const PermissionsSection: React.FC = () => {
 
     // --- Atoms: Permissions ---
-    const [autoApplyAnnotations, setAutoApplyAnnotations] = useState(() => getPref('autoApplyAnnotations'));
-    const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
-    const [enableSystemNotifications, setEnableSystemNotifications] = useState(() => getPref('enableSystemNotifications'));
-    const [enableResponseCompleteNotifications, setEnableResponseCompleteNotifications] = useState(() => getPref('enableResponseCompleteNotifications'));
-    const [accessRemoteFiles, setAccessRemoteFiles] = useState(() => getPref('accessRemoteFiles'));
+    const [autoApplyAnnotations, setAutoApplyAnnotations] = usePreference(() => getPref('autoApplyAnnotations'));
+    const [autoCreateNotes, setAutoCreateNotes] = usePreference(() => getPref('autoCreateNotes'));
+    const [enableSystemNotifications, setEnableSystemNotifications] = usePreference(() => getPref('enableSystemNotifications'));
+    const [enableResponseCompleteNotifications, setEnableResponseCompleteNotifications] = usePreference(() => getPref('enableResponseCompleteNotifications'));
+    const [accessRemoteFiles, setAccessRemoteFiles] = usePreference(() => getPref('accessRemoteFiles'));
 
     // --- Handle Auto-Apply Annotations Toggle ---
     const handleAutoApplyAnnotationsToggle = useCallback(() => {

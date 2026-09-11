@@ -1,21 +1,18 @@
 /**
- * Wires the OCR background lane into the (esbuild) background dispatcher and
- * keeps the OCR entitlement mirror in sync.
+ * Wires the OCR background lane into the background dispatcher.
  *
  * Lives in the webpack bundle because the OcrExecutor needs the
  * Supabase-authenticated backend client. The dispatcher itself stays generic
  * and only knows the `JobExecutor` interface; this hook injects the OCR lane at
  * runtime via `registerExecutor`.
  *
- * Searchable-library scope is published separately by `useLibraryScopeMirror`
- * (store subscription, same turn as the Jotai write). This hook only reacts to
- * that scope to decide when the OCR lane may be registered.
+ * Scope and entitlements are instance-owned. The local projection controls
+ * registration of this renderer's executor.
  */
 
 import { useEffect } from 'react';
 import { useAtomValue } from 'jotai';
 import {
-    hasOcrAccessAtom,
     libraryScopeInitializedAtom,
     searchableLibraryIdsAtom,
 } from '../atoms/profile';
@@ -26,7 +23,6 @@ import { logger } from '@beaver/agent-core/platform/logger';
 const OCR_LANE_MAX_IN_FLIGHT = 3;
 
 export function useOcrLane(): void {
-    const hasOcrAccess = useAtomValue(hasOcrAccessAtom);
     const libraryScopeInitialized = useAtomValue(libraryScopeInitializedAtom);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     // A stable value prevents equivalent profile refreshes from cycling the
@@ -79,12 +75,4 @@ export function useOcrLane(): void {
         };
     }, [libraryScopeKey]);
 
-    // Mirror the entitlement into the esbuild-readable global used by the
-    // enqueue gate, and wake the reconciler when OCR access flips.
-    useEffect(() => {
-        if (Zotero.Beaver) {
-            (Zotero.Beaver as { hasOcrAccess?: boolean }).hasOcrAccess = hasOcrAccess;
-        }
-        Zotero.Beaver?.processingReconciler?.notify();
-    }, [hasOcrAccess]);
 }

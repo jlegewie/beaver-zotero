@@ -1,5 +1,5 @@
 import { ApiService } from '../apiService';
-import { ApiError, ServerError } from '../../types/apiErrors';
+import { isApiError, isServerError } from '../../types/apiErrors';
 import { logger } from '../../platform/logger';
 
 /**
@@ -106,12 +106,12 @@ export class EmbeddingsService extends ApiService {
         }
         
         // Server errors (5xx)
-        if (error instanceof ServerError) {
+        if (isServerError(error)) {
             return true;
         }
         
         // API errors - check status code
-        if (error instanceof ApiError) {
+        if (isApiError(error)) {
             // Rate limit (429) and server errors (5xx) are retryable
             return error.status === 429 || error.status >= 500;
         }

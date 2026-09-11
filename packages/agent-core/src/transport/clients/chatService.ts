@@ -1,6 +1,6 @@
 import { ApiService } from '../apiService';
 import type { ModelProvider, CustomChatModel } from '../../types/customChatModel';
-import { ApiError } from '../../types/apiErrors';
+import { isApiError } from '../../types/apiErrors';
 import { logger } from '../../platform/logger';
 
 
@@ -103,7 +103,7 @@ export class ChatService extends ApiService {
                 { user_move: userMove, custom_model: customModel },
             );
         } catch (error) {
-            if (error instanceof ApiError) {
+            if (isApiError(error)) {
                 // FastAPI 4xx responses (e.g. request validation) carry a
                 // readable message in `detail`; surface it directly.
                 throw new Error(error.message || 'The provider test request was rejected.');

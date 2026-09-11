@@ -15,6 +15,8 @@ import type { VoiceService } from './services/voice/voiceService';
 import type { DevelopmentVoiceHarness } from './services/voice/developmentHarness';
 
 class Addon {
+    public preferences?: import("./services/instancePreferences").InstancePreferences;
+    public account?: import("./services/instanceAccount").InstanceAccount;
     public runtime = new BeaverInstance();
     public voiceNative?: import("./services/voice/nativeVoice").NativeVoice;
     public voice?: VoiceService;
@@ -43,9 +45,9 @@ class Addon {
     public processingReconciler?: ReconcilerService;
     public newItemWatcher?: NewItemWatcher;
     public pluginVersion?: typeof version;
-    /** OCR entitlement mirror kept in sync from the webpack profile hook */
+    /** Instance-owned OCR entitlement */
     public hasOcrAccess: boolean = false;
-    /** Cloud search-index entitlement mirror kept in sync from the webpack profile hook */
+    /** Instance-owned cloud search-index entitlement */
     public hasSearchIndexAccess: boolean = false;
     public searchableLibraryIds: number[] = [];
     public libraryScopeInitialized: boolean = false;

@@ -1,6 +1,6 @@
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useState, useEffect, useCallback } from 'react'
-import { supabase } from '@beaver/agent-core/transport/supabaseClient'
+import { credentials } from '@beaver/agent-core/transport/credentials';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { isProfileLoadedAtom } from '../../atoms/profile'
 import {
@@ -64,7 +64,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
           logger('SignInForm: profile load timed out, signing out', 2);
           setError('Failed to load profile data. Try again later.');
           setErrorMsg('Failed to load profile data. Try again later.');
-          supabase.auth.signOut();
+          credentials.signOut();
           setIsWaitingForProfile(false);
           setIsLoading(false);
         }
@@ -192,7 +192,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
     setErrorMsg(null)
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await credentials.signInWithPassword({
         email,
         password,
       })

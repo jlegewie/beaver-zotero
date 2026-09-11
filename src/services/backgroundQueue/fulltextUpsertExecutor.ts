@@ -26,7 +26,7 @@ import {
 import { getIndexScopeRef, getZoteroUserIdentifier } from '../../utils/zoteroUtils';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { ApiError } from '@beaver/agent-core/types/apiErrors';
+import { isApiError } from '@beaver/agent-core/types/apiErrors';
 import type {
     JobExecutionContext,
     JobExecutor,
@@ -171,7 +171,7 @@ export class FulltextUpsertExecutor implements JobExecutor {
             try {
                 response = await this.api.upsertHash(baseRequest);
             } catch (error) {
-                if (!(error instanceof ApiError)
+                if (!(isApiError(error))
                     || error.status !== 409
                     || error.code !== 'payload_required') {
                     return this.mapApiError(record, row, error, ctx);
@@ -315,17 +315,13 @@ export class FulltextUpsertExecutor implements JobExecutor {
         error: unknown,
         ctx?: JobExecutionContext,
     ): Promise<JobOutcome> {
-        if (!(error instanceof ApiError)) {
+        if (!(isApiError(error))) {
             const message = error instanceof Error ? error.message : String(error);
             return { kind: 'retry', error: `index_network_error: ${message}` };
         }
         const code = error.code ?? `http_${error.status}`;
         if (error.status === 403 && code === 'not_entitled') {
-            if (Zotero.Beaver) {
-                (Zotero.Beaver as { hasSearchIndexAccess?: boolean })
-                    .hasSearchIndexAccess = false;
-            }
-            Zotero.Beaver?.processingReconciler?.notify();
+            Zotero.Beaver.account!.revokeSearchIndexAccess();
         }
         if (TERMINAL_CODES.has(code) || error.status === 400 || error.status === 413) {
             if (record && row) {

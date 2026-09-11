@@ -61,7 +61,7 @@ import {
 import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
-import { ApiError } from '@beaver/agent-core/types/apiErrors';
+import { isApiError } from '@beaver/agent-core/types/apiErrors';
 import {
     libraryScopeInitializedAtom,
     searchableLibraryIdsAtom,
@@ -302,7 +302,7 @@ export class OcrExecutor implements JobExecutor {
         try {
             status = await ocrApiClient.status(jobId);
         } catch (error) {
-            if (error instanceof ApiError && error.status === 404) {
+            if (isApiError(error) && error.status === 404) {
                 // Missing rows are re-created or rejoined through /ocr/request.
                 logger(`OcrExecutor: ${job.sourceKey} OCR backend job ${jobId} was not found`, 3);
                 return { fallback: true };

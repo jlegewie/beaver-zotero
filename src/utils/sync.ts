@@ -11,7 +11,7 @@ import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
 import { openPreferencesWindow } from '../ui/openPreferencesWindow';
 import { SettingsIcon } from '../../react/components/icons/icons';
 import { syncWithZoteroAtom, isDatabaseSyncSupportedAtom, syncDeniedForPlanAtom } from '../../react/atoms/profile';
-import { ApiError, SessionExpiredError } from '@beaver/agent-core/types/apiErrors';
+import { isApiError, isSessionExpiredError } from '@beaver/agent-core/types/apiErrors';
 import { SyncMethod } from '../../react/atoms/sync';
 import { SyncLogsRecord } from '../services/database';
 import { isAttachmentOnServer } from './webAPI';
@@ -522,7 +522,7 @@ export async function syncItemsToBackend(
                     logger(`Beaver Sync '${syncSessionId}':     Batch result: ${JSON.stringify(batchResult)}`, 4);
                     break;
                 } catch (retryError) {
-                    if (retryError instanceof SessionExpiredError) {
+                    if (isSessionExpiredError(retryError)) {
                         throw retryError;
                     }
                     attempts++;
@@ -553,7 +553,7 @@ export async function syncItemsToBackend(
             Zotero.logError(error);
             
             // Check if sync was denied due to plan restrictions
-            if (error instanceof ApiError && error.isSyncNotAllowed()) {
+            if (isApiError(error) && error.status === 403 && error.code === 'SYNC_NOT_ALLOWED') {
                 logger(`Beaver Sync '${syncSessionId}':     Sync denied - plan does not allow database sync. Triggering profile refresh.`, 2);
                 // Signal to useProfileSync to refresh profile data
                 // This will update isDatabaseSyncSupportedAtom and cause useZoteroSync to cleanup
@@ -937,7 +937,7 @@ export async function syncZoteroDatabase(
             updateSyncStatus(libraryID, { status: 'failed', error: errorMessage });
             
             // If sync is denied due to plan restrictions, abort entire sync operation
-            if (error instanceof ApiError && error.isSyncNotAllowed()) {
+            if (isApiError(error) && error.status === 403 && error.code === 'SYNC_NOT_ALLOWED') {
                 logger(`Beaver Sync '${syncSessionId}': Aborting sync - plan does not allow database sync`, 2);
                 // Signal to useProfileSync to refresh profile data
                 store.set(syncDeniedForPlanAtom, true);
@@ -953,7 +953,7 @@ export async function syncZoteroDatabase(
                 return;
             }
 
-            if (error instanceof SessionExpiredError) {
+            if (isSessionExpiredError(error)) {
                 logger(`Beaver Sync '${syncSessionId}': Aborting sync - session expired`, 2);
                 for (const remainingLib of librariesToSync) {
                     if (!processedLibraryIDs.has(remainingLib.libraryID)) {

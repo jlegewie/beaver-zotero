@@ -1,7 +1,7 @@
 import { AuthApiError, AuthError, AuthSessionMissingError, isAuthRetryableFetchError } from '@supabase/supabase-js';
-import { ApiError, RequestTimeoutError, ServerError, SessionExpiredError, SessionRefreshError } from '../types/apiErrors';
+import { isApiError, isSessionExpiredError, isSessionRefreshError, ApiError, RequestTimeoutError, ServerError, SessionExpiredError, SessionRefreshError } from '../types/apiErrors';
 import { logger } from '../platform/logger';
-import { supabase } from './supabaseClient';
+import { credentials, getCredentialGeneration, assertCredentialGeneration } from './credentials';
 import { recordBackendHttpSuccess } from './backendReachability';
 import { getApiBaseUrl } from './config';
 import { getRuntimeAdapter } from '../platform/runtime';
@@ -92,6 +92,7 @@ async function withDeadline<T>(
 export class ApiService {
     /** Set only when a caller pins this instance to a specific backend. */
     private overrideBaseUrl?: string;
+    private responseGenerations = new WeakMap<Response, number>();
 
     constructor(baseUrl?: string) {
         this.overrideBaseUrl = baseUrl;
@@ -131,6 +132,7 @@ export class ApiService {
     }
 
     private classifyRefreshError(error: unknown): SessionExpiredError | SessionRefreshError {
+        const e = error as { name?: string; message?: string; status?: number } | null | undefined;
         // When the OS reports we're offline, no supabase classification can prove the session
         // is permanently gone. Always treat as transient so callers don't trigger logout.
         if (typeof navigator !== 'undefined' && navigator.onLine === false) {
@@ -138,23 +140,23 @@ export class ApiService {
         }
 
         if (isAuthRetryableFetchError(error)) {
-            return this.createSessionRefreshError(error.message, error.status);
+            return this.createSessionRefreshError(e?.message, e?.status);
         }
 
-        if (error instanceof AuthSessionMissingError) {
+        if ((error instanceof AuthSessionMissingError || e?.name === 'AuthSessionMissingError')) {
             return new SessionExpiredError('User not authenticated');
         }
 
-        if (error instanceof AuthApiError) {
-            if (error.status === 429 || error.status >= 500) {
-                return this.createSessionRefreshError(error.message, error.status);
+        if ((error instanceof AuthApiError || e?.name === 'AuthApiError')) {
+            if (e?.status === 429 || (e?.status ?? 0) >= 500) {
+                return this.createSessionRefreshError(e?.message, e?.status);
             }
 
             return new SessionExpiredError('Session expired and refresh failed');
         }
 
         if (error instanceof AuthError) {
-            return this.createSessionRefreshError(error.message, error.status);
+            return this.createSessionRefreshError(e?.message, e?.status);
         }
 
         // Defense-in-depth for auth errors that may lose their prototype
@@ -163,8 +165,8 @@ export class ApiService {
             typeof error === 'object' &&
             error !== null &&
             'message' in error &&
-            typeof error.message === 'string' &&
-            error.message.includes('Invalid Refresh Token')
+            typeof e?.message === 'string' &&
+            e?.message.includes('Invalid Refresh Token')
         ) {
             return new SessionExpiredError('Session expired and refresh failed');
         }
@@ -174,7 +176,7 @@ export class ApiService {
 
     private async refreshAccessToken(context: string): Promise<string> {
         try {
-            const refreshResult = await supabase.auth.refreshSession();
+            const refreshResult = await credentials.refreshSession();
 
             if (refreshResult.error) {
                 logger(`${context}: session refresh failed: ${refreshResult.error?.message}`, 2);
@@ -189,7 +191,8 @@ export class ApiService {
 
             return token;
         } catch (error) {
-            if (error instanceof SessionExpiredError || error instanceof SessionRefreshError) {
+            if ((error as any)?.code === 'ACCOUNT_CHANGED') throw error;
+            if (isSessionExpiredError(error) || isSessionRefreshError(error)) {
                 throw error;
             }
 
@@ -205,6 +208,7 @@ export class ApiService {
         deadline?: RequestDeadline,
         options?: { rawBody?: Uint8Array; headers?: Record<string, string> },
     ): Promise<Response> {
+        const generation = getCredentialGeneration();
         const bodyText = body === undefined ? undefined : JSON.stringify(body);
         const requestBody = options?.rawBody ?? bodyText;
         const logMessage = method === 'PATCH' && bodyText
@@ -214,6 +218,7 @@ export class ApiService {
         // Supabase auth calls do not accept our AbortSignal. Do not let one
         // that finishes after the caller's deadline dispatch a request late.
         const throwIfDeadlineExpired = () => {
+            assertCredentialGeneration(generation);
             if (deadline?.controller.signal.aborted) {
                 throw new RequestTimeoutError(`Request timed out after ${deadline.timeoutMs}ms`);
             }
@@ -232,6 +237,7 @@ export class ApiService {
                     ...(deadline ? { signal: deadline.controller.signal } : {}),
                 });
             } catch (e) {
+                assertCredentialGeneration(generation);
                 // An expired deadline aborts the fetch; `withDeadline` owns that
                 // classification, so leave it alone here.
                 if (deadline?.controller.signal.aborted) throw e;
@@ -253,12 +259,14 @@ export class ApiService {
         logger(logMessage);
 
         let response = await makeRequest(headers);
+        throwIfDeadlineExpired();
         if (response.status === 401) {
             logger(`${method}: Received 401 for ${endpoint}. Refreshing session and retrying once.`, 2);
             const refreshedToken = await this.refreshAccessToken(`${method} ${endpoint}`);
             throwIfDeadlineExpired();
             headers = this.buildAuthHeaders(refreshedToken);
             response = await makeRequest(headers);
+            throwIfDeadlineExpired();
 
             if (response.status === 401) {
                 logger(`${method}: Received 401 again for ${endpoint} after refresh.`, 2);
@@ -266,8 +274,9 @@ export class ApiService {
             }
         }
 
+        throwIfDeadlineExpired();
         if (!response.ok) {
-            await this.handleApiError(response);
+            await this.handleApiError(response, generation);
         }
 
         // Every successful REST call proves Beaver's regular HTTPS API was
@@ -276,11 +285,14 @@ export class ApiService {
         // dynamic identifiers (thread/run ids, item keys) reach telemetry.
         recordBackendHttpSuccess(endpoint);
 
+        this.responseGenerations.set(response, generation);
         return response;
     }
 
     private async parseJsonResponse<T>(response: Response, method: HttpMethod): Promise<T> {
         const responseText = await response.text();
+        const generation = this.responseGenerations.get(response);
+        if (generation !== undefined) assertCredentialGeneration(generation);
         try {
             return JSON.parse(responseText) as T;
         } catch (parseError) {
@@ -291,14 +303,14 @@ export class ApiService {
     
     /**
     * Gets authentication headers with JWT token if user is signed in.
-    * This method leverages supabase.auth.getSession() to ensure a valid
+    * This method leverages credentials.getSession() to ensure a valid
     * access token is available, automatically handling token refreshes.
     */
     async getAuthHeaders(): Promise<Record<string, string>> {
-        const { data, error } = await supabase.auth.getSession();
+        const { data, error } = await credentials.getSession();
 
         if (error) {
-            logger(`Error getting session: ${error.message}`, 2);
+            logger(`Error getting session: ${(error as any).message}`, 2);
             throw this.classifyRefreshError(error);
         }
 
@@ -340,10 +352,11 @@ export class ApiService {
     /**
     * Handles API response errors and throws appropriate custom errors
     */
-    private async handleApiError(response: Response): Promise<never> {
+    private async handleApiError(response: Response, generation: number): Promise<never> {
         let errorBody = '';
         try {
             errorBody = await response.text();
+            assertCredentialGeneration(generation);
             logger(`API error ${response.status} ${response.statusText}: ${errorBody}`, 2);
             const errorJson = JSON.parse(errorBody);
             const detail = errorJson.detail;
@@ -362,7 +375,8 @@ export class ApiService {
                 detail || errorJson.message || response.statusText,
             );
         } catch (e) {
-            if (e instanceof ApiError) throw e;
+            assertCredentialGeneration(generation);
+            if (isApiError(e)) throw e;
             logger(`API error ${response.status} ${response.statusText} (non-JSON body: ${errorBody})`, 2);
             if (response.status >= 500) {
                 throw new ServerError(`Server error: ${response.status} - ${response.statusText}`);

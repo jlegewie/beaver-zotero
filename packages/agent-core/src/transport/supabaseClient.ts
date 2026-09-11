@@ -35,6 +35,13 @@ export function setSupabaseStorageAdapter(adapter: SupabaseStorageAdapter): void
     injectedStorageAdapter = adapter;
 }
 
+let fetchAdapter: typeof fetch | undefined;
+/** Optional host-lifetime cancellation for SDK network requests. */
+export function setSupabaseFetchAdapter(value: typeof fetch): void {
+    if (supabaseInstance) throw new Error('Supabase fetch adapter must be set before first use');
+    fetchAdapter = value;
+}
+
 /** How the auth client's token-refresh ticker is driven. */
 export interface SupabaseAuthPolicy {
     /**
@@ -83,9 +90,8 @@ export type SupabaseDisposer = () => Promise<void>;
  * reason: an operation already waiting behind an in-flight refresh must still be
  * released by the old holder once the new instance takes over.
  *
- * The host decides how far that state reaches — the Zotero plugin scopes it to
- * the window that loaded the bundle, so reloading one window never touches
- * another window's live client.
+ * The host decides how far that state reaches. Hosts with an app-owned client
+ * can instead delegate renderer access through `setSupabaseClientProvider`.
  *
  * A host that neither reloads its bundle nor needs to stop the client from
  * outside this bundle can skip registration entirely: there is then no previous
@@ -117,7 +123,7 @@ let reloadBridge: SupabaseReloadBridge | null = null;
 
 /**
  * Register the bridge to reload-persistent Supabase state. Call once at bundle
- * init (e.g. `registerZoteroSupabaseReloadBridge()` from `react/index.tsx`),
+ * initialization,
  * before the Supabase client is first used.
  *
  * Registering adopts the shared auth lock and stops any previous instance's
@@ -386,6 +392,7 @@ function createSupabaseClient(): SupabaseClientInstance {
     const { url, anonKey } = getSupabaseConfig();
 
     const client = createClient(url, anonKey, {
+        ...(fetchAdapter ? { global: { fetch: fetchAdapter } } : {}),
         auth: {
             persistSession: true,
             autoRefreshToken: true,
@@ -451,7 +458,16 @@ function createSupabaseClient(): SupabaseClientInstance {
     return client;
 }
 
+let clientProvider: (() => SupabaseClientInstance) | undefined;
+
+/** Delegate to a host-owned client without constructing an SDK client in this realm. */
+export function setSupabaseClientProvider(provider: () => SupabaseClientInstance): void {
+    if (supabaseInstance) throw new Error("Supabase client already initialized");
+    clientProvider = provider;
+}
+
 function getSupabaseClient(): SupabaseClientInstance {
+    if (clientProvider) return clientProvider();
     supabaseInstance ??= createSupabaseClient();
     return supabaseInstance;
 }

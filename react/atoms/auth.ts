@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 import { selectAtom } from 'jotai/utils';
 import { Session } from '@supabase/supabase-js';
-import { supabase } from '@beaver/agent-core/transport/supabaseClient';
+import { credentials } from '@beaver/agent-core/transport/credentials';
 import { isProfileLoadedAtom, profileWithPlanAtom } from './profile';
 import {
     firstRunNextStepsDismissedAtom,
@@ -175,25 +175,4 @@ export const authLoadingAtom = atom<boolean>(true);
  * Atom setter for logging out, setting session and user atoms to null
  * Also resets all login form state (except email for convenience)
  */
-export const logoutAtom = atom(
-    null,
-    async (_, set) => {
-        await supabase.auth.signOut();
-        set(profileWithPlanAtom, null);
-        set(isProfileLoadedAtom, false);
-
-        // Reset first-run session state — plain Jotai atoms don't auto-reset.
-        // The origin itself lives on persisted run data, but session-only
-        // dismissal/return flags must be cleared so the next user starts fresh.
-        set(firstRunNextStepsDismissedAtom, new Set<string>());
-        set(firstRunReturnRequestedAtom, false);
-        set(firstRunSuggestionsModeAtom, false);
-        set(firstRunSuggestionsAtom, null);
-        set(firstRunSuggestionsErrorAtom, null);
-        set(whereToStartVisibleAtom, false);
-
-        // Reset transient form state and restore authMethod to persisted preference
-        resetLoginFormState(set);
-        set(authMethodAtom, getInitialAuthMethod());
-    }
-);
+export const logoutAtom = atom(null, () => credentials.signOut());

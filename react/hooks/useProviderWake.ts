@@ -14,22 +14,20 @@
  * created with `private: true` and realtime auth must carry the user's JWT.
  */
 
-import { useEffect, useRef } from 'react';
-import { useAtomValue } from 'jotai';
-import type { RealtimeChannel } from '@supabase/supabase-js';
-import { supabase } from '@beaver/agent-core/transport/supabaseClient';
-import { providerConnection } from '@beaver/agent-core/transport/providerConnection';
-import { logger } from '@beaver/agent-core/platform/logger';
-import { isAuthenticatedAtom, sessionAtom } from '../atoms/auth';
-import { isProfileLoadedAtom } from '../atoms/profile';
-import { dataProviderEnabledAtom } from '../atoms/ui';
+import { useEffect } from "react";
+import { useAtomValue } from "jotai";
+import { getCredentialGeneration } from "@beaver/agent-core/transport/credentials";
+import { providerConnection } from "@beaver/agent-core/transport/providerConnection";
+import { logger } from "@beaver/agent-core/platform/logger";
+import { isAuthenticatedAtom, sessionAtom } from "../atoms/auth";
+import { isProfileLoadedAtom } from "../atoms/profile";
+import { dataProviderEnabledAtom } from "../atoms/ui";
 
 export function useProviderWake() {
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
     const session = useAtomValue(sessionAtom);
     const enabled = useAtomValue(dataProviderEnabledAtom);
-    const channelRef = useRef<RealtimeChannel | null>(null);
 
     const userId = session?.user?.id ?? null;
 
@@ -39,57 +37,42 @@ export function useProviderWake() {
         }
 
         let cancelled = false;
+        const generation = getCredentialGeneration();
 
-        const subscribe = async () => {
-            try {
-                // Private channels authorize against realtime.messages RLS with
-                // the user's JWT — make sure realtime has a fresh token.
-                const { data: sessionData } = await supabase.auth.getSession();
-                if (cancelled) return;
-                if (sessionData.session?.access_token) {
-                    supabase.realtime.setAuth(sessionData.session.access_token);
-                }
-
-                const channel = supabase
-                    .channel(`provider-wake:${userId}`, { config: { private: true } })
-                    .on('broadcast', { event: 'wake' }, (message) => {
-                        const payload = (message as any)?.payload ?? {};
-                        logger(`useProviderWake: Wake received (wake_id=${payload.wake_id})`, 1);
-                        providerConnection.connect({
-                            wakeId: payload.wake_id,
-                            wakeInstanceId: payload.instance_id,
-                        }).catch((err) => {
-                            logger(`useProviderWake: Provider connect after wake failed: ${err}`, 1);
-                        });
+        const unsubscribe = Zotero.Beaver.account!.realtime.subscribe(
+            "provider-wake",
+            userId,
+            (message) => {
+                if (cancelled || generation !== getCredentialGeneration())
+                    return;
+                const payload = message.payload ?? {};
+                logger(
+                    `useProviderWake: Wake received (wake_id=${payload.wake_id})`,
+                    1,
+                );
+                providerConnection
+                    .connect({
+                        wakeId: payload.wake_id,
+                        wakeInstanceId: payload.instance_id,
                     })
-                    .subscribe((status, err) => {
+                    .catch((err) => {
                         logger(
-                            `useProviderWake: Subscription status ${status}${err ? ` (${err.message})` : ''}`,
-                            err ? 3 : 1,
+                            `useProviderWake: Provider connect after wake failed: ${err}`,
+                            1,
                         );
                     });
-                channelRef.current = channel;
-                logger(`useProviderWake: Subscribed to provider-wake channel`, 1);
-            } catch (error) {
-                logger(`useProviderWake: Failed to subscribe: ${error}`, 3);
-            }
-        };
-
-        subscribe();
-
+            },
+        );
         return () => {
             cancelled = true;
-            const channel = channelRef.current;
-            channelRef.current = null;
-            if (channel) {
-                supabase.realtime.removeChannel(channel).catch((err: unknown) => {
-                    logger(`useProviderWake: Failed to remove channel: ${err}`, 1);
-                });
-            }
+            unsubscribe();
             // Drop any open provider connection when the gate turns off
             // (logout or pref disabled). A server idle-close would arrive
             // eventually; this just makes the teardown immediate.
-            providerConnection.close(1000, 'Provider wake subscription stopped');
+            providerConnection.close(
+                1000,
+                "Provider wake subscription stopped",
+            );
         };
     }, [isAuthenticated, isProfileLoaded, enabled, userId]);
 }

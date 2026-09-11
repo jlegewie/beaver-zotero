@@ -1,3 +1,4 @@
+import { usePreference } from '../../hooks/usePreference';
 import React, { useState, useCallback, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
@@ -25,21 +26,21 @@ const PreferencePage: React.FC = () => {
     const logout = useSetAtom(logoutAtom);
 
     // --- User profile ---
-    const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
+    const profileWithPlan = useAtomValue(profileWithPlanAtom);
 
     // --- State for Preferences ---
-    const [citationFormat, setCitationFormat] = useState(() => getPref('citationFormat') === 'numeric');
-    const [useTemporaryCitationAnnotations, setUseTemporaryCitationAnnotations] = useState(() => getPref('useTemporaryCitationAnnotations') === true);
-    const [keyboardShortcut, setKeyboardShortcut] = useState(() => {
+    const [citationFormat, setCitationFormat] = usePreference(() => getPref('citationFormat') === 'numeric');
+    const [useTemporaryCitationAnnotations, setUseTemporaryCitationAnnotations] = usePreference(() => getPref('useTemporaryCitationAnnotations') === true);
+    const [keyboardShortcut, setKeyboardShortcut] = usePreference(() => {
         const shortcut = getPref('keyboardShortcut');
         return /^[a-z]$/i.test(shortcut) ? shortcut.toUpperCase() : 'J';
     });
-    const [addSelectedOnNewThread, setAddSelectedOnNewThread] = useState(() => getPref('addSelectedItemsOnNewThread'));
-    const [addSelectedOnOpen, setAddSelectedOnOpen] = useState(() => getPref('addSelectedItemsOnOpen'));
+    const [addSelectedOnNewThread, setAddSelectedOnNewThread] = usePreference(() => getPref('addSelectedItemsOnNewThread'));
+    const [addSelectedOnOpen, setAddSelectedOnOpen] = usePreference(() => getPref('addSelectedItemsOnOpen'));
     const [runStatusPopupEnabled, setRunStatusPopupEnabled] = useAtom(runStatusPopupEnabledAtom);
-    const [addProvenanceNote, setAddProvenanceNote] = useState(() => getPref('addBeaverProvenanceNote'));
-    const [focusResponseForScreenReaders, setFocusResponseForScreenReaders] = useState(() => getPref('focusResponseForScreenReaders'));
-    const [showDiffPreview, setShowDiffPreview] = useState(() => getPref('showDiffPreviewInNoteEditor') !== false);
+    const [addProvenanceNote, setAddProvenanceNote] = usePreference(() => getPref('addBeaverProvenanceNote'));
+    const [focusResponseForScreenReaders, setFocusResponseForScreenReaders] = usePreference(() => getPref('focusResponseForScreenReaders'));
+    const [showDiffPreview, setShowDiffPreview] = usePreference(() => getPref('showDiffPreviewInNoteEditor') !== false);
     const diffPreviewSupported = isDiffPreviewSupported();
     const [consentToShare, setConsentToShare] = useState(() => profileWithPlan?.consent_to_share || false);
     const [emailNotifications, setEmailNotifications] = useState(() => profileWithPlan?.email_notifications || false);
@@ -70,12 +71,8 @@ const PreferencePage: React.FC = () => {
         const action = checked ? 'enable' : 'disable';
         try {
             logger(`User confirmed to ${action} consent to share. New value: ${checked}`);
-            await accountService.updatePreference('consent_to_share', checked);
+            await Zotero.Beaver.account?.updatePreference('consent_to_share', checked);
 
-            setProfileWithPlan((prev) => {
-                if (!prev) return null;
-                return { ...prev, consent_to_share: checked };
-            });
             setConsentToShare(checked);
             logger('Successfully updated consent to share preference.');
         } catch (error) {
@@ -84,19 +81,15 @@ const PreferencePage: React.FC = () => {
             // Revert the toggle on error
             setConsentToShare(!checked);
         }
-    }, [setProfileWithPlan]);
+    }, []);
 
     // --- Email Notifications Toggle Change Handler ---
     const handleEmailNotificationsChange = useCallback(async (checked: boolean) => {
         const action = checked ? 'enable' : 'disable';
         try {
             logger(`User confirmed to ${action} email notifications. New value: ${checked}`);
-            await accountService.updatePreference('email_notifications', checked);
+            await Zotero.Beaver.account?.updatePreference('email_notifications', checked);
 
-            setProfileWithPlan((prev) => {
-                if (!prev) return null;
-                return { ...prev, email_notifications: checked };
-            });
             setEmailNotifications(checked);
             logger('Successfully updated email notifications preference.');
         } catch (error) {
@@ -105,7 +98,7 @@ const PreferencePage: React.FC = () => {
             // Revert the toggle on error
             setEmailNotifications(!checked);
         }
-    }, [setProfileWithPlan]);
+    }, []);
 
     // --- Inline toggle handlers for card-based layout ---
     const handleCitationFormatToggle = useCallback(() => {

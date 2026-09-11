@@ -83,7 +83,7 @@ export async function handleTestExcludedLibrariesHttpRequest(request: any) {
             return { ok: false, error: 'Provide exclude_library_ids or excluded_libraries' };
         }
 
-        store.set(profileWithPlanAtom, { ...profile, excluded_libraries: entries });
+        Zotero.Beaver.account!.setExcludedLibrariesForTesting(entries);
         return { ok: true, has_profile: true, ...currentExclusionState() };
     }
 

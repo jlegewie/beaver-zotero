@@ -1,3 +1,4 @@
+import { getCredentialGeneration } from '@beaver/agent-core/transport/credentials';
 import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { LibrarySuggestionsResponse, SuggestionCard } from '@beaver/agent-core/types/librarySuggestions';
@@ -158,19 +159,22 @@ export const emptyLibraryDiscoverSubmittingAtom = atom<boolean>(false);
 export const EMPTY_LIBRARY_DISCOVER_MAX_LENGTH = 500;
 
 async function fetchAndPersist(set: any): Promise<void> {
+    const generation = getCredentialGeneration();
     set(firstRunSuggestionsLoadingAtom, true);
     set(firstRunSuggestionsErrorAtom, null);
     try {
         const response = await librarySuggestionsService.getSuggestions({ purpose: 'first_run' });
+        if (generation !== getCredentialGeneration()) return;
         writeCachedSuggestions(response);
         set(firstRunSuggestionsAtom, response);
     } catch (err: any) {
+        if (generation !== getCredentialGeneration()) return;
         const message = err?.message ?? String(err);
         logger(`firstRun: getSuggestions failed: ${message}`, 1);
         set(firstRunSuggestionsErrorAtom, message);
         set(firstRunSuggestionsAtom, null);
     } finally {
-        set(firstRunSuggestionsLoadingAtom, false);
+        if (generation === getCredentialGeneration()) set(firstRunSuggestionsLoadingAtom, false);
     }
 }
 
@@ -241,11 +245,7 @@ export const markFirstRunCompleteAtom = atom(
         const profile = get(profileWithPlanAtom);
         if (!profile || profile.first_run_completed_at) return;
         await accountService.completeFirstRun(completionKind);
-        set(profileWithPlanAtom, {
-            ...profile,
-            first_run_completed_at: new Date().toISOString(),
-            first_run_completion_kind: completionKind ?? null,
-        });
+        await Zotero.Beaver.account!.invalidateProfile();
     },
 );
 

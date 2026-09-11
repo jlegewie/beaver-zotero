@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtomValue } from "jotai";
 import { profileWithPlanAtom } from "../../atoms/profile";
 import { userAtom } from "../../atoms/auth";
 import { accountService } from "@beaver/agent-core/transport/clients/accountService";
@@ -19,7 +19,7 @@ import PreferenceToggle from "../preferences/PreferenceToggle";
  * After consent, user is routed to ProOnboardingPage Step 2 (library selection).
  */
 const UpgradeConsentPage: React.FC = () => {
-    const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
+    const profileWithPlan = useAtomValue(profileWithPlanAtom);
     const user = useAtomValue(userAtom);
     const [agreedToSync, setAgreedToSync] = useState<boolean>(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -44,13 +44,8 @@ const UpgradeConsentPage: React.FC = () => {
             // Call the service to complete upgrade consent
             await accountService.completeUpgradeConsent();
 
-            // Update local state
-            setProfileWithPlan({
-                ...profileWithPlan,
-                has_authorized_access: true,
-                pending_upgrade_consent: false,
-                consented_at: new Date(),
-            });
+            // Publish the authoritative profile before advancing.
+            await Zotero.Beaver.account!.invalidateProfile();
 
             logger(`UpgradeConsentPage: Upgrade consent completed, routing to library selection`);
 

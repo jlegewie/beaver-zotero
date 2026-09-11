@@ -549,10 +549,14 @@ describe('background queue honors the searchable set', () => {
         // `empty` when the dispatcher's own tick retired the row first.
         expect(['job_done', 'empty']).toContain(result.reason);
         // The row is retired, not retried or dead-lettered...
-        const peek = await backgroundPeek();
-        expect(peek.jobs).toHaveLength(0);
+        // Other searchable libraries can enqueue work while this test runs.
+        // Assert retirement of this job without requiring an idle global queue.
+        const peek = await backgroundPeek({ limit: 1000 });
+        expect(peek.jobs).not.toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: enqueued.id }),
+        ]));
         const stats = await backgroundStats();
-        expect(stats.queue).toMatchObject({ pending: 0, dead: 0 });
+        expect(stats.queue).toMatchObject({ dead: 0 });
         // ...and nothing was read from the excluded library to service it.
         const cached = await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
         expect(cached).toBeNull();

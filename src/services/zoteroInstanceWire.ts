@@ -1,5 +1,5 @@
 import type { ZoteroInstanceWire } from '@beaver/agent-core/protocol/agentProtocol';
-import { getInstanceIndexScopeRefs, getZoteroUserIdentifier } from '../utils/zoteroUtils';
+import { getInstanceIndexScopeRefs, getZoteroUserIdentifier } from '../utils/zoteroInstanceIdentity';
 
 /**
  * Build the snake_case Zotero instance identity sent in auth handshakes.

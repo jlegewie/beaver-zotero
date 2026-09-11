@@ -1,4 +1,4 @@
-import { useAtom, useAtomValue } from 'jotai';
+import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
 import { syncedLibraryIdsAtom, profileWithPlanAtom } from '../atoms/profile';
 import { accountService } from '@beaver/agent-core/transport/clients/accountService';
@@ -13,7 +13,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
  */
 export function useValidateSyncLibraries() {
     const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
-    const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
+    const profileWithPlan = useAtomValue(profileWithPlanAtom);
     const { startDeletion, activeDeletionIds } = useLibraryDeletions();
     const askedRef = useRef<Set<number>>(new Set());
 
@@ -34,11 +34,11 @@ export function useValidateSyncLibraries() {
 
         try {
             await accountService.updateSyncLibraries(remaining);
-            setProfileWithPlan({ ...profileWithPlan, libraries: remaining });
+            await Zotero.Beaver.account!.invalidateProfile();
         } catch (e) {
             logger(`useValidateSyncLibraries: failed to update libraries: ${String(e)}`, 1);
         }
-    }, [profileWithPlan, setProfileWithPlan]);
+    }, [profileWithPlan]);
 
     useEffect(() => {
         const run = async () => {

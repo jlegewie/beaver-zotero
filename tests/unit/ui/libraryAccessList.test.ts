@@ -7,7 +7,7 @@ import type { ExcludedLibrary } from '@beaver/agent-core/types/profile';
 import {
     isProfileLoadedAtom,
     localZoteroLibrariesAtom,
-    profileWithPlanAtom,
+    profileProjectionAtom,
 } from '../../../react/atoms/profile';
 import LibraryAccessList from '../../../react/components/preferences/LibraryAccessList';
 
@@ -65,7 +65,7 @@ function storeWithProfile(excluded: ExcludedLibrary[] | null) {
     store.set(localZoteroLibrariesAtom, localLibraries);
     if (excluded !== null) {
         store.set(isProfileLoadedAtom, true);
-        store.set(profileWithPlanAtom, { excluded_libraries: excluded } as any);
+        store.set(profileProjectionAtom, { excluded_libraries: excluded } as any);
     }
     return store;
 }

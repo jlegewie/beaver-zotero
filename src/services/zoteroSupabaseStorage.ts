@@ -1,10 +1,7 @@
 /**
- * Zotero adapters for the Supabase client: the auth-session storage, and the
- * bridge to state that has to survive a plugin reload.
+ * Encrypted auth-session storage for the plugin-owned Supabase client.
  *
- * Both are kept out of `supabaseClient.ts` so the L1 transport layer doesn't
- * statically import Zotero-specific implementations — encrypted storage here,
- * and the window the reload-persistent state is stashed on.
+ * Kept outside the shared transport layer so other hosts can supply their own storage.
  */
 
 import { EncryptedStorage } from './EncryptedStorage';
@@ -12,17 +9,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import {
     SupabaseStorageAdapter,
     setSupabaseStorageAdapter,
-    setSupabaseReloadBridge,
 } from '@beaver/agent-core/transport/supabaseClient';
-
-/**
- * The window that loaded this bundle, which is where the reload-persistent
- * Supabase state lives. Deliberately not `Zotero.getMainWindow()`: that would
- * let a second main window stop the first window's live auto-refresh ticker
- * and hijack its auth lock.
- */
-// eslint-disable-next-line no-restricted-globals -- per-window scoping is the point; getMainWindow() would reach across windows
-const currentWindow: Window | undefined = typeof window !== 'undefined' ? window : undefined;
 
 /**
  * The Zotero plugin's storage adapter: an AES-encrypted, profile-bound store
@@ -94,41 +81,11 @@ function createEncryptedStorageAdapter(): SupabaseStorageAdapter {
 /**
  * Register the Zotero encrypted-storage adapter the Supabase auth session
  * persists into. Required, not a fallback: the client throws when nothing is
- * registered. Call once at webpack bundle init (from `react/index.tsx`),
+ * registered. Call once during instance startup,
  * before the Supabase client is first used — the client is created lazily on
  * first access to the exported `supabase` proxy, so this only needs to land
  * before that point, not before module load.
  */
 export function registerZoteroSupabaseStorage(): void {
     setSupabaseStorageAdapter(createEncryptedStorageAdapter());
-}
-
-/**
- * Register the bridge to Supabase state that outlives a plugin reload, stashed
- * on this bundle's window.
- *
- * `__beaverDisposeSupabase` is also the cross-bundle channel the esbuild
- * bundle's shutdown path calls to stop the client (the webpack bundle owns the
- * client, the esbuild bundle owns shutdown), so the property name is a
- * contract, not an implementation detail.
- *
- * Call once at webpack bundle init (from `react/index.tsx`), before the
- * Supabase client is first used: registration is what stops a previous
- * instance's auto-refresh ticker and adopts its auth lock.
- */
-export function registerZoteroSupabaseReloadBridge(): void {
-    setSupabaseReloadBridge({
-        previousDisposer: () => currentWindow?.__beaverDisposeSupabase,
-        publishDisposer: (dispose) => {
-            if (currentWindow) {
-                currentWindow.__beaverDisposeSupabase = dispose;
-            }
-        },
-        shareAuthLock: (fallback) => {
-            if (!currentWindow) return fallback;
-            const shared = currentWindow.__beaverAuthLock ?? fallback;
-            currentWindow.__beaverAuthLock = shared;
-            return shared;
-        },
-    });
 }

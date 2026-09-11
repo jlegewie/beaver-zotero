@@ -395,7 +395,7 @@ describe('BackgroundExtractor', () => {
 
             // The user excludes the library mid-extraction.
             (Zotero as any).Beaver.searchableLibraryIds = [];
-            proc.abortJobsOutsideScope();
+            proc.abortJobsWithoutAccess();
 
             expect(signal.aborted).toBe(true);
             mockState.extractResolve!({
@@ -421,7 +421,7 @@ describe('BackgroundExtractor', () => {
 
             // A different library was excluded; this job must keep running.
             (Zotero as any).Beaver.searchableLibraryIds = [1];
-            proc.abortJobsOutsideScope();
+            proc.abortJobsWithoutAccess();
 
             expect(signal.aborted).toBe(false);
             mockState.extractResolve!(okResult());
