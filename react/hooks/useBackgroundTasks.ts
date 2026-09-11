@@ -7,14 +7,13 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import {
-    BackgroundTaskState,
-    BackgroundTaskType,
     subscribeToTasks,
     getTasksForItem,
     getTasksByType,
     getActiveTasks,
     getAllTasks,
-} from '../../src/utils/backgroundTasks';
+} from '../runtime/backgroundTasks';
+import type { BackgroundTaskState, BackgroundTaskType } from '../../src/utils/backgroundTasks';
 
 /**
  * Subscribe to all background tasks and get updates when any task changes.
@@ -28,6 +27,7 @@ export function useBackgroundTasks(): BackgroundTaskState[] {
             // Re-fetch all active tasks on any change
             setTasks(getActiveTasks());
         });
+        setTasks(getActiveTasks());
         return unsubscribe;
     }, []);
 
@@ -82,6 +82,7 @@ export function useTasksByType(type: BackgroundTaskType): BackgroundTaskState[] 
                 setTasks(getTasksByType(type));
             }
         });
+        setTasks(getTasksByType(type));
         return unsubscribe;
     }, [type]);
 
@@ -141,6 +142,7 @@ export function useAllBackgroundTasks(): BackgroundTaskState[] {
             // Re-fetch all tasks on any change
             setTasks(getAllTasks());
         });
+        setTasks(getAllTasks());
         return unsubscribe;
     }, []);
 

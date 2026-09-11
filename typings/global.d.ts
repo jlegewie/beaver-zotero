@@ -80,6 +80,11 @@ declare namespace Zotero {
     let __beaverTableWriteLocks: Map<string, Promise<unknown>> | undefined;
 
     namespace Beaver {
+        let notePreviews: import("../src/services/notePreviews").NotePreviews;
+        let libraryOperations: import("../src/services/libraryOperations").LibraryOperations;
+        let backgroundTasks: import("../src/utils/backgroundTasks").BackgroundTaskSource;
+        let mutations: import("../src/services/libraryMutations").LibraryMutations;
+        let syncPause: ReturnType<typeof import("../src/services/syncPause").createSyncPauseService>;
         const preferences: import("../src/services/instancePreferences").InstancePreferences | undefined;
         const account: import("../src/services/instanceAccount").InstanceAccount | undefined;
         const runtime: import("../src/runtime/instance").BeaverInstance;

@@ -5,30 +5,30 @@
  * warming the simplification cache used by edit_note.
  */
 
+import {
+    normalizeCitationTag,
+    parseRawCitationAttributes,
+} from '@beaver/agent-core/citations/citationGrammar';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { getOrSimplify } from '../../utils/noteHtmlSimplifier';
-import { preloadNotePageLabels } from '../../utils/noteCitationExpand';
-import { getNoteHtmlForRead } from '../../utils/noteEditorIO';
-import { containsPreviewMarkers, stripPreviewMarkers } from '../../utils/notePreviewGuard';
 import {
     WSReadNoteRequest,
     WSReadNoteResponse,
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { ItemStub, ItemSummary } from '@beaver/agent-core/types/zotero';
-import { serializeItemStub, serializeItemSummary } from '../../utils/zoteroSerializers';
+import { CITATION_TAG_PATTERN } from '../../utils/citationPreprocessing';
 import {
     libraryRefForLibraryID,
     modelObjectId,
     resolveObjectId,
     UNRESOLVED_LIBRARY_ID,
 } from '../../utils/libraryIdentity';
+import { preloadNotePageLabels } from '../../utils/noteCitationExpand';
+import { getNoteHtmlForRead } from '../../utils/noteEditorIO';
+import { getOrSimplify } from '../../utils/noteHtmlSimplifier';
+import { containsPreviewMarkers, stripPreviewMarkers } from '../../utils/notePreviewGuard';
+import { getNoteContentPreviewText } from '../../utils/noteText';
+import { serializeItemStub, serializeItemSummary } from '../../utils/zoteroSerializers';
 import { checkLibraryExcluded, getAttachmentInfoForItem, prepareAttachmentInfoBatchData, processAttachmentInfoBatch } from './utils';
-import { CITATION_TAG_PATTERN } from '../../../react/utils/citationPreprocessing';
-import {
-    normalizeCitationTag,
-    parseRawCitationAttributes,
-} from '@beaver/agent-core/citations/citationGrammar';
-import { getNoteContentPreviewText } from '../../../react/utils/noteText';
 
 const CITED_NOTE_PREVIEW_LENGTH = 500;
 

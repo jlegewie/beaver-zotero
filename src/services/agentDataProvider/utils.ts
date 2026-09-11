@@ -1,14 +1,13 @@
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
-    ZoteroItemStatus,
-    FrontendFileStatus,
     AttachmentInfo,
+    FrontendFileStatus,
+    ZoteroItemStatus,
     type ItemStub,
     type ZoteroItemReference,
 } from '@beaver/agent-core/types/zotero';
-import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../utils/zoteroUtils';
 import { safeAttachmentFilename } from '../../utils/attachmentFiles';
-import { safeStub } from '../../utils/zoteroSerializers';
+import { syncingItemFilterAsync } from '../../utils/itemSyncStatus';
 import {
     libraryRefForLibraryID,
     modelObjectId,
@@ -18,51 +17,36 @@ import {
     resolveLibraryRef,
     UNRESOLVED_LIBRARY_ID,
 } from '../../utils/libraryIdentity';
-import { syncingItemFilterAsync } from '../../utils/sync';
-import { getPref } from '../../utils/prefs';
+import { safeStub } from '../../utils/zoteroSerializers';
+import { isLinkedUrlAttachment, safeFileExists, safeIsInTrash } from '../../utils/zoteroUtils';
+import { loadPreferences } from '../deferredToolPolicy';
+import type { OperationContext } from './operationContext';
 
-import { isAttachmentOnServer } from '../../utils/webAPI';
-import { addPopupMessageAtom } from '../../../react/utils/popupMessageUtils';
-import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
 import { DeferredToolPreference, type AttachmentRowResult } from '@beaver/agent-core/protocol/agentProtocol';
-import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
-import {
-    isActionApprovedForCurrentRun,
-    isFullAccessGrantedForRun,
-    runApprovalPolicyAtom,
-} from '../../../react/atoms/runApprovalPolicy';
-import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { isAgentSupportedItem } from '../../utils/agentItemSupport';
-import { store } from '../../../react/store';
-import { TimingAccumulator } from '../../utils/timing';
+import { wasItemAddedBeforeLastSync } from '../../utils/itemSyncStatus';
+import { isAttachmentOnServer } from '../../utils/webAPI';
 import { getAttachmentInfo as resolveAttachmentInfo, type AttachmentInfoOptions } from '../documentExtraction/attachmentInfo';
+export {
+    checkRemotePdfSize, isRemoteAccessAvailable, preflightCachedPdfMeta, resolveToImageAttachment, resolveToPdfAttachment, validateZoteroItemReference
+} from '../documentExtraction';
+export type {
+    ImageAttachmentResolveResult, PdfAttachmentResolveResult, PreflightErrorCode,
+    PreflightFailure,
+    PreflightOptions
+} from '../documentExtraction';
 export {
     getBestAttachmentBatch,
     prepareAttachmentInfoBatchData,
-    processAttachmentInfoBatch,
+    processAttachmentInfoBatch
 } from '../documentExtraction/attachmentInfoBatch';
 export type { AttachmentInfoBatchData } from '../documentExtraction/attachmentInfoBatch';
 // Re-export shared document-extraction helpers so existing agent-data-provider
 // callers keep importing them from `./utils`.
 import {
+    isRemoteAccessAvailable,
     loadPdfData as loadPdfDataPrimitive,
-    isRemoteAccessAvailable,
     validateZoteroItemReference as validateAttachmentReference,
-} from '../documentExtraction';
-export {
-    isRemoteAccessAvailable,
-    validateZoteroItemReference,
-    checkRemotePdfSize,
-    preflightCachedPdfMeta,
-    resolveToPdfAttachment,
-    resolveToImageAttachment,
-} from '../documentExtraction';
-export type {
-    PreflightErrorCode,
-    PreflightFailure,
-    PreflightOptions,
-    PdfAttachmentResolveResult,
-    ImageAttachmentResolveResult,
 } from '../documentExtraction';
 
 // ---------------------------------------------------------------------------
@@ -166,7 +150,7 @@ export function notifyRemoteDownloadFailure(error: unknown): void {
     const { title, text } = describeRemoteDownloadFailure(error);
 
     try {
-        store.set(addPopupMessageAtom, {
+        Zotero.Beaver.runtime.publish('notification:popup', {
             id: 'remote-download-failed',
             type: 'warning',
             title,
@@ -184,7 +168,7 @@ export function notifyRemoteFileNotSynced(): void {
     _remoteNotSyncedLastNotifiedAt = now;
 
     try {
-        store.set(addPopupMessageAtom, {
+        Zotero.Beaver.runtime.publish('notification:popup', {
             id: 'remote-file-not-synced',
             type: 'warning',
             title: 'File Not Synced Locally',
@@ -1704,51 +1688,19 @@ export function validateLibraryAccess(libraryIdOrName: number | string | null | 
  *
  * Reading it never throws for a caller: an unavailable store means no grant.
  */
-export function hasFullAccessForCurrentRun(): boolean {
-    try {
-        return isFullAccessGrantedForRun(
-            store.get(runApprovalPolicyAtom),
-            store.get(activeRunAtom)?.id ?? null,
-        );
-    } catch (error) {
-        logger(`hasFullAccessForCurrentRun: Failed to read the run policy: ${error}`, 1);
-        return false;
-    }
+export function hasFullAccessForCurrentRun(context?: OperationContext): boolean {
+    return context?.fullAccess === true;
 }
 
-/**
- * Get the user's preference for a deferred tool.
- * Reads from Zotero prefs with a two-level structure:
- * - toolToGroup: Maps tool names to group names
- * - groupPreferences: Maps group names to preference values
- *
- * Merges stored prefs with the defaults from deferredToolPreferences.ts
- * so that newly added tools (e.g. create_note) use their configured
- * default even before the user saves any preference change.
- */
 export function getDeferredToolPreference(
     toolName: string,
     actionData?: Record<string, any>,
+    context?: OperationContext,
 ): DeferredToolPreference {
-    try {
-        const runPolicy = store.get(runApprovalPolicyAtom);
-        const activeRunId = store.get(activeRunAtom)?.id ?? null;
-        if (isActionApprovedForCurrentRun(runPolicy, activeRunId, toolName, actionData)) {
-            return 'always_apply';
-        }
-
-        const data = store.get(deferredToolPreferencesAtom);
-        const group = data.toolToGroup[toolName] ?? toolName;
-        const preference = data.groupPreferences[group];
-        if (preference === 'always_ask' || preference === 'always_apply' || preference === 'continue_without_applying') {
-            return preference;
-        }
-    } catch (error) {
-        logger(`getDeferredToolPreference: Failed to read preference for ${toolName}: ${error}`, 1);
-    }
-    return 'always_ask';
+    if (context?.preference) return context.preference(toolName, actionData);
+    const data = loadPreferences();
+    return data.groupPreferences[data.toolToGroup[toolName] ?? toolName] ?? 'always_ask';
 }
-
 
 /**
  * Extract detailed error information for logging.

@@ -1048,7 +1048,13 @@ export class AgentService {
                         break;
                     }
                     logger(`AgentService: Received ${eventName}`, dataEvent, 1);
+                    const requestConnectionId = this.connectionId;
                     const context: AgentDataRequestContext = {
+                        assertCurrent: () => {
+                            if (this.connectionId !== requestConnectionId) {
+                                throw Object.assign(new Error('Request connection closed'), { code: 'operation_cancelled' });
+                            }
+                        },
                         receivedAt,
                         reportPhase: (phase) => keepalive.setPhase(phase),
                     };

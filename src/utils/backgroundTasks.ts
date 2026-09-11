@@ -448,3 +448,9 @@ export async function deduplicatedSync(
     pendingSyncs.set(key, promise);
     return promise;
 }
+
+/** Read-only task state API, constructed in the bundle that executes the tasks. */
+export function createBackgroundTaskSource() {
+    return { subscribeToTasks, getTasksForItem, getTasksByType, getActiveTasks, getAllTasks };
+}
+export type BackgroundTaskSource = ReturnType<typeof createBackgroundTaskSource>;

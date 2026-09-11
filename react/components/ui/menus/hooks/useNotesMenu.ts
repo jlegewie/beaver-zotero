@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
 import { SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
+import { useEffect, useRef, useState } from 'react';
+import { loadFullItemData } from '../../../../../src/utils/zoteroUtils';
+import { getActiveZoteroLibraryId } from '../../../../utils/zoteroTargetContext';
 import { SourceMenuItemContext, createNoteMenuItem } from '../utils/menuItemFactories';
-import { loadFullItemData, getActiveZoteroLibraryId } from '../../../../../src/utils/zoteroUtils';
 
 const NOTES_DISPLAY_LIMIT = 20;
 const SEARCH_DEBOUNCE_MS = 200;

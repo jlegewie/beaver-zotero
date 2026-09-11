@@ -1,3 +1,4 @@
+import type { OperationContext } from './agentDataProvider/operationContext';
 /**
  * Zotero implementation of the agent data-provider map.
  *
@@ -8,41 +9,39 @@
  * actually imported (see `registerZoteroDataProvider` below).
  */
 
-import {
-    handleZoteroDataRequest,
-    handleExternalReferenceCheckRequest,
-    handleZoteroDocumentRequest,
-    handleZoteroAttachmentPageImagesRequest,
-    handleZoteroAttachmentImageRequest,
-    handleZoteroViewImagesRequest,
-    handleZoteroAttachmentSearchRequest,
-    handleItemSearchByMetadataRequest,
-    handleItemSearchByTopicRequest,
-    handleResolveSearchFiltersRequest,
-    handleItemQuickSearchRequest,
-    handleZoteroSearchRequest,
-    handleListItemsRequest,
-    handleResolvePopulationRequest,
-    handleListCollectionsRequest,
-    handleListTagsRequest,
-    handleListLibrariesRequest,
-    handleGetMetadataRequest,
-    handleGetAnnotationsRequest,
-    handleFindAnnotationsRequest,
-    handleAgentActionValidateRequest,
-    handleAgentActionExecuteRequest,
-    handleReadNoteRequest,
-} from './agentDataProvider';
 import { AgentDataProviderMap, setDefaultAgentDataProvider } from '@beaver/agent-core/transport/agentDataDispatch';
 import {
-    SyncPauseOwner,
-    LOCAL_MUTATING_RUN_SYNC_PAUSE_OWNER,
-    pauseSyncForMutatingRun,
+    handleAgentActionExecuteRequest,
+    handleAgentActionValidateRequest,
+    handleExternalReferenceCheckRequest,
+    handleFindAnnotationsRequest,
+    handleGetAnnotationsRequest,
+    handleGetMetadataRequest,
+    handleItemQuickSearchRequest,
+    handleItemSearchByMetadataRequest,
+    handleItemSearchByTopicRequest,
+    handleListCollectionsRequest,
+    handleListItemsRequest,
+    handleListLibrariesRequest,
+    handleListTagsRequest,
+    handleReadNoteRequest,
+    handleResolvePopulationRequest,
+    handleResolveSearchFiltersRequest,
+    handleZoteroAttachmentImageRequest,
+    handleZoteroAttachmentPageImagesRequest,
+    handleZoteroAttachmentSearchRequest,
+    handleZoteroDataRequest,
+    handleZoteroDocumentRequest,
+    handleZoteroSearchRequest,
+    handleZoteroViewImagesRequest,
+} from './agentDataProvider';
+import {
+    pauseSyncForMutatingRun
 } from './syncPause';
 
 export interface ZoteroDataProviderOptions {
-    /** Owner token used for sync suppression around mutating actions. */
-    syncPauseOwner?: SyncPauseOwner;
+    source?: "local" | "provider";
+    operationContext?: () => OperationContext;
 }
 
 /**
@@ -51,7 +50,6 @@ export interface ZoteroDataProviderOptions {
  * per-request error fallbacks the plugin has always sent.
  */
 export function createZoteroDataProvider(options: ZoteroDataProviderOptions = {}): AgentDataProviderMap {
-    const syncPauseOwner = options.syncPauseOwner ?? LOCAL_MUTATING_RUN_SYNC_PAUSE_OWNER;
 
     return {
         zotero_document_request: {
@@ -295,7 +293,7 @@ export function createZoteroDataProvider(options: ZoteroDataProviderOptions = {}
             }),
         },
         agent_action_validate: {
-            handle: handleAgentActionValidateRequest,
+            handle: event => handleAgentActionValidateRequest({ ...event, operation: options.operationContext?.() }),
             errorResponse: (event, err) => ({
                 type: 'agent_action_validate_response',
                 request_id: event.request_id,
@@ -307,18 +305,27 @@ export function createZoteroDataProvider(options: ZoteroDataProviderOptions = {}
         },
         agent_action_execute: {
             handle: async (event, context) => {
-                pauseSyncForMutatingRun(syncPauseOwner);
-                // The context carries the socket arrival time, so the execute
-                // deadline covers time spent queued behind other executes.
-                return context
-                    ? handleAgentActionExecuteRequest(event, context)
-                    : handleAgentActionExecuteRequest(event);
+                // Capture source state immediately; the instance queue owns waiting
+                // and starts the execution deadline when the operation enters.
+                const operation = options.operationContext?.();
+                if (operation?.runId && event.run_id && operation.runId !== event.run_id) {
+                    throw Object.assign(new Error('Request belongs to another run'), { code: 'operation_cancelled' });
+                }
+                // Only local chats hold sync across requests. Originless writes
+                // use the plugin-owned queue token, whose release survives closing
+                // the renderer that currently hosts this transport.
+                if (operation?.owner && operation.runId) {
+                    pauseSyncForMutatingRun(`chat:${operation.owner}:${operation.runId}`);
+                }
+                return handleAgentActionExecuteRequest({ ...event, operation }, {
+                    ...context,
+                    receivedAt: context?.receivedAt ?? Date.now(),
+                    reportPhase: context?.reportPhase ?? (() => {}),
+                    owner: operation?.owner ?? context?.owner,
+                });
             },
-            syncPauseOwner,
-            // Serialized: concurrent edit_note actions on the same note otherwise
-            // race (each reads the original HTML and saves its own edit, so only
-            // the last save survives).
-            serialize: true,
+            // No transport-local queue: capture identity/citations at receipt, then
+            // serialize all clients through the instance mutation service.
             errorResponse: (event, err) => ({
                 type: 'agent_action_execute_response',
                 request_id: event.request_id,
@@ -334,6 +341,6 @@ export function createZoteroDataProvider(options: ZoteroDataProviderOptions = {}
  * Register the Zotero data-provider factory as the default. Call once at
  * webpack bundle init (from `react/index.tsx`), alongside `registerZoteroHost()`.
  */
-export function registerZoteroDataProvider(): void {
-    setDefaultAgentDataProvider(createZoteroDataProvider);
+export function registerZoteroDataProvider(factory = createZoteroDataProvider): void {
+    setDefaultAgentDataProvider(factory);
 }

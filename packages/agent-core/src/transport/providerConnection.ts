@@ -23,7 +23,6 @@ import { resolveClientIdentity } from './clientIdentity';
 import {
     AgentDataProviderMap,
     resolveDefaultAgentDataProvider,
-    PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER,
     notifySyncPauseOwnerSettled,
     unknownDataRequestErrorResponse,
     NOOP_KEEPALIVE,
@@ -120,7 +119,7 @@ export class ProviderConnection {
     private getDataProvider(): AgentDataProviderMap {
         if (!this.dataProvider) {
             this.dataProvider = resolveDefaultAgentDataProvider({
-                syncPauseOwner: PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER,
+                source: "provider",
             });
         }
         return this.dataProvider;
@@ -530,7 +529,13 @@ export class ProviderConnection {
                 logger(`ProviderConnection: Received ${eventName}`, 1);
                 this.requestsServed++;
                 this.lastRequestAt = Date.now();
-                const context: AgentDataRequestContext = {
+                const requestConnectionId = this.connectionId;
+                    const context: AgentDataRequestContext = {
+                        assertCurrent: () => {
+                            if (this.connectionId !== requestConnectionId) {
+                                throw Object.assign(new Error('Request connection closed'), { code: 'operation_cancelled' });
+                            }
+                        },
                     receivedAt,
                     reportPhase: (phase) => keepalive.setPhase(phase),
                 };

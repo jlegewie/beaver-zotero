@@ -6,28 +6,25 @@
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
+import {
+    AnnotationResultItem,
+    FileStatusLevel,
+    NoteResultItem,
+    WSDataError,
+} from '@beaver/agent-core/protocol/agentProtocol';
+import { AttachmentDataWithStatus, ItemDataWithStatus, ItemStub, ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { libraryKeyToken, libraryRefForLibraryID, modelObjectId, resolveItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
-import { ItemDataWithStatus, AttachmentDataWithStatus, ZoteroItemReference, ItemStub } from '@beaver/agent-core/types/zotero';
-import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
-import { userIdAtom } from '../../../react/atoms/auth';
-import { store } from '../../../react/store';
 import {
     formatZoteroCreatorsString,
     getCreatorsFromItem,
     getYearFromItem,
-    serializeAttachment,
     serializeAnnotation,
+    serializeAttachment,
     serializeItem,
-    serializeNote,
     serializeItemStub,
+    serializeNote,
 } from '../../utils/zoteroSerializers';
-import { checkLibraryExcluded, computeItemStatus, prefetchSyncDates, getAttachmentFileStatus, getAttachmentFileStatusLightweight, getBestAttachmentBatch } from './utils';
-import {
-    WSDataError,
-    AnnotationResultItem,
-    NoteResultItem,
-    FileStatusLevel,
-} from '@beaver/agent-core/protocol/agentProtocol';
+import { checkLibraryExcluded, computeItemStatus, getAttachmentFileStatus, getAttachmentFileStatusLightweight, getBestAttachmentBatch, prefetchSyncDates } from './utils';
 
 
 export interface LookupZoteroReferencesOptions {
@@ -67,9 +64,9 @@ export async function lookupZoteroReferences(
     const errors: WSDataError[] = [];
 
     // Get sync configuration from store
-    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
-    const syncWithZotero = store.get(syncWithZoteroAtom);
-    const userId = store.get(userIdAtom);
+    const searchableLibraryIds = (Zotero.Beaver.libraryScopeInitialized ? (Zotero.Beaver.searchableLibraryIds ?? []) : []);
+    const syncWithZotero = Zotero.Beaver.account?.getSnapshot().data?.profile.use_zotero_sync ?? false;
+    const userId = Zotero.Beaver.account?.getSnapshot().session?.user.id ?? null;
 
     // Track keys to avoid duplicates when including parents/attachments
     const itemKeys = new Set<string>();

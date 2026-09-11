@@ -1,3 +1,4 @@
+vi.mock('../../../react/runtime/operationContext', () => ({ captureOperationContext: () => ({ fullAccess: false, renderMarkdown: async (text: string) => text }) }));
 /**
  * Unit tests for MCP tool handlers defined in react/hooks/useMcpServer.ts
  *
@@ -33,6 +34,11 @@ const mockExecuteCreateNoteAction = vi.fn();
 const mockMcpWriteToolsEnabled = vi.hoisted(() => ({ value: false }));
 
 vi.mock('../../../src/services/agentDataProvider', () => ({
+    handleAgentActionExecuteRequest: (request: any) => {
+        const execute = request.action_type === 'create_note' ? mockExecuteCreateNoteAction
+            : request.action_type === 'create_highlight_annotations' ? mockExecuteHighlights : mockExecuteAnnotationNotes;
+        return execute(request);
+    },
     handleItemSearchByTopicRequest: (...args: any[]) => mockHandleItemSearchByTopicRequest(...args),
     handleItemSearchByMetadataRequest: (...args: any[]) => mockHandleItemSearchByMetadataRequest(...args),
     handleZoteroDocumentRequest: (...args: any[]) => mockHandleZoteroDocumentRequest(...args),
@@ -1364,9 +1370,8 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
                 library: '1',
                 collection: 'COL1',
             });
-            expect(mockExecuteCreateNoteAction.mock.calls[0][1]).toMatchObject({
-                timeoutSeconds: 120,
-            });
+            expect(executeReq.timeout_seconds).toBe(120);
+            expect(executeReq.operation.fullAccess).toBe(false);
             expect(data).toMatchObject({
                 note_id: '1-NOTEKEY1',
                 collection_key: 'COL1',
@@ -2817,7 +2822,7 @@ describe('MCP libraries and annotations', () => {
                 const result = await callTool(endpoint, name, { attachment_id: 'u-ATT00001', items: [item], tags: ['review'] });
                 expect(result.isError).not.toBe(true);
                 expect(validate).toHaveBeenCalledWith(expect.objectContaining({ action_type: name, action_data: expect.objectContaining({ resolved_ref: { library_id: 1, library_ref: 'u', zotero_key: 'ATT00001' } }) }));
-                expect(execute).toHaveBeenCalledWith(expect.objectContaining({ action_data: expect.objectContaining({ tags: ['normalized'], items: [expect.objectContaining({ ...item, index: 0, color: 'yellow' })] }) }), expect.objectContaining({ timeoutSeconds: 120 }));
+                expect(execute).toHaveBeenCalledWith(expect.objectContaining({ action_data: expect.objectContaining({ tags: ['normalized'], items: [expect.objectContaining({ ...item, index: 0, color: 'yellow' })] }) , timeout_seconds: 120 }));
                 expect(JSON.parse(result.content[0].text).created[0]).toMatchObject({ annotation_id: 'u-ANNOT001', zotero_uri: expect.stringContaining('ANNOT001') });
             });
 

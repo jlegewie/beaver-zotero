@@ -1,16 +1,15 @@
-import { validateInput } from '../../../src/services/mcpInputValidation';
-import { mcpError, generateRequestId, buildNoopTimeoutContext } from './utils';
-import {
-    handleListLibrariesRequest,
-    handleFindAnnotationsRequest,
-    validateCreateHighlightAnnotationsAction,
-    executeCreateHighlightAnnotationsAction,
-    validateCreateNoteAnnotationsAction,
-    executeCreateNoteAnnotationsAction,
-} from '../../../src/services/agentDataProvider';
 import type { WSFindAnnotationsRequest } from '@beaver/agent-core/protocol/agentProtocol';
-import { resolveObjectId, modelObjectIdFromReference, UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
+import {
+    handleAgentActionExecuteRequest,
+    handleFindAnnotationsRequest,
+    handleListLibrariesRequest,
+    validateCreateHighlightAnnotationsAction,
+    validateCreateNoteAnnotationsAction,
+} from '../../../src/services/agentDataProvider';
+import { validateInput } from '../../../src/services/mcpInputValidation';
+import { modelObjectIdFromReference, resolveObjectId, UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 import { getZoteroSelectURI } from '../../../src/utils/zoteroUtils';
+import { generateRequestId, mcpError } from './utils';
 
 const readHints = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const writeHints = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
@@ -165,7 +164,6 @@ async function createAnnotations(args: any, highlight: boolean): Promise<any> {
             })),
         };
         const validate = highlight ? validateCreateHighlightAnnotationsAction : validateCreateNoteAnnotationsAction;
-        const execute = highlight ? executeCreateHighlightAnnotationsAction : executeCreateNoteAnnotationsAction;
         const validation = await validate({ event: 'agent_action_validate', request_id: generateRequestId(), action_type: actionType, action_data: data });
         if (!validation.valid) return mcpError(validation.error ?? 'Annotation validation failed.');
         const kind = validation.current_value?.content_kind;
@@ -180,10 +178,10 @@ async function createAnnotations(args: any, highlight: boolean): Promise<any> {
                 throw new Error(`items[${index}] requires text or anchor_id for a snapshot.`);
             }
         }
-        const response = await execute({
-            event: 'agent_action_execute', request_id: generateRequestId(), action_type: actionType,
+        const response = await handleAgentActionExecuteRequest({
+            event: 'agent_action_execute', request_id: generateRequestId(), action_type: actionType, timeout_seconds: 120,
             action_data: { ...data, ...validation.normalized_action_data },
-        }, buildNoopTimeoutContext());
+        });
         if (!response.success) return mcpError(response.error ?? 'Annotation creation failed.');
         const result = response.result_data ?? {};
         const output = {

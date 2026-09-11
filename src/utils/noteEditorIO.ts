@@ -1,3 +1,4 @@
+import { systemDelay } from './systemTimers';
 /**
  * Live-editor I/O for Zotero notes.
  *
@@ -13,10 +14,10 @@
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
-import { stripDataCitationItems } from './noteWrapper';
-import { decodeHtmlEntities } from './noteHtmlEntities';
 import { findRangeByContexts } from './editNoteRawPosition';
+import { decodeHtmlEntities } from './noteHtmlEntities';
 import { assertNoPreviewMarkers } from './notePreviewGuard';
+import { stripDataCitationItems } from './noteWrapper';
 
 // =============================================================================
 // Reading the note
@@ -34,6 +35,17 @@ interface LiveCandidate {
  * INCLUDED so callers can decide whether to skip them. Throws are absorbed —
  * a bad instance is just skipped.
  */
+export function isLiveNoteEditor(instance: any): boolean {
+    try {
+        const win = instance?._iframeWindow;
+        if (!win || win.closed) return false;
+        const frame = win.frameElement ?? win.browsingContext?.embedderElement;
+        if (frame) return frame.isConnected === true;
+        // Separate note windows can expose their content window without a frameElement.
+        return win.document?.querySelector('.ProseMirror')?.isConnected === true;
+    } catch { return false; }
+}
+
 function collectLiveCandidates(item: any, excludeInstance?: any): LiveCandidate[] {
     const instances = (Zotero as any).Notes?._editorInstances;
     if (!Array.isArray(instances)) return [];
@@ -46,8 +58,7 @@ function collectLiveCandidates(item: any, excludeInstance?: any): LiveCandidate[
         // — their content is not authoritative.
         if (instance._disableSaving) continue;
         try {
-            const frameElement = instance._iframeWindow?.frameElement;
-            if (frameElement?.isConnected !== true) continue;
+            if (!isLiveNoteEditor(instance)) continue;
             let noteData = instance._iframeWindow.wrappedJSObject.getDataSync(true);
             if (noteData) {
                 // Clone out of XPCOM sandbox wrapper
@@ -181,7 +192,7 @@ export async function getNoteHtmlForRead(item: any): Promise<string> {
     // pay the ~150ms PM-recovery latency.
     if (candidates.length > 0) {
         for (let i = 0; i < 3; i++) {
-            await new Promise((r) => setTimeout(r, 50));
+            await systemDelay(50);
             candidates = getLiveNoteHtmlCandidates(item);
             nonEmpty = pickNonEmpty(candidates);
             if (nonEmpty) return nonEmpty;
@@ -211,8 +222,7 @@ export function isNoteInEditor(itemId: number): boolean {
                 if (!instance._item || instance._item.id !== itemId) return false;
                 // Verify the editor is still alive (iframe attached to the DOM)
                 try {
-                    const frameElement = instance._iframeWindow?.frameElement;
-                    return frameElement?.isConnected === true;
+                    return isLiveNoteEditor(instance);
                 } catch {
                     return false;
                 }
@@ -272,7 +282,7 @@ export async function waitForPMNormalization(
 
     // Poll until PM changes the HTML or we time out
     for (let elapsed = 0; elapsed < PM_REFRESH_MAX_WAIT_MS; elapsed += PM_REFRESH_INTERVAL_MS) {
-        await new Promise(resolve => setTimeout(resolve, PM_REFRESH_INTERVAL_MS));
+        await systemDelay(PM_REFRESH_INTERVAL_MS);
 
         try {
             const currentHtml = getLatestNoteHtml(item);
@@ -397,7 +407,7 @@ export async function waitForNoteSaveStabilization(
     let stableCount = 0;
 
     for (let elapsed = 0; elapsed < STABILIZE_MAX_WAIT_MS; elapsed += STABILIZE_POLL_MS) {
-        await new Promise(resolve => setTimeout(resolve, STABILIZE_POLL_MS));
+        await systemDelay(STABILIZE_POLL_MS);
 
         const currentHtml: string = item.getNote();
         if (currentHtml === lastHtml) {
@@ -436,13 +446,11 @@ export async function waitForNoteSaveStabilization(
  * Returns true when a flush actually ran.
  */
 export async function flushLiveEditorToDB(item: any): Promise<boolean> {
-    let latest: string;
-    try {
-        latest = getLatestNoteHtml(item);
-    } catch (e: any) {
-        logger(`flushLiveEditorToDB: getLatestNoteHtml threw: ${e?.message || e}`, 1);
-        return false;
+    const candidates = collectLiveCandidates(item);
+    if (new Set(candidates.map(candidate => candidate.html)).size > 1) {
+        throw Object.assign(new Error('This note has different content in multiple editors. Save or close the other editor before applying the edit.'), { code: 'note_editor_conflict' });
     }
+    const latest = getLatestNoteHtml(item);
 
     const saved: string = item.getNote();
     if (latest === saved) return false;
@@ -458,4 +466,23 @@ export async function flushLiveEditorToDB(item: any): Promise<boolean> {
 
     await waitForNoteSaveStabilization(item, latest);
     return true;
+}
+
+/** Collapse selections in each live editor of a changed note after its notifier update. */
+export function clearNoteEditorSelection(libraryId: number, zoteroKey: string): void {
+    const itemId = Zotero.Items.getIDFromLibraryAndKey(libraryId, zoteroKey);
+    if (!itemId) return;
+    void systemDelay(150).then(() => {
+        for (const instance of (Zotero as any).Notes?._editorInstances ?? []) {
+            if (instance._item?.id !== itemId || instance._disableSaving) continue;
+            try {
+                const view = instance._iframeWindow?.wrappedJSObject?._currentEditorInstance?._editorCore?.view;
+                if (!view?.dom?.isConnected) continue;
+                const base = Object.getPrototypeOf(Object.getPrototypeOf(view.state.selection)).constructor;
+                const selectionClass = base.atStart(view.state.doc).constructor;
+                const position = Math.min(view.state.selection.from, view.state.doc.content.size);
+                view.dispatch(view.state.tr.setSelection(selectionClass.create(view.state.doc, position)));
+            } catch { /* Editor teardown can race the notification. */ }
+        }
+    });
 }

@@ -1,20 +1,20 @@
-import { cleanMetadataUrl } from './metadataUrl';
-import { v4 as uuidv4 } from 'uuid';
-import { calculateObjectHash } from '../utils/hash';
-import { logger } from '@beaver/agent-core/platform/logger';
-import { libraryRefForLibraryID, modelObjectId } from './libraryIdentity';
-import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemStub, ItemSummary, CollectionSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary, AttachmentStub } from '@beaver/agent-core/types/zotero';
-import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, getMimeType, safeIsInTrash, safeFileExists } from './zoteroUtils';
-import { safeAttachmentFilename } from './attachmentFiles';
-import { formatItemReference } from './itemReference';
-import { getItemDisplayName } from './itemDisplayName';
-import { syncingItemFilterAsync } from './sync';
-import { isAttachmentOnServer } from './webAPI';
-import { skippedItemsManager } from '../services/skippedItemsManager';
-import { AnnotationResultItem, NoteResultItem } from '@beaver/agent-core/protocol/agentProtocol';
-import { getContentKind } from '../services/documentExtraction/attachmentResolution';
 import type { ContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
+import { logger } from '@beaver/agent-core/platform/logger';
+import { AnnotationResultItem, NoteResultItem } from '@beaver/agent-core/protocol/agentProtocol';
 import type { ItemSearchResult } from '@beaver/agent-core/transport/clients/searchService';
+import { AttachmentDataHashedFields, AttachmentDataWithMimeType, AttachmentStub, BibliographicIdentifier, CollectionSummary, ItemData, ItemDataHashedFields, ItemStub, ItemSummary, ZoteroCollection, ZoteroCreator, ZoteroLibrary } from '@beaver/agent-core/types/zotero';
+import { v4 as uuidv4 } from 'uuid';
+import { getContentKind } from '../services/documentExtraction/attachmentResolution';
+import { skippedItemsManager } from '../services/skippedItemsManager';
+import { calculateObjectHash } from '../utils/hash';
+import { safeAttachmentFilename } from './attachmentFiles';
+import { getItemDisplayName } from './itemDisplayName';
+import { formatItemReference } from './itemReference';
+import { syncingItemFilterAsync } from './itemSyncStatus';
+import { libraryRefForLibraryID, modelObjectId } from './libraryIdentity';
+import { cleanMetadataUrl } from './metadataUrl';
+import { isAttachmentOnServer } from './webAPI';
+import { getCitationKeyFromItem, getCollectionClientDateModifiedAsISOString, getMimeType, safeFileExists, safeIsInTrash } from './zoteroUtils';
 
 export interface FileData {
     // filename: string;

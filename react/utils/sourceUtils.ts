@@ -1,34 +1,35 @@
-import { openNote, viewAttachment } from '../runtime/navigation';
-import { getContextWindow, tryGetWindowRuntime } from '../runtime/windowRuntime';
-import { getItemDisplayName, MAX_NOTE_TITLE_LENGTH } from '../../src/utils/itemDisplayName';
-import { stripHtmlTags, computeDiff } from '../components/agentRuns/EditNotePreview';
-import { logger } from '@beaver/agent-core/platform/logger';
-import { isAgentSupportedItem, agentItemFilter, agentItemFilterAsync } from '../../src/utils/agentItemSupport';
-import { isValidAnnotationType, SourceAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
-import { selectItemById } from './selectItem';
-import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { searchableLibraryIdsAtom } from '../atoms/profile';
-import { store } from '../store';
-import { userIdAtom } from '../atoms/auth';
-import { isAttachmentOnServer } from '../../src/utils/webAPI';
-import { safeFileExists } from '../../src/utils/zoteroUtils';
-import { getSelectedCollection } from '../../src/utils/zoteroSelection';
-import { getNoteContentPreviewText } from './noteText';
-import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
-import { getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
-import { notifyReferenceUnavailable } from '../host/zotero/sourceActions';
-import {
-    resolveItemReference,
-    resolveLibraryRef,
-    resolveObjectId,
-    modelObjectIdFromReference,
-    UNRESOLVED_LIBRARY_ID,
-} from '../../src/utils/libraryIdentity';
 import {
     getPageLocator,
     normalizeCitationTag,
     parseRawCitationAttributes,
 } from '@beaver/agent-core/citations/citationGrammar';
+import { logger } from '@beaver/agent-core/platform/logger';
+import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
+import { isValidAnnotationType, SourceAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import { agentItemFilter, agentItemFilterAsync, isAgentSupportedItem } from '../../src/utils/agentItemSupport';
+import { getItemDisplayName, MAX_NOTE_TITLE_LENGTH } from '../../src/utils/itemDisplayName';
+import {
+    modelObjectIdFromReference,
+    resolveItemReference,
+    resolveLibraryRef,
+    resolveObjectId,
+    UNRESOLVED_LIBRARY_ID,
+} from '../../src/utils/libraryIdentity';
+import { getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
+import { isAttachmentOnServer } from '../../src/utils/webAPI';
+import { getSelectedCollection } from '../../src/utils/zoteroSelection';
+import { safeFileExists } from '../../src/utils/zoteroUtils';
+import { userIdAtom } from '../atoms/auth';
+import { searchableLibraryIdsAtom } from '../atoms/profile';
+import { computeDiff, stripHtmlTags } from '../components/agentRuns/EditNotePreview';
+import { notifyReferenceUnavailable } from '../host/zotero/sourceActions';
+import { openNote, viewAttachment } from '../runtime/navigation';
+import { getContextWindow, tryGetWindowRuntime } from '../runtime/windowRuntime';
+import { store } from '../store';
+import { getNoteContentPreviewText } from './noteText';
+import { selectItemById } from './selectItem';
+export { wasItemAddedBeforeLastSync } from '../../src/utils/itemSyncStatus';
 
 // Constants
 export const MAX_NOTE_CONTENT_LENGTH = 150;
@@ -85,27 +86,7 @@ export function getZoteroItem(source: SourceAttachment | ZoteroItemReference): Z
  * @param userID The user ID
  * @returns True if the item was added before the last sync
  */
-export async function wasItemAddedBeforeLastSync(item: Zotero.Item, syncWithZotero: boolean, userID: string): Promise<boolean> {
-    let syncLog = null;
-    if (syncWithZotero) {
-        syncLog = await Zotero.Beaver.db.getSyncLogWithHighestVersion(userID, item.libraryID);
-    } else {
-        syncLog = await Zotero.Beaver.db.getSyncLogWithMostRecentDate(userID, item.libraryID);
-    }
 
-    if (!syncLog) {
-        return false;
-    }
-
-    const lastSyncDate = syncLog.library_date_modified;
-    const itemDateAdded = item.dateAdded;
-    const lastSyncDateSQL = Zotero.Date.isISODate(lastSyncDate) 
-        ? Zotero.Date.isoToSQL(lastSyncDate) 
-        : lastSyncDate;
-    
-    // Item was added before the last sync
-    return itemDateAdded <= lastSyncDateSQL;
-}
 
 /**
 * Source method: Check if a source is valid

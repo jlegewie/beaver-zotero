@@ -1,3 +1,4 @@
+import { installMutationInstance } from '../../helpers/mutationInstance';
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const items = new Map<string, any>();
@@ -618,3 +619,5 @@ describe("undoEditAnnotationsAction", () => {
         expect(item.annotationComment).toBe("new comment");
     });
 });
+
+beforeEach(installMutationInstance);

@@ -1,11 +1,8 @@
+import { installMutationInstance } from '../../helpers/mutationInstance';
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@beaver/agent-core/platform/logger", () => ({
   logger: vi.fn(),
-}));
-
-vi.mock("../../../src/utils/zoteroUtils", () => ({
-  getZoteroTargetContext: vi.fn(),
 }));
 
 vi.mock("../../../src/utils/backgroundTasks", () => ({
@@ -82,7 +79,12 @@ describe("stampBeaverProvenanceExtra", () => {
 });
 
 describe("createZoteroItem import target", () => {
-  it("adds imports to the selected collection even when an item is selected", async () => {
+  it.each([
+    { tab: "library", libraryId: 7, explicitCollection: undefined, expectedCollection: 42 },
+    { tab: "reader", libraryId: 7, explicitCollection: undefined, expectedCollection: undefined },
+    { tab: "reader", libraryId: 8, explicitCollection: undefined, expectedCollection: undefined },
+    { tab: "reader", libraryId: 8, explicitCollection: 43, expectedCollection: 43 },
+  ])("targets $tab imports in library $libraryId with explicit collection $explicitCollection", async ({ tab, libraryId, explicitCollection, expectedCollection }) => {
     const addItem = vi.fn();
     const collection = { id: 42, libraryID: 7, addItem };
     const createdItem = {
@@ -97,13 +99,15 @@ describe("createZoteroItem import target", () => {
     };
 
     (globalThis as any).Zotero.getMainWindow = vi.fn(() => ({
-      Zotero_Tabs: { selectedType: "library" },
+      Zotero_Tabs: { selectedType: tab, selectedID: "reader-tab" },
     }));
     (globalThis as any).Zotero.getActiveZoteroPane = vi.fn(() => ({
       getSelectedLibraryID: vi.fn(() => 7),
       getSelectedCollection: vi.fn(() => collection),
-      getSelectedItems: vi.fn(() => [{ libraryID: 7, isRegularItem: () => true }]),
+      getSelectedItems: vi.fn(() => [{ libraryID: 7, isAnnotation: () => false, isRegularItem: () => true }]),
     }));
+    (globalThis as any).Zotero.Reader = { getByTabID: vi.fn(() => ({ itemID: 123 })) };
+    (globalThis as any).Zotero.Items = { getAsync: vi.fn(async () => ({ libraryID: libraryId })) };
     (globalThis as any).Zotero.Libraries.userLibraryID = 1;
     (globalThis as any).Zotero.Libraries.get = vi.fn(() => ({ editable: true }));
     (globalThis as any).Zotero.ItemTypes.getID = vi.fn(() => 4);
@@ -111,20 +115,28 @@ describe("createZoteroItem import target", () => {
     (globalThis as any).Zotero.ItemFields.isValidForType = vi.fn(() => true);
     (globalThis as any).Zotero.Item = vi.fn(() => createdItem);
     (globalThis as any).Zotero.Collections = {
-      get: vi.fn(() => collection),
+      get: vi.fn((id: number) => id === 43 ? { id: 43, libraryID: libraryId, addItem } : collection),
     };
     (globalThis as any).Zotero.DB = {
       executeTransaction: vi.fn(async (fn: () => Promise<void>) => fn()),
     };
 
+    installMutationInstance();
+    (Zotero as any).Beaver.searchableLibraryIds = [1, 7, 8];
     await createZoteroItem({
       title: "Imported paper",
       publication_types: ["journal_article"],
       is_open_access: false,
-    } as any);
+    } as any, { collectionId: explicitCollection });
 
-    expect(createdItem.libraryID).toBe(7);
-    expect(addItem).toHaveBeenCalledWith(99);
+    expect(createdItem.libraryID).toBe(libraryId);
+    if (expectedCollection === undefined) {
+      expect(Zotero.Collections.get).not.toHaveBeenCalled();
+      expect(addItem).not.toHaveBeenCalled();
+    } else {
+      expect(Zotero.Collections.get).toHaveBeenCalledWith(expectedCollection);
+      expect(addItem).toHaveBeenCalledWith(99);
+    }
   });
 });
 

@@ -1,4 +1,6 @@
+import { loadPreferences, type DeferredToolPreference, type DeferredToolPreferencesData } from '../../src/services/deferredToolPolicy';
 import { preferencesRevisionAtom } from './preferences';
+export type { DeferredToolPreference, DeferredToolPreferencesData } from '../../src/services/deferredToolPolicy';
 /**
  * Deferred Tool Preferences
  * 
@@ -13,37 +15,13 @@ import { preferencesRevisionAtom } from './preferences';
  * 2. Renaming tools without losing preferences (just update toolToGroup)
  */
 
-import { atom } from 'jotai';
-import { getPref, setPref } from '../../src/utils/prefs';
 import { logger } from '@beaver/agent-core/platform/logger';
-import {
-    DEFAULT_DEFERRED_TOOL_GROUPS,
-    RUN_APPROVAL_ACTION_TYPE_ALIASES,
-} from './runApprovalPolicy';
+import { atom } from 'jotai';
+import { setPref } from '../../src/utils/prefs';
 
 // =============================================================================
 // Types
 // =============================================================================
-
-export type DeferredToolPreference = 'always_ask' | 'always_apply' | 'continue_without_applying';
-
-export interface DeferredToolPreferencesData {
-    /** Maps tool names to group names */
-    toolToGroup: Record<string, string>;
-    /** Maps group names to preference values */
-    groupPreferences: Record<string, DeferredToolPreference>;
-}
-
-// Default preferences for groups
-const DEFAULT_GROUP_PREFERENCES: Record<string, DeferredToolPreference> = {
-    'metadata_edits': 'always_ask',
-    'note_edits': 'always_ask',
-    'note_creation': 'always_apply',
-    'library_modifications': 'always_ask',
-    'library_structure': 'always_ask',
-    'annotations': 'always_ask',
-    'create_items': 'always_ask',
-};
 
 // =============================================================================
 // Preference Labels
@@ -68,37 +46,6 @@ export const DEFERRED_TOOL_PREFERENCE_DESCRIPTIONS: Record<DeferredToolPreferenc
 /**
  * Load preferences from Zotero prefs
  */
-function loadPreferences(): DeferredToolPreferencesData {
-    try {
-        const prefString = getPref('deferredToolPreferences');
-        if (prefString && typeof prefString === 'string') {
-            const parsed = JSON.parse(prefString);
-            const storedToolToGroup = { ...(parsed.toolToGroup ?? {}) };
-            // Older versions persisted the full run-authorization alias map.
-            // Strip those action-record names so they cannot acquire a
-            // preference merely by being authorization aliases.
-            for (const actionType of Object.keys(RUN_APPROVAL_ACTION_TYPE_ALIASES)) {
-                delete storedToolToGroup[actionType];
-            }
-            // Deletion moved out of the shared annotations preference group.
-            // A persisted mapping from an older profile must not override the
-            // new safety boundary and turn annotations=always_apply into an
-            // implicit standing grant to delete annotations.
-            delete storedToolToGroup.delete_annotations;
-            return {
-                toolToGroup: { ...DEFAULT_DEFERRED_TOOL_GROUPS, ...storedToolToGroup },
-                groupPreferences: { ...DEFAULT_GROUP_PREFERENCES, ...parsed.groupPreferences },
-            };
-        }
-    } catch (error) {
-        logger(`deferredToolPreferences: Failed to load preferences: ${error}`, 1);
-    }
-    return {
-        toolToGroup: { ...DEFAULT_DEFERRED_TOOL_GROUPS },
-        groupPreferences: { ...DEFAULT_GROUP_PREFERENCES },
-    };
-}
-
 /**
  * Save preferences to Zotero prefs
  */

@@ -1,3 +1,4 @@
+import { installMutationInstance } from '../../helpers/mutationInstance';
 /**
  * Undo works on an applied action the backend named only by `library_ref`.
  *
@@ -100,3 +101,5 @@ describe('undoCreateNoteAction with portable-only result data', () => {
         expect(eraseTx).not.toHaveBeenCalled();
     });
 });
+
+beforeEach(installMutationInstance);

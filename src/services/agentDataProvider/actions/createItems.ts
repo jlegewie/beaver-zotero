@@ -1,21 +1,17 @@
 import { logger } from '@beaver/agent-core/platform/logger';
-import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
-import { batchFindExistingReferences, BatchReferenceCheckItem } from '../../../../react/utils/batchFindExistingReferences';
-import { store } from '../../../../react/store';
 import {
-    WSAgentActionValidateRequest,
-    WSAgentActionValidateResponse,
-    WSAgentActionExecuteRequest,
-    WSAgentActionExecuteResponse,
     FrontendTimingMetadata,
+    WSAgentActionExecuteResponse,
+    WSAgentActionValidateResponse
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
-import { libraryRefForLibraryID, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
-import { TimeoutContext, checkAborted } from '../timeout';
-import { TimeoutError } from '../timeout';
-import { TimingAccumulator } from '../../../utils/timing';
 import type { CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
-import { applyCreateItemData } from '../../../../react/utils/addItemActions';
+import { batchFindExistingReferences, BatchReferenceCheckItem } from '../../../utils/batchFindExistingReferences';
+import { libraryRefForLibraryID, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
+import { TimingAccumulator } from '../../../utils/timing';
+import { applyCreateItemData } from '../../itemImport';
+import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
+import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
+import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 
 
 /**
@@ -37,7 +33,7 @@ interface CreateItemValidationItem {
  * Returns validation result with existing items info for partial processing.
  */
 async function validateCreateItemAction(
-    request: WSAgentActionValidateRequest
+    request: ActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
     const { library_id: rawLibraryId, library_ref, library_name, items, collections, tags } = request.action_data as {
         library_id?: number | null;
@@ -61,7 +57,7 @@ async function validateCreateItemAction(
     }
 
     // Get searchable library IDs - these are the libraries we can check for duplicates
-    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+    const searchableLibraryIds = (Zotero.Beaver.libraryScopeInitialized ? (Zotero.Beaver.searchableLibraryIds ?? []) : []);
     if (searchableLibraryIds.length === 0) {
         return {
             type: 'agent_action_validate_response',
@@ -173,7 +169,7 @@ async function validateCreateItemAction(
     }
     
     // Get user preference
-    const preference = getDeferredToolPreference('create_item');
+    const preference = getDeferredToolPreference('create_item', undefined, request.operation);
 
     return {
         type: 'agent_action_validate_response',
@@ -201,7 +197,7 @@ async function validateCreateItemAction(
  * The action_data contains a single item's proposed_data.
  */
 async function executeCreateItemAction(
-    request: WSAgentActionExecuteRequest,
+    request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const startTime = Date.now();
@@ -272,6 +268,7 @@ async function executeCreateItemAction(
                 timing: ta,
                 actionId: request.action_id,
                 runId: request.run_id,
+                onAttachmentResolved: request.operation?.onAttachmentResolved,
                 threadId: request.thread_id,
             })
         );
@@ -305,4 +302,4 @@ async function executeCreateItemAction(
     }
 }
 
-export { validateCreateItemAction, executeCreateItemAction };
+export { executeCreateItemAction, validateCreateItemAction };

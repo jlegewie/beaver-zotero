@@ -7,9 +7,9 @@
  * backend's attachment_manager cache.
  */
 
-import { CITATION_TAG_PATTERN } from '../../../../react/utils/citationPreprocessing';
-import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { normalizeCitationTag, parseRawCitationAttributes } from '@beaver/agent-core/citations/citationGrammar';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import { CITATION_TAG_PATTERN } from '../../../utils/citationPreprocessing';
 import { modelObjectIdFromReference } from '../../../utils/libraryIdentity';
 
 

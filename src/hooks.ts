@@ -1,46 +1,45 @@
-import { InstancePreferences } from './services/instancePreferences';
-import { createInstanceAccount } from './services/instanceAccount';
-import { productVoiceAdapters } from "./services/voice/productVoice";
+import { ZOTERO_PLUGIN_CLIENT_TYPE } from "@beaver/agent-core/protocol/agentProtocol";
+import { setActionClient } from "@beaver/agent-core/types/actions";
 import { version } from "../package.json";
-import { initLocale } from "./utils/locale";
-import { createZToolkit } from "./utils/ztoolkit";
-import { BeaverUIFactory } from "./ui/ui";
+import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
+import { disposeMuPDFWorker } from "./beaver-extract";
+import { cleanupReaderIntegration, initReaderIntegration } from "./modules/readerIntegration";
+import { cleanupReaderToolbarMenu, initReaderToolbarMenu } from "./modules/readerToolbarMenu";
+import { cleanupContextMenus, initContextMenus } from "./modules/zoteroContextMenu";
+import {
+    registerTablesApi,
+    unregisterTablesApi
+} from "./services/artifacts/tablesApiHost";
+import {
+    cleanupReaderTableViews,
+    cleanupReaderTableViewsForWindow,
+    initReaderTableViews,
+} from "./services/artifacts/view/readerTableView";
+import { BackgroundExtractor } from "./services/backgroundExtractor";
+import { NewItemWatcher } from "./services/backgroundProcessing/newItemWatcher";
+import { ReconcilerService } from "./services/backgroundProcessing/reconciler";
 import { CitationService } from "./services/CitationService";
 import { BeaverDB } from "./services/database";
 import { DocumentCache } from "./services/documentCache";
-import { BackgroundExtractor } from "./services/backgroundExtractor";
-import { ReconcilerService } from "./services/backgroundProcessing/reconciler";
-import { NewItemWatcher } from "./services/backgroundProcessing/newItemWatcher";
-import { createVoiceService } from "./services/voice/voiceService";
-import { NativeVoice } from "./services/voice/nativeVoice";
+import { createInstanceAccount } from './services/instanceAccount';
+import { InstancePreferences } from './services/instancePreferences';
+import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
 import { DevelopmentVoiceHarness } from "./services/voice/developmentHarness";
+import { NativeVoice } from "./services/voice/nativeVoice";
+import { productVoiceAdapters } from "./services/voice/productVoice";
+import { createVoiceService } from "./services/voice/voiceService";
+import {
+    cleanupTableItemPane,
+    initTableItemPane,
+} from "./ui/tableItemPane";
+import { BeaverUIFactory } from "./ui/ui";
+import { cancelAllActiveTasks } from "./utils/backgroundTasks";
+import { compareVersions } from "./utils/compareVersions";
+import { configurePDFForBeaver } from "./utils/configurePDFForBeaver";
+import { initLocale } from "./utils/locale";
 import { clearPref, getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
-import { compareVersions } from "./utils/compareVersions";
-import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
-import { disposeMuPDFWorker } from "./beaver-extract";
-import { configurePDFForBeaver } from "./utils/configurePDFForBeaver";
-import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
-import { cancelAllActiveTasks } from "./utils/backgroundTasks";
-import { initContextMenus, cleanupContextMenus } from "./modules/zoteroContextMenu";
-import { initReaderIntegration, cleanupReaderIntegration } from "./modules/readerIntegration";
-import { initReaderToolbarMenu, cleanupReaderToolbarMenu } from "./modules/readerToolbarMenu";
-import {
-    initReaderTableViews,
-    cleanupReaderTableViews,
-    cleanupReaderTableViewsForWindow,
-} from "./services/artifacts/view/readerTableView";
-import {
-    initTableItemPane,
-    cleanupTableItemPane,
-} from "./ui/tableItemPane";
-import {
-    registerTablesApi,
-    unregisterTableShadowRestore,
-    unregisterTablesApi,
-} from "./services/artifacts/tablesApiHost";
-import { setActionClient } from "@beaver/agent-core/types/actions";
-import { ZOTERO_PLUGIN_CLIENT_TYPE } from "@beaver/agent-core/protocol/agentProtocol";
+import { createZToolkit } from "./utils/ztoolkit";
 
 /** Timeout for individual async shutdown operations to prevent hangs. */
 const SHUTDOWN_TIMEOUT_MS = 3000;
@@ -462,6 +461,12 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 async function onMainWindowUnload(win: Window): Promise<void> {
     const runtime = addon.runtime.getWindow(win);
     if (!addon.runtime.markClosing(win)) return;
+    if (runtime) {
+        addon.mutations.cancelOwner(runtime.id);
+        void addon.notePreviews.detachOwner(runtime.id).catch(error => {
+            ztoolkit.log('Failed to restore closing window note previews', error);
+        });
+    }
     ztoolkit.log("onMainWindowUnload: Starting cleanup");
 
     try {
@@ -474,6 +479,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // this handler returns. Read quitting and the window count here — the
         // later scope check runs after those awaits.
         const appGoingAway = isAppQuitting || (Services?.startup?.shuttingDown ?? false);
+        if (appGoingAway) await addon.mutations.dispose();
         const isLastMainWindow = Zotero.getMainWindows()
             .filter(w => w !== win && !w.closed).length === 0;
         // Record only when Beaver itself is going away. Closing one of several
@@ -576,7 +582,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // this window's timers and React cleanup are torn down.
         try {
             const rescheduleSync = !(isAppQuitting || isAppShuttingDown);
-            win.__beaverResumeSyncAfterRun?.(rescheduleSync);
+            if (runtime) addon.syncPause.releaseWindow(runtime.id);
         } catch (e) {
             ztoolkit.log(`resumeSyncAfterRun: ${e}`);
         }
@@ -620,11 +626,6 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             return;
         }
 
-        // The React bundle published the table restore hook from
-        // this window and has no teardown of its own, so the closure over its
-        // `tableStore` module would outlive the window on an app-lifetime
-        // global. The next window's bundle re-publishes it on load.
-        unregisterTableShadowRestore();
 
         if (!shouldRunGlobalCleanup) {
             ztoolkit.log("onMainWindowUnload: Last window closed but app still running, skipping global cleanup");
@@ -884,6 +885,8 @@ async function disposeAppServices(): Promise<void> {
             ztoolkit.log(`onAppShutdown: ${label} failed:`, error);
         }
     };
+    await addon.mutations.dispose();
+    addon.syncPause.resumeSyncNow();
     await attempt('disposeAccount', disposeAccountServices);
     await attempt('cancelAllActiveTasks', () => cancelAllActiveTasks());
     await attempt('newItemWatcher.stop', () => addon.newItemWatcher?.stop());
@@ -913,6 +916,8 @@ function onShutdown(): Promise<void> {
 }
 
 async function disposePlugin(): Promise<void> {
+    await addon.mutations.dispose();
+    addon.syncPause.resumeSyncNow();
     Zotero.__beaverShuttingDown = true;
     addon.data.alive = false;
     cancelAllActiveTasks();

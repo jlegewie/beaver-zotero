@@ -1,52 +1,14 @@
-import { preloadStandaloneAttachmentLinks } from '../../../utils/zoteroLinkCitation';
-import { preloadExternalFileCitations } from '../../../utils/externalFileCitation';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
-import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
+import {
+    WSAgentActionExecuteResponse,
+    WSAgentActionValidateResponse
+} from '@beaver/agent-core/protocol/agentProtocol';
 import { EditNoteProposedData, type EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import {
-    getOrSimplify,
-    invalidateSimplificationCache,
-    normalizeNoteHtml,
-    simplifyNoteHtml,
-    type SimplificationMetadata,
-} from '../../../utils/noteHtmlSimplifier';
-import {
-    checkDuplicateCitations,
-    validateNewString,
-    checkNewCitationItemsExist,
-    applyOldStringEnrichment,
-    detectPartialSimplifiedTag,
-    buildPartialSimplifiedTagMessage,
-    buildExpansionErrorMessage,
-} from '../../../utils/editNoteValidation';
-import {
-    expandToRawHtml,
-    preloadPageLabelsForNewCitations,
-    preloadNotePageLabels,
-    preloadStructuralLocatorPages,
-    buildUnresolvedLocatorWarning,
-    type ExternalRefContext,
-    type ResolvedLocatorPages,
-} from '../../../utils/noteCitationExpand';
-import {
-    getLatestNoteHtml,
-    waitForPMNormalization,
-    waitForNoteSaveStabilization,
-    flushLiveEditorToDB,
-} from '../../../utils/noteEditorIO';
-import {
-    stripDataCitationItems,
-    extractDataCitationItems,
-    rebuildDataCitationItems,
-    hasSchemaVersionWrapper,
-} from '../../../utils/noteWrapper';
-import {
-    locateEditTarget,
-    resolveEditTargetAtRuntime,
-    buildZeroMatchHint,
-    buildExecutionZeroMatchHint,
-} from '../../../utils/editNotePositionLookup';
+    buildAmbiguousMatchError,
+    buildInsertDedupWarning,
+    mergeInsertNewString,
+} from '../../../utils/editNoteBatchCore';
 import {
     expandBase,
     findBestMatch,
@@ -54,33 +16,58 @@ import {
     type BaseExpansion,
     type MatchInput,
 } from '../../../utils/editNoteMatcher';
-import { clearNoteEditorSelection } from '../../../../react/utils/sourceUtils';
-import { store } from '../../../../react/store';
-import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
-import { currentThreadIdAtom } from '../../../../react/atoms/threads';
 import {
-    externalReferenceMappingAtom,
-    externalReferenceItemMappingAtom,
-} from '@beaver/agent-core/citations/externalReferences';
-import { renderToHTML, type RenderContextData } from '../../../../react/utils/citationRenderers';
-import { prepareCitationRenderContext } from '../../../../react/utils/citationRenderContext';
+    buildExecutionZeroMatchHint,
+    buildZeroMatchHint,
+    locateEditTarget,
+    resolveEditTargetAtRuntime,
+} from '../../../utils/editNotePositionLookup';
+import {
+    applyOldStringEnrichment,
+    buildExpansionErrorMessage,
+    buildPartialSimplifiedTagMessage,
+    checkDuplicateCitations,
+    checkNewCitationItemsExist,
+    detectPartialSimplifiedTag,
+    validateNewString,
+} from '../../../utils/editNoteValidation';
+import { preloadExternalFileCitations } from '../../../utils/externalFileCitation';
+import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
+import {
+    buildUnresolvedLocatorWarning,
+    expandToRawHtml,
+    preloadNotePageLabels,
+    preloadPageLabelsForNewCitations,
+    preloadStructuralLocatorPages,
+    type ExternalRefContext
+} from '../../../utils/noteCitationExpand';
 import { addOrUpdateEditFooter, getBeaverFooterAppendPoint } from '../../../utils/noteEditFooter';
+import {
+    clearNoteEditorSelection,
+    flushLiveEditorToDB,
+    getLatestNoteHtml,
+    waitForNoteSaveStabilization,
+    waitForPMNormalization,
+} from '../../../utils/noteEditorIO';
+import {
+    getOrSimplify,
+    invalidateSimplificationCache,
+    normalizeNoteHtml,
+    simplifyNoteHtml,
+    type SimplificationMetadata,
+} from '../../../utils/noteHtmlSimplifier';
 import { assertNoPreviewMarkers, containsPreviewMarkers, stripPreviewMarkers } from '../../../utils/notePreviewGuard';
-import { dismissDiffPreview, isDiffPreviewActive, isDiffPreviewPendingFor } from '../../../../react/utils/noteEditorDiffPreview';
 import {
-    WSAgentActionValidateRequest,
-    WSAgentActionValidateResponse,
-    WSAgentActionExecuteRequest,
-    WSAgentActionExecuteResponse,
-} from '@beaver/agent-core/protocol/agentProtocol';
+    extractDataCitationItems,
+    hasSchemaVersionWrapper,
+    rebuildDataCitationItems,
+    stripDataCitationItems,
+} from '../../../utils/noteWrapper';
+import { preloadStandaloneAttachmentLinks } from '../../../utils/zoteroLinkCitation';
+import { dismissNotePreviews } from '../../notePreviews';
+import type { ActionExecuteRequest, ActionValidateRequest, OperationContext } from '../operationContext';
+import { TimeoutContext, TimeoutError, checkAborted } from '../timeout';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
-import { TimeoutContext, checkAborted } from '../timeout';
-import { TimeoutError } from '../timeout';
-import {
-    mergeInsertNewString,
-    buildAmbiguousMatchError,
-    buildInsertDedupWarning,
-} from '../../../utils/editNoteBatchCore';
 
 /** Combine optional warning strings into a `warnings` array, or undefined when empty. */
 function collectWarnings(...warnings: Array<string | null | undefined>): string[] | undefined {
@@ -105,14 +92,6 @@ function containsCitationTag(...parts: string[]): boolean {
     return parts.some((part) => CITATION_TAG_RE.test(part));
 }
 
-function renderMarkdownFragment(
-    content: string,
-    libraryId: number,
-    contextData?: RenderContextData,
-): string {
-    return simplifyNoteHtml(renderToHTML(content, 'markdown', contextData), libraryId).simplified;
-}
-
 /**
  * Render Markdown-shaped edit strings through the same static renderer used by
  * create_note, then simplify the rendered HTML into the matcher's input format.
@@ -122,36 +101,29 @@ export async function buildMarkdownRenderFields(
     oldString: string,
     newString: string,
     operation: EditNoteOperation,
-    libraryId: number,
-): Promise<Pick<MatchInput, 'renderedOldSimplified' | 'renderedNewSimplified'>> {
+    libraryId: number, context?: OperationContext): Promise<Pick<MatchInput, 'renderedOldSimplified' | 'renderedNewSimplified'>> {
     if (!oldString || !looksLikeMarkdownForRender(oldString)) return {};
 
     try {
-        const needsCitationContext = containsCitationTag(oldString, newString);
-        const contextData = needsCitationContext
-            ? await prepareCitationRenderContext(`${oldString}\n\n${newString}`, {
-                citationDataMap: store.get(citationMapAtom),
-                externalMapping: store.get(externalReferenceItemMappingAtom),
-                externalReferencesMap: store.get(externalReferenceMappingAtom),
-            })
-            : undefined;
+        if (!context?.renderMarkdown) return {};
+        const render = async (content: string) => simplifyNoteHtml(await context.renderMarkdown!(content), libraryId).simplified;
 
-        const renderedOldSimplified = renderMarkdownFragment(oldString, libraryId, contextData);
+        const renderedOldSimplified = (await render(oldString));
         let renderedNewSimplified: string;
         if (operation === 'insert_after') {
             const injected = newString.startsWith(oldString)
                 ? newString.substring(oldString.length)
                 : newString;
             renderedNewSimplified = renderedOldSimplified
-                + renderMarkdownFragment(injected, libraryId, contextData);
+                + (await render(injected));
         } else if (operation === 'insert_before') {
             const injected = newString.endsWith(oldString)
                 ? newString.substring(0, newString.length - oldString.length)
                 : newString;
-            renderedNewSimplified = renderMarkdownFragment(injected, libraryId, contextData)
+            renderedNewSimplified = (await render(injected))
                 + renderedOldSimplified;
         } else {
-            renderedNewSimplified = renderMarkdownFragment(newString, libraryId, contextData);
+            renderedNewSimplified = (await render(newString));
         }
 
         return { renderedOldSimplified, renderedNewSimplified };
@@ -166,20 +138,18 @@ async function findMarkdownRenderFallbackMatch(
     oldString: string,
     newString: string,
     operation: EditNoteOperation,
-    libraryId: number,
-): Promise<ReturnType<typeof findBestMatch>> {
+    libraryId: number, context?: OperationContext): Promise<ReturnType<typeof findBestMatch>> {
     const rendered = await buildMarkdownRenderFields(
         oldString,
         newString,
         operation,
-        libraryId,
-    );
+        libraryId, context);
     if (!rendered.renderedOldSimplified) return null;
     return findMarkdownRenderMatch({ ...matchInput, ...rendered });
 }
 
 /** Preload citation labels and files, and snapshot external-work mappings. */
-export async function getExternalRefContext(content: string): Promise<ExternalRefContext> {
+export async function getExternalRefContext(content: string, context?: OperationContext): Promise<ExternalRefContext> {
     const [{ files, warnings }] = await Promise.all([
         preloadExternalFileCitations(content),
         preloadStandaloneAttachmentLinks(content, libraryID => !checkLibraryExcluded(libraryID)),
@@ -187,8 +157,8 @@ export async function getExternalRefContext(content: string): Promise<ExternalRe
     return {
         externalFiles: files,
         externalFileWarnings: warnings,
-        externalRefs: store.get(externalReferenceMappingAtom),
-        externalItemMapping: store.get(externalReferenceItemMappingAtom),
+        externalRefs: context?.externalRefs ?? {},
+        externalItemMapping: context?.externalItemMapping ?? {},
     };
 }
 
@@ -258,6 +228,7 @@ function precheckNewString(
 
 
 function buildValidateSuccess(
+    request: ActionValidateRequest,
     requestId: string,
     item: Zotero.Item,
     simplified: string,
@@ -269,7 +240,7 @@ function buildValidateSuccess(
 ): WSAgentActionValidateResponse {
     const noteTitle = item.getNoteTitle() || '(untitled)';
     const totalLines = simplified.split('\n').length;
-    const preference = getDeferredToolPreference('edit_note', { library_id, zotero_key });
+    const preference = getDeferredToolPreference('edit_note', { library_id, zotero_key }, request.operation);
     return {
         type: 'agent_action_validate_response',
         request_id: requestId,
@@ -306,7 +277,7 @@ function buildAmbiguousMatchResponse(
  * expansion + match to verify the replacement will succeed.
  */
 async function validateEditNoteAction(
-    request: WSAgentActionValidateRequest
+    request: ActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
     // `old_string` is `let` because step 10c may enrich no-ref citations in
     // place (see `applyOldStringEnrichment`). All downstream code operates on
@@ -386,7 +357,7 @@ async function validateEditNoteAction(
     }
 
     // 2. Check library is searchable
-    const searchableIds = store.get(searchableLibraryIdsAtom);
+    const searchableIds = (Zotero.Beaver.libraryScopeInitialized ? (Zotero.Beaver.searchableLibraryIds ?? []) : []);
     if (!searchableIds.includes(resolvedLibraryId)) {
         return {
             type: 'agent_action_validate_response',
@@ -464,7 +435,7 @@ async function validateEditNoteAction(
 
     // Snapshot external-reference state once so every expandToRawHtml('new', ...)
     // below can resolve `<citation external_id="..."/>` consistently.
-    const externalRefContext = await getExternalRefContext(new_string);
+    const externalRefContext = await getExternalRefContext(new_string, request.operation);
 
     // ── rewrite mode: skip old_string matching, validate new_string only ──
     if (operation === 'rewrite') {
@@ -476,7 +447,7 @@ async function validateEditNoteAction(
         const preference = getDeferredToolPreference('edit_note', {
             library_id: resolvedLibraryId,
             zotero_key,
-        });
+        }, request.operation);
 
         return {
             type: 'agent_action_validate_response',
@@ -514,7 +485,7 @@ async function validateEditNoteAction(
         const preference = getDeferredToolPreference('edit_note', {
             library_id: resolvedLibraryId,
             zotero_key,
-        });
+        }, request.operation);
 
         return {
             type: 'agent_action_validate_response',
@@ -611,8 +582,7 @@ async function validateEditNoteAction(
             old_string ?? '',
             new_string,
             operation,
-            resolvedLibraryId,
-        );
+            resolvedLibraryId, request.operation);
         if (!match) {
             return {
                 type: 'agent_action_validate_response',
@@ -635,8 +605,7 @@ async function validateEditNoteAction(
                 old_string ?? '',
                 new_string,
                 operation,
-                resolvedLibraryId,
-            );
+                resolvedLibraryId, request.operation);
         }
     }
     if (!match) {
@@ -727,6 +696,7 @@ async function validateEditNoteAction(
     }
 
     return buildValidateSuccess(
+        request,
         request.request_id,
         item,
         simplified,
@@ -749,7 +719,7 @@ async function validateEditNoteAction(
  * (e.g. Promise.all) at the caller level without adding a per-note lock here.
  */
 async function executeEditNoteAction(
-    request: WSAgentActionExecuteRequest,
+    request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const {
@@ -816,9 +786,7 @@ async function executeEditNoteAction(
     //     finish before reading or writing. Approval paths dismiss the
     //     preview fire-and-forget, so an execute arriving over WS can
     //     otherwise race the restore.
-    if (isDiffPreviewActive(resolvedLibraryId, zotero_key) || isDiffPreviewPendingFor(resolvedLibraryId, zotero_key)) {
-        await dismissDiffPreview();
-    }
+    await dismissNotePreviews(resolvedLibraryId, zotero_key);
 
     // 2b. Promote any unsaved content from the open editor into the DB so that
     //     this execute reads the same HTML validation saw. Without this, a
@@ -851,7 +819,7 @@ async function executeEditNoteAction(
         }
     }
 
-    const externalRefContext = await getExternalRefContext(new_string);
+    const externalRefContext = await getExternalRefContext(new_string, request.operation);
 
     // 3. Pre-load page labels so new citations resolve page indices to labels.
     //    Done before reading the note to avoid async gaps between read and write.
@@ -908,7 +876,7 @@ async function executeEditNoteAction(
         let newHtml = wrapperOpen + expandedNew + wrapperClose;
 
         // Add/update "Edited by Beaver" footer
-        const threadId = store.get(currentThreadIdAtom);
+        const threadId = request.operation?.threadId ?? null;
         if (threadId) {
             newHtml = addOrUpdateEditFooter(newHtml, threadId);
         }
@@ -999,7 +967,7 @@ async function executeEditNoteAction(
         let undoAfterContext = strippedHtml.substring(insertAt, insertAt + 200);
         let newHtml = strippedHtml.slice(0, insertAt) + expandedNew + strippedHtml.slice(insertAt);
 
-        const threadId = store.get(currentThreadIdAtom);
+        const threadId = request.operation?.threadId ?? null;
         if (threadId) {
             newHtml = addOrUpdateEditFooter(newHtml, threadId);
         }
@@ -1124,8 +1092,7 @@ async function executeEditNoteAction(
             old_string ?? '',
             new_string,
             operation,
-            resolvedLibraryId,
-        );
+            resolvedLibraryId, request.operation);
         if (!match) {
             return {
                 type: 'agent_action_execute_response',
@@ -1149,8 +1116,7 @@ async function executeEditNoteAction(
                 old_string ?? '',
                 new_string,
                 operation,
-                resolvedLibraryId,
-            );
+                resolvedLibraryId, request.operation);
         }
     }
     if (!match) {
@@ -1262,7 +1228,7 @@ async function executeEditNoteAction(
     }
 
     // 10b. Add/update "Edited by Beaver" footer
-    const threadId = store.get(currentThreadIdAtom);
+    const threadId = request.operation?.threadId ?? null;
     if (threadId) {
         newHtml = addOrUpdateEditFooter(newHtml, threadId);
     }
@@ -1377,4 +1343,4 @@ async function executeEditNoteAction(
     };
 }
 
-export { validateEditNoteAction, executeEditNoteAction };
+export { executeEditNoteAction, validateEditNoteAction };

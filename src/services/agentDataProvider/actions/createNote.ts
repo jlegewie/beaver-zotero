@@ -1,25 +1,11 @@
 import { logger } from '@beaver/agent-core/platform/logger';
-import { store } from '../../../../react/store';
-import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
-import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
-import { currentThreadIdAtom } from '../../../../react/atoms/threads';
-import { grantCreatedNoteEditsForRunAtom } from '../../../../react/atoms/runApprovalPolicy';
-import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
-import { renderToHTML } from '../../../../react/utils/citationRenderers';
-import { prepareCitationRenderContext } from '../../../../react/utils/citationRenderContext';
-import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from '../../../../react/utils/noteActions';
-import { getOrSimplify } from '../../../utils/noteHtmlSimplifier';
-import { preloadNotePageLabels } from '../../../utils/noteCitationExpand';
-import { getLatestNoteHtml } from '../../../utils/noteEditorIO';
 import {
-    WSAgentActionValidateRequest,
-    WSAgentActionValidateResponse,
-    WSAgentActionExecuteRequest,
+    NoteResultItem,
     WSAgentActionExecuteResponse,
+    WSAgentActionValidateResponse,
+    WSDataError
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { ItemDataWithStatus, AttachmentDataWithStatus } from '@beaver/agent-core/types/zotero';
-import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, getLibraryByIdOrName, getCollectionByIdOrName } from '../utils';
+import { AttachmentDataWithStatus, ItemDataWithStatus } from '@beaver/agent-core/types/zotero';
 import {
     libraryRefForLibraryID,
     resolveObjectId,
@@ -27,12 +13,17 @@ import {
     UNRESOLVED_LIBRARY_ID,
     writeTargetLibraryError,
 } from '../../../utils/libraryIdentity';
-import { TimeoutContext, checkAborted } from '../timeout';
-import { extractCitationReferences } from './extractCitationReferences';
-import { lookupZoteroReferences, LookupZoteroReferencesResult } from '../lookupZoteroReferences';
-import { WSDataError, NoteResultItem } from '@beaver/agent-core/protocol/agentProtocol';
-import { resolveCreateNoteParent } from './resolveCreateNoteParent';
+import { preloadNotePageLabels } from '../../../utils/noteCitationExpand';
+import { getLatestNoteHtml } from '../../../utils/noteEditorIO';
+import { getOrSimplify } from '../../../utils/noteHtmlSimplifier';
+import { getBeaverNoteFooterHTML, wrapWithSchemaVersion } from '../../../utils/noteProvenance';
 import { TimingAccumulator } from '../../../utils/timing';
+import { lookupZoteroReferences, LookupZoteroReferencesResult } from '../lookupZoteroReferences';
+import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
+import { checkAborted, TimeoutContext } from '../timeout';
+import { checkLibraryExcluded, excludedLibraryMessage, getCollectionByIdOrName, getDeferredToolPreference, getLibraryByIdOrName } from '../utils';
+import { extractCitationReferences } from './extractCitationReferences';
+import { resolveCreateNoteParent } from './resolveCreateNoteParent';
 
 
 /**
@@ -97,7 +88,7 @@ interface CreateNoteResultData {
  * Returns the user's preference for this tool.
  */
 async function validateCreateNoteAction(
-    request: WSAgentActionValidateRequest
+    request: ActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
     const start = Date.now();
     const ta = new TimingAccumulator();
@@ -392,7 +383,7 @@ async function validateCreateNoteAction(
     }
 
     // Validate library is searchable (synced with Beaver)
-    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+    const searchableLibraryIds = (Zotero.Beaver.libraryScopeInitialized ? (Zotero.Beaver.searchableLibraryIds ?? []) : []);
     if (!searchableLibraryIds.includes(resolvedLibraryId)) {
         ta.record('library_resolution_ms', Date.now() - tLib);
         return {
@@ -472,7 +463,7 @@ async function validateCreateNoteAction(
     }
 
     // Get user preference
-    const preference = getDeferredToolPreference('create_note');
+    const preference = getDeferredToolPreference('create_note', undefined, request.operation);
 
     // Combine the parent→collection swap warning with any standalone-fallback
     // warning so the agent gets one coherent message about what we did.
@@ -523,7 +514,7 @@ async function validateCreateNoteAction(
  * Creates a new Zotero note item with the specified content.
  */
 async function executeCreateNoteAction(
-    request: WSAgentActionExecuteRequest,
+    request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const start = Date.now();
@@ -602,35 +593,16 @@ async function executeCreateNoteAction(
     }
 
     try {
-        // Get citation context for rendering
-        const citationDataMap = store.get(citationMapAtom);
-        const externalMapping = store.get(externalReferenceItemMappingAtom);
-        const externalReferencesMap = store.get(externalReferenceMappingAtom);
-
-        // Build markdown content with title heading
         const markdownContent = `<h1>${title}</h1>\n\n${content}`;
-
-        // Build citation context for note export, including local page
-        // metadata for structured locators in tool-call content.
-        const renderContextData = await ta.track('prepare_render_context_ms', () =>
-            prepareCitationRenderContext(markdownContent, {
-                citationDataMap,
-                externalMapping,
-                externalReferencesMap,
-            })
-        );
-
-        // Convert markdown to HTML with citation context
+        if (!request.operation?.renderMarkdown) {
+            throw Object.assign(new Error('Note rendering is unavailable'), { code: 'capability_unavailable' });
+        }
         const renderStart = Date.now();
-        let htmlContent = renderToHTML(
-            markdownContent.trim(),
-            "markdown",
-            renderContextData,
-        );
+        let htmlContent = await request.operation.renderMarkdown(markdownContent.trim());
         ta.record('render_html_ms', Date.now() - renderStart);
 
         // Add Beaver footer with thread/run link
-        const threadId = store.get(currentThreadIdAtom);
+        const threadId = request.operation?.threadId ?? null;
         // Only the execute request can authoritatively associate this mutation
         // with a run. MCP/HTTP executions intentionally omit run_id.
         const runId = request.run_id;
@@ -709,12 +681,8 @@ async function executeCreateNoteAction(
 
         // A note created by the agent is a safe, narrow continuation target:
         // allow only edits to this exact note for the remainder of this run.
-        if (runId && store.get(activeRunAtom)?.id === runId) {
-            store.set(grantCreatedNoteEditsForRunAtom, {
-                runId,
-                libraryId: zoteroNote.libraryID,
-                zoteroKey: zoteroNote.key,
-            });
+        if (runId && request.operation?.runId === runId) {
+            request.operation.grantCreatedNote?.(zoteroNote.libraryID, zoteroNote.key);
         }
 
         // Mirror the relation on the related item so the "Related" pane shows
@@ -820,4 +788,4 @@ async function executeCreateNoteAction(
 }
 
 
-export { validateCreateNoteAction, executeCreateNoteAction };
+export { executeCreateNoteAction, validateCreateNoteAction };

@@ -10,15 +10,15 @@
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
-import { agentItemFilter } from '../../utils/agentItemSupport';
-import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import {
+    ResolveSearchFiltersUnresolved,
     WSResolveSearchFiltersRequest,
     WSResolveSearchFiltersResponse,
-    ResolveSearchFiltersUnresolved,
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { resolveItemsByFilters } from '../../../react/utils/searchTools';
+import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import { agentItemFilter } from '../../utils/agentItemSupport';
 import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
+import { resolveItemsByFilters } from '../../utils/searchTools';
 import {
     getCollectionByIdOrName,
     getSearchableLibraryIds,

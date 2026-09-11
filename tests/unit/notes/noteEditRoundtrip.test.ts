@@ -1,3 +1,4 @@
+import { installMutationInstance } from '../../helpers/mutationInstance';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // =============================================================================
@@ -2403,3 +2404,5 @@ describe('Page label translation during citation expansion', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(mockItem, 'xv');
     });
 });
+
+beforeEach(installMutationInstance);

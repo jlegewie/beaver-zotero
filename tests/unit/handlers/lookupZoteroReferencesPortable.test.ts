@@ -1,3 +1,4 @@
+import { installMutationInstance } from '../../helpers/mutationInstance';
 /**
  * `zotero_data` requests carry portable references, not device-local rowids.
  *
@@ -98,6 +99,11 @@ beforeEach(() => {
             getAsync: vi.fn(async () => []),
         },
     };
+});
+
+beforeEach(() => {
+    installMutationInstance();
+    (Zotero as any).Beaver.searchableLibraryIds = [1, 100, 300];
 });
 
 describe('lookupZoteroReferences with portable-only references', () => {

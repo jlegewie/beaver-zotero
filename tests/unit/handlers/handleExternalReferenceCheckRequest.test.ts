@@ -16,7 +16,7 @@ vi.mock('@beaver/agent-core/platform/logger', () => ({
 }));
 
 const mockBatchFindExistingReferences = vi.fn();
-vi.mock('../../../react/utils/batchFindExistingReferences', () => ({
+vi.mock('../../../src/utils/batchFindExistingReferences', () => ({
     batchFindExistingReferences: (...args: any[]) => mockBatchFindExistingReferences(...args),
 }));
 

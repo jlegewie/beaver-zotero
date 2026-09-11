@@ -1,3 +1,4 @@
+import { captureOperationContext } from '../runtime/operationContext';
 import { tryGetWindowRuntime } from '../runtime/windowRuntime';
 /**
  * Hook to register an MCP (Model Context Protocol) server on Zotero's HTTP server.
@@ -13,27 +14,48 @@ import { tryGetWindowRuntime } from '../runtime/windowRuntime';
  * Optional tools: create_note, create_highlight_annotations, create_note_annotations
  */
 
+import { logger } from '@beaver/agent-core/platform/logger';
+import type {
+    AttachmentRowResult,
+    ItemSearchFrontendResultItem,
+    NoteResultItem,
+    RegularListResultItem,
+    WSAgentActionExecuteRequest,
+    WSAgentActionExecuteResponse,
+    WSAgentActionValidateRequest,
+    WSGetMetadataRequest,
+    WSGetMetadataResponse,
+    WSItemSearchByMetadataRequest,
+    WSItemSearchByMetadataResponse,
+    WSItemSearchByTopicRequest,
+    WSItemSearchByTopicResponse,
+    WSListCollectionsRequest,
+    WSListCollectionsResponse,
+    WSListItemsRequest,
+    WSListItemsResponse,
+    WSListTagsRequest,
+    WSListTagsResponse,
+    WSReadNoteRequest,
+    WSReadNoteResponse,
+    WSZoteroDocumentRequest,
+    WSZoteroDocumentResponse,
+    ZoteroItemCategory,
+} from '@beaver/agent-core/protocol/agentProtocol';
+import { useAtomValue } from 'jotai';
 import { useEffect } from 'react';
 import {
-    LIST_LIBRARIES_TOOL, FIND_ANNOTATIONS_TOOL, CREATE_HIGHLIGHT_ANNOTATIONS_TOOL, CREATE_NOTE_ANNOTATIONS_TOOL,
-    handleListLibraries, handleFindAnnotations, handleCreateHighlightAnnotations, handleCreateNoteAnnotations,
-} from './mcp/libraryAnnotationTools';
-import { useAtomValue } from 'jotai';
-import { MCPService } from '../../src/services/mcpService';
-import {
-    handleItemSearchByTopicRequest,
-    handleItemSearchByMetadataRequest,
-    handleZoteroDocumentRequest,
+    handleAgentActionExecuteRequest,
     handleGetMetadataRequest,
+    handleItemSearchByMetadataRequest,
+    handleItemSearchByTopicRequest,
     handleListCollectionsRequest,
-    handleListTagsRequest,
     handleListItemsRequest,
+    handleListTagsRequest,
     handleReadNoteRequest,
+    handleZoteroDocumentRequest,
     validateCreateNoteAction,
-    executeCreateNoteAction,
 } from '../../src/services/agentDataProvider';
-import { mcpError, generateRequestId, buildNoopTimeoutContext } from './mcp/utils';
-import { getCitationKeyFromItem, getZoteroSelectURI } from '../../src/utils/zoteroUtils';
+import { MCPService } from '../../src/services/mcpService';
 import {
     libraryRefForLibraryID,
     modelObjectId,
@@ -41,36 +63,19 @@ import {
     resolveObjectId,
     UNRESOLVED_LIBRARY_ID,
 } from '../../src/utils/libraryIdentity';
-import { logger } from '@beaver/agent-core/platform/logger';
+import { getCitationKeyFromItem, getZoteroSelectURI } from '../../src/utils/zoteroUtils';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import { mcpServerEnabledAtom, mcpWriteToolsEnabledAtom } from '../atoms/ui';
 import { store } from '../store';
-import type {
-    WSItemSearchByTopicRequest,
-    WSItemSearchByTopicResponse,
-    WSItemSearchByMetadataRequest,
-    WSItemSearchByMetadataResponse,
-    WSZoteroDocumentRequest,
-    WSZoteroDocumentResponse,
-    WSGetMetadataRequest,
-    WSGetMetadataResponse,
-    WSListCollectionsRequest,
-    WSListCollectionsResponse,
-    WSListTagsRequest,
-    WSListTagsResponse,
-    WSListItemsRequest,
-    WSListItemsResponse,
-    WSReadNoteRequest,
-    WSReadNoteResponse,
-    WSAgentActionValidateRequest,
-    WSAgentActionExecuteRequest,
-    WSAgentActionExecuteResponse,
-    RegularListResultItem,
-    NoteResultItem,
-    AttachmentRowResult,
-    ZoteroItemCategory,
-    ItemSearchFrontendResultItem,
-} from '@beaver/agent-core/protocol/agentProtocol';
+import {
+    CREATE_HIGHLIGHT_ANNOTATIONS_TOOL, CREATE_NOTE_ANNOTATIONS_TOOL,
+    FIND_ANNOTATIONS_TOOL,
+    handleCreateHighlightAnnotations, handleCreateNoteAnnotations,
+    handleFindAnnotations,
+    handleListLibraries,
+    LIST_LIBRARIES_TOOL,
+} from './mcp/libraryAnnotationTools';
+import { generateRequestId, mcpError } from './mcp/utils';
 
 // =============================================================================
 // MCP stdio bridge script
@@ -1205,10 +1210,9 @@ export async function handleCreateNote(args: any): Promise<any> {
         action_data: mergedActionData,
     };
 
-    const response: WSAgentActionExecuteResponse = await executeCreateNoteAction(
-        executeRequest,
-        buildNoopTimeoutContext(),
-    );
+    const response: WSAgentActionExecuteResponse = await handleAgentActionExecuteRequest({
+        ...executeRequest, timeout_seconds: 120, operation: captureOperationContext(),
+    });
 
     if (!response.success) {
         return mcpError(response.error ?? 'Failed to create note');
