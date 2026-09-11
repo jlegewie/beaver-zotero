@@ -249,7 +249,7 @@ async function hydrateAnnotationRow(
     };
 }
 
-interface RowSpec {
+export interface RowSpec {
     ref: ZoteroItemReference;
     /**
      * 'self' → the targeted item is always the headline (R/A/N — target tools,
@@ -365,6 +365,16 @@ async function hydrateRow(spec: RowSpec): Promise<ItemListRow> {
     }
 
     return selfRow(base, item, parent);
+}
+
+/**
+ * Hydrate item references into {@link ItemListRow}s for the shared item-list
+ * renderer, applying the same R/P/A/N display conventions the tool results
+ * use. Exported for surfaces that list library items outside a tool result
+ * (e.g. the background-processing issues in preferences).
+ */
+export async function hydrateItemListRows(specs: RowSpec[]): Promise<ItemListRow[]> {
+    return hydrateRows(specs);
 }
 
 async function hydrateRows(specs: RowSpec[]): Promise<ItemListRow[]> {

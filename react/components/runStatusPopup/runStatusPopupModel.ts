@@ -107,6 +107,8 @@ export interface CompletedCard extends RunStatusCardBase {
     outcome: 'completed' | 'error' | 'canceled';
     /** What went wrong, in the run error display's words; null for a clean finish. */
     detail: string | null;
+    /** Full error text, clipped by the popup when needed. */
+    errorMessage?: string;
     artifacts: RunStatusArtifact[];
     /** How many artifacts the card left out, for the "+N more" line. */
     hiddenArtifactCount: number;

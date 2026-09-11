@@ -14,7 +14,7 @@ import { NewItemWatcher } from "./services/backgroundProcessing/newItemWatcher";
 import { createVoiceService } from "./services/voice/voiceService";
 import { NativeVoice } from "./services/voice/nativeVoice";
 import { DevelopmentVoiceHarness } from "./services/voice/developmentHarness";
-import { getPref, setPref } from "./utils/prefs";
+import { clearPref, getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
 import { compareVersions } from "./utils/compareVersions";
 import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
@@ -229,6 +229,10 @@ async function onStartup() {
     registerQuitObserver();
     initLocale();
     ztoolkit.log("Startup");
+
+    // Retired preferences: nothing reads them, so a value left by an earlier
+    // version is dropped rather than carried in the profile indefinitely.
+    clearPref("backgroundProcessingContinuous");
 
     // -------- Configure the PDF package (esbuild bundle copy) --------
     // Idempotent. Must run before any PDF op. The webpack bundle calls the

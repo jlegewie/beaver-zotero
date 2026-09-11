@@ -10,6 +10,7 @@
  */
 
 import { store } from '../../store';
+import { eventManager } from '../../events/eventManager';
 import {
     closeQuickPromptAtom,
     openQuickPromptAtom,
@@ -26,6 +27,13 @@ export async function handleTestQuickPromptHttpRequest(request: any): Promise<an
     let outcome: QuickPromptToggleOutcome | null = null;
     if (request?.toggle === true) {
         outcome = await store.set(toggleQuickPromptAtom);
+        if (outcome === 'replace-sidebar') {
+            // The shortcut swaps an open sidebar for the popup. Closing the
+            // sidebar is the popup component's half of that; do it here too so
+            // the endpoint runs the same path the keyboard does.
+            eventManager.dispatch('toggleChat', {});
+            await store.set(openQuickPromptAtom);
+        }
     } else if (request?.open === true) {
         await store.set(openQuickPromptAtom);
     } else if (request?.open === false) {

@@ -1,3 +1,5 @@
+import { BeaverDB } from '../../../src/services/database';
+import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockState = {
@@ -54,7 +56,8 @@ const epubDocument = {
 };
 
 vi.mock('../../../src/utils/prefs', () => ({
-    getPref: vi.fn(() => 100),
+    getPref: vi.fn((key: string) => key === 'installedVersion' ? '0.99.0' : 100),
+    setPref: vi.fn(),
 }));
 
 vi.mock('../../../src/utils/webAPI', () => ({
@@ -193,6 +196,57 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
             contentKind: 'pdf',
             contentType: 'application/pdf',
         } as any);
+    });
+
+    it('adds a cached reading failure to preferences and clears it after a successful just-in-time read', async () => {
+        const connection = new MockDBConnection();
+        const db = new BeaverDB(connection);
+        await db.initDatabase('0.99.0');
+        const documentCache = {
+            getSourceIdentitySnapshot: vi.fn().mockResolvedValue(null),
+            getMetadata: vi.fn().mockResolvedValue({ pageCount: 1, pageLabels: null,
+                errorCode: 'encrypted', contentType: 'application/pdf' }),
+            getResult: vi.fn().mockResolvedValue(structuredResult),
+        };
+        (Zotero as any).Beaver = { data: { env: 'test' }, db, documentCache,
+            libraryScopeInitialized: true, searchableLibraryIds: [1] };
+        const request = { event: 'zotero_document_request' as const, request_id: 'read-problem',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' }, mode: 'structured' as const };
+        try {
+            const failed = await handleZoteroDocumentRequest(request);
+            expect(failed.error_code).toBe('encrypted');
+            const entitlements = { hasOcrAccess: false, hasSearchIndexAccess: false };
+            expect(await db.getProcessingIssueCounts(entitlements)).toEqual([{ reason: 'encrypted', count: 1 }]);
+            documentCache.getMetadata.mockResolvedValue({ pageCount: 1, pageLabels: null,
+                errorCode: null, contentType: 'application/pdf' });
+            const read = await handleZoteroDocumentRequest(request);
+            expect(read.result).toBeDefined();
+            expect(await db.getProcessingIssueCounts(entitlements)).toEqual([]);
+            expect(await db.getAttachmentProcessingState(1, 'ABCD1234')).toBeNull();
+        } finally {
+            await connection.closeDatabase();
+            delete (Zotero as any).Beaver;
+        }
+    });
+
+    it('does not list a readable file as too large because an individual request supplied a lower page limit', async () => {
+        const recordAttachmentReadingOutcome = vi.fn();
+        (Zotero as any).Beaver = { data: { env: 'test' }, db: { recordAttachmentReadingOutcome },
+            libraryScopeInitialized: true, searchableLibraryIds: [1], documentCache: {
+                getSourceIdentitySnapshot: vi.fn().mockResolvedValue(null),
+                getMetadata: vi.fn().mockResolvedValue({ pageCount: 23, pageLabels: null,
+                    errorCode: null, contentType: 'application/pdf' }),
+                getResult: vi.fn(),
+            } };
+        try {
+            const result = await handleZoteroDocumentRequest({ event: 'zotero_document_request',
+                request_id: 'limited-read', attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+                mode: 'structured', max_pages: 20 });
+            expect(result.error_code).toBe('too_many_pages');
+            expect(recordAttachmentReadingOutcome).not.toHaveBeenCalled();
+        } finally {
+            delete (Zotero as any).Beaver;
+        }
     });
 
     it('returns timeout when Zotero item lookup exceeds timeout_seconds', async () => {

@@ -3,19 +3,13 @@ import React, { useState, useCallback, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, DollarCircleIcon } from '../icons/icons';
-import Button from "@beaver/agent-ui/primitives/Button";
+import { UserIcon, LogoutIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, DollarCircleIcon } from '../icons/icons';
 import { useSetAtom } from 'jotai';
 import { runStatusPopupEnabledAtom } from '../../atoms/runStatusPopup';
 import { profileWithPlanAtom, creditPlanAtom, hasCreditPlanAtom } from "../../atoms/profile";
 import { activePreferencePageTabAtom, PreferencePageTab } from "../../atoms/ui";
 import { logger } from "@beaver/agent-core/platform/logger";
 import { isDiffPreviewSupported } from "../../utils/noteEditorDiffPreview";
-import { 
-    embeddingIndexStateAtom, 
-    forceReindexAtom, 
-    isEmbeddingIndexingAtom 
-} from "../../atoms/embeddingIndex";
 import { accountService } from "@beaver/agent-core/transport/clients/accountService";
 import {SettingsGroup, SettingsRow, SectionLabel, PageHeader} from "./components/SettingsElements";
 import ActionsPreferenceSection from "./ActionsPreferenceSection";
@@ -23,8 +17,7 @@ import BillingSection, { formatPlanName } from "./BillingSection";
 import ApiKeysSection from "./ApiKeysSection";
 import AdvancedSection from "./AdvancedSection";
 import PermissionsSection from "./PermissionsSection";
-import EmbeddingIndexProgress from "../pages/onboarding/EmbeddingIndexProgress";
-import ExcludedLibrariesList from "./ExcludedLibrariesList";
+import LibraryAccessList from "./LibraryAccessList";
 import BackgroundProcessingSection from "./BackgroundProcessingSection";
 
 
@@ -61,11 +54,6 @@ const PreferencePage: React.FC = () => {
         setEmailNotifications(profileWithPlan?.email_notifications || false);
     }, [profileWithPlan?.consent_to_share, profileWithPlan?.email_notifications]);
     
-    // --- Embedding Index ---
-    const embeddingIndexState = useAtomValue(embeddingIndexStateAtom);
-    const isEmbeddingIndexing = useAtomValue(isEmbeddingIndexingAtom);
-    const forceReindex = useSetAtom(forceReindexAtom);
-
     const handleKeyboardShortcutChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
         const nextShortcut = event.target.value.toLowerCase();
         if (!/^[a-z]$/.test(nextShortcut)) {
@@ -111,13 +99,6 @@ const PreferencePage: React.FC = () => {
             setEmailNotifications(!checked);
         }
     }, []);
-
-    // --- Rebuild Search Index Handler ---
-    const handleRebuildSearchIndex = useCallback(() => {
-        if (isEmbeddingIndexing) return;
-        logger('handleRebuildSearchIndex: User-initiated search index rebuild');
-        forceReindex();
-    }, [isEmbeddingIndexing, forceReindex]);
 
     // --- Inline toggle handlers for card-based layout ---
     const handleCitationFormatToggle = useCallback(() => {
@@ -175,34 +156,6 @@ const PreferencePage: React.FC = () => {
         handleEmailNotificationsChange(!emailNotifications);
     }, [emailNotifications, handleEmailNotificationsChange]);
 
-    // Helper function to get rebuild index button props
-    const getRebuildIndexButtonProps = () => {
-        if (isEmbeddingIndexing) {
-            const progress = embeddingIndexState.progress > 0 ? ` (${embeddingIndexState.progress}%)` : '';
-            return {
-                icon: RepeatIcon,
-                iconClassName: '',
-                disabled: true,
-                text: `Indexing${progress}`
-            };
-        }
-        if (embeddingIndexState.failedItems > 0) {
-            return {
-                icon: RepeatIcon,
-                iconClassName: '',
-                disabled: false,
-                text: `Indexing Failed (${embeddingIndexState.failedItems})`
-            };
-        }
-        return {
-            icon: RepeatIcon,
-            iconClassName: '',
-            disabled: false,
-            text: 'Check & Repair'
-        };
-    };
-
-    const rebuildIndexButtonProps = getRebuildIndexButtonProps();
     const sidebarShortcutLabel = `${Zotero.isMac ? '⌘' : 'Ctrl'}+${keyboardShortcut}`;
     const windowShortcutLabel = `${Zotero.isMac ? '⌘⇧' : 'Ctrl+Shift'}+${keyboardShortcut}`;
     const quickPromptShortcutLabel = `${Zotero.isMac ? '⌘⌥' : 'Ctrl+Alt'}+${keyboardShortcut}`;
@@ -216,7 +169,7 @@ const PreferencePage: React.FC = () => {
     }
     const tabs = useMemo<PreferenceTabDefinition[]>(() => [
         { id: 'general', label: 'General', icon: SettingsIcon },
-        { id: 'sync', label: 'Search & Processing', icon: SearchIcon },
+        { id: 'sync', label: 'Search & Files', icon: SearchIcon },
         { id: 'permissions', label: 'Permissions', icon: LockIcon },
         { id: 'billing', label: 'Plan & Usage', icon: DollarCircleIcon },
         { id: 'models', label: 'API Keys', icon: KeyIcon },
@@ -573,50 +526,11 @@ const PreferencePage: React.FC = () => {
                     </>
                 )}
 
-                {/* ===== SEARCH TAB ===== */}
+                {/* ===== SEARCH & FILES TAB ===== */}
                 {effectiveActiveTab === 'sync' && (
                     <>
                         <SectionLabel>Libraries</SectionLabel>
-                        <ExcludedLibrariesList />
-
-                                                <SectionLabel>Search Index</SectionLabel>
-                        <SettingsGroup>
-                            <SettingsRow
-                                title="Search Index"
-                                description={
-                                    <>
-                                        Check that the local search index matches your Zotero libraries.
-                                        This usually happens automatically, but you can run a manual check if search results look out of date.
-                                        {embeddingIndexState.failedItems > 0 && (
-                                            <span className="display-flex font-color-yellow mt-1">
-                                                {embeddingIndexState.failedItems} items failed to index
-                                            </span>
-                                        )}
-                                        {embeddingIndexState.status === 'error' && embeddingIndexState.error && (
-                                            <span className="display-flex font-color-red mt-1">
-                                                Error: {embeddingIndexState.error}
-                                            </span>
-                                        )}
-                                    </>
-                                }
-                                control={
-                                    <Button
-                                        variant="outline"
-                                        rightIcon={!isEmbeddingIndexing ? rebuildIndexButtonProps.icon : undefined}
-                                        iconClassName={rebuildIndexButtonProps.iconClassName}
-                                        onClick={handleRebuildSearchIndex}
-                                        disabled={rebuildIndexButtonProps.disabled}
-                                        loading={isEmbeddingIndexing}
-                                        style={{ padding: '4px 6px' }}
-                                    >
-                                        {rebuildIndexButtonProps.text}
-                                    </Button>
-                                }
-                            />
-                            {isEmbeddingIndexing && embeddingIndexState.phase === 'initial' && embeddingIndexState.totalItems > 0 && (
-                                <EmbeddingIndexProgress />
-                            )}
-                        </SettingsGroup>
+                        <LibraryAccessList />
 
                         <BackgroundProcessingSection />
                     </>

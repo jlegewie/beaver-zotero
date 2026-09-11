@@ -21,6 +21,8 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
 import { OCR_PRIORITY_BACKFILL } from '../ocr/constants';
+import { enqueueOcrJob } from '../ocr/enqueueOcr';
+import { shouldStopCachePreparation } from '../backgroundProcessing/cachePreparationBudget';
 import {
     BACKGROUND_UPSERT_PRIORITY,
 } from '../backgroundProcessing/constants';
@@ -52,6 +54,7 @@ export class DocumentExtractExecutor implements JobExecutor {
         record: BackgroundJobRecord,
         ctx: JobExecutionContext,
     ): Promise<JobOutcome> {
+        const attemptedAt = Date.now();
         const preExecute = this.checkScope(record);
         if (preExecute) return preExecute;
         // The durable ledger describes the structured extraction pipeline.
@@ -95,6 +98,10 @@ export class DocumentExtractExecutor implements JobExecutor {
             return { kind: 'complete', reason: 'library_excluded' };
         }
 
+        if (await shouldStopCachePreparation(record)) {
+            return { kind: 'complete', reason: 'cache_budget_reached' };
+        }
+
         const previous = await ctx.db.ensureAttachmentProcessingState({
             libraryId: item.libraryID,
             zoteroKey: item.key,
@@ -111,6 +118,7 @@ export class DocumentExtractExecutor implements JobExecutor {
                 zoteroKey: item.key,
                 status: 'skipped',
                 error: source.code,
+                attemptedAt,
             });
             return { kind: 'complete', reason: source.code };
         }
@@ -119,8 +127,13 @@ export class DocumentExtractExecutor implements JobExecutor {
         let extracted: ExtractSuccess | JobOutcome;
         try {
             extracted = kind === 'pdf'
-                ? await ctx.runOnMuPDFWorker(() => this.extractPdf(record, ctx))
-                : await this.extractDom(record, item, kind, source.source, ctx);
+                ? await ctx.runOnMuPDFWorker(async (): Promise<ExtractSuccess | JobOutcome> => {
+                    if (await shouldStopCachePreparation(record)) {
+                        return { kind: 'complete', reason: 'cache_budget_reached' };
+                    }
+                    return this.extractPdf(record, ctx, attemptedAt);
+                })
+                : await this.extractDom(record, item, kind, source.source, ctx, attemptedAt);
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             return { kind: 'retry', error: `unexpected: ${message}` };
@@ -153,11 +166,19 @@ export class DocumentExtractExecutor implements JobExecutor {
                 zoteroKey: item.key,
                 status: 'skipped',
                 error: 'unsupported_schema_version',
+                attemptedAt,
             });
             return { kind: 'complete', reason: 'unsupported_schema_version' };
         }
 
-        const applied = await ctx.db.markAttachmentExtracted({
+        // Detecting the original scan again must not discard its indexed OCR hash.
+        // The OCR completion compares the restored content with that retained hash.
+        const restoringOcr = record.payload?.prepare_cache === true
+            && previous.ocrStatus === 'done' && extracted.ocrStatus === 'needed'
+            && previous.fileMtimeMs === afterSignature.mtime_ms
+            && previous.fileSizeBytes === afterSignature.size_bytes
+            && previous.fileHash === fileHash;
+        const applied = restoringOcr || await ctx.db.markAttachmentExtracted({
             libraryId: item.libraryID,
             zoteroKey: item.key,
             expectedFileMtimeMs: previous.fileMtimeMs,
@@ -173,6 +194,28 @@ export class DocumentExtractExecutor implements JobExecutor {
         });
         if (!applied) {
             return { kind: 'complete', reason: 'stale_completion_ignored' };
+        }
+
+        if (extracted.ocrStatus === 'needed') {
+            // Ticket the OCR continuation before this job retires. Fresh
+            // detection fires its own fire-and-forget enqueue inside the
+            // extraction, but a cached "no text layer" verdict does not, and a
+            // ticket that lands only after the queue looks empty loses an
+            // immediate-drain request. The enqueue dedupes against an existing
+            // ticket, so the double call is harmless.
+            try {
+                await enqueueOcrJob({
+                    item,
+                    libraryId: item.libraryID,
+                    zoteroKey: item.key,
+                    itemId: item.id,
+                    pageCount: null,
+                    priority: record.priority >= 100 ? OCR_PRIORITY_BACKFILL : undefined,
+                    prepareCache: record.payload?.prepare_cache === true,
+                });
+            } catch (error) {
+                logger(`DocumentExtractExecutor: OCR enqueue failed for ${item.libraryID}-${item.key}: ${error}`, 2);
+            }
         }
 
         const hashChanged = previous.structuredDocumentHash !== documentHash;
@@ -348,6 +391,7 @@ export class DocumentExtractExecutor implements JobExecutor {
     private async extractPdf(
         record: BackgroundJobRecord,
         ctx: JobExecutionContext,
+        attemptedAt: number,
     ): Promise<ExtractSuccess | JobOutcome> {
         const payload = record.payload;
         if (!payload || payload.content_kind !== 'pdf') {
@@ -362,6 +406,7 @@ export class DocumentExtractExecutor implements JobExecutor {
             workerName: 'background',
             externalAbortSignal: ctx.externalAbortSignal,
             ocrPriority: record.priority >= 100 ? OCR_PRIORITY_BACKFILL : undefined,
+            prepareCache: payload.prepare_cache === true,
         });
         switch (result.kind) {
             case 'ok':
@@ -374,7 +419,7 @@ export class DocumentExtractExecutor implements JobExecutor {
                 if (result.code === 'no_text_layer') {
                     return { document: null, ocrStatus: 'needed', reason: 'needs_ocr' };
                 }
-                await this.persistTerminalExtractError(record, ctx, result.code, 'skipped');
+                await this.persistTerminalExtractError(record, ctx, result.code, 'skipped', attemptedAt);
                 return { kind: 'complete', reason: `cached_error:${result.code}` };
             case 'external_abort':
                 return { kind: 'release', reason: 'external_abort' };
@@ -389,6 +434,7 @@ export class DocumentExtractExecutor implements JobExecutor {
                     ctx,
                     result.code,
                     isSkippedResponse(result.code) ? 'skipped' : 'failed',
+                    attemptedAt,
                 );
                 return { kind: 'complete', reason: `terminal:${result.code}` };
         }
@@ -400,6 +446,7 @@ export class DocumentExtractExecutor implements JobExecutor {
         kind: Extract<ProcessableKind, 'epub' | 'snapshot'>,
         source: AttachmentFileSource,
         ctx: JobExecutionContext,
+        attemptedAt: number,
     ): Promise<ExtractSuccess | JobOutcome> {
         let temporaryPath: string | null = null;
         let resolvedFile: {
@@ -422,6 +469,7 @@ export class DocumentExtractExecutor implements JobExecutor {
                     ctx,
                     loaded.code,
                     isSkippedResponse(loaded.code) ? 'skipped' : 'failed',
+                    attemptedAt,
                 );
                 return { kind: 'complete', reason: loaded.code };
             }
@@ -478,6 +526,7 @@ export class DocumentExtractExecutor implements JobExecutor {
             ctx,
             result.code,
             isSkippedResponse(result.code) ? 'skipped' : 'failed',
+            attemptedAt,
         );
         return { kind: 'complete', reason: `terminal:${result.code}` };
     }
@@ -487,12 +536,14 @@ export class DocumentExtractExecutor implements JobExecutor {
         ctx: JobExecutionContext,
         code: string,
         status: 'failed' | 'skipped',
+        attemptedAt: number,
     ): Promise<void> {
         await ctx.db.markAttachmentExtractFailure({
             libraryId: record.libraryId,
             zoteroKey: record.zoteroKey,
             status,
             error: code,
+            attemptedAt,
         });
     }
 }

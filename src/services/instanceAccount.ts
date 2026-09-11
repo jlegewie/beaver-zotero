@@ -1,4 +1,5 @@
 import { InstanceRealtime } from "./instanceRealtime";
+import { initializeSearchProcessing } from "./backgroundProcessing/searchProcessingInitialization";
 import { claimPreSyncThreads } from "./claimPreSyncThreads";
 import type { ExcludedLibrary } from "@beaver/agent-core/types/profile";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
@@ -240,6 +241,7 @@ export class InstanceAccount {
         const beaver = Zotero.Beaver;
         if (!beaver) return;
         const profile = this.snapshot.data?.profile;
+        const previousSearchAccess = beaver.hasSearchIndexAccess;
         const excluded = new Set(
             (profile?.excluded_libraries ?? []).map((entry) =>
                 entry.type === "group" ? `group:${entry.group_id}` : "user",
@@ -270,6 +272,7 @@ export class InstanceAccount {
             !!this.snapshot.session && !!profile?.has_search_index_access;
         beaver.libraryScopeInitialized =
             this.snapshot.scopeReady && !!this.snapshot.session;
+        initializeSearchProcessing(beaver.hasSearchIndexAccess);
         const next = JSON.stringify([
             beaver.libraryScopeInitialized,
             beaver.searchableLibraryIds,
@@ -279,6 +282,9 @@ export class InstanceAccount {
         if (previous !== next) {
             beaver.backgroundExtractor?.abortJobsWithoutAccess?.();
             beaver.processingReconciler?.notify();
+        }
+        if (previousSearchAccess !== beaver.hasSearchIndexAccess) {
+            beaver.backgroundExtractor?.notify();
         }
     }
     private revoke(): void {

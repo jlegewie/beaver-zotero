@@ -4,6 +4,8 @@ import { FulltextUpsertExecutor } from '../../../src/services/backgroundQueue/fu
 import type { JobExecutionContext } from '../../../src/services/backgroundQueue/jobExecutor';
 import { ApiError } from '@beaver/agent-core/types/apiErrors';
 import { MockDBConnection } from '../../mocks/mockDBConnection';
+import { BACKGROUND_EXTRACT_PRIORITY, BACKGROUND_UPSERT_PRIORITY } from '../../../src/services/backgroundProcessing/constants';
+import { OCR_PRIORITY_ON_DEMAND } from '../../../src/services/ocr/constants';
 
 vi.mock('../../../src/services/searchIndex/searchIndexApiClient', () => ({
     searchIndexApiClient: {},
@@ -61,6 +63,7 @@ describe('FulltextUpsertExecutor', () => {
     let record: BackgroundJobRecord;
 
     beforeEach(async () => {
+        vi.clearAllMocks();
         connection = new MockDBConnection();
         db = new BeaverDB(connection);
         await db.initDatabase('0.99.0');
@@ -175,7 +178,12 @@ describe('FulltextUpsertExecutor', () => {
         }));
     });
 
-    it('self-heals a cache miss by enqueueing extraction and deferring', async () => {
+    it.each([
+        { priority: BACKGROUND_UPSERT_PRIORITY, extractionPriority: BACKGROUND_EXTRACT_PRIORITY },
+        { priority: OCR_PRIORITY_ON_DEMAND, extractionPriority: OCR_PRIORITY_ON_DEMAND },
+    ])('recovers a missing payload at priority $extractionPriority for an upsert at priority $priority', async ({ priority, extractionPriority }) => {
+        record.priority = priority;
+        enqueue.mockImplementation((job) => db.enqueueBackgroundJob(job));
         api.upsertHash.mockRejectedValueOnce(
             new ApiError(409, 'Conflict', 'payload needed', 'payload_required'),
         );
@@ -185,7 +193,53 @@ describe('FulltextUpsertExecutor', () => {
         expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({
             jobType: 'document_extract',
             zoteroKey: 'ABCDEFGH',
+            priority: extractionPriority,
         }));
+        // Paused processing only claims jobs below the background priority ceiling.
+        const recovery = await db.claimNextBackgroundJob(Date.now(), 60_000, 100, ['document_extract']);
+        if (priority === OCR_PRIORITY_ON_DEMAND) {
+            expect(recovery).toMatchObject({ jobType: 'document_extract', priority });
+        } else {
+            expect(recovery).toBeNull();
+        }
+    });
+
+    it('keeps a paused index retry queued through OCR cache recovery and indexes after OCR completes', async () => {
+        enqueue.mockImplementation((job) => db.enqueueBackgroundJob(job));
+        const executor = new FulltextUpsertExecutor(api as any);
+        const now = Date.now();
+        await db.enqueueBackgroundJob({ ...record, priority: OCR_PRIORITY_ON_DEMAND, now });
+        const claim = (time: number) => db.claimNextBackgroundJob(time, 60_000, 100, ['fulltext_upsert']);
+        const first = (await claim(now))!;
+        expect(first).toMatchObject({ priority: OCR_PRIORITY_ON_DEMAND });
+        api.upsertHash.mockRejectedValueOnce(new ApiError(409, 'Conflict', 'payload needed', 'payload_required'));
+        (Zotero.Beaver.documentCache!.getResult as any).mockResolvedValueOnce(null);
+        expect(await executor.execute(first, ctx)).toEqual({ kind: 'defer', reason: 'payload_cache_miss' });
+
+        // Extraction of the original scan needs OCR before it has an indexable hash.
+        await connection.queryAsync(`UPDATE attachment_processing_state
+            SET structured_document_hash = NULL, ocr_status = 'needed'`);
+        const waiting = (await claim(now + 60_001))!;
+        expect(await executor.execute(waiting, ctx)).toEqual({ kind: 'defer', reason: 'waiting_for_ocr' });
+        expect(api.upsertHash).toHaveBeenCalledTimes(1);
+
+        expect(await db.markAttachmentOcrDone({
+            libraryId: 1, zoteroKey: 'ABCDEFGH', fileHash: 'file-md5',
+            ocrEngineVersion: '1', structuredDocumentHash: 'a'.repeat(64),
+            expectedOcrStatus: 'needed', expectedOcrEngineVersion: null, expectedExtractStatus: 'done',
+        })).toBe(true);
+        // No replacement upsert is produced: the original request survives at its priority.
+        const ready = (await claim(now + 120_002))!;
+        expect(ready).toMatchObject({ id: first.id, priority: OCR_PRIORITY_ON_DEMAND });
+        expect(await executor.execute(ready, ctx)).toEqual({ kind: 'complete', reason: 'index_tagged' });
+        expect(await db.getAttachmentProcessingState(1, 'ABCDEFGH')).toMatchObject({ upsertStatus: 'done' });
+    });
+
+    it.each(['failed', 'na'])('does not wait for OCR when its status is %s and no document hash exists', async (ocrStatus) => {
+        await connection.queryAsync(`UPDATE attachment_processing_state
+            SET structured_document_hash = NULL, ocr_status = ?`, [ocrStatus]);
+        expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx))
+            .toEqual({ kind: 'complete', reason: 'ledger_not_ready' });
     });
 
     it('pairs a replacement upsert with an idempotent old-hash untag', async () => {

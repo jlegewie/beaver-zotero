@@ -75,8 +75,8 @@ dedup, stats, the `priority` default itself — can use any priority.
 
 `backgroundProcessing.live.test.ts` clears the `attachment_processing_state`
 ledger, the per-library scan cursors and the job queue for **every** library,
-and flips `backgroundProcessingEnabled`, `backgroundProcessingContinuous`,
-`backgroundExtractorEnabled` and `accessRemoteFiles`. All of it is derived data
+and flips `backgroundProcessingEnabled`, `backgroundExtractorEnabled` and
+`accessRemoteFiles`. All of it is derived data
 that the next reconcile rebuilds, and `afterAll` restores the prefs — but an
 interrupted run leaves the instance with an empty ledger and the prefs it was
 last given. Re-run the suite, or turn background processing off in Preferences.

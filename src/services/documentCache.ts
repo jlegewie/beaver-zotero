@@ -69,6 +69,10 @@ export interface DocumentPreflightMetadata {
 }
 
 export interface DocumentCacheStats {
+    /** Processed files are missing cached content and space is available. */
+    can_prepare_uncached_files?: boolean;
+    /** Distinct registered documents with compatible payloads, excluding error metadata. */
+    cached_document_count: number;
     metadata_count: number;
     payload_count: number;
     payload_cache_dir: string;
@@ -145,6 +149,10 @@ interface ExtractionLockEntry<T extends CacheablePayload = BeaverExtractResult> 
 export class DocumentCache {
     private db: BeaverDB;
     private payloadCacheDir = '';
+    private clearing: Promise<{ metadataRows: number; payloadRows: number }> | null = null;
+    private cacheGeneration = 0;
+    private maintenance: Promise<void> | null = null;
+    private activeWrites = new Set<Promise<void>>();
     private writeLocks = new Map<string, Promise<void>>();
     private extractionLocks = new Map<string, ExtractionLockEntry<CacheablePayload>>();
     /** Wall-clock time of the last size-budget pass; 0 = never run. */
@@ -502,6 +510,8 @@ export class DocumentCache {
         create: (signal: AbortSignal) => Promise<T>;
         metadata: (result: T) => CacheMetadataInput;
     }): Promise<T | null> {
+        if (this.clearing) return null;
+        const generation = this.cacheGeneration;
         const ref = {
             libraryId: input.item.libraryID,
             zoteroKey: input.item.key,
@@ -533,6 +543,7 @@ export class DocumentCache {
             return this.waitForSharedExtraction(refreshedExisting, input.abortSignal, input.sharedTimeoutMs);
         }
 
+        if (generation !== this.cacheGeneration || this.clearing) return null;
         const controller = createAbortController();
         const entry: ExtractionLockEntry<T> = {
             controller,
@@ -552,6 +563,7 @@ export class DocumentCache {
             } finally {
                 this.clearSharedExtractionTimer(entry);
             }
+            if (controller.signal.aborted || generation !== this.cacheGeneration) return null;
             await this.putResult({
                 item: input.item,
                 filePath: input.filePath,
@@ -595,6 +607,8 @@ export class DocumentCache {
         expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
         create: (signal: AbortSignal) => Promise<SerializedBeaverExtractResult>;
     }): Promise<SerializedDocumentCacheResult | null> {
+        if (this.clearing) return null;
+        const generation = this.cacheGeneration;
         const ref = {
             libraryId: input.item.libraryID,
             zoteroKey: input.item.key,
@@ -626,6 +640,7 @@ export class DocumentCache {
             return this.waitForSharedExtraction(refreshedExisting, input.abortSignal, input.sharedTimeoutMs);
         }
 
+        if (generation !== this.cacheGeneration || this.clearing) return null;
         const controller = createAbortController();
         const entry: ExtractionLockEntry<SerializedDocumentCacheResult> = {
             controller,
@@ -645,6 +660,7 @@ export class DocumentCache {
             } finally {
                 this.clearSharedExtractionTimer(entry);
             }
+            if (controller.signal.aborted || generation !== this.cacheGeneration) return null;
             const stored: SerializedDocumentCacheResult = {
                 schemaVersion: created.schemaVersion,
                 mode: created.mode,
@@ -777,21 +793,23 @@ export class DocumentCache {
         contentType: string;
         metadata: CacheMetadataInput;
     }): Promise<void> {
-        if (Zotero.__beaverShuttingDown) return;
-        try {
-            const source = await this.getSourceIdentity(input.filePath, input.sourceSizeBytes);
+        return this.trackCacheWrite(async () => {
             if (Zotero.__beaverShuttingDown) return;
-            const record = this.buildMetadataInput(
-                input.item,
-                source,
-                input.contentType,
-                input.metadata,
-            );
-            const { deletedPayloads } = await this.db.upsertDocumentCacheMetadata(record);
-            await this.removePayloadFiles(deletedPayloads);
-        } catch (error) {
-            logger(`DocumentCache.putMetadata error: ${error}`, 1);
-        }
+            try {
+                const source = await this.getSourceIdentity(input.filePath, input.sourceSizeBytes);
+                if (Zotero.__beaverShuttingDown) return;
+                const record = this.buildMetadataInput(
+                    input.item,
+                    source,
+                    input.contentType,
+                    input.metadata,
+                );
+                const { deletedPayloads } = await this.db.upsertDocumentCacheMetadata(record);
+                await this.removePayloadFiles(deletedPayloads);
+            } catch (error) {
+                logger(`DocumentCache.putMetadata error: ${error}`, 1);
+            }
+        });
     }
 
     /** Store fresh source-level metadata and a compressed full-document payload. */
@@ -805,21 +823,23 @@ export class DocumentCache {
         metadata: CacheMetadataInput;
         expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
     }): Promise<void> {
-        if (Zotero.__beaverShuttingDown) return;
-        const payloadKind = DocumentCache.payloadKindForMode(input.mode);
-        const lockKey = `${input.item.libraryID}/${input.item.key}/${payloadKind}`;
-        const previous = this.writeLocks.get(lockKey) ?? Promise.resolve();
-        const next = previous
-            .catch(() => undefined)
-            .then(() => this.putResultUnlocked(input))
-            .catch((error) => logger(`DocumentCache.putResult error: ${error}`, 1))
-            .finally(() => {
-                if (this.writeLocks.get(lockKey) === next) {
-                    this.writeLocks.delete(lockKey);
-                }
-            });
-        this.writeLocks.set(lockKey, next);
-        await next;
+        return this.trackCacheWrite(async () => {
+            if (Zotero.__beaverShuttingDown) return;
+            const payloadKind = DocumentCache.payloadKindForMode(input.mode);
+            const lockKey = `${input.item.libraryID}/${input.item.key}/${payloadKind}`;
+            const previous = this.writeLocks.get(lockKey) ?? Promise.resolve();
+            const next = previous
+                .catch(() => undefined)
+                .then(() => this.putResultUnlocked(input))
+                .catch((error) => logger(`DocumentCache.putResult error: ${error}`, 1))
+                .finally(() => {
+                    if (this.writeLocks.get(lockKey) === next) {
+                        this.writeLocks.delete(lockKey);
+                    }
+                });
+            this.writeLocks.set(lockKey, next);
+            await next;
+        });
     }
 
     /** Store fresh source-level metadata and a pre-serialized compressed payload. */
@@ -833,21 +853,23 @@ export class DocumentCache {
         metadata: CacheMetadataInput;
         expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
     }): Promise<void> {
-        if (Zotero.__beaverShuttingDown) return;
-        const payloadKind = DocumentCache.payloadKindForMode(input.mode);
-        const lockKey = `${input.item.libraryID}/${input.item.key}/${payloadKind}`;
-        const previous = this.writeLocks.get(lockKey) ?? Promise.resolve();
-        const next = previous
-            .catch(() => undefined)
-            .then(() => this.putSerializedResultUnlocked(input))
-            .catch((error) => logger(`DocumentCache.putSerializedResult error: ${error}`, 1))
-            .finally(() => {
-                if (this.writeLocks.get(lockKey) === next) {
-                    this.writeLocks.delete(lockKey);
-                }
-            });
-        this.writeLocks.set(lockKey, next);
-        await next;
+        return this.trackCacheWrite(async () => {
+            if (Zotero.__beaverShuttingDown) return;
+            const payloadKind = DocumentCache.payloadKindForMode(input.mode);
+            const lockKey = `${input.item.libraryID}/${input.item.key}/${payloadKind}`;
+            const previous = this.writeLocks.get(lockKey) ?? Promise.resolve();
+            const next = previous
+                .catch(() => undefined)
+                .then(() => this.putSerializedResultUnlocked(input))
+                .catch((error) => logger(`DocumentCache.putSerializedResult error: ${error}`, 1))
+                .finally(() => {
+                    if (this.writeLocks.get(lockKey) === next) {
+                        this.writeLocks.delete(lockKey);
+                    }
+                });
+            this.writeLocks.set(lockKey, next);
+            await next;
+        });
     }
 
     /** Store authoritative error metadata and delete any payloads for the attachment. */
@@ -861,23 +883,25 @@ export class DocumentCache {
         pageLabels: PageLabels | Record<number, string> | null;
         pages: (PageGeometry | null)[] | null;
     }): Promise<void> {
-        if (Zotero.__beaverShuttingDown) return;
-        try {
-            const metadata: CacheMetadataInput = {
-                pageCount: input.pageCount,
-                pageLabels: input.pageLabels,
-                pages: input.pages,
-                errorCode: input.errorCode,
-            };
-            const source = await this.getSourceIdentity(input.filePath, input.sourceSizeBytes);
+        return this.trackCacheWrite(async () => {
             if (Zotero.__beaverShuttingDown) return;
-            const record = this.buildMetadataInput(input.item, source, input.contentType, metadata);
-            const { metadata: stored, deletedPayloads } = await this.db.upsertDocumentCacheMetadata(record);
-            const payloads = await this.db.deleteDocumentCachePayloadsForMetadata(stored.id);
-            await this.removePayloadFiles([...deletedPayloads, ...payloads]);
-        } catch (error) {
-            logger(`DocumentCache.putErrorMetadata error: ${error}`, 1);
-        }
+            try {
+                const metadata: CacheMetadataInput = {
+                    pageCount: input.pageCount,
+                    pageLabels: input.pageLabels,
+                    pages: input.pages,
+                    errorCode: input.errorCode,
+                };
+                const source = await this.getSourceIdentity(input.filePath, input.sourceSizeBytes);
+                if (Zotero.__beaverShuttingDown) return;
+                const record = this.buildMetadataInput(input.item, source, input.contentType, metadata);
+                const { metadata: stored, deletedPayloads } = await this.db.upsertDocumentCacheMetadata(record);
+                const payloads = await this.db.deleteDocumentCachePayloadsForMetadata(stored.id);
+                await this.removePayloadFiles([...deletedPayloads, ...payloads]);
+            } catch (error) {
+                logger(`DocumentCache.putErrorMetadata error: ${error}`, 1);
+            }
+        });
     }
 
     /** Invalidate all document-cache state for one attachment. */
@@ -903,32 +927,53 @@ export class DocumentCache {
         }
     }
 
+    /** Serialize storage maintenance across all windows sharing this cache. */
+    runMaintenance(work: () => Promise<void>): Promise<void> {
+        const pending = (this.maintenance ?? Promise.resolve())
+            .catch(() => undefined)
+            .then(work)
+            .finally(() => {
+                if (this.maintenance === pending) this.maintenance = null;
+            });
+        this.maintenance = pending;
+        return pending;
+    }
+
     /**
      * Completely clear the document cache: delete every metadata row, every
      * payload row, and every file stored on disk under the cache directory.
      */
-    async clearAll(): Promise<{ metadataRows: number; payloadRows: number }> {
-        // Abort in-flight extractions and drop pending write locks so they
-        // cannot repopulate the cache after it has been wiped.
+    clearAll(): Promise<{ metadataRows: number; payloadRows: number }> {
+        if (this.clearing) return this.clearing;
+        this.cacheGeneration += 1;
+        this.clearing = this.clearAllUnlocked().finally(() => { this.clearing = null; });
+        return this.clearing;
+    }
+
+    private trackCacheWrite(write: () => Promise<void>): Promise<void> {
+        if (this.clearing) return Promise.resolve();
+        const pending = write().finally(() => this.activeWrites.delete(pending));
+        this.activeWrites.add(pending);
+        return pending;
+    }
+
+    private async clearAllUnlocked(): Promise<{ metadataRows: number; payloadRows: number }> {
         for (const entry of this.extractionLocks.values()) {
             entry.controller.abort();
+            this.clearSharedExtractionTimer(entry);
         }
         this.extractionLocks.clear();
-        this.writeLocks.clear();
-
+        // Finish writes that already entered the cache before deleting their output.
+        await Promise.allSettled([...this.activeWrites]);
         const metadataRows = await this.db.getDocumentCacheMetadataCount();
         const payloadRows = await this.db.getDocumentCachePayloadCount();
-
-        await this.db.deleteAllDocumentCache();
-
-        // Wipe every file on disk by removing all children of the cache dir.
         if (this.payloadCacheDir) {
-            const children = await IOUtils.getChildren(this.payloadCacheDir).catch(() => []);
+            const children = await IOUtils.getChildren(this.payloadCacheDir);
             for (const child of children) {
-                await IOUtils.remove(child, { recursive: true } as any).catch(() => undefined);
+                await IOUtils.remove(child, { recursive: true } as any);
             }
         }
-
+        await this.db.deleteAllDocumentCache();
         return { metadataRows, payloadRows };
     }
 
@@ -991,7 +1036,16 @@ export class DocumentCache {
 
     /** Return compact document-cache counts and directory information. */
     async getStats(): Promise<DocumentCacheStats> {
+        // Polling uses registered cache state. Reads and startup GC reconcile external
+        // file changes; cache writes, eviction, and clearing update these rows directly.
         return {
+            cached_document_count: await this.db.getCachedDocumentCount({
+                metadata: DOCUMENT_METADATA_FORMAT_VERSION,
+                payload: DOCUMENT_PAYLOAD_FORMAT_VERSION,
+                pdf: expectedExtractionSchemaVersion('pdf'),
+                epub: expectedExtractionSchemaVersion('epub'),
+                snapshot: expectedExtractionSchemaVersion('snapshot'),
+            }),
             metadata_count: await this.db.getDocumentCacheMetadataCount(),
             payload_count: await this.db.getDocumentCachePayloadCount(),
             payload_cache_dir: this.payloadCacheDir,

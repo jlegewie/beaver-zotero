@@ -370,14 +370,13 @@ describe('BatchApprovalCard backend copy', () => {
 
     it('keeps the credit tooltip at a stable width beside the chip', () => {
         // Width is what stops the sentence collapsing to the chip column.
-        // A portal is not an option: the host document may have no HTML body
-        // to portal into.
+        // Tooltip has no portal escape hatch: the host document may have no
+        // HTML body to portal into.
         const tooltip = findOne(
             render(vi.fn()),
             (el) => el.props.content === CREDIT_TOOLTIP,
         );
 
-        expect(tooltip.props.usePortal).toBeFalsy();
         expect(tooltip.props.width).toBe('220px');
         expect(tooltip.props.horizontalAlign).toBe('end');
     });

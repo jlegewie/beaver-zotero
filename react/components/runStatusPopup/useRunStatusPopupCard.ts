@@ -18,7 +18,7 @@ import {
 } from '@beaver/agent-core/run-state/atoms';
 import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
 import { runStatusText } from '@beaver/agent-core/run-state/runStatusCopy';
-import { getRunErrorTitle } from '@beaver/agent-core/run-state/runErrorCopy';
+import { getRunErrorTitle, stripRunErrorTypePrefix } from '@beaver/agent-core/run-state/runErrorCopy';
 import { pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import {
     pendingCreditConfirmationsAtom,
@@ -488,6 +488,9 @@ function useLiveCard(): RunStatusPopupCard | null {
             detail: outcome === 'error'
                 ? getRunErrorTitle(run.error?.type)
                 : outcome === 'canceled' ? 'Response was interrupted' : null,
+            errorMessage: outcome === 'error'
+                ? stripRunErrorTypePrefix(run.error?.message ?? '', run.error?.type)
+                : undefined,
             artifacts: completed.artifacts,
             hiddenArtifactCount: completed.hiddenArtifactCount,
             changes: completed.changes,

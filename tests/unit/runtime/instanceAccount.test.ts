@@ -34,6 +34,7 @@ vi.mock("../../../src/utils/zoteroInstanceIdentity", () => ({
     getZoteroUserIdentifier: () => ({ localUserKey: "install" }),
 }));
 import { InstanceAccount } from "../../../src/services/instanceAccount";
+import { getPref, setPref } from "../../../src/utils/prefs";
 
 const session = (id = "a", token = "token") =>
     ({ user: { id }, access_token: token, expires_at: 9999999999 }) as any;
@@ -66,6 +67,11 @@ describe("instance account ownership", () => {
     beforeEach(() => {
         vi.useFakeTimers();
         vi.clearAllMocks();
+        const prefs = new Map<string, unknown>();
+        vi.mocked(Zotero.Prefs.get).mockImplementation((key) => prefs.get(key) as any);
+        vi.mocked(Zotero.Prefs.set).mockImplementation((key, value) => { prefs.set(key, value); });
+        setPref("backgroundProcessingEnabled", false);
+        setPref("backgroundProcessingSearchInitialized", false);
         vi.stubGlobal("Services", {
             io: { offline: false },
             obs: { addObserver: vi.fn(), removeObserver: vi.fn() },
@@ -74,7 +80,7 @@ describe("instance account ownership", () => {
         mocks.exclusion.mockResolvedValue({});
         const beaver = {
             voice: { authChanged: vi.fn() },
-            backgroundExtractor: { abortJobsWithoutAccess: vi.fn() },
+            backgroundExtractor: { abortJobsWithoutAccess: vi.fn(), notify: vi.fn() },
             processingReconciler: { notify: vi.fn() },
         };
         (Zotero as any).Beaver = beaver;
@@ -117,6 +123,37 @@ describe("instance account ownership", () => {
         event("INITIAL_SESSION", session());
         await account.refresh();
     };
+    it("initializes search processing without a renderer and preserves a later pause", async () => {
+        await load();
+        expect(getPref("backgroundProcessingEnabled")).toBe(false);
+        expect(getPref("backgroundProcessingSearchInitialized")).toBe(false);
+
+        const entitled = profile();
+        entitled.profile.has_search_index_access = true;
+        mocks.profile.mockResolvedValue(entitled);
+        vi.mocked(Zotero.Beaver.backgroundExtractor!.notify).mockClear();
+        await account.refresh();
+        expect(Zotero.Beaver.hasSearchIndexAccess).toBe(true);
+        expect(getPref("backgroundProcessingEnabled")).toBe(true);
+        expect(getPref("backgroundProcessingSearchInitialized")).toBe(true);
+        expect(Zotero.Beaver.backgroundExtractor!.notify).toHaveBeenCalledOnce();
+
+        setPref("backgroundProcessingEnabled", false);
+        vi.mocked(Zotero.Beaver.backgroundExtractor!.notify).mockClear();
+        event("TOKEN_REFRESHED", session("a", "rotated"));
+        await account.refresh();
+        expect(getPref("backgroundProcessingEnabled")).toBe(false);
+        expect(Zotero.Beaver.backgroundExtractor!.notify).not.toHaveBeenCalled();
+
+        mocks.profile.mockResolvedValue(profile());
+        await account.refresh();
+        expect(Zotero.Beaver.hasSearchIndexAccess).toBe(false);
+        expect(Zotero.Beaver.backgroundExtractor!.notify).toHaveBeenCalledOnce();
+        mocks.profile.mockResolvedValue(entitled);
+        await account.refresh();
+        expect(getPref("backgroundProcessingEnabled")).toBe(false);
+        expect(Zotero.Beaver.backgroundExtractor!.notify).toHaveBeenCalledTimes(2);
+    });
     it("starts one SDK listener and hydrates subscribers without an update gap", async () => {
         account.start();
         await load();

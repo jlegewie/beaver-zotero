@@ -53,10 +53,10 @@ const IDLE_THRESHOLD_SEC = 30;
 const LOW_PRIORITY_CEILING = 100;
 const PREF_ENABLED = 'backgroundExtractorEnabled';
 const PREF_PROCESSING_ENABLED = 'backgroundProcessingEnabled';
-const PREF_CONTINUOUS = 'backgroundProcessingContinuous';
 const COOPERATIVE_THROTTLE = true;
 
 export type ProcessOnceReason =
+    | 'startup_delay'
     | 'stopped'
     | 'shutting_down'
     | 'disabled'
@@ -93,15 +93,23 @@ export class BackgroundExtractor {
     private started = false;
     private currentTickId: ReturnType<typeof setTimeout> | undefined;
     private tickRunning = false;
+    private tickIdleWaiters: Array<() => void> = [];
     private pendingWake = false;
     private dbWritesPermanentlyDisabled = false;
     private prefEnabled = true;
     private syncInProgress = false;
     private startupDelayUntil = 0;
     private prefObserverSymbol: symbol | null = null;
+    private processingPrefObserverSymbol: symbol | null = null;
     private syncObserverId: string | null = null;
     private unregisterIdleObserver: (() => void) | null = null;
     private workerRunning = false;
+    /**
+     * Set by {@link requestImmediateDrain}: the next passes claim backlog work
+     * regardless of the idle gate, until registered lanes have no queued or
+     * in-flight work left, including parked remote work and delayed retries.
+     */
+    private drainNowRequested = false;
     private readonly executors = new Map<BackgroundJobType, ExecutorRegistration>();
     private readonly laneInFlight = new Map<BackgroundJobType, Map<number, LaneEntry>>();
     private readonly muPDFLane = new MuPDFSerialLane();
@@ -113,6 +121,62 @@ export class BackgroundExtractor {
     /** Return the current background worker activity state for UI subscribers. */
     getStatus(): { running: boolean } {
         return { running: this.workerRunning };
+    }
+
+    /**
+     * User-facing "process now": run the queued backlog without waiting for
+     * Zotero to be idle. One-off — the bypass clears itself once a dispatch
+     * pass finds the queue empty, so the idle gate governs again afterwards.
+     */
+    requestImmediateDrain(): void {
+        if (getPref(PREF_PROCESSING_ENABLED) !== true) return;
+        this.drainNowRequested = true;
+        this.notify();
+    }
+
+    /**
+     * Cancel a {@link requestImmediateDrain} session. In-flight work finishes;
+     * the idle gate governs the next claim. No-op when no drain is active.
+     */
+    cancelImmediateDrain(): void {
+        if (!this.drainNowRequested) return;
+        this.drainNowRequested = false;
+        this.notify();
+    }
+
+    /** True while a {@link requestImmediateDrain} bypass is still active. */
+    isImmediateDrainRequested(): boolean {
+        return this.drainNowRequested;
+    }
+
+    /**
+     * Whether a dispatch pass right now may claim backlog work: a one-off
+     * drain is pending, or Zotero has been idle long enough. Mirrors the gate
+     * {@link processOnce} applies, so the status UI can tell "queued and
+     * running" from "queued behind the idle timer".
+     */
+    isBacklogGateOpen(): boolean {
+        if (this.getDispatchBlocker() !== null) return false;
+        if (getPref(PREF_PROCESSING_ENABLED) !== true) return false;
+        if (this.drainNowRequested) return true;
+        return getSystemIdleTimeMs() >= IDLE_THRESHOLD_MS;
+    }
+
+    /** Claim preconditions shared by dispatch and status; manual passes bypass the startup timer. */
+    getDispatchBlocker(includeStartup = true): ProcessOnceReason | null {
+        if (this.stopRequested) return 'stopped';
+        if (this.dbWritesPermanentlyDisabled || Zotero.__beaverShuttingDown === true) return 'shutting_down';
+        if (!this.prefEnabled || (!this.started && getPref(PREF_ENABLED) === false)) return 'disabled';
+        if (includeStartup && Date.now() < this.startupDelayUntil) return 'startup_delay';
+        if (!Zotero.getMainWindow?.()) return 'no_window';
+        if (this.syncInProgress) return 'sync_in_progress';
+        if (COOPERATIVE_THROTTLE) {
+            const hot = getExistingMuPDFWorkerClient('hot');
+            if (hot && hot.getStats().pendingCount > 0) return 'hot_busy';
+        }
+        if (!isLibraryScopeKnown()) return 'library_scope_unknown';
+        if (!Zotero.Beaver?.db || this.executors.size === 0) return 'empty';
+        return null;
     }
 
     /** Return capacity and in-flight counts for registered lanes. */
@@ -230,6 +294,19 @@ export class BackgroundExtractor {
         }
 
         try {
+            this.processingPrefObserverSymbol = Zotero.Prefs.registerObserver(
+                'extensions.zotero.beaver.backgroundProcessingEnabled',
+                (value: unknown) => {
+                    if (value !== true) this.drainNowRequested = false;
+                    this.notify();
+                },
+                true,
+            );
+        } catch (e) {
+            logger(`BackgroundExtractor: registerObserver(processing pref) failed: ${e}`, 1);
+        }
+
+        try {
             this.unregisterIdleObserver = registerIdleObserver(
                 { onIdle: () => this.notify() },
                 IDLE_THRESHOLD_SEC,
@@ -241,12 +318,23 @@ export class BackgroundExtractor {
         this.scheduleTick(STARTUP_DELAY_MS);
     }
 
+    /** Suspend background work for local storage maintenance, preserving startup state. */
+    async suspendForMaintenance(): Promise<() => void> {
+        const wasStarted = this.started;
+        await this.stop();
+        if (this.tickRunning) await new Promise<void>((resolve) => this.tickIdleWaiters.push(resolve));
+        return () => {
+            if (wasStarted && !Zotero.__beaverShuttingDown) this.start();
+        };
+    }
+
     /**
      * Stop the dispatcher, abort all active lanes, and release the background
      * MuPDF worker.
      */
     async stop(): Promise<void> {
         this.stopRequested = true;
+        this.drainNowRequested = false;
         if (Zotero.__beaverShuttingDown === true) {
             this.dbWritesPermanentlyDisabled = true;
         }
@@ -258,6 +346,14 @@ export class BackgroundExtractor {
                 // best-effort
             }
             this.prefObserverSymbol = null;
+        }
+        if (this.processingPrefObserverSymbol) {
+            try {
+                Zotero.Prefs.unregisterObserver(this.processingPrefObserverSymbol);
+            } catch {
+                // best-effort
+            }
+            this.processingPrefObserverSymbol = null;
         }
         if (this.syncObserverId) {
             try {
@@ -391,6 +487,9 @@ export class BackgroundExtractor {
             awaitLaunchedJobs?: boolean;
         } = {},
     ): Promise<ProcessOnceResult> {
+        if (getPref(PREF_PROCESSING_ENABLED) !== true) {
+            this.drainNowRequested = false;
+        }
         const inactive = (reason: ProcessOnceReason): ProcessOnceResult => {
             if (this.totalInFlight() === 0) this.setWorkerRunning(false);
             return { processed: false, reason };
@@ -398,33 +497,16 @@ export class BackgroundExtractor {
 
         if (this.stopRequested) return inactive('stopped');
         if (this.shouldSkipDbWrites()) return inactive('shutting_down');
-        if (!this.prefEnabled) return inactive('disabled');
-
-        const win = Zotero.getMainWindow?.() ?? null;
-        if (!win) return inactive('no_window');
-
-        if (this.syncInProgress) return inactive('sync_in_progress');
-
-        if (COOPERATIVE_THROTTLE) {
-            const hot = getExistingMuPDFWorkerClient('hot');
-            if (hot && hot.getStats().pendingCount > 0) {
-                return inactive('hot_busy');
-            }
-        }
-
-        // Fail closed: without a resolved searchable-library scope the
-        // dispatcher cannot prove a queued row is allowed to run, so it claims
-        // nothing. Checked every pass because rows outlive both restarts and
-        // the exclusion state they were enqueued under.
-        if (!isLibraryScopeKnown()) return inactive('library_scope_unknown');
+        const blocker = this.getDispatchBlocker(false);
+        if (blocker) return inactive(blocker);
 
         const db = Zotero.Beaver?.db;
         if (!db || this.executors.size === 0) return inactive('empty');
 
         const idleMs = getSystemIdleTimeMs();
         const processBacklog = getPref(PREF_PROCESSING_ENABLED) === true;
-        const continuous = processBacklog && getPref(PREF_CONTINUOUS) === true;
-        const maxPriority = processBacklog && (continuous || idleMs >= IDLE_THRESHOLD_MS)
+        const drainNow = processBacklog && this.drainNowRequested;
+        const maxPriority = processBacklog && (drainNow || idleMs >= IDLE_THRESHOLD_MS)
             ? undefined
             : LOW_PRIORITY_CEILING;
 
@@ -434,7 +516,15 @@ export class BackgroundExtractor {
             awaitLaunchedJobs: options.awaitLaunchedJobs === true,
         });
 
-        if (launched === 0) return inactive('empty');
+        if (launched === 0) {
+            // Remote OCR frees its lane slot while its queue row is parked.
+            // Keep the bypass through that wait and any subsequent stages.
+            if (this.drainNowRequested && this.totalInFlight() === 0) {
+                const queue = await db.getBackgroundQueueStats(Date.now(), [...this.executors.keys()]);
+                if (queue.pending === 0) this.drainNowRequested = false;
+            }
+            return inactive('empty');
+        }
         if (!options.keepRunningAfterJob && this.totalInFlight() === 0) {
             this.setWorkerRunning(false);
         }
@@ -494,6 +584,7 @@ export class BackgroundExtractor {
                         registration.executor,
                         { kind: 'complete', reason: 'library_excluded' },
                         options.db,
+                        Date.now(),
                     );
                     continue;
                 }
@@ -554,6 +645,7 @@ export class BackgroundExtractor {
         executor: JobExecutor,
         externalAbortSignal: AbortSignal,
     ): Promise<void> {
+        const attemptedAt = Date.now();
         dispatchBackgroundEvent('background-job:start', { id: record.id, record });
         const db = Zotero.Beaver?.db;
         if (!db) return;
@@ -577,7 +669,7 @@ export class BackgroundExtractor {
             outcome = { kind: 'retry', error: `unexpected: ${message}` };
         }
 
-        await this.persistOutcome(record, executor, outcome, db);
+        await this.persistOutcome(record, executor, outcome, db, attemptedAt);
     }
 
     private async persistOutcome(
@@ -585,21 +677,32 @@ export class BackgroundExtractor {
         executor: JobExecutor,
         outcome: JobOutcome,
         db: QueueDB,
+        attemptedAt: number,
     ): Promise<void> {
         if (this.shouldSkipDbWrites()) return;
 
         switch (outcome.kind) {
-            case 'complete':
-                await db.completeBackgroundJob(record.id);
+            case 'complete': {
+                let reason = outcome.reason;
+                if (reason === 'cache_budget_reached') {
+                    const retired = await db.completeBackgroundPreparationJob(record.id, Date.now());
+                    if (!retired) {
+                        reason = 'promoted_to_on_demand';
+                        this.notify();
+                    }
+                } else {
+                    await db.completeBackgroundJob(record.id);
+                }
                 logger(
-                    `BackgroundExtractor: job id=${record.id} done (${outcome.reason})`,
+                    `BackgroundExtractor: job id=${record.id} settled (${reason})`,
                     3,
                 );
                 dispatchBackgroundEvent('background-job:done', {
                     id: record.id,
-                    reason: outcome.reason,
+                    reason,
                 });
                 return;
+            }
             case 'release':
                 await db.releaseBackgroundJob(record.id, Date.now());
                 logger(
@@ -612,7 +715,7 @@ export class BackgroundExtractor {
                 });
                 return;
             case 'retry':
-                await this.recordRetryFailure(record, executor, outcome, db);
+                await this.recordRetryFailure(record, executor, outcome, db, attemptedAt);
                 return;
             case 'failPermanent':
                 await db.recordDocumentProcessingFailure(outcome.failure);
@@ -651,6 +754,7 @@ export class BackgroundExtractor {
         executor: JobExecutor,
         outcome: Extract<JobOutcome, { kind: 'retry' }>,
         db: QueueDB,
+        attemptedAt: number,
     ): Promise<void> {
         const result = await db.failBackgroundJob(record.id, outcome.error, {
             maxAttempts: MAX_ATTEMPTS,
@@ -664,6 +768,7 @@ export class BackgroundExtractor {
                     zoteroKey: record.zoteroKey,
                     status: 'failed',
                     error: outcome.error,
+                    attemptedAt,
                 });
             } else if (record.jobType === 'fulltext_upsert' && record.payload?.doc_hash) {
                 await db.markAttachmentUpsertFailed(
@@ -758,6 +863,7 @@ export class BackgroundExtractor {
             );
         } finally {
             this.tickRunning = false;
+            for (const resolve of this.tickIdleWaiters.splice(0)) resolve();
         }
     }
 

@@ -1,3 +1,4 @@
+import { recordReadingOutcome } from '../documentExtraction/readingOutcome';
 /**
  * Whole-document extraction handler for zotero_document_request.
  *
@@ -417,6 +418,7 @@ export async function handleZoteroDocumentRequest(
         }
 
         if (contentKind === 'text') {
+            const attemptedAt = Date.now();
             const source = await resolveAttachmentFileSource({
                 item: resolvedItem,
                 localSizeStrategy: 'stat',
@@ -424,6 +426,7 @@ export async function handleZoteroDocumentRequest(
                 throwIfTimedOut: timeout.throwIfTimedOut,
             });
             if (source.kind === 'error') {
+                await recordReadingOutcome(resolvedItem, 'text', { kind: 'response_error', code: source.code }, attemptedAt);
                 if (source.code === 'file_missing') {
                     const detail = source.remoteAvailable
                         ? 'The file is available remotely, but remote file access is disabled.'
@@ -451,6 +454,7 @@ export async function handleZoteroDocumentRequest(
                 throwIfTimedOut: timeout.throwIfTimedOut,
             });
             if (data.kind === 'error') {
+                await recordReadingOutcome(resolvedItem, 'text', { kind: 'response_error', code: data.code }, attemptedAt);
                 if (data.code === 'file_too_large') {
                     return errorResponse(
                         `Attachment ${resolvedKey} file is too large (${(data.sizeMB ?? 0).toFixed(1)}MB > ${data.maxMB}MB).`,
@@ -480,6 +484,7 @@ export async function handleZoteroDocumentRequest(
                 contentType,
             });
 
+            await recordReadingOutcome(resolvedItem, 'text', { kind: 'ok' }, attemptedAt);
             return guardPayloadSize(request, {
                 type: 'zotero_document',
                 request_id,

@@ -55,6 +55,7 @@ import {
     type AttachmentFileSource,
 } from './documentExtraction';
 import { readableToExtractKind, type ExtractContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
+import { recordReadingOutcome } from './documentExtraction/readingOutcome';
 import { maybeEnqueueOcrJob } from './ocr/enqueueOcr';
 import {
     EpubStructureError,
@@ -186,6 +187,8 @@ export interface ExtractAndCacheArgs {
     onRemoteDownloadFailure?: (error: unknown) => void;
     /** Queue priority forwarded to the existing no-text-layer OCR producer. */
     ocrPriority?: number;
+    /** Carry explicit cache preparation through fresh no-text-layer detection. */
+    prepareCache?: boolean;
 }
 
 export interface ExtractAndCacheResolvedPdfArgs
@@ -534,6 +537,19 @@ export async function extractAndCacheDocument(
 export async function extractAndCacheEpubDocument(
     args: ExtractAndCacheEpubArgs,
 ): Promise<ExtractAndCacheEpubResult> {
+    const attemptedAt = Date.now();
+    const result = await extractAndCacheEpubDocumentImpl(args);
+    if (args.source.kind === 'zotero' && !args.externalAbortSignal?.aborted
+        && !(result.kind === 'response_error' && result.code === 'too_many_pages'
+            && args.maxPages != null && args.maxPages < effectiveMaxPageCount())) {
+        await recordReadingOutcome(args.source.item, 'epub', result, attemptedAt);
+    }
+    return result;
+}
+
+async function extractAndCacheEpubDocumentImpl(
+    args: ExtractAndCacheEpubArgs,
+): Promise<ExtractAndCacheEpubResult> {
     const cacheItemRef: DocumentCacheItemRef = args.source.kind === 'zotero'
         ? args.source.item
         : args.source.itemRef;
@@ -719,6 +735,19 @@ export async function extractAndCacheEpubDocument(
  * mapping, matching the EPUB extraction result shape.
  */
 export async function extractAndCacheSnapshotDocument(
+    args: ExtractAndCacheSnapshotArgs,
+): Promise<ExtractAndCacheSnapshotResult> {
+    const attemptedAt = Date.now();
+    const result = await extractAndCacheSnapshotDocumentImpl(args);
+    if (args.source.kind === 'zotero' && !args.externalAbortSignal?.aborted
+        && !(result.kind === 'response_error' && result.code === 'too_many_pages'
+            && args.maxPages != null && args.maxPages < effectiveMaxPageCount())) {
+        await recordReadingOutcome(args.source.item, 'snapshot', result, attemptedAt);
+    }
+    return result;
+}
+
+async function extractAndCacheSnapshotDocumentImpl(
     args: ExtractAndCacheSnapshotArgs,
 ): Promise<ExtractAndCacheSnapshotResult> {
     const cacheItemRef: DocumentCacheItemRef = args.source.kind === 'zotero'
@@ -907,6 +936,19 @@ export async function extractAndCacheSnapshotDocument(
  * Expected outcomes are returned as a tagged union for caller-side mapping.
  */
 export async function extractAndCacheResolvedPdfDocument(
+    args: ExtractAndCacheResolvedPdfArgs,
+): Promise<ExtractAndCacheResult> {
+    const attemptedAt = Date.now();
+    const result = await extractAndCacheResolvedPdfDocumentImpl(args);
+    if (args.source.kind === 'zotero' && !args.externalAbortSignal?.aborted
+        && !(result.kind === 'response_error' && result.code === 'too_many_pages'
+            && args.maxPages != null && args.maxPages < effectiveMaxPageCount())) {
+        await recordReadingOutcome(args.source.item, 'pdf', result, attemptedAt);
+    }
+    return result;
+}
+
+async function extractAndCacheResolvedPdfDocumentImpl(
     args: ExtractAndCacheResolvedPdfArgs,
 ): Promise<ExtractAndCacheResult> {
     const {
@@ -1440,6 +1482,7 @@ export async function extractAndCacheResolvedPdfDocument(
                         itemId: zoteroItem.id,
                         pageCount: extractionError.pageCount ?? totalPages,
                         priority: args.ocrPriority,
+                        prepareCache: args.prepareCache,
                     });
                 }
 

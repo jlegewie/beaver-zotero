@@ -317,6 +317,17 @@
     text-overflow: ellipsis;
 }
 
+.beaver-run-status-popup__error-preview {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 54px;
+    overflow: hidden;
+}
+
+.beaver-run-status-popup__error-preview--clipped {
+    mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+}
+
 /* The shimmering status line: the text clips, and the component appends a
  * plain ellipsis beside it. Gecko does not paint `text-overflow`'s own marker
  * through the shimmer's transparent text fill. */

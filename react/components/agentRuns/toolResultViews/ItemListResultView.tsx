@@ -87,8 +87,16 @@ interface RowEventProps {
     onMouseLeave: () => void;
 }
 
-const ItemRow: React.FC<{ row: ItemRowView } & RowEventProps> = ({
+/**
+ * Optional trailing control per item row (a retry icon, for instance). Rendered
+ * inside the clickable row, so the control must stop propagation itself if its
+ * click should not also reveal the item.
+ */
+export type ItemRowAction = (row: ItemRowView) => React.ReactNode;
+
+const ItemRow: React.FC<{ row: ItemRowView; action?: ItemRowAction } & RowEventProps> = ({
     row,
+    action,
     isHovered,
     onMouseEnter,
     onMouseLeave,
@@ -152,11 +160,16 @@ const ItemRow: React.FC<{ row: ItemRowView } & RowEventProps> = ({
                     </div>
                 )}
             </div>
+            {action && (
+                <div className="flex-shrink-0 display-flex items-center" style={{ alignSelf: 'center' }}>
+                    {action(row)}
+                </div>
+            )}
         </div>
     );
 };
 
-export const ItemListResultView: React.FC<{ view: ItemListView }> = ({ view }) => {
+export const ItemListResultView: React.FC<{ view: ItemListView; rowAction?: ItemRowAction }> = ({ view, rowAction }) => {
     const [hoveredKey, setHoveredKey] = useState<string | null>(null);
 
     if (view.items.length === 0) {
@@ -180,7 +193,7 @@ export const ItemListResultView: React.FC<{ view: ItemListView }> = ({ view }) =
                 return (
                     <div key={key} className={isLast ? '' : 'border-bottom-quinary'}>
                         {isItemRow(row) ? (
-                            <ItemRow row={row} {...rowEvents} />
+                            <ItemRow row={row} action={rowAction} {...rowEvents} />
                         ) : (
                             <AnnotationResultRow row={row} variant="with-parent" {...rowEvents} />
                         )}

@@ -14,6 +14,8 @@ import { getPref, setPref } from "../../../src/utils/prefs";
 import { TickIcon, CopyIcon } from "../icons/icons";
 import { normalizeVoiceLanguage, voiceLanguages } from "../../voice/languages";
 import CustomInstructionsSection from "./CustomInstructionsSection";
+import LocalDocumentCacheRow from "./LocalDocumentCacheRow";
+import RebuildSearchIndexRow from "./RebuildSearchIndexRow";
 import {
     deleteAllExternalFiles,
     getExternalFilesStats,
@@ -39,8 +41,6 @@ const AdvancedSection: React.FC = () => {
     const setCurrentMessageExternalFiles = useSetAtom(currentMessageExternalFilesAtom);
     const [externalFileStats, setExternalFileStats] = useState<{ count: number; totalBytes: number } | null>(null);
     const [isDeletingExternalFiles, setIsDeletingExternalFiles] = useState(false);
-    const [isDeletingCache, setIsDeletingCache] = useState(false);
-    const [cacheDeleted, setCacheDeleted] = useState(false);
 
     const refreshExternalFileStats = useCallback(async () => {
         try {
@@ -88,19 +88,6 @@ const AdvancedSection: React.FC = () => {
             refreshExternalFileStats();
         }
     }, [externalFileStats, refreshExternalFileStats, setCurrentMessageExternalFiles]);
-
-    const handleDeleteDocumentCache = useCallback(async () => {
-        setIsDeletingCache(true);
-        try {
-            await Zotero.Beaver?.documentCache?.clearAll();
-            setCacheDeleted(true);
-            setTimeout(() => setCacheDeleted(false), 2000);
-        } catch (error) {
-            logger(`AdvancedSection: failed to clear document cache: ${error}`, 1);
-        } finally {
-            setIsDeletingCache(false);
-        }
-    }, []);
 
     // --- Atoms: MCP Server enabled ---
     const [mcpServerEnabled, setMcpServerEnabled] = useAtom(mcpServerEnabledAtom);
@@ -240,23 +227,15 @@ const AdvancedSection: React.FC = () => {
                         </div>
                     }
                 />
-                <SettingsRow
-                    title="Document Cache"
-                    description="Text extracted from PDFs and other documents, stored to avoid re-processing files"
-                    hasBorder
-                    control={
-                        <Button
-                            variant="outline"
-                            icon={cacheDeleted ? TickIcon : undefined}
-                            onClick={handleDeleteDocumentCache}
-                            disabled={isDeletingCache}
-                            loading={isDeletingCache}
-                            style={{ padding: '4px 6px' }}
-                        >
-                            {cacheDeleted ? 'Deleted' : 'Delete Cache'}
-                        </Button>
-                    }
-                />
+                <LocalDocumentCacheRow hasBorder />
+            </SettingsGroup>
+
+            {/* ===== TROUBLESHOOTING ===== */}
+            <div className="display-flex flex-row items-center gap-2" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>
+                <div className="text-lg font-color-primary font-bold">Troubleshooting</div>
+            </div>
+            <SettingsGroup>
+                <RebuildSearchIndexRow />
             </SettingsGroup>
 
             {/* ===== CONNECTED APPS (DATA PROVIDER) ===== */}

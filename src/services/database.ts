@@ -16,6 +16,16 @@ import type {
     ExtractContentKind,
 } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import { BACKGROUND_UNTAG_PRIORITY } from './backgroundProcessing/constants';
+import {
+    processingIssuesSql,
+    PROCESSING_ISSUE_REASON_ORDER,
+    type AttachmentProcessingIssueRow,
+    type BackgroundQueueDeadRow,
+    type IssueEntitlements,
+    type ProcessingIssueSummary,
+    type ProcessingIssueReason,
+    type ProcessingIssueItem,
+} from './backgroundProcessing/issues';
 import { logger } from '@beaver/agent-core/platform/logger';
 
 export type { DocumentCachePageLabels } from '@beaver/agent-core/extract/document/shared/contentKinds';
@@ -354,6 +364,12 @@ export interface BackgroundQueueStats {
     deferred: number;
     dead: number;
     byJobType: Record<string, number>;
+    /**
+     * Distinct attachments with a queued job. One attachment can hold more
+     * than one job (an upsert parked behind the extraction that refills its
+     * cache), so this is the queue depth in files rather than jobs.
+     */
+    attachments: number;
 }
 
 export type AttachmentExtractStatus = 'done' | 'failed' | 'skipped' | null;
@@ -390,6 +406,10 @@ export interface AttachmentProcessingStateInput {
 
 export interface AttachmentProcessingAggregates {
     total: number;
+    /** Mutually exclusive text-readiness counts for the requested OCR target. */
+    readable: number;
+    unreadable: number;
+    awaitingOcr: number;
     extracted: number;
     ocrNeeded: number;
     ocrDone: number;
@@ -702,6 +722,16 @@ export class BeaverDB {
             );
         `);
         await this.queryAsync(`
+            CREATE TABLE IF NOT EXISTS attachment_reading_state (
+                library_id INTEGER NOT NULL,
+                zotero_key TEXT NOT NULL,
+                content_kind TEXT NOT NULL,
+                error_code TEXT,
+                attempted_at INTEGER NOT NULL,
+                PRIMARY KEY (library_id, zotero_key)
+            );
+        `);
+        await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_attachment_processing_extract
             ON attachment_processing_state(library_id, extract_status);
         `);
@@ -811,6 +841,7 @@ export class BeaverDB {
         `);
 
         await this.queryAsync(`DROP TABLE IF EXISTS attachment_file_cache`);
+        await this.queryAsync(`DROP TABLE IF EXISTS document_cache_recovery`);
 
         // Drop and recreate the document cache tables when their schema version
         // changes. The cache re-warms on demand, so resetting is safe. Bump
@@ -916,6 +947,17 @@ export class BeaverDB {
         await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_dcp_lru
             ON document_cache_payloads(COALESCE(last_accessed_at, created_at));
+        `);
+
+        // Retain reading failures discovered before the shared outcome inventory existed.
+        await this.queryAsync(`
+            INSERT OR IGNORE INTO attachment_reading_state
+                (library_id, zotero_key, content_kind, error_code, attempted_at)
+            SELECT library_id, zotero_key, content_kind,
+                CASE WHEN content_kind = 'pdf' AND error_code = 'no_text_layer'
+                    THEN 'ocr_required' ELSE error_code END,
+                CAST(strftime('%s', updated_at) AS INTEGER) * 1000
+            FROM document_cache_metadata WHERE error_code IS NOT NULL AND library_id > 0;
         `);
 
         // User-attached external files (registry behind the `ext-<KEY>` ids).
@@ -2381,11 +2423,58 @@ export class BeaverDB {
         );
     }
 
+    /** Latest observed reading outcome, independent of cache retention and indexing history. */
+    public async recordAttachmentReadingOutcome(input: {
+        libraryId: number;
+        zoteroKey: string;
+        contentKind: string;
+        errorCode: string | null;
+        attemptedAt: number;
+    }): Promise<void> {
+        await this.queryAsync(
+            `INSERT INTO attachment_reading_state (library_id, zotero_key, content_kind, error_code, attempted_at)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(library_id, zotero_key) DO UPDATE SET
+                content_kind = excluded.content_kind, error_code = excluded.error_code,
+                attempted_at = excluded.attempted_at
+             WHERE excluded.attempted_at >= attachment_reading_state.attempted_at`,
+            [input.libraryId, input.zoteroKey, input.contentKind, input.errorCode, input.attemptedAt],
+        );
+    }
+
+    public async getAttachmentReadingError(libraryId: number, zoteroKey: string): Promise<string | null> {
+        let code: string | null = null;
+        await this.queryAsync(
+            `SELECT error_code FROM attachment_reading_state WHERE library_id = ? AND zotero_key = ?`,
+            [libraryId, zoteroKey],
+            { onRow: (row: any) => { code = row.getResultByIndex(0) ?? null; } },
+        );
+        return code;
+    }
+
+    public async getAttachmentReadingKeysByLibrary(libraryId: number): Promise<string[]> {
+        const keys: string[] = [];
+        await this.queryAsync(
+            `SELECT zotero_key FROM attachment_reading_state WHERE library_id = ?`,
+            [libraryId],
+            { onRow: (row: any) => keys.push(row.getResultByIndex(0)) },
+        );
+        return keys;
+    }
+
+    public async deleteAttachmentReadingState(libraryId: number, zoteroKey: string): Promise<void> {
+        await this.queryAsync(
+            `DELETE FROM attachment_reading_state WHERE library_id = ? AND zotero_key = ?`,
+            [libraryId, zoteroKey],
+        );
+    }
+
     public async deleteAttachmentProcessingState(
         libraryId: number,
         zoteroKey: string,
     ): Promise<AttachmentProcessingStateRecord | null> {
         const existing = await this.getAttachmentProcessingState(libraryId, zoteroKey);
+        await this.deleteAttachmentReadingState(libraryId, zoteroKey);
         if (!existing) return null;
         await this.queryAsync(
             `DELETE FROM attachment_processing_state
@@ -2396,10 +2485,63 @@ export class BeaverDB {
     }
 
     public async deleteAttachmentProcessingStatesByLibrary(libraryId: number): Promise<void> {
+        await this.queryAsync(`DELETE FROM attachment_reading_state WHERE library_id = ?`, [libraryId]);
         await this.queryAsync(
             `DELETE FROM attachment_processing_state WHERE library_id = ?`,
             [libraryId],
         );
+    }
+
+    /** Reset local progress while retaining the identities needed for remote cleanup. */
+    public async resetLocalProcessingState(libraryId?: number, discardRemoteState = false): Promise<void> {
+        const where = libraryId === undefined ? '' : ' WHERE library_id = ?';
+        const params = libraryId === undefined ? [] : [libraryId];
+        await this.conn.executeTransaction(async () => {
+            await this.queryAsync(`DELETE FROM attachment_reading_state${where}`, params);
+            if (!discardRemoteState) {
+                // Upserts may be the only remaining record of a replaced document hash.
+                const cleanup: BackgroundJobInput[] = [];
+                for (const table of ['background_jobs', 'background_jobs_dead']) {
+                    await this.queryAsync(
+                        `SELECT library_id, zotero_key, content_kind, payload_json FROM ${table}
+                         ${where} ${where ? 'AND' : 'WHERE'} job_type = 'fulltext_upsert'`,
+                        params,
+                        { onRow: (row: any) => {
+                            const payload = JSON.parse(row.getResultByIndex(3)) as BackgroundJobPayload;
+                            if (!payload?.previous_doc_hash || payload.previous_doc_hash === payload.doc_hash) return;
+                            cleanup.push({
+                                jobType: 'fulltext_untag', libraryId: row.getResultByIndex(0),
+                                zoteroKey: row.getResultByIndex(1), contentKind: row.getResultByIndex(2),
+                                payloadKind: 'structured', priority: BACKGROUND_UNTAG_PRIORITY, now: Date.now(),
+                                payload: { ...payload, index_action: 'untag', doc_hash: payload.previous_doc_hash,
+                                    previous_doc_hash: undefined },
+                            });
+                        } },
+                    );
+                }
+                for (const job of cleanup) await this.enqueueBackgroundJobInTransaction(job);
+            }
+            for (const table of ['background_jobs', 'background_jobs_dead']) {
+                await this.queryAsync(
+                    `DELETE FROM ${table}${where}${discardRemoteState ? '' :
+                        ` ${where ? 'AND' : 'WHERE'} job_type != 'fulltext_untag'`}`, params,
+                );
+            }
+            if (discardRemoteState) {
+                await this.queryAsync(`DELETE FROM attachment_processing_state${where}`, params);
+            } else {
+                // Keep hash and membership facts until a replacement extraction can
+                // retire the old remote reference, including after an offline reset.
+                await this.queryAsync(`UPDATE attachment_processing_state SET
+                    extract_status = NULL, ocr_status = CASE WHEN ocr_status = 'na' THEN 'na' ELSE NULL END,
+                    file_mtime_ms = NULL,
+                    file_size_bytes = NULL, ocr_engine_version = NULL,
+                    upsert_status = CASE WHEN upsert_status = 'done' THEN 'done' ELSE NULL END,
+                    last_error = NULL, updated_at = datetime('now')${where}`, params);
+            }
+            await this.queryAsync(`DELETE FROM processing_index_state${where}`, params);
+            if (libraryId === undefined) await this.queryAsync('DELETE FROM document_processing_failures');
+        });
     }
 
     /** Drop content-reading work when a library leaves Beaver's scope. */
@@ -2498,6 +2640,10 @@ export class BeaverDB {
         reason: string | null = null,
     ): Promise<void> {
         await this.resetAttachmentStatusColumn('extract_status', libraryId, zoteroKey, reason);
+        if (reason !== 'user_retry') await this.queryAsync(
+            `DELETE FROM attachment_reading_state WHERE library_id = ? AND zotero_key = ?`,
+            [libraryId, zoteroKey],
+        );
     }
 
     public async resetAttachmentOcr(
@@ -2506,6 +2652,25 @@ export class BeaverDB {
         reason: string | null = null,
     ): Promise<void> {
         await this.resetAttachmentStatusColumn('ocr_status', libraryId, zoteroKey, reason);
+    }
+
+    /**
+     * Put a failed OCR stage back to "needed" so the reconciler and the retry
+     * path can ticket it again without re-running extraction.
+     */
+    public async requeueAttachmentOcr(
+        libraryId: number,
+        zoteroKey: string,
+        reason: string | null = null,
+    ): Promise<void> {
+        await this.queryAsync(
+            `UPDATE attachment_processing_state SET
+                ocr_status = 'needed',
+                last_error = ?,
+                updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ?`,
+            [reason, libraryId, zoteroKey],
+        );
     }
 
     public async resetAttachmentUpsert(
@@ -2576,6 +2741,7 @@ export class BeaverDB {
         zoteroKey: string;
         status: Extract<AttachmentExtractStatus, 'failed' | 'skipped'>;
         error: string;
+        attemptedAt: number;
     }): Promise<void> {
         await this.queryAsync(
             `UPDATE attachment_processing_state SET
@@ -2583,6 +2749,13 @@ export class BeaverDB {
              WHERE library_id = ? AND zotero_key = ? AND extract_status IS NULL`,
             [input.status, input.error, input.libraryId, input.zoteroKey],
         );
+        if (await this.lastStatementChangedRow()) {
+            const row = await this.getAttachmentProcessingState(input.libraryId, input.zoteroKey);
+            if (row) await this.recordAttachmentReadingOutcome({
+                libraryId: input.libraryId, zoteroKey: input.zoteroKey,
+                contentKind: row.contentKind, errorCode: input.error, attemptedAt: input.attemptedAt,
+            });
+        }
     }
 
     /** OCR completion is guarded by the exact bytes hash the executor consumed. */
@@ -2727,7 +2900,11 @@ export class BeaverDB {
                 SUM(CASE WHEN upsert_status = 'done' THEN 1 ELSE 0 END),
                 SUM(CASE WHEN extract_status = 'failed' OR ocr_status = 'failed' OR upsert_status = 'failed' THEN 1 ELSE 0 END),
                 SUM(CASE WHEN extract_status = 'skipped' THEN 1 ELSE 0 END),
-                MIN(CASE WHEN ${pendingConditions.join(' OR ')} THEN created_at END)
+                MIN(CASE WHEN ${pendingConditions.join(' OR ')} THEN created_at END),
+                SUM(CASE WHEN extract_status = 'done' AND (ocr_status IS NULL OR ocr_status IN ('na', 'done')) THEN 1 ELSE 0 END),
+                SUM(CASE WHEN extract_status IN ('failed', 'skipped')
+                    OR (extract_status = 'done' AND (ocr_status = 'failed' ${targets.ocr ? '' : "OR ocr_status = 'needed'"})) THEN 1 ELSE 0 END),
+                SUM(CASE WHEN extract_status = 'done' AND ocr_status = 'needed' AND ${targets.ocr ? '1' : '0'} THEN 1 ELSE 0 END)
              FROM attachment_processing_state${where}`,
             params,
             {
@@ -2740,11 +2917,17 @@ export class BeaverDB {
                     failed: Number(row.getResultByIndex(5)) || 0,
                     skipped: Number(row.getResultByIndex(6)) || 0,
                     oldestPendingAt: row.getResultByIndex(7) ?? null,
+                    readable: Number(row.getResultByIndex(8)) || 0,
+                    unreadable: Number(row.getResultByIndex(9)) || 0,
+                    awaitingOcr: Number(row.getResultByIndex(10)) || 0,
                 }),
             },
         );
         return rows[0] ?? {
             total: 0,
+            readable: 0,
+            unreadable: 0,
+            awaitingOcr: 0,
             extracted: 0,
             ocrNeeded: 0,
             ocrDone: 0,
@@ -2753,6 +2936,143 @@ export class BeaverDB {
             skipped: 0,
             oldestPendingAt: null,
         };
+    }
+
+    /**
+     * Ledger rows that did not reach a readable state, most recent first:
+     * terminal extraction outcomes (`failed` / `skipped`), OCR and index
+     * failures, and scans still waiting for OCR. The caller decides which of
+     * these count as issues for the current entitlements. Omit limit when
+     * building the complete grouped inventory.
+     */
+    public async getAttachmentProcessingIssueRows(
+        limit?: number,
+    ): Promise<AttachmentProcessingIssueRow[]> {
+        const rows: AttachmentProcessingIssueRow[] = [];
+        await this.queryAsync(
+            `SELECT library_id, zotero_key, extract_status, ocr_status,
+                    upsert_status, last_error, updated_at, content_kind
+             FROM attachment_processing_state
+             WHERE extract_status IN ('failed', 'skipped')
+                OR ocr_status IN ('failed', 'needed')
+                OR upsert_status = 'failed'
+             ORDER BY updated_at DESC LIMIT ?`,
+            [limit === undefined ? -1 : Math.max(1, Math.floor(limit))],
+            { onRow: (row: any) => rows.push({
+                libraryId: row.getResultByIndex(0),
+                zoteroKey: row.getResultByIndex(1),
+                extractStatus: row.getResultByIndex(2) ?? null,
+                ocrStatus: row.getResultByIndex(3) ?? null,
+                upsertStatus: row.getResultByIndex(4) ?? null,
+                lastError: row.getResultByIndex(5) ?? null,
+                updatedAt: row.getResultByIndex(6) ?? null,
+                contentKind: row.getResultByIndex(7) ?? null,
+            }) },
+        );
+        return rows;
+    }
+
+    /** Count the complete current issue inventory without materializing attachments in JS. */
+    public async getProcessingIssueCounts(entitlements: IssueEntitlements): Promise<ProcessingIssueSummary[]> {
+        const counts = new Map<ProcessingIssueReason, number>();
+        await this.queryAsync(
+            `SELECT * FROM (${processingIssuesSql(entitlements)} SELECT reason, COUNT(*) FROM issues GROUP BY reason)`,
+            [],
+            { onRow: (row: any) => counts.set(row.getResultByIndex(0), Number(row.getResultByIndex(1))) },
+        );
+        return PROCESSING_ISSUE_REASON_ORDER.filter((reason) => counts.has(reason))
+            .map((reason) => ({ reason, count: counts.get(reason)! }));
+    }
+
+    /** Load a bounded page for an expanded issue group, most recent first with stable ties. */
+    public async getProcessingIssuePage(
+        entitlements: IssueEntitlements,
+        reason: ProcessingIssueReason,
+        offset = 0,
+        limit = 10,
+    ): Promise<ProcessingIssueItem[]> {
+        const items: ProcessingIssueItem[] = [];
+        await this.queryAsync(
+            `SELECT * FROM (${processingIssuesSql(entitlements)}
+             SELECT library_id, zotero_key, last_error, timestamp FROM issues WHERE reason = ?
+             ORDER BY timestamp DESC, library_id, zotero_key LIMIT ? OFFSET ?)`,
+            [reason, Math.min(100, Math.max(1, Math.floor(limit))), Math.max(0, Math.floor(offset))],
+            { onRow: (row: any) => items.push({
+                libraryId: row.getResultByIndex(0), zoteroKey: row.getResultByIndex(1),
+                error: row.getResultByIndex(2) ?? null, timestamp: row.getResultByIndex(3) ?? null,
+            }) },
+        );
+        return items;
+    }
+
+    /**
+     * Every attachment in one issue group, for a group-level retry. Bounded so a
+     * pathological ledger cannot materialize an unbounded array; the retry
+     * re-reads the group afterwards, so a second click picks up the remainder.
+     */
+    public async getProcessingIssueRefs(
+        entitlements: IssueEntitlements,
+        reason: ProcessingIssueReason,
+        limit = 5_000,
+    ): Promise<Array<{ libraryId: number; zoteroKey: string }>> {
+        const refs: Array<{ libraryId: number; zoteroKey: string }> = [];
+        await this.queryAsync(
+            `SELECT * FROM (${processingIssuesSql(entitlements)}
+             SELECT library_id, zotero_key FROM issues WHERE reason = ?
+             ORDER BY timestamp DESC, library_id, zotero_key LIMIT ?)`,
+            [reason, Math.max(1, Math.floor(limit))],
+            { onRow: (row: any) => refs.push({
+                libraryId: row.getResultByIndex(0), zoteroKey: row.getResultByIndex(1),
+            }) },
+        );
+        return refs;
+    }
+
+    /**
+     * Drop one attachment's dead-lettered processing jobs so a retry can
+     * re-enqueue them and the issues list stops reporting the old failure.
+     * Untag dead letters are remote-cleanup intents with their own redrive and
+     * are left alone.
+     */
+    public async deleteBackgroundDeadLetters(libraryId: number, zoteroKey: string): Promise<void> {
+        await this.queryAsync(
+            `DELETE FROM background_jobs_dead
+             WHERE library_id = ? AND zotero_key = ?
+               AND job_type IN ('document_extract', 'document_ocr', 'fulltext_upsert')`,
+            [libraryId, zoteroKey],
+        );
+    }
+
+    /** Dead letters, optionally restricted to current, unrecovered ledger entries. */
+    public async getBackgroundDeadLetters(
+        limit?: number,
+        onlyUnresolved = false,
+    ): Promise<BackgroundQueueDeadRow[]> {
+        const rows: BackgroundQueueDeadRow[] = [];
+        await this.queryAsync(
+            `SELECT d.job_type, d.library_id, d.zotero_key, d.last_error, d.died_at
+             FROM background_jobs_dead d
+             ${onlyUnresolved ? `WHERE EXISTS (
+                 SELECT 1 FROM attachment_processing_state s
+                 WHERE s.library_id = d.library_id AND s.zotero_key = d.zotero_key
+             ) AND NOT EXISTS (
+                 SELECT 1 FROM attachment_processing_state s
+                 WHERE s.library_id = d.library_id AND s.zotero_key = d.zotero_key
+                   AND ((d.job_type = 'document_extract' AND s.extract_status = 'done')
+                     OR (d.job_type = 'document_ocr' AND s.extract_status = 'done' AND s.ocr_status IN ('done', 'na'))
+                     OR (d.job_type = 'fulltext_upsert' AND s.upsert_status = 'done'))
+             )` : ''}
+             ORDER BY d.died_at DESC LIMIT ?`,
+            [limit === undefined ? -1 : Math.max(1, Math.floor(limit))],
+            { onRow: (row: any) => rows.push({
+                jobType: row.getResultByIndex(0),
+                libraryId: row.getResultByIndex(1) ?? null,
+                zoteroKey: row.getResultByIndex(2) ?? null,
+                lastError: row.getResultByIndex(3) ?? null,
+                diedAt: row.getResultByIndex(4) ?? null,
+            }) },
+        );
+        return rows;
     }
 
     public async getBackgroundProcessingFailures(
@@ -3773,6 +4093,35 @@ export class BeaverDB {
         return rows[0]?.count ?? 0;
     }
 
+    /** Count registered, compatible documents without probing source or payload files. */
+    public async getCachedDocumentCount(versions: {
+        metadata: number;
+        payload: number;
+        pdf: string | null;
+        epub: string | null;
+        snapshot: string | null;
+    }): Promise<number> {
+        let count = 0;
+        await this.queryAsync(
+            `SELECT COUNT(*) FROM (
+                SELECT DISTINCT m.library_id, m.zotero_key
+                FROM document_cache_metadata m JOIN document_cache_payloads p ON p.metadata_id = m.id
+                WHERE m.error_code IS NULL AND m.document_metadata_json != 'null'
+                    AND m.metadata_format_version = ? AND p.cache_format_version = ?
+                    AND ((m.content_kind = 'pdf' AND m.extraction_schema_version = ?)
+                        OR (m.content_kind = 'epub' AND m.extraction_schema_version = ?)
+                        OR (m.content_kind = 'snapshot' AND m.extraction_schema_version = ?))
+                    AND p.extraction_schema_version = m.extraction_schema_version
+                    AND p.content_kind = m.content_kind AND p.source_file_path = m.file_path
+                    AND p.source_file_mtime_ms = m.file_mtime_ms AND p.source_file_size_bytes = m.file_size_bytes
+                    AND p.source_size_bytes = m.source_size_bytes
+            )`,
+            [versions.metadata, versions.payload, versions.pdf, versions.epub, versions.snapshot],
+            { onRow: (row: any) => { count = row.getResultByIndex(0); } },
+        );
+        return count;
+    }
+
     /** Count document-cache payload rows. */
     public async getDocumentCachePayloadCount(libraryId?: number): Promise<number> {
         const rows: Array<{ count: number }> = [];
@@ -3791,6 +4140,35 @@ export class BeaverDB {
             await this.queryAsync(`DELETE FROM document_cache_payloads`);
             await this.queryAsync(`DELETE FROM document_cache_metadata`);
         });
+    }
+
+    /** Processed files missing local content, ordered by recent use or addition. */
+    public async getUncachedProcessingCandidates(options: {
+        libraryIds: number[]; hasOcrAccess: boolean; firstOnly?: boolean;
+    }): Promise<Array<{ libraryId: number; zoteroKey: string }>> {
+        const result: Array<{ libraryId: number; zoteroKey: string }> = [];
+        if (options.libraryIds.length === 0) return result;
+        await this.queryAsync(`SELECT S.library_id, S.zotero_key
+            FROM attachment_processing_state S
+            LEFT JOIN document_cache_metadata M
+                ON M.library_id = S.library_id AND M.zotero_key = S.zotero_key
+            WHERE S.library_id IN (${options.libraryIds.map(() => '?').join(',')})
+                AND S.extract_status = 'done'
+                AND (S.ocr_status = 'na' ${options.hasOcrAccess ? "OR S.ocr_status = 'done'" : ''})
+                AND NOT EXISTS (SELECT 1 FROM document_cache_payloads P
+                    WHERE P.library_id = S.library_id AND P.zotero_key = S.zotero_key
+                        AND P.payload_kind = 'structured')
+                AND NOT EXISTS (SELECT 1 FROM background_jobs J
+                    WHERE J.library_id = S.library_id AND J.zotero_key = S.zotero_key)
+                AND NOT EXISTS (SELECT 1 FROM background_jobs
+                    WHERE json_extract(payload_json, '$.prepare_cache') = 1)
+            ORDER BY COALESCE(M.last_accessed_at, S.created_at) DESC, S.library_id, S.zotero_key
+            ${options.firstOnly ? 'LIMIT 1' : ''}`, options.libraryIds, {
+            onRow: (row: any) => result.push({
+                libraryId: row.getResultByIndex(0), zoteroKey: row.getResultByIndex(1),
+            }),
+        });
+        return result;
     }
 
     // =====================================================================
@@ -4136,7 +4514,9 @@ export class BeaverDB {
                     available_at  = CASE WHEN content_kind != ? OR ? < priority
                                          THEN MIN(available_at, ?) ELSE available_at END,
                     content_kind  = ?,
-                    payload_json  = CASE WHEN content_kind != ? OR ? < priority OR ? = 'fulltext_upsert'
+                    payload_json  = CASE WHEN priority >= 100 AND ? >= 100
+                                              AND json_extract(?, '$.prepare_cache') = 1 THEN ?
+                                         WHEN content_kind != ? OR ? < priority OR ? = 'fulltext_upsert'
                                          THEN ? ELSE payload_json END,
                     attempt_count = CASE WHEN content_kind != ? OR ? < priority
                                          THEN 0 ELSE attempt_count END,
@@ -4150,6 +4530,7 @@ export class BeaverDB {
                     priority,
                     input.now,
                     input.contentKind,
+                    priority, payloadJson, payloadJson,
                     input.contentKind, priority,
                     input.jobType,
                     payloadJson,
@@ -4203,6 +4584,7 @@ export class BeaverDB {
         zoteroKey: string,
         payloadKind: DocumentCachePayloadKind,
         priority: number,
+        preparationPayload?: BackgroundJobPayload,
     ): Promise<{ exists: boolean; promoted: boolean }> {
         // Current priority doubles as the existence check (dedup key is UNIQUE).
         const current: number[] = [];
@@ -4215,6 +4597,14 @@ export class BeaverDB {
             { onRow: (row: any) => current.push(row.getResultByIndex(0)) },
         );
         if (current.length === 0) return { exists: false, promoted: false };
+        // Fresh detection and its extraction continuation can ticket the same
+        // scan. Preserve the budget marker even when priority does not change.
+        if (preparationPayload?.prepare_cache && priority >= 100) {
+            await this.queryAsync(`UPDATE background_jobs SET payload_json = ?
+                WHERE job_type = ? AND library_id = ? AND zotero_key = ? AND payload_kind = ?
+                    AND dedupe_key = '' AND priority >= 100`,
+            [JSON.stringify(preparationPayload), jobType, libraryId, zoteroKey, payloadKind]);
+        }
         if ((current[0] ?? 0) <= priority) return { exists: true, promoted: false };
 
         // Lower priority only. The `priority > ?` guard keeps the value
@@ -4308,6 +4698,20 @@ export class BeaverDB {
             `DELETE FROM background_jobs WHERE id = ?`,
             [id],
         );
+    }
+
+    /** Retire budget-limited work only while it is still background priority. */
+    public async completeBackgroundPreparationJob(id: number, now: number): Promise<boolean> {
+        let retired = true;
+        await this.conn.executeTransaction(async () => {
+            await this.queryAsync(`DELETE FROM background_jobs WHERE id = ? AND priority >= 100`, [id]);
+            if (await this.lastStatementChangedRow()) return;
+            // A foreground request may have promoted the claimed ticket while
+            // its executor was waiting. Make that work immediately claimable.
+            await this.queryAsync(`UPDATE background_jobs SET available_at = ? WHERE id = ? AND priority < 100`, [now, id]);
+            retired = !(await this.lastStatementChangedRow());
+        });
+        return retired;
     }
 
     /**
@@ -4414,36 +4818,48 @@ export class BeaverDB {
     /** Counts surfaced through the dev queue-stats endpoint. */
     public async getBackgroundQueueStats(
         now: number,
+        jobTypes?: string[],
     ): Promise<BackgroundQueueStats> {
+        const laneFilter = jobTypes === undefined ? '1' : jobTypes.length === 0
+            ? '0' : `job_type IN (${jobTypes.map(() => '?').join(', ')})`;
+        const laneParams = jobTypes ?? [];
         const totalsRows: number[] = [];
         await this.queryAsync(
-            `SELECT COUNT(*) FROM background_jobs`,
-            [],
+            `SELECT COUNT(*) FROM background_jobs WHERE ${laneFilter}`,
+            laneParams,
             { onRow: (row: any) => totalsRows.push(row.getResultByIndex(0)) },
         );
         const pending = totalsRows[0] ?? 0;
 
         const availableRows: number[] = [];
         await this.queryAsync(
-            `SELECT COUNT(*) FROM background_jobs WHERE available_at <= ?`,
-            [now],
+            `SELECT COUNT(*) FROM background_jobs WHERE available_at <= ? AND ${laneFilter}`,
+            [now, ...laneParams],
             { onRow: (row: any) => availableRows.push(row.getResultByIndex(0)) },
         );
         const available = availableRows[0] ?? 0;
         const deferred = pending - available;
 
+        const attachmentRows: number[] = [];
+        await this.queryAsync(
+            `SELECT COUNT(DISTINCT library_id || '/' || zotero_key) FROM background_jobs WHERE ${laneFilter}`,
+            laneParams,
+            { onRow: (row: any) => attachmentRows.push(row.getResultByIndex(0)) },
+        );
+        const attachments = attachmentRows[0] ?? 0;
+
         const deadRows: number[] = [];
         await this.queryAsync(
-            `SELECT COUNT(*) FROM background_jobs_dead`,
-            [],
+            `SELECT COUNT(*) FROM background_jobs_dead WHERE ${laneFilter}`,
+            laneParams,
             { onRow: (row: any) => deadRows.push(row.getResultByIndex(0)) },
         );
         const dead = deadRows[0] ?? 0;
 
         const byJobType: Record<string, number> = {};
         await this.queryAsync(
-            `SELECT job_type, COUNT(*) FROM background_jobs GROUP BY job_type`,
-            [],
+            `SELECT job_type, COUNT(*) FROM background_jobs WHERE ${laneFilter} GROUP BY job_type`,
+            laneParams,
             {
                 onRow: (row: any) => {
                     const jobType: string = row.getResultByIndex(0);
@@ -4453,7 +4869,7 @@ export class BeaverDB {
             },
         );
 
-        return { pending, available, deferred, dead, byJobType };
+        return { pending, available, deferred, dead, byJobType, attachments };
     }
 
     private async selectBackgroundJobs(

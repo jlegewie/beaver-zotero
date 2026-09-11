@@ -397,9 +397,11 @@ declare namespace Zotero {
                 zoteroKey: string,
                 payloadKind: import("../src/services/database").DocumentCachePayloadKind,
                 priority: number,
+                preparationPayload?: import("../src/services/database").BackgroundJobPayload,
             ): Promise<{ exists: boolean; promoted: boolean }>;
 
             completeBackgroundJob(id: number): Promise<void>;
+            completeBackgroundPreparationJob(id: number, now: number): Promise<boolean>;
 
             failBackgroundJob(
                 id: number,
@@ -415,6 +417,7 @@ declare namespace Zotero {
 
             getBackgroundQueueStats(
                 now: number,
+                jobTypes?: string[],
             ): Promise<import("../src/services/database").BackgroundQueueStats>;
 
             recordDocumentProcessingFailure(
@@ -477,6 +480,7 @@ declare namespace Zotero {
             }): Promise<boolean>;
             markAttachmentExtractFailure(input: {
                 libraryId: number; zoteroKey: string; status: 'failed' | 'skipped'; error: string;
+                attemptedAt: number;
             }): Promise<void>;
             ensureAttachmentFileHash(libraryId: number, zoteroKey: string, fileHash: string): Promise<void>;
             markAttachmentOcrDone(input: {
@@ -502,6 +506,29 @@ declare namespace Zotero {
             getBackgroundProcessingFailures(
                 limit?: number,
             ): Promise<import("../src/services/database").BackgroundProcessingFailureSummary[]>;
+            getAttachmentProcessingIssueRows(
+                limit?: number,
+            ): Promise<import("../src/services/backgroundProcessing/issues").AttachmentProcessingIssueRow[]>;
+            getProcessingIssueCounts(
+                entitlements: import("../src/services/backgroundProcessing/issues").IssueEntitlements,
+            ): Promise<import("../src/services/backgroundProcessing/issues").ProcessingIssueSummary[]>;
+            getProcessingIssuePage(
+                entitlements: import("../src/services/backgroundProcessing/issues").IssueEntitlements,
+                reason: import("../src/services/backgroundProcessing/issues").ProcessingIssueReason,
+                offset?: number,
+                limit?: number,
+            ): Promise<import("../src/services/backgroundProcessing/issues").ProcessingIssueItem[]>;
+            getProcessingIssueRefs(
+                entitlements: import("../src/services/backgroundProcessing/issues").IssueEntitlements,
+                reason: import("../src/services/backgroundProcessing/issues").ProcessingIssueReason,
+                limit?: number,
+            ): Promise<import("../src/services/backgroundProcessing/issues").AttachmentRef[]>;
+            deleteBackgroundDeadLetters(libraryId: number, zoteroKey: string): Promise<void>;
+            requeueAttachmentOcr(libraryId: number, zoteroKey: string, reason?: string | null): Promise<void>;
+            getBackgroundDeadLetters(
+                limit?: number,
+                onlyUnresolved?: boolean,
+            ): Promise<import("../src/services/backgroundProcessing/issues").BackgroundQueueDeadRow[]>;
             getProcessingIndexState(
                 libraryId: number,
             ): Promise<import("../src/services/database").ProcessingIndexStateRecord | null>;
@@ -509,6 +536,15 @@ declare namespace Zotero {
                 state: import("../src/services/database").ProcessingIndexStateRecord,
             ): Promise<void>;
             deleteProcessingIndexState(libraryId: number): Promise<void>;
+            recordAttachmentReadingOutcome(input: {
+                libraryId: number; zoteroKey: string; contentKind: string;
+                errorCode: string | null; attemptedAt: number;
+            }): Promise<void>;
+            getAttachmentReadingError(libraryId: number, zoteroKey: string): Promise<string | null>;
+            getAttachmentReadingKeysByLibrary(libraryId: number): Promise<string[]>;
+            deleteAttachmentReadingState(libraryId: number, zoteroKey: string): Promise<void>;
+            resetLocalProcessingState(libraryId?: number, discardRemoteState?: boolean): Promise<void>;
+            getUncachedProcessingCandidates: import('../src/services/database').BeaverDB['getUncachedProcessingCandidates'];
         }
 
         const backgroundExtractor:

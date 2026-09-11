@@ -9,13 +9,14 @@
 
 import { store } from '../../store';
 import { hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../../atoms/profile';
+import { resetLocalProcessingState } from '../../../src/services/backgroundProcessing/resetLocalState';
 import { collectProcessingStatus } from '../../../src/services/backgroundProcessing/statusSnapshot';
 import type { AttachmentProcessingStateRecord } from '../../../src/services/database';
 import { getPref } from '../../../src/utils/prefs';
 
 /**
  * Force a full reconcile pass and wait for it to finish (the same entry point
- * as the prefs "Process now" button). Returns the elapsed time so a live test
+ * as the prefs "Start now" button). Returns the elapsed time so a live test
  * or a manual backlog measurement can record it.
  */
 export async function handleTestProcessingReconcileNowHttpRequest(_request: unknown) {
@@ -64,9 +65,7 @@ export async function handleTestProcessingStatusHttpRequest(
             },
             prefs: {
                 backgroundProcessingEnabled: getPref('backgroundProcessingEnabled') === true,
-                backgroundProcessingContinuous: getPref('backgroundProcessingContinuous') === true,
                 backgroundExtractorEnabled: getPref('backgroundExtractorEnabled') === true,
-                backgroundProcessingLibrariesToSkip: getPref('backgroundProcessingLibrariesToSkip'),
                 // Changes what the producer does with a file-less attachment:
                 // remote-capable ones become a download rather than a skip.
                 accessRemoteFiles: getPref('accessRemoteFiles') === true,
@@ -132,28 +131,13 @@ export async function handleTestProcessingLedgerHttpRequest(
 export async function handleTestProcessingResetHttpRequest(
     request: { libraryId?: number } = {},
 ) {
-    const db = Zotero.Beaver?.db;
-    if (!db) return { ok: false, error: 'db not available' };
-    const conn = (db as unknown as {
-        conn: { queryAsync: (sql: string, params?: unknown[]) => Promise<unknown> };
-    }).conn;
-    if (!conn?.queryAsync) return { ok: false, error: 'db connection unavailable' };
-    const libraryIds = typeof request?.libraryId === 'number'
-        ? [request.libraryId]
-        : Zotero.Libraries.getAll()
-            .filter((library) => library.libraryType === 'user' || library.libraryType === 'group')
-            .map((library) => library.libraryID);
-    let deletedJobs = 0;
-    for (const id of libraryIds) {
-        // Direct SQL rather than `deleteBackgroundJobsByLibrary`, which
-        // deliberately preserves `fulltext_untag`: in production those rows are
-        // durable remote-cleanup intents that must outlive a local wipe. A test
-        // reset promises an empty queue, so here they go too.
-        await conn.queryAsync(`DELETE FROM background_jobs WHERE library_id = ?`, [id]);
-        await conn.queryAsync(`DELETE FROM background_jobs_dead WHERE library_id = ?`, [id]);
-        await db.deleteAttachmentProcessingStatesByLibrary(id);
-        await db.deleteProcessingIndexState(id);
-        deletedJobs += 1;
+    try {
+        const { libraryIds } = await resetLocalProcessingState(
+            typeof request?.libraryId === 'number' ? request.libraryId : undefined,
+            { discardRemoteState: true },
+        );
+        return { ok: true, library_ids: libraryIds, libraries_reset: libraryIds.length };
+    } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
-    return { ok: true, library_ids: libraryIds, libraries_reset: deletedJobs };
 }

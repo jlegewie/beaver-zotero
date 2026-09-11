@@ -97,6 +97,12 @@ export class FulltextUpsertExecutor implements JobExecutor {
             record.zoteroKey,
         );
         if (!row?.structuredDocumentHash || row.extractStatus !== 'done') {
+            if (row?.extractStatus === 'done' && row.ocrStatus === 'needed') {
+                // Cache recovery can temporarily remove the hash while OCR runs.
+                // Keep this request (and its priority) until the claim becomes visible
+                // again; OCR need not create a replacement upsert while paused.
+                return { kind: 'defer', reason: 'waiting_for_ocr' };
+            }
             return { kind: 'complete', reason: 'ledger_not_ready' };
         }
         const scopeRef = getIndexScopeRef(record.libraryId);
@@ -130,7 +136,8 @@ export class FulltextUpsertExecutor implements JobExecutor {
                     zoteroKey: record.zoteroKey,
                     contentKind: row.contentKind,
                     payloadKind: 'structured',
-                    priority: BACKGROUND_EXTRACT_PRIORITY,
+                    // Cache recovery must remain runnable for an on-demand retry while paused.
+                    priority: Math.min(record.priority, BACKGROUND_EXTRACT_PRIORITY),
                     payload: buildBackgroundExtractPayload(row.contentKind),
                     now: Date.now(),
                 });
