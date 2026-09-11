@@ -53,7 +53,6 @@ import { useRunStatusTip } from './hooks/useRunStatusTip';
 import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
 import { useOcrLane } from './hooks/useOcrLane';
 import { useFulltextUpsertLane } from './hooks/useFulltextUpsertLane';
-import { useBackgroundProcessingStatus } from './hooks/useBackgroundProcessingStatus';
 import { useBackgroundProcessingWelcome } from './hooks/useBackgroundProcessingWelcome';
 import { useBackgroundProcessingScopeCleanup } from './hooks/useBackgroundProcessingScopeCleanup';
 import { useSyncSuppression } from './hooks/useSyncSuppression';
@@ -238,12 +237,6 @@ const GlobalContextInitializer = () => {
 
     // Register the authenticated cloud-index lane and reconcile tag coverage.
     useFulltextUpsertLane();
-
-    // Poll queue, ledger, and remote coverage for status UI.
-    useBackgroundProcessingStatus({
-        onlyWhenEnabled: true,
-        pollIntervalMs: 15_000,
-    });
 
     useBackgroundProcessingWelcome();
 

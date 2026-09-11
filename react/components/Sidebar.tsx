@@ -25,7 +25,6 @@ import DragDropWrapper from './input/DragDropWrapper';
 import DialogContainer from './dialog/DialogContainer';
 import ThreadListView from './ThreadListView';
 import CreditInfoBar from './input/CreditInfoBar';
-import EmbeddingIndexBar from './input/EmbeddingIndexBar';
 import UpgradeConsentPage from './pages/UpgradeConsentPage';
 import DowngradeAcknowledgmentPage from './pages/DowngradeAcknowledgmentPage';
 import { store } from '../store';
@@ -468,9 +467,6 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                         </div>
                     )}
                 </div>
-
-                {/* Embedding index status bar - visible while indexing */}
-                <EmbeddingIndexBar />
 
                 {/* Credit info bar - always visible at bottom */}
                 {creditInfoWarning && (
