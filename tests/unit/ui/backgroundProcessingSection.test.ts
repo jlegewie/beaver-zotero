@@ -132,6 +132,13 @@ it('cancels a Start now drain from Stop without touching the reconciler', async 
         expect(cancelImmediateDrain).toHaveBeenCalledOnce();
         expect(reconcileNow).not.toHaveBeenCalled();
         expect(refresh).toHaveBeenCalledOnce();
+        // The refreshed snapshot: drain off, gate shut, the current file still running.
+        await act(async () => store.set(backgroundProcessingStatusAtom, {
+            ...store.get(backgroundProcessingStatusAtom),
+            worker: { available: 2, deferred: 0, inFlight: 1, dispatchBlocker: null, drainNow: false, backlogGateOpen: false },
+        }));
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Finishing current file…');
+        expect(Array.from(container.querySelectorAll('button')).map((node) => node.textContent)).not.toContain('Stop');
     } finally {
         act(() => root.unmount());
         Zotero.Beaver = previousBeaver;
@@ -153,7 +160,39 @@ it('offers neither Start now nor Stop while the dispatcher keeps the gate open w
         expect(labels).not.toContain('Start now');
         expect(labels).not.toContain('Stop');
         expect(container.querySelector('[aria-label="Also run while Zotero is in use"]')).toBeNull();
-        expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-label')).toBe('0 of 3 files read');
+        expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-label')).toBe('0 of 3 files processed in this run');
+        // The run's size is the largest queue depth seen; progress is what has drained since.
+        await act(async () => store.set(backgroundProcessingStatusAtom, {
+            ...store.get(backgroundProcessingStatusAtom),
+            ledger: { ...store.get(backgroundProcessingStatusAtom).ledger, total: 3, readable: 2 },
+            worker: { available: 0, deferred: 0, inFlight: 1, dispatchBlocker: null, drainNow: false, backlogGateOpen: true },
+        }));
+        expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-label')).toBe('2 of 3 files processed in this run');
+        expect(container.textContent).toContain('2 of 3');
+        // Five files queued mid-run grow the total; completed work is not undone.
+        await act(async () => store.set(backgroundProcessingStatusAtom, {
+            ...store.get(backgroundProcessingStatusAtom),
+            worker: { available: 5, deferred: 0, inFlight: 1, dispatchBlocker: null, drainNow: false, backlogGateOpen: true, queuedFiles: 6 },
+        }));
+        expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-label')).toBe('2 of 8 files processed in this run');
+        // Draining again counts from there.
+        await act(async () => store.set(backgroundProcessingStatusAtom, {
+            ...store.get(backgroundProcessingStatusAtom),
+            worker: { available: 1, deferred: 0, inFlight: 1, dispatchBlocker: null, drainNow: false, backlogGateOpen: true, queuedFiles: 2 },
+        }));
+        expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-label')).toBe('6 of 8 files processed in this run');
+        // Settled: the bar goes, and the next run starts from its own size.
+        await act(async () => store.set(backgroundProcessingStatusAtom, {
+            ...store.get(backgroundProcessingStatusAtom),
+            ledger: { ...store.get(backgroundProcessingStatusAtom).ledger, total: 3, readable: 3 },
+            worker: { available: 0, deferred: 0, inFlight: 0, dispatchBlocker: null, drainNow: false, backlogGateOpen: false },
+        }));
+        expect(container.querySelector('[role="progressbar"]')).toBeNull();
+        await act(async () => store.set(backgroundProcessingStatusAtom, {
+            ...store.get(backgroundProcessingStatusAtom),
+            worker: { available: 1, deferred: 0, inFlight: 1, dispatchBlocker: null, drainNow: false, backlogGateOpen: true, queuedFiles: 1 },
+        }));
+        expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-label')).toBe('0 of 1 files processed in this run');
     } finally {
         act(() => root.unmount());
     }

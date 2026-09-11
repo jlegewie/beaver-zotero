@@ -40,6 +40,26 @@ describe('processing status sentence', () => {
         });
     });
 
+    it('reports the running file as finishing once the gate is shut, immediately after Stop', () => {
+        const snapshot = status(0, 10);
+        snapshot.ledger.readable = 4;
+        snapshot.worker.inFlight = 1;
+        snapshot.worker.available = 5;
+        snapshot.worker.backlogGateOpen = false;
+        expect(describeStatus(snapshot)).toMatchObject({
+            tone: 'busy',
+            headline: 'Finishing current file…',
+            caption: '5 files waiting. Processing continues when Zotero is idle.',
+            outstanding: 6,
+            processNow: false,
+            stopDrain: false,
+        });
+        // While the drain is still on, the same lane state is ordinary processing with Stop.
+        snapshot.worker.drainNow = true;
+        snapshot.worker.backlogGateOpen = true;
+        expect(describeStatus(snapshot)).toMatchObject({ headline: 'Processing files…', stopDrain: true });
+    });
+
     it('offers Stop during a Start now drain and not Start now', () => {
         const snapshot = status(0);
         snapshot.worker.available = 3;
@@ -51,26 +71,31 @@ describe('processing status sentence', () => {
         });
     });
 
-    it('reports remaining files and progress while working through a tracked backlog', () => {
+    it('reports remaining files while working through a tracked backlog', () => {
         const snapshot = status(0, 10);
         snapshot.ledger.readable = 6;
         snapshot.ledger.unreadable = 1;
         snapshot.worker.inFlight = 1;
         expect(describeStatus(snapshot)).toMatchObject({
-            tone: 'busy', headline: 'Processing files…', caption: '3 files remaining.',
-            progress: { done: 7, total: 10 },
+            tone: 'busy', headline: 'Processing files…', caption: '3 files remaining.', outstanding: 3,
         });
     });
 
-    it('counts queued re-reads of settled files without a progress bar, running ones included once', () => {
+    it('counts queued re-reads of settled files, running ones included once', () => {
         // A claimed job is still a queue row (deferred until its visibility
         // timeout), so inFlight is not added on top of the queue depth.
         const snapshot = status(1, 0);
         snapshot.worker.inFlight = 1;
         snapshot.worker.available = 4;
-        const sentence = describeStatus(snapshot);
-        expect(sentence).toMatchObject({ tone: 'busy', caption: '5 files remaining.' });
-        expect(sentence.progress).toBeUndefined();
+        expect(describeStatus(snapshot)).toMatchObject({ tone: 'busy', caption: '5 files remaining.', outstanding: 5 });
+    });
+
+    it('exposes no queue depth outside the busy states', () => {
+        expect(describeStatus(status(0)).outstanding).toBeUndefined();
+        const waiting = status(0);
+        waiting.worker.available = 2;
+        waiting.worker.backlogGateOpen = false;
+        expect(describeStatus(waiting).outstanding).toBeUndefined();
     });
 
     it('never reports zero files remaining while a lane is still running', () => {
@@ -92,7 +117,7 @@ describe('processing status sentence', () => {
         expect(describeStatus(snapshot).caption).toBe('1 file waiting. Starts after about 30 seconds without activity in Zotero.');
     });
 
-    it('keeps reading progress from the ledger while the caption counts every file with queued work', () => {
+    it('counts every file with queued work, read or not', () => {
         // Search-entitled accounts queue an index upload for each file as soon
         // as it is read, so read files routinely outnumber settled ones.
         const snapshot = status(0, 10);
@@ -100,13 +125,10 @@ describe('processing status sentence', () => {
         snapshot.worker.inFlight = 1;
         snapshot.worker.available = 7;
         snapshot.worker.queuedFiles = 8;
-        expect(describeStatus(snapshot)).toMatchObject({
-            tone: 'busy', caption: '8 files remaining.', progress: { done: 6, total: 10 },
-        });
-        // An index backfill of already-read files: nothing left to read, so no bar.
+        expect(describeStatus(snapshot)).toMatchObject({ tone: 'busy', caption: '8 files remaining.', outstanding: 8 });
+        // An index backfill of already-read files counts the same way.
         snapshot.ledger.readable = 10;
-        expect(describeStatus(snapshot)).toMatchObject({ caption: '8 files remaining.' });
-        expect(describeStatus(snapshot).progress).toBeUndefined();
+        expect(describeStatus(snapshot)).toMatchObject({ caption: '8 files remaining.', outstanding: 8 });
     });
 
     it.each(['failed', 'skipped'] as const)('treats a terminal %s extraction as settled, leaving it to the issue list', (outcome) => {
@@ -245,11 +267,12 @@ describe('processing status sentence', () => {
         });
         snapshot.worker.inFlight = 1;
         expect(describeStatus(snapshot, { canRestoreCache: true })).toMatchObject({
-            tone: 'busy', processNow: false, stopDrain: false,
+            tone: 'busy', headline: 'Finishing current file…', processNow: false, stopDrain: false,
         });
         snapshot.worker.drainNow = true;
+        snapshot.worker.backlogGateOpen = true;
         expect(describeStatus(snapshot, { canRestoreCache: true })).toMatchObject({
-            tone: 'busy', processNow: false, stopDrain: true,
+            tone: 'busy', headline: 'Processing files…', processNow: false, stopDrain: true,
         });
     });
 });

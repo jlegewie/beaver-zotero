@@ -6,25 +6,16 @@ export function plural(count: number, singular: string, pluralForm = `${singular
 
 export type StatusTone = 'idle' | 'busy' | 'waiting' | 'error';
 
-/**
- * Reading progress from the ledger: files whose text has been read (or that
- * cannot be), out of every file in the processed libraries. Files can still
- * have queued work after being read (an index upload, a re-read), so this is
- * deliberately a different measure from the queue depth in the caption.
- */
-export interface StatusProgress {
-    /** Attachments that reached a terminal state (readable or not). */
-    done: number;
-    /** Attachments the ledger tracks in the processed libraries. */
-    total: number;
-}
-
 export interface StatusSentence {
     tone: StatusTone;
     headline: string;
     caption: string;
-    /** Progress toward a settled ledger while files are being processed. */
-    progress?: StatusProgress;
+    /**
+     * Files with queued or running work, while a lane is busy. The row turns
+     * this into progress through the current run by tracking how it moves
+     * between polls.
+     */
+    outstanding?: number;
     /** Show Start now: queued work can start without waiting for idle. */
     processNow: boolean;
     /** Disable Start now: a dispatcher blocker, not the idle gate. */
@@ -64,7 +55,7 @@ function blockerCaption(blocker: string): string {
 /**
  * Reduce the status snapshot to the one sentence the status row shows.
  *
- * Four states: working (with progress), waiting (with the reason), settled,
+ * Four states: working (with a queue depth), waiting (with the reason), settled,
  * and unreadable. Order matters: an unreadable status wins, then running
  * work, then work queued behind the idle gate or a blocker, then unfinished
  * ledger work, then the settled summary. Files that could not be read never
@@ -107,6 +98,21 @@ export function describeStatus(
     const deferred = status.worker?.deferred ?? 0;
     const queued = status.worker?.queuedFiles ?? (runnable + deferred);
     const outstanding = Math.max(remaining, queued);
+    // Stop cancels the drain but never the job already running, so until that
+    // job finishes the lane is busy while the gate is shut. Say so, or the
+    // click looks ignored for as long as a large PDF takes to read.
+    if (inFlight > 0 && !gateOpen && !draining) {
+        const waitingAfter = Math.max(0, outstanding - inFlight);
+        return {
+            tone: 'busy',
+            headline: 'Finishing current file…',
+            caption: (waitingAfter > 0 ? `${plural(waitingAfter, 'file')} waiting. ` : '')
+                + 'Processing continues when Zotero is idle.',
+            outstanding,
+            processNow: false,
+            stopDrain: false,
+        };
+    }
     if (inFlight > 0 || (runnable > 0 && gateOpen)) {
         return {
             tone: 'busy',
@@ -118,7 +124,7 @@ export function describeStatus(
                 : outstanding > 0
                     ? `${plural(outstanding, 'file')} remaining.`
                     : 'Reading text from your files.',
-            progress: total > 0 && remaining > 0 ? { done, total } : undefined,
+            outstanding,
             processNow: false,
             stopDrain: draining,
         };

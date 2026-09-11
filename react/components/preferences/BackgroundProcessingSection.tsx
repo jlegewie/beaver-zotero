@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../../atoms/profile';
 import {
@@ -42,9 +42,25 @@ const ProcessingStatusRow: React.FC<{
     onStopDrain: () => void;
 }> = ({ status, canRestoreCache, processing, onProcessNow, onStopDrain }) => {
     const sentence = describeStatus(status, { canRestoreCache });
-    const percent = sentence.progress
-        ? Math.floor((sentence.progress.done / sentence.progress.total) * 100)
-        : null;
+    // Progress through the current run, from how the queue depth moves between
+    // polls: a drop is work completed, a rise is work added (the reconciler
+    // keeps queueing new files during a run), so `total - done` always equals
+    // the depth shown in the caption. A poll that nets the two against each
+    // other under-reports both, which only delays the bar. Forgotten once the
+    // lane settles, so the next run starts its own bar. Updating the ref
+    // during render is safe: a repeated render sees a zero delta.
+    const run = useRef<{ seen: number; done: number; total: number } | null>(null);
+    if (sentence.outstanding === undefined) {
+        run.current = null;
+    } else if (run.current === null) {
+        run.current = { seen: sentence.outstanding, done: 0, total: sentence.outstanding };
+    } else {
+        const delta = sentence.outstanding - run.current.seen;
+        if (delta < 0) run.current.done -= delta;
+        else run.current.total += delta;
+        run.current.seen = sentence.outstanding;
+    }
+    const progress = run.current && run.current.total > 0 ? run.current : null;
 
     return (
         <div className="display-flex flex-col gap-1 border-top-quinary" style={{ padding: '10px 12px 12px' }}>
@@ -113,16 +129,22 @@ const ProcessingStatusRow: React.FC<{
                     </Tooltip>
                 ) : null}
             </div>
-            {sentence.progress && percent !== null && (
+            {progress && (
                 <div
                     role="progressbar"
                     aria-valuemin={0}
-                    aria-valuemax={sentence.progress.total}
-                    aria-valuenow={sentence.progress.done}
-                    aria-label={`${sentence.progress.done.toLocaleString()} of ${sentence.progress.total.toLocaleString()} files read`}
+                    aria-valuemax={progress.total}
+                    aria-valuenow={progress.done}
+                    aria-label={`${progress.done.toLocaleString()} of ${progress.total.toLocaleString()} files processed in this run`}
+                    className="display-flex flex-row items-start gap-3"
                     style={{ paddingLeft: '22px' }}
                 >
-                    <ProgressBar progress={percent} />
+                    <div className="flex-1 min-w-0">
+                        <ProgressBar progress={Math.floor((progress.done / progress.total) * 100)} />
+                    </div>
+                    <span className="text-sm font-color-secondary flex-shrink-0" aria-hidden="true">
+                        {progress.done.toLocaleString()} of {progress.total.toLocaleString()}
+                    </span>
                 </div>
             )}
         </div>
