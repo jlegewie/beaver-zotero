@@ -189,9 +189,10 @@ describe('toggleQuickPromptAtom', () => {
         expect(store.get(quickPromptStateAtom)).toBeNull();
     });
 
-    it('hands the shortcut to the sidebar composer while the sidebar is open', async () => {
+    it('asks the caller to swap the open sidebar for the popup', async () => {
         store.set(isSidebarVisibleAtom, true);
-        await expect(store.set(toggleQuickPromptAtom)).resolves.toBe('focus-sidebar');
+        await expect(store.set(toggleQuickPromptAtom)).resolves.toBe('replace-sidebar');
+        // Opening waits for the caller to close the sidebar first.
         expect(store.get(quickPromptStateAtom)).toBeNull();
         expect(mocks.newThread).not.toHaveBeenCalled();
     });

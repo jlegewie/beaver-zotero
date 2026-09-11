@@ -37,6 +37,13 @@ function openBeaver(): void {
 }
 
 /**
+ * The sidebar's React roots. Closing the sidebar only collapses its pane, so
+ * an element inside one stays connected while being invisible — focus must not
+ * be handed back to it when the popup goes away.
+ */
+const SIDEBAR_ROOTS = '#beaver-react-root-library, #beaver-react-root-reader';
+
+/**
  * The close control, in the card's top-right corner. Shown only while the
  * pointer is over the card (see the stylesheet), so the card stays quiet;
  * Escape does the same and the tooltip says so.
@@ -148,10 +155,11 @@ const BlockedNotice: React.FC<{ reason: ChatAccessGate; onClose: () => void }> =
 
 /**
  * A composer in the corner of the main window while the sidebar is closed,
- * opened by its keyboard shortcut. It sends into a fresh thread the way the
- * sidebar's composer would, so the run it starts is picked up by the run
- * status popup in the same corner; the popup closes as soon as the run
- * starts. Escape closes it and keeps the draft.
+ * opened by its keyboard shortcut — pressed with the sidebar open, the
+ * shortcut closes it and the popup takes its place. It sends into a fresh
+ * thread the way the sidebar's composer would, so the run it starts is picked
+ * up by the run status popup in the same corner; the popup closes as soon as
+ * the run starts. Escape closes it and keeps the draft.
  *
  * Always mounted: the shortcut's event needs a subscriber whether or not the
  * popup is showing.
@@ -212,8 +220,12 @@ const QuickPromptPopup: React.FC = () => {
         const focused = active && active !== doc.body && active !== doc.documentElement ? active : null;
         void toggle().then((outcome) => {
             switch (outcome) {
-                case 'focus-sidebar':
-                    eventManager.dispatch('focusInput', {});
+                case 'replace-sidebar':
+                    // The shortcut swaps the sidebar for the popup: the
+                    // sidebar closes and the composer reopens in the corner.
+                    restoreFocusRef.current = focused?.closest(SIDEBAR_ROOTS) ? null : focused;
+                    eventManager.dispatch('toggleChat', {});
+                    void open();
                     break;
                 case 'closed':
                     dismiss();
@@ -223,7 +235,7 @@ const QuickPromptPopup: React.FC = () => {
                     break;
             }
         });
-    }, [toggle, dismiss, isSidebarVisible, hasActiveWork, close, surfaceWindow]);
+    }, [toggle, dismiss, open, isSidebarVisible, hasActiveWork, close, surfaceWindow]);
 
     // The popup steps aside on its own: when the sidebar opens (it now shows
     // the same draft and thread), when the message it composed has been sent

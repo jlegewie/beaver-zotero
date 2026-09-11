@@ -102,18 +102,19 @@ export const closeQuickPromptAtom = atom(null, (_get, set) => {
 
 /** What the quick prompt shortcut did; the caller dispatches the UI events. */
 export type QuickPromptToggleOutcome =
-    /** The sidebar is open, so its composer is the place to type. */
-    | 'focus-sidebar'
+    /** The sidebar is open: the caller closes it and opens the popup in its place. */
+    | 'replace-sidebar'
     | 'closed'
     /** The popup is up: the composer, or a notice saying why not. */
     | 'opened';
 
 /**
- * The shortcut's action. The popup only stands in for a closed sidebar, so
- * with the sidebar open the shortcut focuses its composer instead.
+ * The shortcut's action. The popup stands in for a closed sidebar, so with the
+ * sidebar open the shortcut swaps the two: closing the sidebar is left to the
+ * caller, which owns the UI event, and the popup opens in its corner.
  */
 export const toggleQuickPromptAtom = atom(null, async (get, set): Promise<QuickPromptToggleOutcome> => {
-    if (get(isSidebarVisibleAtom)) return 'focus-sidebar';
+    if (get(isSidebarVisibleAtom)) return 'replace-sidebar';
     if (openInFlight) {
         await openInFlight;
         return 'opened';

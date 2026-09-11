@@ -136,6 +136,7 @@ function pressEscape(target: Element) {
 
 beforeEach(() => {
     vi.clearAllMocks();
+    mocks.dispatch.mockReset();
     mocks.subscribers.clear();
     (globalThis as any).Zotero = { getMainWindow: () => window };
     store = createStore();
@@ -171,12 +172,39 @@ describe('QuickPromptPopup', () => {
         expect(store.get(quickPromptStateAtom)).toBeNull();
     });
 
-    it('focuses the sidebar composer instead while the sidebar is open', async () => {
+    it('closes an open sidebar and puts the popup in its place', async () => {
         store.set(isSidebarVisibleAtom, true);
+        // The toggleChat handler is what closes the sidebar; the event bus is
+        // mocked here, so stand in for it.
+        mocks.dispatch.mockImplementation((name: string) => {
+            if (name === 'toggleChat') store.set(isSidebarVisibleAtom, false);
+        });
         mount();
         await fireShortcut();
-        expect(mocks.dispatch).toHaveBeenCalledWith('focusInput', {});
-        expect(store.get(quickPromptStateAtom)).toBeNull();
+        expect(mocks.dispatch).toHaveBeenCalledWith('toggleChat', {});
+        expect(store.get(isSidebarVisibleAtom)).toBe(false);
+        expect(store.get(quickPromptStateAtom)).toEqual({ mode: 'compose' });
+        expect(container.querySelector('[data-testid="drop-zone"] .stub-composer')).not.toBeNull();
+    });
+
+    it('does not hand focus back into the sidebar it closed', async () => {
+        const sidebar = document.createElement('div');
+        sidebar.id = 'beaver-react-root-library';
+        const composer = document.createElement('button');
+        sidebar.appendChild(composer);
+        document.body.appendChild(sidebar);
+        composer.focus();
+        store.set(isSidebarVisibleAtom, true);
+        mocks.dispatch.mockImplementation((name: string) => {
+            if (name === 'toggleChat') store.set(isSidebarVisibleAtom, false);
+        });
+        mount();
+        await fireShortcut();
+        pressEscape(container.querySelector('[data-testid="editor"]')!);
+        // The toolbar button takes focus, so nothing is sent to the hidden
+        // sidebar element the shortcut was pressed from.
+        expect(mocks.focusToggleButton).toHaveBeenCalled();
+        sidebar.remove();
     });
 
     it('closes on Escape from the editor and returns focus where it was', async () => {
