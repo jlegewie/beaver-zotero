@@ -1,0 +1,767 @@
+[
+  {
+    "name": "read-current",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "read-current",
+      "op": "read",
+      "key": "u-ABCDEFGH"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "read-current",
+      "op": "read",
+      "ok": true,
+      "version": 3,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "spec": {
+        "id": "t4",
+        "spec_version": 1,
+        "columns": [
+          {
+            "id": "paper",
+            "header": "Paper",
+            "type": "reference"
+          },
+          {
+            "id": "topic",
+            "header": "Topic",
+            "type": "select",
+            "options": [
+              {
+                "label": "Methods",
+                "color": "blue"
+              }
+            ]
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "type": "boolean"
+          }
+        ],
+        "rows": [],
+        "key": "ABCDEFGH",
+        "version": 3,
+        "title": "Comparison"
+      },
+      "summary": {
+        "rows": 0,
+        "columns": 3,
+        "failed_rows": 0,
+        "user_edits": 0,
+        "columns_detail": {
+          "paper": {
+            "type": "reference",
+            "filled": 0,
+            "unsure": 0,
+            "unsourced": 0,
+            "stale": 0
+          },
+          "topic": {
+            "type": "select",
+            "filled": 0,
+            "unsure": 0,
+            "unsourced": 0,
+            "stale": 0,
+            "distribution": {}
+          },
+          "open_access": {
+            "type": "boolean",
+            "filled": 0,
+            "unsure": 0,
+            "unsourced": 0,
+            "stale": 0,
+            "distribution": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "retained-history",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "retained-history",
+      "op": "versions",
+      "key": "u-ABCDEFGH"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "retained-history",
+      "op": "versions",
+      "ok": true,
+      "versions": [
+        {
+          "version": 3,
+          "actor": "user",
+          "at": "2026-09-10T12:00:00.000Z",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "summary": {
+            "rows": 0,
+            "columns": 3,
+            "failed_rows": 0,
+            "user_edits": 0,
+            "columns_detail": {
+              "paper": {
+                "type": "reference",
+                "filled": 0,
+                "unsure": 0,
+                "unsourced": 0,
+                "stale": 0
+              },
+              "topic": {
+                "type": "select",
+                "filled": 0,
+                "unsure": 0,
+                "unsourced": 0,
+                "stale": 0,
+                "distribution": {}
+              },
+              "open_access": {
+                "type": "boolean",
+                "filled": 0,
+                "unsure": 0,
+                "unsourced": 0,
+                "stale": 0,
+                "distribution": {}
+              }
+            }
+          },
+          "sealed": true
+        }
+      ]
+    }
+  },
+  {
+    "name": "create-replay-after-user-edit",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "create-replay-after-user-edit",
+      "op": "create",
+      "kind": "table",
+      "library_ref": "u",
+      "title": "Comparison",
+      "spec": {
+        "id": "t4",
+        "spec_version": 1,
+        "columns": [
+          {
+            "id": "paper",
+            "header": "Paper",
+            "type": "reference"
+          },
+          {
+            "id": "topic",
+            "header": "Topic",
+            "type": "select",
+            "options": [
+              {
+                "label": "Methods",
+                "color": "blue"
+              }
+            ]
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "type": "boolean"
+          }
+        ],
+        "rows": []
+      },
+      "meta": {
+        "actor": "agent",
+        "run_id": "run",
+        "thread_id": "thread"
+      },
+      "operation_id": "operation"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "create-replay-after-user-edit",
+      "op": "create",
+      "ok": true,
+      "version": 3,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "spec": {
+        "id": "t4",
+        "spec_version": 1,
+        "columns": [
+          {
+            "id": "paper",
+            "header": "Paper",
+            "type": "reference"
+          },
+          {
+            "id": "topic",
+            "header": "Topic",
+            "type": "select",
+            "options": [
+              {
+                "label": "Methods",
+                "color": "blue"
+              }
+            ]
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "type": "boolean"
+          }
+        ],
+        "rows": [],
+        "key": "ABCDEFGH",
+        "version": 3,
+        "title": "Comparison"
+      },
+      "summary": {
+        "rows": 0,
+        "columns": 3,
+        "failed_rows": 0,
+        "user_edits": 0,
+        "columns_detail": {
+          "paper": {
+            "type": "reference",
+            "filled": 0,
+            "unsure": 0,
+            "unsourced": 0,
+            "stale": 0
+          },
+          "topic": {
+            "type": "select",
+            "filled": 0,
+            "unsure": 0,
+            "unsourced": 0,
+            "stale": 0,
+            "distribution": {}
+          },
+          "open_access": {
+            "type": "boolean",
+            "filled": 0,
+            "unsure": 0,
+            "unsourced": 0,
+            "stale": 0,
+            "distribution": {}
+          }
+        }
+      },
+      "zotero_item": {
+        "library_id": 47,
+        "library_ref": "u",
+        "zotero_key": "ABCDEFGH"
+      },
+      "operation": {
+        "operation_id": "operation",
+        "request_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "version": 1,
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "replayed": true,
+      "saved": true
+    }
+  },
+  {
+    "name": "write-replay-needs-bookkeeping",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "write-replay-needs-bookkeeping",
+      "op": "write",
+      "key": "u-ABCDEFGH",
+      "spec": {
+        "id": "t4",
+        "spec_version": 1,
+        "columns": [
+          {
+            "id": "paper",
+            "header": "Paper",
+            "type": "reference"
+          },
+          {
+            "id": "topic",
+            "header": "Topic",
+            "type": "select",
+            "options": [
+              {
+                "label": "Methods",
+                "color": "blue"
+              }
+            ]
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "type": "boolean"
+          }
+        ],
+        "rows": [],
+        "key": "ABCDEFGH",
+        "version": 3,
+        "title": "Comparison"
+      },
+      "meta": {
+        "actor": "agent",
+        "run_id": "run",
+        "thread_id": "thread"
+      },
+      "expected_version": 1,
+      "expected_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "operation_id": "operation"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "write-replay-needs-bookkeeping",
+      "op": "write",
+      "ok": true,
+      "version": 3,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "spec": {
+        "id": "t4",
+        "spec_version": 1,
+        "columns": [
+          {
+            "id": "paper",
+            "header": "Paper",
+            "type": "reference"
+          },
+          {
+            "id": "topic",
+            "header": "Topic",
+            "type": "select",
+            "options": [
+              {
+                "label": "Methods",
+                "color": "blue"
+              }
+            ]
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "type": "boolean"
+          }
+        ],
+        "rows": [],
+        "key": "ABCDEFGH",
+        "version": 3,
+        "title": "Comparison"
+      },
+      "summary": {
+        "rows": 0,
+        "columns": 3,
+        "failed_rows": 0,
+        "user_edits": 0,
+        "columns_detail": {
+          "paper": {
+            "type": "reference",
+            "filled": 0,
+            "unsure": 0,
+            "unsourced": 0,
+            "stale": 0
+          },
+          "topic": {
+            "type": "select",
+            "filled": 0,
+            "unsure": 0,
+            "unsourced": 0,
+            "stale": 0,
+            "distribution": {}
+          },
+          "open_access": {
+            "type": "boolean",
+            "filled": 0,
+            "unsure": 0,
+            "unsourced": 0,
+            "stale": 0,
+            "distribution": {}
+          }
+        }
+      },
+      "operation": {
+        "operation_id": "operation",
+        "request_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "version": 1,
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "replayed": true,
+      "saved": false
+    }
+  },
+  {
+    "name": "write-conflict-current-state",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "write-conflict-current-state",
+      "op": "write",
+      "key": "u-ABCDEFGH",
+      "spec": {
+        "id": "t4",
+        "spec_version": 1,
+        "columns": [
+          {
+            "id": "paper",
+            "header": "Paper",
+            "type": "reference"
+          },
+          {
+            "id": "topic",
+            "header": "Topic",
+            "type": "select",
+            "options": [
+              {
+                "label": "Methods",
+                "color": "blue"
+              }
+            ]
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "type": "boolean"
+          }
+        ],
+        "rows": [],
+        "key": "ABCDEFGH",
+        "version": 3,
+        "title": "Comparison"
+      },
+      "meta": {
+        "actor": "agent",
+        "run_id": "run",
+        "thread_id": "thread"
+      },
+      "expected_version": 1,
+      "expected_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "operation_id": "new-operation"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "write-conflict-current-state",
+      "op": "write",
+      "ok": false,
+      "error_code": "conflict",
+      "conflict": true,
+      "version": 3,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "spec": {
+        "id": "t4",
+        "spec_version": 1,
+        "columns": [
+          {
+            "id": "paper",
+            "header": "Paper",
+            "type": "reference"
+          },
+          {
+            "id": "topic",
+            "header": "Topic",
+            "type": "select",
+            "options": [
+              {
+                "label": "Methods",
+                "color": "blue"
+              }
+            ]
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "type": "boolean"
+          }
+        ],
+        "rows": [],
+        "key": "ABCDEFGH",
+        "version": 3,
+        "title": "Comparison"
+      }
+    }
+  },
+  {
+    "name": "pending-create",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "pending-create",
+      "op": "create",
+      "kind": "table",
+      "library_ref": "u",
+      "title": "Comparison",
+      "spec": {
+        "id": "t4",
+        "spec_version": 1,
+        "columns": [
+          {
+            "id": "paper",
+            "header": "Paper",
+            "type": "reference"
+          },
+          {
+            "id": "topic",
+            "header": "Topic",
+            "type": "select",
+            "options": [
+              {
+                "label": "Methods",
+                "color": "blue"
+              }
+            ]
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "type": "boolean"
+          }
+        ],
+        "rows": []
+      },
+      "meta": {
+        "actor": "agent",
+        "run_id": "run",
+        "thread_id": "thread"
+      },
+      "operation_id": "pending-operation"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "pending-create",
+      "op": "create",
+      "ok": false,
+      "error_code": "operation_pending"
+    }
+  },
+  {
+    "name": "revert-new-version",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "revert-new-version",
+      "op": "revert",
+      "key": "u-ABCDEFGH",
+      "to_version": 1,
+      "meta": {
+        "actor": "user"
+      }
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "revert-new-version",
+      "op": "revert",
+      "ok": true,
+      "version": 3,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "spec": {
+        "id": "t4",
+        "spec_version": 1,
+        "columns": [
+          {
+            "id": "paper",
+            "header": "Paper",
+            "type": "reference"
+          },
+          {
+            "id": "topic",
+            "header": "Topic",
+            "type": "select",
+            "options": [
+              {
+                "label": "Methods",
+                "color": "blue"
+              }
+            ]
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "type": "boolean"
+          }
+        ],
+        "rows": [],
+        "key": "ABCDEFGH",
+        "version": 3,
+        "title": "Comparison"
+      },
+      "summary": {
+        "rows": 0,
+        "columns": 3,
+        "failed_rows": 0,
+        "user_edits": 0,
+        "columns_detail": {
+          "paper": {
+            "type": "reference",
+            "filled": 0,
+            "unsure": 0,
+            "unsourced": 0,
+            "stale": 0
+          },
+          "topic": {
+            "type": "select",
+            "filled": 0,
+            "unsure": 0,
+            "unsourced": 0,
+            "stale": 0,
+            "distribution": {}
+          },
+          "open_access": {
+            "type": "boolean",
+            "filled": 0,
+            "unsure": 0,
+            "unsourced": 0,
+            "stale": 0,
+            "distribution": {}
+          }
+        }
+      },
+      "saved": true
+    }
+  },
+  {
+    "name": "trim-already-trashed",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "trim-already-trashed",
+      "op": "trim",
+      "key": "u-ABCDEFGH",
+      "thread_id": "thread",
+      "run_ids": [
+        "run"
+      ]
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "trim-already-trashed",
+      "op": "trim",
+      "ok": true,
+      "outcome": "unchanged",
+      "trimmed_versions": [],
+      "trimmed_to": null,
+      "retention_exhausted": false,
+      "saved": false
+    }
+  },
+  {
+    "name": "delete",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "delete",
+      "op": "delete",
+      "key": "u-ABCDEFGH"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "delete",
+      "op": "delete",
+      "ok": true,
+      "saved": true
+    }
+  },
+  {
+    "name": "explicit-list",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "explicit-list",
+      "op": "list",
+      "keys": [
+        "u-ABCDEFGH",
+        "g123-BCDEFGHJ"
+      ],
+      "thread_id": "thread"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "explicit-list",
+      "op": "list",
+      "ok": true,
+      "items": [
+        {
+          "key": "u-ABCDEFGH",
+          "kind": "table",
+          "unavailable": false,
+          "title": "Comparison",
+          "zotero_item": {
+            "library_id": 47,
+            "library_ref": "u",
+            "zotero_key": "ABCDEFGH"
+          },
+          "version": 3,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "summary": {
+            "rows": 0,
+            "columns": 3,
+            "failed_rows": 0,
+            "user_edits": 0,
+            "columns_detail": {
+              "paper": {
+                "type": "reference",
+                "filled": 0,
+                "unsure": 0,
+                "unsourced": 0,
+                "stale": 0
+              },
+              "topic": {
+                "type": "select",
+                "filled": 0,
+                "unsure": 0,
+                "unsourced": 0,
+                "stale": 0,
+                "distribution": {}
+              },
+              "open_access": {
+                "type": "boolean",
+                "filled": 0,
+                "unsure": 0,
+                "unsourced": 0,
+                "stale": 0,
+                "distribution": {}
+              }
+            }
+          },
+          "unseen": [
+            {
+              "version": 3,
+              "actor": "user",
+              "at": "2026-09-10T12:00:00.000Z",
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "summary": {
+                "rows": 0,
+                "columns": 3,
+                "failed_rows": 0,
+                "user_edits": 0,
+                "columns_detail": {
+                  "paper": {
+                    "type": "reference",
+                    "filled": 0,
+                    "unsure": 0,
+                    "unsourced": 0,
+                    "stale": 0
+                  },
+                  "topic": {
+                    "type": "select",
+                    "filled": 0,
+                    "unsure": 0,
+                    "unsourced": 0,
+                    "stale": 0,
+                    "distribution": {}
+                  },
+                  "open_access": {
+                    "type": "boolean",
+                    "filled": 0,
+                    "unsure": 0,
+                    "unsourced": 0,
+                    "stale": 0,
+                    "distribution": {}
+                  }
+                }
+              },
+              "sealed": true
+            }
+          ]
+        },
+        {
+          "key": "g123-BCDEFGHJ",
+          "kind": "table",
+          "unavailable": true,
+          "error_code": "item_missing",
+          "unseen": []
+        }
+      ]
+    }
+  }
+]

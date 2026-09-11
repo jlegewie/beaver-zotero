@@ -1,3 +1,4 @@
+import { openStoredTableEditor } from './components/tables/openStoredTableEditor';
 import { accountGenerationAtom, accountRevisionAtom, profileWithPlanAtom, isProfileLoadedAtom, searchableLibraryIdsAtom } from './atoms/profile';
 import { sessionAtom } from './atoms/auth';
 import { preferencesRevisionAtom } from './atoms/preferences';
@@ -361,6 +362,8 @@ export function closeAgentConnection(
 /** Called by the plugin before mounting any surface. */
 export function initializeRuntime(runtime: WindowRuntime) {
     initializeWindowRuntime(runtime);
+    runtime.contextWindow.__beaverEditTable = openStoredTableEditor;
+    Zotero.Beaver.runtime.addWindowCleanup(runtime, () => { delete runtime.contextWindow.__beaverEditTable; });
     runtime.hostWindow.__beaverJotaiStore = store;
     attachAccountProjection(runtime);
     initializeReactUI(runtime.hostWindow);

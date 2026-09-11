@@ -795,7 +795,7 @@ describe("plain text", () => {
 
     it("exports a CSV cell without the tags", () => {
         expect(toCsv(citedSpec)).toBe(
-            'Methods\r\n"Survey of 1,200 adults in 2019."',
+            'Methods,Methods — evidence,Methods — sources,Methods — state\r\n"Survey of 1,200 adults in 2019.",,zotero:1-ABCD1234:s12,extracted',
         );
     });
 });
@@ -807,10 +807,10 @@ describe("toCsv", () => {
             sortRows(spec, { column_id: "cites", direction: "desc" }),
         );
         expect(csv.split("\r\n")).toEqual([
-            "Reference,Year,Citations,Type,Open access,Methods",
-            'Smith 2020 — Alpha,2020,120,Article,true,"Survey, n = 1,200"',
-            "Jones 2018,2018-05,7,Book,false,",
-            "adams 2022,2022-01-15,,Article,,Interviews",
+            "Reference,Reference — evidence,Reference — sources,Reference — state,Year,Year — evidence,Year — sources,Year — state,Citations,Citations — evidence,Citations — sources,Citations — state,Type,Type — evidence,Type — sources,Type — state,Open access,Open access — evidence,Open access — sources,Open access — state,Methods,Methods — evidence,Methods — sources,Methods — state",
+            'Smith 2020 — Alpha,,,,2020,,,,120,,,,Article,,,,true,,,,"Survey, n = 1,200",,,',
+            "Jones 2018,,,,2018-05,,,,7,,,,Book,,,,false,,,,,,,",
+            "adams 2022,,,,2022-01-15,,,,,,,,Article,,,,,,,,Interviews,,,",
         ]);
     });
 });
@@ -1366,8 +1366,8 @@ describe("coverage", () => {
             cells: 6,
             filled: 1,
             empty: 3,
-            // Only the empty answer to a question counts as "not reported".
-            notReported: 1,
+            // Empty legacy answers do not establish completed inspection.
+            notReported: 0,
             pending: 1,
             error: 1,
             errorRows: 1,
@@ -1405,4 +1405,31 @@ it("keeps optional citation parentage without making it a citation lookup identi
     expect(index[citationKeysInText('<citation id="1-CHILD001"/>')[0]]).toBe(citation);
     expect(index[citationKeysInText('<citation id="1-PARENT01"/>')[0]]).toBeUndefined();
     expect(JSON.parse(JSON.stringify(citation)).parent_ref).toEqual(citation.parent_ref);
+});
+
+it('keeps completed outcomes separate from unattempted values and safely exports evidence', () => {
+    const spec: TableSpec = { id: 'outcomes', columns: [{ id: 'a', header: '=Header', type: 'text' }], rows: [
+        { id: 'empty', cells: {} },
+        { id: 'completed', cells: { a: { outcome: 'not_reported', provenance: 'extracted', details: { kind: 'text', text: '=Evidence, "quoted"\nnext line <citation item_id="u-ABCDEFGH" loc="s1"/>' } } } },
+        { id: 'blank', cells: { a: { provenance: 'user' } } },
+    ] };
+    expect(summarizeCoverage(spec).notReported).toBe(1);
+    expect(isCellEmpty(spec.rows[1].cells.a)).toBe(false);
+    expect(isCellEmpty(spec.rows[0].cells.a)).toBe(true);
+    const csv = toCsv(spec);
+    expect(csv).toContain("'=Header");
+    expect(csv).toContain('Not reported');
+    expect(csv).toContain('"\'=Evidence, ""quoted""\nnext line"');
+    expect(csv).toContain('s1');
+    expect(csv).not.toContain('<citation');
+});
+
+
+it("exports self-contained source labels and passage evidence", () => {
+    const tag = '<citation item_id="u-ABCDEFGH" loc="s1"/>';
+    const spec: TableSpec = { id: "cited", columns: [{ id: "n", header: "Size", type: "number" }], rows: [{ id: "r", cells: { n: { value: { kind: "number", value: 120 }, provenance: "extracted", details: { kind: "text", text: tag } } } }], citations: [{ citation_id: "source", raw_tag: tag, formatted_citation: "Author. 2025. Study title.", preview: "The study enrolled 120 participants." }] };
+    const csv = toCsv(spec);
+    expect(csv).toContain("Author. 2025. Study title.");
+    expect(csv).toContain("The study enrolled 120 participants.");
+    expect(csv).toContain("u-ABCDEFGH:s1");
 });

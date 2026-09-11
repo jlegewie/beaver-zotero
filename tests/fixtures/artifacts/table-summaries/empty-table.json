@@ -39,7 +39,9 @@
                 "filled": 0,
                 "unsure": 0,
                 "unsourced": 0,
-                "stale": 0
+                "stale": 0,
+                "completed": 0,
+                "not_reported": 0
             },
             "topic": {
                 "type": "select",
@@ -47,7 +49,9 @@
                 "unsure": 0,
                 "unsourced": 0,
                 "stale": 0,
-                "distribution": {}
+                "distribution": {},
+                "completed": 0,
+                "not_reported": 0
             },
             "open_access": {
                 "type": "boolean",
@@ -55,7 +59,9 @@
                 "unsure": 0,
                 "unsourced": 0,
                 "stale": 0,
-                "distribution": {}
+                "distribution": {},
+                "completed": 0,
+                "not_reported": 0
             }
         }
     }

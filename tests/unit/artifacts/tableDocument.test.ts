@@ -1034,3 +1034,8 @@ describe("things a stored table must survive", () => {
         expect(alphaRow?.[1]).toContain(rule![1]);
     });
 });
+
+it("shows uncertainty and staleness alongside failures without requiring a value", () => {
+    const { html } = renderTableHtml({ id: "states", columns: [{ id: "a", header: "Answer", type: "text" }], rows: [{ id: "r", cells: { a: { status: "error", error: "Failed inspection", flag: "unsourced", stale: true } } }] });
+    expect(html).toContain('Failed inspection</span><small class="bt-cell-state"> · Unsourced · Stale</small>');
+});

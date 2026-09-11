@@ -1,0 +1,57 @@
+{
+    "name": "not-reported",
+    "before": {
+        "id": "outcomes",
+        "columns": [
+            {
+                "id": "answer",
+                "header": "Answer",
+                "type": "text",
+                "description": "What is reported?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r",
+                "cells": {}
+            }
+        ]
+    },
+    "mutations": [
+        {
+            "op": "set_cells",
+            "cells": [
+                {
+                    "row": "r",
+                    "column": "answer",
+                    "cell": {
+                        "outcome": "not_reported",
+                        "provenance": "extracted"
+                    }
+                }
+            ]
+        }
+    ],
+    "after": {
+        "id": "outcomes",
+        "columns": [
+            {
+                "id": "answer",
+                "header": "Answer",
+                "type": "text",
+                "description": "What is reported?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r",
+                "cells": {
+                    "answer": {
+                        "outcome": "not_reported",
+                        "provenance": "extracted"
+                    }
+                }
+            }
+        ]
+    }
+}

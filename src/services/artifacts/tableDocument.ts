@@ -294,7 +294,14 @@ function safeHref(uri: string | null | undefined): string | null {
  * what it is and where it sits: its passage and comment are listed as fields
  * of their own there (`cellExpandedFields`).
  */
-function renderCellValue(
+function renderCellValue(cell: Cell | undefined, column: Column, cites?: CitationNumbering, variant: 'cell' | 'detail' = 'cell'): string {
+    const html = renderCellValueInner(cell, column, cites, variant);
+    if (!cell) return html;
+    const states = [cell.flag === 'unsure' ? 'Unsure' : cell.flag === 'unsourced' ? 'Unsourced' : '', cell.stale ? 'Stale' : '', cell.provenance === 'user' ? 'Edited by you' : ''].filter(Boolean);
+    return html + (states.length ? `<small class="bt-cell-state"> · ${states.join(' · ')}</small>` : '');
+}
+
+function renderCellValueInner(
     cell: Cell | undefined,
     column: Column,
     cites?: CitationNumbering,
@@ -310,7 +317,7 @@ function renderCellValue(
     // reads as noise across a wide table, and the footer already counts what
     // is missing.
     const value = cell?.value;
-    if (!value) return '<span class="bt-empty"></span>';
+    if (!value) return `<span class="bt-empty">${cell?.outcome === 'not_reported' ? 'Not reported' : ''}</span>`;
 
     switch (value.kind) {
         case 'text':
@@ -740,7 +747,7 @@ function renderDetail(
     const fields = spec.columns
         .filter((column) => {
             const cell = row.cells[column.id];
-            return !!cell?.value || !!cell?.details || !!cell?.status;
+            return !!cell?.value || !!cell?.details || !!cell?.status || !!cell?.outcome || cell?.provenance === 'user';
         })
         .map((column) => {
             const cell = row.cells[column.id];

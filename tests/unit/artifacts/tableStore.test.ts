@@ -1,3 +1,4 @@
+import { handleArtifactRequest } from '../../../src/services/artifacts/artifactProvider';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -43,7 +44,7 @@ import * as recoveryShadow from '../../../src/services/artifacts/recoveryShadow'
 // ---------------------------------------------------------------------------
 
 const LIBRARY_ID = 1;
-const KEY = 'TBL00001';
+const KEY = 'TBLABCDE';
 
 let storageDir: string;
 let htmlPath: string;
@@ -794,7 +795,7 @@ describe('addressing', () => {
     });
 
     it('refuses an item that is not one of ours', async () => {
-        item.hasTag = () => false;
+        item.getField = () => 'https://example.org';
 
         await expect(readTable(ref)).rejects.toMatchObject({ code: 'not_a_table' });
     });
@@ -1362,4 +1363,131 @@ it('repairs a collapsed commit even when both its old sidecars still agree', asy
         JSON.parse(await readFile(sidecar(`v${base.version}.json`), 'utf8')).rows[0].cells.note
             .value.text
     ).toBe('new');
+});
+
+describe('artifact provider through the real file store', () => {
+    const remoteKey = `u-${KEY}`;
+    const request = (op: string, fields: Record<string, unknown> = {}) => handleArtifactRequest({ event: 'artifact_request', request_id: `request-${op}`, op, key: remoteKey, ...fields });
+    it('reads, writes, replays original receipts with current state, conflicts, and restores history', async () => {
+        const read = await request('read');
+        expect(read).toMatchObject({ ok: true, type: 'artifact_response', request_id: 'request-read', op: 'read', version: 1 });
+        const fields = { spec: demoSpec('remote'), meta: { actor: 'agent', run_id: 'run', thread_id: 'thread' }, operation_id: 'remote', expected_version: read.version, expected_sha256: read.sha256 };
+        const written = await request('write', fields);
+        expect(written).toMatchObject({ ok: true, saved: true, operation: { operation_id: 'remote' } });
+        await editTable(ref, [{ op: 'set_meta', title: 'Local correction' }], { actor: 'user' });
+        const replay = await request('write', fields);
+        expect(replay).toMatchObject({ ok: true, replayed: true, operation: written.operation, spec: { title: 'Local correction' } });
+        expect(replay.version).toBeGreaterThan(written.version);
+        expect(await request('write', { ...fields, operation_id: 'different' })).toMatchObject({ ok: false, conflict: true, error_code: 'conflict', spec: { title: 'Local correction' } });
+        const restored = await request('revert', { to_version: 1, meta: { actor: 'user' } });
+        expect(restored).toMatchObject({ ok: true, spec: { title: 'Demo table' } });
+        expect(restored.version).toBeGreaterThan(replay.version);
+    });
+    it.each(['read', 'list', 'write'].flatMap(op => ['missing', 'digest', 'log-digest'].map(damage => [op, damage])))('repairs interrupted tip bookkeeping before provider %s (%s)', async (op, damage) => {
+        const before = await openTable(ref);
+        if (damage === 'missing') await rm(sidecar(`v${before.version}.json`));
+        else if (damage === 'digest') await writeFile(sidecar(`v${before.version}.json`), JSON.stringify({ ...before.spec, title: 'Interrupted sidecar' }));
+        else {
+            const history = await readHistory();
+            history.versions[history.versions.length - 1].sha256 = '0'.repeat(64);
+            await writeFile(sidecar('history.json'), JSON.stringify(history));
+        }
+        const response = await request(op, op === 'list'
+            ? { key: null, keys: [remoteKey] }
+            : op === 'write' ? { spec: demoSpec('new'), meta: { actor: 'user' }, operation_id: `repair-${damage}`, expected_version: before.version, expected_sha256: before.sha256 } : {});
+        if (op === 'list') expect(response.items[0]).toMatchObject({ unavailable: false });
+        else expect(response.ok).toBe(true);
+        expect(JSON.parse(await readFile(sidecar(`v${before.version}.json`), 'utf8'))).toEqual(before.spec);
+    });
+    it('does not expose missing older history or repair around excluded retained content', async () => {
+        const old = await openTable(ref);
+        await writeTable(ref, demoSpec('current'), { actor: 'user' });
+        const current = await openTable(ref);
+        await rm(sidecar(`v${old.version}.json`));
+        expect(await request('read')).toMatchObject({ ok: false });
+        const excluded = { ...old.spec, rows: [{ ...old.spec.rows[0], ref: { kind: 'item', library_id: 7, zotero_key: 'SOURCEAB' } }] };
+        await writeFile(sidecar(`v${old.version}.json`), JSON.stringify(excluded));
+        await rm(sidecar(`v${current.version}.json`));
+        checkLibraryExcluded.mockImplementation((id) => id === 7 ? { message: 'excluded' } : null);
+        expect(await request('read')).toMatchObject({ ok: false, error_code: 'library_excluded' });
+        expect(existsSync(sidecar(`v${current.version}.json`))).toBe(false);
+    });
+    it('serves valid documents after tag removal but rejects an arbitrary HTML document', async () => {
+        item.hasTag = () => false;
+        expect(await request('read')).toMatchObject({ ok: true });
+        await writeFile(htmlPath, '<html>Ordinary HTML</html>');
+        expect(await request('read')).toMatchObject({ ok: false, error_code: 'no_spec' });
+        expect(await request('delete')).toMatchObject({ ok: false, error_code: 'no_spec' });
+        expect(item.deleted).toBe(false);
+    });
+    it('returns one bounded status per explicit key and no metadata for unavailable items', async () => {
+        const response = await request('list', { key: null, keys: [remoteKey, 'u-MISSNGAB'], thread_id: 'new-thread' });
+        expect(response.items).toHaveLength(2);
+        expect(response.items[0]).toMatchObject({ key: remoteKey, unavailable: false, version: 1 });
+        expect(response.items[1]).toEqual({ key: 'u-MISSNGAB', kind: 'table', unavailable: true, error_code: 'not_found', unseen: [] });
+    });
+    it('checks target exclusions before item lookup', async () => {
+        checkLibraryExcluded.mockReturnValue({ message: 'excluded secret library' });
+        expect(await request('read')).toEqual(expect.objectContaining({ ok: false, error_code: 'library_excluded' }));
+        expect(Zotero.Items.getByLibraryAndKey).not.toHaveBeenCalled();
+    });
+    it('withholds excluded rows in retained history even after their removal from current content', async () => {
+        const withSource = demoSpec();
+        withSource.rows[0].ref = { kind: 'item', library_id: 7, zotero_key: 'SOURCE01' };
+        await writeTable(ref, withSource, { actor: 'user' });
+        await writeTable(ref, demoSpec('current'), { actor: 'user' });
+        checkLibraryExcluded.mockImplementation((id) => id === 7 ? { message: 'excluded' } : null);
+        for (const op of ['read', 'versions', 'delete']) {
+            const response = await request(op);
+            expect(response).toMatchObject({ ok: false, error_code: 'library_excluded' });
+            for (const field of ['spec', 'summary', 'versions', 'version', 'sha256']) expect(response).not.toHaveProperty(field);
+        }
+    });
+    it('rejects excluded incoming content before replay lookup and preserves current bytes', async () => {
+        const before = await readFile(htmlPath, 'utf8');
+        checkLibraryExcluded.mockImplementation((id) => id === 7 ? { message: 'excluded' } : null);
+        const spec = demoSpec();
+        spec.citations = [{ citation_id: 'private', resolved_ref: { kind: 'zotero', library_id: 7, zotero_key: 'SOURCE01' } } as any];
+        expect(await request('write', { spec, meta: { actor: 'user' }, operation_id: 'private', expected_version: 1, expected_sha256: 'a'.repeat(64) })).toMatchObject({ error_code: 'library_excluded' });
+        expect(await readFile(htmlPath, 'utf8')).toBe(before);
+    });
+    it('maps absent local files distinctly from missing items and rejects mismatched document identity', async () => {
+        await rm(htmlPath);
+        expect(await request('read')).toMatchObject({ error_code: 'item_missing' });
+        await writeFile(htmlPath, buildTableDocument({ ...demoSpec(), key: 'OTHER001', version: 1 }).html);
+        expect(await request('read')).toMatchObject({ ok: false });
+    });
+    it('guards local drafts inside the store lock and retains intentional blank ownership', async () => {
+        const read = await openTable(ref);
+        const guard = { version: read.version, sha256: read.sha256 };
+        await editTable(ref, [{ op: 'set_cells', cells: [{ row: 'r1', column: 'note', cell: { provenance: 'user' } }] }], { actor: 'user' }, guard);
+        expect((await openTable(ref)).spec.rows[0].cells.note).toEqual({ provenance: 'user' });
+        const stale = await editTable(ref, [{ op: 'remove_rows', rows: ['r1'] }], { actor: 'user' }, guard);
+        expect(stale).toMatchObject({ ok: false, conflict: true });
+        expect((await openTable(ref)).spec.rows).toHaveLength(1);
+    });
+    it('reads read-only tables but refuses writes before changing bytes', async () => {
+        (Zotero.Libraries.get as any).mockReturnValue({ editable: false, filesEditable: false });
+        expect(await request('read')).toMatchObject({ ok: true });
+        const before = await readFile(htmlPath, 'utf8');
+        expect(await request('revert', { to_version: 1, meta: { actor: 'user' } })).toMatchObject({ error_code: 'invalid_target' });
+        expect(await readFile(htmlPath, 'utf8')).toBe(before);
+    });
+});
+
+
+it('rechecks source exclusions at the document commit point', async () => {
+    const opened = await openTable(ref);
+    const original = await readFile(htmlPath, 'utf8');
+    const spec = demoSpec('new answer');
+    spec.citations = [{ citation_id: 'retained-source', resolved_ref: { kind: 'zotero', library_id: 7, zotero_key: 'SOURCEAB' } } as any];
+    const ioWrite = IOUtils.writeUTF8;
+    (IOUtils as any).writeUTF8 = async (...args: any[]) => {
+        const result = await (ioWrite as any)(...args);
+        checkLibraryExcluded.mockImplementation((id) => id === 7 ? { message: 'excluded' } : null);
+        return result;
+    };
+    const response = await handleArtifactRequest({ event: 'artifact_request', request_id: 'mid-write', op: 'write', key: `u-${KEY}`, spec, meta: { actor: 'user' }, operation_id: 'mid-write', expected_version: opened.version, expected_sha256: opened.sha256 });
+    expect(response).toMatchObject({ ok: false, error_code: 'library_excluded' });
+    expect(await readFile(htmlPath, 'utf8')).toBe(original);
 });

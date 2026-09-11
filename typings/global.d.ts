@@ -23,6 +23,7 @@ declare const addon: import("../src/addon").default;
 declare const __env__: "production" | "development";
 
 interface Window {
+    __beaverEditTable?: (ref: import("../src/services/artifacts/tableItemIdentity").TableRef) => Promise<void>;
     __beaverRuntime?: import("../src/runtime/instance").WindowRuntime;
     __beaverJotaiStore?: ReturnType<typeof import('jotai').createStore>;
     /**

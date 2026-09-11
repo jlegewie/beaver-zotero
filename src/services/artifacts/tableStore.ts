@@ -90,7 +90,7 @@ import {
     createTableItem,
     resolveTableLibrary,
     loadTableItemFields,
-    isTableItem,
+    isTableAttachment,
     describeTableItem,
     readTableItemDocument,
     buildTableUrl,
@@ -176,7 +176,10 @@ export type TableRecovery =
     /** Versions the retention cap dropped while the log was being rewritten. */
     | { kind: 'pruned'; versions: number[] };
 
+export type TableAccessGuard = (spec: TableSpec) => void;
+
 export interface TableRemoteWrite {
+    accessGuard?: TableAccessGuard;
     /** Opaque digest returned by openTable; never compute it on another client. */
     expected_sha256: string;
     operation_id: string;
@@ -232,6 +235,7 @@ export interface TableEditRejected {
 export type TableEditResult = TableWriteResult | TableEditRejected;
 
 export interface CreateTableOptions extends CreateTableItemOptions {
+    accessGuard?: TableAccessGuard;
     operation_id?: string;
     /** Who is creating it. Defaults to `agent`. */
     actor?: TableActor;
@@ -489,6 +493,8 @@ async function versionFilesOnDisk(item: Zotero.Item): Promise<number[]> {
 function requireWritable(ref: TableRef): void {
     const excluded = checkLibraryExcluded(ref.libraryID);
     if (excluded) throw new TableItemError(excluded.message, 'library_excluded');
+    const library = Zotero.Libraries.get(ref.libraryID);
+    if (library && (!library.editable || library.filesEditable === false)) throw new TableItemError('Library is read-only.', 'invalid_target');
 }
 
 // ---------------------------------------------------------------------------
@@ -893,7 +899,8 @@ async function auditSidecar(
  * idea of it — is what a revert to version 1 restores.
  */
 export async function createTable(options: CreateTableOptions): Promise<CreatedTable> {
-    const { operation_id, ...ordinary } = options;
+    const { operation_id, accessGuard, ...ordinary } = options;
+    accessGuard?.(options.spec);
     const spec = pruneTableCitations(options.spec);
     if (operation_id === undefined)
         return createTableOnce({ ...ordinary, spec });
@@ -932,8 +939,10 @@ export async function createTable(options: CreateTableOptions): Promise<CreatedT
                     'operation_pending'
                 );
             const item = await Zotero.Items.getAsync(ids[0]);
-            return replayTableCreation(item, operation_id, requestHash);
+            return replayTableCreation(item, operation_id, requestHash, accessGuard);
         }
+        requireWritable({ libraryID, key: '' });
+        accessGuard?.(spec);
         const created = await createTableOnce({
             ...ordinary,
             libraryID,
@@ -965,7 +974,7 @@ export async function createTable(options: CreateTableOptions): Promise<CreatedT
 }
 
 
-async function replayTableCreation(item: Zotero.Item, operation_id: string, requestHash: string): Promise<CreatedTable> {
+async function replayTableCreation(item: Zotero.Item, operation_id: string, requestHash: string, accessGuard?: TableAccessGuard): Promise<CreatedTable> {
     const ref = { libraryID: item.libraryID, key: item.key };
     return withTableLock(ref, async () => {
         requireWritable(ref);
@@ -974,6 +983,13 @@ async function replayTableCreation(item: Zotero.Item, operation_id: string, requ
         if (!path || !(await IOUtils.exists(path)))
             throw new TableItemError('The earlier import has no readable file yet.', 'operation_pending');
         const html = await IOUtils.readUTF8(path);
+        if (accessGuard) {
+            const parsed = parseTableDocument(html);
+            if (parsed.ok) {
+                accessGuard(parsed.spec);
+                await guardStoredTable(ref, item, await readCurrentState(item, { html, parsed }), accessGuard);
+            }
+        }
         const state = parseTableDocumentState(html);
         if (state.creation?.request_sha256 !== requestHash)
             throw new TableItemError('Operation identity was reused with a different request.', 'operation_mismatch');
@@ -988,6 +1004,7 @@ async function replayTableCreation(item: Zotero.Item, operation_id: string, requ
         item.addTag(TABLE_TAG, 1);
         item.addTag(TABLE_EMOJI_TAG, 1);
         const opened = await readCurrentState(item, { html, parsed: read });
+        await guardStoredTable(ref, item, opened, accessGuard);
         const history = await reconcileLog(item, opened);
         const audited = await auditSidecar(item, spec, opened.htmlVersion, history.versions);
         if (history.repairs.length || audited.repairs.length)
@@ -1183,6 +1200,8 @@ export async function writeTable(
     requireWritable(ref);
     const result = await withTableLock(ref, async () => {
         const { item, current } = await prepareWrite(ref);
+        await guardStoredTable(ref, item, current, remote?.accessGuard);
+        remote?.accessGuard?.(spec);
         return commitWrite(ref, item, current, spec, meta, expectedVersion, remote);
     });
     if (result.ok && !result.replayed) emitTableUpdated(ref, result.version, meta);
@@ -1211,7 +1230,8 @@ async function commitWrite(
     spec: TableSpec,
     meta: TableWriteMeta,
     expectedVersion: number | undefined,
-    remote?: TableRemoteWrite
+    remote?: TableRemoteWrite,
+    accessGuard: TableAccessGuard | undefined = remote?.accessGuard
 ): Promise<TableWriteResult> {
     const reconciled = await reconcileLog(item, current);
     if (reconciled.repairs.length) {
@@ -1361,6 +1381,9 @@ async function commitWrite(
         // Still before the commit point, so a failure here is a failed write.
         await writeAtomic(versionPath, serialized, temp);
     }
+    requireWritable(ref);
+    if (current.spec) accessGuard?.(current.spec);
+    accessGuard?.(stored);
     await writeAtomic(htmlPath, document.html, temp);
 
     // ---- past the commit point ------------------------------------------
@@ -1461,14 +1484,11 @@ function markForUpload(item: Zotero.Item): void {
  * one's mutations gone from the file and from the log while both callers were
  * told they succeeded.
  *
- * There is consequently no `expectedVersion` here and no conflict-and-rebase
- * loop: nothing else in this process can move the table between the read and
- * the write, so the guard would be comparing the read against itself. It is not
- * a guard against another process either — there is no cross-process lock, and
- * a check would leave exactly the same window open between itself and the
- * rename. A caller that held a spec across an await boundary of its own — a UI
- * writing back what a user edited — wants {@link writeTable} with the version
- * it was shown.
+ * A UI draft may supply the version/hash pair it displayed. That optional
+ * guard is checked inside the lock before applying mutations, so a concurrent
+ * edit produces a conflict rather than silently overwriting a correction.
+ * Calls without a guard apply directly to the current state under the lock.
+ * This is process-local serialization, not a cross-device lock.
  *
  * A mutation the table cannot accept comes back unchanged: the caller wrote
  * something wrong, and retrying would not fix it.
@@ -1476,7 +1496,8 @@ function markForUpload(item: Zotero.Item): void {
 export async function editTable(
     ref: TableRef,
     mutations: TableMutation[],
-    meta: TableWriteMeta
+    meta: TableWriteMeta,
+    expected?: { version: number; sha256: string }
 ): Promise<TableEditResult> {
     requireWritable(ref);
     const result = await withTableLock(ref, async () => {
@@ -1488,6 +1509,9 @@ export async function editTable(
             );
         }
 
+        if (expected && (current.htmlVersion !== expected.version || await tableSpecHash(current.spec) !== expected.sha256)) {
+            return { ok: false, conflict: true, version: current.htmlVersion, sha256: await tableSpecHash(current.spec), spec: current.spec } as const;
+        }
         const applied = applyMutations(current.spec, mutations);
         if (!applied.ok) return { ok: false, error: applied.error } as const;
 
@@ -1519,10 +1543,12 @@ export async function listVersions(ref: TableRef): Promise<TableVersionEntry[]> 
  * Recovery writes, so it is done under the lock and skipped entirely in an
  * excluded library, where Beaver does not write at all.
  */
-export async function openTable(ref: TableRef): Promise<OpenTableResult> {
+export async function openTable(ref: TableRef, accessGuard?: TableAccessGuard): Promise<OpenTableResult> {
     return withTableLock(ref, async () => {
         const item = await resolveTableItem(ref);
-        const current = await readCurrentState(item);
+        const document = await readTableItemDocument(item);
+        if (!document.parsed.ok) throw tableReadError(document.parsed.code, document.parsed.message);
+        const current = await readCurrentState(item, document);
         if (!current.spec) {
             throw new TableItemError(
                 `Table ${ref.key} carries no readable spec.`,
@@ -1530,8 +1556,9 @@ export async function openTable(ref: TableRef): Promise<OpenTableResult> {
             );
         }
 
-        const recovered: TableRecovery[] = [];
-        if (!checkLibraryExcluded(ref.libraryID)) {
+        const recovered = await guardStoredTable(ref, item, current, accessGuard);
+        const library = Zotero.Libraries.get(ref.libraryID);
+        if (!checkLibraryExcluded(ref.libraryID) && library && library.editable && library.filesEditable !== false) {
             const reconciled = await reconcileLog(item, current);
             const audited = await auditSidecar(
                 item,
@@ -1689,7 +1716,8 @@ export async function restoreShadowVersion(
 export async function revertTable(
     ref: TableRef,
     toVersion: number,
-    meta: TableWriteMeta
+    meta: TableWriteMeta,
+    accessGuard?: TableAccessGuard
 ): Promise<TableWriteResult> {
     requireWritable(ref);
     // A revert is a deliberate step back, so it is never folded into the
@@ -1702,8 +1730,10 @@ export async function revertTable(
 
     const result = await withTableLock(ref, async () => {
         const { item, current } = await prepareWrite(ref);
+        await guardStoredTable(ref, item, current, accessGuard);
         const spec = await readStoredVersion(ref, item, current, toVersion);
-        return commitWrite(ref, item, current, spec, revertMeta, undefined);
+        accessGuard?.(spec);
+        return commitWrite(ref, item, current, spec, revertMeta, undefined, undefined, accessGuard);
     });
     if (result.ok) emitTableUpdated(ref, result.version, revertMeta);
     return result;
@@ -1790,7 +1820,8 @@ async function retireTrashedTableShadow(ref: TableRef): Promise<boolean> {
 /** Drops only the contiguous suffix owned by discarded runs of this conversation. */
 export async function trimTable(
     ref: TableRef,
-    request: TableTrimRequest
+    request: TableTrimRequest,
+    accessGuard?: TableAccessGuard
 ): Promise<TableTrimResult> {
     requireWritable(ref);
     if (
@@ -1806,9 +1837,14 @@ export async function trimTable(
             | Zotero.Item
             | false;
         requireWritable(ref);
+        if (accessGuard && existing) {
+            const document = await readTableItemDocument(existing);
+            if (!document.parsed.ok) throw tableReadError(document.parsed.code, document.parsed.message);
+            await guardStoredTable(ref, existing, await readCurrentState(existing, document), accessGuard);
+        }
         if (existing && existing.deleted) {
             await loadTableItemFields([existing]);
-            if (!isTableItem(existing))
+            if (!isTableAttachment(existing))
                 throw new TableItemError('Item is not a stored table.', 'not_a_table');
             return {
                 ok: true,
@@ -1874,7 +1910,8 @@ export async function trimTable(
         }
         if (keep === 0) {
             requireWritable(ref);
-            await trashTableItem(item);
+            await guardStoredTable(ref, item, await readCurrentState(item), accessGuard);
+        await trashTableItem(item);
             const saved = await retireTrashedTableShadow(ref);
             return {
                 ok: true,
@@ -1903,6 +1940,8 @@ export async function trimTable(
         requireWritable(ref);
         const path = await item.getFilePathAsync();
         if (!path) throw new TableItemError('Table file is missing.', 'file_missing');
+        requireWritable(ref);
+        accessGuard?.(spec);
         await writeAtomic(path, document.html, tableTempPath(item));
         let saved = true;
         try {
@@ -1947,11 +1986,14 @@ export async function trimTable(
  * Moves a table to the trash. Deleting outright is not offered: the file is the
  * only copy of the table's state, so the recoverable step is the only safe one.
  */
-export async function deleteTable(ref: TableRef): Promise<void> {
+export async function deleteTable(ref: TableRef, accessGuard?: TableAccessGuard): Promise<void> {
     requireWritable(ref);
     await withTableLock(ref, async () => {
-        const item = await resolveTableItem(ref);
+        const item = await resolveTableItem(ref, true);
         requireWritable(ref);
+        const document = await readTableItemDocument(item);
+        if (accessGuard && !document.parsed.ok) throw tableReadError(document.parsed.code, document.parsed.message);
+        await guardStoredTable(ref, item, await readCurrentState(item, document), accessGuard);
         await trashTableItem(item);
         // The shadow lives outside the storage directory, so nothing else would
         // ever collect it: a deleted table's retained specs would sit in the
@@ -2038,4 +2080,45 @@ function emitTableUpdated(
  */
 export function registerTableShadowRestore(): void {
     setTableShadowRestore((ref) => restoreShadowVersion(ref));
+}
+
+/** Repair canonical bookkeeping before validating history for provider access. */
+async function guardStoredTable(ref: TableRef, item: Zotero.Item, current: CurrentState, guard?: TableAccessGuard): Promise<TableRecovery[]> {
+    if (!guard) return [];
+    if (checkLibraryExcluded(ref.libraryID)) throw new TableItemError('Table unavailable.', 'library_excluded');
+    if (current.spec) guard(current.spec);
+
+    // Check readable sidecar content before any repair, including unlogged files
+    // the audit might adopt. Digests are enforced after the canonical tip has had
+    // a chance to repair its interrupted write; older damaged history still fails.
+    for (const version of await versionFilesOnDisk(item)) {
+        if (version > current.htmlVersion) continue;
+        const raw = await readJson<unknown>(versionPathOf(item, version));
+        const read = readSpec(raw);
+        if (read.ok) guard(read.spec);
+    }
+    const recovered: TableRecovery[] = [];
+    const library = Zotero.Libraries.get(ref.libraryID);
+    if (current.spec && library && library.editable && library.filesEditable !== false) {
+        guard(current.spec);
+        requireWritable(ref);
+        const reconciled = await reconcileLog(item, current);
+        const audited = await auditSidecar(item, current.spec, current.htmlVersion, reconciled.versions);
+        recovered.push(...reconciled.repairs, ...audited.repairs);
+        const repaired = { ...current, history: { ...current.history, versions: audited.versions } };
+        for (const entry of audited.versions) {
+            guard(await readStoredVersion(ref, item, repaired, entry.version));
+        }
+        guard(current.spec);
+        requireWritable(ref);
+        if (recovered.length) {
+            const pruned = await commitHistory(item, audited.versions);
+            if (pruned.length) recovered.push({ kind: 'pruned', versions: pruned });
+            current.history = normalizeTableHistory(await readJson<TableHistory>(historyPathOf(item)));
+        }
+    }
+    for (const entry of current.history.versions) {
+        guard(await readStoredVersion(ref, item, current, entry.version));
+    }
+    return recovered;
 }

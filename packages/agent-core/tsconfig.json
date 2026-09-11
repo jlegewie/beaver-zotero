@@ -34,6 +34,7 @@
   // The full transitive closure, listed explicitly so the package surface is
   // readable. `verify-program.mjs` keeps this list honest.
   "files": [
+    "src/protocol/artifactProtocol.ts",
     "./src/globals.d.ts",
     "./src/voice/contracts.ts",
     "./src/voice/controller.ts",

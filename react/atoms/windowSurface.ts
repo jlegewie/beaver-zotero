@@ -17,6 +17,8 @@ export type WindowSurface = { kind: "thread" } | TableWindowSurface;
 
 export interface TableWindowSurface {
     kind: "table";
+    /** Persistent identity for the local editor. Ordinary Open uses the reader. */
+    ref?: { libraryID: number; key: string };
     /**
      * Which showing this is. A new id every time the window is asked to show a
      * table, the same id while that table is updated in place — so the view

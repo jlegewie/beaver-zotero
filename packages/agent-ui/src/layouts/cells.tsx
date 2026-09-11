@@ -74,14 +74,43 @@ export function CellView({
     onSelectClick,
     onRetry,
 }: CellViewProps): React.ReactElement {
-    if (cell?.status === "pending") return <PendingCell />;
+    const states = (
+        <>
+            {cell?.flag ? (
+                <small>
+                    {" "}
+                    · {cell.flag === "unsure" ? "Unsure" : "Unsourced"}
+                </small>
+            ) : null}
+            {cell?.stale ? <small> · Stale</small> : null}
+        </>
+    );
+    if (cell?.status === "pending")
+        return (
+            <span>
+                <PendingCell />
+                {states}
+            </span>
+        );
     if (cell?.status === "error")
-        return <ErrorCell message={cell.error} onRetry={onRetry} />;
+        return (
+            <span>
+                <ErrorCell message={cell.error} onRetry={onRetry} />
+                {states}
+            </span>
+        );
 
     // Nothing at all, rather than a placeholder glyph. A column of em dashes
     // reads as noise across a wide table; the footer is where the count of
     // what is missing belongs.
-    if (!cell?.value) return <span className="bt-empty" />;
+    if (!cell?.value)
+        return (
+            <span className="bt-empty">
+                {cell?.outcome === "not_reported" ? "Not reported" : ""}
+                {states}
+                {cell?.provenance === "user" ? " · Edited by you" : ""}
+            </span>
+        );
 
     return (
         <span
@@ -102,6 +131,7 @@ export function CellView({
                 renderText={renderText}
                 onSelectClick={onSelectClick}
             />
+            {states}
             {cell.provenance === "user" ? (
                 <span className="bt-edit-mark" title="Edited by you">
                     <Icon icon={EditIcon} size={11} />

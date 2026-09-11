@@ -665,6 +665,9 @@ function renderActions(doc: Document, item: Zotero.Item): HTMLElement {
         button(doc, 'open', 'Open table', actions.open, () =>
             void openTable(ref)
         ),
+        button(doc, 'edit', 'Edit table', !!win?.__beaverEditTable, () => {
+            void win?.__beaverEditTable?.(ref).catch((error) => Zotero.logError(error));
+        }),
         button(doc, 'library', 'Show in library', actions.showInLibrary, () =>
             showInLibrary(win, item)
         ),

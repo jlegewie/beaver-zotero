@@ -1,3 +1,4 @@
+import { handleArtifactRequest } from '../../src/services/artifacts/artifactProvider';
 import { tryGetWindowRuntime } from '../runtime/windowRuntime';
 /**
  * Hook to register HTTP endpoints for local FrontendCapability.
@@ -898,6 +899,8 @@ function registerEndpoints(): (() => void) | undefined {
 
     endpoints['/beaver/library/find-annotations'] =
         createEndpoint(handleFindAnnotationsHttpRequest);
+
+    endpoints['/beaver/artifact'] = createEndpoint(handleArtifactRequest);
 
     endpoints['/beaver/library/libraries'] =
         createEndpoint(handleListLibrariesHttpRequest);

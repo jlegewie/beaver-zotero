@@ -1,0 +1,55 @@
+{
+    "name": "changed-question-stales-not-reported",
+    "before": {
+        "id": "outcomes",
+        "columns": [
+            {
+                "id": "answer",
+                "header": "Answer",
+                "type": "text",
+                "description": "What is reported?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r",
+                "cells": {
+                    "answer": {
+                        "outcome": "not_reported",
+                        "provenance": "extracted"
+                    }
+                }
+            }
+        ]
+    },
+    "mutations": [
+        {
+            "op": "update_column",
+            "column": "answer",
+            "description": "What is the revised answer?"
+        }
+    ],
+    "after": {
+        "id": "outcomes",
+        "columns": [
+            {
+                "id": "answer",
+                "header": "Answer",
+                "type": "text",
+                "description": "What is the revised answer?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r",
+                "cells": {
+                    "answer": {
+                        "outcome": "not_reported",
+                        "provenance": "extracted",
+                        "stale": true
+                    }
+                }
+            }
+        ]
+    }
+}

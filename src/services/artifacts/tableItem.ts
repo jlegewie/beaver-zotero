@@ -62,6 +62,7 @@ import {
 export {
     buildTableUrl,
     isTableItem,
+    isTableAttachment,
     loadTableItemFields,
     normalizeTableHistory,
     readTable,

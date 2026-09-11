@@ -1,0 +1,37 @@
+{
+    "name": "not-reported-without-provenance",
+    "before": {
+        "id": "outcomes",
+        "columns": [
+            {
+                "id": "answer",
+                "header": "Answer",
+                "type": "text",
+                "description": "What is reported?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r",
+                "cells": {}
+            }
+        ]
+    },
+    "mutations": [
+        {
+            "op": "set_cells",
+            "cells": [
+                {
+                    "row": "r",
+                    "column": "answer",
+                    "cell": {
+                        "outcome": "not_reported"
+                    }
+                }
+            ]
+        }
+    ],
+    "error": {
+        "code": "invalid_mutation"
+    }
+}
