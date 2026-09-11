@@ -47,6 +47,7 @@ const LocalDocumentCacheRow: React.FC<{ hasBorder?: boolean }> = ({ hasBorder = 
     const hasSearchAccess = useAtomValue(hasSearchIndexAccessAtom);
     const [cache, setCache] = useState<DocumentCacheStats | null | undefined>(undefined);
     const [clearing, setClearing] = useState(false);
+    const [cleared, setCleared] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     const refresh = useCallback(async () => {
@@ -94,9 +95,11 @@ const LocalDocumentCacheRow: React.FC<{ hasBorder?: boolean }> = ({ hasBorder = 
         });
         if (buttonIndex !== 0) return;
         setClearing(true);
+        setCleared(false);
         setError(null);
         try {
             await clearDocumentCache();
+            setCleared(true);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not clear the local cache.');
         } finally {
@@ -116,6 +119,9 @@ const LocalDocumentCacheRow: React.FC<{ hasBorder?: boolean }> = ({ hasBorder = 
                     <span className="display-flex mt-1">
                         {cache === undefined ? 'Checking local storage…' : cache === null ? 'Cache status unavailable' : describeCache(cache)}
                     </span>
+                    {cleared && <span role="status" className="display-flex mt-1">
+                        Cache cleared. Files will be read again when needed. To prepare them ahead of time, enable Background Processing, then use Rebuild cache when pending processing has finished and the button appears.
+                    </span>}
                     {error && <span role="alert" className="display-flex font-color-red mt-1">{error}</span>}
                 </>
             }
@@ -123,7 +129,7 @@ const LocalDocumentCacheRow: React.FC<{ hasBorder?: boolean }> = ({ hasBorder = 
                 <Button
                     variant="outline"
                     onClick={clear}
-                    disabled={clearing || !cache}
+                    disabled={clearing || !cache || (cache.metadata_count === 0 && cache.payload_count === 0)}
                     loading={clearing}
                     style={{ padding: '4px 6px' }}
                 >

@@ -1,6 +1,6 @@
 import type { WSAgentActionExecuteRequest } from '@beaver/agent-core/protocol/agentProtocol';
 import { ZOTERO_AGENT_NAME, ZOTERO_PLUGIN_CLIENT_TYPE } from '@beaver/agent-core/protocol/agentProtocol';
-import { setTransportConfig } from '@beaver/agent-core/transport/config';
+import { getTransportConfigurationError, setTransportConfig } from '@beaver/agent-core/transport/config';
 import { setCredentialAdapter } from '@beaver/agent-core/transport/credentials';
 import { setSupabaseClientProvider } from '@beaver/agent-core/transport/supabaseClient';
 import { setThreadAgentName } from '@beaver/agent-core/transport/threadService';
@@ -85,16 +85,6 @@ import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
 // Only the webpack copy wires `onWorkerStartFailure` to an in-app popup (hot worker only)
 configurePDFForBeaver({ onWorkerStartFailure: notifyWorkerStartFailure });
 
-// Register the backend endpoints. The `process.env` reads live here rather
-// than in the transport layer because they only work under a bundler that
-// substitutes them at build time; other hosts resolve the same values at
-// runtime. Must run before the first backend request or Supabase client use.
-setTransportConfig({
-    apiBaseUrl: process.env.API_BASE_URL ?? '',
-    supabaseUrl: process.env.SUPABASE_URL ?? '',
-    supabaseAnonKey: process.env.SUPABASE_ANON_KEY ?? '',
-});
-
 // Register the Zotero client host so rendered chat-history components can
 // resolve host-specific navigation and data lookups. Non-Zotero clients omit
 // this and run the render surface with the default empty host.
@@ -133,8 +123,21 @@ setThreadAgentName(ZOTERO_AGENT_NAME);
 
 const instanceAccount = Zotero.Beaver.account;
 if (!instanceAccount) throw new Error('Instance account service unavailable');
+// Register the backend endpoints. The `process.env` reads live here rather
+// than in the transport layer because they only work under a bundler that
+// substitutes them at build time; other hosts resolve the same values at
+// runtime. Must run before the first backend request or Supabase client use.
+setTransportConfig({
+    apiBaseUrl: process.env.API_BASE_URL ?? '',
+    supabaseUrl: process.env.SUPABASE_URL ?? '',
+    supabaseAnonKey: process.env.SUPABASE_ANON_KEY ?? '',
+}, instanceAccount.getTransportConfig());
 setSupabaseClientProvider(() => instanceAccount.client);
-setCredentialAdapter({ auth: instanceAccount.auth, getGeneration: () => instanceAccount.getGeneration() });
+setCredentialAdapter({
+    auth: instanceAccount.auth,
+    getGeneration: () => instanceAccount.getGeneration(),
+    reportSessionRejected: generation => { void instanceAccount.reportSessionRejected(generation); },
+});
 
 // Register the Zotero busy-context snapshot attached to outgoing WS
 // diagnostics, and the sync-pause resume handler released when a mutating
@@ -235,12 +238,6 @@ const GlobalContextInitializer = () => {
     // Register the authenticated cloud-index lane and reconcile tag coverage.
     useFulltextUpsertLane();
 
-    // Poll queue, ledger, and remote coverage for status UI.
-    useBackgroundProcessingStatus({
-        onlyWhenEnabled: true,
-        pollIntervalMs: 15_000,
-    });
-
     useBackgroundProcessingWelcome();
 
     useBackgroundProcessingScopeCleanup();
@@ -264,7 +261,13 @@ function mountSurface(domElement: HTMLElement, children: React.ReactNode) {
     root.render(
         <Provider store={store}>
             <SurfaceWindowContext.Provider value={domElement.ownerDocument.defaultView}>
-                {children}
+                {getTransportConfigurationError() ? (
+                    <div role="alert" style={{ padding: 20 }}>
+                        <strong>Beaver couldn’t start</strong>
+                        <p>{getTransportConfigurationError()}</p>
+                        <p>Restart Zotero. If this continues, reinstall Beaver.</p>
+                    </div>
+                ) : children}
             </SurfaceWindowContext.Provider>
         </Provider>
     );
@@ -361,7 +364,7 @@ export function closeAgentConnection(
 export function initializeRuntime(runtime: WindowRuntime) {
     initializeWindowRuntime(runtime);
     runtime.hostWindow.__beaverJotaiStore = store;
-    attachAccountProjection(runtime);
+    if (!getTransportConfigurationError()) attachAccountProjection(runtime);
     Zotero.Beaver.runtime.subscribeWindow(runtime, 'notification:popup', detail => {
         store.set(addPopupMessageAtom, detail);
     });

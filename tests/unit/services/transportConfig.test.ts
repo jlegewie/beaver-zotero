@@ -185,3 +185,24 @@ describe('backend clients resolving the base URL', () => {
         expect(await requestedUrl(service)).toBe('https://pinned.example.com/api/v1/ping');
     });
 });
+
+describe('cross-bundle configuration', () => {
+    const plugin = { apiBaseUrl: 'https://api.example.com', supabaseUrl: 'https://p.supabase.co', supabaseAnonKey: 'anon' };
+    it.each(['apiBaseUrl', 'supabaseUrl', 'supabaseAnonKey'])('blocks requests on mismatched %s without making an auth request', async field => {
+        const { setTransportConfig, getTransportConfigurationError, ApiService } = await loadModules();
+        setTransportConfig({ ...plugin, [field]: 'different' }, plugin);
+        expect(getTransportConfigurationError()).toContain('incompatible server settings');
+        const fetchMock = vi.fn();
+        vi.stubGlobal('fetch', fetchMock);
+        await expect(new ApiService().get('/threads')).rejects.toThrow('incompatible server settings');
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(mockSupabase.auth.getSession).not.toHaveBeenCalled();
+    });
+    it('accepts equivalent URLs and isolates the owner configuration from mutation', async () => {
+        const { setTransportConfig, getTransportConfig, getTransportConfigurationError } = await loadModules();
+        setTransportConfig({ ...plugin, apiBaseUrl: plugin.apiBaseUrl + '/' }, plugin);
+        getTransportConfig().apiBaseUrl = 'changed';
+        expect(getTransportConfig().apiBaseUrl).toBe(plugin.apiBaseUrl + '/');
+        expect(getTransportConfigurationError()).toBeNull();
+    });
+});

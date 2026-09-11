@@ -4,20 +4,20 @@ import { createRoot } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { afterEach, expect, it, vi } from 'vitest';
 import { backgroundProcessingStatusAtom } from '../../../react/atoms/backgroundProcessing';
-import { hasSearchIndexAccessAtom } from '../../../react/atoms/profile';
 import BackgroundProcessingSection from '../../../react/components/preferences/BackgroundProcessingSection';
 
-const { refresh, prefs, prepareCache } = vi.hoisted(() => ({
+const { refresh, prefs, prepareCache, access } = vi.hoisted(() => ({
     refresh: vi.fn().mockResolvedValue(undefined),
     prepareCache: vi.fn().mockResolvedValue(1),
     prefs: { backgroundProcessingEnabled: true },
+    access: { search: false },
 }));
 vi.mock('../../../src/services/backgroundProcessing/cachePreparation', () => ({ prepareUncachedFiles: prepareCache }));
 vi.mock('../../../react/atoms/profile', async () => {
     const { atom } = await import('jotai');
     return {
         hasOcrAccessAtom: atom(false),
-        hasSearchIndexAccessAtom: atom(false),
+        hasSearchIndexAccessAtom: atom(() => access.search),
         localZoteroLibrariesAtom: atom([]),
         searchableLibraryIdsAtom: atom([]),
     };
@@ -49,12 +49,14 @@ vi.mock('../../../src/utils/prefs', () => ({
 afterEach(() => {
     vi.clearAllMocks();
     prefs.backgroundProcessingEnabled = true;
+    access.search = false;
 });
 
-it('reconciles before draining Start now for queued files', async () => {
+it('starts pending files without rebuilding missing cached text', async () => {
     const store = createStore();
     store.set(backgroundProcessingStatusAtom, {
         ...store.get(backgroundProcessingStatusAtom),
+        documentCache: { ...cacheStats, can_prepare_uncached_files: true },
         ledger: { ...store.get(backgroundProcessingStatusAtom).ledger, total: 1 },
         worker: { available: 1, deferred: 0, inFlight: 0, dispatchBlocker: null, drainNow: false, backlogGateOpen: false },
     });
@@ -79,7 +81,7 @@ it('reconciles before draining Start now for queued files', async () => {
         await act(async () => finishReconcile());
         expect(requestImmediateDrain).toHaveBeenCalledOnce();
         expect(refresh).toHaveBeenCalledOnce();
-        // Nothing was evicted from the cache, so a plain drain must not re-extract anything.
+        // Missing cached text must not expand the scope of Start now.
         expect(prepareCache).not.toHaveBeenCalled();
     } finally {
         act(() => root.unmount());
@@ -295,7 +297,7 @@ it('keeps known problems visible with background processing off, without status,
 });
 it('lists server indexing problems with reading problems and keeps the search status on the toggle row', async () => {
     const store = createStore();
-    store.set(hasSearchIndexAccessAtom, true);
+    access.search = true;
     store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
         updatedAt: Date.now(),
         ledger: { ...store.get(backgroundProcessingStatusAtom).ledger, total: 2, readable: 2 },
@@ -326,7 +328,7 @@ it.each([
 ])('keeps the search index status %j visible while processing is paused', async (coverageState, line) => {
     prefs.backgroundProcessingEnabled = false;
     const store = createStore();
-    store.set(hasSearchIndexAccessAtom, true);
+    access.search = true;
     store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom), updatedAt: Date.now(), ...coverageState });
     await withView(store, (container) => {
         expect(container.querySelector('[role="status"]')).toBeNull();
@@ -337,7 +339,7 @@ it.each([
     });
 });
 
-it('restores evicted cached text through Start now once the backlog is settled', async () => {
+it('restores evicted cached text through Rebuild cache once the backlog is settled', async () => {
     const store = createStore();
     store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
         updatedAt: Date.now(),
@@ -355,18 +357,18 @@ it('restores evicted cached text through Start now once the backlog is settled',
     try {
         await withView(store, async (container) => {
             expect(container.textContent).not.toContain('Process uncached files');
-            expect(container.textContent).toContain('Cached text for some files was removed to save space.');
-            const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Start now')!;
+            expect(container.textContent).toContain('Prepare previously processed files again for faster responses. Uses available cache space.');
+            const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Rebuild cache')!;
             expect(button).toBeDefined();
             await act(async () => button.click());
-            expect(reconcileNow).toHaveBeenCalledOnce();
+            expect(reconcileNow).not.toHaveBeenCalled();
             expect(prepareCache).toHaveBeenCalledOnce();
             expect(requestImmediateDrain).toHaveBeenCalledOnce();
             expect(refresh).toHaveBeenCalledOnce();
             await act(async () => store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
                 documentCache: { ...cacheStats, can_prepare_uncached_files: false },
             }));
-            expect(Array.from(container.querySelectorAll('button')).some((node) => node.textContent === 'Start now')).toBe(false);
+            expect(Array.from(container.querySelectorAll('button')).some((node) => node.textContent === 'Rebuild cache')).toBe(false);
         });
     } finally {
         Zotero.Beaver = previousBeaver;
@@ -381,7 +383,7 @@ it('does not restore cached text while background processing is off', async () =
         documentCache: { ...cacheStats, can_prepare_uncached_files: true },
     });
     await withView(store, (container) => {
-        expect(Array.from(container.querySelectorAll('button')).some((node) => node.textContent === 'Start now')).toBe(false);
+        expect(Array.from(container.querySelectorAll('button')).some((node) => node.textContent === 'Rebuild cache')).toBe(false);
     });
 });
 
@@ -402,7 +404,7 @@ it('surfaces a failed cache restoration on the page and still drains what was qu
     };
     try {
         await withView(store, async (container) => {
-            const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Start now')!;
+            const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Rebuild cache')!;
             await act(async () => button.click());
             expect(container.querySelector('[role="alert"]')?.textContent).toContain('No room in the cache.');
             expect(requestImmediateDrain).toHaveBeenCalledOnce();
@@ -412,7 +414,7 @@ it('surfaces a failed cache restoration on the page and still drains what was qu
     }
 });
 
-it('still restores cached text and drains when the reconcile step fails', async () => {
+it('rebuilds cached text independently of reconciliation', async () => {
     const store = createStore();
     store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
         updatedAt: Date.now(),
@@ -428,12 +430,12 @@ it('still restores cached text and drains when the reconcile step fails', async 
     };
     try {
         await withView(store, async (container) => {
-            const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent?.startsWith('Start now'))!;
+            const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent?.startsWith('Rebuild cache'))!;
             await act(async () => button.click());
             expect(prepareCache).toHaveBeenCalledOnce();
             expect(requestImmediateDrain).toHaveBeenCalledOnce();
             expect(refresh).toHaveBeenCalledOnce();
-            expect(container.querySelector('[role="alert"]')?.textContent).toContain('ledger locked');
+            expect(container.querySelector('[role="alert"]')).toBeNull();
         });
     } finally {
         Zotero.Beaver = previousBeaver;

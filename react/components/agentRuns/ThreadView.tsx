@@ -1,7 +1,7 @@
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useEffect, useRef, forwardRef, useLayoutEffect, useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { activeRunAtom, allRunsAtom, threadRunIdsAtom } from "@beaver/agent-core/run-state/atoms";
+import { activeRunAtom, allRunsAtom } from "@beaver/agent-core/run-state/atoms";
 import { AgentRunView } from "./AgentRunView";
 import { pinToBottom, scrollToBottom } from "../../utils/scrollToBottom";
 import { AT_BOTTOM_EPSILON, BOTTOM_THRESHOLD, getScrollAtoms, latchIntentFromDistance, markProgrammaticScroll, measureDistanceFromBottom, publishDistanceFromBottom, publishScrollPosition, resumeFollowing } from "../../utils/scrollPosition";
@@ -46,10 +46,8 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
     function ThreadView({ className, isWindow = false }: ThreadViewProps, ref: React.ForwardedRef<HTMLDivElement>) {
         const surfaceWindow = useSurfaceWindow();
         const runs = useAtomValue(allRunsAtom);
-        // The rendered runs' ids, holding their array while the set of runs is
-        // unchanged. Used below to re-observe the run elements only when they
-        // are actually replaced, rather than on every frame of a response.
-        const runIds = useAtomValue(threadRunIdsAtom);
+        const hasRuns = runs.length > 0;
+        const contentRef = useRef<HTMLDivElement | null>(null);
         const pendingRunId = useAtomValue(pendingScrollToRunAtom);
         const isLoadingThread = useAtomValue(isLoadingThreadAtom);
         const setPendingScrollToRun = useSetAtom(pendingScrollToRunAtom);
@@ -349,7 +347,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         // Nothing else reports that: growing the content moves the bottom away
         // without moving `scrollTop`, so no scroll event fires, and a reader
         // sitting above the fold would otherwise keep an "at the bottom" reading
-        // taken before the response began. Observing the run elements catches it
+        // taken before the response began. Observing the content wrapper catches it
         // at the source, and catches it whatever caused it — a token arriving, an
         // image finishing, a code block re-wrapping, a card animating open, the
         // working indicator appearing part-way through a response. None of those
@@ -369,7 +367,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         // content, with no intermediate state ever painted.
         useEffect(() => {
             const container = scrollContainerRef.current;
-            if (!container) return;
+            if (!container || !contentRef.current) return;
 
             const observer = new ResizeObserver(() => {
                 // A pane that is mounted but not laid out yet, or one the reader
@@ -403,7 +401,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
 
                 // Nothing to follow in a thread with no runs in it, and nothing
                 // the reader can have scrolled back from.
-                if (runIds.length === 0) {
+                if (!hasRuns) {
                     return;
                 }
 
@@ -474,28 +472,13 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 // offset it came to rest at, for free.
             });
 
-            for (const child of Array.from(container.children)) {
-                observer.observe(child);
-            }
+            // Run roots can be replaced when their streaming provider mounts or
+            // unmounts. Observe a stable, non-shrinking content box so those swaps,
+            // new runs, and delayed action reviews all report their layout changes.
+            observer.observe(contentRef.current);
 
             return () => observer.disconnect();
-            // Keyed on which runs are rendered, not on the array holding them:
-            // that array is replaced on every frame of a streaming response and
-            // would tear this observer down and rebuild it just as often, while
-            // the ids behind it stay put — `threadRunIdsAtom` holds its array
-            // for exactly as long as they do. The count alone is not enough: a
-            // retry drops a run and installs its replacement in one batch, so
-            // the children are swapped without the count ever moving, and an
-            // observer keyed on the count would sit watching detached elements.
-            //
-            // Re-registering is also how a run being added or removed is noticed
-            // at all: observing an element delivers an initial record for it, so
-            // the swap reports the new content size the same way growth does.
-            //
-            // `pendingRunId` is in here so the gate above reads the current one.
-            // It changes only on protocol navigation, and a re-registration
-            // during one is gated by that same navigation.
-        }, [runIds, scrollAtoms, scrolledAtom, scrollContainerRef, pendingRunId, isProtocolScrollLocked]);
+        }, [hasRuns, scrollAtoms, scrolledAtom, scrollContainerRef, pendingRunId, isProtocolScrollLocked]);
 
         // Scroll to bottom when a new pending approval appears
         // This ensures the approval buttons are visible, even if user had scrolled up
@@ -612,18 +595,20 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 id="beaver-thread-view"
                 role="log"
                 aria-label="Chat history"
-                className={`display-flex flex-col flex-1 min-h-0 overflow-y-auto gap-4 scrollbar min-w-0 pb-4 ${className || ''}`}
+                className={`display-flex flex-col flex-1 min-h-0 overflow-y-auto scrollbar min-w-0 pb-4 ${className || ''}`}
                 onScroll={handleScroll}
                 ref={setScrollContainerRef}
             >
-                {runs.map((run, index) => (
-                    <AgentRunView
-                        key={run.id}
-                        ref={run.id === pendingRunId ? setPendingRunRef : undefined}
-                        run={run}
-                        isLastRun={index === runs.length - 1}
-                    />
-                ))}
+                <div ref={contentRef} className="display-flex flex-col flex-shrink-0 min-w-0 gap-4">
+                    {runs.map((run, index) => (
+                        <AgentRunView
+                            key={run.id}
+                            ref={run.id === pendingRunId ? setPendingRunRef : undefined}
+                            run={run}
+                            isLastRun={index === runs.length - 1}
+                        />
+                    ))}
+                </div>
             </div>
         );
     }

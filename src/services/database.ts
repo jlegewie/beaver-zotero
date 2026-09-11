@@ -395,6 +395,8 @@ export interface AttachmentProcessingStateRecord {
     lastError: string | null;
     createdAt: string;
     updatedAt: string;
+    /** Source identity belonging to the accepted extraction verdict, including failures. */
+    extractionSource: string | null;
 }
 
 export interface AttachmentProcessingStateInput {
@@ -448,7 +450,7 @@ const ATTACHMENT_PROCESSING_COLUMNS = `
     library_id, zotero_key, item_id, content_kind,
     file_mtime_ms, file_size_bytes, file_hash, structured_document_hash,
     extract_status, extract_schema_version, ocr_status, ocr_engine_version,
-    upsert_status, upsert_index_version, last_error, created_at, updated_at
+    upsert_status, upsert_index_version, last_error, created_at, updated_at, extraction_source
 `;
 
 /**
@@ -721,6 +723,10 @@ export class BeaverDB {
                 UNIQUE(library_id, zotero_key)
             );
         `);
+        // Extend the ledger in place: completed index membership must survive upgrades.
+        if (!(await this.getTableColumns('attachment_processing_state')).has('extraction_source')) {
+            await this.queryAsync('ALTER TABLE attachment_processing_state ADD COLUMN extraction_source TEXT');
+        }
         await this.queryAsync(`
             CREATE TABLE IF NOT EXISTS attachment_reading_state (
                 library_id INTEGER NOT NULL,
@@ -2534,7 +2540,7 @@ export class BeaverDB {
                 // retire the old remote reference, including after an offline reset.
                 await this.queryAsync(`UPDATE attachment_processing_state SET
                     extract_status = NULL, ocr_status = CASE WHEN ocr_status = 'na' THEN 'na' ELSE NULL END,
-                    file_mtime_ms = NULL,
+                    extraction_source = NULL, file_mtime_ms = NULL,
                     file_size_bytes = NULL, ocr_engine_version = NULL,
                     upsert_status = CASE WHEN upsert_status = 'done' THEN 'done' ELSE NULL END,
                     last_error = NULL, updated_at = datetime('now')${where}`, params);
@@ -2640,10 +2646,28 @@ export class BeaverDB {
         reason: string | null = null,
     ): Promise<void> {
         await this.resetAttachmentStatusColumn('extract_status', libraryId, zoteroKey, reason);
-        if (reason !== 'user_retry') await this.queryAsync(
-            `DELETE FROM attachment_reading_state WHERE library_id = ? AND zotero_key = ?`,
-            [libraryId, zoteroKey],
+        // Scheduling work does not supersede the last observed reading outcome.
+        // The next actual read replaces it, whether that read succeeds or fails.
+    }
+
+    /** Adopt an identity only for an unchanged legacy success that has no identity yet. */
+    public async adoptAttachmentExtractionSource(input: {
+        libraryId: number;
+        zoteroKey: string;
+        source: string;
+        contentKind: AttachmentProcessingStateRecord['contentKind'];
+        fileMtimeMs: number;
+        fileSizeBytes: number;
+    }): Promise<boolean> {
+        await this.queryAsync(
+            `UPDATE attachment_processing_state SET extraction_source = ?
+             WHERE library_id = ? AND zotero_key = ? AND extraction_source IS NULL
+               AND extract_status = 'done' AND content_kind = ?
+               AND file_mtime_ms = ? AND file_size_bytes = ?`,
+            [input.source, input.libraryId, input.zoteroKey, input.contentKind,
+                input.fileMtimeMs, input.fileSizeBytes],
         );
+        return await this.lastStatementChangedRow();
     }
 
     public async resetAttachmentOcr(
@@ -2697,6 +2721,7 @@ export class BeaverDB {
         fileHash: string | null;
         structuredDocumentHash: string | null;
         extractSchemaVersion: string;
+        extractionSource?: string | null;
         ocrStatus: Extract<AttachmentOcrStatus, 'na' | 'needed'>;
     }): Promise<boolean> {
         const hashChanged = input.previousDocumentHash !== input.structuredDocumentHash;
@@ -2705,7 +2730,7 @@ export class BeaverDB {
             `UPDATE attachment_processing_state SET
                 file_mtime_ms = ?, file_size_bytes = ?, file_hash = ?,
                 structured_document_hash = ?, extract_status = 'done',
-                extract_schema_version = ?,
+                extract_schema_version = ?, extraction_source = ?,
                 ocr_status = CASE WHEN ? THEN ? ELSE ocr_status END,
                 ocr_engine_version = CASE WHEN ? THEN NULL ELSE ocr_engine_version END,
                 upsert_status = CASE WHEN ? THEN NULL ELSE upsert_status END,
@@ -2720,6 +2745,7 @@ export class BeaverDB {
                 input.fileHash,
                 input.structuredDocumentHash,
                 input.extractSchemaVersion,
+                input.extractionSource ?? null,
                 refreshDownstream ? 1 : 0,
                 input.ocrStatus,
                 refreshDownstream ? 1 : 0,
@@ -2742,12 +2768,13 @@ export class BeaverDB {
         status: Extract<AttachmentExtractStatus, 'failed' | 'skipped'>;
         error: string;
         attemptedAt: number;
+        extractionSource?: string | null;
     }): Promise<void> {
         await this.queryAsync(
             `UPDATE attachment_processing_state SET
-                extract_status = ?, last_error = ?, updated_at = datetime('now')
+                extract_status = ?, last_error = ?, extraction_source = ?, updated_at = datetime('now')
              WHERE library_id = ? AND zotero_key = ? AND extract_status IS NULL`,
-            [input.status, input.error, input.libraryId, input.zoteroKey],
+            [input.status, input.error, input.extractionSource ?? null, input.libraryId, input.zoteroKey],
         );
         if (await this.lastStatementChangedRow()) {
             const row = await this.getAttachmentProcessingState(input.libraryId, input.zoteroKey);
@@ -3220,6 +3247,7 @@ export class BeaverDB {
                 lastError: row.getResultByIndex(14) ?? null,
                 createdAt: row.getResultByIndex(15),
                 updatedAt: row.getResultByIndex(16),
+                extractionSource: row.getResultByIndex(17) ?? null,
             }),
         });
         return rows;

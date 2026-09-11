@@ -3,12 +3,10 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../atoms/profile';
 import { backgroundProcessingStatusAtom } from '../atoms/backgroundProcessing';
 import { collectProcessingStatus } from '../../src/services/backgroundProcessing/statusSnapshot';
-import { getPref } from '../../src/utils/prefs';
 
 export function useBackgroundProcessingStatus(options: {
     includeCoverage?: boolean;
     includeFailures?: boolean;
-    onlyWhenEnabled?: boolean;
     pollIntervalMs?: number;
 } = {}): () => Promise<void> {
     const hasSearchAccess = useAtomValue(hasSearchIndexAccessAtom);
@@ -18,10 +16,6 @@ export function useBackgroundProcessingStatus(options: {
 
     const refresh = useCallback(async () => {
         const requestGeneration = ++generation.current;
-        if (
-            options.onlyWhenEnabled
-            && getPref('backgroundProcessingEnabled') !== true
-        ) return;
         if (!Zotero.Beaver?.db) return;
         try {
             const { queue, ledger, failures, issues, worker, coverage, documentCache } =
@@ -33,18 +27,21 @@ export function useBackgroundProcessingStatus(options: {
                     },
                 );
             if (requestGeneration !== generation.current) return;
+            const updatedAt = Date.now();
             setStatus((previous) => ({
                 queue,
                 ledger,
                 coverage: !hasSearchAccess ? null : coverage ?? previous.coverage,
-                coverageUpdatedAt: !hasSearchAccess ? null : coverage ? Date.now() : previous.coverageUpdatedAt,
+                coverageUpdatedAt: !hasSearchAccess ? null : coverage ? updatedAt : previous.coverageUpdatedAt,
                 coverageError: !hasSearchAccess ? null : coverage === null ? 'Could not check search coverage.' : coverage ? null : previous.coverageError,
                 failures: failures ?? previous.failures,
                 issues: issues ?? previous.issues,
+                // Only invalidate expanded issue pages when their counts were refreshed.
+                issuesUpdatedAt: issues === undefined ? previous.issuesUpdatedAt : updatedAt,
                 worker,
                 documentCache,
                 error: null,
-                updatedAt: Date.now(),
+                updatedAt,
             }));
         } catch (error) {
             if (requestGeneration !== generation.current) return;
@@ -59,7 +56,6 @@ export function useBackgroundProcessingStatus(options: {
         hasSearchAccess,
         options.includeCoverage,
         options.includeFailures,
-        options.onlyWhenEnabled,
         setStatus,
     ]);
 

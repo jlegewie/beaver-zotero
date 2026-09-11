@@ -2,7 +2,7 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
-import { expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
 import { backgroundProcessingStatusAtom } from '../../../react/atoms/backgroundProcessing';
 import { useBackgroundProcessingStatus } from '../../../react/hooks/useBackgroundProcessingStatus';
 const collect = vi.hoisted(() => vi.fn());
@@ -15,6 +15,11 @@ function Consumer() {
     useBackgroundProcessingStatus({ includeCoverage: true, includeFailures: true, pollIntervalMs: 1000 });
     return null;
 }
+function GeneralStatusConsumer() {
+    useBackgroundProcessingStatus({ includeFailures: false, pollIntervalMs: 60_000 });
+    return null;
+}
+beforeEach(() => collect.mockReset());
 it('finishes slow polls and preserves separately dated server status after a failed refresh', async () => {
     vi.useFakeTimers();
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -47,5 +52,37 @@ it('finishes slow polls and preserves separately dated server status after a fai
         act(() => root.unmount());
         Zotero.Beaver = previous;
         vi.useRealTimers();
+    }
+});
+
+it('does not invalidate issue pages when a general status poll omits issues', async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const previous = Zotero.Beaver;
+    (Zotero as any).Beaver = { db: {} };
+    const store = createStore();
+    const initial = store.get(backgroundProcessingStatusAtom);
+    store.set(backgroundProcessingStatusAtom, {
+        ...initial,
+        issues: [{ reason: 'no_text', count: 1 }],
+        issuesUpdatedAt: 123,
+    });
+    collect.mockResolvedValue({
+        ...initial,
+        failures: undefined,
+        issues: undefined,
+        documentCache: null,
+    });
+    const root = createRoot(document.createElement('div'));
+    try {
+        await act(async () => root.render(React.createElement(
+            Provider,
+            { store },
+            React.createElement(GeneralStatusConsumer),
+        )));
+        expect(store.get(backgroundProcessingStatusAtom).updatedAt).not.toBeNull();
+        expect(store.get(backgroundProcessingStatusAtom).issuesUpdatedAt).toBe(123);
+    } finally {
+        act(() => root.unmount());
+        Zotero.Beaver = previous;
     }
 });

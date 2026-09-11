@@ -25,6 +25,7 @@ vi.mock('../../../src/services/documentExtraction/attachmentSource', () => ({
 }));
 vi.mock('../../../src/services/documentFileIdentity', () => ({
     getFileSignature: vi.fn(async () => ({ mtime_ms: 1, size_bytes: 2 })),
+    isRemoteFilePath: () => false,
 }));
 vi.mock('../../../src/services/documentExtractionCore', () => ({
     extractAndCacheDocument: mocks.extractAndCacheDocument,

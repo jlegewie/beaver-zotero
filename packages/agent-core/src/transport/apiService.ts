@@ -1,9 +1,9 @@
 import { AuthApiError, AuthError, AuthSessionMissingError, isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { isApiError, isSessionExpiredError, isSessionRefreshError, ApiError, RequestTimeoutError, ServerError, SessionExpiredError, SessionRefreshError } from '../types/apiErrors';
 import { logger } from '../platform/logger';
-import { credentials, getCredentialGeneration, assertCredentialGeneration } from './credentials';
+import { credentials, getCredentialGeneration, assertCredentialGeneration, reportSessionRejected } from './credentials';
 import { recordBackendHttpSuccess } from './backendReachability';
-import { getApiBaseUrl } from './config';
+import { getApiBaseUrl, getTransportConfigurationError } from './config';
 import { getRuntimeAdapter } from '../platform/runtime';
 
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -202,6 +202,27 @@ export class ApiService {
     }
 
     private async request(
+        endpoint: string,
+        method: HttpMethod,
+        body?: unknown,
+        deadline?: RequestDeadline,
+        options?: { rawBody?: Uint8Array; headers?: Record<string, string> },
+    ): Promise<Response> {
+        const generation = getCredentialGeneration();
+        const configurationError = getTransportConfigurationError();
+        if (configurationError) throw new Error(configurationError);
+        try {
+            return await this.performRequest(endpoint, method, body, deadline, options);
+        } catch (error) {
+            assertCredentialGeneration(generation);
+            if (!deadline?.controller.signal.aborted && isSessionExpiredError(error)) {
+                reportSessionRejected(generation);
+            }
+            throw error;
+        }
+    }
+
+    private async performRequest(
         endpoint: string,
         method: HttpMethod,
         body?: unknown,

@@ -36,9 +36,9 @@ const TONE_COLOR: Record<StatusTone, string> = {
 const ProcessingStatusRow: React.FC<{
     status: BackgroundProcessingStatus;
     canRestoreCache: boolean;
-    /** A Start now click is still preparing work; the button waits for it. */
+    /** The clicked action is still preparing work; the button waits for it. */
     processing: boolean;
-    onProcessNow: () => void;
+    onProcessNow: (action: 'start' | 'rebuild') => void;
     onStopDrain: () => void;
 }> = ({ status, canRestoreCache, processing, onProcessNow, onStopDrain }) => {
     const sentence = describeStatus(status, { canRestoreCache });
@@ -107,7 +107,7 @@ const ProcessingStatusRow: React.FC<{
                             Stop
                         </Button>
                     </Tooltip>
-                ) : sentence.processNow ? (
+                ) : sentence.processNow || sentence.rebuildCache ? (
                     <Tooltip
                         content={sentence.caption}
                         disabled={!sentence.processNowBlocked}
@@ -122,9 +122,9 @@ const ProcessingStatusRow: React.FC<{
                             ariaLabel={sentence.processNowBlocked
                                 ? `Start now. ${sentence.caption}`
                                 : undefined}
-                            onClick={onProcessNow}
+                            onClick={() => onProcessNow(sentence.rebuildCache ? 'rebuild' : 'start')}
                         >
-                            Start now
+                            {sentence.rebuildCache ? 'Rebuild cache' : 'Start now'}
                         </Button>
                     </Tooltip>
                 ) : null}
@@ -254,23 +254,20 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
     const [actionError, setActionError] = useState<string | null>(null);
     const canRestoreCache = enabled && status.documentCache?.can_prepare_uncached_files === true;
 
-    /**
-     * One "do it now": reconcile so every unfinished stage is queued, restore
-     * cached text the budget evicted, then drain without waiting for idle.
-     * The two preparation steps are independent, so a failing reconcile does
-     * not skip the cache restore that may be the button's only purpose; the
-     * first error is what the page reports.
-     */
+    /** Start pending work or explicitly rebuild cached text, according to the clicked action. */
     const [processing, setProcessing] = useState(false);
-    const processNow = async () => {
+    const processNow = async (action: 'start' | 'rebuild') => {
         if (processing) return;
         setProcessing(true);
         setActionError(null);
         const report = (error: unknown) => setActionError((current) =>
             current ?? (error instanceof Error ? error.message : 'Could not start processing.'));
         try {
-            await Zotero.Beaver?.processingReconciler?.reconcileNow().catch(report);
-            if (canRestoreCache) await prepareUncachedFiles().catch(report);
+            if (action === 'rebuild') {
+                await prepareUncachedFiles().catch(report);
+            } else {
+                await Zotero.Beaver?.processingReconciler?.reconcileNow().catch(report);
+            }
             Zotero.Beaver?.backgroundExtractor?.requestImmediateDrain();
             await refresh();
         } finally {
@@ -367,7 +364,7 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                         group={group}
                         hasOcrAccess={hasOcrAccess}
                         hasSearchAccess={hasSearchAccess}
-                        updatedAt={status.updatedAt}
+                        issuesUpdatedAt={status.issuesUpdatedAt}
                         hasBorder
                         onRetry={retryIssues}
                     />

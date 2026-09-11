@@ -10,6 +10,7 @@ import type { ZoteroInstanceRef } from '@beaver/agent-core/transport/threadServi
 import { logger } from '@beaver/agent-core/platform/logger';
 import { deduplicateByThread, threadModelToThreadData, isThreadInstanceMismatch } from '../utils/threadMatches';
 import { isTransientNetworkError } from '../utils/isTransientNetworkError';
+import { classifyChatLoadError, type ChatLoadError } from '../utils/chatLoadError';
 // Type-only: `threads.ts` imports this module's writers, so a value import here
 // would close a runtime cycle between them.
 import type { ThreadData } from './threads';
@@ -163,8 +164,8 @@ export interface ThreadListViewState {
      */
     pinnedLoadedAt: number;
     status: ThreadViewStatus;
-    /** Set only for transient network failures, which offer a retry. */
-    error: { offline: boolean } | null;
+    /** A failed load must never be presented as an empty result. */
+    error: ChatLoadError | null;
     /** When the view last completed a load, for the staleness check. */
     loadedAt: number;
 }
@@ -334,12 +335,26 @@ function mergeIds(existing: string[], incoming: string[]): string[] {
  */
 const inFlight = new Set<string>();
 
+/**
+ * Earliest time a failed request key may be retried automatically, keyed the
+ * same way as {@link inFlight}.
+ *
+ * A view that failed is never "fresh", so nothing else stops a loader effect
+ * from reissuing the request every time it re-runs. One endpoint returning a
+ * durable error — an expired session, a backend the session is not valid for —
+ * then becomes a hot loop rather than one failure, and every retry that fails
+ * the same way costs another round trip and another render.
+ *
+ * An explicit retry (the error banner, pressing Enter on the same query,
+ * "show more") passes `force` and ignores this.
+ */
+const retryAfter = new Map<string, number>();
+
+/** How long an automatic reload waits after a failure. */
+const RETRY_BACKOFF_MS = 30_000;
+
 const pageRequestKey = (key: string) => `${key}|page`;
 
-function errorFor(error: unknown): { offline: boolean } | null {
-    if (!isTransientNetworkError(error)) return null;
-    return { offline: typeof navigator !== 'undefined' && navigator.onLine === false };
-}
 
 interface LoadPageParams {
     key: string;
@@ -372,6 +387,11 @@ async function runViewLoad(
         /** True when there is nothing to do — already fresh, or nothing to page. */
         skip: (view: ThreadListViewState) => boolean;
         /**
+         * An explicit request from the user rather than an effect re-running,
+         * so it ignores the post-failure backoff.
+         */
+        force?: boolean;
+        /**
          * Whether this load owns the view's `status`/`error`. The pinned query
          * does not: it renders no spinner and swallows its failure, because the
          * list below it stays usable and a second error banner would be noise.
@@ -381,23 +401,37 @@ async function runViewLoad(
             => Promise<(view: ThreadListViewState) => ThreadListViewState>;
     }
 ): Promise<void> {
-    const { label, key, requestKey, skip, tracksStatus = true, run } = options;
+    const { label, key, requestKey, skip, force = false, tracksStatus = true, run } = options;
     const stamp = get(threadWriteStampAtom);
     const view = get(threadViewsAtom).get(key) ?? EMPTY_THREAD_VIEW;
     if (skip(view)) return;
+    if (!force) {
+        const until = retryAfter.get(requestKey);
+        if (until !== undefined && Date.now() < until) return;
+    }
     if (inFlight.has(requestKey)) return;
     inFlight.add(requestKey);
+
+    /**
+     * Whether this request still speaks for the store it was issued against.
+     * Everything keyed by request key outlives `resetThreadStoreAtom`, which
+     * clears those maps but cannot cancel a request already in flight — so a
+     * response that lands after a reset must not write to either of them.
+     */
+    const ownsStore = () => stamp.generation === get(threadStoreGenerationAtom);
 
     try {
         if (tracksStatus) {
             patchView(get, set, key, stamp.generation, (v) => ({ ...v, status: 'loading' }));
         }
         patchView(get, set, key, stamp.generation, await run(stamp, view));
+        if (ownsStore()) retryAfter.delete(requestKey);
     } catch (error) {
         logger(`${label}: ${error}`, 1);
+        if (ownsStore()) retryAfter.set(requestKey, Date.now() + RETRY_BACKOFF_MS);
         if (tracksStatus) {
             patchView(get, set, key, stamp.generation, (v) => ({
-                ...v, status: 'error', error: errorFor(error),
+                ...v, status: 'error', error: classifyChatLoadError(error),
             }));
         }
     } finally {
@@ -405,7 +439,7 @@ async function runViewLoad(
         // clears the set, and a list remounting for the same user reissues the
         // identical key — deleting it then would void the serialization guard
         // for a request that is still outstanding.
-        if (stamp.generation === get(threadStoreGenerationAtom)) inFlight.delete(requestKey);
+        if (ownsStore()) inFlight.delete(requestKey);
     }
 }
 
@@ -421,6 +455,7 @@ export const loadThreadPageAtom = atom(
             key,
             requestKey: pageRequestKey(key),
             skip: (view) => !force && isViewFresh(view),
+            force,
             run: async (stamp) => {
                 const response = query
                     ? await threadService.searchThreads(query, THREAD_PAGE_SIZE, null, scope)
@@ -454,6 +489,9 @@ export const loadMoreThreadsAtom = atom(
             key,
             requestKey: pageRequestKey(key),
             skip: (view) => !view.hasMore || !view.cursor,
+            // Always a "show more" click, so a failed page must not lock the
+            // button out for the backoff window.
+            force: true,
             run: async (stamp, view) => {
                 const response = query
                     ? await threadService.searchThreads(query, THREAD_PAGE_SIZE, view.cursor, scope)
@@ -491,6 +529,7 @@ export const loadPinnedThreadsAtom = atom(
             tracksStatus: false,
             skip: (view) =>
                 !force && !!view.pinnedLoadedAt && Date.now() - view.pinnedLoadedAt < THREAD_VIEW_TTL,
+            force,
             run: async (stamp) => {
                 const rows = (await threadService.getStarredThreads(MAX_PINNED, scope))
                     .map(threadModelToThreadData);
@@ -556,6 +595,7 @@ export const loadThreadsByItemAtom = atom(
             key,
             requestKey: `${key}|by-item`,
             skip: (view) => !force && isViewFresh(view),
+            force,
             run: async (stamp) => {
                 const matches = await threadService.findThreadsByItem(
                     { libraryId: filter.libraryId, libraryRef: filter.libraryRef },
@@ -693,6 +733,7 @@ export const resetThreadStoreAtom = atom(null, (get, set) => {
     // back in as the same user reuses the same key. The list would then sit on
     // "No chats yet" with no spinner and no retry.
     inFlight.clear();
+    retryAfter.clear();
 });
 
 // ---------------------------------------------------------------------------

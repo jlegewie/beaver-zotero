@@ -353,6 +353,141 @@ describe('view isolation and freshness', () => {
     });
 });
 
+describe('load failure visibility', () => {
+    it.each([
+        [{ message: 'Rejected', status: 401, statusText: 'Unauthorized', code: 'SESSION_EXPIRED' }, 'session'],
+        [new Error('Invalid response'), 'generic'],
+        [new SessionRefreshError('Unavailable'), 'transient'],
+    ])('keeps an explicit failure and clears it after a successful empty response', async (error, kind) => {
+        const store = createStore();
+        const key = nextKey();
+        getPaginatedThreadsMock.mockRejectedValueOnce(error).mockResolvedValueOnce(page([]));
+        await store.set(loadThreadPageAtom, { key, query: '', includeOtherCount: false });
+        expect(store.get(threadViewsAtom).get(key)).toMatchObject({ status: 'error', error: { kind } });
+        await store.set(loadThreadPageAtom, { key, query: '', includeOtherCount: false, force: true });
+        expect(store.get(threadViewsAtom).get(key)).toMatchObject({ status: 'ready', error: null, ids: [] });
+    });
+});
+
+describe('a failed load backs off instead of retrying on every re-run', () => {
+    it('does not reissue a failed page load, however often the loader re-runs', async () => {
+        const store = createStore();
+        const key = nextKey();
+        getPaginatedThreadsMock.mockRejectedValue(new Error('401'));
+
+        for (let i = 0; i < 5; i++) {
+            await store.set(loadThreadPageAtom, { key, query: '', includeOtherCount: false });
+        }
+
+        // A failed view is never "fresh", so without the backoff each re-run
+        // would issue another request — one durable failure becomes a hot loop.
+        expect(getPaginatedThreadsMock).toHaveBeenCalledTimes(1);
+        expect(store.get(threadViewsAtom).get(key)!.status).toBe('error');
+    });
+
+    it('does not reissue a failed by-item load either', async () => {
+        const store = createStore();
+        const key = nextKey();
+        const filter = { libraryId: 1, libraryRef: 'u', keys: ['K1'], label: 'x', itemType: 'book' } as never;
+        findThreadsByItemMock.mockRejectedValue(new Error('401'));
+
+        await store.set(loadThreadsByItemAtom, { key, filter });
+        await store.set(loadThreadsByItemAtom, { key, filter });
+
+        expect(findThreadsByItemMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets an explicit retry through while the backoff is still running', async () => {
+        const store = createStore();
+        const key = nextKey();
+        getPaginatedThreadsMock.mockRejectedValue(new Error('401'));
+
+        await store.set(loadThreadPageAtom, { key, query: '', includeOtherCount: false });
+        await store.set(loadThreadPageAtom, { key, query: '', includeOtherCount: false, force: true });
+
+        expect(getPaginatedThreadsMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('clears the backoff once a load succeeds', async () => {
+        const store = createStore();
+        const key = nextKey();
+        getPaginatedThreadsMock
+            .mockRejectedValueOnce(new Error('401'))
+            .mockResolvedValue(page([row('a')]));
+
+        await store.set(loadThreadPageAtom, { key, query: '', includeOtherCount: false });
+        await store.set(loadThreadPageAtom, { key, query: '', includeOtherCount: false, force: true });
+        expect(store.get(threadViewsAtom).get(key)!.status).toBe('ready');
+
+        // The view is fresh now, so only `force` reaches the transport. That it
+        // does is the point: the backoff must not outlive the failure.
+        await store.set(loadThreadPageAtom, { key, query: '', includeOtherCount: false, force: true });
+        expect(getPaginatedThreadsMock).toHaveBeenCalledTimes(3);
+    });
+
+    it('keeps "show more" clickable after a failed page', async () => {
+        const store = createStore();
+        const key = nextKey();
+        getPaginatedThreadsMock.mockResolvedValueOnce(page([row('a')], { next_cursor: 'c1', has_more: true }));
+        await store.set(loadThreadPageAtom, { key, query: '', includeOtherCount: false });
+
+        getPaginatedThreadsMock.mockRejectedValueOnce(new Error('boom'));
+        await store.set(loadMoreThreadsAtom, { key, query: '' });
+
+        // "show more" is always a click, so the second one must not be swallowed
+        // as an automatic retry.
+        getPaginatedThreadsMock.mockResolvedValueOnce(page([row('b')]));
+        await store.set(loadMoreThreadsAtom, { key, query: '' });
+        expect(store.get(threadViewsAtom).get(key)!.ids).toEqual(['a', 'b']);
+    });
+
+    it('does not leave a backoff behind when a load fails after the store was reset', async () => {
+        const store = createStore();
+        const key = nextKey();
+
+        let rejectAbandoned: (error: unknown) => void = () => {};
+        getPaginatedThreadsMock
+            .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectAbandoned = reject; }))
+            .mockResolvedValue(page([row('a')]));
+
+        const abandoned = store.set(loadThreadPageAtom, { key, query: '', includeOtherCount: false });
+        store.set(resetThreadStoreAtom);
+        rejectAbandoned(new Error('401'));
+        await abandoned;
+
+        // The reset clears the backoff map, but it cannot cancel a request
+        // already in flight. Signing back in as the same user reuses this key,
+        // and a backoff recreated by the abandoned request would leave the list
+        // idle and empty — no spinner, no retry banner, and nothing to reissue
+        // the load when the backoff lapses.
+        await store.set(loadThreadPageAtom, { key, query: '', includeOtherCount: false });
+        expect(store.get(threadViewsAtom).get(key)!.ids).toEqual(['a']);
+    });
+
+    it('does not lift a live backoff when a superseded load finally succeeds', async () => {
+        const store = createStore();
+        const key = nextKey();
+
+        let resolveAbandoned: (value: unknown) => void = () => {};
+        getPaginatedThreadsMock
+            .mockImplementationOnce(() => new Promise(r => { resolveAbandoned = r; }))
+            .mockRejectedValueOnce(new Error('401'))
+            .mockResolvedValue(page([row('b')]));
+
+        const abandoned = store.set(loadThreadPageAtom, { key, query: '', includeOtherCount: false });
+        store.set(resetThreadStoreAtom);
+        await store.set(loadThreadPageAtom, { key, query: '', includeOtherCount: false });
+
+        resolveAbandoned(page([row('a')]));
+        await abandoned;
+
+        // The abandoned success belongs to a store that no longer exists, so it
+        // must not clear the backoff the live generation just took.
+        await store.set(loadThreadPageAtom, { key, query: '', includeOtherCount: false });
+        expect(getPaginatedThreadsMock).toHaveBeenCalledTimes(2);
+    });
+});
+
 describe('setThreadPinnedAtom', () => {
     it('keeps the confirmed state while the request is pending', async () => {
         const store = createStore();

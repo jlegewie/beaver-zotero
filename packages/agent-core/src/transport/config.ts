@@ -28,6 +28,7 @@ export interface TransportConfig {
 }
 
 let config: TransportConfig | null = null;
+let configurationError: string | null = null;
 let warnedUnregistered = false;
 /** The Supabase values a client was created with, once one exists. */
 let supabaseConfigInUse: { url: string; anonKey: string } | null = null;
@@ -44,7 +45,12 @@ let supabaseConfigInUse: { url: string; anonKey: string } | null = null;
  * another, and the resulting 401s are indistinguishable from an expired
  * session.
  */
-export function setTransportConfig(next: TransportConfig): void {
+export function setTransportConfig(next: TransportConfig, expected?: TransportConfig): void {
+    const mismatch = expected && (
+        next.apiBaseUrl.replace(/\/$/, '') !== expected.apiBaseUrl.replace(/\/$/, '') ||
+        next.supabaseUrl.replace(/\/$/, '') !== expected.supabaseUrl.replace(/\/$/, '') ||
+        next.supabaseAnonKey !== expected.supabaseAnonKey
+    ) ? 'Client components have incompatible server settings.' : null;
     if (
         supabaseConfigInUse &&
         (next.supabaseUrl !== supabaseConfigInUse.url || next.supabaseAnonKey !== supabaseConfigInUse.anonKey)
@@ -53,7 +59,8 @@ export function setTransportConfig(next: TransportConfig): void {
             'Supabase configuration cannot change once the Supabase client has been created.'
         );
     }
-    config = next;
+    configurationError = mismatch;
+    config = { ...next };
 }
 
 /** Whether a host has registered configuration. */
@@ -70,9 +77,8 @@ export function markSupabaseConfigInUse(values: { url: string; anonKey: string }
 }
 
 /**
- * The backend base URL, or '' when no host has registered one. Never throws:
- * the connection diagnostics path reads it precisely when the backend is
- * already unreachable.
+ * The backend base URL, or '' when no host has registered one. An explicitly
+ * mismatched registration throws so sockets cannot contact the wrong backend.
  *
  * A host can also register an empty base URL, so a caller that needs to tell an
  * unconfigured backend from a configured one must ask
@@ -81,6 +87,7 @@ export function markSupabaseConfigInUse(values: { url: string; anonKey: string }
  * Only a missing registration warns, and only once.
  */
 export function getApiBaseUrl(): string {
+    if (configurationError) throw new Error(configurationError);
     if (!config) {
         if (!warnedUnregistered) {
             warnedUnregistered = true;
@@ -101,6 +108,7 @@ export function getApiBaseUrl(): string {
  * from the missing wiring, so fail at the source instead.
  */
 export function getSupabaseConfig(): { url: string; anonKey: string } {
+    if (configurationError) throw new Error(configurationError);
     if (!config?.supabaseUrl || !config.supabaseAnonKey) {
         throw new Error(
             'No Supabase URL or anon key configured. Call setTransportConfig() ' +
@@ -108,4 +116,14 @@ export function getSupabaseConfig(): { url: string; anonKey: string } {
         );
     }
     return { url: config.supabaseUrl, anonKey: config.supabaseAnonKey };
+}
+
+/** A copy of the host registration for cross-bundle validation. */
+export function getTransportConfig(): TransportConfig {
+    if (!config) throw new Error('Transport configuration is unavailable');
+    return { ...config };
+}
+
+export function getTransportConfigurationError(): string | null {
+    return configurationError;
 }

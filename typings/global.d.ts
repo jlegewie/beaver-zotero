@@ -471,6 +471,11 @@ declare namespace Zotero {
             deleteAttachmentProcessingStatesByLibrary(libraryId: number): Promise<void>;
             deleteBackgroundJobsByLibrary(libraryId: number): Promise<void>;
             redriveDeadUntagJobs(now: number, limit?: number): Promise<number>;
+            adoptAttachmentExtractionSource(input: {
+                libraryId: number; zoteroKey: string; source: string;
+                contentKind: import("../src/services/database").AttachmentProcessingStateRecord['contentKind'];
+                fileMtimeMs: number; fileSizeBytes: number;
+            }): Promise<boolean>;
             resetAttachmentExtraction(libraryId: number, zoteroKey: string, reason?: string | null): Promise<void>;
             resetAttachmentOcr(libraryId: number, zoteroKey: string, reason?: string | null): Promise<void>;
             resetAttachmentUpsert(libraryId: number, zoteroKey: string, reason?: string | null): Promise<void>;
@@ -482,10 +487,11 @@ declare namespace Zotero {
                 fileMtimeMs: number; fileSizeBytes: number;
                 fileHash: string | null; structuredDocumentHash: string | null;
                 extractSchemaVersion: string; ocrStatus: 'na' | 'needed';
+                extractionSource?: string | null;
             }): Promise<boolean>;
             markAttachmentExtractFailure(input: {
                 libraryId: number; zoteroKey: string; status: 'failed' | 'skipped'; error: string;
-                attemptedAt: number;
+                attemptedAt: number; extractionSource?: string | null;
             }): Promise<void>;
             ensureAttachmentFileHash(libraryId: number, zoteroKey: string, fileHash: string): Promise<void>;
             markAttachmentOcrDone(input: {

@@ -308,6 +308,8 @@ function resolvePageFromStructuredResult(
  * citation is saved without a locator) rather than triggering a full
  * extraction. Callers thread the returned `pages` map into `expandToRawHtml`
  * and surface `unresolved` as a save warning.
+ * External-file links use the same cached page lookup, but retain their
+ * structural locator when no page is available instead of dropping it.
  */
 export async function preloadStructuralLocatorPages(str: string): Promise<StructuralLocatorPreload> {
     const pages: ResolvedLocatorPages = {};
@@ -317,13 +319,14 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
 
     const seen = new Set<string>();
     const resultsByAttachment = new Map<number, Promise<StructuredExtractResult | null>>();
+    const resultsByExternalFile = new Map<string, Promise<StructuredExtractResult | null>>();
     const regex = noteCitationTagPattern();
     let match: RegExpExecArray | null;
 
     while ((match = regex.exec(str)) !== null) {
         const attrStr = match[1];
         const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
-        if (!normalized.ok || normalized.ref.kind !== 'zotero') continue;
+        if (!normalized.ok) continue;
         const loc = normalized.ref.loc;
         // Page locators and locator-less citations are handled elsewhere.
         if (!loc || loc.kind === 'page') continue;
@@ -331,6 +334,33 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
         const citationKey = requestedCitationKey(normalized.ref);
         if (seen.has(citationKey)) continue;
         seen.add(citationKey);
+
+        if (normalized.ref.kind === 'external_file') {
+            const key = normalized.ref.ext_key;
+            try {
+                let resultPromise = resultsByExternalFile.get(key);
+                if (!resultPromise) {
+                    resultPromise = (async () => {
+                        const record = await Zotero.Beaver?.db?.getExternalFileByKey(key);
+                        if (!record?.storedPath) return null;
+                        const { EXTERNAL_LIBRARY_ID } = await import('../services/externalFiles');
+                        const result = await cache.getResult(
+                            { libraryId: EXTERNAL_LIBRARY_ID, zoteroKey: key },
+                            'structured', record.storedPath,
+                        );
+                        return result?.mode === 'structured' ? result : null;
+                    })();
+                    resultsByExternalFile.set(key, resultPromise);
+                }
+                const result = await resultPromise;
+                const resolved = result && resolvePageFromStructuredResult(result, loc, true);
+                if (resolved) pages[citationKey] = resolved;
+            } catch {
+                // File links retain their structural locator when cached pages are unavailable.
+            }
+            continue;
+        }
+        if (normalized.ref.kind !== 'zotero') continue;
 
         // A portable ref whose library isn't on this device can't be looked
         // up; skip it here rather than misreport it as an unresolved locator —
@@ -781,9 +811,10 @@ export function expandToRawHtml(
                 if (!file) {
                     throw new Error(`External file ext-${fileRef.ext_key} was not preloaded for note expansion.`);
                 }
+                const resolved = resolvedLocatorPages?.[requestedCitationKey(fileRef)];
                 return formatExternalFileCitationHTML(
                     file.filename,
-                    externalFileLocatorSuffix(fileRef.loc),
+                    resolved ? `, p. ${resolved.label}` : externalFileLocatorSuffix(fileRef.loc),
                     file.href,
                 );
             }
@@ -800,12 +831,12 @@ export function expandToRawHtml(
                     if (itemId) {
                         const newAttrs = parseSimplifiedCitationAttrs(attrStr, resolvedLocatorPages);
                         if (attrsChanged(stored.originalAttrs, newAttrs)) {
-                            // Existing page citations are shown to the agent as
-                            // physical page numbers. When the page changes,
-                            // store the corresponding Zotero page label just
-                            // like a newly inserted citation.
-                            const shouldTranslatePage = stored.originalAttrs?.pageConvention === 'number'
-                                && (stored.originalAttrs.cslLabel == null || stored.originalAttrs.cslLabel === 'page');
+                            // Newly added locators use physical pages. Existing
+                            // locators retain the convention exposed when read.
+                            const original = stored.originalAttrs;
+                            const shouldTranslatePage = !original?.page
+                                || (original.pageConvention === 'number'
+                                    && (original.cslLabel == null || original.cslLabel === 'page'));
                             return buildCitation({ ...newAttrs, shouldTranslatePage, pageLabels });
                         }
                     }

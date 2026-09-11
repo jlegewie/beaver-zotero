@@ -70,9 +70,24 @@ export const libraryScopeInitializedAtom = atom<boolean>((get) => {
     return get(isProfileLoadedAtom) && get(localZoteroLibrariesInitializedAtom);
 });
 
+/**
+ * Positional equality for id lists.
+ *
+ * Load-bearing for every library atom below. The account service publishes a
+ * deep clone of its snapshot on *every* revision — a token refresh included —
+ * so `profileWithPlanAtom` and `localZoteroLibrariesAtom` change identity
+ * several times a second without their contents changing. Without an equality
+ * guard each of those publishes hands every consumer a new array, and an effect
+ * with one of these atoms in its dependency list re-runs on each one.
+ */
+const sameIds = (a: readonly number[], b: readonly number[]) =>
+    a.length === b.length && a.every((value, index) => value === b[index]);
+
 export const excludedLibrariesAtom = selectAtom(
     profileWithPlanAtom,
     (profile: SafeProfileWithPlan | null) => profile?.excluded_libraries ?? [],
+    (a, b) => a.length === b.length
+        && a.every((entry, index) => excludedEntryKey(entry) === excludedEntryKey(b[index])),
 );
 
 export function libraryExclusionKey(library: Pick<ZoteroLibrary, 'is_group' | 'group_id'>): string {
@@ -103,11 +118,10 @@ export const syncedLibrariesAtom = atom<ZoteroLibrary[]>((get) => {
 export const syncedLibraryIdsAtom = selectAtom(
     syncedLibrariesAtom,
     (libraries) => libraries.map(lib => lib.library_id),
-    (a, b) => a.length === b.length && a.every((v, i) => v === b[i])
+    sameIds
 );
 
-// Searchable library IDs
-export const searchableLibraryIdsAtom = atom<number[]>((get) => {
+const searchableLibraryIdsSourceAtom = atom<number[]>((get) => {
     if (!get(isProfileLoadedAtom)) return [];
     const excluded = new Set(get(excludedLibrariesAtom).map(excludedEntryKey));
     return get(localZoteroLibrariesAtom)
@@ -116,14 +130,34 @@ export const searchableLibraryIdsAtom = atom<number[]>((get) => {
 });
 
 /**
- * Local library IDs the user explicitly excluded in Beaver Preferences.
+ * Searchable library IDs.
+ *
+ * Identity-stable across recomputations that produce the same ids — see
+ * {@link sameIds}. Effects key off this list (the thread list's loader, the
+ * embedding index), so a fresh array on every account publish would restart
+ * them continuously.
  */
-export const excludedLibraryIdsAtom = atom<number[]>((get) => {
+export const searchableLibraryIdsAtom = selectAtom(
+    searchableLibraryIdsSourceAtom,
+    (ids) => ids,
+    sameIds
+);
+
+const excludedLibraryIdsSourceAtom = atom<number[]>((get) => {
     const excluded = new Set(get(excludedLibrariesAtom).map(excludedEntryKey));
     return get(localZoteroLibrariesAtom)
         .filter(lib => excluded.has(libraryExclusionKey(lib)))
         .map(lib => lib.library_id);
 });
+
+/**
+ * Local library IDs the user explicitly excluded in Beaver Preferences.
+ */
+export const excludedLibraryIdsAtom = selectAtom(
+    excludedLibraryIdsSourceAtom,
+    (ids) => ids,
+    sameIds
+);
 
 /**
  * Whether the library-access snapshot is ready to make allow/deny decisions.

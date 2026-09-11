@@ -18,6 +18,8 @@ export interface StatusSentence {
     outstanding?: number;
     /** Show Start now: queued work can start without waiting for idle. */
     processNow: boolean;
+    /** Offer rebuilding missing cached text only after pending work is settled. */
+    rebuildCache?: boolean;
     /** Disable Start now: a dispatcher blocker, not the idle gate. */
     processNowBlocked?: boolean;
     /** Show Stop: a Start now drain is active and can be cancelled. */
@@ -25,11 +27,7 @@ export interface StatusSentence {
 }
 
 export interface StatusSentenceOptions {
-    /**
-     * Offer Start now when processed files have lost their cached text and
-     * the cache has room to restore it, even while nothing is queued yet: the
-     * restore has no other entry point.
-     */
+    /** Missing cached text can be restored within the available cache space. */
     canRestoreCache?: boolean;
 }
 
@@ -148,7 +146,7 @@ export function describeStatus(
             tone: 'waiting',
             headline: 'Waiting to start',
             caption: waiting + 'Some files are processing remotely or waiting to retry.',
-            processNow: restore && !draining,
+            processNow: false,
             stopDrain: draining,
         };
     }
@@ -158,7 +156,8 @@ export function describeStatus(
             tone: 'waiting',
             headline: 'Waiting to start',
             caption: waiting + 'Beaver picks up unfinished files automatically.',
-            processNow: restore && !draining,
+            processNow: !draining,
+            processNowBlocked: Boolean(blocker),
             stopDrain: draining,
         };
     }
@@ -175,9 +174,10 @@ export function describeStatus(
         return {
             tone: 'idle',
             headline: 'Up to date',
-            caption: 'Cached text for some files was removed to save space. Start now restores it.',
-            processNow: true,
-            stopDrain: false,
+            caption: 'Prepare previously processed files again for faster responses. Uses available cache space.',
+            processNow: false,
+            rebuildCache: !draining,
+            stopDrain: draining,
         };
     }
     return {

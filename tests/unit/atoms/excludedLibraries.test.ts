@@ -194,6 +194,51 @@ describe('searchableLibraryIdsAtom', () => {
 
         expect(store.get(allLibrariesExcludedAtom)).toBe(true);
     });
+
+    it('keeps its identity when an account publish re-sends the same scope', () => {
+        // The account service hands every subscriber a deep clone of its
+        // snapshot on every revision, and a token refresh is a revision. Without
+        // an equality guard each of those gives this atom a new array, and every
+        // effect holding it in a dependency list re-runs — which is what turned
+        // one failing request into a refetch loop.
+        const store = createStore();
+        const publish = () => {
+            store.set(profileWithPlanAtom, structuredClone(profile({
+                excluded_libraries: [{ type: 'group', group_id: 77 }],
+            })));
+            store.set(localZoteroLibrariesAtom, structuredClone([
+                library({ library_id: 1 }),
+                library({ library_id: 2, is_group: true, group_id: 77, type: 'group' }),
+            ]));
+        };
+
+        store.set(isProfileLoadedAtom, true);
+        publish();
+        const first = store.get(searchableLibraryIdsAtom);
+        expect(first).toEqual([1]);
+
+        let notifications = 0;
+        const unsubscribe = store.sub(searchableLibraryIdsAtom, () => { notifications++; });
+        for (let i = 0; i < 5; i++) publish();
+
+        expect(store.get(searchableLibraryIdsAtom)).toBe(first);
+        expect(notifications).toBe(0);
+        unsubscribe();
+    });
+
+    it('still reports a scope change when an exclusion is actually added', () => {
+        const store = createStore();
+        store.set(isProfileLoadedAtom, true);
+        store.set(localZoteroLibrariesAtom, [
+            library({ library_id: 1 }),
+            library({ library_id: 2, is_group: true, group_id: 77, type: 'group' }),
+        ]);
+        store.set(profileWithPlanAtom, profile());
+        expect(store.get(searchableLibraryIdsAtom)).toEqual([1, 2]);
+
+        store.set(profileWithPlanAtom, profile({ excluded_libraries: [{ type: 'group', group_id: 77 }] }));
+        expect(store.get(searchableLibraryIdsAtom)).toEqual([1]);
+    });
 });
 
 describe('toggleExcludedLibraryAtom', () => {
