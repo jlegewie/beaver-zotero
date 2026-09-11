@@ -21,11 +21,14 @@ export class NewItemWatcher {
                 ids: number[],
                 extraData: Record<number, { libraryID?: number; key?: string }> | undefined,
             ) => {
-                if (type !== 'item' || !['add', 'modify', 'delete'].includes(event)) return;
+                const downloaded = type === 'file' && event === 'download';
+                if (!downloaded && (type !== 'item' || !['add', 'modify', 'delete'].includes(event))) return;
                 if (Zotero.__beaverShuttingDown === true) return;
                 for (const id of ids) {
+                    // A late download must not erase the identity needed for deletion cleanup.
+                    if (downloaded && this.pending.get(id)?.event === 'delete') continue;
                     this.pending.set(id, {
-                        event: event as AttachmentChange['event'],
+                        event: downloaded ? 'modify' : event as AttachmentChange['event'],
                         id,
                         extra: extraData?.[id],
                     });
@@ -35,7 +38,7 @@ export class NewItemWatcher {
         } as any;
         this.observerId = Zotero.Notifier.registerObserver(
             observer,
-            ['item'],
+            ['item', 'file'],
             'beaver-background-processing',
         );
         moduleNotifierId = this.observerId;

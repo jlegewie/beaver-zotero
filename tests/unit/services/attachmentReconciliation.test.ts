@@ -234,6 +234,73 @@ describe('attachment change reconciliation', () => {
         expect(await db.getProcessingIssueCounts(entitlements)).toEqual([{ reason: 'file_unavailable', count: 1 }]);
     });
 
+    async function download() {
+        // Zotero emits file/download with item IDs and no item extraData.
+        observer.notify('download', 'file', [7]);
+        await (watcher as any).flush();
+        await (reconciler as any).run(false);
+    }
+
+    it('subscribes to item and file notifications', () => {
+        expect(Zotero.Notifier.registerObserver).toHaveBeenCalledWith(observer, ['item', 'file'], 'beaver-background-processing');
+    });
+
+    it('processes a downloaded attachment without requiring an item modification', async () => {
+        mocks.resolve.mockResolvedValue({ kind: 'error', code: 'file_missing' });
+        await notify('add');
+        mocks.resolve.mockResolvedValue({ kind: 'ok', source: { filePath: '/a.html', isRemoteOnly: false } });
+        await download();
+        expect((await db.getAttachmentProcessingState(1, item.key))?.extractStatus).toBeNull();
+        expect(await db.peekBackgroundJobs()).toEqual([expect.objectContaining({ jobType: 'document_extract' })]);
+    });
+
+    it('processes new attachments discovered through a download notification', async () => {
+        await download();
+        expect(await db.peekBackgroundJobs()).toEqual([expect.objectContaining({ jobType: 'document_extract' })]);
+    });
+
+    it.each([true, false])('does no extraction work for an unchanged download (failed=%s)', async (failed) => {
+        await seed(failed);
+        const before = await db.getAttachmentProcessingState(1, item.key);
+        await download();
+        expect(await db.getAttachmentProcessingState(1, item.key)).toEqual(before);
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+        expect(mocks.invalidate).not.toHaveBeenCalled();
+    });
+
+    it('reprocesses changed bytes on download and coalesces the accompanying item event', async () => {
+        await seed(false);
+        mocks.stat.mockResolvedValue({ lastModified: 11, size: 20 });
+        const checks = vi.spyOn(reconciler as any, 'reconcileAttachment');
+        observer.notify('modify', 'item', [7]);
+        await download();
+        expect(checks).toHaveBeenCalledTimes(1);
+        expect(await db.peekBackgroundJobs()).toEqual([expect.objectContaining({ jobType: 'document_extract' })]);
+    });
+
+    it('ignores file open, close, and page-change notifications', async () => {
+        const handoff = vi.spyOn(reconciler, 'notifyAttachments');
+        for (const event of ['open', 'close', 'pageChange']) observer.notify(event, 'file', [7]);
+        await vi.advanceTimersByTimeAsync(500);
+        expect(handoff).not.toHaveBeenCalled();
+        expect(mocks.resolve).not.toHaveBeenCalled();
+    });
+
+    it('preserves pending deletion cleanup when a late download notification arrives', async () => {
+        await seed(false);
+        observer.notify('delete', 'item', [7], { 7: { libraryID: 1, key: item.key } });
+        await download();
+        expect(await db.getAttachmentProcessingState(1, item.key)).toBeNull();
+        expect(await db.peekBackgroundJobs()).toEqual([expect.objectContaining({ jobType: 'fulltext_untag' })]);
+    });
+
+    it('does not inspect a downloaded file from an excluded library', async () => {
+        (Zotero.Beaver as any).searchableLibraryIds = [];
+        await download();
+        expect(mocks.resolve).not.toHaveBeenCalled();
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+    });
+
     it('uses remote file identity instead of metadata sync versions', async () => {
         mocks.resolve.mockResolvedValue({ kind: 'ok', source: { filePath: 'remote:k:1-SNAPSHOT-v1', isRemoteOnly: true } });
         item.attachmentSyncedHash = 'hash1';
