@@ -65,7 +65,6 @@ export async function handleTestProcessingStatusHttpRequest(
             },
             prefs: {
                 backgroundProcessingEnabled: getPref('backgroundProcessingEnabled') === true,
-                backgroundProcessingContinuous: getPref('backgroundProcessingContinuous') === true,
                 backgroundExtractorEnabled: getPref('backgroundExtractorEnabled') === true,
                 // Changes what the producer does with a file-less attachment:
                 // remote-capable ones become a download rather than a skip.

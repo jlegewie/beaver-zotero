@@ -1,5 +1,4 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useSetAtom } from 'jotai';
 import { type ItemListRow } from '@beaver/agent-core/run-state/toolResultViews';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '@beaver/agent-core/transport/attachmentLimits';
@@ -8,7 +7,6 @@ import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { ArrowDownIcon, ArrowLeftIcon, ArrowRightIcon, Icon, SyncIcon } from '../icons/icons';
 import { hydrateItemListRows } from '../../compat/legacyToolResults';
 import ItemListResultView from '../agentRuns/toolResultViews/ItemListResultView';
-import { activePreferencePageTabAtom } from '../../atoms/ui';
 import {
     isRetryableProcessingIssue,
     type AttachmentRef,
@@ -21,7 +19,7 @@ const PAGE_SIZE = 10;
 interface ReasonCopy {
     title: string;
     description: string;
-    /** Offer the plan page: the remedy is an entitlement, not a file fix. */
+    /** The remedy is an entitlement, not a file fix; shown as a badge, never an action. */
     plansLink?: boolean;
 }
 
@@ -33,7 +31,7 @@ function reasonCopy(reason: ProcessingIssueReason, hasOcrAccess: boolean): Reaso
                 title: 'Scanned files without a text layer',
                 description: hasOcrAccess
                     ? 'These files contain only images of text.'
-                    : 'OCR can turn scans into readable, searchable text. It will be included with eligible plans soon.',
+                    : 'OCR can turn scans into readable, searchable text. It will be included with eligible plans.',
                 plansLink: !hasOcrAccess,
             };
         case 'no_text':
@@ -183,7 +181,6 @@ export const ProcessingIssueGroupRow: React.FC<{
     const [open, setOpen] = useState(false);
     const [page, setPage] = useState(0);
     const [retrying, setRetrying] = useState(false);
-    const setActiveTab = useSetAtom(activePreferencePageTabAtom);
     const copy = reasonCopy(group.reason, hasOcrAccess);
     const retryable = Boolean(onRetry) && isRetryableProcessingIssue(group.reason);
     const retry = async (refs: AttachmentRef[] | null) => {
@@ -237,12 +234,9 @@ export const ProcessingIssueGroupRow: React.FC<{
                     <div className="font-color-secondary text-base">{copy.description}</div>
                 </div>
                 {copy.plansLink && (
-                    // <Button variant="outline" onClick={() => setActiveTab('billing')}>
-                    //     See plans
-                    // </Button>
-                    <Button variant="outline" onClick={() => setActiveTab('billing')} disabled>
-                        Supported soon
-                    </Button>
+                    <span className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary flex-shrink-0">
+                        Coming soon
+                    </span>
                 )}
                 {retryable && (
                     <Button

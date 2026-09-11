@@ -47,7 +47,6 @@ let available = false;
 /** Prefs to put back in `afterAll`, captured before the suite changes them. */
 let originalPrefs: {
     enabled: boolean;
-    continuous: boolean;
     extractor: boolean;
 } | null = null;
 
@@ -77,7 +76,6 @@ const SLOW = { timeout: 300_000 } as const;
  */
 async function disableProcessing(): Promise<void> {
     await setPref('backgroundProcessingEnabled', false);
-    await setPref('backgroundProcessingContinuous', false);
 }
 
 /**
@@ -95,9 +93,6 @@ async function enableProcessing(
 ): Promise<void> {
     await setPref('accessRemoteFiles', options.remoteFiles === true);
     await setPref('backgroundExtractorEnabled', options.executor);
-    // Left off deliberately: the suite drives every pass explicitly, and
-    // continuous mode would let the auto-tick claim the backlog mid-assertion.
-    await setPref('backgroundProcessingContinuous', false);
     await setPref('backgroundProcessingEnabled', true);
 }
 
@@ -130,7 +125,6 @@ beforeAll(async () => {
     const status = await processingStatus({ includeFailures: false });
     originalPrefs = {
         enabled: status.prefs?.backgroundProcessingEnabled === true,
-        continuous: status.prefs?.backgroundProcessingContinuous === true,
         extractor: status.prefs?.backgroundExtractorEnabled === true,
     };
     originalAccessRemoteFiles = status.prefs?.accessRemoteFiles === true;
@@ -151,7 +145,6 @@ afterAll(async () => {
     await setPref('accessRemoteFiles', originalAccessRemoteFiles);
     if (originalPrefs) {
         await setPref('backgroundExtractorEnabled', originalPrefs.extractor);
-        await setPref('backgroundProcessingContinuous', originalPrefs.continuous);
         await setPref('backgroundProcessingEnabled', originalPrefs.enabled);
     }
 }, 120_000);
@@ -349,8 +342,8 @@ describe('draining an extract job fills in the ledger', () => {
         expect(status.ledger?.extracted ?? 0).toBeGreaterThan(0);
         // Both fixture jobs are gone. Deliberately not `queue.pending === 0`:
         // an entitled account still has follow-on OCR/upsert rows queued here,
-        // and a priority-115 upsert cannot be claimed at all while continuous
-        // mode is off.
+        // and a priority-115 upsert cannot be claimed at all outside a drain
+        // or an idle window.
         for (const fixture of [NORMAL_PDF, NO_TEXT_PDF]) {
             expect(await isJobQueued({
                 libraryId: fixture.library_id,

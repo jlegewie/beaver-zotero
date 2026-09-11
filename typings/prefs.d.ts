@@ -80,7 +80,6 @@ declare namespace _ZoteroTypes {
       "backgroundExtractorEnabled": boolean;
       "backgroundProcessingEnabled": boolean;
       "backgroundProcessingSearchInitialized": boolean;
-      "backgroundProcessingContinuous": boolean;
       "backgroundProcessingWelcomeAck": boolean;
       "backgroundProcessingWelcomeDeferred": boolean;
       "runConsistencyCheck": boolean;

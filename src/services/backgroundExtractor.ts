@@ -53,7 +53,6 @@ const IDLE_THRESHOLD_SEC = 30;
 const LOW_PRIORITY_CEILING = 100;
 const PREF_ENABLED = 'backgroundExtractorEnabled';
 const PREF_PROCESSING_ENABLED = 'backgroundProcessingEnabled';
-const PREF_CONTINUOUS = 'backgroundProcessingContinuous';
 const COOPERATIVE_THROTTLE = true;
 
 export type ProcessOnceReason =
@@ -102,7 +101,6 @@ export class BackgroundExtractor {
     private startupDelayUntil = 0;
     private prefObserverSymbol: symbol | null = null;
     private processingPrefObserverSymbol: symbol | null = null;
-    private continuousPrefObserverSymbol: symbol | null = null;
     private syncObserverId: string | null = null;
     private unregisterIdleObserver: (() => void) | null = null;
     private workerRunning = false;
@@ -129,12 +127,10 @@ export class BackgroundExtractor {
      * User-facing "process now": run the queued backlog without waiting for
      * Zotero to be idle. One-off — the bypass clears itself once a dispatch
      * pass finds the queue empty, so the idle gate governs again afterwards.
-     * A no-op for the bypass flag while continuous processing is on: that pref
-     * already keeps the gate open. Still wakes the dispatcher.
      */
     requestImmediateDrain(): void {
         if (getPref(PREF_PROCESSING_ENABLED) !== true) return;
-        if (getPref(PREF_CONTINUOUS) !== true) this.drainNowRequested = true;
+        this.drainNowRequested = true;
         this.notify();
     }
 
@@ -154,16 +150,14 @@ export class BackgroundExtractor {
     }
 
     /**
-     * Whether a dispatch pass right now may claim backlog work: the user
-     * allowed it while active, a one-off drain is pending, or Zotero has been
-     * idle long enough. Mirrors the gate {@link processOnce} applies, so the
-     * status UI can tell "queued and running" from "queued behind the idle
-     * timer".
+     * Whether a dispatch pass right now may claim backlog work: a one-off
+     * drain is pending, or Zotero has been idle long enough. Mirrors the gate
+     * {@link processOnce} applies, so the status UI can tell "queued and
+     * running" from "queued behind the idle timer".
      */
     isBacklogGateOpen(): boolean {
         if (this.getDispatchBlocker() !== null) return false;
         if (getPref(PREF_PROCESSING_ENABLED) !== true) return false;
-        if (getPref(PREF_CONTINUOUS) === true) return true;
         if (this.drainNowRequested) return true;
         return getSystemIdleTimeMs() >= IDLE_THRESHOLD_MS;
     }
@@ -313,21 +307,6 @@ export class BackgroundExtractor {
         }
 
         try {
-            this.continuousPrefObserverSymbol = Zotero.Prefs.registerObserver(
-                'extensions.zotero.beaver.backgroundProcessingContinuous',
-                (value: unknown) => {
-                    // Continuous already bypasses idle; a leftover drain would
-                    // keep running after the user turns continuous back off.
-                    if (value === true) this.drainNowRequested = false;
-                    this.notify();
-                },
-                true,
-            );
-        } catch (e) {
-            logger(`BackgroundExtractor: registerObserver(continuous pref) failed: ${e}`, 1);
-        }
-
-        try {
             this.unregisterIdleObserver = registerIdleObserver(
                 { onIdle: () => this.notify() },
                 IDLE_THRESHOLD_SEC,
@@ -375,14 +354,6 @@ export class BackgroundExtractor {
                 // best-effort
             }
             this.processingPrefObserverSymbol = null;
-        }
-        if (this.continuousPrefObserverSymbol) {
-            try {
-                Zotero.Prefs.unregisterObserver(this.continuousPrefObserverSymbol);
-            } catch {
-                // best-effort
-            }
-            this.continuousPrefObserverSymbol = null;
         }
         if (this.syncObserverId) {
             try {
@@ -514,7 +485,7 @@ export class BackgroundExtractor {
             awaitLaunchedJobs?: boolean;
         } = {},
     ): Promise<ProcessOnceResult> {
-        if (getPref(PREF_PROCESSING_ENABLED) !== true || getPref(PREF_CONTINUOUS) === true) {
+        if (getPref(PREF_PROCESSING_ENABLED) !== true) {
             this.drainNowRequested = false;
         }
         const inactive = (reason: ProcessOnceReason): ProcessOnceResult => {
@@ -532,9 +503,8 @@ export class BackgroundExtractor {
 
         const idleMs = getSystemIdleTimeMs();
         const processBacklog = getPref(PREF_PROCESSING_ENABLED) === true;
-        const continuous = processBacklog && getPref(PREF_CONTINUOUS) === true;
         const drainNow = processBacklog && this.drainNowRequested;
-        const maxPriority = processBacklog && (continuous || drainNow || idleMs >= IDLE_THRESHOLD_MS)
+        const maxPriority = processBacklog && (drainNow || idleMs >= IDLE_THRESHOLD_MS)
             ? undefined
             : LOW_PRIORITY_CEILING;
 

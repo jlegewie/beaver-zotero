@@ -169,14 +169,12 @@ describe('BackgroundExtractor', () => {
         await conn.closeDatabase();
     });
 
-    it.each(['continuous', 'drain', 'idle'].flatMap((mode) =>
+    it.each(['drain', 'idle'].flatMap((mode) =>
         ['startup_delay', 'sync_in_progress', 'hot_busy', 'library_scope_unknown', 'disabled', 'no_window']
             .map((blocker) => [mode, blocker]),
     ))('keeps the backlog gate closed in %s mode while blocked by %s', async (mode, blocker) => {
         (Zotero as any).Prefs.get = vi.fn((pref: string) =>
-            pref === 'extensions.zotero.beaver.backgroundProcessingEnabled' ? true
-                : pref === 'extensions.zotero.beaver.backgroundProcessingContinuous' ? mode === 'continuous'
-                    : undefined);
+            pref === 'extensions.zotero.beaver.backgroundProcessingEnabled' ? true : undefined);
         const { BackgroundExtractor } = await loadProcessor();
         const proc = new BackgroundExtractor();
         if (mode === 'drain') proc.requestImmediateDrain();
@@ -2478,53 +2476,6 @@ describe('BackgroundExtractor', () => {
             }
         });
 
-        it('requestImmediateDrain does not set a drain while continuous processing is on', async () => {
-            (Zotero as any).Prefs.get = vi.fn((pref: string) =>
-                pref === 'extensions.zotero.beaver.backgroundProcessingEnabled' ? true
-                    : pref === 'extensions.zotero.beaver.backgroundProcessingContinuous' ? true
-                        : undefined);
-            const idleMod = await import('../../../src/utils/idleService');
-            (idleMod.getSystemIdleTimeMs as any).mockReturnValue(0);
-            const { BackgroundExtractor } = await loadProcessor();
-            const proc = new BackgroundExtractor();
-            try {
-                proc.requestImmediateDrain();
-                expect(proc.isImmediateDrainRequested()).toBe(false);
-                expect(proc.isBacklogGateOpen()).toBe(true);
-            } finally {
-                (idleMod.getSystemIdleTimeMs as any).mockReturnValue(Number.MAX_SAFE_INTEGER);
-            }
-        });
-
-        it('enabling continuous processing clears a pending immediate drain', async () => {
-            let continuous = false;
-            (Zotero as any).Prefs.get = vi.fn((pref: string) =>
-                pref === 'extensions.zotero.beaver.backgroundProcessingEnabled' ? true
-                    : pref === 'extensions.zotero.beaver.backgroundProcessingContinuous' ? continuous
-                        : undefined);
-            const registerObserver = vi.fn(
-                (_pref: string, _handler: (v: unknown) => void) => Symbol('pref-obs'),
-            );
-            (Zotero as any).Prefs.registerObserver = registerObserver;
-            const idleMod = await import('../../../src/utils/idleService');
-            (idleMod.getSystemIdleTimeMs as any).mockReturnValue(0);
-            const { BackgroundExtractor } = await loadProcessor();
-            const proc = new BackgroundExtractor();
-            proc.start();
-            try {
-                proc.requestImmediateDrain();
-                expect(proc.isImmediateDrainRequested()).toBe(true);
-                const handler = registerObserver.mock.calls.find(([pref]) =>
-                    pref === 'extensions.zotero.beaver.backgroundProcessingContinuous')![1];
-                continuous = true;
-                handler(true);
-                expect(proc.isImmediateDrainRequested()).toBe(false);
-            } finally {
-                await proc.stop();
-                (idleMod.getSystemIdleTimeMs as any).mockReturnValue(Number.MAX_SAFE_INTEGER);
-            }
-        });
-
         it('cancels an immediate drain on disable even when re-enabled before the next pass', async () => {
             let enabled = true;
             (Zotero as any).Prefs.get = vi.fn((pref: string) =>
@@ -2577,7 +2528,7 @@ describe('BackgroundExtractor', () => {
             await proc.start();
             await proc.stop();
 
-            expect(prefDisposer).toHaveBeenCalledTimes(3);
+            expect(prefDisposer).toHaveBeenCalledTimes(2);
             expect(notifierDisposer).toHaveBeenCalledTimes(1);
             expect(idleDisposer).toHaveBeenCalledTimes(1);
         });

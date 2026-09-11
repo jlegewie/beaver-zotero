@@ -152,7 +152,6 @@ pref("backgroundExtractorEnabled", true);
 // enabled so user-initiated extraction jobs still work when this is off.
 pref("backgroundProcessingEnabled", false);
 pref("backgroundProcessingSearchInitialized", false);
-pref("backgroundProcessingContinuous", false);
 pref("backgroundProcessingWelcomeAck", false);
 pref("backgroundProcessingWelcomeDeferred", false);
 

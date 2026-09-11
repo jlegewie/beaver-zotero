@@ -39,7 +39,7 @@ export interface BackgroundWorkerSnapshot {
     inFlight: number;
     /** A one-off "process now" is bypassing the idle gate until the queue drains. */
     drainNow: boolean;
-    /** Queued backlog work may run right now (idle, continuous, or draining). */
+    /** Queued backlog work may run right now (idle or draining). */
     backlogGateOpen: boolean;
 }
 

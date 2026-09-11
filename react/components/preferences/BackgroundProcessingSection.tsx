@@ -1,10 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../../atoms/profile';
 import {
     backgroundProcessingStatusAtom,
     type BackgroundProcessingStatus,
 } from '../../atoms/backgroundProcessing';
+import {
+    embeddingIndexStateAtom,
+    forceReindexAtom,
+    isEmbeddingIndexingAtom,
+    type EmbeddingIndexState,
+} from '../../atoms/embeddingIndex';
 import { useBackgroundProcessingStatus } from '../../hooks/useBackgroundProcessingStatus';
 import { getPref, setPref } from '../../../src/utils/prefs';
 import type { AttachmentRef, ProcessingIssueReason } from '../../../src/services/backgroundProcessing/issues';
@@ -13,24 +19,11 @@ import Button from '@beaver/agent-ui/primitives/Button';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { SettingsGroup, SettingsRow, SectionLabel } from './components/SettingsElements';
 import ProcessingIssueGroupRow from './ProcessingIssueList';
+import { ProgressBar } from '../status/ProgressBar';
 import { describeStatus, plural, type StatusTone } from './processingStatusSentence';
 import PlayIcon from '@beaver/agent-ui/icons/PlayIcon';
 import StopIcon from '@beaver/agent-ui/icons/StopIcon';
-import { clearDocumentCache } from '../../../src/services/backgroundProcessing/resetLocalState';
 import { prepareUncachedFiles } from '../../../src/services/backgroundProcessing/cachePreparation';
-
-/** Format a byte count with one decimal in the largest fitting binary unit. */
-function formatBytes(bytes: number): string {
-    if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB';
-    const units = ['bytes', 'KB', 'MB', 'GB', 'TB'];
-    let value = bytes;
-    let unit = 0;
-    while (value >= 1024 && unit < units.length - 1) {
-        value /= 1024;
-        unit++;
-    }
-    return `${unit === 0 ? value : value.toFixed(1)} ${units[unit]}`;
-}
 
 const TONE_COLOR: Record<StatusTone, string> = {
     idle: 'var(--accent-green)',
@@ -39,17 +32,22 @@ const TONE_COLOR: Record<StatusTone, string> = {
     error: 'var(--tag-red)',
 };
 
-/** Background worker activity, independent of cache occupancy and search coverage. */
+/** Background worker activity: one headline, a reason, and the one action that applies. */
 const ProcessingStatusRow: React.FC<{
     status: BackgroundProcessingStatus;
-    continuous: boolean;
+    canRestoreCache: boolean;
+    /** A Process now click is still preparing work; the button waits for it. */
+    processing: boolean;
     onProcessNow: () => void;
     onStopDrain: () => void;
-}> = ({ status, continuous, onProcessNow, onStopDrain }) => {
-    const sentence = describeStatus(status, continuous);
+}> = ({ status, canRestoreCache, processing, onProcessNow, onStopDrain }) => {
+    const sentence = describeStatus(status, { canRestoreCache });
+    const percent = sentence.progress
+        ? Math.floor((sentence.progress.done / sentence.progress.total) * 100)
+        : null;
 
     return (
-        <div className="display-flex flex-col gap-2 border-top-quinary" style={{ padding: '10px 12px 12px' }}>
+        <div className="display-flex flex-col gap-1 border-top-quinary" style={{ padding: '10px 12px 12px' }}>
             <div className="display-flex flex-row items-center gap-3">
                 <div className="display-flex flex-row items-start gap-2 flex-1 min-w-0">
                     <div
@@ -103,7 +101,8 @@ const ProcessingStatusRow: React.FC<{
                             variant="outline"
                             className="flex-shrink-0"
                             rightIcon={PlayIcon}
-                            disabled={sentence.processNowBlocked}
+                            disabled={sentence.processNowBlocked || processing}
+                            loading={processing}
                             ariaLabel={sentence.processNowBlocked
                                 ? `Process now. ${sentence.caption}`
                                 : undefined}
@@ -114,9 +113,80 @@ const ProcessingStatusRow: React.FC<{
                     </Tooltip>
                 ) : null}
             </div>
-
-
+            {sentence.progress && percent !== null && (
+                <div
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={sentence.progress.total}
+                    aria-valuenow={sentence.progress.done}
+                    aria-label={`${sentence.progress.done.toLocaleString()} of ${sentence.progress.total.toLocaleString()} files processed`}
+                    style={{ paddingLeft: '22px' }}
+                >
+                    <ProgressBar progress={percent} />
+                </div>
+            )}
         </div>
+    );
+};
+
+/**
+ * The server search-index check, for accounts with full-text search. Shown
+ * with the toggle so it stays visible while processing is paused. The status
+ * poll keeps the last successful check when a later one fails, so a failure
+ * is named ahead of that stale result rather than hidden behind it.
+ */
+function searchIndexStatusLine(status: BackgroundProcessingStatus): string {
+    const known = status.coverage
+        ? (status.coverage.namespace_exists
+            ? 'Full-text search index available.'
+            : 'Full-text search index not built yet.')
+        : null;
+    const checked = known && status.coverageUpdatedAt
+        ? ` Last checked ${new Date(status.coverageUpdatedAt).toLocaleString()}.`
+        : '';
+    if (status.coverageError) {
+        return 'The full-text search index could not be checked.'
+            + (known ? ` Last known status: ${known}${checked}` : '');
+    }
+    return known ? known + checked : 'Checking the full-text search index…';
+}
+
+/** True while the local metadata search index has something to fix. */
+function hasMetadataIndexProblem(indexState: EmbeddingIndexState): boolean {
+    return indexState.failedItems > 0 || (indexState.status === 'error' && Boolean(indexState.error));
+}
+
+/**
+ * Items the local metadata search index could not embed. The index maintains
+ * itself, so this row appears only while there is something to fix.
+ */
+const MetadataIndexProblemRow: React.FC<{ indexState: EmbeddingIndexState }> = ({ indexState }) => {
+    const isIndexing = useAtomValue(isEmbeddingIndexingAtom);
+    const forceReindex = useSetAtom(forceReindexAtom);
+    const failed = indexState.failedItems > 0;
+    const errored = indexState.status === 'error' && Boolean(indexState.error);
+    if (!failed && !errored) return null;
+    return (
+        <SettingsRow
+            hasBorder
+            announceDescription
+            title={failed
+                ? `${plural(indexState.failedItems, 'item')} missing from metadata search`
+                : 'Metadata search index needs attention'}
+            description={errored
+                ? `The last index update failed: ${indexState.error}`
+                : 'These items could not be added to the local index that powers searching by title and abstract.'}
+            control={
+                <Button
+                    variant="outline"
+                    onClick={() => { if (!isIndexing) forceReindex(); }}
+                    disabled={isIndexing}
+                    loading={isIndexing}
+                >
+                    {isIndexing ? 'Rebuilding…' : 'Rebuild'}
+                </Button>
+            }
+        />
     );
 };
 
@@ -124,11 +194,9 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
     const hasOcrAccess = useAtomValue(hasOcrAccessAtom);
     const hasSearchAccess = useAtomValue(hasSearchIndexAccessAtom);
     const status = useAtomValue(backgroundProcessingStatusAtom);
+    const indexState = useAtomValue(embeddingIndexStateAtom);
     const [enabled, setEnabled] = useState(
         () => getPref('backgroundProcessingEnabled') === true,
-    );
-    const [continuous, setContinuous] = useState(
-        () => getPref('backgroundProcessingContinuous') === true,
     );
     const working = (status.worker?.inFlight ?? 0) > 0 || status.worker?.drainNow === true;
     const refresh = useBackgroundProcessingStatus({
@@ -139,24 +207,17 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
     });
 
     useEffect(() => {
-        const observers: symbol[] = [];
-        const observe = (pref: string, sync: () => void) => {
-            try {
-                observers.push(Zotero.Prefs.registerObserver(pref, sync, true));
-            } catch { /* preferences may be closing */ }
-        };
-        observe(
-            'extensions.zotero.beaver.backgroundProcessingEnabled',
-            () => setEnabled(getPref('backgroundProcessingEnabled') === true),
-        );
-        observe(
-            'extensions.zotero.beaver.backgroundProcessingContinuous',
-            () => setContinuous(getPref('backgroundProcessingContinuous') === true),
-        );
+        let observer: symbol | null = null;
+        try {
+            observer = Zotero.Prefs.registerObserver(
+                'extensions.zotero.beaver.backgroundProcessingEnabled',
+                () => setEnabled(getPref('backgroundProcessingEnabled') === true),
+                true,
+            );
+        } catch { /* preferences may be closing */ }
         return () => {
-            for (const observer of observers) {
-                try { Zotero.Prefs.unregisterObserver(observer); } catch { /* best effort */ }
-            }
+            if (observer === null) return;
+            try { Zotero.Prefs.unregisterObserver(observer); } catch { /* best effort */ }
         };
     }, []);
 
@@ -168,20 +229,31 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
         Zotero.Beaver?.backgroundExtractor?.notify();
     };
 
-    const updateContinuous = (next: boolean) => {
-        setContinuous(next);
-        setPref('backgroundProcessingContinuous', next);
-        // Continuous already keeps the idle gate open; a leftover Process now
-        // drain would keep running after the user turns this back off.
-        if (next) Zotero.Beaver?.backgroundExtractor?.cancelImmediateDrain();
-        Zotero.Beaver?.backgroundExtractor?.notify();
-        void refresh();
-    };
+    const [actionError, setActionError] = useState<string | null>(null);
+    const canRestoreCache = enabled && status.documentCache?.can_prepare_uncached_files === true;
 
+    /**
+     * One "do it now": reconcile so every unfinished stage is queued, restore
+     * cached text the budget evicted, then drain without waiting for idle.
+     * The two preparation steps are independent, so a failing reconcile does
+     * not skip the cache restore that may be the button's only purpose; the
+     * first error is what the page reports.
+     */
+    const [processing, setProcessing] = useState(false);
     const processNow = async () => {
-        await Zotero.Beaver?.processingReconciler?.reconcileNow();
-        Zotero.Beaver?.backgroundExtractor?.requestImmediateDrain();
-        await refresh();
+        if (processing) return;
+        setProcessing(true);
+        setActionError(null);
+        const report = (error: unknown) => setActionError((current) =>
+            current ?? (error instanceof Error ? error.message : 'Could not start processing.'));
+        try {
+            await Zotero.Beaver?.processingReconciler?.reconcileNow().catch(report);
+            if (canRestoreCache) await prepareUncachedFiles().catch(report);
+            Zotero.Beaver?.backgroundExtractor?.requestImmediateDrain();
+            await refresh();
+        } finally {
+            setProcessing(false);
+        }
     };
 
     const stopDrain = async () => {
@@ -210,81 +282,33 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
         await refresh();
     };
 
-    const cache = status.documentCache;
-    const [clearingCache, setClearingCache] = useState(false);
-    const [preparingCache, setPreparingCache] = useState(false);
-    const prepareCache = async () => {
-        setPreparingCache(true);
-        setActionError(null);
-        try {
-            await prepareUncachedFiles();
-        } catch (error) {
-            setActionError(error instanceof Error ? error.message : 'Could not prepare files.');
-        } finally {
-            await refresh();
-            setPreparingCache(false);
-        }
-    };
-    const [actionError, setActionError] = useState<string | null>(null);
-    const readingIssues = status.issues.filter((group) => group.reason !== 'index_failed');
-    const indexIssues = status.issues.filter((group) => group.reason === 'index_failed');
-    const clearCache = async () => {
-        setClearingCache(true);
-        setActionError(null);
-        try {
-            await clearDocumentCache();
-        } catch (error) {
-            setActionError(error instanceof Error ? error.message : 'Could not clear the local cache.');
-        } finally {
-            await refresh();
-            setClearingCache(false);
-        }
-    };
-    const issueRow = (group: typeof status.issues[number]) => (
-        <ProcessingIssueGroupRow
-            key={group.reason}
-            group={group}
-            hasOcrAccess={hasOcrAccess}
-            hasSearchAccess={hasSearchAccess}
-            updatedAt={status.updatedAt}
-            hasBorder
-            onRetry={retryIssues}
-        />
-    );
+    const issueCount = status.issues.reduce((sum, group) => sum + group.count, 0);
+    const metadataProblem = hasMetadataIndexProblem(indexState);
+    const problemsSummary = status.error
+        ? 'Could not update the list of problems. Previously reported problems are shown below.'
+        : status.updatedAt === null
+            ? metadataProblem ? 'Checking files for problems…' : 'Checking for problems…'
+            : issueCount > 0
+                ? `Of the files Beaver has processed so far, ${plural(issueCount, 'attachment')} could not be read or indexed.`
+                : metadataProblem
+                    ? 'All files Beaver has processed so far were read. Metadata search needs attention.'
+                    : 'No problems found in the files Beaver has processed so far.';
 
     return (
         <>
-            {hasSearchAccess && (
-                <>
-                    <SectionLabel>Full-text Search</SectionLabel>
-                    <SettingsGroup>
-                        <SettingsRow
-                            title={status.coverage === null
-                                ? status.coverageError ? 'Server search status unavailable' : 'Checking the server search index…'
-                                : status.coverage.namespace_exists ? 'Server search index available' : 'Server search index not available yet'}
-                            description={<>
-                                {!enabled && <span>Updates paused. </span>}
-                                {status.coverageError
-                                    ? 'Could not check the server search index. Showing its last known status when available.'
-                                    : 'Full-text search finds content inside indexed attachments. Detailed attachment coverage is not available yet.'}
-                                {status.coverageUpdatedAt && <span> Last checked {new Date(status.coverageUpdatedAt).toLocaleString()}.</span>}
-                            </>}
-                        />
-                        {indexIssues.map(issueRow)}
-                        {readingIssues.length > 0 && <div className="font-color-secondary text-base" style={{ padding: '8px 12px' }}>
-                            Some attachments may be missing from search because they could not be read. See the reading problems below.
-                        </div>}
-                    </SettingsGroup>
-                </>
-            )}
-
             <SectionLabel>Background Processing</SectionLabel>
             <SettingsGroup>
                 <SettingsRow
-                    title={hasSearchAccess ? 'Keep full-text search up to date' : 'Process files in the background'}
+                    title={hasSearchAccess ? 'Keep Full-Text Search Up to Date' : 'Process Files in the Background'}
+                    announceDescription={hasSearchAccess}
                     description={hasSearchAccess
-                        ? 'Background processing is required to keep full-text search up to date. Turn it off to pause updates; existing search results are retained.'
-                        : 'By default, Beaver processes files when you use them. Enable background processing to prepare files ahead of time for faster responses.'}
+                        ? <>
+                            Background processing keeps full-text search up to date. Turn it off to pause updates; existing search results are retained.
+                            <span className="display-flex mt-1">
+                                {!enabled && 'Updates paused. '}{searchIndexStatusLine(status)}
+                            </span>
+                        </>
+                        : 'By default, Beaver processes files when you use them. Turn this on to process files ahead of time, while Zotero is idle, for faster responses.'}
                     onClick={() => updateEnabled(!enabled)}
                     control={<input
                         type="checkbox"
@@ -297,73 +321,32 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                 {(enabled || (status.worker?.inFlight ?? 0) > 0) && (
                     <ProcessingStatusRow
                         status={status}
-                        continuous={continuous}
+                        canRestoreCache={canRestoreCache}
+                        processing={processing}
                         onProcessNow={processNow}
                         onStopDrain={stopDrain}
                     />
                 )}
-                <SettingsRow
-                    title="Also run while Zotero is in use"
-                    description="When off, background preparation waits until Zotero is idle. Files you request are still processed when needed."
-                    disabled={!enabled}
-                    hasBorder
-                    onClick={() => {
-                        if (!enabled) return;
-                        updateContinuous(!continuous);
-                    }}
-                    control={<input
-                        type="checkbox"
-                        aria-label="Also run while Zotero is in use"
-                        checked={continuous}
-                        disabled={!enabled}
-                        onChange={(event) => updateContinuous(event.target.checked)}
-                        onClick={(event) => event.stopPropagation()}
-                    />}
-                />
+                {actionError && <div role="alert" className="font-color-red text-base border-top-quinary" style={{ padding: '8px 12px' }}>{actionError}</div>}
             </SettingsGroup>
 
-            <SectionLabel>Local Document Cache</SectionLabel>
-            <SettingsGroup>
-                <SettingsRow
-                    title={cache
-                        ? (typeof cache.cached_document_count === 'number' ? `${plural(cache.cached_document_count, 'document')} cached · ` : '')
-                            + formatBytes(cache.payload_total_bytes)
-                            + (cache.payload_budget_bytes > 0 ? ` of ${formatBytes(cache.payload_budget_bytes)}` : '')
-                        : status.updatedAt === null ? 'Checking local storage…' : 'Local cache status unavailable'}
-                    description="Cached text helps Beaver respond faster. Clearing cached text frees local storage and leaves your original files intact."
-                    control={<Button variant="outline" onClick={clearCache} disabled={clearingCache || preparingCache || !cache} loading={clearingCache}>
-                        Clear local cache
-                    </Button>}
-                />
-                {enabled && cache?.can_prepare_uncached_files && <SettingsRow
-                    title="Process uncached files"
-                    description="Process missing cached text now for faster responses, staying within the storage limit."
-                    hasBorder
-                    control={<Button variant="outline" onClick={prepareCache} disabled={clearingCache || preparingCache} loading={preparingCache}>
-                        Process uncached files
-                    </Button>}
-                />}
-                {hasSearchAccess && <div className="font-color-secondary text-base" style={{ padding: '8px 12px' }}>
-                    Your server search index is unaffected by clearing or restoring the local cache.
-                </div>}
-                {hasOcrAccess && <div className="font-color-secondary text-base" style={{ padding: '8px 12px' }}>
-                    Scanned files may need preparation again after their cached text is removed.
-                </div>}
-                {actionError && <div role="alert" className="font-color-red text-base" style={{ padding: '8px 12px' }}>{actionError}</div>}
-            </SettingsGroup>
-
-            <SectionLabel>Files Beaver Can’t Read</SectionLabel>
+            <SectionLabel>Problems</SectionLabel>
             <SettingsGroup>
                 <div className="font-color-secondary text-base" style={{ padding: '8px 12px' }}>
-                    {status.error
-                        ? 'Could not update reading problems. Previously reported problems are shown below.'
-                        : status.updatedAt === null
-                            ? 'Checking known reading problems…'
-                            : readingIssues.length > 0
-                                ? `${plural(readingIssues.reduce((sum, group) => sum + group.count, 0), 'attachment')} could not be read. Includes files Beaver has attempted to process.`
-                                : 'No reading problems found in files checked so far.'}
+                    {problemsSummary}
                 </div>
-                {readingIssues.map(issueRow)}
+                {status.issues.map((group) => (
+                    <ProcessingIssueGroupRow
+                        key={group.reason}
+                        group={group}
+                        hasOcrAccess={hasOcrAccess}
+                        hasSearchAccess={hasSearchAccess}
+                        updatedAt={status.updatedAt}
+                        hasBorder
+                        onRetry={retryIssues}
+                    />
+                ))}
+                <MetadataIndexProblemRow indexState={indexState} />
             </SettingsGroup>
         </>
     );
