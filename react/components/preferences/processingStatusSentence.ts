@@ -175,7 +175,7 @@ export function describeStatus(
         return {
             tone: 'idle',
             headline: 'Up to date',
-            caption: 'Cached text for some files was removed to save space. Start now restores it.',
+            caption: 'Some files aren’t cached on this computer. Start now prepares them for faster responses.',
             processNow: true,
             stopDrain: false,
         };

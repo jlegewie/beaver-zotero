@@ -355,7 +355,7 @@ it('restores evicted cached text through Start now once the backlog is settled',
     try {
         await withView(store, async (container) => {
             expect(container.textContent).not.toContain('Process uncached files');
-            expect(container.textContent).toContain('Cached text for some files was removed to save space.');
+            expect(container.textContent).toContain('Some files aren’t cached on this computer. Start now prepares them for faster responses.');
             const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Start now')!;
             expect(button).toBeDefined();
             await act(async () => button.click());
