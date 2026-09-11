@@ -800,12 +800,12 @@ export function expandToRawHtml(
                     if (itemId) {
                         const newAttrs = parseSimplifiedCitationAttrs(attrStr, resolvedLocatorPages);
                         if (attrsChanged(stored.originalAttrs, newAttrs)) {
-                            // Existing page citations are shown to the agent as
-                            // physical page numbers. When the page changes,
-                            // store the corresponding Zotero page label just
-                            // like a newly inserted citation.
-                            const shouldTranslatePage = stored.originalAttrs?.pageConvention === 'number'
-                                && (stored.originalAttrs.cslLabel == null || stored.originalAttrs.cslLabel === 'page');
+                            // Newly added locators use physical pages. Existing
+                            // locators retain the convention exposed when read.
+                            const original = stored.originalAttrs;
+                            const shouldTranslatePage = !original?.page
+                                || (original.pageConvention === 'number'
+                                    && (original.cslLabel == null || original.cslLabel === 'page'));
                             return buildCitation({ ...newAttrs, shouldTranslatePage, pageLabels });
                         }
                     }
