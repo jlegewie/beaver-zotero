@@ -51,7 +51,7 @@ afterEach(() => {
     prefs.backgroundProcessingEnabled = true;
 });
 
-it('reconciles before draining Process now for queued files', async () => {
+it('reconciles before draining Start now for queued files', async () => {
     const store = createStore();
     store.set(backgroundProcessingStatusAtom, {
         ...store.get(backgroundProcessingStatusAtom),
@@ -70,7 +70,7 @@ it('reconciles before draining Process now for queued files', async () => {
     const root = createRoot(container);
     try {
         await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(BackgroundProcessingSection))));
-        const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Process now');
+        const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Start now');
         expect(button).toBeDefined();
         await act(async () => button!.click());
         expect(reconcileNow).toHaveBeenCalledOnce();
@@ -87,7 +87,7 @@ it('reconciles before draining Process now for queued files', async () => {
     }
 });
 
-it('shows Process now disabled while a dispatcher blocker is set', async () => {
+it('shows Start now disabled while a dispatcher blocker is set', async () => {
     const store = createStore();
     store.set(backgroundProcessingStatusAtom, {
         ...store.get(backgroundProcessingStatusAtom),
@@ -98,7 +98,7 @@ it('shows Process now disabled while a dispatcher blocker is set', async () => {
     const root = createRoot(container);
     try {
         await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(BackgroundProcessingSection))));
-        const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Process now') as HTMLButtonElement | undefined;
+        const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Start now') as HTMLButtonElement | undefined;
         expect(button).toBeDefined();
         expect(button!.disabled).toBe(true);
     } finally {
@@ -106,7 +106,7 @@ it('shows Process now disabled while a dispatcher blocker is set', async () => {
     }
 });
 
-it('cancels a Process now drain from Stop without touching the reconciler', async () => {
+it('cancels a Start now drain from Stop without touching the reconciler', async () => {
     const store = createStore();
     store.set(backgroundProcessingStatusAtom, {
         ...store.get(backgroundProcessingStatusAtom),
@@ -126,7 +126,7 @@ it('cancels a Process now drain from Stop without touching the reconciler', asyn
         await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(BackgroundProcessingSection))));
         const buttons = Array.from(container.querySelectorAll('button')).map((node) => node.textContent);
         expect(buttons).toContain('Stop');
-        expect(buttons).not.toContain('Process now');
+        expect(buttons).not.toContain('Start now');
         const stop = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Stop');
         await act(async () => stop!.click());
         expect(cancelImmediateDrain).toHaveBeenCalledOnce();
@@ -138,7 +138,7 @@ it('cancels a Process now drain from Stop without touching the reconciler', asyn
     }
 });
 
-it('offers neither Process now nor Stop while the dispatcher keeps the gate open without a drain', async () => {
+it('offers neither Start now nor Stop while the dispatcher keeps the gate open without a drain', async () => {
     const store = createStore();
     store.set(backgroundProcessingStatusAtom, {
         ...store.get(backgroundProcessingStatusAtom),
@@ -150,10 +150,10 @@ it('offers neither Process now nor Stop while the dispatcher keeps the gate open
     try {
         await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(BackgroundProcessingSection))));
         const labels = Array.from(container.querySelectorAll('button')).map((node) => node.textContent);
-        expect(labels).not.toContain('Process now');
+        expect(labels).not.toContain('Start now');
         expect(labels).not.toContain('Stop');
         expect(container.querySelector('[aria-label="Also run while Zotero is in use"]')).toBeNull();
-        expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-label')).toBe('0 of 3 files processed');
+        expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-label')).toBe('0 of 3 files read');
     } finally {
         act(() => root.unmount());
     }
@@ -173,7 +173,7 @@ it('leaves unreadable files to the issue list instead of a red status headline',
     try {
         await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(BackgroundProcessingSection))));
         expect(container.querySelector('[role="status"]')?.textContent).toBe('Up to date');
-        expect(Array.from(container.querySelectorAll('button')).some((node) => node.textContent === 'Process now')).toBe(false);
+        expect(Array.from(container.querySelectorAll('button')).some((node) => node.textContent === 'Start now')).toBe(false);
         expect(container.textContent).toContain('1 attachment could not be read or indexed');
         expect(container.textContent).not.toContain('Libraries to Process');
     } finally {
@@ -298,7 +298,7 @@ it.each([
     });
 });
 
-it('restores evicted cached text through Process now once the backlog is settled', async () => {
+it('restores evicted cached text through Start now once the backlog is settled', async () => {
     const store = createStore();
     store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
         updatedAt: Date.now(),
@@ -317,7 +317,7 @@ it('restores evicted cached text through Process now once the backlog is settled
         await withView(store, async (container) => {
             expect(container.textContent).not.toContain('Process uncached files');
             expect(container.textContent).toContain('Cached text for some files was removed to save space.');
-            const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Process now')!;
+            const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Start now')!;
             expect(button).toBeDefined();
             await act(async () => button.click());
             expect(reconcileNow).toHaveBeenCalledOnce();
@@ -327,7 +327,7 @@ it('restores evicted cached text through Process now once the backlog is settled
             await act(async () => store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
                 documentCache: { ...cacheStats, can_prepare_uncached_files: false },
             }));
-            expect(Array.from(container.querySelectorAll('button')).some((node) => node.textContent === 'Process now')).toBe(false);
+            expect(Array.from(container.querySelectorAll('button')).some((node) => node.textContent === 'Start now')).toBe(false);
         });
     } finally {
         Zotero.Beaver = previousBeaver;
@@ -342,7 +342,7 @@ it('does not restore cached text while background processing is off', async () =
         documentCache: { ...cacheStats, can_prepare_uncached_files: true },
     });
     await withView(store, (container) => {
-        expect(Array.from(container.querySelectorAll('button')).some((node) => node.textContent === 'Process now')).toBe(false);
+        expect(Array.from(container.querySelectorAll('button')).some((node) => node.textContent === 'Start now')).toBe(false);
     });
 });
 
@@ -363,7 +363,7 @@ it('surfaces a failed cache restoration on the page and still drains what was qu
     };
     try {
         await withView(store, async (container) => {
-            const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Process now')!;
+            const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Start now')!;
             await act(async () => button.click());
             expect(container.querySelector('[role="alert"]')?.textContent).toContain('No room in the cache.');
             expect(requestImmediateDrain).toHaveBeenCalledOnce();
@@ -389,7 +389,7 @@ it('still restores cached text and drains when the reconcile step fails', async 
     };
     try {
         await withView(store, async (container) => {
-            const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent?.startsWith('Process now'))!;
+            const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent?.startsWith('Start now'))!;
             await act(async () => button.click());
             expect(prepareCache).toHaveBeenCalledOnce();
             expect(requestImmediateDrain).toHaveBeenCalledOnce();
@@ -401,7 +401,7 @@ it('still restores cached text and drains when the reconcile step fails', async 
     }
 });
 
-it('disables Process now while a click is still preparing work', async () => {
+it('disables Start now while a click is still preparing work', async () => {
     const store = createStore();
     store.set(backgroundProcessingStatusAtom, {
         ...store.get(backgroundProcessingStatusAtom),
@@ -417,7 +417,7 @@ it('disables Process now while a click is still preparing work', async () => {
     };
     try {
         await withView(store, async (container) => {
-            const find = () => Array.from(container.querySelectorAll('button')).find((node) => node.textContent?.startsWith('Process now')) as HTMLButtonElement;
+            const find = () => Array.from(container.querySelectorAll('button')).find((node) => node.textContent?.startsWith('Start now')) as HTMLButtonElement;
             expect(find().disabled).toBe(false);
             await act(async () => find().click());
             expect(find().disabled).toBe(true);

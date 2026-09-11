@@ -499,6 +499,20 @@ describe('BeaverDB background queue', () => {
         expect(stats.dead).toBe(0);
     });
 
+    it('counts distinct attachments across job types, running jobs included', async () => {
+        await db.enqueueBackgroundJob(makeInput({ zoteroKey: 'SAME0000', now: 0 }));
+        await db.enqueueBackgroundJob(makeInput({ jobType: 'fulltext_upsert', zoteroKey: 'SAME0000', now: 0 }));
+        await db.enqueueBackgroundJob(makeInput({ zoteroKey: 'OTHER000', now: 0 }));
+        // The same key in another library is a different attachment.
+        await db.enqueueBackgroundJob(makeInput({ libraryId: 2, zoteroKey: 'SAME0000', now: 0 }));
+        // Claim one so it sits behind its visibility timeout: still a queue row.
+        expect(await db.claimNextBackgroundJob(50, 1_000_000)).not.toBeNull();
+        const stats = await db.getBackgroundQueueStats(500);
+        expect(stats).toMatchObject({ pending: 4, available: 3, deferred: 1, attachments: 3 });
+        expect((await db.getBackgroundQueueStats(500, ['fulltext_upsert'])).attachments).toBe(1);
+        expect((await db.getBackgroundQueueStats(500, [])).attachments).toBe(0);
+    });
+
     it('restricts available and deferred counts to the supplied lanes', async () => {
         await db.enqueueBackgroundJob(makeInput({ zoteroKey: 'READ0000', now: 0 }));
         await db.enqueueBackgroundJob(makeInput({ jobType: 'fulltext_upsert', zoteroKey: 'INDEX000', now: 0 }));

@@ -19,6 +19,9 @@ import {
 import { AlertIcon, CSSIcon, Icon } from '../icons/icons';
 import { SettingsGroup } from './components/SettingsElements';
 
+/** Libraries shown before the list collapses behind "Show all". */
+const COLLAPSED_LIBRARY_COUNT = 3;
+
 type LocalZoteroLibraryLike = {
     libraryID: number;
     id: number;
@@ -70,6 +73,7 @@ const LibraryAccessList: React.FC = () => {
 
     const [allLibraries, setAllLibraries] = useState<ZoteroLibrary[] | null>(null);
     const [statsById, setStatsById] = useState<Record<number, LibraryStatistics>>({});
+    const [expanded, setExpanded] = useState(false);
 
     useEffect(() => {
         let isCancelled = false;
@@ -110,6 +114,15 @@ const LibraryAccessList: React.FC = () => {
         [excludedLibraries],
     );
     const personalExcluded = isPersonalLibraryExcluded(excludedLibraries);
+    const collapsible = (allLibraries?.length ?? 0) > COLLAPSED_LIBRARY_COUNT;
+    const visibleLibraries = allLibraries && collapsible && !expanded
+        ? allLibraries.slice(0, COLLAPSED_LIBRARY_COUNT)
+        : allLibraries ?? [];
+    // Exclusions are the point of the list, so a collapsed view says how many
+    // of the hidden libraries are unchecked rather than hiding that silently.
+    const hiddenExcluded = allLibraries && collapsible && !expanded
+        ? allLibraries.slice(COLLAPSED_LIBRARY_COUNT).filter((library) => excludedKeys.has(libraryExclusionKey(library))).length
+        : 0;
 
     return (
         <div className="display-flex flex-col gap-2">
@@ -140,7 +153,7 @@ const LibraryAccessList: React.FC = () => {
                     </div>
                 ) : allLibraries.length === 0 ? (
                     <div className="p-2 text-base font-color-secondary">No libraries found.</div>
-                ) : allLibraries.map((library, index) => {
+                ) : visibleLibraries.map((library, index) => {
                     const stats = statsById[library.library_id];
                     const checked = !excludedKeys.has(libraryExclusionKey(library));
                     const toggle = () => { if (!isUpdating) void toggleExcludedLibrary(library); };
@@ -179,6 +192,20 @@ const LibraryAccessList: React.FC = () => {
                         </div>
                     );
                 })}
+                {allLibraries !== null && profileReady && collapsible && (
+                    <button
+                        type="button"
+                        className="display-flex flex-row items-center border-top-quinary text-base text-link-muted"
+                        style={{ padding: '8px 12px', background: 'none', border: 'none', borderTop: '1px solid var(--fill-quinary)', cursor: 'pointer', width: '100%' }}
+                        aria-expanded={expanded}
+                        onClick={() => setExpanded((value) => !value)}
+                    >
+                        {expanded
+                            ? 'Show fewer'
+                            : `Show all ${allLibraries.length.toLocaleString()} libraries`
+                                + (hiddenExcluded > 0 ? ` · ${hiddenExcluded.toLocaleString()} unchecked` : '')}
+                    </button>
+                )}
             </SettingsGroup>
         </div>
     );

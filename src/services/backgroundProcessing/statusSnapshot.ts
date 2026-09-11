@@ -35,7 +35,13 @@ export interface BackgroundWorkerSnapshot {
     /** Available and deferred jobs restricted to registered, entitled lanes. */
     available: number;
     deferred: number;
-    /** Jobs currently running across all lanes. */
+    /**
+     * Distinct attachments behind those jobs, running ones included (a
+     * claimed job stays a queue row until it finishes). Absent from older
+     * snapshots.
+     */
+    queuedFiles?: number;
+    /** Jobs currently running across the file-processing lanes. */
     inFlight: number;
     /** A one-off "process now" is bypassing the idle gate until the queue drains. */
     drainNow: boolean;
@@ -92,15 +98,22 @@ export async function collectProcessingStatus(
     }
     const extractor = Zotero.Beaver?.backgroundExtractor;
     const lanes = extractor?.getLaneStatus?.() ?? {};
+    // Lanes that process files. Index untagging is cleanup for a library the
+    // user unchecked, not a backlog of files, so it never counts as waiting.
     const activeTypes = Object.keys(lanes).filter((type) =>
-        (type !== 'fulltext_upsert' || hasSearchIndexAccess)
+        type !== 'fulltext_untag'
+        && (type !== 'fulltext_upsert' || hasSearchIndexAccess)
         && (type !== 'document_ocr' || hasOcrAccess));
     const activeQueue = await db.getBackgroundQueueStats(Date.now(), activeTypes);
     const worker: BackgroundWorkerSnapshot = {
         dispatchBlocker: extractor?.getDispatchBlocker?.() ?? null,
         available: activeQueue.available,
         deferred: activeQueue.deferred,
-        inFlight: Object.values(lanes).reduce((sum, lane) => sum + (lane?.inFlight ?? 0), 0),
+        queuedFiles: activeQueue.attachments,
+        inFlight: activeTypes.reduce(
+            (sum, type) => sum + ((lanes as Record<string, { inFlight: number } | undefined>)[type]?.inFlight ?? 0),
+            0,
+        ),
         drainNow: extractor?.isImmediateDrainRequested?.() ?? false,
         backlogGateOpen: extractor?.isBacklogGateOpen?.() ?? false,
     };

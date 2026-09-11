@@ -36,7 +36,7 @@ const TONE_COLOR: Record<StatusTone, string> = {
 const ProcessingStatusRow: React.FC<{
     status: BackgroundProcessingStatus;
     canRestoreCache: boolean;
-    /** A Process now click is still preparing work; the button waits for it. */
+    /** A Start now click is still preparing work; the button waits for it. */
     processing: boolean;
     onProcessNow: () => void;
     onStopDrain: () => void;
@@ -104,11 +104,11 @@ const ProcessingStatusRow: React.FC<{
                             disabled={sentence.processNowBlocked || processing}
                             loading={processing}
                             ariaLabel={sentence.processNowBlocked
-                                ? `Process now. ${sentence.caption}`
+                                ? `Start now. ${sentence.caption}`
                                 : undefined}
                             onClick={onProcessNow}
                         >
-                            Process now
+                            Start now
                         </Button>
                     </Tooltip>
                 ) : null}
@@ -119,7 +119,7 @@ const ProcessingStatusRow: React.FC<{
                     aria-valuemin={0}
                     aria-valuemax={sentence.progress.total}
                     aria-valuenow={sentence.progress.done}
-                    aria-label={`${sentence.progress.done.toLocaleString()} of ${sentence.progress.total.toLocaleString()} files processed`}
+                    aria-label={`${sentence.progress.done.toLocaleString()} of ${sentence.progress.total.toLocaleString()} files read`}
                     style={{ paddingLeft: '22px' }}
                 >
                     <ProgressBar progress={percent} />
@@ -284,12 +284,16 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
 
     const issueCount = status.issues.reduce((sum, group) => sum + group.count, 0);
     const metadataProblem = hasMetadataIndexProblem(indexState);
-    const problemsSummary = status.error
+    const problemsSummary: React.ReactNode = status.error
         ? 'Could not update the list of problems. Previously reported problems are shown below.'
         : status.updatedAt === null
             ? metadataProblem ? 'Checking files for problems…' : 'Checking for problems…'
             : issueCount > 0
-                ? `Of the files Beaver has processed so far, ${plural(issueCount, 'attachment')} could not be read or indexed.`
+                ? <>
+                    Of the files Beaver has processed so far,{' '}
+                    <span className="font-medium font-color-primary">{plural(issueCount, 'attachment')}</span>
+                    {' '}could not be read or indexed.
+                </>
                 : metadataProblem
                     ? 'All files Beaver has processed so far were read. Metadata search needs attention.'
                     : 'No problems found in the files Beaver has processed so far.';

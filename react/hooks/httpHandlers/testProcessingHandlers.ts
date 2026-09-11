@@ -16,7 +16,7 @@ import { getPref } from '../../../src/utils/prefs';
 
 /**
  * Force a full reconcile pass and wait for it to finish (the same entry point
- * as the prefs "Process now" button). Returns the elapsed time so a live test
+ * as the prefs "Start now" button). Returns the elapsed time so a live test
  * or a manual backlog measurement can record it.
  */
 export async function handleTestProcessingReconcileNowHttpRequest(_request: unknown) {

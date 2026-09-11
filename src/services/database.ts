@@ -364,6 +364,12 @@ export interface BackgroundQueueStats {
     deferred: number;
     dead: number;
     byJobType: Record<string, number>;
+    /**
+     * Distinct attachments with a queued job. One attachment can hold more
+     * than one job (an upsert parked behind the extraction that refills its
+     * cache), so this is the queue depth in files rather than jobs.
+     */
+    attachments: number;
 }
 
 export type AttachmentExtractStatus = 'done' | 'failed' | 'skipped' | null;
@@ -4834,6 +4840,14 @@ export class BeaverDB {
         const available = availableRows[0] ?? 0;
         const deferred = pending - available;
 
+        const attachmentRows: number[] = [];
+        await this.queryAsync(
+            `SELECT COUNT(DISTINCT library_id || '/' || zotero_key) FROM background_jobs WHERE ${laneFilter}`,
+            laneParams,
+            { onRow: (row: any) => attachmentRows.push(row.getResultByIndex(0)) },
+        );
+        const attachments = attachmentRows[0] ?? 0;
+
         const deadRows: number[] = [];
         await this.queryAsync(
             `SELECT COUNT(*) FROM background_jobs_dead WHERE ${laneFilter}`,
@@ -4855,7 +4869,7 @@ export class BeaverDB {
             },
         );
 
-        return { pending, available, deferred, dead, byJobType };
+        return { pending, available, deferred, dead, byJobType, attachments };
     }
 
     private async selectBackgroundJobs(

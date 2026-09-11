@@ -6,6 +6,12 @@ export function plural(count: number, singular: string, pluralForm = `${singular
 
 export type StatusTone = 'idle' | 'busy' | 'waiting' | 'error';
 
+/**
+ * Reading progress from the ledger: files whose text has been read (or that
+ * cannot be), out of every file in the processed libraries. Files can still
+ * have queued work after being read (an index upload, a re-read), so this is
+ * deliberately a different measure from the queue depth in the caption.
+ */
 export interface StatusProgress {
     /** Attachments that reached a terminal state (readable or not). */
     done: number;
@@ -19,17 +25,17 @@ export interface StatusSentence {
     caption: string;
     /** Progress toward a settled ledger while files are being processed. */
     progress?: StatusProgress;
-    /** Show Process now: queued work can start without waiting for idle. */
+    /** Show Start now: queued work can start without waiting for idle. */
     processNow: boolean;
-    /** Disable Process now: a dispatcher blocker, not the idle gate. */
+    /** Disable Start now: a dispatcher blocker, not the idle gate. */
     processNowBlocked?: boolean;
-    /** Show Stop: a Process now drain is active and can be cancelled. */
+    /** Show Stop: a Start now drain is active and can be cancelled. */
     stopDrain: boolean;
 }
 
 export interface StatusSentenceOptions {
     /**
-     * Offer Process now when processed files have lost their cached text and
+     * Offer Start now when processed files have lost their cached text and
      * the cache has room to restore it, even while nothing is queued yet: the
      * restore has no other entry point.
      */
@@ -93,39 +99,49 @@ export function describeStatus(
     const { total, readable, unreadable, awaitingOcr, oldestPendingAt } = status.ledger;
     const done = readable + unreadable;
     const remaining = Math.max(0, total - done);
+    // Queue depth in files. The ledger counts files with no final outcome yet;
+    // the queue also holds re-reads of settled files (a cache restore, a
+    // changed file), which the ledger does not see, so take the larger.
+    // Running jobs are still queue rows, so they are not added on top. Jobs
+    // are the fallback for a snapshot without the per-file count.
+    const deferred = status.worker?.deferred ?? 0;
+    const queued = status.worker?.queuedFiles ?? (runnable + deferred);
+    const outstanding = Math.max(remaining, queued);
     if (inFlight > 0 || (runnable > 0 && gateOpen)) {
         return {
             tone: 'busy',
             headline: 'Processing files…',
+            // A job can finish between the lane read and the queue read, which
+            // leaves a running lane with nothing left to count.
             caption: inFlight === 0
                 ? 'Starting…'
-                : remaining > 0
-                    ? `${plural(remaining, 'file')} remaining.`
+                : outstanding > 0
+                    ? `${plural(outstanding, 'file')} remaining.`
                     : 'Reading text from your files.',
             progress: total > 0 && remaining > 0 ? { done, total } : undefined,
             processNow: false,
             stopDrain: draining,
         };
     }
+    const waiting = outstanding > 0 ? `${plural(outstanding, 'file')} waiting. ` : '';
     if (runnable > 0) {
         return {
             tone: 'waiting',
             headline: 'Waiting to start',
-            caption: blocker
+            caption: waiting + (blocker
                 ? blockerCaption(blocker)
-                : 'Starts after about 30 seconds without activity in Zotero.',
+                : 'Starts after about 30 seconds without activity in Zotero.'),
             processNow: !draining,
             processNowBlocked: Boolean(blocker),
             stopDrain: draining,
         };
     }
     const restore = options.canRestoreCache === true;
-    const deferred = status.worker?.deferred ?? 0;
     if (deferred > 0) {
         return {
             tone: 'waiting',
             headline: 'Waiting to start',
-            caption: 'Some files are processing remotely or waiting to retry.',
+            caption: waiting + 'Some files are processing remotely or waiting to retry.',
             processNow: restore && !draining,
             stopDrain: draining,
         };
@@ -135,7 +151,7 @@ export function describeStatus(
         return {
             tone: 'waiting',
             headline: 'Waiting to start',
-            caption: 'Beaver picks up unfinished files automatically.',
+            caption: waiting + 'Beaver picks up unfinished files automatically.',
             processNow: restore && !draining,
             stopDrain: draining,
         };
@@ -153,7 +169,7 @@ export function describeStatus(
         return {
             tone: 'idle',
             headline: 'Up to date',
-            caption: 'Cached text for some files was removed to save space. Process now restores it.',
+            caption: 'Cached text for some files was removed to save space. Start now restores it.',
             processNow: true,
             stopDrain: false,
         };

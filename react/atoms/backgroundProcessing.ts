@@ -32,6 +32,7 @@ export const EMPTY_BACKGROUND_QUEUE_STATS: BackgroundQueueStats = {
     deferred: 0,
     dead: 0,
     byJobType: {},
+    attachments: 0,
 };
 
 export const EMPTY_ATTACHMENT_PROCESSING_AGGREGATES: AttachmentProcessingAggregates = {
