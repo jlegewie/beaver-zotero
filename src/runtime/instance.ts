@@ -31,7 +31,6 @@ export class BeaverInstance {
     readonly readerWidth = new ReaderWidthDispatcher();
     private subscriptions = new Map<WindowRuntime, Set<() => void>>();
     private notifications = new Map<string, Set<(detail: any) => void>>();
-    private endpointOwners = new Map<string, Map<WindowRuntime, { handler: any; release: () => void }>>();
 
     attachWindow(win: Window): WindowRuntime {
         if (this.disposed) throw new Error('Beaver instance disposed');
@@ -130,31 +129,40 @@ export class BeaverInstance {
         };
     }
 
-    /** Keep a global endpoint backed by a live, authenticated renderer. */
-    registerWindowEndpoint(runtime: WindowRuntime, path: string, handler: any): () => void {
-        if (this.disposed || runtime.status === 'closing' || this.windows.get(runtime.hostWindow) !== runtime) return () => {};
-        this.endpointOwners.get(path)?.get(runtime)?.release();
-        let owners = this.endpointOwners.get(path);
-        if (!owners) this.endpointOwners.set(path, owners = new Map());
-        let subscriptions = this.subscriptions.get(runtime);
-        if (!subscriptions) this.subscriptions.set(runtime, subscriptions = new Set());
-        const release = () => {
-            if (owners.get(runtime)?.release !== release) return;
-            owners.delete(runtime);
-            subscriptions.delete(release);
-            if (!owners.size) this.endpointOwners.delete(path);
-            const endpoints = Zotero.Server?.Endpoints;
-            if (endpoints?.[path] === handler) {
-                const successor = [...owners.values()].pop();
-                if (successor) endpoints[path] = successor.handler;
-                else delete endpoints[path];
-            }
-        };
-        owners.set(runtime, { handler, release });
-        subscriptions.add(release);
-        Zotero.Server.Endpoints[path] = handler;
-        return release;
+    private commands = new Map<WindowRuntime, Record<string, (request: any) => Promise<any>>>();
+
+    registerWindowCommands(runtime: WindowRuntime, handlers: Record<string, (request: any) => Promise<any>>): void {
+        if (runtime.status === 'closing') return;
+        this.commands.set(runtime, handlers);
+        this.addWindowCleanup(runtime, () => {
+            if (this.commands.get(runtime) === handlers) this.commands.delete(runtime);
+        });
     }
+
+    async dispatchWindowCommand(command: string, request: any): Promise<any> {
+        const runtime = this.resolveWindow(request?.windowId);
+        const handler = runtime && this.commands.get(runtime)?.[command];
+        const unavailable = () => Object.assign(new Error('Target window is unavailable'), { code: 'window_unavailable' });
+        if (!runtime || !handler) throw unavailable();
+        // Resolve once before invoking a renderer; closing never retargets a request.
+        const work = Promise.resolve().then(() => {
+            if (runtime.status !== 'ready' || runtime.hostWindow.closed) throw unavailable();
+            return handler(request);
+        });
+        let release!: () => void;
+        const closed = new Promise<never>((_resolve, reject) => {
+            release = () => reject(unavailable());
+            this.addWindowCleanup(runtime, release);
+        });
+        try {
+            const result = await Promise.race([work, closed]);
+            if (runtime.status !== 'ready' || runtime.hostWindow.closed) throw unavailable();
+            return result;
+        } finally {
+            this.subscriptions.get(runtime)?.delete(release);
+        }
+    }
+
     publish(name: string, detail: unknown): void {
         // Retained state and subscribers never receive a caller-owned mutable object.
         if (this.disposed || Zotero.__beaverShuttingDown) return;

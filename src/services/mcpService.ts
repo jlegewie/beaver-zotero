@@ -1,5 +1,5 @@
 import { validateInput } from './mcpInputValidation';
-import type { WindowRuntime } from "../runtime/instance";
+import { registerEndpoint } from "./localEndpoints/registration";
 /**
  * MCP (Model Context Protocol) Service
  *
@@ -92,7 +92,7 @@ export class MCPService {
     /**
      * Register the /beaver/mcp endpoint on Zotero's HTTP server.
      */
-    register(runtime?: WindowRuntime): boolean {
+    register(): boolean {
         this.unregister();
         if (!Zotero?.Server?.Endpoints) {
             logger('MCPService: Zotero.Server.Endpoints not available', 2);
@@ -121,14 +121,7 @@ export class MCPService {
             },
         };
 
-        if (runtime) {
-            this.releaseEndpoint = Zotero.Beaver.runtime.registerWindowEndpoint(runtime, '/beaver/mcp', Endpoint);
-        } else {
-            Zotero.Server.Endpoints['/beaver/mcp'] = Endpoint;
-            this.releaseEndpoint = () => {
-                if (Zotero.Server?.Endpoints['/beaver/mcp'] === Endpoint) delete Zotero.Server.Endpoints['/beaver/mcp'];
-            };
-        }
+        this.releaseEndpoint = registerEndpoint('/beaver/mcp', Endpoint);
         this.registered = true;
         logger(`MCPService: Registered /beaver/mcp endpoint with ${this.tools.size} tools`, 3);
         return true;

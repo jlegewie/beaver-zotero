@@ -1,12 +1,11 @@
-vi.mock('../../../react/runtime/operationContext', () => ({ captureOperationContext: () => ({ fullAccess: false, renderMarkdown: async (text: string) => text }) }));
+vi.mock('../../../src/services/localEndpoints/operation', () => ({ captureInstanceOperation: () => ({ fullAccess: false, renderMarkdown: async (text: string) => text }) }));
 /**
  * Unit tests for MCP tool handlers defined in react/hooks/useMcpServer.ts
  *
  * Tests the tool handler logic, response formatting, argument validation,
  * pagination, and error handling for each MCP tool.
  *
- * Strategy: Mock all backend handler functions, then trigger the useMcpServer
- * hook's useEffect to register tools on a real MCPService. We intercept the
+ * Strategy: Mock backend handler functions and register a real MCPService. We intercept the
  * MCPService via the Zotero.Server.Endpoints mock and call tools via JSON-RPC.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -66,34 +65,6 @@ vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
 
-vi.mock('../../../react/atoms/auth', () => ({
-    isAuthenticatedAtom: { toString: () => 'isAuthenticatedAtom' },
-}));
-
-vi.mock('../../../react/atoms/ui', () => ({
-    mcpServerEnabledAtom: { toString: () => 'mcpServerEnabledAtom' },
-    mcpWriteToolsEnabledAtom: { toString: () => 'mcpWriteToolsEnabledAtom' },
-}));
-
-vi.mock('../../../react/store', () => ({
-    store: { get: vi.fn().mockReturnValue(true), set: vi.fn(), sub: vi.fn() },
-}));
-
-// Capture the useEffect callback so we can call it manually
-let capturedEffect: (() => (() => void) | void) | null = null;
-
-vi.mock('react', () => ({
-    useEffect: vi.fn((cb: any) => { capturedEffect = cb; }),
-    useState: vi.fn(() => [null, vi.fn()]),
-}));
-
-vi.mock('jotai', () => ({
-    useAtomValue: vi.fn((atom: any) => {
-        if (atom?.toString?.() === 'mcpWriteToolsEnabledAtom') return mockMcpWriteToolsEnabled.value;
-        return true; // MCP server enabled and authenticated by default
-    }),
-}));
-
 // ---------------------------------------------------------------------------
 // Zotero globals
 // ---------------------------------------------------------------------------
@@ -105,6 +76,7 @@ beforeEach(() => {
     zotero.Utilities = { randomString: vi.fn(() => 'test-request-id') };
     zotero.DataDirectory = { dir: '/mock/data' };
     zotero.Server = { Endpoints: {} };
+    zotero.Beaver = { account: { getGeneration: () => 1, getSnapshot: () => ({ session: { user: { id: "user" } } }) } };
     zotero.Items = { getByLibraryAndKeyAsync: vi.fn().mockResolvedValue(null) };
     zotero.Libraries = { get: vi.fn(() => ({ libraryType: 'user' })) };
 });
@@ -113,28 +85,16 @@ beforeEach(() => {
 // Import useMcpServer — mocks are already wired
 // ---------------------------------------------------------------------------
 
-import { useMcpServer, getMcpBridgeScriptPath, ensureMcpBridgeScript } from '../../../react/hooks/useMcpServer';
+import { registerMcpServer, getMcpBridgeScriptPath, ensureMcpBridgeScript } from '../../../src/services/localEndpoints/mcp';
 
 // ---------------------------------------------------------------------------
-// Helper: set up the MCP endpoint by triggering the hook's useEffect
+// Helper: register the instance MCP endpoint
 // ---------------------------------------------------------------------------
 
 type Endpoint = { init: (data: any) => Promise<[number, string, string]> };
 
 function setupMcpEndpoint(): Endpoint {
-    capturedEffect = null;
-
-    // Call the hook — this triggers our mock useEffect, capturing the callback
-    useMcpServer();
-
-    // Mock assignment is invisible to TS; read via local to avoid `never` after null reset.
-    const effect = capturedEffect as (() => (() => void) | void) | null;
-    if (!effect) {
-        throw new Error('useEffect callback was not captured');
-    }
-
-    // Execute the effect — registers the MCP endpoint on Zotero.Server.Endpoints
-    effect();
+    registerMcpServer(mockMcpWriteToolsEnabled.value);
 
     const EndpointCtor = zotero.Server.Endpoints['/beaver/mcp'];
     if (!EndpointCtor) {
@@ -219,6 +179,7 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
         // Re-setup Zotero globals
         zotero.Utilities = { randomString: vi.fn(() => 'test-request-id') };
         zotero.Server = { Endpoints: {} };
+    zotero.Beaver = { account: { getGeneration: () => 1, getSnapshot: () => ({ session: { user: { id: "user" } } }) } };
         zotero.Items = { getByLibraryAndKeyAsync: vi.fn().mockResolvedValue(null) };
         zotero.Libraries = { get: vi.fn(() => ({ libraryType: 'user' })) };
 
@@ -2215,6 +2176,7 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             for (const itemCategory of ['regular', 'note', 'attachment', 'all']) {
                 vi.clearAllMocks();
                 zotero.Server = { Endpoints: {} };
+    zotero.Beaver = { account: { getGeneration: () => 1, getSnapshot: () => ({ session: { user: { id: "user" } } }) } };
                 endpoint = setupMcpEndpoint();
 
                 mockHandleListItemsRequest.mockResolvedValue({
@@ -2234,6 +2196,7 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             for (const sortBy of ['dateAdded', 'dateModified', 'title', 'creator', 'year']) {
                 vi.clearAllMocks();
                 zotero.Server = { Endpoints: {} };
+    zotero.Beaver = { account: { getGeneration: () => 1, getSnapshot: () => ({ session: { user: { id: "user" } } }) } };
                 endpoint = setupMcpEndpoint();
 
                 mockHandleListItemsRequest.mockResolvedValue({
@@ -2919,4 +2882,16 @@ describe('MCP libraries and annotations', () => {
         expect(result.pages).toHaveLength(1);
         expect(result.pages[0].passages[0]).toEqual({ text: 'Source.', page_label: 'iii', page_locations: [{ page_idx: 1, page_label: 'iii', boxes: [box] }], note_position: { ...note.note_position, page_index: 1 } });
     });
+});
+
+it('discards an MCP read that completes after library access is revoked', async () => {
+    Zotero.Beaver.searchableLibraryIds = [1];
+    const endpoint = setupMcpEndpoint();
+    mockHandleListLibrariesRequest.mockImplementationOnce(async () => {
+        Zotero.Beaver.searchableLibraryIds = [];
+        return { type: 'list_libraries', libraries: [], total_count: 0 };
+    });
+    const result = await callTool(endpoint, 'list_libraries');
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('MCP access changed');
 });
