@@ -73,15 +73,12 @@ export function startEmbeddingIndex(
                     : 0,
         });
     const updateFailedCount = (failedItems: number) => publish({ failedItems });
-    const eventsRef = {
-        current: {
-            ...pendingEvents,
-            timer: null as ReturnType<typeof setTimeout> | null,
-            timestamp: 0,
-        },
+    const events = {
+        ...pendingEvents,
+        timer: null as ReturnType<typeof setTimeout> | null,
     };
-    const indexerRef = { current: null as EmbeddingIndexer | null };
-    let moduleNotifierId: string | null = null;
+    let currentIndexer: EmbeddingIndexer | null = null;
+    let observerId: string | null = null;
     /**
      * Get the BeaverDB instance from addon
      */
@@ -93,7 +90,7 @@ export function startEmbeddingIndex(
      * Get or create the indexer instance
      */
     const getIndexer = (): EmbeddingIndexer | null => {
-        if (indexerRef.current) return indexerRef.current;
+        if (currentIndexer) return currentIndexer;
 
         const db = getDB();
         if (!db) {
@@ -101,8 +98,8 @@ export function startEmbeddingIndex(
             return null;
         }
 
-        indexerRef.current = new EmbeddingIndexer(db);
-        return indexerRef.current;
+        currentIndexer = new EmbeddingIndexer(db);
+        return currentIndexer;
     };
 
     /**
@@ -548,13 +545,13 @@ export function startEmbeddingIndex(
         const indexer = getIndexer();
         if (!indexer) return;
 
-        const modifiedIds = Array.from(eventsRef.current.modifiedItemIds);
-        const deletedIds = Array.from(eventsRef.current.deletedItemIds);
+        const modifiedIds = Array.from(events.modifiedItemIds);
+        const deletedIds = Array.from(events.deletedItemIds);
 
         // Clear collections immediately
-        eventsRef.current.modifiedItemIds.clear();
-        eventsRef.current.deletedItemIds.clear();
-        eventsRef.current.timer = null;
+        events.modifiedItemIds.clear();
+        events.deletedItemIds.clear();
+        events.timer = null;
 
         if (modifiedIds.length === 0 && deletedIds.length === 0) return;
 
@@ -677,47 +674,23 @@ export function startEmbeddingIndex(
      * Schedule event processing with debounce
      */
     const scheduleEventProcessing = () => {
-        eventsRef.current.timestamp = Date.now();
-
-        if (eventsRef.current.timer !== null) {
-            clearTimeout(eventsRef.current.timer);
+        if (events.timer !== null) {
+            clearTimeout(events.timer);
         }
 
-        eventsRef.current.timer = setTimeout(() => {
+        events.timer = setTimeout(() => {
             void serialize(processEvents);
         }, EVENT_DEBOUNCE_MS);
     };
 
     logger("EmbeddingIndex: Setting up embedding index", 3);
 
-    let isMounted = true;
-
-    // Track the observer ID for this specific hook instance to prevent race conditions during cleanup
-    let myObserverId: string | null = null;
-
     // Create a set for efficient library lookup in event handling
     const searchableLibrarySet = new Set(searchableLibraryIds);
 
     // Setup observer (only if we have libraries to index)
     const setupObserver = () => {
-        if (myObserverId || isCancelled()) return;
-        // Don't set up observer if no libraries are searchable
         if (searchableLibraryIds.length === 0) return;
-
-        // Unregister any existing observer before registering a new one
-        // This handles hot-reload scenarios where cleanup may not have run
-        if (moduleNotifierId) {
-            try {
-                Zotero.Notifier.unregisterObserver(moduleNotifierId);
-                logger(
-                    "EmbeddingIndex: Unregistered stale observer before re-registering",
-                    4,
-                );
-            } catch (e) {
-                // Ignore errors if observer was already unregistered
-            }
-            moduleNotifierId = null;
-        }
 
         const observer = {
             notify: async function (
@@ -727,7 +700,7 @@ export function startEmbeddingIndex(
                 extraData: any,
             ) {
                 // Skip all processing if shutdown has started
-                if (Zotero.__beaverShuttingDown) return;
+                if (isCancelled() || Zotero.__beaverShuttingDown) return;
 
                 // Only handle item events
                 if (type !== "item") return;
@@ -742,8 +715,8 @@ export function startEmbeddingIndex(
                     for (const item of items) {
                         if (item && searchableLibrarySet.has(item.libraryID)) {
                             // Remove from delete set if it was there (item was restored)
-                            eventsRef.current.deletedItemIds.delete(item.id);
-                            eventsRef.current.modifiedItemIds.add(item.id);
+                            events.deletedItemIds.delete(item.id);
+                            events.modifiedItemIds.add(item.id);
                             shouldSchedule = true;
                         }
                     }
@@ -760,8 +733,8 @@ export function startEmbeddingIndex(
                                 searchableLibrarySet.has(libraryID)
                             ) {
                                 // Remove from modified set
-                                eventsRef.current.modifiedItemIds.delete(id);
-                                eventsRef.current.deletedItemIds.add(id);
+                                events.modifiedItemIds.delete(id);
+                                events.deletedItemIds.add(id);
                                 shouldSchedule = true;
                             }
                         }
@@ -775,12 +748,11 @@ export function startEmbeddingIndex(
             // @ts-ignore Zotero.Notifier.Notify is defined
         } as Zotero.Notifier.Notify;
 
-        moduleNotifierId = Zotero.Notifier.registerObserver(
+        observerId = Zotero.Notifier.registerObserver(
             observer,
             ["item"],
             "beaver-embedding-index",
         );
-        myObserverId = moduleNotifierId;
     };
 
     // Initialize indexing
@@ -799,24 +771,6 @@ export function startEmbeddingIndex(
                 isForceReindex,
                 isCancelled,
             );
-
-            // Setup observer after initial indexing
-            if (isMounted && !isCancelled()) {
-                setupObserver();
-
-                // If a prior generation was cleaned up before debounce fired,
-                // resume processing of the queued IDs in this generation.
-                if (
-                    eventsRef.current.modifiedItemIds.size > 0 ||
-                    eventsRef.current.deletedItemIds.size > 0
-                ) {
-                    logger(
-                        "EmbeddingIndex: Rescheduling pending queued events after re-init",
-                        4,
-                    );
-                    scheduleEventProcessing();
-                }
-            }
         } catch (error) {
             if (isCancelled()) return;
             logger(
@@ -824,18 +778,14 @@ export function startEmbeddingIndex(
                 1,
             );
             Zotero.logError(error as Error);
-            if (isMounted && !isCancelled()) {
-                setupObserver(); // Still set up observer even if initial indexing fails
-                if (
-                    eventsRef.current.modifiedItemIds.size > 0 ||
-                    eventsRef.current.deletedItemIds.size > 0
-                ) {
-                    logger(
-                        "EmbeddingIndex: Rescheduling pending queued events after init failure",
-                        4,
-                    );
-                    scheduleEventProcessing();
-                }
+        } finally {
+            // Resume IDs retained when the previous generation cancelled its debounce.
+            if (
+                !isCancelled() &&
+                (events.modifiedItemIds.size > 0 ||
+                    events.deletedItemIds.size > 0)
+            ) {
+                scheduleEventProcessing();
             }
         }
     };
@@ -845,28 +795,26 @@ export function startEmbeddingIndex(
 
     // Cleanup
     return () => {
-        isMounted = false;
-        // Bump generation so isCancelled() fires for in-flight performInitialIndexing,
-        // whether this is an effect re-fire or a permanent unmount.
+        // Cancel in-flight work before a replacement generation can start.
         cancelled = true;
         logger("EmbeddingIndex: Cleaning up embedding index", 3);
 
         // Unregister observer
-        if (moduleNotifierId && moduleNotifierId === myObserverId) {
-            Zotero.Notifier.unregisterObserver(myObserverId);
-            moduleNotifierId = null;
+        if (observerId) {
+            Zotero.Notifier.unregisterObserver(observerId);
+            observerId = null;
         }
 
         // Clear pending timer
-        if (eventsRef.current.timer !== null) {
-            clearTimeout(eventsRef.current.timer);
-            eventsRef.current.timer = null;
+        if (events.timer !== null) {
+            clearTimeout(events.timer);
+            events.timer = null;
         }
 
         // The owner retains queued IDs across generations and re-schedules
         // processing after initialization, which avoids losing debounced updates.
 
         // Clear indexer reference
-        indexerRef.current = null;
+        currentIndexer = null;
     };
 }

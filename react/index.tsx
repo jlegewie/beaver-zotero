@@ -72,16 +72,13 @@ import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { undoEditNoteOrBatchAction } from './utils/editNoteActions';
 import { addPopupMessageAtom } from './utils/popupMessageUtils';
 import { selectItemById } from './utils/selectItem';
-import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
 
 // Configure the PDF package (webpack bundle copy). The esbuild bundle
 // configures its own copy from `src/hooks.ts`. Both must run because each
 // bundle has its own module-scope config in `src/beaver-extract/config.ts`.
 // The cross-bundle `MuPDFWorkerClient` per-name singletons are shared via
 // `Zotero.__beaverMuPDFWorkerClient_hot` / `_background` regardless.
-//
-// Only the webpack copy wires `onWorkerStartFailure` to an in-app popup (hot worker only)
-configurePDFForBeaver({ onWorkerStartFailure: notifyWorkerStartFailure });
+configurePDFForBeaver();
 
 // Register the Zotero client host so rendered chat-history components can
 // resolve host-specific navigation and data lookups. Non-Zotero clients omit

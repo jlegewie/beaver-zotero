@@ -1,5 +1,5 @@
 import { isExtractionError } from '@beaver/agent-core/extract/types';
-import { BeaverExtractor, ExtractionError, ExtractionErrorCode, isTransientWorkerError } from '../../beaver-extract';
+import { BeaverExtractor, ExtractionErrorCode, isTransientWorkerError } from '../../beaver-extract';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { getPref } from '../../utils/prefs';
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';

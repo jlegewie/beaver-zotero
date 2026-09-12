@@ -1,4 +1,3 @@
-import { isExtractionError } from '@beaver/agent-core/extract/types';
 /**
  * Dev-only HTTP handlers for the `/beaver/test/pdf-*` endpoints.
  *
@@ -6,6 +5,8 @@ import { isExtractionError } from '@beaver/agent-core/extract/types';
  * registration. Handler exports are wired to paths in
  * `useHttpEndpoints.ts` → `registerEndpoints()`.
  */
+
+import { isExtractionError } from '@beaver/agent-core/extract/types';
 
 import {
     buildColumnOverlayFromDebugPage,
@@ -110,7 +111,7 @@ async function runPdfExtractorCall<T>(
     fn: (pdfData: Uint8Array) => Promise<T>,
     onSuccess: (result: T) => any,
 ): Promise<any> {
-    const { ExtractionError } = await import('../../../src/beaver-extract');
+
     const loaded = await loadPdfBytesForTestEndpoint(request);
     if (!loaded.ok) return loaded;
     try {
@@ -164,7 +165,7 @@ async function runPdfExtractorCall<T>(
  *   resolution.
  */
 export async function handleTestPdfPageCountHttpRequest(request: any) {
-    const { BeaverExtractor, ExtractionError } = await import(
+    const { BeaverExtractor } = await import(
         '../../../src/beaver-extract'
     );
 
@@ -243,7 +244,7 @@ export async function handleTestPdfPageCountHttpRequest(request: any) {
  * @deprecated Prefer `npm run beaver-extract -- info <pdf>`.
  */
 export async function handleTestPdfPageLabelsHttpRequest(request: any) {
-    const { BeaverExtractor, ExtractionError } = await import(
+    const { BeaverExtractor } = await import(
         '../../../src/beaver-extract'
     );
 
@@ -280,7 +281,7 @@ export async function handleTestPdfPageLabelsHttpRequest(request: any) {
  *   The CLI writes PNGs to disk and avoids the base64 round-trip.
  */
 export async function handleTestPdfRenderPagesHttpRequest(request: any) {
-    const { BeaverExtractor, ExtractionError } = await import(
+    const { BeaverExtractor } = await import(
         '../../../src/beaver-extract'
     );
 
@@ -332,7 +333,7 @@ export async function handleTestPdfRenderPagesHttpRequest(request: any) {
  * @deprecated Prefer `npm run beaver-extract -- render <pdf> --pages <list> --out <dir> --json`.
  */
 export async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) {
-    const { BeaverExtractor, ExtractionError } = await import(
+    const { BeaverExtractor } = await import(
         '../../../src/beaver-extract'
     );
 
@@ -397,7 +398,7 @@ export async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) 
  * @deprecated Prefer `npm run beaver-extract -- raw-detailed <pdf> --page <n> --json`.
  */
 export async function handleTestPdfExtractRawDetailedHttpRequest(request: any) {
-    const { ExtractionError } = await import('../../../src/beaver-extract');
+
     const { getMuPDFWorkerClient } = await import(
         '../../../src/beaver-extract/MuPDFWorkerClient'
     );
@@ -666,7 +667,6 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
     const {
         getMuPDFWorkerClient,
         BeaverExtractor,
-        ExtractionError,
         ExtractionErrorCode,
     } = await import('../../../src/beaver-extract');
 
@@ -907,7 +907,7 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
  * `mode: "summary"` shape).
  */
 export async function handleTestPdfExtractTraceHttpRequest(request: any) {
-    const { ExtractionError, getMuPDFWorkerClient } = await import('../../../src/beaver-extract');
+    const { getMuPDFWorkerClient } = await import('../../../src/beaver-extract');
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
     if (!loaded.ok) return loaded;
@@ -1023,7 +1023,7 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
  *     metadata: { extractedAt, version, settings, timings } }
  */
 export async function handleTestPdfAnalyzeLayoutHttpRequest(request: any) {
-    const { BeaverExtractor, ExtractionError, ExtractionErrorCode } = await import(
+    const { BeaverExtractor, ExtractionErrorCode } = await import(
         '../../../src/beaver-extract'
     );
 

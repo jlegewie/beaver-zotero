@@ -9,17 +9,15 @@ const START_FAILURE_POPUP_THRESHOLD = 3;
 // At most one restart prompt per this interval
 const WORKER_UNAVAILABLE_NOTIFY_INTERVAL_MS = 10 * 60 * 1000;
 
-let lastNotifiedAt = 0;
-
 export function notifyWorkerStartFailure(info: WorkerStartFailureInfo): void {
     // Background extraction is silent; only the user-facing worker warrants a
     // user-facing prompt.
     if (info.slotName !== 'hot') return;
     if (info.consecutiveFailures < START_FAILURE_POPUP_THRESHOLD) return;
 
-    const now = Date.now();
-    if (now - lastNotifiedAt < WORKER_UNAVAILABLE_NOTIFY_INTERVAL_MS) return;
-    lastNotifiedAt = now;
+    if (!Zotero.Beaver.background?.claimNotification(
+        'worker-unavailable', WORKER_UNAVAILABLE_NOTIFY_INTERVAL_MS,
+    )) return;
 
     try {
         store.set(addPopupMessageAtom, {

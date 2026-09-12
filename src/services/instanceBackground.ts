@@ -24,7 +24,9 @@ export class InstanceBackground {
     private cleanups: (() => void | Promise<void>)[] = [];
     private key = "";
     private notificationGeneration: number | undefined;
-    private force = false;
+    private stopEmbedding?: () => void;
+    private embeddingLibraryIds?: number[];
+    private pendingReindex = false;
     private settling = new Set<Promise<void>>();
     private tail: Promise<void> = Promise.resolve();
     private pendingEmbeddingEvents: PendingEmbeddingEvents = {
@@ -32,11 +34,10 @@ export class InstanceBackground {
         deletedItemIds: new Set(),
     };
     private state = { ...initialEmbeddingState };
-    private listeners = new Set<(state: EmbeddingIndexState) => void>();
-    private notifications = new Set<string>();
+    private notifications = new Map<string, number>();
     private statusReads = new Map<
         string,
-        ReturnType<typeof collectProcessingStatus>
+        ReturnType<InstanceBackground["collectStatus"]>
     >();
     claimVersionNotifications(): string[] {
         const versions = getPendingVersionNotifications();
@@ -45,7 +46,7 @@ export class InstanceBackground {
     }
     collectStatus(
         options: ProcessingStatusOptions = {},
-    ): ReturnType<typeof collectProcessingStatus> {
+    ): Promise<Awaited<ReturnType<typeof collectProcessingStatus>> | null> {
         const owner = Zotero.Beaver;
         const key = JSON.stringify([
             owner.account?.getGeneration(),
@@ -62,13 +63,17 @@ export class InstanceBackground {
             },
             options,
         )
-            .then((result) => {
-                if (owner.account?.getGeneration() !== generation)
-                    throw new Error(
-                        "Account changed during background status read",
-                    );
-                return result;
-            })
+            .then(
+                (result) =>
+                    owner.account?.getGeneration() === generation
+                        ? result
+                        : null,
+                (error) => {
+                    if (owner.account?.getGeneration() !== generation)
+                        return null;
+                    throw error;
+                },
+            )
             .finally(() => {
                 if (this.statusReads.get(key) === pending)
                     this.statusReads.delete(key);
@@ -83,13 +88,6 @@ export class InstanceBackground {
             this.reconcile(snapshot),
         );
     }
-    subscribe(listener: (state: EmbeddingIndexState) => void): () => void {
-        this.listeners.add(listener);
-        listener(this.getSnapshot());
-        return () => {
-            this.listeners.delete(listener);
-        };
-    }
     getSnapshot(): EmbeddingIndexState {
         return { ...this.state };
     }
@@ -99,25 +97,39 @@ export class InstanceBackground {
             "embedding-index:status",
             this.getSnapshot(),
         );
-        for (const listener of [...this.listeners]) {
-            try {
-                listener(this.getSnapshot());
-            } catch (error) {
-                logger(`Background listener: ${error}`, 2);
-            }
-        }
     }
     /** Synchronous session eligibility prevents duplicate presentation across renderers. */
-    claimNotification(key: string): boolean {
-        if (this.notifications.has(key)) return false;
-        this.notifications.add(key);
+    claimNotification(key: string, intervalMs = Infinity): boolean {
+        const now = Date.now();
+        const lastClaim = this.notifications.get(key);
+        if (lastClaim !== undefined && now - lastClaim < intervalMs)
+            return false;
+        this.notifications.set(key, now);
         return true;
     }
     reindex(): void {
-        this.force = true;
-        this.key = "";
-        const account = Zotero.Beaver.account;
-        if (account) this.reconcile(account.getSnapshot());
+        this.pendingReindex = true;
+        if (this.embeddingLibraryIds)
+            this.restartEmbedding(this.embeddingLibraryIds, true);
+    }
+    private restartEmbedding(ids: number[], force = false): void {
+        this.stopEmbedding?.();
+        this.embeddingLibraryIds = ids;
+        this.publish({ ...initialEmbeddingState });
+        this.stopEmbedding = startEmbeddingIndex(
+            ids,
+            force,
+            (update) => this.publish(update),
+            (work) => {
+                const pending = this.tail.then(work);
+                this.tail = pending.catch((error) =>
+                    logger(`Embedding work: ${error}`, 1),
+                );
+                return this.tail;
+            },
+            this.pendingEmbeddingEvents,
+        );
+        this.pendingReindex = false;
     }
     private reconcile(snapshot: AccountSnapshot): void {
         if (snapshot.generation !== this.notificationGeneration) {
@@ -147,8 +159,10 @@ export class InstanceBackground {
         if (key === this.key) return;
         this.key = key;
         this.clearGeneration();
-        this.publish({ ...initialEmbeddingState });
-        if (!owner.libraryScopeInitialized || !authorized) return;
+        if (!owner.libraryScopeInitialized || !authorized) {
+            this.publish({ ...initialEmbeddingState });
+            return;
+        }
         const ocr = new OcrExecutor();
         owner.backgroundExtractor!.registerExecutor(ocr, { maxInFlight: 3 });
         this.cleanups.push(() =>
@@ -164,24 +178,12 @@ export class InstanceBackground {
                 !!owner.hasSearchIndexAccess,
             ),
         );
-        this.cleanups.push(
-            startEmbeddingIndex(
-                ids,
-                this.force,
-                (update) => this.publish(update),
-                (work) => {
-                    const pending = this.tail.then(work);
-                    this.tail = pending.catch((error) =>
-                        logger(`Embedding work: ${error}`, 1),
-                    );
-                    return this.tail;
-                },
-                this.pendingEmbeddingEvents,
-            ),
-        );
-        this.force = false;
+        this.restartEmbedding(ids, this.pendingReindex);
     }
     private clearGeneration(): void {
+        this.stopEmbedding?.();
+        this.stopEmbedding = undefined;
+        this.embeddingLibraryIds = undefined;
         for (const cleanup of this.cleanups.splice(0)) {
             const result = cleanup();
             if (result) {
@@ -196,7 +198,7 @@ export class InstanceBackground {
         this.unsubscribe?.();
         this.unsubscribe = undefined;
         this.clearGeneration();
-        this.listeners.clear();
+        this.pendingReindex = false;
         await Promise.allSettled([
             this.tail,
             ...this.settling,

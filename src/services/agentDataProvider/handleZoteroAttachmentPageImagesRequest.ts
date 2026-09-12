@@ -1,5 +1,3 @@
-import { isWorkerAbortError } from '../../beaver-extract/MuPDFWorkerClient';
-import { isExtractionError } from '@beaver/agent-core/extract/types';
 /**
  * Agent Data Provider
  *
@@ -8,6 +6,9 @@ import { isExtractionError } from '@beaver/agent-core/extract/types';
  *
  * The Beaver agent is the primary agent that handles chat completions and tool execution.
  */
+
+import { isWorkerAbortError } from '../../beaver-extract/MuPDFWorkerClient';
+import { isExtractionError } from '@beaver/agent-core/extract/types';
 
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';  // kept for file_missing message check
@@ -19,9 +20,7 @@ import {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import {
     BeaverExtractor,
-    ExtractionError,
     ExtractionErrorCode,
-    WorkerAbortError,
     isWorkerDeadlineError,
 } from '../../beaver-extract';
 import { makeRemoteFilePath } from '../documentFileIdentity';

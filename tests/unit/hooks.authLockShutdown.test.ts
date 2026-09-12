@@ -305,6 +305,17 @@ describe('hooks auth lock shutdown cleanup', () => {
         expect(mockCancelAllActiveTasks).toHaveBeenCalledOnce();
     });
 
+    it.each([false, true])('clears the document owner after disposal (throws: %s)', async (throws) => {
+        const hooks = await loadHooks();
+        const win = makeWindow();
+        const dispose = vi.fn(() => { if (throws) throw new Error('disposed'); });
+        (globalThis as any).addon.documents = { dispose };
+        vi.mocked(Zotero.getMainWindows).mockReturnValue([win]);
+        await hooks.onMainWindowUnload(win);
+        expect(dispose).toHaveBeenCalledOnce();
+        expect((globalThis as any).addon.documents).toBeUndefined();
+    });
+
     it('continues cleanup when instance auth disposal throws', async () => {
         const hooks = await loadHooks();
         const win = makeWindow();

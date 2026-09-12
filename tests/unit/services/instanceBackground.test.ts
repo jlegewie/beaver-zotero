@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
     cleanup: vi.fn(),
     embedding: vi.fn(),
     stop: vi.fn(),
+    collect: vi.fn(),
 }));
 vi.mock("../../../src/services/backgroundQueue/ocrExecutor", () => ({
     OcrExecutor: class {
@@ -28,6 +29,9 @@ vi.mock("../../../src/services/instanceEmbeddingIndex", () => ({
         failedItems: 0,
     },
     startEmbeddingIndex: mocks.embedding,
+}));
+vi.mock("../../../src/services/backgroundProcessing/statusSnapshot", () => ({
+    collectProcessingStatus: mocks.collect,
 }));
 import { InstanceBackground } from "../../../src/services/instanceBackground";
 
@@ -61,6 +65,7 @@ describe("InstanceBackground", () => {
                     return vi.fn();
                 }),
                 getSnapshot: () => snapshot,
+                getGeneration: () => snapshot.generation,
             },
         };
         (Zotero as any).Beaver = owner;
@@ -69,11 +74,7 @@ describe("InstanceBackground", () => {
         const service = new InstanceBackground();
         service.start(owner.account);
         service.start(owner.account);
-        const a = service.subscribe(vi.fn());
-        const b = service.subscribe(vi.fn());
         notify({ ...snapshot, revision: 2 });
-        a();
-        b();
         expect(owner.account.subscribe).toHaveBeenCalledTimes(1);
         expect(
             owner.backgroundExtractor.registerExecutor,
@@ -111,7 +112,15 @@ describe("InstanceBackground", () => {
                 deletedItemIds: expect.any(Set),
             }),
         );
+        const lanesStarted = mocks.fulltext.mock.calls.length;
+        const stopped = mocks.stop.mock.calls.length;
         service.reindex();
+        expect(mocks.fulltext).toHaveBeenCalledTimes(lanesStarted);
+        expect(mocks.cleanup).toHaveBeenCalledTimes(lanesStarted);
+        expect(
+            owner.backgroundExtractor.registerExecutor,
+        ).toHaveBeenCalledTimes(lanesStarted);
+        expect(mocks.stop).toHaveBeenCalledTimes(stopped + 1);
         expect(mocks.embedding).toHaveBeenLastCalledWith(
             [],
             true,
@@ -124,10 +133,61 @@ describe("InstanceBackground", () => {
         );
         await service.dispose();
     });
+    it("holds an early rebuild until authorized scope is available, then consumes it once", async () => {
+        const service = new InstanceBackground();
+        owner.libraryScopeInitialized = false;
+        service.reindex();
+        service.reindex();
+        service.start(owner.account);
+        expect(mocks.embedding).not.toHaveBeenCalled();
+        owner.libraryScopeInitialized = true;
+        notify({ ...snapshot, session: null });
+        expect(mocks.embedding).not.toHaveBeenCalled();
+        notify(snapshot);
+        expect(mocks.embedding).toHaveBeenCalledTimes(1);
+        expect(mocks.embedding.mock.calls[0][1]).toBe(true);
+        owner.hasOcrAccess = false;
+        notify(snapshot);
+        expect(mocks.embedding.mock.calls[1][1]).toBe(false);
+        await service.dispose();
+    });
+
     it("allows only one renderer to claim each notification", () => {
         const service = new InstanceBackground();
         expect(service.claimNotification("welcome")).toBe(true);
         expect(service.claimNotification("welcome")).toBe(false);
         expect(service.claimNotification("reader")).toBe(true);
+    });
+    it("silently discards successful and failed status reads from an old account", async () => {
+        const service = new InstanceBackground();
+        for (const reject of [false, true]) {
+            let finish!: () => void;
+            mocks.collect.mockImplementationOnce(
+                () =>
+                    new Promise((resolve, fail) => {
+                        finish = () =>
+                            reject
+                                ? fail(new Error("old request failed"))
+                                : resolve({ queue: {} });
+                    }),
+            );
+            const pending = service.collectStatus();
+            expect(service.collectStatus()).toBe(pending);
+            snapshot.generation++;
+            finish();
+            await expect(pending).resolves.toBeNull();
+        }
+    });
+    it("keeps notification cooldowns shared across renderers", () => {
+        const service = new InstanceBackground();
+        const now = vi.spyOn(Date, "now").mockReturnValue(1000);
+        try {
+            expect(service.claimNotification("worker", 600_000)).toBe(true);
+            expect(service.claimNotification("worker", 600_000)).toBe(false);
+            now.mockReturnValue(601_000);
+            expect(service.claimNotification("worker", 600_000)).toBe(true);
+        } finally {
+            now.mockRestore();
+        }
     });
 });

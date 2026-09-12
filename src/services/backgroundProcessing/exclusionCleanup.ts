@@ -24,7 +24,7 @@ export async function purgeExcludedLibraries(
         const isStillExcluded = () =>
             !(Zotero.Beaver?.searchableLibraryIds ?? []).includes(libraryId);
         if (isCancelled()) return completed;
-        if (isCancelled() || !isStillExcluded()) continue;
+        if (!isStillExcluded()) continue;
         const rows = await db.getAttachmentProcessingStatesByLibrary(libraryId);
         const ledgerWasEmpty = rows.length === 0;
         const refs = new Map<string, {

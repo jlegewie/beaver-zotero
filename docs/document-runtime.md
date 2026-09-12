@@ -21,13 +21,16 @@ that rejection as cancellation and releases the job without consuming a retry.
 `addon.background` registers OCR (3 local jobs), cloud fulltext upsert (2 jobs),
 and untag (1 job) alongside the extraction lane (1 job). Backend OCR waits release
 their local slots. A shared background MuPDF mutex orders OCR re-extraction and
-document extraction. The existing idle, sync, priority, startup-delay, busy,
+document extraction at whole-job granularity; the bounded worker queue orders
+individual operations within those jobs and interactive requests. The existing
+idle, sync, priority, startup-delay, busy,
 preference, access and entitlement gates still apply with zero main windows.
 
 The instance also owns metadata embedding scans and their item observer,
 remote-reference sweeps, exclusion cleanup, notification claims and background
 status reads. Renderers subscribe to embedding/status changes and issue explicit
-rebuild commands. Account generations and scope changes cancel stale work;
+rebuild commands. A rebuild restarts only embedding work, leaving the other
+background lanes registered. Account generations and scope changes cancel stale work;
 same-account refreshes with unchanged access do not restart lanes or indexing.
 Debounced embedding events stay with the instance across generation changes;
 the next generation drains them using its current searchable-library scope.

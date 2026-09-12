@@ -849,7 +849,7 @@ export async function workerIdleProbe(
 
 /** Realm/timer wiring info and self-heal probes for the hot worker slot. */
 export async function workerRealmProbe(
-    action: 'info' | 'identity' | 'simulate-dead-realm' | 'legacy-stub',
+    action: 'info' | 'identity' | 'legacy-stub',
 ): Promise<{
     ok: boolean;
     error?: string;
@@ -860,13 +860,10 @@ export async function workerRealmProbe(
     createdFromWindowRecorded?: boolean;
     // identity
     sameInstance?: boolean;
-    // simulate-dead-realm
-    doomedReportedDead?: boolean;
+    // legacy-stub
     replaced?: boolean;
-    doomedDisposed?: boolean;
     replacementIsCreatorRealmDead?: boolean;
     replacementHasTracking?: boolean;
-    // legacy-stub
     stubDisposed?: boolean;
 }> {
     return post('/beaver/test/worker-realm-probe', { action });

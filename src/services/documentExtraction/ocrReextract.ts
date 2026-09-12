@@ -1,4 +1,3 @@
-import { isExtractionError } from '@beaver/agent-core/extract/types';
 /**
  * Re-extract OCR'd PDF bytes and cache the result against the original
  * attachment's on-disk identity.
@@ -19,8 +18,9 @@ import { isExtractionError } from '@beaver/agent-core/extract/types';
  * the esbuild background lane.
  */
 
+import { isExtractionError } from '@beaver/agent-core/extract/types';
+
 import {
-    ExtractionError,
     ExtractionErrorCode,
     getMuPDFWorkerClient,
     type PDFWorkerSlotName,

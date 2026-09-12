@@ -68,8 +68,14 @@ function withShutdownTimeout<T>(
     ]).finally(() => clearTimeout(timeoutId));
 }
 
+function ensureDocumentRuntime(): void {
+    addon.documents ??= new InstanceDocuments();
+    configurePDFForBeaver({ onWorkerStartFailure: info => addon.runtime.publish('document-worker:failure', info) });
+}
+
 async function disposeAccountServices(): Promise<void> {
     try { addon.documents?.dispose(); } catch (error) { ztoolkit.log(`disposeDocuments: ${error}`); }
+    addon.documents = undefined;
     try { if (addon.background) await withShutdownTimeout(addon.background.dispose(), "disposeBackground"); }
     catch (error) { ztoolkit.log(`disposeBackground: ${error}`); }
     addon.background = undefined;
@@ -268,8 +274,7 @@ async function onStartup() {
     // -------- Configure the PDF package (esbuild bundle copy) --------
     // Idempotent. Must run before any PDF op. The webpack bundle calls the
     // same adapter from `react/index.tsx` for its own copy of the config.
-    addon.documents ??= new InstanceDocuments();
-    configurePDFForBeaver({ onWorkerStartFailure: info => addon.runtime.publish('document-worker:failure', info) });
+    ensureDocumentRuntime();
 
     // -------- Declare the client actions are gated on --------
     // Each bundle holds its own copy of this seam, so the webpack bundle
@@ -452,8 +457,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
     // `onStartup()` does not re-run, but the package's module-scope config
     // must be configured before this window can dispatch document work.
     // Idempotent — `configurePDF()` overwrites prior config.
-    addon.documents ??= new InstanceDocuments();
-    configurePDFForBeaver({ onWorkerStartFailure: info => addon.runtime.publish('document-worker:failure', info) });
+    ensureDocumentRuntime();
 
     registerMainWindowFtl(win);
 

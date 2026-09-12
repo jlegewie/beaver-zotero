@@ -217,8 +217,7 @@ export function __resetModuleWindowForTest(): void {
  * process). Snapshotted per instance so schedule and cancel always go
  * through the same implementation.
  */
-function resolveTimerFunctions(): PDFTimerFunctions {
-    const injected = isConfigured() ? getConfig().timers : undefined;
+function resolveTimerFunctions(injected?: PDFTimerFunctions): PDFTimerFunctions {
     if (injected) return injected;
     return {
         setTimeout: (callback, delayMs) => {
@@ -401,12 +400,12 @@ export class WorkerDeadlineError extends Error {
     }
 }
 
-/** Cross-bundle-safe classification for worker-level deadline expiration. */
 /** Worker cancellation crosses the host's bundle boundary. */
 export function isWorkerAbortError(error: unknown): error is WorkerAbortError {
     return (error as { name?: unknown } | null)?.name === 'WorkerAbortError';
 }
 
+/** Cross-bundle-safe classification for worker-level deadline expiration. */
 export function isWorkerDeadlineError(error: unknown): boolean {
     return error instanceof WorkerDeadlineError
         || (error as { name?: unknown } | null | undefined)?.name
@@ -414,8 +413,7 @@ export function isWorkerDeadlineError(error: unknown): boolean {
 }
 
 export class MuPDFWorkerClient {
-    private readonly workQueue = getConfig().maxQueuedOperations === undefined
-        ? null : new DocumentWorkQueue(getConfig().maxQueuedOperations);
+    private readonly workQueue: DocumentWorkQueue | null;
     private readonly slotName: PDFWorkerSlotName;
     private idleTimeoutMs: number;
     private busyLeaseMs: number | null;
@@ -503,8 +501,11 @@ export class MuPDFWorkerClient {
             recycleAfterDataOperations?: number | null;
         } = {},
     ) {
+        const config = isConfigured() ? getConfig() : null;
+        this.workQueue = config?.maxQueuedOperations === undefined
+            ? null : new DocumentWorkQueue(config.maxQueuedOperations);
         this.slotName = opts.slotName ?? "hot";
-        this.timers = resolveTimerFunctions();
+        this.timers = resolveTimerFunctions(config?.timers);
         this.createdFromWindowInternal = moduleWindow;
         const override = testIdleTimeoutOverrides[this.slotName];
         this.idleTimeoutMs =

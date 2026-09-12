@@ -56,7 +56,7 @@ export function useValidateSyncLibraries() {
 
             const accepted: number[] = [];
             for (const id of missing) {
-                if (!Zotero.Beaver.background?.claimNotification(`missing-library:${Zotero.Beaver.account?.getGeneration()}:${id}`)) continue;
+                if (!Zotero.Beaver.background?.claimNotification(`missing-library:${id}`)) continue;
                 const libMeta = profileWithPlan.libraries.find(l => l.library_id === id);
                 const name = libMeta?.name || `Library ${id}`;
                 const isGroup = !!libMeta?.is_group;

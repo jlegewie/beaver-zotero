@@ -86,3 +86,20 @@ it('does not invalidate issue pages when a general status poll omits issues', as
         Zotero.Beaver = previous;
     }
 });
+
+it('ignores the stale-account status sentinel without displaying an error', async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const previous = Zotero.Beaver;
+    (Zotero as any).Beaver = { db: {}, background: { collectStatus: collect } };
+    const store = createStore();
+    const initial = store.get(backgroundProcessingStatusAtom);
+    collect.mockResolvedValue(null);
+    const root = createRoot(document.createElement('div'));
+    try {
+        await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(Consumer))));
+        expect(store.get(backgroundProcessingStatusAtom)).toBe(initial);
+    } finally {
+        act(() => root.unmount());
+        Zotero.Beaver = previous;
+    }
+});

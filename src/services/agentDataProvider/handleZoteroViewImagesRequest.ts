@@ -1,5 +1,3 @@
-import { isWorkerAbortError } from '../../beaver-extract/MuPDFWorkerClient';
-import { isExtractionError } from '@beaver/agent-core/extract/types';
 /**
  * Agent Data Provider — unified view-images requests (`view` tool).
  *
@@ -9,6 +7,9 @@ import { isExtractionError } from '@beaver/agent-core/extract/types';
  * attachment-image handler. The response always carries a list of images
  * (length 1 for image attachments).
  */
+
+import { isWorkerAbortError } from '../../beaver-extract/MuPDFWorkerClient';
+import { isExtractionError } from '@beaver/agent-core/extract/types';
 
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
@@ -40,9 +41,7 @@ import {
 } from './handleZoteroDocumentRequest';
 import {
     BeaverExtractor,
-    ExtractionError,
     ExtractionErrorCode,
-    WorkerAbortError,
     isWorkerDeadlineError,
 } from '../../beaver-extract';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '@beaver/agent-core/transport/attachmentLimits';

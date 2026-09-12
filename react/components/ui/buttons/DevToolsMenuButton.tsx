@@ -7,7 +7,6 @@ import PdfIcon from '@beaver/agent-ui/icons/PdfIcon';
 import SearchIcon from '@beaver/agent-ui/icons/SearchIcon';
 import ToolsIcon from '@beaver/agent-ui/icons/ToolsIcon';
 import {
-    ExtractionError,
     ExtractionErrorCode,
     BeaverExtractor,
 } from '../../../../src/beaver-extract';
