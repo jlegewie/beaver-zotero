@@ -45,6 +45,7 @@
  * machine, not whether a user may look at an item already in their library.
  */
 
+import { renderTableDocumentActions } from './tableDocumentActions';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { summarize } from '@beaver/agent-core/layouts/tableMutations';
 import type { TableSpec } from '@beaver/agent-core/layouts/table';
@@ -183,20 +184,6 @@ function couldBeTableItem(item: Zotero.Item | null | undefined): boolean {
         return item.attachmentContentType === 'text/html';
     } catch {
         return false;
-    }
-}
-
-/**
- * The real test, on an item whose lazy data may not be loaded.
- *
- * `isTableItem` reads tags, which throws on an unloaded item rather than
- * answering false, so "we cannot tell yet" is a third answer here and not a no.
- */
-function knownTableItem(item: Zotero.Item): boolean | null {
-    try {
-        return isTableItem(item);
-    } catch {
-        return null;
     }
 }
 
@@ -395,16 +382,16 @@ function handleItemChange({ item, setEnabled }: HookArgs): void {
  * The synchronous half: reset the body and put the actions up.
  *
  * The actions need no I/O, so they render immediately and the section has its
- * height before the counts arrive. If the item's data happens to be loaded and
- * says this is not one of ours, the section hides itself here — before anything
- * paints — and the asynchronous half is skipped.
+ * height before the counts arrive. Only primary data is checked here: the URL
+ * and tags can still be unloaded, and hiding the section prevents asyncRender
+ * from loading and validating them.
  */
 function handleRender({ doc, body, item, setEnabled, setSectionSummary }: HookArgs): void {
     try {
         body.setAttribute(ITEM_ATTRIBUTE, String(item?.id ?? ''));
         body.replaceChildren();
         setSectionSummary('');
-        if (knownTableItem(item) === false) {
+        if (!couldBeTableItem(item)) {
             setEnabled(false);
             return;
         }
@@ -431,6 +418,7 @@ async function handleAsyncRender({
         const stamp = body.getAttribute(ITEM_ATTRIBUTE);
 
         await loadTableItemFields([item]);
+        if (body.getAttribute(ITEM_ATTRIBUTE) !== stamp) return;
         if (!isTableItem(item)) {
             setEnabled(false);
             return;
@@ -618,23 +606,12 @@ async function openTable(ref: TableRef): Promise<void> {
  * *write*, and every write goes through `tableStore.ts`, which is webpack-only
  * so its single-flight lock stays single. This module cannot import it at all.
  */
-async function restoreShadow(ref: TableRef): Promise<void> {
+async function restoreShadow(ref: TableRef): Promise<string> {
     const api = getTablesApi();
-    if (!api) {
-        logger('tableItemPane: the table surfaces are not registered', 1);
-        return;
-    }
+    if (!api) return 'Table document actions are unavailable.';
     const result = await api.shadow.restore(ref);
-    if (!result.ok) {
-        logger(`tableItemPane: restore refused (${result.code}): ${result.error}`, 1);
-        return;
-    }
-    // The store announces the write, so whatever is showing the table re-reads
-    // it; the section itself re-renders on the next selection change.
-    logger(
-        `tableItemPane: restored ${ref.key} v${result.restoredFrom} as v${result.version}`,
-        3
-    );
+    if (!result.ok) return result.error;
+    return `Restored this device's version ${result.restoredFrom} as version ${result.version}. Close and reopen any open snapshot to see the current table.`;
 }
 
 function showInLibrary(win: Window | null, item: Zotero.Item): void {
@@ -659,15 +636,14 @@ function renderActions(doc: Document, item: Zotero.Item): HTMLElement {
     wrapper.className = 'beaver-table-section-actions';
 
     const ref = refOf(item);
+    const status = doc.createElement('div');
+    status.setAttribute('role', 'status');
     wrapper.append(
         // Enabled optimistically; the async half disables it when the item has
         // no file, which is the only way to know.
         button(doc, 'open', 'Open table', actions.open, () =>
             void openTable(ref)
         ),
-        button(doc, 'edit', 'Edit table', !!win?.__beaverEditTable, () => {
-            void win?.__beaverEditTable?.(ref).catch((error) => Zotero.logError(error));
-        }),
         button(doc, 'library', 'Show in library', actions.showInLibrary, () =>
             showInLibrary(win, item)
         ),
@@ -675,11 +651,16 @@ function renderActions(doc: Document, item: Zotero.Item): HTMLElement {
         // table, so it starts disabled and the async half enables it only for a
         // table that is actually in the conflicted state.
         hidden(
-            button(doc, 'restore-shadow', 'Restore my version', false, () =>
-                void restoreShadow(ref)
-            )
+            button(doc, 'restore-shadow', 'Restore my version', false, () => {
+                const restore = wrapper.querySelector<HTMLButtonElement>('[data-beaver-action="restore-shadow"]')!;
+                restore.disabled = true;
+                void restoreShadow(ref).then((message) => { status.textContent = message; })
+                    .catch((error) => { status.textContent = `${String(error)} Check the current table before trying again.`; })
+                    .finally(() => { restore.disabled = false; });
+            })
         )
     );
+    wrapper.append(status, renderTableDocumentActions(doc, ref));
     return wrapper;
 }
 

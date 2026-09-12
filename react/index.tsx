@@ -1,4 +1,3 @@
-import { openStoredTableEditor } from './components/tables/openStoredTableEditor';
 import { accountGenerationAtom, accountRevisionAtom, profileWithPlanAtom, isProfileLoadedAtom, searchableLibraryIdsAtom } from './atoms/profile';
 import { sessionAtom } from './atoms/auth';
 import { preferencesRevisionAtom } from './atoms/preferences';
@@ -70,7 +69,7 @@ import { ZOTERO_AGENT_NAME, ZOTERO_PLUGIN_CLIENT_TYPE } from '@beaver/agent-core
 import { setCredentialAdapter } from '@beaver/agent-core/transport/credentials';
 import { attachAccountProjection } from './runtime/accountProjection';
 import { setSupabaseClientProvider } from '@beaver/agent-core/transport/supabaseClient';
-import { registerTableShadowRestore } from '../src/services/artifacts/tableStore';
+import { registerTableLocalCommands } from '../src/services/artifacts/tableStore';
 import { registerZoteroBusyContext } from '../src/services/busyContext';
 import { registerZoteroSyncPause } from '../src/services/syncPause';
 import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
@@ -98,12 +97,6 @@ setTransportConfig({
 // resolve host-specific navigation and data lookups. Non-Zotero clients omit
 // this and run the render surface with the default empty host.
 registerZoteroHost();
-
-// Publish the stored-table recovery shadow's write half. Restoring a version a
-// sync conflict took is a write, so it goes through `tableStore.ts`, which is
-// webpack-only; the esbuild-side item pane reaches it through the shared
-// global. See src/services/artifacts/tablesApi.ts.
-registerTableShadowRestore();
 
 // Register the Zotero agent data-provider as the default for AgentService and
 // ProviderConnection. Must run before either singleton serves its first
@@ -362,8 +355,7 @@ export function closeAgentConnection(
 /** Called by the plugin before mounting any surface. */
 export function initializeRuntime(runtime: WindowRuntime) {
     initializeWindowRuntime(runtime);
-    runtime.contextWindow.__beaverEditTable = openStoredTableEditor;
-    Zotero.Beaver.runtime.addWindowCleanup(runtime, () => { delete runtime.contextWindow.__beaverEditTable; });
+    Zotero.Beaver.runtime.addWindowCleanup(runtime, registerTableLocalCommands(runtime.contextWindow));
     runtime.hostWindow.__beaverJotaiStore = store;
     attachAccountProjection(runtime);
     initializeReactUI(runtime.hostWindow);

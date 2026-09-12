@@ -14,6 +14,8 @@
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     clearTableWriteLocks,
+    tableLocalCommands,
+    getTableLocalCommands,
     getTableShadowRestore,
     setTableShadowRestore,
     setTablesApi,
@@ -23,7 +25,7 @@ import {
 } from './tablesApi';
 import { inspectTableShadow } from './recoveryShadow';
 import { openTable } from '../../ui/openTable';
-import { listReaderTableViews, openTableInReader } from './view/readerTableView';
+import { listReaderTableViews, openTableInReader, markTableReadersStale } from './view/readerTableView';
 import {
     describeTableItemPane,
     isTableItemPaneRegistered,
@@ -37,6 +39,8 @@ import {
 export function registerTablesApi(): void {
     const api: TablesApi = {
         openTable,
+        tableChanged: markTableReadersStale,
+        local: { commands: getTableLocalCommands },
         listViews: () => listReaderTableViews(),
         openInReader: (item, options) => openTableInReader(item, options),
         itemPane: {
@@ -67,6 +71,7 @@ export function registerTablesApi(): void {
     // Seed the registry in the plugin realm (`onShutdown` tears it down), not
     // in whichever window bundle first takes a lock.
     tableWriteLocks();
+    tableLocalCommands();
     logger('tablesApiHost: registered Zotero.__beaverTables', 3);
 }
 
@@ -80,22 +85,15 @@ export function registerTablesApi(): void {
  */
 export function unregisterTablesApi(): void {
     setTablesApi(null);
+    Zotero.__beaverTableLocalCommands?.clear();
+    Zotero.__beaverTableLocalCommands = undefined;
     unregisterTableShadowRestore();
     // Dropped with the realm that created it. Teardown means no write is in
     // flight to lose its turn.
     clearTableWriteLocks();
 }
 
-/**
- * Withdraws the shadow's write half on its own.
- *
- * The React bundle publishes it from its entry point and has no teardown of its
- * own, so the closure — which holds that bundle's `tableStore` module and
- * therefore its whole realm — has to be dropped by the window teardown that
- * outlives it. That is not only plugin shutdown: on macOS the last window can
- * close while the app keeps running, and the slot would otherwise pin the dead
- * realm indefinitely. The next window's bundle re-publishes it on load.
- */
+/** Clears the recovery callback during last-window or plugin teardown. */
 export function unregisterTableShadowRestore(): void {
     setTableShadowRestore(null);
 }

@@ -19,6 +19,7 @@
  * only that the undo function it hands back is called exactly once.
  */
 
+import { JSDOM } from 'jsdom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const enhanceTableDocument = vi.hoisted(() => vi.fn());
@@ -36,6 +37,9 @@ vi.mock('../../../src/services/artifacts/tableItemIdentity', () => ({
 }));
 
 import {
+    markTableReadersStale,
+    closeStaleTableReaders,
+    initReaderTableViews,
     cleanupReaderTableViews,
     cleanupReaderTableViewsForWindow,
     listReaderTableViews,
@@ -169,6 +173,49 @@ describe('the reader table view registry', () => {
                 }),
             },
         };
+    });
+
+    it('marks only matching snapshots and releases their listeners before reopening', async () => {
+        await openTableInReader(tableItem(1, 'KEY1'));
+        const reader = readers[0];
+        const doc = new JSDOM('<html data-beaver-table="1"><body>Old answer</body></html>').window.document;
+        reader._internalReader._primaryView.iframeDocument = doc;
+        reader.close = vi.fn(async () => { readers.splice(readers.indexOf(reader), 1); });
+        markTableReadersStale({ libraryID: 2, key: 'KEY1' });
+        expect(doc.querySelector('[data-beaver-table-outdated]')).toBeNull();
+        markTableReadersStale({ libraryID: 1, key: 'KEY1' });
+        markTableReadersStale({ libraryID: 1, key: 'KEY1' });
+        expect(doc.querySelectorAll('[data-beaver-table-outdated]')).toHaveLength(1);
+        expect(doc.body.textContent).toContain('Close and reopen');
+        await openTableInReader(tableItem(1, 'KEY1'));
+        expect(reader.close).toHaveBeenCalledOnce();
+        expect(dispose).toHaveBeenCalledOnce();
+        expect(enhanceTableDocument).toHaveBeenCalledTimes(2);
+        expect(readers).not.toContain(reader);
+    });
+
+    it('recognizes an outdated notice left across plugin reload', async () => {
+        const reader = fakeReader(main.win, 1, 'tab-1');
+        reader._internalReader._primaryView.iframeDocument = new JSDOM('<body><div data-beaver-table-outdated="true">Reopen</div></body>').window.document;
+        reader.close = vi.fn();
+        readers.push(reader);
+        await closeStaleTableReaders(1);
+        expect(reader.close).toHaveBeenCalledOnce();
+    });
+
+    it('reattaches enhancement when a toolbar belongs to a replacement document', async () => {
+        await openTableInReader(tableItem(1, 'KEY1'));
+        const reader = readers[0];
+        (Zotero.Reader as any).registerEventListener = vi.fn();
+        initReaderTableViews();
+        await vi.waitFor(() => expect(enhanceTableDocument).toHaveBeenCalledTimes(2));
+        const handler = vi.mocked(Zotero.Reader.registerEventListener).mock.calls[0][1] as any;
+        const replacement = loadedDocument();
+        reader._internalReader._primaryView.iframeDocument = replacement;
+        handler({ reader });
+        await vi.waitFor(() => expect(enhanceTableDocument).toHaveBeenCalledTimes(3));
+        expect(enhanceTableDocument.mock.calls[2][0]).toBe(replacement);
+        expect(dispose).toHaveBeenCalledTimes(2);
     });
 
     it('drops the view when its reader leaves the registry', async () => {

@@ -1,4 +1,3 @@
-import StoredTableEditor from './StoredTableEditor';
 import React, { useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { citationsAtom, processCitationsAtom } from '@beaver/agent-core/citations/atoms';
@@ -35,10 +34,6 @@ const renderCellText = (text: string) => (
 );
 
 export default function TableWindowView({ surface }: { surface: TableSurface }): React.ReactElement {
-    return surface.ref ? <StoredTableEditor key={`${surface.ref.libraryID}/${surface.ref.key}`} surface={surface} /> : <TableSnapshotView surface={surface} />;
-}
-
-export function TableSnapshotView({ surface }: { surface: TableSurface }): React.ReactElement {
     const showThread = useSetAtom(showThreadInWindowAtom);
     const addCitations = useSetAtom(citationsAtom);
     const processCitations = useSetAtom(processCitationsAtom);

@@ -37,7 +37,9 @@
 
 import type { TableRef } from './tableItemIdentity';
 import type { TableShadowReport, TableShadowObservation } from './recoveryShadow';
-import type { TableShadowRestoreResult } from './tableStore';
+import type { TableSpec } from '@beaver/agent-core/layouts/table';
+import type { TableVersionEntry } from './tableItemIdentity';
+import type { TableWriteResult, TableShadowRestoreResult } from './tableStore';
 import type { TableViewSummary } from './view/enhanceTableDocument';
 import type { ReaderTableDiagnostics } from './view/readerTableView';
 import type { OpenTableOutcome } from '../../ui/openTable';
@@ -103,6 +105,11 @@ export interface TablesApi {
         options?: { timeoutMs?: number }
     ): Promise<ReaderTableDiagnostics>;
 
+    /** Marks open snapshots as outdated after a persisted write. */
+    tableChanged(ref: TableRef): void;
+    local: {
+        commands(win: Window): TableLocalCommands;
+    };
     itemPane: TablesItemPaneApi;
     shadow: TablesShadowApi;
 }
@@ -202,3 +209,27 @@ export function clearTableWriteLocks(): void {
 export const TABLES_API_UNAVAILABLE =
     "Beaver's table surfaces are not registered (Zotero.__beaverTables is unset). " +
     'The esbuild bundle either failed to load or has already been torn down.';
+
+/** Local document commands supplied by a live renderer; dialogs stay with the caller. */
+export interface TableLocalCommands {
+    read(ref: TableRef): Promise<{ spec: TableSpec; version: number }>;
+    history(ref: TableRef): Promise<TableVersionEntry[]>;
+    revert(ref: TableRef, version: number): Promise<TableWriteResult>;
+    restoreShadow: TableShadowRestore;
+}
+
+/** Seeded by the plugin realm, released as each renderer detaches. */
+export function tableLocalCommands(): Map<Window, TableLocalCommands> {
+    return Zotero.__beaverTableLocalCommands ??= new Map();
+}
+
+export function getTableLocalCommands(win: Window): TableLocalCommands {
+    const entries = tableLocalCommands();
+    if (win.closed) throw new Error('The originating window is closed.');
+    const owner = win.__beaverOwnerWindowRef?.deref() ?? win;
+    const direct = entries.get(owner);
+    if (direct && !owner.closed) return direct;
+    // A standalone reader window has no renderer of its own.
+    for (const [owner, commands] of entries) if (!owner.closed) return commands;
+    throw new Error('Table document actions are unavailable. Reopen a Zotero library window with Beaver loaded.');
+}

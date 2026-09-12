@@ -439,12 +439,15 @@ class CitationNumbering {
     }
 
     /**
-     * `zotero://open` at the first cited page, or the item if there is none.
+     * Attachment citations open their document; metadata citations reveal the item.
      * Shared with the bibliography so a marker and its entry always agree.
      */
     hrefFor(citation: Citation | undefined): string | null {
         const ref = citation?.resolved_ref ?? citation?.requested_ref;
         if (!ref || !('zotero_key' in ref) || !ref.zotero_key) return null;
+        if (citation?.citation_type === 'item') {
+            return `zotero://select/${this.scopeFor(ref.library_id)}/items/${ref.zotero_key}`;
+        }
         const page = citation?.pages?.[0];
         const base = `zotero://open/${this.scopeFor(ref.library_id)}/items/${ref.zotero_key}`;
         return page ? `${base}?page=${page}` : base;

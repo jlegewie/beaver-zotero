@@ -465,6 +465,15 @@ describe("citations", () => {
         expect(markers.filter((m) => m === "1").length).toBeGreaterThan(1);
     });
 
+    it("reveals metadata sources instead of asking the reader to open a regular item", () => {
+        const metadata = structuredClone(cited);
+        metadata.citations![0].citation_type = "item";
+        metadata.citations![0].pages = undefined;
+        const { html } = renderTableHtml(metadata);
+        expect(html).toContain('href="zotero://select/library/items/K1"');
+        expect(html).not.toContain('href="zotero://open/library/items/K1');
+    });
+
     it("opens the cited page, and carries the card's parts", () => {
         const { html } = renderTableHtml(cited);
         expect(html).toContain('href="zotero://open/library/items/K1?page=4"');
@@ -1038,4 +1047,22 @@ describe("things a stored table must survive", () => {
 it("shows uncertainty and staleness alongside failures without requiring a value", () => {
     const { html } = renderTableHtml({ id: "states", columns: [{ id: "a", header: "Answer", type: "text" }], rows: [{ id: "r", cells: { a: { status: "error", error: "Failed inspection", flag: "unsourced", stale: true } } }] });
     expect(html).toContain('Failed inspection</span><small class="bt-cell-state"> · Unsourced · Stale</small>');
+});
+
+it("preserves not-reported, blank user ownership, uncertainty and cited evidence in the snapshot", () => {
+    const { html } = buildTableDocument({
+        id: "outcomes", columns: [{ id: "a", header: "Answer", type: "text" }],
+        rows: [
+            { id: "absent", cells: { a: { outcome: "not_reported", provenance: "extracted", details: { kind: "text", text: 'No result reported <citation id="u-ABCD1234-p1-s1"/>' } } } },
+            { id: "blank", cells: { a: { provenance: "user" } } },
+            { id: "tentative", cells: { a: { value: { kind: "text", text: "Tentative answer" }, flag: "unsure", stale: true } } },
+        ],
+    });
+    expect(html).toContain('Not reported');
+    expect(html).toContain('Edited by you');
+    expect(html).toContain('Unsure · Stale');
+    expect(html).toContain('No result reported');
+    expect(html).toContain('u-ABCD1234-p1-s1');
+    expect(html).not.toContain('contenteditable');
+    expect(html).not.toMatch(/<script(?![^>]*type="application\/json")/);
 });

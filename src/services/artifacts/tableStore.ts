@@ -77,7 +77,8 @@ import {
     tableSpecHash,
     type TableSyncConflict,
 } from './recoveryShadow';
-import { setTableShadowRestore, tableWriteLocks } from './tablesApi';
+import { getTablesApi, setTableShadowRestore, tableWriteLocks, tableLocalCommands } from './tablesApi';
+import { readTable } from './tableItemIdentity';
 import { zoteroLinkScope, zoteroLinksFor } from './view/tableLinks';
 import {
     buildTableDocument,
@@ -2058,6 +2059,7 @@ function emitTableUpdated(
             actor: meta.actor,
             ...(meta.run_id ? { run_id: meta.run_id } : {}),
         };
+        getTablesApi()?.tableChanged(ref);
         Zotero.Beaver?.runtime?.publish(TABLE_UPDATED_EVENT, detail);
     } catch (error) {
         logger(`tableStore: table-updated dispatch failed: ${String(error)}`, 2);
@@ -2068,18 +2070,22 @@ function emitTableUpdated(
 // Publishing the write half
 // ---------------------------------------------------------------------------
 
-/**
- * Publishes {@link restoreShadowVersion} on the shared global, so the
- * esbuild-side item pane can offer the action without importing this module.
- *
- * It cannot import it: this module owns the single-flight write lock, which is
- * only single because the store stays out of the esbuild bundle
- * (`npm run check:bundle` enforces it). Called once from the React bundle's
- * entry point; safe to call twice, since it replaces the binding. Withdrawing
- * it is `unregisterTablesApi`'s job, in the bundle that owns teardown.
- */
-export function registerTableShadowRestore(): void {
-    setTableShadowRestore((ref) => restoreShadowVersion(ref));
+/** Registers the store callbacks for one renderer and returns its teardown. */
+export function registerTableLocalCommands(win: Window): () => void {
+    const commands = {
+        read: readTable,
+        history: async (ref: TableRef) => (await openTable(ref)).history,
+        revert: (ref: TableRef, version: number) => revertTable(ref, version, { actor: 'user' }),
+        restoreShadow: restoreShadowVersion,
+    };
+    const entries = tableLocalCommands();
+    entries.set(win, commands);
+    setTableShadowRestore(commands.restoreShadow);
+    return () => {
+        if (entries.get(win) !== commands) return;
+        entries.delete(win);
+        setTableShadowRestore(entries.values().next().value?.restoreShadow ?? null);
+    };
 }
 
 /** Repair canonical bookkeeping before validating history for provider access. */

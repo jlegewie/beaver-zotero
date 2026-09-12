@@ -79,7 +79,7 @@ import {
     type TableViewSummary,
 } from './enhanceTableDocument';
 import { openTableLink } from './tableLinks';
-import { isTableItem, loadTableItemFields } from '../tableItemIdentity';
+import { isTableItem, loadTableItemFields, type TableRef } from '../tableItemIdentity';
 
 /** How long to wait for a view that never finishes initialising. */
 const VIEW_INIT_TIMEOUT_MS = 8000;
@@ -153,6 +153,7 @@ function blankDiagnostics(): ReaderTableDiagnostics {
 
 interface EnhancedReaderView {
     reader: any;
+    document: Document;
     itemKey: string | null;
     libraryID: number | null;
     tabID: string | null;
@@ -161,6 +162,43 @@ interface EnhancedReaderView {
 }
 
 const views = new Map<any, EnhancedReaderView>();
+const staleReaders = new WeakSet<object>();
+const revokedReaders = new WeakSet<object>();
+let lifecycle = 0;
+
+function snapshotDocument(reader: any): Document | undefined {
+    const view = reader?._internalReader?._primaryView;
+    return view?.iframeDocument ?? view?._iframeDocument;
+}
+
+/** A persisted write never leaves an old snapshot silently presented as current. */
+export function markTableReadersStale(ref: TableRef): void {
+    for (const reader of readerRegistry()) {
+        const item = Zotero.Items.get(reader.itemID);
+        if (!item || item.key !== ref.key || item.libraryID !== ref.libraryID) continue;
+        staleReaders.add(reader);
+        const doc = snapshotDocument(reader);
+        if (!doc?.body || doc.querySelector('[data-beaver-table-outdated]')) continue;
+        const notice = doc.createElement('div');
+        notice.setAttribute('data-beaver-table-outdated', 'true');
+        notice.setAttribute('role', 'status');
+        notice.textContent = 'This table has changed. Close and reopen this snapshot to see the current version.';
+        notice.style.cssText = 'position:sticky;top:0;z-index:10000;padding:12px;background:#fff0bd;color:#332600;font:14px sans-serif;border:1px solid #b68700';
+        doc.body.prepend(notice);
+    }
+}
+
+/** The product Open command replaces readers known to contain old bytes. */
+export async function closeStaleTableReaders(itemID: number): Promise<void> {
+    for (const reader of [...readerRegistry()]) {
+        if (reader.itemID !== itemID || (!staleReaders.has(reader) && !snapshotDocument(reader)?.querySelector?.('[data-beaver-table-outdated]'))) continue;
+        if (typeof reader.close !== 'function') throw new Error('Close the outdated snapshot before reopening the table.');
+        await reader.close();
+        disposeView(reader);
+        staleReaders.delete(reader);
+    }
+}
+
 
 /** Readers that are definitively not tables, so they are not re-examined. */
 const notTables = new WeakSet<object>();
@@ -384,8 +422,10 @@ async function enhanceReader(
     reader: any,
     options: { force?: boolean } = {}
 ): Promise<ReaderTableDiagnostics | null> {
-    if (!reader) return null;
-    if (views.has(reader)) return lastDiagnosticsFor(reader);
+    if (!reader || revokedReaders.has(reader)) return null;
+    const existing = views.get(reader);
+    if (existing && existing.document === snapshotDocument(reader)) return lastDiagnosticsFor(reader);
+    if (existing) disposeView(reader);
     if (!options.force && notTables.has(reader)) return null;
     if (inFlight.has(reader)) return null;
 
@@ -394,6 +434,7 @@ async function enhanceReader(
     attempts.set(reader, attempt);
     inFlight.add(reader);
 
+    const generation = lifecycle;
     const diagnostics = blankDiagnostics();
     try {
         diagnostics.readerType = reader.type ?? null;
@@ -421,7 +462,7 @@ async function enhanceReader(
         const view = await initializedView(reader, diagnostics.failures);
         diagnostics.internalReaderFound = !!reader._internalReader;
         diagnostics.primaryViewFound = !!reader._internalReader?._primaryView;
-        if (!view) return diagnostics;
+        if (!view || generation !== lifecycle || revokedReaders.has(reader) || reader._window?.closed) return diagnostics;
         diagnostics.viewInitialized = view.initialized !== false;
 
         // `iframeDocument` is the reader's own public getter for this; the
@@ -476,6 +517,7 @@ async function enhanceReader(
         // closes over the array, so every later push lands in this dispose.
         views.set(reader, {
             reader,
+            document: doc,
             itemKey: diagnostics.itemKey,
             libraryID: diagnostics.libraryID,
             tabID: diagnostics.tabID,
@@ -610,6 +652,9 @@ export function initReaderTableViews(): void {
  * report itself closed and its readers are still in `Zotero.Reader._readers`.
  */
 export function cleanupReaderTableViewsForWindow(win: Window): void {
+    for (const reader of readerRegistry()) {
+        if (reader?._window === win) revokedReaders.add(reader);
+    }
     for (const reader of [...views.keys()]) {
         if (reader?._window === win) disposeView(reader);
     }
@@ -617,6 +662,7 @@ export function cleanupReaderTableViewsForWindow(win: Window): void {
 
 /** Restores every reader this touched, for window teardown and shutdown. */
 export function cleanupReaderTableViews(): void {
+    lifecycle += 1;
     for (const reader of [...views.keys()]) disposeView(reader);
     lastDiagnostics.clear();
 
@@ -672,6 +718,7 @@ export async function openTableInReader(
     const deadline = Date.now() + timeoutMs;
 
     try {
+        await closeStaleTableReaders(item.id);
         await (Zotero.Reader as any).open(item.id);
     } catch (error) {
         const diagnostics = blankDiagnostics();

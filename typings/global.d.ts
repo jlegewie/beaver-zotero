@@ -23,7 +23,6 @@ declare const addon: import("../src/addon").default;
 declare const __env__: "production" | "development";
 
 interface Window {
-    __beaverEditTable?: (ref: import("../src/services/artifacts/tableItemIdentity").TableRef) => Promise<void>;
     __beaverRuntime?: import("../src/runtime/instance").WindowRuntime;
     __beaverJotaiStore?: ReturnType<typeof import('jotai').createStore>;
     /**
@@ -70,6 +69,9 @@ declare namespace Zotero {
      * webpack-only (it imports the library-exclusion check), so the
      * esbuild-side item pane reaches it through here.
      */
+    let __beaverTableLocalCommands:
+        | Map<Window, import("../src/services/artifacts/tablesApi").TableLocalCommands>
+        | undefined;
     let __beaverTableShadowRestore:
         | import("../src/services/artifacts/tablesApi").TableShadowRestore
         | undefined;

@@ -24,6 +24,7 @@ import {
 } from '../../../src/services/artifacts/tableDocument';
 import { TABLE_TAG } from '../../../src/services/artifacts/tableItem';
 import {
+    registerTableLocalCommands,
     createTable,
     editTable,
     listVersions,
@@ -36,7 +37,7 @@ import {
     type TableHistory,
     type TableWriteResult,
 } from '../../../src/services/artifacts/tableStore';
-import { tableWriteLocks } from '../../../src/services/artifacts/tablesApi';
+import { getTableLocalCommands, getTableShadowRestore, tableLocalCommands, tableWriteLocks } from '../../../src/services/artifacts/tablesApi';
 import * as recoveryShadow from '../../../src/services/artifacts/recoveryShadow';
 
 // ---------------------------------------------------------------------------
@@ -1490,4 +1491,20 @@ it('rechecks source exclusions at the document commit point', async () => {
     const response = await handleArtifactRequest({ event: 'artifact_request', request_id: 'mid-write', op: 'write', key: `u-${KEY}`, spec, meta: { actor: 'user' }, operation_id: 'mid-write', expected_version: opened.version, expected_sha256: opened.sha256 });
     expect(response).toMatchObject({ ok: false, error_code: 'library_excluded' });
     expect(await readFile(htmlPath, 'utf8')).toBe(original);
+});
+
+it('releases renderer-owned document commands while preserving another live renderer', () => {
+    const first = { closed: false } as Window;
+    const second = { closed: false } as Window;
+    const releaseFirst = registerTableLocalCommands(first);
+    const releaseSecond = registerTableLocalCommands(second);
+    expect(getTableLocalCommands(first).read).toBe(readTable);
+    expect(tableLocalCommands().size).toBe(2);
+    releaseFirst();
+    expect(tableLocalCommands().has(first)).toBe(false);
+    expect(getTableLocalCommands(second).restoreShadow).toBe(getTableShadowRestore());
+    releaseSecond();
+    expect(tableLocalCommands().size).toBe(0);
+    expect(getTableShadowRestore()).toBeNull();
+    expect(() => getTableLocalCommands(second)).toThrow('unavailable');
 });
