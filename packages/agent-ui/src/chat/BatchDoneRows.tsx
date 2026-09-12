@@ -79,7 +79,7 @@ const BatchDoneRow: React.FC<{
                         isCancelled
                             ? 'font-color-tertiary'
                             : hasFailures
-                              ? 'font-color-orange'
+                              ? 'font-color-secondary'
                               : 'font-color-green'
                     }`}
                 />
