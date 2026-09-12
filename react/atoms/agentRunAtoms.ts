@@ -1,3 +1,5 @@
+import { acquireWriter, assertWriter, bindWriter, currentWriter, ownsWriter, releaseWriter, type WriterLease } from '../runtime/threadWriter';
+import { viewedHistoryRevisionAtom } from '../runtime/threadProjection';
 import { getCredentialGeneration, assertCredentialGeneration } from '@beaver/agent-core/transport/credentials';
 /**
  * WebSocket-based message generation atoms
@@ -621,7 +623,7 @@ type StartContinuationRunOptions = {
     userMessage?: string;
 };
 
-async function startContinuationRun(
+async function startContinuationRunOwned(
     get: Getter,
     set: Setter,
     failedRunId: string,
@@ -750,7 +752,7 @@ async function startContinuationRun(
  * removed runs stay in place, as before. A failed or refused truncation
  * takes the ordinary auto-retry error path with nothing local to unwind.
  */
-async function startAutoRetryRun(
+async function startAutoRetryRunOwned(
     get: Getter,
     set: Setter,
     failedRunId: string,
@@ -1489,10 +1491,13 @@ export function createWSCallbacks(
     connectAttempts: () => number | null = () => null,
 ): WSCallbacks {
     const generation = getCredentialGeneration();
+    const writer = currentWriter();
+    const callbackEpoch = ++writerCallbackEpoch;
     // Callbacks also write after awaits; entry validation alone cannot protect those writes.
     const originalSet = set;
     set = ((...args: Parameters<Setter>) => {
         assertCredentialGeneration(generation);
+        if (!ownsWriter(writer) || callbackEpoch !== writerCallbackEpoch) return;
         return originalSet(...args);
     }) as Setter;
     const callbacks = flushPartsBeforeOtherEvents({
@@ -1732,6 +1737,8 @@ export function createWSCallbacks(
         // — retries commit their removal through `POST /truncate` before the
         // run request is sent.
         onThread: (newThreadId: string) => {
+            if (!bindWriter(writer, newThreadId)) { agentService.close(1000, 'Chat ownership changed'); return; }
+            Zotero.Beaver?.threads?.invalidateViews();
             logger('WS onThread:', { threadId: newThreadId }, 1);
             set(currentThreadIdAtom, newThreadId);
             set(activeRunAtom, (prev) => prev ? { ...prev, thread_id: newThreadId } : prev);
@@ -1740,6 +1747,7 @@ export function createWSCallbacks(
         onThreadName: (event: WSThreadNameEvent) => {
             logger('WS onThreadName:', { threadId: event.thread_id, name: event.name }, 1);
             set(currentThreadNameAtom, event.name);
+            Zotero.Beaver?.threads?.patchThread(event.thread_id, { name: event.name });
         },
 
         onDone: () => {
@@ -2125,8 +2133,13 @@ export function createWSCallbacks(
     for (const [name, callback] of Object.entries(callbacks)) {
         if (typeof callback !== 'function') continue;
         guarded[name] = (...args: unknown[]) => {
-            if (generation !== getCredentialGeneration()) return;
-            return (callback as (...callbackArgs: unknown[]) => unknown)(...args);
+            if (generation !== getCredentialGeneration() || !ownsWriter(writer) || callbackEpoch !== writerCallbackEpoch) return;
+            const result = (callback as (...callbackArgs: unknown[]) => unknown)(...args);
+            if (name === 'onDone' || name === 'onError' || name === 'onClose') {
+                if (result instanceof Promise) return result.finally(() => settleWriter(store.get, writer));
+                settleWriter(store.get, writer);
+            }
+            return result;
         };
     }
     return guarded as unknown as WSCallbacks;
@@ -2195,6 +2208,7 @@ async function executeWSRequest(
     get: Getter,
     set: Setter
 ): Promise<void> {
+    assertWriter(currentWriter());
     // Every send/retry/resume lands here; stop if the client is already gone.
     if (clientShutDown) {
         logger('executeWSRequest: client is shutting down, not connecting', 1);
@@ -2202,6 +2216,7 @@ async function executeWSRequest(
         return;
     }
 
+    const requestWriter = currentWriter();
     // How many attempts this run's connection cost, once it has one.
     let attemptsMade: number | null = null;
 
@@ -2254,7 +2269,7 @@ async function executeWSRequest(
         isStillWanted: () => {
             const activeRun = store.get(activeRunAtom);
             return (
-                activeRun?.id === run.id &&
+                ownsWriter(requestWriter) && activeRun?.id === run.id &&
                 (activeRun.status === 'in_progress' || activeRun.status === 'awaiting_deferred')
             );
         },
@@ -2262,6 +2277,7 @@ async function executeWSRequest(
         connectLoopsInFlight--;
     });
 
+    if (!ownsWriter(requestWriter)) return;
     attemptsMade = result.attemptsMade;
 
     if (result.kind === 'connected') return;
@@ -2319,11 +2335,9 @@ export interface SendWSMessageOptions {
     actions?: PromptAction[];
 }
 
-export const sendWSMessageAtom = atom(
-    null,
-    async (
-        get,
-        set,
+const sendWSMessage = async (
+        get: Getter,
+        set: Setter,
         message: string,
         options?: SendWSMessageOptions,
     ) => {
@@ -2657,8 +2671,9 @@ export const sendWSMessageAtom = atom(
             set(activeRunAtom, null);
             set(isWSChatPendingAtom, false);
         }
-    }
-);
+    };
+export const sendWSMessageAtom = atom(null, (get, set, message: string, options?: SendWSMessageOptions) =>
+    withThreadWriter(get, set, guardedSet => sendWSMessage(get, guardedSet, message, options)));
 
 /** How a regenerate path replaces the target run. */
 interface RegenerateRunOptions {
@@ -2690,7 +2705,7 @@ interface RegenerateRunOptions {
  *    actions/citations locally
  * 5. Create the replacement run and execute it via WebSocket
  */
-async function startRegenerateRun(
+async function startRegenerateRunOwned(
     get: Getter,
     set: Setter,
     runId: string,
@@ -3170,6 +3185,10 @@ export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
     // so the streamed text still sitting in the frame queue has to be applied
     // first — after the slot is null there is nothing left to apply it to.
     flushPendingPartEvents();
+    releaseWriter();
+    writerCallbackEpoch++;
+    set(retryPendingRunIdAtom, null);
+    set(scheduledAutoResumeRunIdsAtom, new Set());
 
     // Set pending to false immediately for better UI responsiveness
     set(isWSChatPendingAtom, false);
@@ -3235,7 +3254,7 @@ export const closeWSConnectionForShutdownAtom = atom(
     ) => {
         // Latch first: a send still preparing has nothing to close or abandon.
         clientShutDown = true;
-        if (!agentService.isConnected() && connectLoopsInFlight === 0) return;
+        if (!agentService.isConnected() && connectLoopsInFlight === 0) { releaseWriter(); return; }
         agentService.close(1000, reason);
         if (options?.rememberInterruptedThread) rememberInterruptedThread(get);
         set(abandonActiveRunLocallyAtom);
@@ -3263,6 +3282,7 @@ function rememberInterruptedThread(get: Getter): void {
         threadId,
         userId,
         threadName: get(currentThreadNameAtom),
+        runId: activeRun.id,
     });
 }
 
@@ -3361,6 +3381,7 @@ export const clearStaleApprovalsAtom = atom(
 export const sendApprovalResponseAtom = atom(
     null,
     (_get, set, { actionId, approved, userInstructions }: { actionId: string; approved: boolean; userInstructions?: string | null }) => {
+        if (!ownsWriter(currentWriter())) return;
         set(approvalResponseIntentsAtom, (prev) => {
             const next = new Map(prev);
             next.set(actionId, approved);
@@ -3537,6 +3558,7 @@ export const sendAskUserQuestionResponseAtom = atom(
         answers: AskUserQuestionAnswer[];
         cancelled?: boolean;
     }) => {
+        if (!ownsWriter(currentWriter())) return;
         logger(`sendAskUserQuestionResponseAtom: Sending question response for ${questionId}: ${cancelled ? 'cancelled' : `${answers.length} answer(s)`}`, 1);
         agentService.sendAskUserQuestionResponse(questionId, answers, cancelled ?? false);
         set(removePendingQuestionAtom, toolcallId);
@@ -3558,6 +3580,7 @@ export const sendCreditConfirmationResponseAtom = atom(
         approved: boolean;
         userInstructions?: string | null;
     }) => {
+        if (!ownsWriter(currentWriter())) return;
         logger(`sendCreditConfirmationResponseAtom: Sending credit confirmation response for ${confirmationId}: ${approved}`, 1);
         const delivered = agentService.sendCreditConfirmationResponse(
             confirmationId,
@@ -3586,6 +3609,7 @@ export const sendBatchApprovalResponseAtom = atom(
         mode: BatchApprovalMode;
         userInstructions?: string | null;
     }) => {
+        if (!ownsWriter(currentWriter())) return;
         logger(`sendBatchApprovalResponseAtom: Sending batch approval response for ${approvalId}: ${approved} (${mode})`, 1);
         const delivered = agentService.sendBatchApprovalResponse(
             approvalId,
@@ -3610,3 +3634,55 @@ export const sendBatchApprovalResponseAtom = atom(
  * its batch paused — as does a batch the stamp itself flags as paused.
  */
 export const batchProgressAtom = atom((get) => selectLiveBatchProgress(get(allRunsAtom)));
+
+async function startContinuationRun(get: Getter, set: Setter, failedRunId: string, options: StartContinuationRunOptions): Promise<void> {
+    return withThreadWriter(get, set, guardedSet => startContinuationRunOwned(get, guardedSet, failedRunId, options));
+}
+
+async function startAutoRetryRun(get: Getter, set: Setter, failedRunId: string): Promise<void> {
+    return withThreadWriter(get, set, guardedSet => startAutoRetryRunOwned(get, guardedSet, failedRunId));
+}
+
+async function startRegenerateRun(get: Getter, set: Setter, runId: string, options: RegenerateRunOptions): Promise<void> {
+    return withThreadWriter(get, set, guardedSet => startRegenerateRunOwned(get, guardedSet, runId, options));
+}
+
+let writerCallbackEpoch = 0;
+function settleWriter(get: Getter, writer: WriterLease | undefined): void {
+    if (!writer || writer !== currentWriter() || writer.preparing || get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom))
+        || get(retryPendingRunIdAtom) || get(autoReplacementPendingRunIdsAtom).size) return;
+    releaseWriter(writer);
+    const id = get(currentThreadIdAtom);
+    if (id) store.set(viewedHistoryRevisionAtom, Zotero.Beaver.presence.getSnapshot().history[id] ?? 0);
+}
+/** Admit before preparation; nested composer/run phases retain the same lease. */
+export async function withThreadWriter<T>(get: Getter, set: Setter, operation: (set: Setter) => Promise<T>): Promise<T | undefined> {
+    const id = get(currentThreadIdAtom);
+    const presence = Zotero.Beaver?.presence;
+    if (presence && id) {
+        const snapshot = presence.getSnapshot();
+        if (snapshot.deleted.includes(id) || (!ownsWriter(currentWriter()) && (snapshot.history[id] ?? 0) !== get(viewedHistoryRevisionAtom))) {
+            set(addPopupMessageAtom, { type: 'warning', title: 'This chat was updated elsewhere', text: 'Refresh the chat before continuing. Your draft and attachments are preserved.', expire: false });
+            return;
+        }
+    }
+    const writer = acquireWriter(id, getCredentialGeneration());
+    if (writer === null) {
+        set(addPopupMessageAtom, { type: 'info', title: 'Responding in another window', text: 'Wait for that response to finish or go to its window.', expire: true });
+        return;
+    }
+    if (writer) writer.preparing++;
+    const nav = get(threadNavigationSeqAtom);
+    const guardedSet = ((...args: any[]) => {
+        assertWriter(writer);
+        if (writer && nav !== get(threadNavigationSeqAtom)) throw Object.assign(new Error('Chat changed'), { code: 'thread_operation_canceled' });
+        return (set as any)(...args);
+    }) as Setter;
+    try { return await operation(guardedSet); }
+    catch (error) {
+        if ((error as { code?: string })?.code !== 'thread_operation_canceled') throw error;
+    } finally {
+        if (writer) writer.preparing--;
+        settleWriter(get, writer);
+    }
+}

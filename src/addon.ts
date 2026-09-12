@@ -1,5 +1,7 @@
 import { ColumnOptions, DialogHelper } from "zotero-plugin-toolkit";
 import { config, version } from "../package.json";
+import { ThreadRepository } from './services/threads/threadRepository';
+import { ThreadPresence } from './services/threads/threadPresence';
 import hooks from "./hooks";
 import { createBackgroundTaskSource } from "./utils/backgroundTasks";
 import { BeaverInstance } from './runtime/instance';
@@ -20,6 +22,8 @@ import type { DevelopmentVoiceHarness } from './services/voice/developmentHarnes
 import type { VoiceService } from './services/voice/voiceService';
 
 class Addon {
+    public threads = new ThreadRepository();
+    public presence = new ThreadPresence();
     public documents?: import("./services/instanceDocuments").InstanceDocuments;
     public background?: import("./services/instanceBackground").InstanceBackground;
     public backgroundTasks = createBackgroundTaskSource();

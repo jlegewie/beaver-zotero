@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ChatLoadFailure from '../../../react/components/ChatLoadFailure';
 import { useChatReconnect } from '../../../react/hooks/useChatReconnect';
-import { classifyChatLoadError } from '../../../react/utils/chatLoadError';
+import { classifyChatLoadError } from '../../../src/services/threads/chatLoadError';
 import { SessionRefreshError } from '@beaver/agent-core/types/apiErrors';
 
 let root: Root;

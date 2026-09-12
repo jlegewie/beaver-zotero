@@ -1,3 +1,6 @@
+import { otherThreadWriterAtom, threadDeletedAtom, threadHistoryStaleAtom } from '../../runtime/threadProjection';
+import { loadThreadAtom } from '../../atoms/threads';
+import { userIdAtom } from '../../atoms/auth';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { useComposerVoice } from "../../hooks/useComposerVoice";
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -61,6 +64,12 @@ const InputArea: React.FC<InputAreaProps> = ({
     hideAttachmentMenu = false,
 }) => {
     const surfaceWindow = useSurfaceWindow();
+    const otherWriter = useAtomValue(otherThreadWriterAtom);
+    const chatDeleted = useAtomValue(threadDeletedAtom);
+    const historyStale = useAtomValue(threadHistoryStaleAtom);
+    const refreshThread = useSetAtom(loadThreadAtom);
+    const viewerUserId = useAtomValue(userIdAtom);
+    const viewerThreadId = useAtomValue(currentThreadIdAtom);
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
     const [messagePills, setMessagePills] = useAtom(currentMessagePillsAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
@@ -597,6 +606,17 @@ const InputArea: React.FC<InputAreaProps> = ({
             onClick={handleContainerClick}
             style={{ minHeight: 'fit-content' }}
         >
+            {(otherWriter || chatDeleted || historyStale) && <div className="p-2 text-sm" role="status">
+                {chatDeleted ? 'This chat was deleted.' : otherWriter ? 'Responding in another window' : 'This chat was updated elsewhere'}
+                {otherWriter && <Button variant="outline" onClick={() => {
+                    const target = Zotero.Beaver.runtime.resolveWindow(otherWriter.windowId);
+                    target?.hostWindow.focus();
+                    target?.hostWindow.__beaverEventBus?.dispatchEvent(new target.hostWindow.CustomEvent('toggleChat', { detail: { forceOpen: true } }));
+                }}>Go to window</Button>}
+                {!otherWriter && !chatDeleted && historyStale && <Button variant="outline" onClick={() => {
+                    if (viewerUserId && viewerThreadId) void refreshThread({ user_id: viewerUserId, threadId: viewerThreadId, preserveDraft: true, window: surfaceWindow });
+                }}>Refresh chat</Button>}
+            </div>}
             {/* Live batch progress. Above the band so it stacks as: what the
                 run is doing, then what it wants from the user. */}
             <BatchProgressPanel />
@@ -867,7 +887,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             className="composer-send"
                             ariaLabel="Send message"
                             onClick={handleSubmit}
-                            disabled={voice.busy || messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles}
+                            disabled={!!otherWriter || chatDeleted || historyStale || voice.busy || messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles}
                         />
                     )}
                 </div>

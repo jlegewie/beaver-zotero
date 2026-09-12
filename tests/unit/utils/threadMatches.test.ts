@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deduplicateByThread, threadModelToThreadData, isThreadInstanceMismatch } from '../../../react/utils/threadMatches';
+import { deduplicateByThread, threadModelToThreadData, isThreadInstanceMismatch } from '../../../src/services/threads/threadMatches';
 import { ThreadRunMatch, ZoteroInstanceRef } from '@beaver/agent-core/transport/threadService';
 
 function match(overrides: Partial<ThreadRunMatch> = {}): ThreadRunMatch {

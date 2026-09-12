@@ -1,73 +1,26 @@
 import ChatLoadFailure from './ChatLoadFailure';
-import { classifyChatLoadError, type ChatLoadError } from '../utils/chatLoadError';
 import { useChatReconnect } from '../hooks/useChatReconnect';
 import { useSurfaceWindow } from '../runtime/SurfaceWindowContext';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import React, { useEffect, useMemo } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { isThreadListViewAtom, isLibraryTabAtom, selectedZoteroTabIdAtom, hasPopupMessagesAtom, threadListFilterAtom, ThreadItemFilter } from '../atoms/ui';
 import { ThreadData, loadThreadAtom } from '../atoms/threads';
-import { upsertThreadsAtom, threadWriteStampAtom } from '../atoms/threadList';
+import { threadEntitiesAtom, threadViewsAtom, threadViewKey, EMPTY_THREAD_VIEW, resolveThreadView, loadThreadPageAtom, loadThreadsByItemAtom } from '../atoms/threadList';
 import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
-import { threadService, isThreadAgentMismatch } from '@beaver/agent-core/transport/threadService';
 import { convertUTCToLocal } from '../utils/dateUtils';
-import { deduplicateByThread, threadModelToThreadData, isThreadInstanceMismatch } from '../utils/threadMatches';
+import { isThreadInstanceMismatch } from '../../src/services/threads/threadMatches';
 import { currentZoteroInstanceRef } from '../../src/utils/zoteroUtils';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { getReaderOrNoteContextItem } from '../utils/zoteroTabContext';
 import { buildThreadItemFilter } from '../utils/threadItemFilter';
-import { buildRecentChatsCacheKey, buildRecentChatsItemLookup } from '../utils/recentChatsLookup';
+import { buildRecentChatsItemLookup } from '../utils/recentChatsLookup';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
-import { logger } from '@beaver/agent-core/platform/logger';
 import Button from '@beaver/agent-ui/primitives/Button';
 
 const MAX_RECENT = 3;
-const CACHE_TTL = 60_000; // 1 minute
-
 type ContextType = 'recent' | 'file' | 'note';
-
-interface CacheEntry {
-    threads: ThreadData[];
-    contextType: ContextType;
-    timestamp: number;
-}
-
-// Module-level cache persists across mount/unmount cycles
-const recentCache = new Map<string, CacheEntry>();
-
-/**
- * Clear cache and optionally remove a specific thread from mounted RecentChats.
- * When `deletedThreadId` is provided each mounted instance filters it out
- * immediately so the user sees the change without waiting for a re-fetch.
- */
-const recentChatsRemovers = new Set<(id: string) => void>();
-export function registerRecentChatsRemover(fn: (id: string) => void) {
-    recentChatsRemovers.add(fn);
-    return () => {
-        recentChatsRemovers.delete(fn);
-    };
-}
-
-export function clearRecentChatsCache(deletedThreadId?: string) {
-    if (deletedThreadId) {
-        for (const [cacheKey, entry] of recentCache.entries()) {
-            recentCache.set(cacheKey, {
-                ...entry,
-                threads: entry.threads.filter(thread => thread.id !== deletedThreadId),
-            });
-        }
-        for (const removeThread of recentChatsRemovers) {
-            try { 
-                removeThread(deletedThreadId); 
-            } catch (e) { 
-                logger(`RecentChats: error removing thread from local state: ${e}`, 1);
-            }
-        }
-    } else {
-        recentCache.clear();
-    }
-}
 
 /**
  * Compact relative time: "now", "3m", "2h", "1d", "2w", "3mo"
@@ -95,187 +48,49 @@ const RecentChats: React.FC = () => {
     const selectedTabId = useAtomValue(selectedZoteroTabIdAtom);
     const setIsThreadListView = useSetAtom(isThreadListViewAtom);
     const loadThread = useSetAtom(loadThreadAtom);
-    const upsertThreads = useSetAtom(upsertThreadsAtom);
-    const jotaiStore = useStore();
     const setFilter = useSetAtom(threadListFilterAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const hasPopupMessages = useAtomValue(hasPopupMessagesAtom);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
-
-    const [threads, setThreads] = useState<ThreadData[]>([]);
-    const [contextType, setContextType] = useState<ContextType>('recent');
-    const [isLoaded, setIsLoaded] = useState(false);
-    const [isFetching, setIsFetching] = useState(false);
-    const [fetchError, setFetchError] = useState<ChatLoadError | null>(null);
-    const [retryRevision, setRetryRevision] = useState(0);
-    const handledRetryRevision = useRef(0);
-    const retry = useCallback(() => setRetryRevision(value => value + 1), []);
+    const entities = useAtomValue(threadEntitiesAtom);
+    const views = useAtomValue(threadViewsAtom);
+    const loadPage = useSetAtom(loadThreadPageAtom);
+    const loadByItem = useSetAtom(loadThreadsByItemAtom);
+    const { ctx, filter } = useMemo(() => {
+        const ctx = !isLibraryTab && selectedTabId ? getReaderOrNoteContextItem(selectedTabId) : null;
+        const lookup = ctx ? buildRecentChatsItemLookup(ctx.libraryId, ctx.keys, searchableLibraryIds) : null;
+        const filter: ThreadItemFilter | null = lookup ? {
+            libraryId: lookup.libraryId, libraryRef: libraryRefForLibraryID(lookup.libraryId) ?? undefined,
+            keys: lookup.zoteroKeys, itemKey: ctx!.item.key, itemType: '', label: '',
+        } : null;
+        return { ctx, filter };
+    }, [isLibraryTab, selectedTabId, searchableLibraryIds]);
+    const instance = currentZoteroInstanceRef();
+    const scope = useMemo(() => instance ?? undefined, [instance?.zoteroUserId, instance?.zoteroLocalId]);
+    const pageKey = threadViewKey({ userId: user?.id ?? '', showAll: false, scope });
+    const itemKey = filter ? threadViewKey({ userId: user?.id ?? '', showAll: false, filter }) : null;
+    const itemView = itemKey ? views.get(itemKey) ?? EMPTY_THREAD_VIEW : EMPTY_THREAD_VIEW;
+    const itemRows = resolveThreadView(itemView, entities).filter(thread => !isThreadInstanceMismatch(scope ?? null, thread));
+    const useItems = !!itemKey && (itemView.status !== 'ready' || itemRows.length > 0);
+    const activeView = useItems ? itemView : views.get(pageKey) ?? EMPTY_THREAD_VIEW;
+    const threads = (useItems ? itemRows : resolveThreadView(activeView, entities)).slice(0, MAX_RECENT);
+    const contextType: ContextType = useItems ? ctx?.source === 'reader' ? 'file' : 'note' : 'recent';
+    const fetchError = activeView.error;
+    const isLoaded = activeView.status === 'ready' || activeView.status === 'error';
+    const isFetching = activeView.status === 'loading';
+    const retry = () => {
+        if (useItems && filter && itemKey) void loadByItem({ key: itemKey, filter, force: true });
+        else void loadPage({ key: pageKey, query: '', scope, includeOtherCount: scope !== undefined, force: true });
+    };
     useChatReconnect(retry, !!fetchError);
-
-    // Clear cache on mount so returning to home always shows fresh data
-    const hasMountedRef = useRef(false);
-
-    const fetchRecentChats = useCallback(async (isCancelled: () => boolean, force = false) => {
+    // Query identity and freshness drive loads; the instance deduplicates both surfaces.
+    useEffect(() => {
         if (!user) return;
-        // Read at call time, not subscribed: the stamp must be the value as
-        // of this request, and subscribing would re-run this effect on every
-        // pin toggle anywhere in the app.
-        const stampAtFetch = jotaiStore.get(threadWriteStampAtom);
-
-        // Read reader/note info synchronously from Zotero APIs
-        // instead of waiting for the async zoteroContextAtom update chain
-        let attachmentKey: string | null = null;
-        let noteKey: string | null = null;
-        let libraryId: number | undefined;
-
-        const itemKeys: string[] = [];
-
-        if (!isLibraryTab && selectedTabId) {
-            const ctx = getReaderOrNoteContextItem(selectedTabId);
-            if (ctx) {
-                libraryId = ctx.libraryId;
-                itemKeys.push(...ctx.keys);
-                if (ctx.source === 'reader') {
-                    attachmentKey = ctx.item.key;
-                } else {
-                    noteKey = ctx.item.key;
-                }
-            }
-        }
-
-        // Cache key: differentiate library vs reader-per-attachment vs note
-        let contextCacheKey: string;
-        if (!isLibraryTab && attachmentKey) {
-            contextCacheKey = `${user.id}:reader:${attachmentKey}`;
-        } else if (!isLibraryTab && noteKey) {
-            contextCacheKey = `${user.id}:note:${noteKey}`;
-        } else {
-            contextCacheKey = `${user.id}:library`;
-        }
-        const cacheKey = buildRecentChatsCacheKey(
-            contextCacheKey,
-            searchableLibraryIds,
-        );
-
-        // On first mount, clear cache for fresh data; subsequent renders use TTL
-        if (!hasMountedRef.current) {
-            recentCache.delete(cacheKey);
-            hasMountedRef.current = true;
-        }
-
-        // Check cache
-        const cached = recentCache.get(cacheKey);
-        if (!force && cached && Date.now() - cached.timestamp < CACHE_TTL) {
-            if (isCancelled()) return;
-            setFetchError(null);
-            setThreads(cached.threads);
-            setContextType(cached.contextType);
-            setIsLoaded(true);
-            return;
-        }
-
-        setIsFetching(true);
-        try {
-            let resultThreads: ThreadData[] = [];
-            let resultContextType: ContextType = 'recent';
-
-            const itemLookup = !isLibraryTab
-                ? buildRecentChatsItemLookup(libraryId, itemKeys, searchableLibraryIds)
-                : null;
-
-            // Silently scope to the current Zotero instance — RecentChats has
-            // no "Show all" affordance (the full ThreadListView does).
-            const instanceScope = currentZoteroInstanceRef() ?? undefined;
-
-            // Reader/note context: try item-specific threads first. Excluded
-            // libraries produce no lookup payload (privacy boundary), so neither
-            // their stable identity nor item keys reach the backend.
-            if (itemLookup) {
-                try {
-                    const matches = await threadService.findThreadsByItem(
-                        {
-                            libraryId: itemLookup.libraryId,
-                            libraryRef: libraryRefForLibraryID(itemLookup.libraryId),
-                        },
-                        itemLookup.zoteroKeys,
-                        'both'
-                    );
-                    if (isCancelled()) return;
-                    // By-item results are scoped client-side from the agent and
-                    // identity columns (bounded set; no server-side by-item
-                    // scoping).
-                    const ownAgent = matches.filter(m => !isThreadAgentMismatch(m));
-                    const deduped = deduplicateByThread(ownAgent).filter(t =>
-                        !isThreadInstanceMismatch(instanceScope ?? null, {
-                            zoteroUserId: t.zoteroUserId, zoteroLocalId: t.zoteroLocalId,
-                        })
-                    );
-                    if (deduped.length > 0) {
-                        resultThreads = deduped.slice(0, MAX_RECENT);
-                        resultContextType = noteKey ? 'note' : 'file';
-                    }
-                } catch (err) {
-                    if (isCancelled()) return;
-                    throw err;
-                }
-            }
-
-            // Fallback: general recent chats
-            if (resultThreads.length === 0) {
-                const response = await threadService.getPaginatedThreads(MAX_RECENT, null, instanceScope);
-                if (isCancelled()) return;
-                resultThreads = response.data.map(threadModelToThreadData);
-                resultContextType = 'recent';
-            }
-
-            if (isCancelled()) return;
-            setFetchError(null);
-            setThreads(resultThreads);
-            setContextType(resultContextType);
-            // Into the shared thread store too: opening one of these chats then
-            // needs no extra fetch to know whether it is pinned. The generation
-            // was read before the fetch, so a response arriving after a
-            // sign-out is dropped rather than repopulating the store.
-            upsertThreads({ threads: resultThreads, stamp: stampAtFetch });
-
-            recentCache.set(cacheKey, {
-                threads: resultThreads,
-                contextType: resultContextType,
-                timestamp: Date.now(),
-            });
-        } catch (error) {
-            if (isCancelled()) return;
-            console.error('RecentChats: error fetching threads:', error);
-            setFetchError(classifyChatLoadError(error));
-        } finally {
-            if (!isCancelled()) {
-                setIsLoaded(true);
-                setIsFetching(false);
-            }
-        }
-    }, [user, isLibraryTab, selectedTabId, searchableLibraryIds, upsertThreads, jotaiStore]);
-
-    // Fetch on mount and when context changes (e.g. library ↔ reader tab switch)
+        if (filter && itemKey) void loadByItem({ key: itemKey, filter });
+    }, [user?.id, itemKey, filter, loadByItem, itemView.loadedAt]);
     useEffect(() => {
-        let cancelled = false;
-        const generation = jotaiStore.get(threadWriteStampAtom).generation;
-        const isCancelled = () => cancelled || !!Zotero.__beaverShuttingDown
-            || jotaiStore.get(threadWriteStampAtom).generation !== generation;
-        const force = retryRevision !== handledRetryRevision.current;
-        handledRetryRevision.current = retryRevision;
-        fetchRecentChats(isCancelled, force);
-        return () => { cancelled = true; };
-    }, [fetchRecentChats, retryRevision, jotaiStore]);
-
-    // Register callback so external callers (ThreadListView, the header's
-    // chat-actions menu) can remove a deleted thread from our local state
-    // without a full re-fetch.
-    useEffect(() => {
-        const unregister = registerRecentChatsRemover((id: string) => {
-            setThreads(prev => prev.filter(t => t.id !== id));
-        });
-        return unregister;
-    }, []);
+        if (user && !useItems) void loadPage({ key: pageKey, query: '', scope, includeOtherCount: scope !== undefined });
+    }, [user?.id, pageKey, scope, useItems, loadPage, activeView.loadedAt]);
 
     const handleSelectThread = async (thread: ThreadData) => {
         if (!user || thread.id === currentThreadId) return;

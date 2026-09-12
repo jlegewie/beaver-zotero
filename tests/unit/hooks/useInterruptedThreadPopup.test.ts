@@ -1,3 +1,4 @@
+vi.mock('../../../react/runtime/SurfaceWindowContext', () => ({ useSurfaceWindow: () => window }));
 // @vitest-environment jsdom
 
 /**
@@ -19,8 +20,11 @@ const {
 }));
 
 vi.mock('../../../src/utils/interruptedThreadPrefs', () => ({
-    clearInterruptedThread: clearInterruptedThreadMock,
-    getInterruptedThread: getInterruptedThreadMock,
+    takeInterruptedThread: (userId: string) => {
+        const value = getInterruptedThreadMock();
+        if (value) clearInterruptedThreadMock();
+        return value?.userId === userId ? value : null;
+    },
 }));
 vi.mock('../../../react/events/eventManager', () => ({
     eventManager: { dispatch: dispatchMock },
@@ -114,6 +118,18 @@ afterEach(() => {
 });
 
 describe('offering to reopen an interrupted chat', () => {
+    it('offers a newly recorded interruption on preference revision without a focus event', async () => {
+        const { preferencesRevisionAtom } = await import('../../../react/atoms/preferences');
+        record = null;
+        signIn();
+        mount();
+        expect(popups()).toHaveLength(0);
+        act(() => {
+            record = { ...INTERRUPTED };
+            store.set(preferencesRevisionAtom, value => value + 1);
+        });
+        expect(popups()).toHaveLength(1);
+    });
     it('shows a popup naming the interrupted chat', () => {
         signIn();
         mount();
@@ -160,7 +176,7 @@ describe('offering to reopen an interrupted chat', () => {
         signIn();
         mount();
 
-        expect(popup()?.text).toBe('Beaver closed before it finished working on your last chat.');
+        expect(popup()?.text).toBe('The window closed before Beaver finished working on your last chat.');
     });
 
     it('shows nothing when no chat was interrupted', () => {

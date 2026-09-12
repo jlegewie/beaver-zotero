@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError, ServerError, SessionRefreshError } from '@beaver/agent-core/types/apiErrors';
-import { isTransientNetworkError } from '../../../react/utils/isTransientNetworkError';
+import { isTransientNetworkError } from '../../../src/services/threads/isTransientNetworkError';
 
 describe('isTransientNetworkError', () => {
     it('treats coded JSON 5xx and rate-limit responses as transient', () => {

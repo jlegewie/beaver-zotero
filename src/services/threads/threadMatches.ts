@@ -1,11 +1,22 @@
-import type { ThreadModel, ThreadRunMatch, ZoteroInstanceRef } from '@beaver/agent-core/transport/threadService';
-import type { ThreadData } from '../atoms/threads';
+import type {
+    ThreadModel,
+    ThreadRunMatch,
+    ZoteroInstanceRef,
+} from "@beaver/agent-core/transport/threadService";
+import type { ThreadData } from "./types";
 
 /** The `ThreadModel` fields the UI mapping needs (sources like the Supabase
  * realtime feed select exactly these columns rather than full rows). */
 type ThreadDataSource = Pick<
     ThreadModel,
-    'id' | 'name' | 'created_at' | 'updated_at' | 'zotero_user_id' | 'zotero_local_id' | 'starred' | 'agent_name'
+    | "id"
+    | "name"
+    | "created_at"
+    | "updated_at"
+    | "zotero_user_id"
+    | "zotero_local_id"
+    | "starred"
+    | "agent_name"
 >;
 
 /**
@@ -16,7 +27,7 @@ type ThreadDataSource = Pick<
 export function threadModelToThreadData(thread: ThreadDataSource): ThreadData {
     return {
         id: thread.id,
-        name: thread.name || '',
+        name: thread.name || "",
         createdAt: thread.created_at,
         updatedAt: thread.updated_at,
         zoteroUserId: thread.zotero_user_id ?? null,
@@ -40,14 +51,16 @@ export function threadModelToThreadData(thread: ThreadDataSource): ThreadData {
  */
 export function isThreadInstanceMismatch(
     current: ZoteroInstanceRef | null,
-    stored: ZoteroInstanceRef
+    stored: ZoteroInstanceRef,
 ): boolean {
     if (!current) return false;
     const storedUser = stored.zoteroUserId ?? null;
     const storedLocal = stored.zoteroLocalId ?? null;
     if (storedUser == null && storedLocal == null) return false;
-    if (storedUser != null && storedUser === (current.zoteroUserId ?? null)) return false;
-    if (storedLocal != null && storedLocal === (current.zoteroLocalId ?? null)) return false;
+    if (storedUser != null && storedUser === (current.zoteroUserId ?? null))
+        return false;
+    if (storedLocal != null && storedLocal === (current.zoteroLocalId ?? null))
+        return false;
     return true;
 }
 
@@ -60,5 +73,7 @@ export function deduplicateByThread(matches: ThreadRunMatch[]): ThreadData[] {
             seen.set(m.id, threadModelToThreadData(m));
         }
     }
-    return Array.from(seen.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return Array.from(seen.values()).sort((a, b) =>
+        b.updatedAt.localeCompare(a.updatedAt),
+    );
 }

@@ -1,4 +1,4 @@
-import { threadNavigationSeqAtom, recentThreadsAtom } from "../atoms/threads";
+import { threadNavigationSeqAtom } from "../atoms/threads";
 import { preferencesRevisionAtom } from "../atoms/preferences";
 import {
     refreshCustomModelsAtom,
@@ -30,7 +30,6 @@ import {
     minimumFrontendVersionAtom,
 } from "../atoms/profile";
 import { setModelsAtom } from "../atoms/models";
-import { resetThreadStoreAtom } from "../atoms/threadList";
 import {
     clearThreadAtom,
     abandonActiveRunLocallyAtom,
@@ -102,9 +101,7 @@ export function attachAccountProjection(runtime: WindowRuntime): void {
             providerConnection.close(1000, "Account changed");
             store.set(abandonActiveRunLocallyAtom);
             store.set(threadNavigationSeqAtom, (value) => value + 1);
-            store.set(recentThreadsAtom, []);
             store.set(clearThreadAtom);
-            store.set(resetThreadStoreAtom);
             if (generation !== -1) store.set(resetUserModelStateAtom);
             store.set(clearComposerAtom);
             store.set(clearMessageContextAtom);
