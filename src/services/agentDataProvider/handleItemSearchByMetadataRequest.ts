@@ -8,16 +8,16 @@
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
-import { deduplicateItems } from '../../utils/zoteroUtils';
-import { agentItemFilter } from '../../utils/agentItemSupport';
-import { serializeItemSearchRows } from './itemSearchSerialization';
 import {
-    WSItemSearchByMetadataRequest,
-    WSItemSearchByMetadataResponse,
-    ItemSearchFrontendResultItem,
     FrontendTimingMetadata,
+    WSItemSearchByMetadataRequest,
+    WSItemSearchByMetadataResponse
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { searchItemsByMetadata, SearchItemsByMetadataOptions } from '../../../react/utils/searchTools';
+import { agentItemFilter } from '../../utils/agentItemSupport';
+import { searchItemsByMetadata, SearchItemsByMetadataOptions } from '../../utils/searchTools';
+import { TimingAccumulator } from '../../utils/timing';
+import { deduplicateItems } from '../../utils/zoteroUtils';
+import { serializeItemSearchRows } from './itemSearchSerialization';
 import {
     collectionsFilterError,
     getSearchableLibraryIds,
@@ -27,7 +27,6 @@ import {
     resolveTagsFilter,
     tagsFilterError,
 } from './utils';
-import { TimingAccumulator } from '../../utils/timing';
 
 
 /**

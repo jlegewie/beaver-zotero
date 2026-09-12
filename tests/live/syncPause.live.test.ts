@@ -13,12 +13,11 @@
  *   - the pause -> resume round-trip works against the real runner and never
  *     starts a sync (`syncInProgress` stays false),
  *   - the debounced and cancel paths behave with real timers, and
- *   - the window unload-cleanup hook (`__beaverResumeSyncAfterRun`) is wired.
+ *   - the plugin-owned sync service exposes window cleanup and shutdown release.
  *
- * The endpoint shares the same webpack module instance the production path
- * uses (the `agent_action_execute` dispatch wrapper and `useSyncSuppression`),
- * so every test releases the pause; a leaked pause would otherwise suppress
- * the user's auto-sync until the 10-minute idle safety timer fires.
+ * The endpoint calls the plugin-owned service shared by all windows, so every
+ * test releases the pause; a leaked pause would otherwise suppress auto-sync
+ * until the idle safety timer fires.
  *
  * Prerequisites (per tests/README.md):
  *   - Dev build of Beaver loaded in a running Zotero (NODE_ENV=development).
@@ -70,9 +69,9 @@ describe('sync suppression — Zotero.Sync.Runner contract', () => {
         expect(res.probe?.error).toBeUndefined();
     });
 
-    it('registers the window resume hook used for unload cleanup', async () => {
+    it('registers the instance service used for window cleanup and shutdown', async () => {
         const res = await syncPause('status');
-        expect(res.resumeHookRegistered).toBe(true);
+        expect(res.instanceServiceRegistered).toBe(true);
     });
 
     it('reports the documented debounce and safety-idle timings', async () => {

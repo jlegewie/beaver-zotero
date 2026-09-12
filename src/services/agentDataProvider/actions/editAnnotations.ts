@@ -1,9 +1,8 @@
+import { logger } from "@beaver/agent-core/platform/logger";
 import type {
     DeferredToolPreference,
-    WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
-    WSAgentActionValidateRequest,
-    WSAgentActionValidateResponse,
+    WSAgentActionValidateResponse
 } from "@beaver/agent-core/protocol/agentProtocol";
 import type {
     AnnotationBeforeSnapshot,
@@ -17,7 +16,6 @@ import type {
 } from "@beaver/agent-core/types/agentActions/editAnnotations";
 import { editAnnotationsTargets } from "@beaver/agent-core/types/agentActions/editAnnotations";
 import type { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
-import { logger } from "@beaver/agent-core/platform/logger";
 import { ZOTERO_ANNOTATION_PALETTE_COLORS } from "../../../constants/annotations";
 import {
     libraryRefForLibraryID,
@@ -33,8 +31,9 @@ import {
     refreshMovedAnnotationsInOpenReaders,
     unsetTrashedAnnotationsInOpenReaders,
 } from "../../annotations/readerSync";
-import { checkLibraryExcluded, getDeferredToolPreference, hasFullAccessForCurrentRun } from "../utils";
+import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
 import { checkAborted, TimeoutContext, TimeoutError } from "../timeout";
+import { checkLibraryExcluded, getDeferredToolPreference, hasFullAccessForCurrentRun } from "../utils";
 import {
     prepareRelocation,
     type RelocatableAnnotationType,
@@ -984,28 +983,25 @@ function turnedDestructive(
  * defaulting to a prompt the user opted out of.
  */
 function resolvePreference(
+    request: ActionValidateRequest,
     data: EditAnnotationsProposedData,
     targets: ResolvedTarget[],
 ): DeferredToolPreference {
     // The run's "Full access" grant sits above all of it: the user asked for
     // every library change in this response to apply on its own, so an edit
     // that would otherwise escalate back to a prompt is not raised again.
-    if (hasFullAccessForCurrentRun()) return "always_apply";
+    if (hasFullAccessForCurrentRun(request.operation)) return "always_apply";
     if (data.operation === "delete") {
-        const deletionPreference = getDeferredToolPreference(
-            "delete_annotations",
-        );
+        const deletionPreference = getDeferredToolPreference("delete_annotations", undefined, request.operation);
         // This is normally a per-run grant. Keep honoring an advanced manual
         // configuration too, even though the UI does not expose one.
         if (deletionPreference === "always_apply") return deletionPreference;
-        const annotations = getDeferredToolPreference(
-            "create_highlight_annotations",
-        );
+        const annotations = getDeferredToolPreference("create_highlight_annotations", undefined, request.operation);
         return annotations === "continue_without_applying"
             ? annotations
             : "always_ask";
     }
-    const stored = getDeferredToolPreference("edit_annotations");
+    const stored = getDeferredToolPreference("edit_annotations", undefined, request.operation);
     return stored === "always_apply" &&
         requiresApproval(data, currentStates(targets))
         ? "always_ask"
@@ -1034,7 +1030,7 @@ function describeSkips(skipped: SkippedAnnotation[]): string {
 }
 
 export async function validateEditAnnotationsAction(
-    request: WSAgentActionValidateRequest,
+    request: ActionValidateRequest,
     relocationBudgetMs: number = VALIDATE_RELOCATION_BUDGET_MS,
 ): Promise<WSAgentActionValidateResponse> {
     const normalized = normalizeData(request.action_data);
@@ -1073,7 +1069,7 @@ export async function validateEditAnnotationsAction(
     }
 
     const surviving = survivingData(normalized.data, partition);
-    const preference = resolvePreference(normalized.data, partition.targets);
+    const preference = resolvePreference(request, normalized.data, partition.targets);
 
     return {
         type: "agent_action_validate_response",
@@ -1213,7 +1209,7 @@ function nextTags(
 }
 
 export async function executeEditAnnotationsAction(
-    request: WSAgentActionExecuteRequest,
+    request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const normalized = normalizeData(request.action_data);

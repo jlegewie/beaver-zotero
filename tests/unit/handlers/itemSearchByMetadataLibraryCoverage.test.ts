@@ -32,7 +32,7 @@ const {
     resolveTagsFilter,
 } = mocks;
 
-vi.mock('../../../react/utils/searchTools', () => ({
+vi.mock('../../../src/utils/searchTools', () => ({
     searchItemsByMetadata: mocks.searchItemsByMetadata,
 }));
 

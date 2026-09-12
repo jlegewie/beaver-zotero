@@ -16,7 +16,8 @@ async function loadSyncPause(delayIndefinite?: () => () => void) {
         runner.delayIndefinite = delayIndefinite;
     }
     (globalThis as any).Zotero.Sync.Runner = runner;
-    return import('../../../src/services/syncPause');
+    const module = await import('../../../src/services/syncPause');
+    return { ...module, ...module.createSyncPauseService() };
 }
 
 function runner() {
@@ -173,7 +174,7 @@ describe('syncPause', () => {
 
         it('re-applies suppression on every mutating action, even while already paused', async () => {
             const resume = vi.fn();
-            const { pauseSyncForMutatingRun } = await loadSyncPause(() => resume);
+            const { pauseSyncForMutatingRun, resumeSyncNow } = await loadSyncPause(() => resume);
 
             pauseSyncForMutatingRun();
             pauseSyncForMutatingRun();
@@ -229,34 +230,33 @@ describe('syncPause', () => {
             expect(runner().setSyncTimeout).not.toHaveBeenCalled();
         });
 
-        it('reschedules a sync through the window resume hook used on unload', async () => {
+        it('reschedules sync on explicit instance release', async () => {
             // The plugin-disable / window-close path calls this hook with `true`
             // so an interrupted run still pushes its edits (hooks.ts onMainWindowUnload).
             const resume = vi.fn();
             const win: any = {};
             (globalThis as any).window = win;
-            const { pauseSyncForMutatingRun } = await loadSyncPause(() => resume);
+            const { pauseSyncForMutatingRun, resumeSyncNow } = await loadSyncPause(() => resume);
 
-            expect(typeof win.__beaverResumeSyncAfterRun).toBe('function');
 
             pauseSyncForMutatingRun();
-            win.__beaverResumeSyncAfterRun(true);
+            resumeSyncNow(true);
 
             expect(resume).toHaveBeenCalledTimes(1);
             expect(runner().delaySync).toHaveBeenLastCalledWith(0);
             expect(runner().setSyncTimeout).toHaveBeenCalledTimes(1);
         });
 
-        it('does not reschedule a sync through the window resume hook when quitting', async () => {
+        it('does not reschedule sync on instance disposal', async () => {
             // During an app quit hooks.ts passes `false`: Zotero runs its own
             // shutdown sync, so arming a timer mid-teardown is pointless.
             const resume = vi.fn();
             const win: any = {};
             (globalThis as any).window = win;
-            const { pauseSyncForMutatingRun } = await loadSyncPause(() => resume);
+            const { pauseSyncForMutatingRun, resumeSyncNow } = await loadSyncPause(() => resume);
 
             pauseSyncForMutatingRun();
-            win.__beaverResumeSyncAfterRun(false);
+            resumeSyncNow(false);
 
             expect(resume).toHaveBeenCalledTimes(1);
             expect(runner().delaySync).toHaveBeenLastCalledWith(0);
@@ -274,4 +274,27 @@ describe('syncPause', () => {
             expect(runner().setSyncTimeout).not.toHaveBeenCalled();
         });
     });
+});
+
+it('closing one window retains another run and an executing write', async () => {
+    vi.useFakeTimers();
+    try {
+        const resume = vi.fn();
+        const service = await loadSyncPause(() => resume);
+        service.pauseSyncForMutatingRun('chat:A:run-1');
+        service.pauseSyncForMutatingRun('chat:B:run-2');
+        service.pauseSyncForMutatingRun('mutation:1');
+        service.releaseWindow('A');
+        await vi.advanceTimersByTimeAsync(service.RELEASE_DEBOUNCE_MS);
+        expect(resume).not.toHaveBeenCalled();
+        service.releaseWindow('B');
+        await vi.advanceTimersByTimeAsync(service.SAFETY_IDLE_MS);
+        expect(resume).not.toHaveBeenCalled();
+        service.scheduleResumeAfterRun('mutation:1');
+        await vi.advanceTimersByTimeAsync(service.RELEASE_DEBOUNCE_MS);
+        expect(resume).toHaveBeenCalledOnce();
+    } finally {
+        vi.clearAllTimers();
+        vi.useRealTimers();
+    }
 });

@@ -1,3 +1,4 @@
+import { installMutationInstance } from '../../helpers/mutationInstance';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -231,6 +232,8 @@ beforeEach(async () => {
     };
 
     await seedTable();
+
+    installMutationInstance();
 });
 
 afterEach(async () => {
@@ -1199,7 +1202,9 @@ describe('retriable creation', () => {
                 return item;
             }
         );
-    });
+
+    installMutationInstance();
+});
 
     const options = {
         spec: demoSpec(),
@@ -1273,7 +1278,7 @@ describe('retriable creation', () => {
 
     it.each(['v1.json', 'history.json'])('retries a failed %s seed without acknowledging incomplete creation', async (failedFile) => {
         const publish = vi.fn();
-        (Zotero as any).Beaver = { runtime: { publish } };
+        (Zotero as any).Beaver = { ...(Zotero as any).Beaver, runtime: { publish } };
         (globalThis as any).IOUtils = {
             ...realIOUtils,
             move: async (from: string, to: string) => {

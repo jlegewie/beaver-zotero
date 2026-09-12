@@ -6,12 +6,12 @@
  * in `useHttpEndpoints.ts` → `registerEndpoints()`.
  */
 
-import { wrapWithSchemaVersion } from '../../utils/noteActions';
-import { executeEditNoteOrBatchAction, undoEditNoteOrBatchAction } from '../../utils/editNoteActions';
-import { containsPreviewMarkers } from '../../../src/utils/notePreviewGuard';
-import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
-import type { AgentAction } from '../../agents/agentActions';
 import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
+import { getLatestNoteHtml, isLiveNoteEditor } from '../../../src/utils/noteEditorIO';
+import { containsPreviewMarkers } from '../../../src/utils/notePreviewGuard';
+import type { AgentAction } from '../../agents/agentActions';
+import { executeEditNoteOrBatchAction, undoEditNoteOrBatchAction } from '../../utils/editNoteActions';
+import { wrapWithSchemaVersion } from '../../utils/noteActions';
 
 
 export async function handleTestNoteCreateHttpRequest(request: any) {
@@ -76,8 +76,7 @@ export async function handleTestNoteReadHttpRequest(request: any) {
             inEditor = instances.some((inst: any) => {
                 if (!inst._item || inst._item.id !== item.id) return false;
                 try {
-                    const frameElement = inst._iframeWindow?.frameElement;
-                    return frameElement?.isConnected === true;
+                    return isLiveNoteEditor(inst);
                 } catch {
                     return false;
                 }

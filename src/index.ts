@@ -1,8 +1,12 @@
 import { BasicTool } from "zotero-plugin-toolkit";
 import Addon from "./addon";
+import { registerZoteroLibraryIdentity } from "./utils/libraryIdentity";
 import { config } from "../package.json";
 
 const basicTool = new BasicTool();
+
+// Each bundle owns its identity registry; initialize before exposing instance operations.
+registerZoteroLibraryIdentity();
 
 // Always construct a fresh Addon on script load
 _globalThis.addon = new Addon();

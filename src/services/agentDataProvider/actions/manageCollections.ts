@@ -1,3 +1,4 @@
+import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
 /**
  * Validate and execute library-wide collection operations (manage_collections).
  *
@@ -14,13 +15,11 @@
  * and doesn't need an item-level snapshot.
  */
 
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
-    WSAgentActionValidateRequest,
-    WSAgentActionValidateResponse,
-    WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
+    WSAgentActionValidateResponse
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, isLibrarySearchable, getCollectionByIdOrName } from '../utils';
 import {
     libraryRefForLibraryID,
     parseItemReference,
@@ -29,8 +28,8 @@ import {
     UNRESOLVED_LIBRARY_ID,
     writeTargetLibraryError,
 } from '../../../utils/libraryIdentity';
-import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
-import { logger } from '@beaver/agent-core/platform/logger';
+import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
+import { checkLibraryExcluded, excludedLibraryMessage, getCollectionByIdOrName, getDeferredToolPreference, isLibrarySearchable } from '../utils';
 
 /**
  * Parse a collection identifier that may be a plain 8-char Zotero key or a
@@ -113,7 +112,7 @@ async function classifyNonCollectionKey(
 
 
 export async function validateManageCollectionsAction(
-    request: WSAgentActionValidateRequest
+    request: ActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
     const { action, collection_key: rawCollectionKey, new_name: rawNewName, new_parent_key: rawNewParentKey, library_id: rawLibraryId, library_ref } = request.action_data as {
         action: 'rename' | 'move' | 'delete';
@@ -402,7 +401,7 @@ export async function validateManageCollectionsAction(
         oldItemCount = (collection.getChildItems(true, false) as number[]).length;
     }
 
-    const preference = getDeferredToolPreference('manage_collections');
+    const preference = getDeferredToolPreference('manage_collections', undefined, request.operation);
 
     return {
         type: 'agent_action_validate_response',
@@ -435,7 +434,7 @@ export async function validateManageCollectionsAction(
 
 
 export async function executeManageCollectionsAction(
-    request: WSAgentActionExecuteRequest,
+    request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const { action, collection_key, new_name, new_parent_key, library_id, library_ref } = request.action_data as {

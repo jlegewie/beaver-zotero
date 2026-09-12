@@ -1,3 +1,4 @@
+import { installMutationInstance } from '../../helpers/mutationInstance';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // =============================================================================
@@ -124,6 +125,7 @@ vi.mock('../../../src/utils/noteWrapper', () => ({
 }));
 
 vi.mock('../../../src/utils/noteEditorIO', () => ({
+    clearNoteEditorSelection: vi.fn(),
     getLatestNoteHtml: vi.fn((item: any) => item.getNote()),
     isNoteInEditor: vi.fn(() => false),
     waitForPMNormalization: vi.fn().mockResolvedValue(undefined),
@@ -229,7 +231,7 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test-user' })),
 }));
 
-vi.mock('../../../react/utils/batchFindExistingReferences', () => ({
+vi.mock('../../../src/utils/batchFindExistingReferences', () => ({
     batchFindExistingReferences: vi.fn().mockResolvedValue([]),
     BatchReferenceCheckItem: {},
 }));
@@ -403,6 +405,8 @@ beforeEach(() => {
     vi.mocked(invalidateSimplificationCache).mockImplementation(() => {});
     vi.mocked(preloadPageLabelsForNewCitations).mockResolvedValue({});
     vi.mocked(checkLibraryExcluded).mockReturnValue(null);
+
+    installMutationInstance();
 });
 
 
@@ -612,8 +616,7 @@ describe('validateEditNoteBatchAction — success', () => {
         expect(response.valid).toBe(true);
         expect(getDeferredToolPreference).toHaveBeenCalledWith(
             'destructive_note_rewrite',
-            expect.objectContaining({ zotero_key: 'NOTE0001' }),
-        );
+            expect.objectContaining({ zotero_key: 'NOTE0001' }), undefined);
         // The flag must ride along on the action, or the approval that follows
         // (which only sees the edit_note_batch action type) would fall back to
         // the ordinary note-edit group.
@@ -641,8 +644,7 @@ describe('validateEditNoteBatchAction — success', () => {
         expect(response.valid).toBe(true);
         expect(getDeferredToolPreference).toHaveBeenCalledWith(
             'edit_note_batch',
-            expect.objectContaining({ zotero_key: 'NOTE0001' }),
-        );
+            expect.objectContaining({ zotero_key: 'NOTE0001' }), undefined);
         expect(response.normalized_action_data?.destructive_rewrite).toBeUndefined();
     });
 });

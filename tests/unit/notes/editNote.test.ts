@@ -1,3 +1,4 @@
+import { installMutationInstance } from '../../helpers/mutationInstance';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // =============================================================================
@@ -136,6 +137,7 @@ vi.mock('../../../src/utils/noteWrapper', () => ({
 }));
 
 vi.mock('../../../src/utils/noteEditorIO', () => ({
+    clearNoteEditorSelection: vi.fn(),
     getLatestNoteHtml: vi.fn((item: any) => item.getNote()),
     isNoteInEditor: vi.fn(() => false),
     waitForPMNormalization: vi.fn().mockResolvedValue(undefined),
@@ -240,7 +242,7 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test-user' })),
 }));
 
-vi.mock('../../../react/utils/batchFindExistingReferences', () => ({
+vi.mock('../../../src/utils/batchFindExistingReferences', () => ({
     batchFindExistingReferences: vi.fn().mockResolvedValue([]),
     BatchReferenceCheckItem: {},
 }));
@@ -302,8 +304,9 @@ import type {
 
 const NOTE_HTML = '<div data-schema-version="9"><p>Hello world</p></div>';
 
-function makeValidateRequest(overrides: Partial<WSAgentActionValidateRequest> = {}): WSAgentActionValidateRequest {
+function makeValidateRequest(overrides: Partial<import("../../../src/services/agentDataProvider/operationContext").ActionValidateRequest> = {}): import("../../../src/services/agentDataProvider/operationContext").ActionValidateRequest {
     return {
+        operation: { renderMarkdown: async content => renderToHTML(content, 'markdown', {}), threadId: 'thread-1' },
         event: 'agent_action_validate',
         request_id: 'val-1',
         action_type: 'edit_note',
@@ -317,8 +320,9 @@ function makeValidateRequest(overrides: Partial<WSAgentActionValidateRequest> = 
     };
 }
 
-function makeExecuteRequest(overrides: Partial<WSAgentActionExecuteRequest> = {}): WSAgentActionExecuteRequest {
+function makeExecuteRequest(overrides: Partial<import("../../../src/services/agentDataProvider/operationContext").ActionExecuteRequest> = {}): import("../../../src/services/agentDataProvider/operationContext").ActionExecuteRequest {
     return {
+        operation: { renderMarkdown: async content => renderToHTML(content, 'markdown', {}), threadId: 'thread-1' },
         event: 'agent_action_execute',
         request_id: 'exe-1',
         action_type: 'edit_note',
@@ -410,6 +414,8 @@ beforeEach(() => {
     vi.mocked(invalidateSimplificationCache).mockImplementation(() => {});
     vi.mocked(preloadPageLabelsForNewCitations).mockResolvedValue({});
     vi.mocked(enrichOldStringCitationRefs).mockReturnValue(null);
+
+    installMutationInstance();
 });
 
 
@@ -452,7 +458,7 @@ describe('validateEditNoteAction — success', () => {
         expect(getDeferredToolPreference).toHaveBeenCalledWith('edit_note', {
             library_id: 1,
             zotero_key: 'NOTE0001',
-        });
+        }, expect.any(Object));
     });
 
     it('validates append with match_count 1 and no old content', async () => {
@@ -576,7 +582,7 @@ describe('validateEditNoteAction — success', () => {
         }));
 
         expect(response.valid).toBe(true);
-        expect(prepareCitationRenderContext).toHaveBeenCalledTimes(1);
+        expect(renderToHTML).toHaveBeenCalledTimes(2);
         expect(response.normalized_action_data).toMatchObject({
             old_string: renderedOld,
             new_string: renderedNew,
@@ -625,7 +631,7 @@ describe('validateEditNoteAction — failures', () => {
     });
 
     it('library_not_searchable', async () => {
-        vi.mocked(store.get).mockReturnValue([99]); // Library 1 not in list
+        (Zotero as any).Beaver.searchableLibraryIds = [99];
         const response = await handleAgentActionValidateRequest(makeValidateRequest());
         expect(response.valid).toBe(false);
         expect(response.error_code).toBe('library_not_searchable');
@@ -898,7 +904,7 @@ describe('executeEditNoteAction — success', () => {
         }));
 
         expect(response.success).toBe(true);
-        expect(prepareCitationRenderContext).toHaveBeenCalledTimes(1);
+        expect(renderToHTML).toHaveBeenCalledTimes(2);
         expect(item.setNote).toHaveBeenCalled();
         expect(item.setNote.mock.calls[0][0]).toContain(renderedNew);
     });
@@ -1522,7 +1528,9 @@ describe('trailing whitespace normalization in matching', () => {
         mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
         vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
-    });
+
+    installMutationInstance();
+});
 
     it('matches old_string with trailing \\n\\n when note has \\n and emits normalized_action_data', async () => {
         const req = makeValidateRequest({
@@ -1666,7 +1674,9 @@ describe('JSON-escape unescape fallback in matching', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
-    });
+
+    installMutationInstance();
+});
 
     it('matches old_string with literal \\" when note has plain " and emits normalized_action_data', async () => {
         const noteHtml = '<div data-schema-version="9"><p>Say "hello"</p></div>';
@@ -1942,7 +1952,9 @@ describe('citation ref enrichment — validate', () => {
             isStale: false,
         });
         vi.mocked(getDeferredToolPreference).mockReturnValue('always_ask');
-    });
+
+    installMutationInstance();
+});
 
     it('enriched old_string is carried through validation and surfaces in normalized_action_data', async () => {
         // Simulate enrichment: swap the no-ref token for the enriched token.
@@ -2246,7 +2258,9 @@ describe('citation ref enrichment — execute (defense-in-depth)', () => {
             metadata: { elements: new Map() } as any,
             isStale: false,
         });
-    });
+
+    installMutationInstance();
+});
 
     it('re-enriches old_string during execute so direct executor calls also benefit', async () => {
         vi.mocked(enrichOldStringCitationRefs).mockImplementation((oldStr: string) => {

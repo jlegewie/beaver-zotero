@@ -1,18 +1,14 @@
 import { logger } from '@beaver/agent-core/platform/logger';
-import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
-import { store } from '../../../../react/store';
-import { MetadataEdit } from '@beaver/agent-core/types/agentActions/base';
-import { canSetField, getCreatorTypeInfo, resolveFieldForItemType, SETTABLE_PRIMARY_FIELDS, sanitizeCreators } from '../../../utils/zoteroUtils';
 import {
-    WSAgentActionValidateRequest,
-    WSAgentActionValidateResponse,
-    WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
+    WSAgentActionValidateResponse
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
-import { TimeoutContext, checkAborted } from '../timeout';
-import { TimeoutError } from '../timeout';
+import { MetadataEdit } from '@beaver/agent-core/types/agentActions/base';
 import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
+import { SETTABLE_PRIMARY_FIELDS, canSetField, getCreatorTypeInfo, resolveFieldForItemType, sanitizeCreators } from '../../../utils/zoteroUtils';
+import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
+import { TimeoutContext, TimeoutError, checkAborted } from '../timeout';
+import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 
 
 /**
@@ -329,7 +325,7 @@ function restoreCreatorSnapshots(item: any, originalCreators: any[] | null): voi
  * Checks if the item exists, validates all fields (batch), and returns current field values.
  */
 async function validateEditMetadataAction(
-    request: WSAgentActionValidateRequest
+    request: ActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
     const { library_id, library_ref, zotero_key, edits, creators } = request.action_data as {
         library_id: number;
@@ -392,7 +388,7 @@ async function validateEditMetadataAction(
     }
 
     // Validate library is searchable
-    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+    const searchableLibraryIds = (Zotero.Beaver.libraryScopeInitialized ? (Zotero.Beaver.searchableLibraryIds ?? []) : []);
     if (!searchableLibraryIds.includes(resolvedLibraryId)) {
         return {
             type: 'agent_action_validate_response',
@@ -552,7 +548,7 @@ async function validateEditMetadataAction(
     }
 
     // Get user preference from settings
-    const preference = getDeferredToolPreference('edit_metadata');
+    const preference = getDeferredToolPreference('edit_metadata', undefined, request.operation);
 
     return {
         type: 'agent_action_validate_response',
@@ -569,7 +565,7 @@ async function validateEditMetadataAction(
  * Applies the field edits to the Zotero item.
  */
 async function executeEditMetadataAction(
-    request: WSAgentActionExecuteRequest,
+    request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const { library_id, library_ref, zotero_key, edits, creators } = request.action_data as {
@@ -747,4 +743,4 @@ async function executeEditMetadataAction(
     }
 }
 
-export { validateEditMetadataAction, executeEditMetadataAction };
+export { executeEditMetadataAction, validateEditMetadataAction };

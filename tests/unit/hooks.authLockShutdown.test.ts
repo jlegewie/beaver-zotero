@@ -186,6 +186,9 @@ function setupGlobals() {
         account: { dispose: vi.fn().mockResolvedValue(undefined), start: vi.fn() },
         preferences: { dispose: vi.fn() },
         runtime: new BeaverInstance(),
+        mutations: { cancelOwner: vi.fn(), dispose: vi.fn().mockResolvedValue(undefined) },
+        notePreviews: { detachOwner: vi.fn().mockResolvedValue(undefined) },
+        syncPause: { releaseWindow: vi.fn(), scheduleResumeAfterRun: vi.fn(), resumeSyncNow: vi.fn() },
         data: {
             alive: true,
             config: {

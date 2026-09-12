@@ -31,6 +31,10 @@ import type { PreparedJsonMessage } from './preparedJsonMessage';
  * signature so hand-written providers and tests can omit it.
  */
 export interface AgentDataRequestContext {
+    /** Cancellation and originating runtime, pinned at dispatch. */
+    signal?: AbortSignal;
+    assertCurrent?: () => void;
+    owner?: string;
     /** `Date.now()` when the request arrived on the socket, before any queueing */
     receivedAt: number;
     /** Report what the handler is doing; surfaces in keepalives sent to the backend */
@@ -99,15 +103,6 @@ export const NOOP_KEEPALIVE: RequestKeepalive = {
     setPhase: () => {},
     stop: () => {},
 };
-
-// =============================================================================
-// Sync-pause owner tokens
-// =============================================================================
-
-/** Owner token used when a mutating run is dispatched by this client's own AgentService connection. */
-export const LOCAL_MUTATING_RUN_SYNC_PAUSE_OWNER = 'local-mutating-run';
-/** Owner token used when a mutating run is dispatched over a ProviderConnection (another client's run). */
-export const PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER = 'provider-mutating-run';
 
 // =============================================================================
 // Sync-pause resume seam
@@ -179,6 +174,7 @@ export type AgentDataProviderMap = Record<string, AgentDataRequestEntry>;
 
 /** Options accepted by a data-provider factory. */
 export interface AgentDataProviderOptions {
+    source?: "local" | "provider";
     /** Owner token used for sync suppression around mutating actions. */
     syncPauseOwner?: string;
 }

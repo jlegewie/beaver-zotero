@@ -127,23 +127,19 @@ describe('execute create_item — result_data.library_ref', () => {
         expect(del.deleted).toBeGreaterThanOrEqual(1);
     });
 
-    it('falls back to the personal library for an unknown library id (execute does not re-validate)', async () => {
-        // Unlike validate (which rejects an unknown library), the execute path
-        // does not re-check the target library — an unresolvable numeric
-        // library_id defaults to the personal library rather than erroring.
-        // The item still lands with a correct portable ref ("u").
+    it('rejects an unknown explicit library without falling back to the personal library', async () => {
         const res = await execute('create_item', {
-            item: { source: 'openalex', title: `Beaver Identity Fallback Test ${Date.now()}` },
+            item: { source: 'openalex', title: `Beaver Identity Invalid Target Test ${Date.now()}` },
             file_available: false,
             library_id: 999999,
         });
-        expect(res.success).toBe(true);
-        expect(res.result_data?.library_id).toBe(topo.personal.library_id);
-        expect(res.result_data?.library_ref).toBe('u');
-
-        const id = `${res.result_data!.library_id}-${res.result_data!.zotero_key}`;
-        createdItemIds.push(id);
-        await post('/beaver/delete-items', { item_ids: [id] });
+        // Track an unexpected write so cleanup still runs if this regresses.
+        if (res.result_data?.zotero_key) {
+            createdItemIds.push(`${res.result_data.library_id}-${res.result_data.zotero_key}`);
+        }
+        expect(res.success).toBe(false);
+        expect(res.error).toMatch(/excluded or unavailable/);
+        expect(res.result_data).toBeUndefined();
     });
 });
 

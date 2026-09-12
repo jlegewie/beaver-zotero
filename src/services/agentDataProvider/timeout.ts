@@ -61,6 +61,7 @@ function isExternalAbortReason(reason: unknown): boolean {
 
 /** Context passed to executors for cooperative timeout checking */
 export interface TimeoutContext {
+    assertCurrent?: () => void;
     signal: AbortSignal;
     timeoutSeconds: number;
     /** Deadline origin: when the executor started, not when the request arrived */
@@ -74,6 +75,7 @@ export interface TimeoutContext {
  * Called at checkpoints before irreversible operations (saves, transactions).
  */
 export function checkAborted(ctx: TimeoutContext, phase: string): void {
+    ctx.assertCurrent?.();
     const elapsed = Date.now() - ctx.startTime;
     if (ctx.signal.aborted || elapsed >= ctx.timeoutSeconds * 1000) {
         throw new TimeoutError(ctx.timeoutSeconds, elapsed, phase);

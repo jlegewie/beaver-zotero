@@ -1,14 +1,8 @@
 import { logger } from '@beaver/agent-core/platform/logger';
-import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
-import { store } from '../../../../react/store';
 import {
-    WSAgentActionValidateRequest,
-    WSAgentActionValidateResponse,
-    WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
-
+    WSAgentActionValidateResponse
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import {
     libraryRefForLibraryID,
     resolveItemReference,
@@ -17,8 +11,9 @@ import {
     UNRESOLVED_LIBRARY_ID,
     writeTargetLibraryError,
 } from '../../../utils/libraryIdentity';
-import { TimeoutContext, checkAborted } from '../timeout';
-import { TimeoutError } from '../timeout';
+import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
+import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
+import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 
 
 /**
@@ -26,7 +21,7 @@ import { TimeoutError } from '../timeout';
  * Checks if the library exists and is editable.
  */
 async function validateCreateCollectionAction(
-    request: WSAgentActionValidateRequest
+    request: ActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
     const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = request.action_data as {
         library_id?: number | null;
@@ -63,7 +58,7 @@ async function validateCreateCollectionAction(
     }
 
     // Validate library is searchable
-    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+    const searchableLibraryIds = (Zotero.Beaver.libraryScopeInitialized ? (Zotero.Beaver.searchableLibraryIds ?? []) : []);
     if (!searchableLibraryIds.includes(library_id)) {
         return {
             type: 'agent_action_validate_response',
@@ -170,7 +165,7 @@ async function validateCreateCollectionAction(
     }
 
     // Get user preference from settings
-    const preference = getDeferredToolPreference('create_collection');
+    const preference = getDeferredToolPreference('create_collection', undefined, request.operation);
 
     // Build current value for preview (includes resolved library_id)
     const currentValue = {
@@ -196,7 +191,7 @@ async function validateCreateCollectionAction(
  * Creates a new Zotero collection with the specified properties.
  */
 async function executeCreateCollectionAction(
-    request: WSAgentActionExecuteRequest,
+    request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = request.action_data as {
@@ -347,4 +342,4 @@ async function executeCreateCollectionAction(
     }
 }
 
-export { validateCreateCollectionAction, executeCreateCollectionAction };
+export { executeCreateCollectionAction, validateCreateCollectionAction };

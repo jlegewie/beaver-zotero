@@ -1,22 +1,41 @@
-import { BeaverInstance } from './runtime/instance';
-import { config, version } from "../package.json";
 import { ColumnOptions, DialogHelper } from "zotero-plugin-toolkit";
+import { config, version } from "../package.json";
 import hooks from "./hooks";
-import { createZToolkit } from "./utils/ztoolkit";
-import { BeaverDB } from "./services/database";
-import { AIProvider } from "./services/OpenAIProvider";
-import { CitationService } from "./services/CitationService";
-import { DocumentCache } from "./services/documentCache";
+import { createBackgroundTaskSource } from "./utils/backgroundTasks";
+import { BeaverInstance } from './runtime/instance';
 import { BackgroundExtractor } from "./services/backgroundExtractor";
-import type { ReconcilerService } from "./services/backgroundProcessing/reconciler";
 import type { NewItemWatcher } from "./services/backgroundProcessing/newItemWatcher";
+import type { ReconcilerService } from "./services/backgroundProcessing/reconciler";
+import { CitationService } from "./services/CitationService";
+import { BeaverDB } from "./services/database";
+import { DocumentCache } from "./services/documentCache";
+import { LibraryMutations } from './services/libraryMutations';
+import { LibraryOperations } from './services/libraryOperations';
+import { NotePreviews } from './services/notePreviews';
+import { AIProvider } from "./services/OpenAIProvider";
+import { createSyncPauseService } from './services/syncPause';
+import { createZToolkit } from "./utils/ztoolkit";
 
-import type { VoiceService } from './services/voice/voiceService';
 import type { DevelopmentVoiceHarness } from './services/voice/developmentHarness';
+import type { VoiceService } from './services/voice/voiceService';
 
 class Addon {
+    public backgroundTasks = createBackgroundTaskSource();
     public preferences?: import("./services/instancePreferences").InstancePreferences;
     public account?: import("./services/instanceAccount").InstanceAccount;
+    public notePreviews = new NotePreviews();
+    public syncPause = createSyncPauseService();
+    public mutations = new LibraryMutations(
+        token => {
+            this.notePreviews.setMutationActive(true);
+            this.syncPause.pauseSyncForMutatingRun(token);
+        },
+        token => {
+            this.notePreviews.setMutationActive(false);
+            this.syncPause.scheduleResumeAfterRun(token);
+        },
+    );
+    public libraryOperations = new LibraryOperations();
     public runtime = new BeaverInstance();
     public voiceNative?: import("./services/voice/nativeVoice").NativeVoice;
     public voice?: VoiceService;

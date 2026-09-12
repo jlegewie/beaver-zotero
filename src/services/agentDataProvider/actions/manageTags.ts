@@ -1,3 +1,4 @@
+import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
 /**
  * Validate and execute library-wide tag operations (manage_tags).
  *
@@ -18,16 +19,14 @@
  * to a different casing or merging into an existing tag are legitimate.
  */
 
-import {
-    WSAgentActionValidateRequest,
-    WSAgentActionValidateResponse,
-    WSAgentActionExecuteRequest,
-    WSAgentActionExecuteResponse,
-} from '@beaver/agent-core/protocol/agentProtocol';
-import { checkLibraryExcluded, getDeferredToolPreference, validateLibraryAccess } from '../utils';
-import { libraryRefForLibraryID, modelObjectId, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
-import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import { logger } from '@beaver/agent-core/platform/logger';
+import {
+    WSAgentActionExecuteResponse,
+    WSAgentActionValidateResponse
+} from '@beaver/agent-core/protocol/agentProtocol';
+import { libraryRefForLibraryID, modelObjectId, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
+import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
+import { checkLibraryExcluded, getDeferredToolPreference, validateLibraryAccess } from '../utils';
 
 // Safety cap: if a tag is on more than this many items, refuse to snapshot the
 // set so we don't balloon proposed_data. The agent can still perform the op
@@ -206,7 +205,7 @@ function formatSuggestions(suggestions: string[]): string {
 
 
 export async function validateManageTagsAction(
-    request: WSAgentActionValidateRequest
+    request: ActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
     const { action, name: rawName, new_name: rawNewName, library_id: rawLibraryId, library_ref, library_name } = request.action_data as {
         action: 'rename' | 'delete';
@@ -389,7 +388,7 @@ export async function validateManageTagsAction(
         };
     }
 
-    const preference = getDeferredToolPreference('manage_tags');
+    const preference = getDeferredToolPreference('manage_tags', undefined, request.operation);
 
     return {
         type: 'agent_action_validate_response',
@@ -419,7 +418,7 @@ export async function validateManageTagsAction(
 
 
 export async function executeManageTagsAction(
-    request: WSAgentActionExecuteRequest,
+    request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const { action, name, new_name, library_id, library_ref } = request.action_data as {

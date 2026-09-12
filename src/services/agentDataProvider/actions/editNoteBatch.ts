@@ -1,83 +1,79 @@
+import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import { logger } from '@beaver/agent-core/platform/logger';
+import {
+    WSAgentActionExecuteResponse,
+    WSAgentActionValidateResponse,
+    type EditValidationError,
+    type ErrorCandidate
+} from '@beaver/agent-core/protocol/agentProtocol';
+import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
+import type {
+    EditNoteBatchAppliedEdit,
+    EditNoteBatchEditItem,
+    EditNoteBatchProposedData,
+    EditNoteBatchUndoRecord,
+} from '@beaver/agent-core/types/agentActions/editNoteBatch';
+import {
+    applyResolvedEdits,
+    captureUndoContexts,
+    detectOverlaps,
+    resolveBatchEdits,
+    type BatchEditFailure,
+    type BatchEditSpec,
+    type BatchUndoDraft,
+    type ResolveBatchContext,
+    type ResolvedBatchEdit,
+} from '../../../utils/editNoteBatchCore';
+import {
+    applyOldStringEnrichment,
+    checkDuplicateCitations,
+    checkNewCitationItemsExist,
+    validateNewString,
+} from '../../../utils/editNoteValidation';
 import {
     libraryRefForLibraryID,
     modelObjectIdFromReference,
     resolveItemReference,
     resolveLibraryRef,
 } from '../../../utils/libraryIdentity';
-import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
-import type {
-    EditNoteBatchProposedData,
-    EditNoteBatchEditItem,
-    EditNoteBatchUndoRecord,
-    EditNoteBatchAppliedEdit,
-} from '@beaver/agent-core/types/agentActions/editNoteBatch';
-import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
+import {
+    buildUnresolvedLocatorWarning,
+    expandToRawHtml,
+    preloadNotePageLabels,
+    preloadPageLabelsForNewCitations,
+    preloadStructuralLocatorPages,
+    type ExternalRefContext,
+    type ResolvedLocatorPages,
+} from '../../../utils/noteCitationExpand';
+import { addOrUpdateEditFooter, getBeaverFooterAppendPoint } from '../../../utils/noteEditFooter';
+import {
+    clearNoteEditorSelection,
+    flushLiveEditorToDB,
+    getLatestNoteHtml,
+    waitForNoteSaveStabilization,
+} from '../../../utils/noteEditorIO';
 import {
     getOrSimplify,
     invalidateSimplificationCache,
     normalizeNoteHtml,
     type SimplificationMetadata,
 } from '../../../utils/noteHtmlSimplifier';
+import { assertNoPreviewMarkers, containsPreviewMarkers, stripPreviewMarkers } from '../../../utils/notePreviewGuard';
 import { assessNoteRewrite } from '../../../utils/noteRewriteRisk';
 import {
-    checkDuplicateCitations,
-    validateNewString,
-    checkNewCitationItemsExist,
-    applyOldStringEnrichment,
-} from '../../../utils/editNoteValidation';
-import {
-    expandToRawHtml,
-    preloadPageLabelsForNewCitations,
-    preloadNotePageLabels,
-    preloadStructuralLocatorPages,
-    buildUnresolvedLocatorWarning,
-    type ExternalRefContext,
-    type ResolvedLocatorPages,
-} from '../../../utils/noteCitationExpand';
-import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
-import {
-    getLatestNoteHtml,
-    waitForNoteSaveStabilization,
-    flushLiveEditorToDB,
-} from '../../../utils/noteEditorIO';
-import {
-    stripDataCitationItems,
     extractDataCitationItems,
-    rebuildDataCitationItems,
     hasSchemaVersionWrapper,
+    rebuildDataCitationItems,
+    stripDataCitationItems,
 } from '../../../utils/noteWrapper';
-import { clearNoteEditorSelection } from '../../../../react/utils/sourceUtils';
-import { store } from '../../../../react/store';
-import { currentThreadIdAtom } from '../../../../react/atoms/threads';
-import { addOrUpdateEditFooter, getBeaverFooterAppendPoint } from '../../../utils/noteEditFooter';
-import { assertNoPreviewMarkers, containsPreviewMarkers, stripPreviewMarkers } from '../../../utils/notePreviewGuard';
-import { dismissDiffPreview, isDiffPreviewActive, isDiffPreviewPendingFor } from '../../../../react/utils/noteEditorDiffPreview';
-import {
-    WSAgentActionValidateRequest,
-    WSAgentActionValidateResponse,
-    WSAgentActionExecuteRequest,
-    WSAgentActionExecuteResponse,
-    type EditValidationError,
-    type ErrorCandidate,
-} from '@beaver/agent-core/protocol/agentProtocol';
+import { dismissNotePreviews } from '../../notePreviews';
+import type { ActionExecuteRequest, ActionValidateRequest, OperationContext } from '../operationContext';
+import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
-import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import {
-    getExternalRefContext,
     buildMarkdownRenderFields,
+    getExternalRefContext,
 } from './editNote';
-import {
-    resolveBatchEdits,
-    detectOverlaps,
-    applyResolvedEdits,
-    captureUndoContexts,
-    type BatchEditSpec,
-    type BatchEditFailure,
-    type ResolveBatchContext,
-    type ResolvedBatchEdit,
-    type BatchUndoDraft,
-} from '../../../utils/editNoteBatchCore';
 
 // =============================================================================
 // Shared helpers
@@ -224,6 +220,7 @@ export async function prepareSpecs(
     externalRefContext: ExternalRefContext,
     labels: PreloadedLabels,
     libraryId: number,
+    context?: OperationContext,
 ): Promise<{ specs: BatchEditSpec[]; failures: BatchEditFailure[] }> {
     const specs: BatchEditSpec[] = [];
     const failures: BatchEditFailure[] = [];
@@ -250,7 +247,7 @@ export async function prepareSpecs(
         let rendered: { renderedOldSimplified?: string; renderedNewSimplified?: string } = {};
         if (isStrReplaceFamily) {
             oldString = applyOldStringEnrichment(oldString, metadata, labels.pageLabels) ?? oldString;
-            rendered = await buildMarkdownRenderFields(oldString, edit.new_string, operation, libraryId);
+            rendered = await buildMarkdownRenderFields(oldString, edit.new_string, operation, libraryId, context);
         }
 
         specs.push({
@@ -418,7 +415,7 @@ export function checkBatchShape(edits: EditNoteBatchEditItem[] | undefined): { e
  * diagnostics if any edit cannot be resolved or two edits truly intersect.
  */
 async function validateEditNoteBatchAction(
-    request: WSAgentActionValidateRequest,
+    request: ActionValidateRequest,
 ): Promise<WSAgentActionValidateResponse> {
     const { library_id, library_ref, zotero_key, edits } = request.action_data as EditNoteBatchProposedData;
 
@@ -445,7 +442,7 @@ async function validateEditNoteBatchAction(
         return validateError(request.request_id, `Library not found: ${resolvedLibraryId}`, 'library_not_found');
     }
 
-    const searchableIds = store.get(searchableLibraryIdsAtom);
+    const searchableIds = (Zotero.Beaver.libraryScopeInitialized ? (Zotero.Beaver.searchableLibraryIds ?? []) : []);
     if (!searchableIds.includes(resolvedLibraryId)) {
         return validateError(request.request_id, excludedLibraryMessage(resolvedLibraryId), 'library_not_searchable');
     }
@@ -483,7 +480,7 @@ async function validateEditNoteBatchAction(
     const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, resolvedLibraryId, { extractOnCacheMiss: true });
     const { simplified, metadata } = getOrSimplify(noteId, rawHtml, resolvedLibraryId, pageLabelsByItemId);
 
-    const externalRefContext = await getExternalRefContext(edits.map(edit => edit.new_string).join(BATCH_LABEL_SEPARATOR));
+    const externalRefContext = await getExternalRefContext(edits.map(edit => edit.new_string).join(BATCH_LABEL_SEPARATOR), request.operation);
     const labels = await preloadBatchLabels(edits);
 
     // Strip data-citation-items ONCE — the shared match/apply haystack.
@@ -491,7 +488,7 @@ async function validateEditNoteBatchAction(
     const appendPoint = getBeaverFooterAppendPoint(strippedHtml);
 
     const { specs, failures: prepFailures } = await prepareSpecs(
-        edits, metadata, externalRefContext, labels, resolvedLibraryId,
+        edits, metadata, externalRefContext, labels, resolvedLibraryId, request.operation,
     );
 
     const ctx: ResolveBatchContext = {
@@ -568,10 +565,8 @@ async function validateEditNoteBatchAction(
             total_lines: totalLines,
             ...(isSingleRewrite ? { old_content: simplified } : {}),
         },
-        preference: getDeferredToolPreference(
-            isDestructiveRewrite ? 'destructive_note_rewrite' : 'edit_note_batch',
-            { library_id: resolvedLibraryId, zotero_key },
-        ),
+        preference: getDeferredToolPreference(isDestructiveRewrite ? 'destructive_note_rewrite' : 'edit_note_batch',
+            { library_id: resolvedLibraryId, zotero_key }, request.operation),
     };
     // The classification must travel with the action, not just gate the
     // preference: the approval request that follows still carries the
@@ -603,7 +598,7 @@ async function validateEditNoteBatchAction(
  * agent action dispatches, so no per-note lock is taken here.
  */
 async function executeEditNoteBatchAction(
-    request: WSAgentActionExecuteRequest,
+    request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const {
@@ -644,9 +639,7 @@ async function executeEditNoteBatchAction(
 
     // Load note + settle any in-flight diff preview / unsaved editor content.
     await item.loadDataType('note');
-    if (isDiffPreviewActive(resolvedLibraryId, zotero_key) || isDiffPreviewPendingFor(resolvedLibraryId, zotero_key)) {
-        await dismissDiffPreview();
-    }
+    await dismissNotePreviews(resolvedLibraryId, zotero_key);
     await flushLiveEditorToDB(item);
 
     // Repair persisted diff-preview markup (and save the repair even if the
@@ -667,7 +660,7 @@ async function executeEditNoteBatchAction(
     }
 
     // Preload page labels for ALL edits before the final note snapshot.
-    const externalRefContext = await getExternalRefContext(edits.map(edit => edit.new_string).join(BATCH_LABEL_SEPARATOR));
+    const externalRefContext = await getExternalRefContext(edits.map(edit => edit.new_string).join(BATCH_LABEL_SEPARATOR), request.operation);
     const labels = await preloadBatchLabels(edits);
 
     const preSeedHtml = item.getNote();
@@ -683,7 +676,7 @@ async function executeEditNoteBatchAction(
     const existingCitationCache = extractDataCitationItems(normalizedOldHtml);
     const strippedHtml = stripDataCitationItems(normalizedOldHtml);
 
-    const threadId = store.get(currentThreadIdAtom);
+    const threadId = request.operation?.threadId ?? null;
 
     // ── Single-rewrite batch: v1 rewrite tail semantics, batch envelope ──
     if (edits.length === 1 && opOf(edits[0]) === 'rewrite') {
@@ -724,7 +717,7 @@ async function executeEditNoteBatchAction(
 
     // ── General batch ──
     const { specs, failures: prepFailures } = await prepareSpecs(
-        edits, metadata, externalRefContext, labels, resolvedLibraryId,
+        edits, metadata, externalRefContext, labels, resolvedLibraryId, request.operation,
     );
     // A pre-check failure at execute time means the note drifted since approval.
     if (prepFailures.length > 0) {
@@ -859,7 +852,7 @@ export function buildUndoList(drafts: BatchUndoDraft[]): EditNoteBatchUndoRecord
  * record carries the FULL pre-edit stripped body in undo_old_html.
  */
 async function executeSingleRewrite(
-    request: WSAgentActionExecuteRequest,
+    request: ActionExecuteRequest,
     ctx: TimeoutContext,
     item: Zotero.Item,
     edit: EditNoteBatchEditItem,
@@ -951,4 +944,4 @@ async function executeSingleRewrite(
     };
 }
 
-export { validateEditNoteBatchAction, executeEditNoteBatchAction };
+export { executeEditNoteBatchAction, validateEditNoteBatchAction };

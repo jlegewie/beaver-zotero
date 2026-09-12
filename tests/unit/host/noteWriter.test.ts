@@ -1,3 +1,5 @@
+import { installMutationInstance } from '../../helpers/mutationInstance';
+vi.mock('../../../src/utils/zoteroUtils', () => ({ isLibraryEditable: mocks.isLibraryEditable }));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -10,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   saveTx: vi.fn(),
 }));
 
-vi.mock("../../../src/utils/zoteroUtils", () => ({
+vi.mock("../../../react/utils/zoteroTargetContext", () => ({
   getZoteroTargetContext: mocks.getZoteroTargetContext,
   getZoteroTargetContextSync: mocks.getZoteroTargetContextSync,
   getCurrentLibrary: mocks.getCurrentLibrary,
@@ -41,6 +43,8 @@ import { zoteroNoteWriter } from "../../../react/host/zotero/noteWriter";
 describe("zoteroNoteWriter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    installMutationInstance();
+    (Zotero as any).Beaver.searchableLibraryIds = [1, 7];
     mocks.saveTx.mockReset().mockResolvedValue(undefined);
 
     class MockNote {

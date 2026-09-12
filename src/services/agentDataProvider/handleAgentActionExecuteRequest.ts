@@ -1,20 +1,21 @@
 import { logger } from '@beaver/agent-core/platform/logger';
-import { WSAgentActionExecuteRequest, WSAgentActionExecuteResponse } from '@beaver/agent-core/protocol/agentProtocol';
+import { WSAgentActionExecuteResponse } from '@beaver/agent-core/protocol/agentProtocol';
 import type { AgentDataRequestContext } from '@beaver/agent-core/transport/agentDataDispatch';
-import { TimeoutContext, DEFAULT_TIMEOUT_SECONDS } from './timeout';
-import { TimeoutError } from './timeout';
-import { executeEditNoteAction } from './actions/editNote';
-import { executeEditNoteBatchAction } from './actions/editNoteBatch';
-import { executeEditMetadataAction } from './actions/editMetadata';
-import { executeOrganizeItemsAction } from './actions/organizeItems';
-import { executeCreateNoteAction } from './actions/createNote';
-import { executeManageTagsAction } from './actions/manageTags';
-import { executeManageCollectionsAction } from './actions/manageCollections';
 import { executeCreateCollectionAction } from './actions/createCollection';
-import { executeCreateItemAction } from './actions/createItems';
 import { executeCreateHighlightAnnotationsAction } from './actions/createHighlightAnnotations';
+import { executeCreateItemAction } from './actions/createItems';
+import { executeCreateNoteAction } from './actions/createNote';
 import { executeCreateNoteAnnotationsAction } from './actions/createNoteAnnotations';
 import { executeEditAnnotationsAction } from './actions/editAnnotations';
+import { executeEditMetadataAction } from './actions/editMetadata';
+import { executeEditNoteAction } from './actions/editNote';
+import { executeEditNoteBatchAction } from './actions/editNoteBatch';
+import { executeManageCollectionsAction } from './actions/manageCollections';
+import { executeManageTagsAction } from './actions/manageTags';
+import { executeOrganizeItemsAction } from './actions/organizeItems';
+import type { ActionExecuteRequest } from './operationContext';
+import { prepareOperationRendering } from './prepareOperationRendering';
+import { DEFAULT_TIMEOUT_SECONDS, TimeoutContext, TimeoutError } from './timeout';
 
 
 /**
@@ -37,9 +38,9 @@ import { executeEditAnnotationsAction } from './actions/editAnnotations';
  *   from socket receipt, so slow executes can still be attributed to queueing
  *   versus the executor itself.
  */
-export async function handleAgentActionExecuteRequest(
-    request: WSAgentActionExecuteRequest,
-    context?: Pick<AgentDataRequestContext, 'receivedAt' | 'reportPhase'>,
+export async function executeRequest(
+    request: ActionExecuteRequest,
+    context?: AgentDataRequestContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const rawTimeout = request.timeout_seconds;
     const timeoutSeconds = (typeof rawTimeout === 'number' && rawTimeout > 0)
@@ -53,7 +54,10 @@ export async function handleAgentActionExecuteRequest(
     logger(`handleAgentActionExecuteRequest: Executing ${request.action_type} with timeout ${timeoutSeconds}s (queued ${queuedMs}ms)`, 1);
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
+    const timers = typeof ChromeUtils !== 'undefined'
+        ? ChromeUtils.importESModule('resource://gre/modules/Timer.sys.mjs')
+        : { setTimeout, clearTimeout };
+    const timer = timers.setTimeout(() => controller.abort(), timeoutSeconds * 1000);
 
     const withTiming = (result: WSAgentActionExecuteResponse): WSAgentActionExecuteResponse => ({
         ...result,
@@ -67,6 +71,7 @@ export async function handleAgentActionExecuteRequest(
     try {
         const ctx: TimeoutContext = {
             signal: controller.signal,
+            assertCurrent: context?.assertCurrent,
             timeoutSeconds,
             startTime,
             reportPhase: context?.reportPhase,
@@ -144,6 +149,34 @@ export async function handleAgentActionExecuteRequest(
             },
         });
     } finally {
-        clearTimeout(timer);
+        timers.clearTimeout(timer);
+    }
+}
+
+/** Queue the entire operation so its reads see the preceding writer's committed state. */
+export async function handleAgentActionExecuteRequest(
+    request: ActionExecuteRequest,
+    context?: AgentDataRequestContext,
+): Promise<WSAgentActionExecuteResponse> {
+    const receivedAt = context?.receivedAt ?? Date.now();
+    const generation = request.operation?.accountGeneration ?? Zotero.Beaver.account?.getGeneration();
+    const assertCurrent = () => {
+        if (generation !== Zotero.Beaver.account?.getGeneration()) throw Object.assign(new Error('Account changed'), { code: 'account_changed' });
+        if (context?.signal?.aborted) throw Object.assign(new Error('Operation cancelled'), { code: 'operation_cancelled' });
+        context?.assertCurrent?.();
+    };
+    try {
+        const operation = await prepareOperationRendering(request.action_type, request.action_data, request.operation);
+        return await Zotero.Beaver.libraryOperations.run('executeRequest', [{ ...request, operation }, { ...context, assertCurrent, receivedAt, reportPhase: context?.reportPhase ?? (() => {}) }], {
+            signal: context?.signal,
+            owner: context?.owner,
+            assertCurrent,
+        });
+    } catch (error) {
+        return {
+            type: 'agent_action_execute_response', request_id: request.request_id,
+            success: false, error: String(error),
+            error_code: (error as { code?: string }).code ?? 'execution_failed',
+        };
     }
 }

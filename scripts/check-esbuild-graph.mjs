@@ -57,18 +57,9 @@ const FORBIDDEN_INPUTS = [
     'react/atoms/profile.ts',
 ];
 
-/**
- * Modules that pull the React graph into esbuild: both import the
- * library-exclusion check, and `agentDataProvider/utils` pulls in the Jotai
- * store, profile atoms, and popup helpers.
- *
- * The `react/` scan below would catch them too, as a hundred-file dump. Naming
- * them here points at the module that imported them, which is the cue to import
- * `tableItemIdentity.ts` instead.
- */
+/** Legacy sync orchestration still depends on renderer state. */
 const WEBPACK_ONLY_INPUTS = [
-    'src/services/artifacts/tableStore.ts',
-    'src/services/artifacts/tableItem.ts',
+    'src/utils/sync.ts',
 ];
 
 // Every voice module is classified so additions/renames require updating the gate.

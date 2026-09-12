@@ -28,6 +28,7 @@ import {
     getLatestNoteHtml,
     getLiveNoteHtmlCandidates,
     getNoteHtmlForRead,
+    isLiveNoteEditor,
 } from '../../../src/utils/noteEditorIO';
 
 // =============================================================================
@@ -318,4 +319,18 @@ describe('getLatestNoteHtml regression', () => {
         );
         expect(getLatestNoteHtml(makeItem({ id: 1, getNote: () => '' }))).toBe('<p>selected</p>');
     });
+});
+
+it('recognizes a separate live note window without a frameElement and rejects its closed window', () => {
+    const win = { closed: false, document: { querySelector: () => ({ isConnected: true }) } };
+    expect(isLiveNoteEditor({ _iframeWindow: win })).toBe(true);
+    win.closed = true;
+    expect(isLiveNoteEditor({ _iframeWindow: win })).toBe(false);
+});
+
+it('rejects a detached iframe even if nodes in its old document remain connected', () => {
+    expect(isLiveNoteEditor({ _iframeWindow: {
+        frameElement: { isConnected: false },
+        document: { querySelector: () => ({ isConnected: true }) },
+    } })).toBe(false);
 });

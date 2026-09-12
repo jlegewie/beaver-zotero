@@ -1,44 +1,44 @@
-import { getContextWindow } from '../../../runtime/windowRuntime';
-import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
-import React, { useState, useCallback } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
-import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
-import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
-import Spinner from '@beaver/agent-ui/icons/Spinner';
-import { MoreHorizontalIcon } from '../../icons/icons';
-import { copyToClipboard } from '../../../utils/clipboard';
-import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../../utils/citationRenderers';
-import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
-import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
-import { resolveToolCallLabelEnrichMap } from '../../../utils/toolCallLabelEnrich';
-import { allRunsAtom, runsCountAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
-import { flushPendingPartEvents } from '../../../utils/streamingPartQueue';
-import { currentThreadIdAtom, currentThreadNameAtom, newThreadAtom, recentThreadsAtom, ThreadData } from '../../../atoms/threads';
-import {
-    currentThreadPinnedAtom,
-    setThreadPinnedAtom,
-    upsertThreadsAtom,
-    threadWriteStampAtom,
-    pinsPendingAtom,
-    isPinPending,
-    threadViewKey,
-    updateThreadAtom,
-    removeThreadAtom,
-} from '../../../atoms/threadList';
 import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
-import { getZoteroTargetContextSync } from '../../../../src/utils/zoteroUtils';
+import { allRunsAtom, runsCountAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
+import { threadService } from '@beaver/agent-core/transport/threadService';
+import Spinner from '@beaver/agent-ui/icons/Spinner';
+import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
+import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
+import { useAtomValue, useSetAtom } from 'jotai';
+import React, { useCallback, useState } from 'react';
 import { getSelectedCollection } from '../../../../src/utils/zoteroSelection';
-import { selectItem, selectItemById } from '../../../utils/selectItem';
+import { currentZoteroInstanceRef } from '../../../../src/utils/zoteroUtils';
+import { userAtom } from '../../../atoms/auth';
+import {
+    currentThreadPinnedAtom,
+    isPinPending,
+    pinsPendingAtom,
+    removeThreadAtom,
+    setThreadPinnedAtom,
+    threadViewKey,
+    threadWriteStampAtom,
+    updateThreadAtom,
+    upsertThreadsAtom,
+} from '../../../atoms/threadList';
+import { currentThreadIdAtom, currentThreadNameAtom, newThreadAtom, recentThreadsAtom, ThreadData } from '../../../atoms/threads';
+import { showAllThreadInstancesAtom } from '../../../atoms/ui';
+import { useFindInChatControls } from '../../../hooks/useFindInChat';
+import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
+import { getContextWindow } from '../../../runtime/windowRuntime';
 import { store } from '../../../store';
 import { prepareCitationRenderContext } from '../../../utils/citationRenderContext';
-import { threadService } from '@beaver/agent-core/transport/threadService';
+import { preprocessNoteContent, renderToHTML, renderToMarkdown } from '../../../utils/citationRenderers';
+import { copyToClipboard } from '../../../utils/clipboard';
+import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
+import { selectItem, selectItemById } from '../../../utils/selectItem';
+import { flushPendingPartEvents } from '../../../utils/streamingPartQueue';
+import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
 import { threadModelToThreadData } from '../../../utils/threadMatches';
-import { userAtom } from '../../../atoms/auth';
-import { showAllThreadInstancesAtom } from '../../../atoms/ui';
-import { currentZoteroInstanceRef } from '../../../../src/utils/zoteroUtils';
+import { resolveToolCallLabelEnrichMap } from '../../../utils/toolCallLabelEnrich';
+import { getZoteroTargetContextSync } from '../../../utils/zoteroTargetContext';
+import { MoreHorizontalIcon } from '../../icons/icons';
 import { clearRecentChatsCache } from '../../RecentChats';
-import { useFindInChatControls } from '../../../hooks/useFindInChat';
 
 interface ThreadMenuButtonProps {
     className?: string;

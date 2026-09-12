@@ -471,9 +471,36 @@ describe('edit_note validate — partial citation detector', () => {
         });
 
         expect(res.valid).toBe(false);
-        // Updated hint mentions `<citation id="..." loc="page..."/>`.
-        expect(res.error).toMatch(/<citation id="\.\.\." loc="page\.\.\."\/>/);
+        // The hint requires a whole atomic citation and preserves its occurrence ref.
+        expect(res.error).toContain('copy the WHOLE tag exactly as shown by read_note');
+        expect(res.error).toContain('including its ref attribute');
         // Old hint mentioned `<citation item_id="..." page="..."/>`.
         expect(res.error).not.toMatch(/<citation item_id="\.\.\." page="\.\.\."\/>/);
+    });
+});
+
+describe('edit_note_batch execute — portable citation identity', () => {
+    beforeEach((ctx) => skipIfNoZotero(ctx, zoteroAvailable));
+
+    it('resolves a portable citation in the plugin-owned executor', async () => {
+        const ref = await seedNote('<p>Body to edit.</p>');
+        const citationId = `${LIBRARY_PREFIX}-${PARENT_ITEM.zotero_key}`;
+        const result = await post<{ success: boolean; error?: string }>('/beaver/agent-action/execute', {
+            action_type: 'edit_note_batch',
+            action_data: {
+                library_id: ref.library_id,
+                zotero_key: ref.zotero_key,
+                edits: [{
+                    index: 0,
+                    operation: 'str_replace',
+                    old_string: 'Body to edit.',
+                    new_string: `Body with <citation id="${citationId}" loc="page42" label="(Legewie, 2024, p. 42)"/>.`,
+                }],
+            },
+        });
+        expect(result.success, result.error).toBe(true);
+        const saved = await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
+        expect(saved).toContain(`id="${citationId}"`);
+        expect(saved).toContain('loc="page42"');
     });
 });

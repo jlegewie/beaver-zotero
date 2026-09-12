@@ -1,3 +1,5 @@
+import type { AttachmentResolvedPayload } from '../../src/services/attachmentResolved';
+export type { AttachmentResolvedPayload } from '../../src/services/attachmentResolved';
 /**
  * Helper to emit an `attachment_resolved` ws event to the backend when a
  * background PDF fetch (scheduled by `applyCreateItemData` or `createZoteroItem`)
@@ -11,27 +13,11 @@
  * those cases via `lookup_zotero_data`.
  */
 
-import { agentService } from '@beaver/agent-core/transport/agentService';
 import { logger } from '@beaver/agent-core/platform/logger';
+import { agentService } from '@beaver/agent-core/transport/agentService';
 
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 
-export interface AttachmentResolvedPayload {
-    threadId?: string;
-    actionId?: string;
-    libraryId: number;
-    zoteroKey: string;
-    attachmentStatus: 'available' | 'failed';
-    attachmentKey?: string;
-    /**
-     * Which resolver produced the file — one we supplied ('openalex') or one of
-     * Zotero's own ('doi', 'url', 'oa', 'custom'). Without it the attach rate is
-     * a single number with no way to tell which sources earn their place.
-     */
-    accessMethod?: string;
-    /** Wall-clock duration of the whole fetch task. */
-    elapsedMs?: number;
-}
 
 export function emitAttachmentResolved(payload: AttachmentResolvedPayload): void {
     if (!payload.threadId) return;
