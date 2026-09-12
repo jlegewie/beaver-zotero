@@ -8,7 +8,7 @@ import { getCredentialGeneration, assertCredentialGeneration } from '@beaver/age
  * using AgentRun for structured run management.
  */
 
-import { getHostWindow } from '../runtime/windowRuntime';
+import { getHostWindow, tryGetWindowRuntime } from '../runtime/windowRuntime';
 
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
@@ -1784,6 +1784,10 @@ export function createWSCallbacks(
             logger('WS onError:', event, 1);
             const errorRunId = resolveErrorRunId(event, store.get(activeRunAtom));
 
+            // An error can release the writer before onClose arrives. Retire
+            // connection UI here while these callbacks still own the request.
+            set(isWSConnectedAtom, false);
+            set(isWSReadyAtom, false);
             // Clear streaming-done state
             set(streamingDoneRunIdsAtom, new Set<string>());
             streamActivity.reset();
@@ -3185,7 +3189,15 @@ export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
     // so the streamed text still sitting in the frame queue has to be applied
     // first — after the slot is null there is nothing left to apply it to.
     flushPendingPartEvents();
+    const writer = currentWriter();
+    const ownedWriter = !!writer && ownsWriter(writer);
     releaseWriter();
+    // The owner already has the canceled response locally. Other viewers must
+    // refresh, but our own release must not make this chat read-only.
+    const threadId = get(currentThreadIdAtom);
+    if (ownedWriter && threadId) {
+        set(viewedHistoryRevisionAtom, Zotero.Beaver.presence.getSnapshot().history[threadId] ?? 0);
+    }
     writerCallbackEpoch++;
     set(retryPendingRunIdAtom, null);
     set(scheduledAutoResumeRunIdsAtom, new Set());
@@ -3212,6 +3224,14 @@ export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
         };
         // Move canceled run to completed runs
         set(threadRunsAtom, (runs) => [...runs, canceledRun]);
+        set(activeRunAtom, null);
+    }
+
+    // run_complete can precede citation linking. Preserve that completed
+    // response without waiting for the now-revoked onClose callback.
+    const completedRun = lingeringCompletedRun(get(activeRunAtom));
+    if (completedRun) {
+        set(threadRunsAtom, (runs) => appendRunIfMissing(runs, completedRun));
         set(activeRunAtom, null);
     }
 
@@ -3661,6 +3681,11 @@ export async function withThreadWriter<T>(get: Getter, set: Setter, operation: (
     const presence = Zotero.Beaver?.presence;
     if (presence && id) {
         const snapshot = presence.getSnapshot();
+        const owner = snapshot.claims.find(claim => claim.threadId === id);
+        if (owner && owner.windowId !== tryGetWindowRuntime()?.id) {
+            set(addPopupMessageAtom, { type: 'info', title: 'Responding in another window', text: 'Wait for that response to finish or go to its window.', expire: true });
+            return;
+        }
         if (snapshot.deleted.includes(id) || (!ownsWriter(currentWriter()) && (snapshot.history[id] ?? 0) !== get(viewedHistoryRevisionAtom))) {
             set(addPopupMessageAtom, { type: 'warning', title: 'This chat was updated elsewhere', text: 'Refresh the chat before continuing. Your draft and attachments are preserved.', expire: false });
             return;

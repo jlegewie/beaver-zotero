@@ -132,6 +132,7 @@ vi.mock('@beaver/agent-core/run-state/atoms', async () => {
 vi.mock('../../../react/atoms/agentRunAtoms', async () => {
     const { atom } = await import('jotai');
     return {
+        abandonActiveRunLocallyAtom: atom(null, () => {}),
         isWSChatPendingAtom: atom(false),
         isWSConnectedAtom: atom(false),
         isWSReadyAtom: atom(false),

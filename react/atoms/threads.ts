@@ -1,4 +1,3 @@
-import { releaseWriter } from '../runtime/threadWriter';
 import { viewedHistoryRevisionAtom } from '../runtime/threadProjection';
 import { atom } from "jotai";
 import { readerActionContextAtom, currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateMessageCollectionsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
@@ -21,7 +20,7 @@ import { clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } f
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom, resetRunSelectorCaches } from "@beaver/agent-core/run-state/atoms";
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
-import { retryPendingRunIdAtom, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
+import { abandonActiveRunLocallyAtom, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
 import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
 import { 
     threadAgentActionsAtom, 
@@ -42,7 +41,6 @@ import { enrichMessageAttachmentStub } from "../types/attachments/converters";
 import { zoteroReferenceKey } from "@beaver/agent-core/types/attachments/apiTypes";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
 import type { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
-import { flushPendingPartEvents } from "../utils/streamingPartQueue";
 
 /**
  * Stores a run ID that ThreadView should scroll to after a thread finishes loading.
@@ -237,32 +235,14 @@ function confirmOpenMismatchedThread(window?: Window): boolean {
  * This ensures the WebSocket connection is closed and UI state is consistent.
  */
 async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any, value?: any) => void, isCurrent = () => true): Promise<void> {
-    // A run canceled mid-response is archived as it stands, so it has to
-    // include the streamed text still sitting in the frame queue.
-    flushPendingPartEvents();
-    releaseWriter();
-    if (Zotero.Beaver?.presence) set(retryPendingRunIdAtom, null);
-    const isPending = get(isWSChatPendingAtom);
-    const activeRun = get(activeRunAtom);
-    
-    if (isPending || activeRun) {
+    const hadActiveWork = get(isWSChatPendingAtom) || get(activeRunAtom);
+    // Navigation revokes socket callbacks, so cleanup must be synchronous and
+    // complete even when the connection's close notification is ignored.
+    set(abandonActiveRunLocallyAtom);
+    set(activeRunAtom, null);
+
+    if (hadActiveWork) {
         logger('cancelActiveRunIfNeeded: Canceling active run before switching threads', 1);
-        
-        // Set pending to false immediately for responsive UI
-        set(isWSChatPendingAtom, false);
-        
-        // Mark active run as canceled if it exists
-        if (activeRun && activeRun.status === 'in_progress') {
-            const canceledRun: AgentRun = {
-                ...activeRun,
-                status: 'canceled',
-                completed_at: new Date().toISOString(),
-            };
-            // Move canceled run to completed runs before clearing
-            set(threadRunsAtom, (runs: AgentRun[]) => [...runs, canceledRun]);
-        }
-        set(activeRunAtom, null);
-        
         // Cancel the WebSocket connection
         await agentService.cancel();
         if (!isCurrent()) return;

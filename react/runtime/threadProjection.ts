@@ -35,9 +35,14 @@ export const threadDeletedAtom = atom((get) => {
 });
 export const threadHistoryStaleAtom = atom((get) => {
     const id = get(currentThreadIdAtom);
+    const presence = get(threadPresenceAtom);
+    const ownsThread = presence.claims.some(
+        (claim) => claim.threadId === id && claim.windowId === tryGetWindowRuntime()?.id,
+    );
     return (
         !!id &&
-        (get(threadPresenceAtom).history[id] ?? 0) !==
+        !ownsThread &&
+        (presence.history[id] ?? 0) !==
             get(viewedHistoryRevisionAtom)
     );
 });
