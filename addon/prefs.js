@@ -22,6 +22,8 @@ pref("addSelectedItemsOnOpen", true);
 pref("addSelectedItemsOnNewThread", true);
 pref("addBeaverProvenanceNote", false);
 pref("focusResponseForScreenReaders", false);
+// Line spacing used by messages in the chat history: compact, default, or relaxed.
+pref("chatLineSpacing", "compact");
 pref("annotationToolEnabled", true);
 // Author name on annotations Beaver creates. Empty string = no attribution.
 // Only affects new annotations. Reader-created annotations ignore this —

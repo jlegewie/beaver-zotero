@@ -19,6 +19,7 @@ import AdvancedSection from "./AdvancedSection";
 import PermissionsSection from "./PermissionsSection";
 import LibraryAccessList from "./LibraryAccessList";
 import BackgroundProcessingSection from "./BackgroundProcessingSection";
+import { normalizeChatLineSpacing } from '../../utils/chatLineSpacing';
 
 
 const PreferencePage: React.FC = () => {
@@ -40,6 +41,9 @@ const PreferencePage: React.FC = () => {
     const [runStatusPopupEnabled, setRunStatusPopupEnabled] = useAtom(runStatusPopupEnabledAtom);
     const [addProvenanceNote, setAddProvenanceNote] = usePreference(() => getPref('addBeaverProvenanceNote'));
     const [focusResponseForScreenReaders, setFocusResponseForScreenReaders] = usePreference(() => getPref('focusResponseForScreenReaders'));
+    const [chatLineSpacing, setChatLineSpacing] = usePreference(() =>
+        normalizeChatLineSpacing(getPref('chatLineSpacing')),
+    );
     const [showDiffPreview, setShowDiffPreview] = usePreference(() => getPref('showDiffPreviewInNoteEditor') !== false);
     const diffPreviewSupported = isDiffPreviewSupported();
     const [consentToShare, setConsentToShare] = useState(() => profileWithPlan?.consent_to_share || false);
@@ -140,6 +144,12 @@ const PreferencePage: React.FC = () => {
         setPref("focusResponseForScreenReaders", newValue);
         setFocusResponseForScreenReaders(newValue);
     }, [focusResponseForScreenReaders]);
+
+    const handleChatLineSpacingChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+        const newValue = normalizeChatLineSpacing(event.target.value);
+        setPref('chatLineSpacing', newValue);
+        setChatLineSpacing(newValue);
+    }, []);
 
     const handleShowDiffPreviewToggle = useCallback(() => {
         if (!diffPreviewSupported) return;
@@ -468,9 +478,28 @@ const PreferencePage: React.FC = () => {
                         <SectionLabel>Accessibility</SectionLabel>
                         <SettingsGroup>
                             <SettingsRow
+                                title="Chat Line Spacing"
+                                description="Adjust the vertical spacing of chat messages for easier reading"
+                                control={
+                                    <select
+                                        id="chat-line-spacing"
+                                        value={chatLineSpacing}
+                                        onChange={handleChatLineSpacingChange}
+                                        className="py-1 px-2 border preference-input text-sm"
+                                        style={{ minWidth: '104px', margin: 0 }}
+                                        onClick={(event) => event.stopPropagation()}
+                                    >
+                                        <option value="compact">Compact</option>
+                                        <option value="default">Default</option>
+                                        <option value="relaxed">Relaxed</option>
+                                    </select>
+                                }
+                            />
+                            <SettingsRow
                                 title="Announce Responses for Screen Readers"
                                 description="Move focus to screen-reader text when Beaver starts and finishes generating a response"
                                 onClick={handleFocusResponseForScreenReadersToggle}
+                                hasBorder
                                 tooltip="When enabled, focus moves from the chat input to screen-reader-only status text while Beaver generates, then to a screen-reader-only copy of the completed response."
                                 control={
                                     <input
