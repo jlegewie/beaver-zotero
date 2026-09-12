@@ -186,9 +186,9 @@ describe('the completed batch rows', () => {
         hookState.index = 0;
         const text = renderedText(BatchDoneRows({ batches }) as React.ReactNode).join(' ');
         expect(text).toContain('File the Methods collection by topic');
-        // On the row's own line, and again as the track's legend — a segmented
-        // bar with no caption reads as a half-finished job.
-        expect(text.split('151 filed · 26 left as-is · 7 failed')).toHaveLength(3);
+        // The full breakdown labels the track; the header keeps failures separate.
+        expect(text.split('151 filed · 26 left as-is · 7 failed')).toHaveLength(2);
+        expect(text.match(/7 failed/g)).toHaveLength(2);
         expect(text).toContain('Where items went');
         expect(text).toContain('Ecology');
         expect(text).toContain('+ 4 more');
@@ -297,4 +297,36 @@ describe('the completed batch rows', () => {
             .find((element) => element.props && 'bounded' in element.props);
         expect(body?.props.bounded).toBe(false);
     });
+});
+
+
+it.each(['9 read · 2 blocked', '9 read · 2 failed'])(
+    'shows a single failure count for %s',
+    (detail_label) => {
+        const text = render([entry({
+            progress_title: 'Read documents', detail_label,
+            failed: 2, blocked: 2, status: 'failed_out',
+        })]);
+        expect(text.match(/2 failed/g)).toHaveLength(1);
+        expect(text).not.toContain('blocked');
+        expect(text).toContain('9 read');
+    },
+);
+
+it('exposes all supplied reasons in the expanded receipt', () => {
+    hookState.slots = [];
+    hookState.index = 0;
+    const batches = [entry({
+        failed: 5, status: 'failed_out',
+        blocks: [{ heading: 'Not done', kind: 'failure', rows:
+            ['No text layer', 'Image unsupported', '3D unsupported', 'Markdown unsupported', 'Word unsupported']
+                .map((label) => ({ label, count: 1 })),
+        }],
+    })];
+    renderedText(BatchDoneRows({ batches }) as React.ReactNode);
+    hookState.slots[0].value = true;
+    hookState.index = 0;
+    const text = renderedText(BatchDoneRows({ batches }) as React.ReactNode).join(' ');
+    expect(text).toContain('Word unsupported');
+    expect(text).not.toContain('more');
 });

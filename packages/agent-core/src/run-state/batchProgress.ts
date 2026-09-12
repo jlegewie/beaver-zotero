@@ -38,7 +38,7 @@ export interface BatchOutcomeTally {
  * How a block's rows are drawn. `finding` is what the model flagged for the
  * user to act on, grouped by finding; any operation may send one.
  */
-export type BatchOutcomeBlockKind = 'destination' | 'removal' | 'finding' | 'failure';
+export type BatchOutcomeBlockKind = 'destination' | 'removal' | 'finding' | 'failure' | 'no_change';
 
 /**
  * One labelled group of outcome rows.

@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import type { BatchProgressEntry } from '@beaver/agent-core/run-state/batchProgress';
 import { ArrowDownIcon, CancelCircleIcon, Icon, LayersIcon, TickIcon } from '../icons';
-import { BatchFailureChip, BatchOutcomeBody } from './BatchOutcomeBlocks';
+import { BatchOutcomeBody } from './BatchOutcomeBlocks';
 
 /** Heading copied from the approval card. Keep in step with the backend string. */
 const headingLabel = (count: number): string =>
@@ -52,7 +52,14 @@ const BatchDoneRow: React.FC<{
     // Cancelled is not an outcome; a tick would claim one. Neutral icon keeps the column aligned.
     const isCancelled = batch.status === 'cancelled';
     const lead = leadLabel(batch);
-    const trail = trailLabel(batch);
+    const failed = batch.failed ?? 0;
+    // Keep failures visible independently of the shrinking detail text.
+    const trail = failed > 0
+        ? trailLabel(batch)
+              ?.split(' · ')
+              .filter((part) => !/^[\d,]+ (?:blocked|failed)$/.test(part))
+              .join(' · ')
+        : trailLabel(batch);
 
     return (
         <div className={['display-flex flex-col min-w-0', ruleAbove && 'border-top-quinary'].filter(Boolean).join(' ')}>
@@ -86,14 +93,18 @@ const BatchDoneRow: React.FC<{
                     {lead}
                 </span>
                 {/* Present even when empty: it is also the spacer that pushes the
-                    chip and the chevron to the end of the row. */}
+                    failure count and the chevron to the end of the row. */}
                 <span
                     className="font-color-secondary opacity-70 text-sm truncate flex-1 min-w-0"
                     title={trail || undefined}
                 >
                     {trail}
                 </span>
-                <BatchFailureChip batch={batch} />
+                {failed > 0 && (
+                    <span className="font-color-orange text-sm flex-none">
+                        {`${failed.toLocaleString()} failed`}
+                    </span>
+                )}
                 <Icon
                     icon={ArrowDownIcon}
                     className="font-color-secondary flex-none scale-85 transition"

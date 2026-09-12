@@ -47,7 +47,7 @@ const view = (block: BatchOutcomeBlock, resolved?: number) =>
     text(BatchOutcomeBlockView({ block, resolved }));
 
 describe('one outcome block', () => {
-    it.each(['destination', 'removal', 'finding', 'failure'] as const)(
+    it.each(['destination', 'removal', 'finding', 'failure', 'no_change'] as const)(
         'reports the %s rows it hid',
         (kind) => {
             const rendered = view({
@@ -290,4 +290,14 @@ describe('the block list and the surface it draws on', () => {
         )[0] as React.ReactElement<any>;
         expect(block.props.libraryRef).toBe('g900');
     });
+});
+
+
+it('shows why no action was needed', () => {
+    const rendered = view({
+        heading: 'No action needed', kind: 'no_change',
+        rows: [{ label: 'Outside the requested date range', count: 2 }],
+    });
+    expect(rendered).toContain('Outside the requested date range');
+    expect(rendered).toContain('2');
 });

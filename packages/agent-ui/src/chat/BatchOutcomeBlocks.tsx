@@ -280,7 +280,7 @@ export const BatchOutcomeBlockView: React.FC<{
         <div className="display-flex flex-col gap-1 min-w-0">
             <BatchBlockHeading>{block.heading}</BatchBlockHeading>
             {shown.map((row) => {
-                if (block.kind === 'failure') {
+                if (block.kind === 'failure' || block.kind === 'no_change') {
                     return (
                         <div
                             key={row.label}
