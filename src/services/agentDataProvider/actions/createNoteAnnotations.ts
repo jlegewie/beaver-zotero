@@ -1,33 +1,33 @@
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
-    WSAgentActionValidateRequest,
-    WSAgentActionValidateResponse,
+    WSAgentActionValidateResponse
 } from '@beaver/agent-core/protocol/agentProtocol';
-import {
-    EpubAnnotationError,
-    MissingPageGeometryError,
-    SnapshotAnnotationError,
-    createEpubNoteAnnotation,
-    createNoteAnnotation,
-    createSnapshotNoteAnnotation,
-    prepareSnapshotAnnotationDocument,
-} from '../../annotations/createAnnotation';
-import { getReadableContentKind } from '../../documentExtraction/attachmentResolution';
-import { checkLibraryExcluded, getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
-import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
+import { normalizeNotePosition } from '@beaver/agent-core/types/agentActions/annotations';
 import type {
     CreatedAnnotationResult,
     CreateNoteAnnotationsProposedData,
     FailedAnnotationResult,
     NoteAnnotationItem,
 } from '@beaver/agent-core/types/agentActions/createAnnotations';
-import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { normalizeNotePosition } from '@beaver/agent-core/types/agentActions/annotations';
 import { normalizeAnnotationTags } from '@beaver/agent-core/types/agentActions/createAnnotations';
-import { shortItemTitle } from '../../../utils/zoteroUtils';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { hasLibraryIdentity, libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
-import { logger } from '@beaver/agent-core/platform/logger';
+import { shortItemTitle } from '../../../utils/zoteroUtils';
+import {
+    createEpubNoteAnnotation,
+    createNoteAnnotation,
+    createSnapshotNoteAnnotation,
+    EpubAnnotationError,
+    MissingPageGeometryError,
+    prepareSnapshotAnnotationDocument,
+    SnapshotAnnotationError,
+} from '../../annotations/createAnnotation';
+import { getReadableContentKind } from '../../documentExtraction/attachmentResolution';
+import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
+import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
+import { checkLibraryExcluded, getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
 
 function mapAnnotationErrorCode(error: unknown): string {
     if (error instanceof MissingPageGeometryError) {
@@ -62,7 +62,7 @@ function normalizeRef(raw: any): ZoteroItemReference {
     };
 }
 
-function getActionData(request: WSAgentActionValidateRequest | WSAgentActionExecuteRequest): CreateNoteAnnotationsProposedData {
+function getActionData(request: ActionValidateRequest | WSAgentActionExecuteRequest): CreateNoteAnnotationsProposedData {
     const raw = request.action_data ?? {};
     return {
         requested_ref: normalizeRef(raw.requested_ref ?? raw.requestedRef ?? {}),
@@ -128,7 +128,7 @@ async function getAttachmentTitle(attachment: Zotero.Item): Promise<string> {
  * Validate a create_note_annotations action before deferred execution.
  */
 export async function validateCreateNoteAnnotationsAction(
-    request: WSAgentActionValidateRequest,
+    request: ActionValidateRequest,
 ): Promise<WSAgentActionValidateResponse> {
     const data = getActionData(request);
     const { requested_ref, resolved_ref, items } = data;
@@ -258,7 +258,7 @@ export async function validateCreateNoteAnnotationsAction(
             needs_extraction: needsExtraction,
         },
         normalized_action_data: data as unknown as Record<string, any>,
-        preference: getDeferredToolPreference('create_note_annotations'),
+        preference: getDeferredToolPreference('create_note_annotations', undefined, request.operation),
     };
 }
 
@@ -266,7 +266,7 @@ export async function validateCreateNoteAnnotationsAction(
  * Execute a create_note_annotations action headlessly.
  */
 export async function executeCreateNoteAnnotationsAction(
-    request: WSAgentActionExecuteRequest,
+    request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const data = getActionData(request);

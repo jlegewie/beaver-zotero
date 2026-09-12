@@ -1,3 +1,7 @@
+const previewRuntime = vi.hoisted(() => ({ id: 'preview-test', contextWindow: {} }));
+vi.mock('../../../react/runtime/windowRuntime', () => ({ tryGetWindowRuntime: () => previewRuntime }));
+import { beforeEach } from 'vitest';
+import { installMutationInstance } from '../../helpers/mutationInstance';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
@@ -239,7 +243,10 @@ describe('showDiffPreview approveAll revision-guard flow', () => {
         const wrapped: any = {
             _currentEditorInstance: { _editorCore: { view: { dom: viewDom } } },
         };
+        installMutationInstance();
         const iframeWindow: any = {
+            top: previewRuntime.contextWindow,
+            frameElement: { isConnected: true },
             wrappedJSObject: wrapped,
             addEventListener: vi.fn(),
             removeEventListener: vi.fn(),
@@ -318,12 +325,23 @@ describe('showDiffPreview approveAll revision-guard flow', () => {
         }
     });
 
+    it('uses the chrome embedder to select its editor when iframe top is a content window', async () => {
+        vi.useFakeTimers();
+        makeHarness(NOTE, { otherEditorHtml: NOTE });
+        const [own] = (Zotero as any).Notes._editorInstances;
+        own._iframeWindow.top = {};
+        (Zotero as any).Beaver.runtime = {
+            resolveWindowFrom: (win: unknown) => win === own._iframeWindow ? previewRuntime : undefined,
+        };
+        expect(await showDiffPreview(1, 'NOTE0001', EDITS)).toBe(true);
+    });
+
     it('preloads a standalone attachment title before rendering the proposed edit', async () => {
         vi.useFakeTimers();
         const h = makeHarness(NOTE);
         const previousLibraries = Zotero.Libraries;
         const previousBeaver = Zotero.Beaver;
-        (Zotero as any).Beaver = { ...previousBeaver, searchableLibraryIds: [1], libraryScopeInitialized: true };
+        (Zotero as any).Beaver = { ...(Zotero as any).Beaver, ...previousBeaver, searchableLibraryIds: [1], libraryScopeInitialized: true };
         let titleLoaded = false;
         const attachment = {
             libraryID: 1, key: 'ATTACH12', parentID: false,
@@ -364,7 +382,7 @@ describe('showDiffPreview approveAll revision-guard flow', () => {
         const previousBeaver = Zotero.Beaver;
         const previousFile = Zotero.File;
         try {
-            (Zotero as any).Beaver = { db: { getExternalFileByKey: vi.fn(async () => ({
+            (Zotero as any).Beaver = { ...(Zotero as any).Beaver, db: { getExternalFileByKey: vi.fn(async () => ({
                 filename: 'Report.pdf', storedPath: '/stored/Report.pdf',
             })) } };
             (Zotero as any).File = { pathToFileURI: vi.fn(() => 'file:///stored/Report.pdf') };

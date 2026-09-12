@@ -1,35 +1,35 @@
+import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
-    WSAgentActionValidateRequest,
-    WSAgentActionValidateResponse,
+    WSAgentActionValidateResponse
 } from '@beaver/agent-core/protocol/agentProtocol';
-import {
-    EpubAnnotationError,
-    MissingPageGeometryError,
-    SnapshotAnnotationError,
-    createEpubHighlightAnnotation,
-    createHighlightAnnotation,
-    createSnapshotHighlightAnnotation,
-    highlightPartComment,
-    prepareSnapshotAnnotationDocument,
-    resolvedAnnotationPageLabel,
-} from '../../annotations/createAnnotation';
-import { getReadableContentKind } from '../../documentExtraction/attachmentResolution';
-import { checkLibraryExcluded, getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
-import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
+import { normalizePageLocations } from '@beaver/agent-core/types/agentActions/annotations';
 import type {
     CreatedAnnotationResult,
     CreateHighlightAnnotationsProposedData,
     FailedAnnotationResult,
     HighlightAnnotationItem,
 } from '@beaver/agent-core/types/agentActions/createAnnotations';
-import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { normalizePageLocations } from '@beaver/agent-core/types/agentActions/annotations';
 import { normalizeAnnotationTags } from '@beaver/agent-core/types/agentActions/createAnnotations';
-import { shortItemTitle } from '../../../utils/zoteroUtils';
+import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { hasLibraryIdentity, libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
-import { logger } from '@beaver/agent-core/platform/logger';
+import { shortItemTitle } from '../../../utils/zoteroUtils';
+import {
+    createEpubHighlightAnnotation,
+    createHighlightAnnotation,
+    createSnapshotHighlightAnnotation,
+    EpubAnnotationError,
+    highlightPartComment,
+    MissingPageGeometryError,
+    prepareSnapshotAnnotationDocument,
+    resolvedAnnotationPageLabel,
+    SnapshotAnnotationError,
+} from '../../annotations/createAnnotation';
+import { getReadableContentKind } from '../../documentExtraction/attachmentResolution';
+import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
+import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
+import { checkLibraryExcluded, getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
 
 function mapAnnotationErrorCode(error: unknown): string {
     if (error instanceof MissingPageGeometryError) {
@@ -64,7 +64,7 @@ function normalizeRef(raw: any): ZoteroItemReference {
     };
 }
 
-function getActionData(request: WSAgentActionValidateRequest | WSAgentActionExecuteRequest): CreateHighlightAnnotationsProposedData {
+function getActionData(request: ActionValidateRequest | WSAgentActionExecuteRequest): CreateHighlightAnnotationsProposedData {
     const raw = request.action_data ?? {};
     return {
         requested_ref: normalizeRef(raw.requested_ref ?? raw.requestedRef ?? {}),
@@ -119,7 +119,7 @@ async function getAttachmentTitle(attachment: Zotero.Item): Promise<string> {
  * Validate a create_highlight_annotations action before deferred execution.
  */
 export async function validateCreateHighlightAnnotationsAction(
-    request: WSAgentActionValidateRequest,
+    request: ActionValidateRequest,
 ): Promise<WSAgentActionValidateResponse> {
     const data = getActionData(request);
     const { requested_ref, resolved_ref, items } = data;
@@ -249,7 +249,7 @@ export async function validateCreateHighlightAnnotationsAction(
             needs_extraction: needsExtraction,
         },
         normalized_action_data: data as unknown as Record<string, any>,
-        preference: getDeferredToolPreference('create_highlight_annotations'),
+        preference: getDeferredToolPreference('create_highlight_annotations', undefined, request.operation),
     };
 }
 
@@ -257,7 +257,7 @@ export async function validateCreateHighlightAnnotationsAction(
  * Execute a create_highlight_annotations action headlessly.
  */
 export async function executeCreateHighlightAnnotationsAction(
-    request: WSAgentActionExecuteRequest,
+    request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const data = getActionData(request);

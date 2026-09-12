@@ -1,21 +1,19 @@
 import { logger } from '@beaver/agent-core/platform/logger';
-import { getContextWindow } from '../../runtime/windowRuntime';
 import type { NoteWriterHost, SaveNoteRequest, SavedNoteReference } from '@beaver/agent-ui/host/types';
-import {
-    getZoteroTargetContextSync,
-    getCurrentLibrary,
-    isLibraryEditable,
-} from '../../../src/utils/zoteroUtils';
-import { selectItem, selectItemById } from '../../utils/selectItem';
+import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
 import { getSelectedCollection as getSelectedZoteroCollection } from '../../../src/utils/zoteroSelection';
+import { isLibraryEditable } from '../../../src/utils/zoteroUtils';
+import { currentThreadIdAtom } from '../../atoms/threads';
+import { runWindowOperation } from '../../runtime/libraryMutation';
+import { getContextWindow } from '../../runtime/windowRuntime';
+import { store } from '../../store';
 import {
     generateNoteTitle,
     getBeaverNoteFooterHTML,
     wrapWithSchemaVersion,
 } from '../../utils/noteActions';
-import { currentThreadIdAtom } from '../../atoms/threads';
-import { store } from '../../store';
-import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
+import { selectItem, selectItemById } from '../../utils/selectItem';
+import { getCurrentLibrary, getZoteroTargetContextSync } from '../../utils/zoteroTargetContext';
 
 function isInReader(): boolean {
     const win = getContextWindow();
@@ -73,22 +71,13 @@ export const zoteroNoteWriter: NoteWriterHost = {
             return null;
         }
 
-        const newNote = new Zotero.Item('note');
-        if (parentReference) {
-            newNote.libraryID = parentReference.library_id;
-            newNote.parentKey = parentReference.zotero_key;
-        } else {
-            newNote.libraryID = context.targetLibraryId;
-        }
-
-        newNote.setNote(wrapWithSchemaVersion(assembleNoteHtml(request)));
-        await newNote.saveTx();
-
-        if (selectedCollection) {
-            await Zotero.DB.executeTransaction(async () => {
-                selectedCollection.addItem(newNote.id);
-            });
-        }
+        const html = wrapWithSchemaVersion(assembleNoteHtml(request));
+        const newNote = await runWindowOperation('savePreparedNote', [{
+            libraryId: parentReference?.library_id ?? context.targetLibraryId,
+            parentKey: parentReference?.zotero_key,
+            collectionId: selectedCollection?.id,
+            html,
+        }]);
 
         // The note is already saved; a failed reveal must not invite a duplicate retry.
         try {

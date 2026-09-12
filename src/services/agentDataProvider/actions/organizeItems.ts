@@ -1,12 +1,10 @@
-import { WSAgentActionValidateRequest, WSAgentActionValidateResponse, WSAgentActionExecuteRequest, WSAgentActionExecuteResponse } from '@beaver/agent-core/protocol/agentProtocol';
-import { store } from '../../../../react/store';
-import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
-import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
-import { resolveItemReference, resolveLibraryRef, parseItemReference, modelObjectId } from '../../../utils/libraryIdentity';
-import { TimeoutContext, checkAborted } from '../timeout';
-import { TimeoutError } from '../timeout';
 import { logger } from '@beaver/agent-core/platform/logger';
+import { WSAgentActionExecuteResponse, WSAgentActionValidateResponse } from '@beaver/agent-core/protocol/agentProtocol';
+import { modelObjectId, parseItemReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import { TimingAccumulator } from '../../../utils/timing';
+import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
+import { TimeoutContext, TimeoutError, checkAborted } from '../timeout';
+import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 
 
 /**
@@ -39,7 +37,7 @@ function restoreItemSnapshots(
  * batch with several bad ids reports all of them in a single error.
  */
 export async function validateOrganizeItemsAction(
-    request: WSAgentActionValidateRequest
+    request: ActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
     const { item_ids, tags, collections } = request.action_data as {
         item_ids: string[];
@@ -94,7 +92,7 @@ export async function validateOrganizeItemsAction(
     const normalizedItemIds: string[] = [];
     // Resolved (device-local) libraryIDs collected for the same-library collection check.
     const resolvedLibraryIds: number[] = [];
-    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+    const searchableLibraryIds = (Zotero.Beaver.libraryScopeInitialized ? (Zotero.Beaver.searchableLibraryIds ?? []) : []);
 
     // Collect EVERY per-item problem instead of returning on the first one. A
     // single nonexistent/invalid id in a large batch used to reject the whole
@@ -398,7 +396,7 @@ export async function validateOrganizeItemsAction(
     }
 
     // Get user preference
-    const preference = getDeferredToolPreference('organize_items');
+    const preference = getDeferredToolPreference('organize_items', undefined, request.operation);
 
     return {
         type: 'agent_action_validate_response',
@@ -424,7 +422,7 @@ export async function validateOrganizeItemsAction(
  * transaction rolls back. Items that don't exist are skipped (not an error).
  */
 export async function executeOrganizeItemsAction(
-    request: WSAgentActionExecuteRequest,
+    request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const start = Date.now();

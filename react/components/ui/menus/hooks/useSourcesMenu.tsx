@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
 import { ItemSearchResult } from '@beaver/agent-core/transport/clients/searchService';
-import { getActiveZoteroLibraryId, getRecentAsync, loadFullItemData } from '../../../../../src/utils/zoteroUtils';
-import { UNRESOLVED_LIBRARY_ID } from '../../../../../src/utils/libraryIdentity';
-import { ArrowRightIcon, CSSIcon, FileLinkIcon, Icon } from '../../../icons/icons';
 import { SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
+import React, { useEffect, useState } from 'react';
+import { UNRESOLVED_LIBRARY_ID } from '../../../../../src/utils/libraryIdentity';
+import { getRecentAsync, loadFullItemData } from '../../../../../src/utils/zoteroUtils';
+import { getActiveZoteroLibraryId } from '../../../../utils/zoteroTargetContext';
+import { ArrowRightIcon, CSSIcon, FileLinkIcon, Icon } from '../../../icons/icons';
 import { SourceMenuItemContext, createSourceMenuItem } from '../utils/menuItemFactories';
 
 interface UseSourcesMenuOptions {

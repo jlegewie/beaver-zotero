@@ -1,3 +1,4 @@
+import { installMutationInstance } from '../../helpers/mutationInstance';
 /**
  * The recovery shadow: what this device wrote, kept where a sync conflict
  * cannot reach it.
@@ -361,6 +362,8 @@ beforeEach(async () => {
         },
         getMainWindow: vi.fn(() => null),
     };
+
+    installMutationInstance();
 });
 
 afterEach(async () => {
@@ -456,7 +459,7 @@ describe('recording what this device wrote', () => {
         await createTable({ spec: demoSpec('One') });
         // The database going away mid-session: the table is already committed
         // by the time the shadow is written, so the write must still succeed.
-        (globalThis as any).Zotero.Beaver = undefined;
+        (globalThis as any).Zotero.Beaver.db = undefined;
 
         const written = expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
 

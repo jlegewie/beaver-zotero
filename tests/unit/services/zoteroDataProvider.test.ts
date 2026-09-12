@@ -32,6 +32,7 @@ vi.mock('../../../src/services/agentDataProvider', () => ({
 vi.mock('../../../src/services/syncPause', () => ({
     LOCAL_MUTATING_RUN_SYNC_PAUSE_OWNER: 'local-mutating-run',
     pauseSyncForMutatingRun: vi.fn(),
+    scheduleResumeAfterRun: vi.fn(),
 }));
 
 import { createZoteroDataProvider } from '../../../src/services/zoteroDataProvider';
@@ -70,12 +71,12 @@ const EXPECTED_EVENTS = [
 
 describe('createZoteroDataProvider dispatch map', () => {
     it('covers exactly the expected backend data-request events', () => {
-        const map = createZoteroDataProvider();
+        const map = createZoteroDataProvider({ operationContext: () => ({ owner: 'window-A', runId: 'run-A' }) });
         expect(Object.keys(map).sort()).toEqual([...EXPECTED_EVENTS].sort());
     });
 
     it('every entry has a handler and a well-formed error fallback', () => {
-        const map = createZoteroDataProvider();
+        const map = createZoteroDataProvider({ operationContext: () => ({ owner: 'window-A', runId: 'run-A' }) });
         for (const [event, entry] of Object.entries(map)) {
             expect(typeof entry.handle, `${event}.handle`).toBe('function');
             expect(typeof entry.errorResponse, `${event}.errorResponse`).toBe('function');
@@ -87,12 +88,12 @@ describe('createZoteroDataProvider dispatch map', () => {
         }
     });
 
-    it('only agent_action_execute is serialized', () => {
-        const map = createZoteroDataProvider();
+    it('leaves serialization to the instance mutation queue', () => {
+        const map = createZoteroDataProvider({ operationContext: () => ({ owner: 'window-A', runId: 'run-A' }) });
         const serialized = Object.entries(map)
             .filter(([, entry]) => entry.serialize)
             .map(([event]) => event);
-        expect(serialized).toEqual(['agent_action_execute']);
+        expect(serialized).toEqual([]);
     });
 
     it('pauses Zotero sync before running mutating agent actions', async () => {
@@ -100,23 +101,24 @@ describe('createZoteroDataProvider dispatch map', () => {
         const pause = vi.mocked(pauseSyncForMutatingRun);
         execute.mockResolvedValueOnce({ type: 'agent_action_execute_response', request_id: 'req-1' });
 
-        const map = createZoteroDataProvider();
+        const map = createZoteroDataProvider({ operationContext: () => ({ owner: 'window-A', runId: 'run-A' }) });
         const response = await map.agent_action_execute.handle({ request_id: 'req-1' });
 
         expect(response).toEqual({ type: 'agent_action_execute_response', request_id: 'req-1' });
-        expect(pause).toHaveBeenCalledWith('local-mutating-run');
+        expect(pause).toHaveBeenCalledWith('chat:window-A:run-A');
         expect(execute).toHaveBeenCalledTimes(1);
         expect(pause.mock.invocationCallOrder[0]).toBeLessThan(execute.mock.invocationCallOrder[0]);
     });
 
-    it('uses the configured sync pause owner for mutating agent actions', async () => {
+    it('leaves originless sync ownership to the plugin mutation queue', async () => {
         const execute = vi.mocked(handleAgentActionExecuteRequest);
         const pause = vi.mocked(pauseSyncForMutatingRun);
         execute.mockResolvedValueOnce({ type: 'agent_action_execute_response', request_id: 'req-1' });
 
-        const map = createZoteroDataProvider({ syncPauseOwner: 'provider-mutating-run' });
+        pause.mockClear();
+        const map = createZoteroDataProvider();
         await map.agent_action_execute.handle({ request_id: 'req-1' });
 
-        expect(pause).toHaveBeenCalledWith('provider-mutating-run');
+        expect(pause).not.toHaveBeenCalled();
     });
 });

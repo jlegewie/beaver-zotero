@@ -21,9 +21,9 @@
  * library.
  */
 
-import { logger } from '@beaver/agent-core/platform/logger';
 import type { TableSpec } from '@beaver/agent-core/layouts/table';
 import type { TableSummary } from '@beaver/agent-core/layouts/tableMutations';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { parseTableDocument } from './tableDocument';
 
 // ---------------------------------------------------------------------------
@@ -96,6 +96,14 @@ export class TableItemError extends Error {
         this.name = 'TableItemError';
         this.code = code;
     }
+}
+
+/** Error constructors differ between the plugin and renderer bundles. */
+export function isTableItemError(error: unknown): error is TableItemError {
+    return !!error && typeof error === 'object'
+        && (error as TableItemError).name === 'TableItemError'
+        && typeof (error as TableItemError).code === 'string'
+        && typeof (error as TableItemError).message === 'string';
 }
 
 // ---------------------------------------------------------------------------

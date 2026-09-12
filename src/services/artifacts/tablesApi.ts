@@ -58,14 +58,9 @@ export interface TablesItemPaneApi {
 /**
  * The recovery shadow, as the item-pane section and the dev endpoints need it.
  *
- * Split across the bundles for a reason neither half can avoid. Detection is
- * esbuild-side (`recoveryShadow.ts` is compiled into `beaver.js` so the section
- * can read it), but the restore is a *write*, and every write goes through
- * `tableStore.ts`, which is webpack-only so that its single-flight lock stays
- * single. So {@link TablesShadowApi.restore} forwards to a function the webpack
- * bundle publishes ({@link setTableShadowRestore}) and answers
- * `store_unavailable` when it has not — which is the honest report, not a
- * fallback that would write around the lock.
+ * The plugin owns both detection and restoration. Restoration enters the
+ * instance mutation queue before acquiring the table lock, and remains
+ * available when no renderer is attached.
  */
 export interface TablesShadowApi {
     /**
@@ -81,7 +76,7 @@ export interface TablesShadowApi {
     restore(ref: TableRef): Promise<TableShadowRestoreResult | TableShadowUnavailable>;
 }
 
-/** What {@link TablesShadowApi.restore} answers with no webpack half up. */
+/** What {@link TablesShadowApi.restore} answers when the plugin service is absent. */
 export interface TableShadowUnavailable {
     ok: false;
     code: 'store_unavailable';
@@ -114,18 +109,14 @@ export interface TablesApi {
     shadow: TablesShadowApi;
 }
 
-/** The write half of the shadow, as the webpack bundle publishes it. */
+/** The plugin-owned recovery operation. */
 export type TableShadowRestore = (
     ref: TableRef
 ) => Promise<TableShadowRestoreResult>;
 
 /**
- * The webpack bundle's restore function, or null before it is up.
- *
- * Its own slot rather than a field on {@link TablesApi}, because the two halves
- * are published by different bundles at different times: the esbuild half
- * registers at plugin startup and re-registers on every reload, and a field it
- * rebuilt would silently drop whatever the React bundle had put there.
+ * The plugin's restore function, published at startup and withdrawn at disposal.
+ * Renderer attachment and teardown never replace this binding.
  */
 export function getTableShadowRestore(): TableShadowRestore | null {
     return Zotero.__beaverTableShadowRestore ?? null;
@@ -136,10 +127,9 @@ export function setTableShadowRestore(restore: TableShadowRestore | null): void 
     Zotero.__beaverTableShadowRestore = restore ?? undefined;
 }
 
-/** What a caller reports when the webpack half has not registered. */
+/** What a caller reports when the plugin recovery service has not registered. */
 export const TABLE_SHADOW_RESTORE_UNAVAILABLE =
-    'Restoring a table version needs Beaver\'s React bundle, which has not registered ' +
-    '(Zotero.__beaverTableShadowRestore is unset).';
+    'Beaver\'s table recovery service is unavailable. Reload Beaver and try again.';
 
 /**
  * The shared slot. `__beaver`-prefixed on `Zotero` to match
@@ -172,21 +162,9 @@ export function setTablesApi(api: TablesApi | null): void {
  * called first, which is why the seed exists — otherwise the first window
  * bundle to take a lock would own the map.
  *
- * Its *entries* are promises created by a window's webpack realm (`tableStore`
- * is compiled there). That is a bounded exception to not parking realm-bound
- * values on a `Zotero.__beaver*` slot:
- *
- * - An entry deletes itself once it settles, so it is not a lasting reference.
- * - Everything a write awaits (`IOUtils`, `Zotero.DB`, `Zotero.Items`) belongs
- *   to the plugin or system realm. Closing a chrome window makes its *timers*
- *   inert but does not nuke its objects, so a write whose window closes
- *   mid-flight still settles and still releases its entry.
- *
- * An entry still pins its creating realm for as long as the write runs, and a
- * future change that made the write await something window-bound would wedge
- * that one table until reload. Clearing a closing window's entries is **not**
- * the fix — a write still in flight would then run concurrently with the next
- * window's, against the same staging path.
+ * Entries are plugin-owned promises, acquired after the instance mutation
+ * queue. They release only when the write settles; closing a window must
+ * never clear a lock protecting an active write.
  */
 export function tableWriteLocks(): Map<string, Promise<unknown>> {
     const existing = Zotero.__beaverTableWriteLocks;

@@ -295,8 +295,8 @@ export async function resolveItemReference(
  *   no local library gets a portable ref stamped.
  *
  * Both are registered together so a host cannot wire up half the identity
- * surface. Call once at webpack bundle init (from `react/index.tsx`), alongside
- * the other `register*` calls, before any note or citation is read.
+ * surface. Call at plugin and renderer bundle initialization, before any
+ * note or citation is read; each bundle has its own registry.
  */
 export function registerZoteroLibraryIdentity(): void {
     setObjectIdResolver(resolveObjectId);

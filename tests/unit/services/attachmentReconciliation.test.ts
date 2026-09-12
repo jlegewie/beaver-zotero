@@ -129,6 +129,22 @@ describe('attachment change reconciliation', () => {
         expect(mocks.invalidate).not.toHaveBeenCalled();
     });
 
+    it('preserves PDF geometry cache through repeated annotation parent modifications', async () => {
+        mocks.kind = 'pdf';
+        await seed(false);
+        const before = await db.getAttachmentProcessingState(1, item.key);
+        for (let count = 1; count <= 3; count++) {
+            item.numAnnotations = count;
+            item.version = count;
+            observer.notify('modify', 'item', [7], { 7: { libraryID: 1, key: item.key } });
+            await vi.advanceTimersByTimeAsync(500);
+            await (reconciler as any).run(false);
+        }
+        expect(mocks.invalidate).not.toHaveBeenCalled();
+        expect(await db.getAttachmentProcessingState(1, item.key)).toEqual(before);
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+    });
+
     it.each(['mtime', 'size', 'path', 'kind'])('rechecks changed %s while preserving the last failure until a new read', async (change) => {
         await seed();
         if (change === 'mtime') mocks.stat.mockResolvedValue({ lastModified: 11, size: 20 });

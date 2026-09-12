@@ -1,3 +1,4 @@
+import { installMutationInstance } from '../../helpers/mutationInstance';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
@@ -114,3 +115,5 @@ describe('handleAgentActionExecuteRequest deadline', () => {
         expect(response.timing?.queued_ms).toBe(0);
     });
 });
+
+beforeEach(installMutationInstance);

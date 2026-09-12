@@ -1,3 +1,4 @@
+import { installMutationInstance } from '../../helpers/mutationInstance';
 /**
  * Unit tests for create_collection validate + execute handlers, focused on
  * dual-form item_ids[] parsing (portable "<library_ref>-<key>" vs legacy
@@ -80,7 +81,10 @@ describe('validateCreateCollectionAction', () => {
                 getByLibraryAndKeyAsync: vi.fn(async (libId: number, key: string) => makeItem(libId, key)),
             },
         };
-    });
+
+    installMutationInstance();
+    (Zotero as any).Beaver.searchableLibraryIds = [1, 100];
+});
 
     afterEach(() => {
         (globalThis as any).Zotero = previousZotero;
@@ -167,7 +171,10 @@ describe('executeCreateCollectionAction', () => {
                 executeTransaction: vi.fn(async (fn: any) => fn()),
             },
         };
-    });
+
+    installMutationInstance();
+    (Zotero as any).Beaver.searchableLibraryIds = [1, 100];
+});
 
     afterEach(() => {
         (globalThis as any).Zotero = previousZotero;

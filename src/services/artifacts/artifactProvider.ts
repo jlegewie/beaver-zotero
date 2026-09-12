@@ -17,15 +17,16 @@ import {
 } from "../../utils/libraryIdentity";
 import { checkLibraryExcluded } from "../agentDataProvider/utils";
 import {
-    createTable,
-    writeTable,
-    openTable,
-    revertTable,
-    trimTable,
-    deleteTable,
+    createTableUncoordinated as createTable,
+    writeTableUncoordinated as writeTable,
+    openTableUncoordinated as openTable,
+    revertTableUncoordinated as revertTable,
+    trimTableUncoordinated as trimTable,
+    deleteTableUncoordinated as deleteTable,
     type TableWriteMeta,
 } from "./tableStore";
 import { TableItemError, type TableRef } from "./tableItemIdentity";
+import type { MutationOptions } from '../libraryMutations';
 
 /** No content or device-local identifiers in provider failure prose. */
 export function artifactFailure(
@@ -134,8 +135,22 @@ function content(raw: unknown): TableSpec {
     return parsed.spec;
 }
 
-/** Identical entry point for provider WebSocket dispatch and localhost. Never retries mutations. */
+/** Executes access checks and table work in the plugin realm under one queue admission. */
 export async function handleArtifactRequest(
+    raw: unknown,
+    options?: MutationOptions,
+): Promise<ArtifactResponse> {
+    const invalid = validateArtifactRequest(raw);
+    if (invalid) return artifactFailure(raw, invalid);
+    try {
+        return await Zotero.Beaver.libraryOperations.run('artifact_request', [raw], options);
+    } catch (error) {
+        return artifactFailure(raw, errorCode(error));
+    }
+}
+
+/** Already coordinated by the instance; table helpers must not re-enter its queue. */
+export async function handleArtifactRequestUncoordinated(
     raw: unknown,
 ): Promise<ArtifactResponse> {
     const invalid = validateArtifactRequest(raw);

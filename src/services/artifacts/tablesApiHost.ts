@@ -1,3 +1,4 @@
+import { registerTableShadowRestore } from './tableStore';
 /**
  * Publishes the esbuild bundle's stored-table surfaces on the shared global.
  *
@@ -12,7 +13,15 @@
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
+import { openTable } from '../../ui/openTable';
 import {
+    describeTableItemPane,
+    isTableItemPaneRegistered,
+    tableItemPaneID,
+} from '../../ui/tableItemPane';
+import { inspectTableShadow } from './recoveryShadow';
+import {
+    TABLE_SHADOW_RESTORE_UNAVAILABLE,
     clearTableWriteLocks,
     tableLocalCommands,
     getTableLocalCommands,
@@ -20,23 +29,16 @@ import {
     setTableShadowRestore,
     setTablesApi,
     tableWriteLocks,
-    TABLE_SHADOW_RESTORE_UNAVAILABLE,
     type TablesApi,
 } from './tablesApi';
-import { inspectTableShadow } from './recoveryShadow';
-import { openTable } from '../../ui/openTable';
 import { listReaderTableViews, openTableInReader, markTableReadersStale } from './view/readerTableView';
-import {
-    describeTableItemPane,
-    isTableItemPaneRegistered,
-    tableItemPaneID,
-} from '../../ui/tableItemPane';
 
 /**
  * Registers the namespace. Safe to call twice — a plugin reload replaces the
  * binding rather than accumulating one.
  */
 export function registerTablesApi(): void {
+    registerTableShadowRestore();
     const api: TablesApi = {
         openTable,
         tableChanged: markTableReadersStale,
@@ -51,9 +53,7 @@ export function registerTablesApi(): void {
         shadow: {
             // Reading the shadow is esbuild-safe, so it is answered here.
             inspect: (ref, observed) => inspectTableShadow(ref, observed ?? null),
-            // Writing is not: every write goes through `tableStore.ts`, which
-            // is webpack-only so its single-flight lock stays single. A missing
-            // registration is reported rather than worked around.
+            // The plugin-owned store coordinates restoration with every writer.
             restore: async (ref) => {
                 const restore = getTableShadowRestore();
                 if (!restore) {
@@ -80,8 +80,7 @@ export function registerTablesApi(): void {
  * global and a caller sees "not up" instead of calling into a dead realm.
  *
  * Plugin teardown only. The esbuild half is registered once, at startup, so a
- * window closing while the app keeps running must *not* come through here —
- * that path withdraws only the React half, {@link unregisterTableShadowRestore}.
+ * window closing while the app keeps running must *not* come through here.
  */
 export function unregisterTablesApi(): void {
     setTablesApi(null);
@@ -93,7 +92,7 @@ export function unregisterTablesApi(): void {
     clearTableWriteLocks();
 }
 
-/** Clears the recovery callback during last-window or plugin teardown. */
+/** Withdraw the plugin-owned shadow restore binding at plugin shutdown. */
 export function unregisterTableShadowRestore(): void {
     setTableShadowRestore(null);
 }

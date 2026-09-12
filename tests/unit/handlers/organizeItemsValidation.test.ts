@@ -1,3 +1,4 @@
+import { installMutationInstance } from '../../helpers/mutationInstance';
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../react/store", () => ({
@@ -71,7 +72,10 @@ describe("validateOrganizeItemsAction", () => {
       ItemTypes: { getName: vi.fn(() => "annotation") },
       Collections: { getByLibraryAndKeyAsync: vi.fn() },
     };
-  });
+
+    installMutationInstance();
+    (Zotero as any).Beaver.searchableLibraryIds = [1, 100];
+});
 
   afterEach(() => {
     (globalThis as any).Zotero = previousZotero;
@@ -249,7 +253,7 @@ describe("validateOrganizeItemsAction", () => {
     const zotero = (globalThis as any).Zotero;
     // Library 100 is normally searchable per the module-level store mock —
     // exclude it for this test only so "100-EXCLKEY1" hits library_not_searchable.
-    (store.get as any).mockReturnValueOnce([1]);
+    zotero.Beaver.searchableLibraryIds = [1];
     zotero.Items.getByLibraryAndKeyAsync = vi.fn(async (libId: number, key: string) =>
       key === "MISSING01" ? false : makeItem("regular", libId, key),
     );

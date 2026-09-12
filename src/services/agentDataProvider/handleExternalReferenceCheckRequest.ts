@@ -9,15 +9,14 @@
 
 import { logger } from '@beaver/agent-core/platform/logger';
 
-import { batchFindExistingReferences, BatchReferenceCheckItem } from '../../../react/utils/batchFindExistingReferences';
 import {
+    ExternalReferenceCheckResult,
     WSExternalReferenceCheckRequest,
     WSExternalReferenceCheckResponse,
-    ExternalReferenceCheckResult,
-
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { getSearchableLibraryIds, resolveLibrariesFilterToSearchableIds } from './utils';
+import { batchFindExistingReferences, BatchReferenceCheckItem } from '../../utils/batchFindExistingReferences';
 import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
+import { getSearchableLibraryIds, resolveLibrariesFilterToSearchableIds } from './utils';
 
 
 /**

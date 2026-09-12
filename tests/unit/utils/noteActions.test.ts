@@ -1,3 +1,4 @@
+import { installMutationInstance } from '../../helpers/mutationInstance';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../react/utils/citationRenderers', () => ({
@@ -45,6 +46,7 @@ class MockNoteItem {
 describe('saveStreamingNote', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        installMutationInstance();
         vi.mocked(store.set).mockClear();
         (globalThis as any).Zotero.Item = vi.fn(() => new MockNoteItem());
         mockRenderToHTML.mockReturnValue('<p>rendered</p>');
@@ -135,6 +137,7 @@ describe('buildProvenanceNoteHTML', () => {
 describe('createProvenanceNote', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        installMutationInstance();
     });
 
     it('creates a schema-wrapped child note', async () => {

@@ -1,3 +1,4 @@
+import { installMutationInstance } from '../../helpers/mutationInstance';
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@beaver/agent-core/platform/logger", () => ({
@@ -107,3 +108,5 @@ describe("undoManageTagsAction", () => {
     expect(Zotero.Tags.removeFromLibrary).toHaveBeenCalledWith(12, [33]);
   });
 });
+
+beforeEach(installMutationInstance);

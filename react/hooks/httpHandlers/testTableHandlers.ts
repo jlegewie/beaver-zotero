@@ -1,3 +1,4 @@
+import { isTableItemError } from '../../../src/services/artifacts/tableItemIdentity';
 /**
  * Dev-only HTTP handlers for looking at the table renderer.
  *
@@ -37,8 +38,6 @@
  * finds no namespace answers `tables_api_unavailable` instead of guessing.
  */
 
-import { openBeaverWindow } from '../../ui/openBeaverWindow';
-import { borrowedWindowCommandError } from './borrowedWindowCommand';
 import type {
     Cell,
     Column,
@@ -50,37 +49,43 @@ import {
     validateTableSpec,
     type RowRef,
 } from '@beaver/agent-core/layouts/table';
-import { store } from '../../store';
-import { showTableInWindowAtom, windowSurfaceAtom } from '../../atoms/windowSurface';
-import { BeaverUIFactory } from '../../../src/ui/ui';
 import {
     zoteroLinkScope,
     zoteroLinksFor,
 } from '../../../src/services/artifacts/view/tableLinks';
+import { BeaverUIFactory } from '../../../src/ui/ui';
+import { showTableInWindowAtom, windowSurfaceAtom } from '../../atoms/windowSurface';
+import { store } from '../../store';
+import { openBeaverWindow } from '../../ui/openBeaverWindow';
+import { borrowedWindowCommandError } from './borrowedWindowCommand';
 // The reader views and the item-pane section keep module state and are compiled
 // into the *esbuild* bundle by `src/hooks.ts`. Importing them here would give
 // this bundle a second, permanently empty copy — the endpoint would then report
 // on a registry nothing ever writes. They are reached through the shared
 // namespace instead; see `tablesApi.ts`.
-import {
-    getTablesApi,
-    TABLES_API_UNAVAILABLE,
-} from '../../../src/services/artifacts/tablesApi';
+import type { TableMutation } from '@beaver/agent-core/layouts/tableMutations';
+import { summarize } from '@beaver/agent-core/layouts/tableMutations';
 import { getSearchableLibraryIds } from '../../../src/services/agentDataProvider/utils';
-import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
-import { safeAttachmentFilename } from '../../../src/utils/attachmentFiles';
+import {
+    inspectTableShadow,
+    TABLE_SHADOW_MAX_PAYLOAD_BYTES,
+    TABLE_SHADOW_RETENTION,
+} from '../../../src/services/artifacts/recoveryShadow';
 import { buildTableDocument } from '../../../src/services/artifacts/tableDocument';
 import {
     isTableItem,
     loadTableItemFields,
     readTableItemSpec,
+    TABLE_TAG,
     tableHistoryPath,
     tableSidecarDirectory,
     tableStorageDirectory,
-    tableVersionPath,
-    TABLE_TAG,
-    TableItemError,
+    tableVersionPath
 } from '../../../src/services/artifacts/tableItem';
+import {
+    getTablesApi,
+    TABLES_API_UNAVAILABLE,
+} from '../../../src/services/artifacts/tablesApi';
 import {
     createTable,
     deleteTable,
@@ -91,19 +96,14 @@ import {
     restoreShadowVersion,
     restoreTable,
     revertTable,
-    writeTable,
     trimTable,
+    writeTable,
     type TableRef,
     type TableWriteMeta,
 } from '../../../src/services/artifacts/tableStore';
-import {
-    inspectTableShadow,
-    TABLE_SHADOW_MAX_PAYLOAD_BYTES,
-    TABLE_SHADOW_RETENTION,
-} from '../../../src/services/artifacts/recoveryShadow';
-import { summarize } from '@beaver/agent-core/layouts/tableMutations';
+import { safeAttachmentFilename } from '../../../src/utils/attachmentFiles';
 import { sha256Hex } from '../../../src/utils/hash';
-import type { TableMutation } from '@beaver/agent-core/layouts/tableMutations';
+import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
 
 /** Wide enough for the demo's columns; the window grows to it and no further. */
 const TABLE_WINDOW_SIZE = { width: 1180, height: 780 };
@@ -771,11 +771,11 @@ export async function handleTestTableListHttpRequest(): Promise<any> {
 }
 
 function errorResponse(error: unknown): any {
-    const code = error instanceof TableItemError ? error.code : 'unexpected_error';
+    const code = isTableItemError(error) ? error.code : 'unexpected_error';
     return {
         ok: false,
         code,
-        error: error instanceof Error ? error.message : String(error),
+        error: isTableItemError(error) ? error.message : String(error),
     };
 }
 

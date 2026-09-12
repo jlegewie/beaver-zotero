@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
 import { SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
+import { useEffect, useState } from 'react';
+import { getActiveZoteroLibraryId } from '../../../../utils/zoteroTargetContext';
 import { CollectionMenuItemContext, createCollectionMenuItem } from '../utils/menuItemFactories';
-import { getActiveZoteroLibraryId } from '../../../../../src/utils/zoteroUtils';
 
 interface UseCollectionsMenuOptions {
     isActive: boolean;

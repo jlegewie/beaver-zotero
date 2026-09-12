@@ -1,4 +1,5 @@
 import { handleArtifactRequest } from '../../src/services/artifacts/artifactProvider';
+import { captureOperationContext } from '../runtime/operationContext';
 import { tryGetWindowRuntime } from '../runtime/windowRuntime';
 /**
  * Hook to register HTTP endpoints for local FrontendCapability.
@@ -20,172 +21,66 @@ import { tryGetWindowRuntime } from '../runtime/windowRuntime';
  * stay HTTP-only.
  */
 
-import { useEffect } from 'react';
-import { useAtomValue } from 'jotai';
-import { isAuthenticatedAtom } from '../atoms/auth';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { getZoteroUserIdentifier } from '../../src/utils/zoteroUtils';
-import { providerConnection } from '@beaver/agent-core/transport/providerConnection';
-import { enqueueMutatingAction } from '@beaver/agent-core/transport/agentActionQueue';
-import { getPref, setPref } from '../../src/utils/prefs';
-import {
-    handleZoteroDataRequest,
-    handleExternalReferenceCheckRequest,
-    handleZoteroDocumentRequest,
-    handleZoteroAttachmentPageImagesRequest,
-    handleZoteroAttachmentSearchRequest,
-    handleItemSearchByMetadataRequest,
-    handleItemSearchByTopicRequest,
-    handleItemQuickSearchRequest,
+import type {
+    WSAgentActionExecuteRequest,
+    // Deferred tools
+    WSAgentActionValidateRequest,
+    WSExternalReferenceCheckRequest,
+    WSFindAnnotationsRequest,
+    WSGetMetadataRequest,
+    WSItemQuickSearchRequest,
+    WSItemSearchByMetadataRequest,
+    WSItemSearchByTopicRequest,
+    WSListCollectionsRequest,
+    WSListItemsRequest,
+    WSListLibrariesRequest,
+    WSListTagsRequest,
+    // Notes
+    WSReadNoteRequest,
+    WSResolvePopulationRequest,
+    WSZoteroAttachmentPageImagesRequest,
+    WSZoteroAttachmentSearchRequest,
+    WSZoteroDataRequest,
+    WSZoteroDocumentRequest,
     // Library management tools
-    handleZoteroSearchRequest,
-    handleListItemsRequest,
-    handleResolvePopulationRequest,
-    handleGetMetadataRequest,
-    handleFindAnnotationsRequest,
-    handleListLibrariesRequest,
-    handleListCollectionsRequest,
-    handleListTagsRequest,
+    WSZoteroSearchRequest,
+} from '@beaver/agent-core/protocol/agentProtocol';
+import { providerConnection } from '@beaver/agent-core/transport/providerConnection';
+import { useAtomValue } from 'jotai';
+import { useEffect } from 'react';
+import {
+    handleAgentActionExecuteRequest,
     // Deferred tools
     handleAgentActionValidateRequest,
-    handleAgentActionExecuteRequest,
     // Utility
     handleDeleteItemsRequest,
+    handleExternalReferenceCheckRequest,
+    handleFindAnnotationsRequest,
+    handleGetMetadataRequest,
+    handleItemQuickSearchRequest,
+    handleItemSearchByMetadataRequest,
+    handleItemSearchByTopicRequest,
+    handleListCollectionsRequest,
+    handleListItemsRequest,
+    handleListLibrariesRequest,
+    handleListTagsRequest,
     // Notes
     handleReadNoteRequest,
+    handleResolvePopulationRequest,
+    handleZoteroAttachmentPageImagesRequest,
+    handleZoteroAttachmentSearchRequest,
+    handleZoteroDataRequest,
+    handleZoteroDocumentRequest,
+    // Library management tools
+    handleZoteroSearchRequest,
 } from '../../src/services/agentDataProvider';
-import { handleTestVoiceHttpRequest } from './httpHandlers/testVoiceHandlers';
-import { handleTestVersionPopupHttpRequest } from './httpHandlers/testVersionPopupHandlers';
-import {
-    handleTestPingHttpRequest,
-    handleTestCacheMetadataHttpRequest,
-    handleTestCachePayloadHttpRequest,
-    handleTestCacheInvalidateHttpRequest,
-    handleTestCacheSeedPageLabelsHttpRequest,
-    handleTestCacheClearAllHttpRequest,
-    handleTestReadAttachmentHttpRequest,
-    handleTestMcpReadNoteHttpRequest,
-    handleTestMcpCreateNoteHttpRequest,
-    handleTestWorkerStatsHttpRequest,
-    handleTestWorkerMarkStaleHttpRequest,
-    handleTestWorkerCacheClearHttpRequest,
-    handleTestWorkerWedgeProbeHttpRequest,
-    handleTestWorkerIdleProbeHttpRequest,
-    handleTestWorkerRealmProbeHttpRequest,
-    handleTestFileStatusHttpRequest,
-    handleTestResolveItemHttpRequest,
-    handleTestResolveReadableHttpRequest,
-    handleTestBestEpubAttachmentHttpRequest,
-    handleTestValidateItemHttpRequest,
-    handleTestValidateRegularItemHttpRequest,
-    handleTestExternalFileAttachHttpRequest,
-    handleTestExternalFileDeleteHttpRequest,
-    handleTestExternalFileViewImagesHttpRequest,
-    handleTestDocumentSerializedHttpRequest,
-    handleTestCacheStatsHttpRequest,
-} from './httpHandlers/testCacheHandlers';
-import {
-    handleTestNoteCreateHttpRequest,
-    handleTestNoteDeleteHttpRequest,
-    handleTestNoteReadHttpRequest,
-    handleTestNoteOpenEditorHttpRequest,
-    handleTestNoteCloseEditorHttpRequest,
-    handleTestNoteUndoHttpRequest,
-    handleTestNoteApplyHttpRequest,
-    handleTestNotePreviewHttpRequest,
-} from './httpHandlers/testNoteHandlers';
-import {
-    handleTestCollectionCreateHttpRequest,
-    handleTestCollectionDeleteHttpRequest,
-} from './httpHandlers/testCollectionHandlers';
-import {
-    handleTestPdfRetrievalHttpRequest,
-    handleTestPdfCaptchaEligibilityHttpRequest,
-} from './httpHandlers/testPdfRetrievalHandlers';
+import { getPref, setPref } from '../../src/utils/prefs';
+import { getZoteroUserIdentifier } from '../../src/utils/zoteroUtils';
+import { isAuthenticatedAtom } from '../atoms/auth';
 import {
     handleTestAnnotationCreateHttpRequest,
 } from './httpHandlers/testAnnotationHandlers';
-import {
-    handleTestSyncPauseHttpRequest,
-} from './httpHandlers/testSyncHandlers';
-import {
-    handleTestSidebarWidthHandlerHttpRequest,
-    handleTestWindowRuntimeHttpRequest,
-} from './httpHandlers/testUiHandlers';
-import {
-    handleBatchProgressPreview,
-    handleBatchProgressClear,
-} from './httpHandlers/testBatchProgressHandlers';
-import {
-    handleTestPdfPageCountHttpRequest,
-    handleTestPdfPageLabelsHttpRequest,
-    handleTestPdfRenderPagesHttpRequest,
-    handleTestPdfRenderPagesWithMetaHttpRequest,
-    handleTestPdfExtractRawDetailedHttpRequest,
-    handleTestPdfExtractHttpRequest,
-    handleTestPdfExtractParagraphHttpRequest,
-    handleTestPdfHasTextLayerHttpRequest,
-    handleTestPdfAnalyzeOcrHttpRequest,
-    handleTestPdfSearchScoredHttpRequest,
-    handleTestPdfSentenceBBoxesHttpRequest,
-    handleTestPdfRenderOverlayHttpRequest,
-    handleTestPdfExtractTraceHttpRequest,
-    handleTestPdfAnalyzeLayoutHttpRequest,
-} from './httpHandlers/testPdfHandlers';
-import {
-    handleTestEpubExtractHttpRequest,
-} from './httpHandlers/testEpubHandlers';
-import {
-    handleTestSnapshotExtractHttpRequest,
-} from './httpHandlers/testSnapshotHandlers';
-import {
-    handleTestCreateReportHttpRequest,
-} from './httpHandlers/testReportHandlers';
-import {
-    handleTestEpubAnnotationParityHttpRequest,
-} from './httpHandlers/testEpubAnnotationHandlers';
-import {
-    handleTestSnapshotAnnotationParityHttpRequest,
-} from './httpHandlers/testSnapshotAnnotationHandlers';
-import {
-    handleTestReaderStateHttpRequest,
-    handleTestEpubCitationNavigateHttpRequest,
-} from './httpHandlers/testReaderHandlers';
-import {
-    handleTestResolveItemDisplayHttpRequest,
-} from './httpHandlers/testCitationHandlers';
-import {
-    handleTestBackgroundEnqueueHttpRequest,
-    handleTestBackgroundStatsHttpRequest,
-    handleTestBackgroundPeekHttpRequest,
-    handleTestBackgroundProcessOnceHttpRequest,
-    handleTestBackgroundClearHttpRequest,
-} from './httpHandlers/testBackgroundHandlers';
-import {
-    handleTestProcessingReconcileNowHttpRequest,
-    handleTestProcessingStatusHttpRequest,
-    handleTestProcessingLedgerHttpRequest,
-    handleTestProcessingResetHttpRequest,
-} from './httpHandlers/testProcessingHandlers';
-import {
-    handleTestExcludedLibrariesHttpRequest,
-    handleTestGetAnnotationsHttpRequest,
-    handleTestViewImagesHttpRequest,
-    handleTestAttachmentImageHttpRequest,
-} from './httpHandlers/testExclusionHandlers';
-import {
-    handleTestLibraryIdentityHttpRequest,
-} from './httpHandlers/testLibraryIdentityHandlers';
-import {
-    handleTestNewThreadHttpRequest,
-    handleTestChatSendHttpRequest,
-    handleTestCurrentIdsHttpRequest,
-    handleTestLoadThreadHttpRequest,
-    handleTestListActionsHttpRequest,
-    handleTestApproveActionHttpRequest,
-    handleTestConfirmCreditsHttpRequest,
-    handleTestUndoActionHttpRequest,
-} from './httpHandlers/testChatHandlers';
 import {
     handleTestApplicationStateHttpRequest,
     handleTestBeaverSidebarHttpRequest,
@@ -193,53 +88,158 @@ import {
     handleTestSelectTabHttpRequest,
 } from './httpHandlers/testApplicationStateHandlers';
 import {
-    handleTestOpenTableHttpRequest,
+    handleTestBackgroundClearHttpRequest,
+    handleTestBackgroundEnqueueHttpRequest,
+    handleTestBackgroundPeekHttpRequest,
+    handleTestBackgroundProcessOnceHttpRequest,
+    handleTestBackgroundStatsHttpRequest,
+} from './httpHandlers/testBackgroundHandlers';
+import {
+    handleBatchProgressClear,
+    handleBatchProgressPreview,
+} from './httpHandlers/testBatchProgressHandlers';
+import {
+    handleTestBestEpubAttachmentHttpRequest,
+    handleTestCacheClearAllHttpRequest,
+    handleTestCacheInvalidateHttpRequest,
+    handleTestCacheMetadataHttpRequest,
+    handleTestCachePayloadHttpRequest,
+    handleTestCacheSeedPageLabelsHttpRequest,
+    handleTestCacheStatsHttpRequest,
+    handleTestDocumentSerializedHttpRequest,
+    handleTestExternalFileAttachHttpRequest,
+    handleTestExternalFileDeleteHttpRequest,
+    handleTestExternalFileViewImagesHttpRequest,
+    handleTestFileStatusHttpRequest,
+    handleTestMcpCreateNoteHttpRequest,
+    handleTestMcpReadNoteHttpRequest,
+    handleTestPingHttpRequest,
+    handleTestReadAttachmentHttpRequest,
+    handleTestResolveItemHttpRequest,
+    handleTestResolveReadableHttpRequest,
+    handleTestValidateItemHttpRequest,
+    handleTestValidateRegularItemHttpRequest,
+    handleTestWorkerCacheClearHttpRequest,
+    handleTestWorkerIdleProbeHttpRequest,
+    handleTestWorkerMarkStaleHttpRequest,
+    handleTestWorkerRealmProbeHttpRequest,
+    handleTestWorkerStatsHttpRequest,
+    handleTestWorkerWedgeProbeHttpRequest,
+} from './httpHandlers/testCacheHandlers';
+import {
+    handleTestApproveActionHttpRequest,
+    handleTestChatSendHttpRequest,
+    handleTestConfirmCreditsHttpRequest,
+    handleTestCurrentIdsHttpRequest,
+    handleTestListActionsHttpRequest,
+    handleTestLoadThreadHttpRequest,
+    handleTestNewThreadHttpRequest,
+    handleTestUndoActionHttpRequest,
+} from './httpHandlers/testChatHandlers';
+import {
+    handleTestResolveItemDisplayHttpRequest,
+} from './httpHandlers/testCitationHandlers';
+import {
+    handleTestCollectionCreateHttpRequest,
+    handleTestCollectionDeleteHttpRequest,
+} from './httpHandlers/testCollectionHandlers';
+import {
+    handleTestEpubAnnotationParityHttpRequest,
+} from './httpHandlers/testEpubAnnotationHandlers';
+import {
+    handleTestEpubExtractHttpRequest,
+} from './httpHandlers/testEpubHandlers';
+import {
+    handleTestAttachmentImageHttpRequest,
+    handleTestExcludedLibrariesHttpRequest,
+    handleTestGetAnnotationsHttpRequest,
+    handleTestViewImagesHttpRequest,
+} from './httpHandlers/testExclusionHandlers';
+import {
+    handleTestLibraryIdentityHttpRequest,
+} from './httpHandlers/testLibraryIdentityHandlers';
+import {
+    handleTestNoteApplyHttpRequest,
+    handleTestNoteCloseEditorHttpRequest,
+    handleTestNoteCreateHttpRequest,
+    handleTestNoteDeleteHttpRequest,
+    handleTestNoteOpenEditorHttpRequest,
+    handleTestNotePreviewHttpRequest,
+    handleTestNoteReadHttpRequest,
+    handleTestNoteUndoHttpRequest,
+} from './httpHandlers/testNoteHandlers';
+import {
+    handleTestPdfAnalyzeLayoutHttpRequest,
+    handleTestPdfAnalyzeOcrHttpRequest,
+    handleTestPdfExtractHttpRequest,
+    handleTestPdfExtractParagraphHttpRequest,
+    handleTestPdfExtractRawDetailedHttpRequest,
+    handleTestPdfExtractTraceHttpRequest,
+    handleTestPdfHasTextLayerHttpRequest,
+    handleTestPdfPageCountHttpRequest,
+    handleTestPdfPageLabelsHttpRequest,
+    handleTestPdfRenderOverlayHttpRequest,
+    handleTestPdfRenderPagesHttpRequest,
+    handleTestPdfRenderPagesWithMetaHttpRequest,
+    handleTestPdfSearchScoredHttpRequest,
+    handleTestPdfSentenceBBoxesHttpRequest,
+} from './httpHandlers/testPdfHandlers';
+import {
+    handleTestPdfCaptchaEligibilityHttpRequest,
+    handleTestPdfRetrievalHttpRequest,
+} from './httpHandlers/testPdfRetrievalHandlers';
+import {
+    handleTestProcessingLedgerHttpRequest,
+    handleTestProcessingReconcileNowHttpRequest,
+    handleTestProcessingResetHttpRequest,
+    handleTestProcessingStatusHttpRequest,
+} from './httpHandlers/testProcessingHandlers';
+import { handleTestQuickPromptHttpRequest } from './httpHandlers/testQuickPromptHandlers';
+import {
+    handleTestEpubCitationNavigateHttpRequest,
+    handleTestReaderStateHttpRequest,
+} from './httpHandlers/testReaderHandlers';
+import {
+    handleTestCreateReportHttpRequest,
+} from './httpHandlers/testReportHandlers';
+import { handleTestRunStatusPopupHttpRequest } from './httpHandlers/testRunStatusPopupHandlers';
+import { handleTestListSavedActionsHttpRequest } from './httpHandlers/testSavedActionsHandlers';
+import {
+    handleTestSnapshotAnnotationParityHttpRequest,
+} from './httpHandlers/testSnapshotAnnotationHandlers';
+import {
+    handleTestSnapshotExtractHttpRequest,
+} from './httpHandlers/testSnapshotHandlers';
+import {
+    handleTestSyncPauseHttpRequest,
+} from './httpHandlers/testSyncHandlers';
+import {
     handleTestCloseTableHttpRequest,
     handleTestOpenStoredTableHttpRequest,
-    handleTestTableCreateHttpRequest,
-    handleTestTableReadHttpRequest,
-    handleTestTableListHttpRequest,
-    handleTestTableWriteHttpRequest,
-    handleTestTableEditHttpRequest,
-    handleTestTableVersionsHttpRequest,
-    handleTestTableRevertHttpRequest,
-    handleTestTableDeleteHttpRequest,
-    handleTestTableTrimHttpRequest,
-    handleTestTableOpenHttpRequest,
+    handleTestOpenTableHttpRequest,
     handleTestTableCorruptHttpRequest,
-    handleTestTableShadowHttpRequest,
-    handleTestTableRestoreShadowHttpRequest,
-    handleTestTableOpenReaderHttpRequest,
+    handleTestTableCreateHttpRequest,
+    handleTestTableDeleteHttpRequest,
+    handleTestTableEditHttpRequest,
     handleTestTableItemPaneHttpRequest,
+    handleTestTableListHttpRequest,
+    handleTestTableOpenHttpRequest,
+    handleTestTableOpenReaderHttpRequest,
+    handleTestTableReadHttpRequest,
+    handleTestTableRestoreShadowHttpRequest,
+    handleTestTableRevertHttpRequest,
+    handleTestTableShadowHttpRequest,
+    handleTestTableTrimHttpRequest,
+    handleTestTableVersionsHttpRequest,
     handleTestTableViewStateHttpRequest,
+    handleTestTableWriteHttpRequest,
 } from './httpHandlers/testTableHandlers';
-import { handleTestRunStatusPopupHttpRequest } from './httpHandlers/testRunStatusPopupHandlers';
-import { handleTestQuickPromptHttpRequest } from './httpHandlers/testQuickPromptHandlers';
-import { handleTestListSavedActionsHttpRequest } from './httpHandlers/testSavedActionsHandlers';
-import type {
-    WSZoteroDataRequest,
-    WSExternalReferenceCheckRequest,
-    WSZoteroDocumentRequest,
-    WSZoteroAttachmentPageImagesRequest,
-    WSZoteroAttachmentSearchRequest,
-    WSItemSearchByMetadataRequest,
-    WSItemSearchByTopicRequest,
-    WSItemQuickSearchRequest,
-    // Library management tools
-    WSZoteroSearchRequest,
-    WSListItemsRequest,
-    WSResolvePopulationRequest,
-    WSGetMetadataRequest,
-    WSFindAnnotationsRequest,
-    WSListLibrariesRequest,
-    WSListCollectionsRequest,
-    WSListTagsRequest,
-    // Deferred tools
-    WSAgentActionValidateRequest,
-    WSAgentActionExecuteRequest,
-    // Notes
-    WSReadNoteRequest,
-} from '@beaver/agent-core/protocol/agentProtocol';
+import {
+    handleTestSidebarWidthHandlerHttpRequest,
+    handleTestWindowRuntimeHttpRequest,
+} from './httpHandlers/testUiHandlers';
+import { handleTestVersionPopupHttpRequest } from './httpHandlers/testVersionPopupHandlers';
+import { handleTestVoiceHttpRequest } from './httpHandlers/testVoiceHandlers';
 
 
 // =============================================================================
@@ -746,7 +746,7 @@ async function handleAgentActionValidateHttpRequest(request: any) {
         action_data: request.action_data,
     };
 
-    const response = await handleAgentActionValidateRequest(wsRequest);
+    const response = await handleAgentActionValidateRequest({ ...wsRequest, operation: captureOperationContext() });
 
     // Hand-maintained projection of WSAgentActionValidateResponse minus the
     // transport envelope.
@@ -773,13 +773,7 @@ async function handleAgentActionExecuteHttpRequest(request: any) {
         timeout_seconds: request.timeout_seconds,
     };
 
-    // Mirror the `serialize` flag the WebSocket dispatch map sets on
-    // `agent_action_execute`: action handlers hold no per-item lock, so two
-    // executes landing together on one item would each write back the content
-    // they read and the later save would drop the earlier edit.
-    const response = await enqueueMutatingAction(() =>
-        handleAgentActionExecuteRequest(wsRequest),
-    );
+    const response = await handleAgentActionExecuteRequest({ ...wsRequest, operation: captureOperationContext() });
 
     return {
         success: response.success,

@@ -1,3 +1,4 @@
+import { installMutationInstance } from '../../helpers/mutationInstance';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { currentThreadIdAtom } = vi.hoisted(() => ({
@@ -346,3 +347,5 @@ describe('executeCreateNoteAction', () => {
         expect(result).toMatchObject({ tags: ['alpha', 'beta'] });
     });
 });
+
+beforeEach(installMutationInstance);

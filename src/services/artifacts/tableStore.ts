@@ -49,14 +49,13 @@
  * id, which is why the spec written to disk is always stamped with the key of
  * the item it lives in rather than with whatever the caller passed.
  *
- * This module is owned by the webpack bundle and never touches the bare
- * `addon` global. The read-only identity module is shared with esbuild.
+ * Public operations dispatch to the plugin-owned library operation service.
+ * Internal implementations and lock lifetimes belong to that plugin realm.
  */
 
-import { logger } from '@beaver/agent-core/platform/logger';
 import {
-    readSpec,
     pruneTableCitations,
+    readSpec,
     TABLE_SPEC_VERSION,
     type TableSpec,
 } from '@beaver/agent-core/layouts/table';
@@ -66,6 +65,7 @@ import {
     type ApplyError,
     type TableMutation,
 } from '@beaver/agent-core/layouts/tableMutations';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { sha256Hex } from '../../utils/hash';
 import { checkLibraryExcluded } from '../agentDataProvider/utils';
 import {
@@ -77,39 +77,37 @@ import {
     tableSpecHash,
     type TableSyncConflict,
 } from './recoveryShadow';
-import { getTablesApi, setTableShadowRestore, tableWriteLocks, tableLocalCommands } from './tablesApi';
 import { readTable } from './tableItemIdentity';
-import { zoteroLinkScope, zoteroLinksFor } from './view/tableLinks';
 import {
     buildTableDocument,
-    parseTableDocumentState,
     parseTableDocument,
+    parseTableDocumentState,
     type TableDocumentState,
     type TableOperationReceipt,
 } from './tableDocument';
 import {
-    createTableItem,
-    resolveTableLibrary,
-    loadTableItemFields,
     isTableAttachment,
-    describeTableItem,
-    readTableItemDocument,
     buildTableUrl,
-    TABLE_URL_PREFIX,
+    createTableItem,
+    describeTableItem,
+    EMPTY_TABLE_HISTORY,
+    loadTableItemFields,
     normalizeTableHistory,
     queueTableFullText,
     readTableHistory,
+    readTableItemDocument,
     resolveTableItem,
+    resolveTableLibrary,
     restoreTableItem,
+    TABLE_EMOJI_TAG,
+    TABLE_TAG,
+    TABLE_URL_PREFIX,
     tableHistoryPath,
+    TableItemError,
     tableReadError,
     tableSidecarDirectory,
     tableVersionPath,
     trashTableItem,
-    EMPTY_TABLE_HISTORY,
-    TABLE_TAG,
-    TABLE_EMOJI_TAG,
-    TableItemError,
     type CreatedTableItem,
     type CreateTableItemOptions,
     type TableActor,
@@ -117,14 +115,15 @@ import {
     type TableRef,
     type TableVersionEntry,
 } from './tableItem';
+import { getTablesApi, setTableShadowRestore, tableWriteLocks, tableLocalCommands } from './tablesApi';
+import { zoteroLinkScope, zoteroLinksFor } from './view/tableLinks';
 
 // ---------------------------------------------------------------------------
 // Shape
 // ---------------------------------------------------------------------------
 
-// Addressing, reading and the shape of the version log live next door, so that
-// the esbuild bundle can reach them without reaching this module (which imports
-// the library-exclusion check and through it the whole React graph).
+// Addressing, reading and the shape of the version log live next door, so
+// read-only callers need not load the write implementation.
 // Re-exported here because this is the store's public surface: `readTable` is
 // still "read a table through the store", with one implementation, and a caller
 // that already imports `TableVersionEntry` from here keeps working.
@@ -135,13 +134,13 @@ export {
     normalizeTableHistory,
     readTable,
     readTableHistory,
-    resolveTableItem,
+    resolveTableItem
 } from './tableItemIdentity';
 export type {
     TableActor,
     TableHistory,
     TableRef,
-    TableVersionEntry,
+    TableVersionEntry
 } from './tableItemIdentity';
 // The sync conflict is part of what opening a table tells you, so its shape is
 // re-exported here for the same reason the log's is: one import for callers of
@@ -150,7 +149,7 @@ export type {
 export type {
     TableShadowEntry,
     TableSyncConflict,
-    TableSyncConflictReason,
+    TableSyncConflictReason
 } from './recoveryShadow';
 
 export interface TableWriteMeta {
@@ -899,7 +898,7 @@ async function auditSidecar(
  * differ from what the store would have written, this file — not the store's
  * idea of it — is what a revert to version 1 restores.
  */
-export async function createTable(options: CreateTableOptions): Promise<CreatedTable> {
+export async function createTableUncoordinated(options: CreateTableOptions): Promise<CreatedTable> {
     const { operation_id, accessGuard, ...ordinary } = options;
     accessGuard?.(options.spec);
     const spec = pruneTableCitations(options.spec);
@@ -1191,7 +1190,7 @@ function unstampedSpec(spec: TableSpec): Omit<TableSpec, 'key' | 'version'> {
  * same run's working version. The sidecar audit compares both the retained
  * file and the current spec against the log digest and repairs either mismatch.
  */
-export async function writeTable(
+export async function writeTableUncoordinated(
     ref: TableRef,
     spec: TableSpec,
     meta: TableWriteMeta,
@@ -1494,7 +1493,7 @@ function markForUpload(item: Zotero.Item): void {
  * A mutation the table cannot accept comes back unchanged: the caller wrote
  * something wrong, and retrying would not fix it.
  */
-export async function editTable(
+export async function editTableUncoordinated(
     ref: TableRef,
     mutations: TableMutation[],
     meta: TableWriteMeta,
@@ -1544,7 +1543,7 @@ export async function listVersions(ref: TableRef): Promise<TableVersionEntry[]> 
  * Recovery writes, so it is done under the lock and skipped entirely in an
  * excluded library, where Beaver does not write at all.
  */
-export async function openTable(ref: TableRef, accessGuard?: TableAccessGuard): Promise<OpenTableResult> {
+export async function openTableUncoordinated(ref: TableRef, accessGuard?: TableAccessGuard): Promise<OpenTableResult> {
     return withTableLock(ref, async () => {
         const item = await resolveTableItem(ref);
         const document = await readTableItemDocument(item);
@@ -1647,7 +1646,7 @@ async function detectSyncConflict(
  * rather than restored approximately. Detecting a loss it cannot undo is a
  * useful thing to say; pretending to undo it is not.
  */
-export async function restoreShadowVersion(
+export async function restoreShadowVersionUncoordinated(
     ref: TableRef,
     meta: TableWriteMeta = { actor: 'user' }
 ): Promise<TableShadowRestoreResult> {
@@ -1676,7 +1675,7 @@ export async function restoreShadowVersion(
 
     // A restore is a deliberate step, never folded into whatever version a run
     // is currently building — the same rule a revert follows.
-    const result = await writeTable(ref, spec, {
+    const result = await writeTableUncoordinated(ref, spec, {
         ...meta,
         run_id: undefined,
         change: meta.change ?? `Restored this device's version ${shadow.version}`,
@@ -1714,7 +1713,7 @@ export async function restoreShadowVersion(
  * make a state the user never saw the current one, under a version number that
  * says otherwise.
  */
-export async function revertTable(
+export async function revertTableUncoordinated(
     ref: TableRef,
     toVersion: number,
     meta: TableWriteMeta,
@@ -1819,7 +1818,7 @@ async function retireTrashedTableShadow(ref: TableRef): Promise<boolean> {
 }
 
 /** Drops only the contiguous suffix owned by discarded runs of this conversation. */
-export async function trimTable(
+export async function trimTableUncoordinated(
     ref: TableRef,
     request: TableTrimRequest,
     accessGuard?: TableAccessGuard
@@ -1987,7 +1986,7 @@ export async function trimTable(
  * Moves a table to the trash. Deleting outright is not offered: the file is the
  * only copy of the table's state, so the recoverable step is the only safe one.
  */
-export async function deleteTable(ref: TableRef): Promise<void> {
+export async function deleteTableUncoordinated(ref: TableRef): Promise<void> {
     requireWritable(ref);
     await withTableLock(ref, async () => {
         const item = await resolveTableItem(ref, true);
@@ -2003,7 +2002,7 @@ export async function deleteTable(ref: TableRef): Promise<void> {
 }
 
 /** Takes a trashed table back out of the trash. */
-export async function restoreTable(ref: TableRef): Promise<void> {
+export async function restoreTableUncoordinated(ref: TableRef): Promise<void> {
     requireWritable(ref);
     await withTableLock(ref, async () => {
         const item = Zotero.Items.getByLibraryAndKey(ref.libraryID, ref.key) as
@@ -2069,21 +2068,24 @@ function emitTableUpdated(
 // ---------------------------------------------------------------------------
 
 /** Registers the store callbacks for one renderer and returns its teardown. */
-export function registerTableLocalCommands(win: Window): () => void {
+export function registerTableLocalCommands(win: Window, owner?: string): () => void {
     const commands = {
         read: readTable,
-        history: async (ref: TableRef) => (await openTable(ref)).history,
-        revert: (ref: TableRef, version: number) => revertTable(ref, version, { actor: 'user' }),
-        restoreShadow: restoreShadowVersion,
+        history: async (ref: TableRef) => (await Zotero.Beaver.libraryOperations.run('table_openTable', [ref], { owner })).history,
+        revert: (ref: TableRef, version: number) => Zotero.Beaver.libraryOperations.run('table_revertTable', [ref, version, { actor: 'user' }], { owner }),
+        restoreShadow: (ref: TableRef) => Zotero.Beaver.libraryOperations.run('table_restoreShadowVersion', [ref], { owner }),
     };
     const entries = tableLocalCommands();
     entries.set(win, commands);
-    setTableShadowRestore(commands.restoreShadow);
     return () => {
         if (entries.get(win) !== commands) return;
         entries.delete(win);
-        setTableShadowRestore(entries.values().next().value?.restoreShadow ?? null);
     };
+}
+
+/** Publishes the plugin-owned recovery operation for every table surface. */
+export function registerTableShadowRestore(): void {
+    setTableShadowRestore((ref) => restoreShadowVersion(ref));
 }
 
 /** Repair canonical bookkeeping before validating history for provider access. */
@@ -2125,4 +2127,40 @@ async function guardStoredTable(ref: TableRef, item: Zotero.Item, current: Curre
         guard(await readStoredVersion(ref, item, current, entry.version));
     }
     return recovered;
+}
+
+export function createTable(...args: Parameters<typeof createTableUncoordinated>): ReturnType<typeof createTableUncoordinated> {
+    return Zotero.Beaver.libraryOperations.run('table_createTable', args);
+}
+
+export function writeTable(...args: Parameters<typeof writeTableUncoordinated>): ReturnType<typeof writeTableUncoordinated> {
+    return Zotero.Beaver.libraryOperations.run('table_writeTable', args);
+}
+
+export function editTable(...args: Parameters<typeof editTableUncoordinated>): ReturnType<typeof editTableUncoordinated> {
+    return Zotero.Beaver.libraryOperations.run('table_editTable', args);
+}
+
+export function openTable(...args: Parameters<typeof openTableUncoordinated>): ReturnType<typeof openTableUncoordinated> {
+    return Zotero.Beaver.libraryOperations.run('table_openTable', args);
+}
+
+export function restoreShadowVersion(...args: Parameters<typeof restoreShadowVersionUncoordinated>): ReturnType<typeof restoreShadowVersionUncoordinated> {
+    return Zotero.Beaver.libraryOperations.run('table_restoreShadowVersion', args);
+}
+
+export function revertTable(...args: Parameters<typeof revertTableUncoordinated>): ReturnType<typeof revertTableUncoordinated> {
+    return Zotero.Beaver.libraryOperations.run('table_revertTable', args);
+}
+
+export function trimTable(...args: Parameters<typeof trimTableUncoordinated>): ReturnType<typeof trimTableUncoordinated> {
+    return Zotero.Beaver.libraryOperations.run('table_trimTable', args);
+}
+
+export function deleteTable(...args: Parameters<typeof deleteTableUncoordinated>): ReturnType<typeof deleteTableUncoordinated> {
+    return Zotero.Beaver.libraryOperations.run('table_deleteTable', args);
+}
+
+export function restoreTable(...args: Parameters<typeof restoreTableUncoordinated>): ReturnType<typeof restoreTableUncoordinated> {
+    return Zotero.Beaver.libraryOperations.run('table_restoreTable', args);
 }

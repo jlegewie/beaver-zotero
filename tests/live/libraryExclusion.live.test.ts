@@ -551,7 +551,13 @@ describe('background queue honors the searchable set', () => {
         // The row is retired, not retried or dead-lettered...
         // Other searchable libraries can enqueue work while this test runs.
         // Assert retirement of this job without requiring an idle global queue.
-        const peek = await backgroundPeek({ limit: 1000 });
+        let peek = await backgroundPeek({ limit: 1000 });
+        // A tick can retire another queued job first. Drain until this job is
+        // observed retired rather than assuming it was first in the queue.
+        for (let attempt = 0; attempt < 20 && peek.jobs.some(job => job.id === enqueued.id); attempt++) {
+            await backgroundProcessOnce();
+            peek = await backgroundPeek({ limit: 1000 });
+        }
         expect(peek.jobs).not.toEqual(expect.arrayContaining([
             expect.objectContaining({ id: enqueued.id }),
         ]));

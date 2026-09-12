@@ -1,20 +1,20 @@
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
-    WSAgentActionValidateRequest,
-    WSAgentActionValidateResponse,
+    WSAgentActionValidateResponse
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { validateEditNoteAction } from './actions/editNote';
-import { validateEditNoteBatchAction } from './actions/editNoteBatch';
-import { validateEditMetadataAction } from './actions/editMetadata';
-import { validateOrganizeItemsAction } from './actions/organizeItems';
-import { validateCreateNoteAction } from './actions/createNote';
-import { validateManageTagsAction } from './actions/manageTags';
-import { validateManageCollectionsAction } from './actions/manageCollections';
 import { validateCreateCollectionAction } from './actions/createCollection';
-import { validateCreateItemAction } from './actions/createItems';
 import { validateCreateHighlightAnnotationsAction } from './actions/createHighlightAnnotations';
+import { validateCreateItemAction } from './actions/createItems';
+import { validateCreateNoteAction } from './actions/createNote';
 import { validateCreateNoteAnnotationsAction } from './actions/createNoteAnnotations';
 import { validateEditAnnotationsAction } from './actions/editAnnotations';
+import { validateEditMetadataAction } from './actions/editMetadata';
+import { validateEditNoteAction } from './actions/editNote';
+import { validateEditNoteBatchAction } from './actions/editNoteBatch';
+import { validateManageCollectionsAction } from './actions/manageCollections';
+import { validateManageTagsAction } from './actions/manageTags';
+import { validateOrganizeItemsAction } from './actions/organizeItems';
+import type { ActionValidateRequest } from './operationContext';
 
 
 /**
@@ -23,7 +23,7 @@ import { validateEditAnnotationsAction } from './actions/editAnnotations';
  * for before/after tracking, plus the user's preference.
  */
 export async function handleAgentActionValidateRequest(
-    request: WSAgentActionValidateRequest
+    request: ActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
     logger(`handleAgentActionValidateRequest: Validating ${request.action_type}`, 1);
 

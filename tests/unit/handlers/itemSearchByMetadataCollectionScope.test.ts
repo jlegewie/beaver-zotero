@@ -36,7 +36,7 @@ const mocks = vi.hoisted(() => ({
 }));
 const { searchItemsByMetadata, resolveCollectionsFilter, collectionsFilterError } = mocks;
 
-vi.mock('../../../react/utils/searchTools', () => ({
+vi.mock('../../../src/utils/searchTools', () => ({
     searchItemsByMetadata: mocks.searchItemsByMetadata,
 }));
 

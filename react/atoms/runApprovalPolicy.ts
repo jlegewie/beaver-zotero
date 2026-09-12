@@ -1,6 +1,8 @@
-import { atom } from 'jotai';
 import type { AgentActionType } from '@beaver/agent-core/protocol/agentProtocol';
+import { atom } from 'jotai';
+import { DEFAULT_DEFERRED_TOOL_GROUPS, RUN_APPROVAL_ACTION_TYPE_ALIASES } from '../../src/services/deferredToolPolicy';
 import { resolveLibraryRef } from '../../src/utils/libraryIdentity';
+export { DEFAULT_DEFERRED_TOOL_GROUPS, RUN_APPROVAL_ACTION_TYPE_ALIASES } from '../../src/services/deferredToolPolicy';
 
 /**
  * Stable groups for actual deferred tool names. These seed persistent
@@ -11,49 +13,6 @@ import { resolveLibraryRef } from '../../src/utils/libraryIdentity';
  * must update this policy boundary explicitly so stored preferences, pending
  * approval matching, and run grants cannot silently diverge.
  */
-export const DEFAULT_DEFERRED_TOOL_GROUPS: Record<string, string> = {
-    edit_metadata: 'metadata_edits',
-    edit_item: 'metadata_edits',
-    edit_note: 'note_edits',
-    edit_note_batch: 'note_edits',
-    // A rewrite that discards or replaces most of a note gets its own group, so
-    // approving note edits never carries one with it. Classification happens in
-    // validation (see noteRewriteRisk.ts) — it is the only step holding both the
-    // live note and the payload — and rides along on the action data as
-    // `destructive_rewrite` so later approval steps, which only ever see the
-    // `edit_note_batch` action type, classify it the same way. Like annotation
-    // deletion this has no Preferences row on purpose: with nothing to persist a
-    // preference against it always resolves to `always_ask`, so "apply note
-    // edits automatically" cannot reach it.
-    destructive_note_rewrite: 'note_rewrite',
-    create_note: 'note_creation',
-    create_collection: 'library_modifications',
-    organize_items: 'library_modifications',
-    manage_tags: 'library_structure',
-    manage_collections: 'library_structure',
-    create_highlight_annotations: 'annotations',
-    create_note_annotations: 'annotations',
-    edit_annotations: 'annotations',
-    // Deletion is its own group so approving annotation edits never carries
-    // deletions with it. It has no editable Preferences row on purpose, so the
-    // normal UI always asks unless the user grants deletion for the current
-    // run. A manually configured underlying group preference is still read.
-    delete_annotations: 'annotation_deletion',
-    create_item: 'create_items',
-    create_items: 'create_items',
-};
-
-/**
- * AgentAction aliases used only when authorizing or matching run approvals.
- * Keeping these out of DEFAULT_DEFERRED_TOOL_GROUPS prevents action-record
- * names from silently acquiring persistent preference defaults.
- */
-export const RUN_APPROVAL_ACTION_TYPE_ALIASES: Record<string, string> = {
-    zotero_note: 'note_creation',
-    highlight_annotation: 'annotations',
-    note_annotation: 'annotations',
-};
-
 const RUN_APPROVAL_TOOL_GROUPS: Record<string, string> = {
     ...DEFAULT_DEFERRED_TOOL_GROUPS,
     ...RUN_APPROVAL_ACTION_TYPE_ALIASES,

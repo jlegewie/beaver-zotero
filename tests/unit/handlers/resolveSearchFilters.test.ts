@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 let searchableLibs: number[] = [1];
-vi.mock('../../../react/utils/searchTools', () => ({
+vi.mock('../../../src/utils/searchTools', () => ({
     resolveItemsByFilters: vi.fn(),
 }));
 // The shared library-filter resolution is exercised by its own tests; here it
@@ -21,7 +21,7 @@ vi.mock('../../../src/utils/agentItemSupport', () => ({
 }));
 
 import { handleResolveSearchFiltersRequest } from '../../../src/services/agentDataProvider/handleResolveSearchFiltersRequest';
-import { resolveItemsByFilters } from '../../../react/utils/searchTools';
+import { resolveItemsByFilters } from '../../../src/utils/searchTools';
 import {
     getCollectionByIdOrName,
     isLibraryAccessReady,

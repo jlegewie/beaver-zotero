@@ -1,76 +1,80 @@
-import { accountGenerationAtom, accountRevisionAtom, profileWithPlanAtom, isProfileLoadedAtom, searchableLibraryIdsAtom } from './atoms/profile';
-import { sessionAtom } from './atoms/auth';
-import { preferencesRevisionAtom } from './atoms/preferences';
-import { runStatusPopupEnabledAtom } from './atoms/runStatusPopup';
-import { openReader, openNote } from './runtime/navigation';
-import { buildZoteroApplicationState } from './atoms/applicationState';
-import { selectItemById } from './utils/selectItem';
-import { SurfaceWindowContext } from './runtime/SurfaceWindowContext';
-import { currentNoteItemAtom } from './atoms/zoteroContext';
-import { eventManager } from './events/eventManager';
-import { isSidebarVisibleAtom, isLibraryTabAtom, selectedZoteroTabIdAtom } from './atoms/ui';
-import { currentMessageContentAtom, currentReaderAttachmentAtom } from './atoms/messageComposition';
-import { isBackgroundWorkerRunningAtom } from './atoms/backgroundExtraction';
-import { getWindowRuntime, getContextWindow } from './runtime/windowRuntime';
-import { initializeWindowRuntime } from './runtime/windowRuntime';
-import type { WindowRuntime } from '../src/runtime/instance';
-import { uiManager } from './ui/UIManager';
-import { initializeReactUI } from './ui/initialization';
+import type { WSAgentActionExecuteRequest } from '@beaver/agent-core/protocol/agentProtocol';
+import { ZOTERO_AGENT_NAME, ZOTERO_PLUGIN_CLIENT_TYPE } from '@beaver/agent-core/protocol/agentProtocol';
+import { getTransportConfigurationError, setTransportConfig } from '@beaver/agent-core/transport/config';
+import { setCredentialAdapter } from '@beaver/agent-core/transport/credentials';
+import { setSupabaseClientProvider } from '@beaver/agent-core/transport/supabaseClient';
+import { setThreadAgentName } from '@beaver/agent-core/transport/threadService';
+import type { ActionCategoryFilter } from '@beaver/agent-core/types/actions';
+import { setActionClient } from '@beaver/agent-core/types/actions';
+import { Provider } from 'jotai';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { Provider } from 'jotai';
-import { configurePDFForBeaver } from '../src/utils/configurePDFForBeaver';
-import LibrarySidebar from './components/LibrarySidebar';
-import { useZoteroSync } from './hooks/useZoteroSync';
-import { useEmbeddingIndex } from './hooks/useEmbeddingIndex';
-import { useAuth } from './hooks/useAuth';
-import ReaderSidebar from './components/ReaderSidebar';
-import WindowSidebar from './components/WindowSidebar';
-import FloatingPopupRoot from './components/FloatingPopupRoot';
-import PreferencesWindow from './components/PreferencesWindow';
-import { PreferencePageTab } from './atoms/ui';
-import type { ActionCategoryFilter } from '@beaver/agent-core/types/actions';
-import { useZoteroTabSelection } from './hooks/useZoteroTabSelection';
-import { useZoteroContext } from './hooks/useZoteroContext';
-import { useReaderTabSelection } from './hooks/useReaderTabSelection';
-import { useProfileSync } from './hooks/useProfileSync';
-import { useToggleSidebar } from './hooks/useToggleSidebar';
-import { store } from './store';
-import { closeWSConnectionForShutdownAtom } from './atoms/agentRunAtoms';
-import { useValidateSyncLibraries } from './hooks/useValidateSyncLibraries';
-import { useUpgradeHandler } from './hooks/useUpgradeHandler';
-import { useHttpEndpoints } from './hooks/useHttpEndpoints';
-import { useMcpServer } from './hooks/useMcpServer';
-import { useProviderWake } from './hooks/useProviderWake';
-import { useThreadProtocolHandler } from './hooks/useThreadProtocolHandler';
-import { useContextMenuActionHandler } from './hooks/useContextMenuActionHandler';
-import { useReaderSelectionActionHandler } from './hooks/useReaderSelectionActionHandler';
-import { useReaderAnnotationActionHandler } from './hooks/useReaderAnnotationActionHandler';
-import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerActionHandler';
-import { useOnboardingPopups } from './hooks/useOnboardingPopups';
-import { useInterruptedThreadPopup } from './hooks/useInterruptedThreadPopup';
-import { useRunStatusTip } from './hooks/useRunStatusTip';
-import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
-import { useOcrLane } from './hooks/useOcrLane';
-import { useFulltextUpsertLane } from './hooks/useFulltextUpsertLane';
-import { useBackgroundProcessingWelcome } from './hooks/useBackgroundProcessingWelcome';
-import { useBackgroundProcessingScopeCleanup } from './hooks/useBackgroundProcessingScopeCleanup';
-import { useSyncSuppression } from './hooks/useSyncSuppression';
-import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
-import { setTransportConfig, getTransportConfigurationError } from '@beaver/agent-core/transport/config';
-import { registerZoteroHost } from './host/zotero';
-import { registerZoteroDataProvider } from '../src/services/zoteroDataProvider';
-import { registerZoteroLibraryIdentity } from '../src/utils/libraryIdentity';
-import { registerZoteroClientIdentity } from '../src/services/zoteroClientIdentity';
-import { setThreadAgentName } from '@beaver/agent-core/transport/threadService';
-import { setActionClient } from '@beaver/agent-core/types/actions';
-import { ZOTERO_AGENT_NAME, ZOTERO_PLUGIN_CLIENT_TYPE } from '@beaver/agent-core/protocol/agentProtocol';
-import { setCredentialAdapter } from '@beaver/agent-core/transport/credentials';
-import { attachAccountProjection } from './runtime/accountProjection';
-import { setSupabaseClientProvider } from '@beaver/agent-core/transport/supabaseClient';
+import type { WindowRuntime } from '../src/runtime/instance';
 import { registerTableLocalCommands } from '../src/services/artifacts/tableStore';
+import { handleAgentActionExecuteRequest } from '../src/services/agentDataProvider/handleAgentActionExecuteRequest';
 import { registerZoteroBusyContext } from '../src/services/busyContext';
 import { registerZoteroSyncPause } from '../src/services/syncPause';
+import { registerZoteroClientIdentity } from '../src/services/zoteroClientIdentity';
+import { createZoteroDataProvider, registerZoteroDataProvider } from '../src/services/zoteroDataProvider';
+import { configurePDFForBeaver } from '../src/utils/configurePDFForBeaver';
+import { registerZoteroLibraryIdentity } from '../src/utils/libraryIdentity';
+import type { AgentAction } from './agents/agentActions';
+import { closeWSConnectionForShutdownAtom } from './atoms/agentRunAtoms';
+import { buildZoteroApplicationState } from './atoms/applicationState';
+import { sessionAtom } from './atoms/auth';
+import { isBackgroundWorkerRunningAtom } from './atoms/backgroundExtraction';
+import { currentMessageContentAtom, currentReaderAttachmentAtom } from './atoms/messageComposition';
+import { preferencesRevisionAtom } from './atoms/preferences';
+import { accountGenerationAtom, accountRevisionAtom, isProfileLoadedAtom, profileWithPlanAtom, searchableLibraryIdsAtom } from './atoms/profile';
+import { runStatusPopupEnabledAtom } from './atoms/runStatusPopup';
+import { isLibraryTabAtom, isSidebarVisibleAtom, PreferencePageTab, selectedZoteroTabIdAtom } from './atoms/ui';
+import { currentNoteItemAtom } from './atoms/zoteroContext';
+import FloatingPopupRoot from './components/FloatingPopupRoot';
+import LibrarySidebar from './components/LibrarySidebar';
+import PreferencesWindow from './components/PreferencesWindow';
+import ReaderSidebar from './components/ReaderSidebar';
+import WindowSidebar from './components/WindowSidebar';
+import { eventManager } from './events/eventManager';
+import { useAuth } from './hooks/useAuth';
+import { useBackgroundProcessingScopeCleanup } from './hooks/useBackgroundProcessingScopeCleanup';
+import { useBackgroundProcessingStatus } from './hooks/useBackgroundProcessingStatus';
+import { useBackgroundProcessingWelcome } from './hooks/useBackgroundProcessingWelcome';
+import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
+import { useContextMenuActionHandler } from './hooks/useContextMenuActionHandler';
+import { useEmbeddingIndex } from './hooks/useEmbeddingIndex';
+import { useFulltextUpsertLane } from './hooks/useFulltextUpsertLane';
+import { useHttpEndpoints } from './hooks/useHttpEndpoints';
+import { useInterruptedThreadPopup } from './hooks/useInterruptedThreadPopup';
+import { useMcpServer } from './hooks/useMcpServer';
+import { useOcrLane } from './hooks/useOcrLane';
+import { useOnboardingPopups } from './hooks/useOnboardingPopups';
+import { useProfileSync } from './hooks/useProfileSync';
+import { useProviderWake } from './hooks/useProviderWake';
+import { useReaderAnnotationActionHandler } from './hooks/useReaderAnnotationActionHandler';
+import { useReaderSelectionActionHandler } from './hooks/useReaderSelectionActionHandler';
+import { useReaderTabSelection } from './hooks/useReaderTabSelection';
+import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerActionHandler';
+import { useRunStatusTip } from './hooks/useRunStatusTip';
+import { useSyncSuppression } from './hooks/useSyncSuppression';
+import { useThreadProtocolHandler } from './hooks/useThreadProtocolHandler';
+import { useToggleSidebar } from './hooks/useToggleSidebar';
+import { useUpgradeHandler } from './hooks/useUpgradeHandler';
+import { useValidateSyncLibraries } from './hooks/useValidateSyncLibraries';
+import { useZoteroContext } from './hooks/useZoteroContext';
+import { useZoteroTabSelection } from './hooks/useZoteroTabSelection';
+import { registerZoteroHost } from './host/zotero';
+import { SurfaceWindowContext } from './runtime/SurfaceWindowContext';
+import { attachAccountProjection } from './runtime/accountProjection';
+import { openNote, openReader } from './runtime/navigation';
+import { captureOperationContext } from './runtime/operationContext';
+import { getContextWindow, getWindowRuntime, initializeWindowRuntime } from './runtime/windowRuntime';
+import { store } from './store';
+import { uiManager } from './ui/UIManager';
+import { initializeReactUI } from './ui/initialization';
+import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
+import { undoEditNoteOrBatchAction } from './utils/editNoteActions';
+import { addPopupMessageAtom } from './utils/popupMessageUtils';
+import { selectItemById } from './utils/selectItem';
 import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
 
 // Configure the PDF package (webpack bundle copy). The esbuild bundle
@@ -91,7 +95,10 @@ registerZoteroHost();
 // ProviderConnection. Must run before either singleton serves its first
 // WebSocket data request (both resolve their provider lazily on first use, so
 // this only needs to land before that point, not before module load).
-registerZoteroDataProvider();
+registerZoteroDataProvider(options => createZoteroDataProvider({
+    ...options,
+    operationContext: () => captureOperationContext(options?.source !== "provider"),
+}));
 
 // Register the Zotero library-identity resolvers: the object-id resolver used
 // by citation and note-reference parsing (citationGrammar.ts) to resolve a
@@ -357,9 +364,12 @@ export function closeAgentConnection(
 /** Called by the plugin before mounting any surface. */
 export function initializeRuntime(runtime: WindowRuntime) {
     initializeWindowRuntime(runtime);
-    Zotero.Beaver.runtime.addWindowCleanup(runtime, registerTableLocalCommands(runtime.contextWindow));
+    Zotero.Beaver.runtime.addWindowCleanup(runtime, registerTableLocalCommands(runtime.hostWindow, runtime.id));
     runtime.hostWindow.__beaverJotaiStore = store;
     if (!getTransportConfigurationError()) attachAccountProjection(runtime);
+    Zotero.Beaver.runtime.subscribeWindow(runtime, 'notification:popup', detail => {
+        store.set(addPopupMessageAtom, detail);
+    });
     initializeReactUI(runtime.hostWindow);
 }
 
@@ -373,10 +383,21 @@ export function disposeRuntime() {
 }
 
 /** Development commands execute inside the target renderer's atom graph. */
-export function inspectRuntime(request?: { command?: string; itemId?: number; draft?: string }) {
+export function inspectRuntime(request?: { command?: string; itemId?: number; draft?: string; mutation?: WSAgentActionExecuteRequest; undo?: AgentAction }) {
     if (process.env.NODE_ENV !== 'development') return undefined;
     const runtime = getWindowRuntime();
     switch (request?.command) {
+        case 'execute-action':
+            if (!request.mutation) return { error: 'mutation_required' };
+            return handleAgentActionExecuteRequest({ ...request.mutation, operation: captureOperationContext() }, {
+                receivedAt: Date.now(), owner: runtime.id, reportPhase: () => {},
+                assertCurrent: () => {
+                    if (runtime.status === 'closing') throw Object.assign(new Error('Window closed'), { code: 'window_unavailable' });
+                },
+            });
+        case 'undo-note-action':
+            if (!request.undo) return { error: 'action_required' };
+            return undoEditNoteOrBatchAction(request.undo).then(() => ({ ok: true }));
         case 'account-state':
             return {
                 generation: store.get(accountGenerationAtom), revision: store.get(accountRevisionAtom),

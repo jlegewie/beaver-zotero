@@ -249,6 +249,16 @@ through its listener API and release only their own listener on cleanup; never u
 a shared SDK channel from a renderer. The final listener releases the channel, and account
 revocation clears listeners before late events can reach another account.
 
+### Library mutations
+
+`addon.libraryOperations` executes named library operations in the plugin realm;
+renderers pass data, not async write callbacks. `addon.mutations` serializes complete
+read/modify/write sequences. Window closure cancels queued owner work; active writes
+retain their lock and sync hold until settlement. Prepare Markdown rendering before
+admission, and keep asynchronous preview restoration in the plugin realm. Table writes
+and shadow restores use the same service and acquire table locks after the instance
+queue. See [library mutation ownership](docs/library-mutations.md).
+
 ### Window lifecycle (close window ≠ quit app)
 
 On macOS, closing the last window does not quit Zotero. `onMainWindowUnload()`

@@ -1,4 +1,5 @@
 import { handleArtifactRequest } from '../../../src/services/artifacts/artifactProvider';
+import { installMutationInstance } from '../../helpers/mutationInstance';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -25,6 +26,7 @@ import {
 import { TABLE_TAG } from '../../../src/services/artifacts/tableItem';
 import {
     registerTableLocalCommands,
+    registerTableShadowRestore,
     createTable,
     editTable,
     listVersions,
@@ -233,6 +235,8 @@ beforeEach(async () => {
     };
 
     await seedTable();
+
+    installMutationInstance();
 });
 
 afterEach(async () => {
@@ -1201,7 +1205,9 @@ describe('retriable creation', () => {
                 return item;
             }
         );
-    });
+
+    installMutationInstance();
+});
 
     const options = {
         spec: demoSpec(),
@@ -1275,7 +1281,7 @@ describe('retriable creation', () => {
 
     it.each(['v1.json', 'history.json'])('retries a failed %s seed without acknowledging incomplete creation', async (failedFile) => {
         const publish = vi.fn();
-        (Zotero as any).Beaver = { runtime: { publish } };
+        (Zotero as any).Beaver = { ...(Zotero as any).Beaver, runtime: { publish } };
         (globalThis as any).IOUtils = {
             ...realIOUtils,
             move: async (from: string, to: string) => {
@@ -1513,7 +1519,9 @@ it('rechecks source exclusions at the document commit point', async () => {
     expect(await readFile(htmlPath, 'utf8')).toBe(original);
 });
 
-it('releases renderer-owned document commands while preserving another live renderer', () => {
+it('releases renderer-owned commands without withdrawing plugin-owned recovery', async () => {
+    registerTableShadowRestore();
+    const restore = getTableShadowRestore();
     const first = { closed: false } as Window;
     const second = { closed: false } as Window;
     const releaseFirst = registerTableLocalCommands(first);
@@ -1522,9 +1530,56 @@ it('releases renderer-owned document commands while preserving another live rend
     expect(tableLocalCommands().size).toBe(2);
     releaseFirst();
     expect(tableLocalCommands().has(first)).toBe(false);
-    expect(getTableLocalCommands(second).restoreShadow).toBe(getTableShadowRestore());
+    expect(getTableLocalCommands(second).restoreShadow).toBeTypeOf('function');
+    expect(getTableShadowRestore()).toBe(restore);
     releaseSecond();
     expect(tableLocalCommands().size).toBe(0);
-    expect(getTableShadowRestore()).toBeNull();
+    expect(getTableShadowRestore()).toBe(restore);
+    await expect(restore!(ref)).resolves.toMatchObject({ ok: false, code: 'no_shadow' });
     expect(() => getTableLocalCommands(second)).toThrow('unavailable');
+});
+
+it('cancels queued artifact and local table writes when their owner closes', async () => {
+    const mutations = Zotero.Beaver.mutations;
+    let release!: () => void;
+    const blocker = mutations.run(() => new Promise<void>(resolve => { release = resolve; }));
+    const win = { closed: false } as Window;
+    const detach = registerTableLocalCommands(win, 'closing-table-owner');
+    const local = getTableLocalCommands(win).revert(ref, 1);
+    const localResult = expect(local).rejects.toMatchObject({ code: 'operation_cancelled' });
+    const remote = handleArtifactRequest({ event: 'artifact_request', request_id: 'queued-delete', op: 'delete', key: `u-${KEY}` }, { owner: 'closing-table-owner' });
+    expect(mutations.getSnapshot().pending).toBe(2);
+    mutations.cancelOwner('closing-table-owner');
+    detach();
+    release();
+    await blocker;
+    await localResult;
+    await expect(remote).resolves.toMatchObject({ ok: false, error_code: 'operation_cancelled' });
+    expect(item.deleted).not.toBe(true);
+    expect((await readTable(ref)).version).toBe(1);
+});
+
+it('holds the instance queue through an active artifact write after its owner closes', async () => {
+    const opened = await openTable(ref);
+    let entered!: () => void;
+    const writing = new Promise<void>(resolve => { entered = resolve; });
+    let release!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    const originalMove = IOUtils.move;
+    (IOUtils as any).move = async (...args: any[]) => {
+        if (args[1] === htmlPath) {
+            entered();
+            await blocked;
+        }
+        return (originalMove as any)(...args);
+    };
+    const write = handleArtifactRequest({ event: 'artifact_request', request_id: 'active-write', op: 'write', key: `u-${KEY}`, spec: demoSpec('survives close'), meta: { actor: 'user' }, operation_id: 'active-write', expected_version: opened.version, expected_sha256: opened.sha256 }, { owner: 'active-table-owner' });
+    await writing;
+    Zotero.Beaver.mutations.cancelOwner('active-table-owner');
+    const read = openTable(ref);
+    expect(Zotero.Beaver.mutations.getSnapshot().pending).toBe(1);
+    expect(Zotero.Beaver.mutations.getSnapshot().active).not.toBeNull();
+    release();
+    await expect(write).resolves.toMatchObject({ ok: true, version: 2 });
+    await expect(read).resolves.toMatchObject({ version: 2 });
 });

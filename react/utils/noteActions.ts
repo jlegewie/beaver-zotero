@@ -1,27 +1,25 @@
 import { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
-import { renderToHTML, RenderContextData } from "./citationRenderers";
-import { prepareCitationRenderContext } from "./citationRenderContext";
-import { hasSchemaVersionWrapper } from "../../src/utils/noteWrapper";
-import { store } from "../store";
-import { currentThreadNameAtom } from "../atoms/threads";
-import { logger } from "@beaver/agent-core/platform/logger";
 import { libraryRefForLibraryID } from "../../src/utils/libraryIdentity";
+import { getBeaverNoteFooterHTML, wrapWithSchemaVersion } from '../../src/utils/noteProvenance';
+import { currentThreadNameAtom } from "../atoms/threads";
+import { captureWindowMutationOptions, runWindowOperation } from '../runtime/libraryMutation';
+import { store } from "../store";
+import { prepareCitationRenderContext } from "./citationRenderContext";
+import { RenderContextData, renderToHTML } from "./citationRenderers";
+export { buildProvenanceNoteHTML, createProvenanceNote, getBeaverNoteFooterHTML, wrapWithSchemaVersion, type ProvenanceNoteOptions, type ProvenanceNoteParent } from '../../src/utils/noteProvenance';
 
 /**
- * Schema version used by the Zotero note editor for modern notes.
- * Version 9 is standard for notes without underline annotations.
- */
+    * Schema version used by the Zotero note editor for modern notes.
+    * Version 9 is standard for notes without underline annotations.
+    */
 const NOTE_SCHEMA_VERSION = 9;
 
 /**
- * Wrap note HTML in a `<div data-schema-version="N">` container if not already present.
- * This ensures Beaver-created notes have the same structure as notes created by the
- * Zotero note editor, which is required for edit_note to work correctly.
- */
-export function wrapWithSchemaVersion(html: string): string {
-    if (hasSchemaVersionWrapper(html)) return html;
-    return `<div data-schema-version="${NOTE_SCHEMA_VERSION}">${html}</div>`;
-}
+    * Wrap note HTML in a `<div data-schema-version="N">` container if not already present.
+    * This ensures Beaver-created notes have the same structure as notes created by the
+    * Zotero note editor, which is required for edit_note to work correctly.
+    */
+
 
 export interface SaveStreamingNoteOptions {
     markdownContent: string;
@@ -39,11 +37,11 @@ function escapeHtml(str: string): string {
 }
 
 /**
- * Generate an HTML title heading for a saved note.
- * For single responses: "Thread Name (Chat 2, Apr 1, 2026, 4:23 PM)"
- * Date/time is locale-aware (e.g. 24h clock in Europe).
- * @param responseIndex - 1-based index of the response in the thread (omit for full-thread saves)
- */
+    * Generate an HTML title heading for a saved note.
+    * For single responses: "Thread Name (Chat 2, Apr 1, 2026, 4:23 PM)"
+    * Date/time is locale-aware (e.g. 24h clock in Europe).
+    * @param responseIndex - 1-based index of the response in the thread (omit for full-thread saves)
+    */
 export function generateNoteTitle(responseIndex?: number): string {
     const threadName = store.get(currentThreadNameAtom) || 'Beaver Response';
     const now = new Date();
@@ -53,65 +51,7 @@ export function generateNoteTitle(responseIndex?: number): string {
     return `<h1>${escapeHtml(threadName)}${indexPart} (${dateStr} at ${timeStr})</h1>`;
 }
 
-export function getBeaverNoteFooterHTML(threadId: string, runId?: string): string {
-    const url = runId
-        ? `zotero://beaver/thread/${threadId}/run/${runId}`
-        : `zotero://beaver/thread/${threadId}`;
-    const linkText = runId ? 'Open Message' : 'Open Chat';
-    return `<p><span style="color: #aaa;"><strong>Created by Beaver</strong> \u00b7 <a href="${url}">${linkText}</a></span></p>`;
-}
 
-export interface ProvenanceNoteOptions {
-    reason?: string;
-    threadId?: string;
-    runId?: string;
-}
-
-export interface ProvenanceNoteParent {
-    library_id: number;
-    zotero_key: string;
-    library_ref?: string;
-}
-
-/**
- * Build the inner HTML for an item provenance note.
- */
-export function buildProvenanceNoteHTML(options: ProvenanceNoteOptions = {}): string {
-    const now = new Date();
-    const dateStr = now.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-    const timeStr = now.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-    const lines = [
-        `<p><strong>Added by Beaver</strong> on ${dateStr} at ${timeStr}</p>`,
-    ];
-
-    if (options.reason) {
-        lines.push(`<p><strong>Reason:</strong> ${escapeHtml(options.reason)}</p>`);
-    }
-
-    if (options.threadId) {
-        lines.push(getBeaverNoteFooterHTML(options.threadId, options.runId));
-    }
-
-    return lines.join('');
-}
-
-/**
- * Create a child note that records why Beaver added an item.
- */
-export async function createProvenanceNote(
-    parent: ProvenanceNoteParent,
-    options: ProvenanceNoteOptions = {},
-): Promise<void> {
-    try {
-        const zoteroNote = new Zotero.Item('note');
-        zoteroNote.libraryID = parent.library_id;
-        zoteroNote.parentKey = parent.zotero_key;
-        zoteroNote.setNote(wrapWithSchemaVersion(buildProvenanceNoteHTML(options)));
-        await zoteroNote.saveTx();
-    } catch (error) {
-        logger(`createProvenanceNote: Failed to create provenance note: ${error}`, 1);
-    }
-}
 
 export interface SavedNoteReference {
 
@@ -123,6 +63,7 @@ export interface SavedNoteReference {
 }
 
 export async function saveStreamingNote(options: SaveStreamingNoteOptions): Promise<SavedNoteReference> {
+    const owner = captureWindowMutationOptions();
     const { markdownContent, parentReference, targetLibraryId, contextData, threadId, runId } = options;
     const renderContextData = await prepareCitationRenderContext(markdownContent, contextData);
     let htmlContent = renderToHTML(markdownContent.trim(), "markdown", renderContextData);
@@ -131,17 +72,11 @@ export async function saveStreamingNote(options: SaveStreamingNoteOptions): Prom
         htmlContent += getBeaverNoteFooterHTML(threadId, runId);
     }
 
-    const zoteroNote = new Zotero.Item('note');
-
-    if (parentReference) {
-        zoteroNote.libraryID = parentReference.library_id;
-        zoteroNote.parentKey = parentReference.zotero_key;
-    } else if (typeof targetLibraryId === 'number') {
-        zoteroNote.libraryID = targetLibraryId;
-    }
-
-    zoteroNote.setNote(wrapWithSchemaVersion(htmlContent));
-    await zoteroNote.saveTx();
+    const zoteroNote = await runWindowOperation('savePreparedNote', [{
+        libraryId: parentReference?.library_id ?? targetLibraryId ?? Zotero.Libraries.userLibraryID,
+        parentKey: parentReference?.zotero_key,
+        html: wrapWithSchemaVersion(htmlContent),
+    }], owner);
 
     return {
         library_id: zoteroNote.libraryID,

@@ -1,22 +1,22 @@
-import { syncService, DeleteLibraryTask } from '../services/syncService';
-import { fileUploader } from '../services/FileUploader';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { logoutAtom, userIdAtom } from "../../react/atoms/auth";
-import { store } from "../../react/store";
-import { syncStatusAtom, LibrarySyncStatus, SyncStatus, SyncType } from '../../react/atoms/sync';
-import { ItemData, DeleteData, AttachmentDataWithMimeType, ZoteroItemReference, ZoteroCollection } from '@beaver/agent-core/types/zotero';
-import { isLibrarySynced, getClientDateModifiedAsISOString, getZoteroUserIdentifier, getCollectionClientDateModifiedAsISOString, safeIsInTrash, safeFileExists } from './zoteroUtils';
-import { v4 as uuidv4 } from 'uuid';
-import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
-import { openPreferencesWindow } from '../ui/openPreferencesWindow';
-import { SettingsIcon } from '../../react/components/icons/icons';
-import { syncWithZoteroAtom, isDatabaseSyncSupportedAtom, syncDeniedForPlanAtom } from '../../react/atoms/profile';
 import { isApiError, isSessionExpiredError } from '@beaver/agent-core/types/apiErrors';
-import { SyncMethod } from '../../react/atoms/sync';
+import { AttachmentDataWithMimeType, DeleteData, ItemData, ZoteroCollection, ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import { v4 as uuidv4 } from 'uuid';
+import { logoutAtom, userIdAtom } from "../../react/atoms/auth";
+import { isDatabaseSyncSupportedAtom, syncDeniedForPlanAtom, syncWithZoteroAtom } from '../../react/atoms/profile';
+import { LibrarySyncStatus, SyncMethod, SyncStatus, syncStatusAtom, SyncType } from '../../react/atoms/sync';
+import { SettingsIcon } from '../../react/components/icons/icons';
+import { store } from "../../react/store";
+import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
 import { SyncLogsRecord } from '../services/database';
-import { isAttachmentOnServer } from './webAPI';
+import { fileUploader } from '../services/FileUploader';
+import { DeleteLibraryTask, syncService } from '../services/syncService';
+import { openPreferencesWindow } from '../ui/openPreferencesWindow';
+import { syncingItemFilter } from './itemSyncStatus';
 import { getServerOnlyAttachmentCount } from './libraries';
-import { serializeCollection, serializeItem, serializeAttachment } from './zoteroSerializers';
+import { serializeAttachment, serializeCollection, serializeItem } from './zoteroSerializers';
+import { getClientDateModifiedAsISOString, getCollectionClientDateModifiedAsISOString, getZoteroUserIdentifier, isLibrarySynced } from './zoteroUtils';
+export { syncingItemFilter, syncingItemFilterAsync } from './itemSyncStatus';
 
 
 const MAX_SERVER_FILES = 100;
@@ -103,46 +103,6 @@ export const hasSupportedAttachment = async (item: Zotero.Item): Promise<boolean
  * @param item Zotero item
  * @returns true if the item should be synced
  */
-export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item | false, collectionIds?: number[]) => {
-    if (!item) return false;
-    if (!isSupportedItem(item)) return false;
-    const trashState = safeIsInTrash(item);
-    if (trashState === null) {
-        logger(
-            `syncingItemFilter: Item missing isInTrash, skipping. id=${item?.id ?? "unknown"} key=${item?.key ?? "unknown"} library=${item?.libraryID ?? "unknown"} type=${item?.itemType ?? "unknown"}`,
-            2
-        );
-        return false;
-    }
-    if (trashState) return false;
-    if (collectionIds) {
-        const itemCollections = new Set(item.getCollections());
-        return collectionIds.some(id => itemCollections.has(id));
-    }
-    return true;
-};
-
-/**
- * Comprehensive filter function for syncing items based on item type, trash status and file availability
- * 
- * This filter checks for item type, trash status and file availability.
- * It servers as a comprehensive filter for what actually gets synced.
- * 
- * @param item Zotero item
- * @returns Promise resolving to true if the item should be synced
- */
-export const syncingItemFilterAsync = async (item: Zotero.Item | false, collectionIds?: number[]): Promise<boolean> => {
-    if (!item) return false;
-    if (!syncingItemFilter(item, collectionIds)) return false;
-    if (item.isRegularItem()) return true;
-    if (item.isAttachment()) {
-        // Item is available locally or on server
-        return isAttachmentOnServer(item) || await safeFileExists(item);
-    }
-    return false;
-};
-
-
 export async function extractDeleteData(item: Zotero.Item): Promise<DeleteData> {
     return {
         library_id: item.libraryID,

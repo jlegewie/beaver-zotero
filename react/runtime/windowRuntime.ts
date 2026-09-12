@@ -8,8 +8,8 @@ export function initializeWindowRuntime(value: WindowRuntime): void {
 }
 
 /** Late UI callbacks may run before initialization or during teardown. */
-export function tryGetWindowRuntime(): WindowRuntime | undefined {
-    return runtime?.status === 'closing' ? undefined : runtime;
+export function tryGetWindowRuntime(includeClosing = false): WindowRuntime | undefined {
+    return !includeClosing && runtime?.status === 'closing' ? undefined : runtime;
 }
 
 export function getWindowRuntime(): WindowRuntime {
