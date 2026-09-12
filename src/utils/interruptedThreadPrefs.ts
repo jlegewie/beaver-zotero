@@ -77,17 +77,12 @@ export function saveInterruptedThread(
         ].slice(0, MAX_RECORDS),
     );
 }
-export const getInterruptedThread = (): InterruptedThread | null =>
-    getInterruptedThreads().find((record) => !record.presented) ?? null;
-export const clearInterruptedThread = (): void => writeRecords([]);
 /** Synchronous consumption admits exactly one presenting surface. */
 export function takeInterruptedThread(
     userId: string,
 ): InterruptedThread | null {
-    const records = getInterruptedThreads().filter(
-        (record) => record.userId === userId,
-    );
-    const record = records.find((value) => !value.presented) ?? null;
+    const records = getInterruptedThreads();
+    const record = records.find((value) => value.userId === userId && !value.presented) ?? null;
     if (record) {
         record.presented = true;
         writeRecords(records);

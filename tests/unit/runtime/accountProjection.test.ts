@@ -34,6 +34,8 @@ import {
 } from "../../../react/atoms/firstRun";
 import { libraryItemCountAtom } from "../../../react/atoms/zoteroContext";
 import { store } from "../../../react/store";
+import { recentThreadsAtom } from "../../../react/atoms/threads";
+import { threadEntitiesAtom, pinsPendingAtom } from "../../../react/atoms/threadList";
 import { attachAccountProjection } from "../../../react/runtime/accountProjection";
 import {
     loginStepAtom,
@@ -96,6 +98,20 @@ describe("account projection transitions", () => {
         snapshot = { ...snapshot, ...patch, revision: snapshot.revision + 1 };
         publish(snapshot);
     };
+    it("leaves repository projections intact when account hydration follows repository publication", () => {
+        const entities = new Map([['fresh', {
+            id: 'fresh', name: 'Current account', createdAt: '', updatedAt: '', isPinned: false,
+        }]]);
+        const pins = new Map();
+        const recent = [...entities.values()];
+        store.set(recentThreadsAtom, recent);
+        store.set(threadEntitiesAtom, entities);
+        store.set(pinsPendingAtom, pins);
+        emit({ generation: 1, session: { user: { id: 'a' }, access_token: 'token' } });
+        expect(store.get(threadEntitiesAtom)).toBe(entities);
+        expect(store.get(recentThreadsAtom)).toBe(recent);
+        expect(store.get(pinsPendingAtom)).toBe(pins);
+    });
     it("preserves OTP entry and countdown through pending and failed verification", () => {
         emit({ generation: 1, authenticating: true });
         expect(store.get(loginLoadingAtom)).toBe(true);

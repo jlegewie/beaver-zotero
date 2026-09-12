@@ -24,7 +24,6 @@ import {
     setThreadPinnedAtom,
     pinsPendingAtom,
     isPinPending,
-    removeThreadAtom,
     EMPTY_THREAD_VIEW,
 } from '../atoms/threadList';
 import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
@@ -34,13 +33,12 @@ import { currentZoteroInstanceRef } from '../../src/utils/zoteroUtils';
 import { getDateGroup } from '../utils/dateUtils';
 import { formatTimeAgo } from '../utils/formatTimeAgo';
 import { buildThreadItemFilter } from '../utils/threadItemFilter';
-import { isThreadInstanceMismatch } from '../utils/threadMatches';
+import { isThreadInstanceMismatch } from '../../src/services/threads/threadMatches';
 import Button from '@beaver/agent-ui/primitives/Button';
 import { ChipButton } from './agentRuns/requestChips/ChipButton';
 import { CSSIcon, CSSItemTypeIcon } from './icons/zotero';
 import ThreadFilterMenu from './ui/menus/ThreadFilterMenu';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import { clearRecentChatsCache } from './RecentChats';
 
 interface ThreadListViewProps {
     isWindow?: boolean;
@@ -105,7 +103,6 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     const loadByItem = useSetAtom(loadThreadsByItemAtom);
     const setThreadPinned = useSetAtom(setThreadPinnedAtom);
     const pinsPending = useAtomValue(pinsPendingAtom);
-    const removeThread = useSetAtom(removeThreadAtom);
 
     // Instance scoping: hide threads stamped by other Zotero accounts/installs
     // by default; "Show all" reveals them. Global so the choice survives closing
@@ -311,17 +308,10 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
 
         try {
             await Zotero.Beaver.threads.deleteThread(threadId, getWindowRuntime().id, getCredentialGeneration());
-            clearRecentChatsCache(threadId);
-            // Switch away first when this is the open chat: forgetting the
-            // entity while it is still `currentThreadId` makes the header's pin
-            // state read "unknown" and fire a GET for a chat that is gone.
-            // The user already confirmed the delete, so skip the run confirm.
+            // The delete was confirmed; leave only if this is still the open chat.
             if (threadId === store.get(currentThreadIdAtom)) {
                 await newThread({ skipActiveRunConfirm: true, window: surfaceWindow });
             }
-            // One removal: every view resolves ids through the entity map and
-            // drops what it cannot find, so no id set needs touching.
-            removeThread(threadId);
         } catch (error) {
             console.error('Error deleting thread:', error);
         }
@@ -346,7 +336,6 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         try {
             await Zotero.Beaver.threads.renameThread(threadId, newName);
 
-            clearRecentChatsCache();
         } catch (error) {
             console.error('Error renaming thread:', error);
         } finally {

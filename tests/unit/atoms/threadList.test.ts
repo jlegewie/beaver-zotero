@@ -38,15 +38,9 @@ import {
     loadMoreThreadsAtom,
     loadThreadsByItemAtom,
     setThreadPinnedAtom,
-    updateThreadAtom,
-    upsertThreadsAtom,
-    removeThreadAtom,
-    resetThreadStoreAtom,
     pinsPendingAtom,
     isPinPending,
     PIN_LOCK_TTL_MS,
-    threadStoreGenerationAtom,
-    threadWriteStampAtom,
     currentThreadPinnedAtom,
     MAX_PINNED,
     EMPTY_THREAD_VIEW,
@@ -92,7 +86,7 @@ let keySeq = 0;
  */
 const nextKey = () => `user-1|test-${++keySeq}||scoped::`;
 
-const gen = (store: ReturnType<typeof createStore>) => store.get(threadStoreGenerationAtom);
+const gen = () => Zotero.Beaver.threads.getSnapshot().generation;
 
 beforeEach(() => {
     vi.clearAllMocks();
@@ -120,25 +114,25 @@ describe('threadViewKey', () => {
 });
 
 describe('entity writes', () => {
-    it('updateThreadAtom no-ops on a thread that is not loaded', () => {
+    it('patchThread no-ops on a thread that is not loaded', () => {
         const store = createStore();
-        store.set(updateThreadAtom, { id: 'missing', update: t => ({ ...t, isPinned: true }) });
+        Zotero.Beaver.threads.patchThread('missing', { isPinned: true });
         expect(store.get(threadEntitiesAtom).size).toBe(0);
     });
 
-    it('removeThreadAtom drops the entity, and views stop resolving its id', () => {
+    it('removeThread drops the entity, and views stop resolving its id', () => {
         const store = createStore();
-        store.set(upsertThreadsAtom, { stamp: { generation: 0, pinSeq: 0 }, threads: [
+        Zotero.Beaver.threads.upsertThreads({ stamp: { generation: 0, pinSeq: 0 }, threads: [
             entity('a', { updatedAt: '2026-01-02T00:00:00Z' }),
             entity('b', { updatedAt: '2026-01-01T00:00:00Z' }),
         ] });
-        store.set(removeThreadAtom, 'a');
+        Zotero.Beaver.threads.removeThread('a');
 
         const rows = resolveThreadView({ ...EMPTY_THREAD_VIEW, ids: ['a', 'b'] }, store.get(threadEntitiesAtom));
         expect(rows.map(r => r.id)).toEqual(['b']);
     });
 
-    it('resetThreadStoreAtom forgets everything, so no account inherits another\'s chats', async () => {
+    it('resetThreadStore forgets everything, so no account inherits another\'s chats', async () => {
         const store = createStore();
         const key = nextKey();
         getPaginatedThreadsMock.mockResolvedValue(page([row('a')]));
@@ -178,7 +172,7 @@ describe('the pinned group is derived from entities, not from a view window', ()
 
     it('excludes chats from another Zotero profile when the caller is scoped', () => {
         const store = createStore();
-        store.set(upsertThreadsAtom, { stamp: { generation: 0, pinSeq: 0 }, threads: [
+        Zotero.Beaver.threads.upsertThreads({ stamp: { generation: 0, pinSeq: 0 }, threads: [
             entity('mine', { isPinned: true, zoteroLocalId: 'ME' }),
             entity('theirs', { isPinned: true, zoteroLocalId: 'THEM' }),
         ] });
@@ -191,7 +185,7 @@ describe('the pinned group is derived from entities, not from a view window', ()
 
     it('sorts newest first regardless of discovery order', () => {
         const store = createStore();
-        store.set(upsertThreadsAtom, { stamp: { generation: 0, pinSeq: 0 }, threads: [
+        Zotero.Beaver.threads.upsertThreads({ stamp: { generation: 0, pinSeq: 0 }, threads: [
             entity('old', { isPinned: true, updatedAt: '2025-01-01T00:00:00Z' }),
             entity('new', { isPinned: true, updatedAt: '2026-01-01T00:00:00Z' }),
         ] });
@@ -491,7 +485,7 @@ describe('a failed load backs off instead of retrying on every re-run', () => {
 describe('setThreadPinnedAtom', () => {
     it('keeps the confirmed state while the request is pending', async () => {
         const store = createStore();
-        store.set(upsertThreadsAtom, { threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
+        Zotero.Beaver.threads.upsertThreads({ threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
         let resolveStar: (v: unknown) => void = () => {};
         starThreadMock.mockImplementationOnce(() => new Promise(r => { resolveStar = r; }));
 
@@ -506,7 +500,7 @@ describe('setThreadPinnedAtom', () => {
 
     it('refuses a second toggle for the same chat while one is in flight', async () => {
         const store = createStore();
-        store.set(upsertThreadsAtom, { threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
+        Zotero.Beaver.threads.upsertThreads({ threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
         let resolveStar: (v: unknown) => void = () => {};
         starThreadMock.mockImplementationOnce(() => new Promise(r => { resolveStar = r; }));
 
@@ -529,7 +523,7 @@ describe('setThreadPinnedAtom', () => {
 
     it('ignores a lock whose owning window is gone, instead of disabling the chat forever', async () => {
         const store = createStore();
-        store.set(upsertThreadsAtom, { threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
+        Zotero.Beaver.threads.upsertThreads({ threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
         // A claim left behind by a window that closed mid-request: its promise
         // continuation and its deadline both died with that realm, so nothing
         // will ever remove this entry.
@@ -543,7 +537,7 @@ describe('setThreadPinnedAtom', () => {
 
     it('sweeps expired locks when a new one is claimed, and keeps live ones', async () => {
         const store = createStore();
-        store.set(upsertThreadsAtom, { threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
+        Zotero.Beaver.threads.upsertThreads({ threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
         (Zotero.Beaver.threads as any).change({ pins: new Map([
             ['stale', { claimedAt: Date.now() - PIN_LOCK_TTL_MS - 1, token: -1 }],
             ['live', { claimedAt: Date.now(), token: -2 }],
@@ -562,7 +556,7 @@ describe('setThreadPinnedAtom', () => {
 
     it('keeps an executing pin serialized even if a legacy UI lock expires', async () => {
         const store = createStore();
-        store.set(upsertThreadsAtom, { threads: [entity('x')], stamp: { generation: 0, pinSeq: 0 } });
+        Zotero.Beaver.threads.upsertThreads({ threads: [entity('x')], stamp: { generation: 0, pinSeq: 0 } });
         let rejectFirst!: (error: unknown) => void;
         starThreadMock.mockImplementationOnce(() => new Promise((_, reject) => { rejectFirst = reject; }));
         const first = store.set(setThreadPinnedAtom, { threadId: 'x', pinned: true });
@@ -580,7 +574,7 @@ describe('setThreadPinnedAtom', () => {
 
     it('keeps the confirmed state when the backend rejects', async () => {
         const store = createStore();
-        store.set(upsertThreadsAtom, { threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
+        Zotero.Beaver.threads.upsertThreads({ threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
         starThreadMock.mockRejectedValue(new Error('boom'));
 
         expect(await store.set(setThreadPinnedAtom, { threadId: 'a', pinned: true })).toBe(false);
@@ -589,7 +583,7 @@ describe('setThreadPinnedAtom', () => {
 
     it('uses the state returned by a successful mutation', async () => {
         const store = createStore();
-        store.set(upsertThreadsAtom, { threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
+        Zotero.Beaver.threads.upsertThreads({ threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
         starThreadMock.mockResolvedValue(row('a', { starred: false }));
 
         expect(await store.set(setThreadPinnedAtom, { threadId: 'a', pinned: true })).toBe(false);
@@ -598,7 +592,7 @@ describe('setThreadPinnedAtom', () => {
 
     it('reconciles a transient failure when the PATCH committed', async () => {
         const store = createStore();
-        store.set(upsertThreadsAtom, { threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
+        Zotero.Beaver.threads.upsertThreads({ threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
         starThreadMock.mockRejectedValue(new SessionRefreshError('timed out'));
         getThreadMock.mockResolvedValue(row('a', { starred: true }));
 
@@ -609,7 +603,7 @@ describe('setThreadPinnedAtom', () => {
 
     it('keeps the old state when reconciliation shows the PATCH did not commit', async () => {
         const store = createStore();
-        store.set(upsertThreadsAtom, { threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
+        Zotero.Beaver.threads.upsertThreads({ threads: [entity('a')], stamp: { generation: 0, pinSeq: 0 } });
         starThreadMock.mockRejectedValue(new SessionRefreshError('timed out'));
         getThreadMock.mockResolvedValue(row('a', { starred: false }));
 
@@ -619,7 +613,7 @@ describe('setThreadPinnedAtom', () => {
 
     it('keeps the old state when an ambiguous failure cannot be reconciled', async () => {
         const store = createStore();
-        store.set(upsertThreadsAtom, {
+        Zotero.Beaver.threads.upsertThreads({
             threads: [entity('a', { isPinned: true })],
             stamp: { generation: 0, pinSeq: 0 },
         });
@@ -638,7 +632,7 @@ describe('setThreadPinnedAtom', () => {
         'treats a reconciliation response without starred as unknown',
         async ({ initialPinned, requestedPinned }) => {
             const store = createStore();
-            store.set(upsertThreadsAtom, {
+            Zotero.Beaver.threads.upsertThreads({
                 threads: [entity('a', { isPinned: initialPinned })],
                 stamp: { generation: 0, pinSeq: 0 },
             });
@@ -660,12 +654,12 @@ describe('setThreadPinnedAtom', () => {
 
     it('does not resurrect a chat deleted while the request was in flight', async () => {
         const store = createStore();
-        store.set(upsertThreadsAtom, { threads: [entity('a', { isPinned: true })], stamp: { generation: 0, pinSeq: 0 } });
+        Zotero.Beaver.threads.upsertThreads({ threads: [entity('a', { isPinned: true })], stamp: { generation: 0, pinSeq: 0 } });
         let rejectUnstar: (e: unknown) => void = () => {};
         unstarThreadMock.mockImplementationOnce(() => new Promise((_, rej) => { rejectUnstar = rej; }));
 
         const pending = store.set(setThreadPinnedAtom, { threadId: 'a', pinned: false });
-        store.set(removeThreadAtom, 'a');
+        Zotero.Beaver.threads.removeThread('a');
         rejectUnstar(new Error('boom'));
         await pending;
 
@@ -694,13 +688,13 @@ describe('the store belongs to one account', () => {
 
     it('drops an upsert stamped with a superseded generation', () => {
         const store = createStore();
-        const stale = gen(store);
+        const stale = gen();
         Zotero.Beaver.threads.resetThreadStore();
 
-        store.set(upsertThreadsAtom, { threads: [entity('a')], stamp: { generation: stale, pinSeq: 0 } });
+        Zotero.Beaver.threads.upsertThreads({ threads: [entity('a')], stamp: { generation: stale, pinSeq: 0 } });
         expect(store.get(threadEntitiesAtom).size).toBe(0);
 
-        store.set(upsertThreadsAtom, { threads: [entity('a')], stamp: store.get(threadWriteStampAtom) });
+        Zotero.Beaver.threads.upsertThreads({ threads: [entity('a')], stamp: Zotero.Beaver.threads.stamp() });
         expect(store.get(threadEntitiesAtom).size).toBe(1);
     });
 });
@@ -709,7 +703,7 @@ describe('the pinned query reconciles what it is authoritative about', () => {
     it('clears a flag for a chat unpinned on another device', async () => {
         const store = createStore();
         const key = nextKey();
-        store.set(upsertThreadsAtom, {
+        Zotero.Beaver.threads.upsertThreads({
             threads: [entity('gone', { isPinned: true }), entity('still', { isPinned: true })],
             stamp: { generation: 0, pinSeq: 0 },
         });
@@ -725,7 +719,7 @@ describe('the pinned query reconciles what it is authoritative about', () => {
     it('leaves another profile\'s pinned chats alone when the query was scoped', async () => {
         const store = createStore();
         const key = nextKey();
-        store.set(upsertThreadsAtom, {
+        Zotero.Beaver.threads.upsertThreads({
             threads: [entity('theirs', { isPinned: true, zoteroLocalId: 'THEM' })],
             stamp: { generation: 0, pinSeq: 0 },
         });
@@ -743,7 +737,7 @@ describe('the pinned query reconciles what it is authoritative about', () => {
     it('does not reconcile a truncated response', async () => {
         const store = createStore();
         const key = nextKey();
-        store.set(upsertThreadsAtom, { threads: [entity('beyond-cap', { isPinned: true })], stamp: { generation: 0, pinSeq: 0 } });
+        Zotero.Beaver.threads.upsertThreads({ threads: [entity('beyond-cap', { isPinned: true })], stamp: { generation: 0, pinSeq: 0 } });
         // A full page means the absentees may just be past the cap.
         getStarredThreadsMock.mockResolvedValue(
             Array.from({ length: MAX_PINNED }, (_, i) => row(`p${i}`, { starred: true }))
@@ -757,7 +751,7 @@ describe('the pinned query reconciles what it is authoritative about', () => {
     it('does not undo an UNPIN the user made while the query was in flight', async () => {
         const store = createStore();
         const key = nextKey();
-        store.set(upsertThreadsAtom, {
+        Zotero.Beaver.threads.upsertThreads({
             threads: [entity('x', { isPinned: true })],
             stamp: { generation: 0, pinSeq: 0 },
         });
@@ -778,7 +772,7 @@ describe('the pinned query reconciles what it is authoritative about', () => {
     it('does not undo a pin the user made while the query was in flight', async () => {
         const store = createStore();
         const key = nextKey();
-        store.set(upsertThreadsAtom, { threads: [entity('x')], stamp: { generation: 0, pinSeq: 0 } });
+        Zotero.Beaver.threads.upsertThreads({ threads: [entity('x')], stamp: { generation: 0, pinSeq: 0 } });
         let resolveStarred: (v: unknown) => void = () => {};
         getStarredThreadsMock.mockImplementationOnce(() => new Promise(r => { resolveStarred = r; }));
         starThreadMock.mockResolvedValue({});
@@ -855,11 +849,11 @@ describe('currentThreadPinnedAtom', () => {
 
     it('tracks the entity, so it cannot disagree with the lists', () => {
         const store = createStore();
-        store.set(upsertThreadsAtom, { threads: [entity('t1', { isPinned: true })], stamp: { generation: 0, pinSeq: 0 } });
+        Zotero.Beaver.threads.upsertThreads({ threads: [entity('t1', { isPinned: true })], stamp: { generation: 0, pinSeq: 0 } });
         store.set(currentThreadIdAtom, 't1');
         expect(store.get(currentThreadPinnedAtom)).toBe(true);
 
-        store.set(updateThreadAtom, { id: 't1', update: t => ({ ...t, isPinned: false }) });
+        Zotero.Beaver.threads.patchThread('t1', { isPinned: false });
         expect(store.get(currentThreadPinnedAtom)).toBe(false);
     });
 });

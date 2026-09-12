@@ -4,10 +4,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-    clearInterruptedThread,
     getInterruptedThreads,
     takeInterruptedThread,
-    getInterruptedThread,
     saveInterruptedThread,
 } from '../../../src/utils/interruptedThreadPrefs';
 
@@ -43,7 +41,7 @@ describe('interrupted thread record', () => {
             closedAt: '2026-08-20T10:00:00.000Z',
         });
 
-        expect(getInterruptedThread()).toEqual({
+        expect((getInterruptedThreads()[0] ?? null)).toEqual({
             threadId: 'thread-1',
             userId: 'user-1',
             threadName: 'Protein folding',
@@ -54,25 +52,25 @@ describe('interrupted thread record', () => {
     it('stamps the current time when the caller gives none', () => {
         saveInterruptedThread({ threadId: 'thread-1', userId: 'user-1', threadName: null });
 
-        expect(getInterruptedThread()?.closedAt).toBe('2026-08-20T12:00:00.000Z');
+        expect((getInterruptedThreads()[0] ?? null)?.closedAt).toBe('2026-08-20T12:00:00.000Z');
     });
 
     it('offers the most recent interruption first', () => {
         saveInterruptedThread({ threadId: 'thread-1', userId: 'user-1', threadName: 'First' });
         saveInterruptedThread({ threadId: 'thread-2', userId: 'user-1', threadName: 'Second' });
 
-        expect(getInterruptedThread()?.threadId).toBe('thread-2');
+        expect((getInterruptedThreads()[0] ?? null)?.threadId).toBe('thread-2');
     });
 
     it('reads nothing once cleared', () => {
         saveInterruptedThread({ threadId: 'thread-1', userId: 'user-1', threadName: null });
-        clearInterruptedThread();
+        prefs[PREF_KEY] = "";
 
-        expect(getInterruptedThread()).toBeNull();
+        expect((getInterruptedThreads()[0] ?? null)).toBeNull();
     });
 
     it('reads nothing when no interruption was recorded', () => {
-        expect(getInterruptedThread()).toBeNull();
+        expect((getInterruptedThreads()[0] ?? null)).toBeNull();
     });
 
     it('ignores a record that aged out', () => {
@@ -84,7 +82,7 @@ describe('interrupted thread record', () => {
             closedAt: eightDaysAgo,
         });
 
-        expect(getInterruptedThread()).toBeNull();
+        expect((getInterruptedThreads()[0] ?? null)).toBeNull();
     });
 
     it('keeps a record from within the last week', () => {
@@ -96,7 +94,7 @@ describe('interrupted thread record', () => {
             closedAt: sixDaysAgo,
         });
 
-        expect(getInterruptedThread()?.threadId).toBe('thread-1');
+        expect((getInterruptedThreads()[0] ?? null)?.threadId).toBe('thread-1');
     });
 
     it.each([
@@ -109,13 +107,13 @@ describe('interrupted thread record', () => {
     ])('ignores %s', (_label, stored) => {
         prefs[PREF_KEY] = stored;
 
-        expect(getInterruptedThread()).toBeNull();
+        expect((getInterruptedThreads()[0] ?? null)).toBeNull();
     });
 
     it('tolerates a missing thread name', () => {
         prefs[PREF_KEY] = '{"threadId":"thread-1","userId":"user-1","closedAt":"2026-08-20T10:00:00.000Z"}';
 
-        expect(getInterruptedThread()).toEqual({
+        expect((getInterruptedThreads()[0] ?? null)).toEqual({
             threadId: 'thread-1',
             userId: 'user-1',
             threadName: null,
@@ -133,11 +131,20 @@ describe('interrupted thread record', () => {
         expect(() =>
             saveInterruptedThread({ threadId: 'thread-1', userId: 'user-1', threadName: null }),
         ).not.toThrow();
-        expect(() => clearInterruptedThread()).not.toThrow();
+        expect(() => takeInterruptedThread("user-1")).not.toThrow();
     });
 });
 
 describe('interrupted run list', () => {
+    it('preserves other accounts pending records when presenting an offer', () => {
+        saveInterruptedThread({ threadId: 'a', userId: 'user-a', threadName: null });
+        saveInterruptedThread({ threadId: 'b', userId: 'user-b', threadName: null });
+        expect(takeInterruptedThread('user-b')?.threadId).toBe('b');
+        expect(getInterruptedThreads()).toHaveLength(2);
+        expect(takeInterruptedThread('user-a')?.threadId).toBe('a');
+        expect(takeInterruptedThread('user-a')).toBeNull();
+        expect(takeInterruptedThread('user-b')).toBeNull();
+    });
     it('deduplicates by account, thread and run and presents each only once', () => {
         const record = { threadId: 't', runId: 'r1', userId: 'u', threadName: null };
         saveInterruptedThread(record); saveInterruptedThread(record);

@@ -1,5 +1,4 @@
 import { preferencesRevisionAtom } from '../atoms/preferences';
-import { useSurfaceWindow } from '../runtime/SurfaceWindowContext';
 /**
  * Offers to reopen chats interrupted by a renderer closing.
  *
@@ -8,7 +7,7 @@ import { useSurfaceWindow } from '../runtime/SurfaceWindowContext';
  * and shows a floating popup whose button reopens the thread.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { isAuthenticatedAtom, userIdAtom } from '../atoms/auth';
 import { currentThreadIdAtom } from '../atoms/threads';
@@ -31,14 +30,6 @@ export function useInterruptedThreadPopup() {
     const addFloatingPopupMessage = useSetAtom(addFloatingPopupMessageAtom);
     const jotaiStore = useStore();
     const revision = useAtomValue(preferencesRevisionAtom);
-    const host = useSurfaceWindow();
-    const [focusRevision, setFocusRevision] = useState(0);
-    useEffect(() => {
-        const onFocus = () => setFocusRevision(value => value + 1);
-        host.addEventListener('focus', onFocus);
-        return () => host.removeEventListener('focus', onFocus);
-    }, [host]);
-
     useEffect(() => {
         if (jotaiStore.get(floatingPopupMessagesAtom).some(msg => msg.id === INTERRUPTED_THREAD_POPUP_ID)) return;
 
@@ -91,5 +82,5 @@ export function useInterruptedThreadPopup() {
         });
         // `floatingPopupMessages` is a dependency, not a read: it re-runs this
         // effect when the version-update popup is dismissed.
-    }, [isAuthenticated, userId, currentThreadId, floatingPopupMessages, addFloatingPopupMessage, jotaiStore, revision, focusRevision]);
+    }, [isAuthenticated, userId, currentThreadId, floatingPopupMessages, addFloatingPopupMessage, jotaiStore, revision]);
 }

@@ -3,7 +3,6 @@ import { getCredentialGeneration } from '@beaver/agent-core/transport/credential
 import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { allRunsAtom, runsCountAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
-import { threadService } from '@beaver/agent-core/transport/threadService';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
 import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
@@ -16,13 +15,10 @@ import {
     currentThreadPinnedAtom,
     isPinPending,
     pinsPendingAtom,
-    removeThreadAtom,
     setThreadPinnedAtom,
     threadViewKey,
-    threadWriteStampAtom,
-    upsertThreadsAtom,
 } from '../../../atoms/threadList';
-import { currentThreadIdAtom, currentThreadNameAtom, newThreadAtom, recentThreadsAtom, ThreadData } from '../../../atoms/threads';
+import { recentThreadsAtom, currentThreadIdAtom, currentThreadNameAtom, newThreadAtom, ThreadData } from '../../../atoms/threads';
 import { showAllThreadInstancesAtom } from '../../../atoms/ui';
 import { useFindInChatControls } from '../../../hooks/useFindInChat';
 import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
@@ -35,11 +31,9 @@ import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
 import { selectItem, selectItemById } from '../../../utils/selectItem';
 import { flushPendingPartEvents } from '../../../utils/streamingPartQueue';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
-import { threadModelToThreadData } from '../../../utils/threadMatches';
 import { resolveToolCallLabelEnrichMap } from '../../../utils/toolCallLabelEnrich';
 import { getZoteroTargetContextSync } from '../../../utils/zoteroTargetContext';
 import { MoreHorizontalIcon } from '../../icons/icons';
-import { clearRecentChatsCache } from '../../RecentChats';
 
 interface ThreadMenuButtonProps {
     className?: string;
@@ -59,8 +53,6 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     // resolved below rather than assumed to be unpinned.
     const isPinned = useAtomValue(currentThreadPinnedAtom);
     const setThreadPinned = useSetAtom(setThreadPinnedAtom);
-    const upsertThreads = useSetAtom(upsertThreadsAtom);
-    const removeThread = useSetAtom(removeThreadAtom);
     // Shared with the list's pin buttons, so the two surfaces cannot fire
     // concurrent toggles for the same chat.
     const pinsPending = useAtomValue(pinsPendingAtom);
@@ -75,19 +67,12 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     const resolvePinnedState = useCallback(async () => {
         const openThreadId = store.get(currentThreadIdAtom);
         if (!openThreadId || store.get(currentThreadPinnedAtom) !== null) return;
-        const stamp = store.get(threadWriteStampAtom);
         try {
-            const thread = await Zotero.Beaver.threads.getThread(openThreadId);
-            // Into the store, not into local state — the lists want it too.
-            // Re-checked because the user can switch chats mid-request; the
-            // stamp additionally drops it if the store was reset or a pin moved.
-            if (store.get(currentThreadIdAtom) === openThreadId) {
-                upsertThreads({ threads: [threadModelToThreadData(thread)], stamp });
-            }
+            await Zotero.Beaver.threads.getThread(openThreadId);
         } catch (error) {
             console.error('Error resolving pinned state:', error);
         }
-    }, [upsertThreads]);
+    }, []);
 
     const handleMenuToggle = useCallback((isOpen: boolean) => {
         if (!isOpen) return;
@@ -254,7 +239,6 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
         try {
             await Zotero.Beaver.threads.renameThread(threadId, newName);
-            clearRecentChatsCache();
         } catch (error) {
             console.error('Error renaming thread:', error);
         }
@@ -301,17 +285,8 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
         try {
             await Zotero.Beaver.threads.deleteThread(threadId, getWindowRuntime().id, getCredentialGeneration());
-            store.set(recentThreadsAtom, (prev: ThreadData[]) => prev.filter(t => t.id !== threadId));
-            clearRecentChatsCache(threadId);
-            // This menu always targets the current thread, so switch to a new chat
-            // BEFORE forgetting the entity: while the deleted id is still
-            // `currentThreadId`, its pin state reads "unknown" and anything
-            // watching for that would fetch a chat that no longer exists.
-            // The delete was already confirmed above, so skip the run confirm.
+            // The delete was confirmed; leave only if this is still the open chat.
             if (store.get(currentThreadIdAtom) === threadId) await store.set(newThreadAtom, { skipActiveRunConfirm: true });
-            // Every chat list resolves ids through the store and drops what is
-            // gone, so one entity removal is the whole job.
-            removeThread(threadId);
         } catch (error) {
             console.error('Error deleting thread:', error);
         }

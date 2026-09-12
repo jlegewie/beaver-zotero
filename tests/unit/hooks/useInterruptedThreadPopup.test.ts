@@ -118,6 +118,18 @@ afterEach(() => {
 });
 
 describe('offering to reopen an interrupted chat', () => {
+    it('offers a newly recorded interruption on preference revision without a focus event', async () => {
+        const { preferencesRevisionAtom } = await import('../../../react/atoms/preferences');
+        record = null;
+        signIn();
+        mount();
+        expect(popups()).toHaveLength(0);
+        act(() => {
+            record = { ...INTERRUPTED };
+            store.set(preferencesRevisionAtom, value => value + 1);
+        });
+        expect(popups()).toHaveLength(1);
+    });
     it('shows a popup naming the interrupted chat', () => {
         signIn();
         mount();

@@ -1,3 +1,4 @@
+import { ZOTERO_AGENT_NAME } from "@beaver/agent-core/protocol/agentProtocol";
 import {
     threadService,
     setThreadAgentName,
@@ -594,15 +595,13 @@ export class ThreadRepository {
         this.tombstones.clear();
         this.changedAt.clear();
         this.mutationTails.clear();
-        this.change({ generation: this.generation + 1 });
-        this.change({ entities: new Map() });
-        this.change({ views: new Map() });
+        this.change({ generation: this.generation + 1, entities: new Map(), views: new Map(), pins: new Map() });
         this.inFlight.clear();
         this.retryAfter.clear();
     }
     start(account: import("../instanceAccount").InstanceAccount): void {
         if (this.disposeSubscription) return;
-        setThreadAgentName("beaver");
+        setThreadAgentName(ZOTERO_AGENT_NAME);
         this.disposeSubscription = account.subscribe((snapshot) => {
             if (snapshot.generation !== this.accountGeneration) {
                 this.accountGeneration = snapshot.generation;

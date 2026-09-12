@@ -1,3 +1,4 @@
+import { tryGetWindowRuntime } from "./windowRuntime";
 import { atom } from "jotai";
 import {
     currentThreadIdAtom,
@@ -10,10 +11,7 @@ import { recentThreadsAtom } from "../atoms/threads";
 import {
     threadEntitiesAtom,
     threadViewsAtom,
-    threadStoreGenerationAtom,
-    pinMutationSeqAtom,
     pinsPendingAtom,
-    threadRepositoryRevisionAtom,
     sortThreadsByUpdatedAt,
 } from "../atoms/threadList";
 export const threadPresenceAtom = atom<ThreadPresenceSnapshot>({
@@ -31,8 +29,6 @@ export const otherThreadWriterAtom = atom((get) => {
     );
     return owner && owner.windowId !== tryGetWindowRuntime()?.id ? owner : null;
 });
-// Resolve the immutable renderer owner, never the currently focused main window.
-import { tryGetWindowRuntime } from "./windowRuntime";
 export const threadDeletedAtom = atom((get) => {
     const id = get(currentThreadIdAtom);
     return !!id && get(threadPresenceAtom).deleted.includes(id);
@@ -51,10 +47,7 @@ export function attachThreadProjection(runtime: WindowRuntime): void {
         if (runtime.status === "closing") return;
         store.set(threadEntitiesAtom, snapshot.entities);
         store.set(threadViewsAtom, snapshot.views);
-        store.set(threadStoreGenerationAtom, snapshot.generation);
-        store.set(pinMutationSeqAtom, snapshot.pinSeq);
         store.set(pinsPendingAtom, snapshot.pins);
-        store.set(threadRepositoryRevisionAtom, snapshot.revision);
         store.set(
             recentThreadsAtom,
             sortThreadsByUpdatedAt([...snapshot.entities.values()]).slice(0, 6),

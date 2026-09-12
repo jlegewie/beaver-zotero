@@ -658,8 +658,7 @@ export const sendComposedMessageAtom = atom(
             pills: SlashCommandDescriptor[];
         },
     ): Promise<boolean> => {
-        return (await withThreadWriter(get, set, async guardedSet => {
-        set = guardedSet;
+        return (await withThreadWriter(get, set, async set => {
         const { baseText, pills } = payload;
 
         const resolved = await set(resolvePillsToPromptActionsAtom, { pills });

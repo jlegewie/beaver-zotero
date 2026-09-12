@@ -1,7 +1,7 @@
 import ChatLoadFailure from './ChatLoadFailure';
 import { useChatReconnect } from '../hooks/useChatReconnect';
 import { useSurfaceWindow } from '../runtime/SurfaceWindowContext';
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { isThreadListViewAtom, isLibraryTabAtom, selectedZoteroTabIdAtom, hasPopupMessagesAtom, threadListFilterAtom, ThreadItemFilter } from '../atoms/ui';
@@ -10,7 +10,7 @@ import { threadEntitiesAtom, threadViewsAtom, threadViewKey, EMPTY_THREAD_VIEW, 
 import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { convertUTCToLocal } from '../utils/dateUtils';
-import { isThreadInstanceMismatch } from '../utils/threadMatches';
+import { isThreadInstanceMismatch } from '../../src/services/threads/threadMatches';
 import { currentZoteroInstanceRef } from '../../src/utils/zoteroUtils';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { getReaderOrNoteContextItem } from '../utils/zoteroTabContext';
@@ -21,10 +21,6 @@ import Button from '@beaver/agent-ui/primitives/Button';
 
 const MAX_RECENT = 3;
 type ContextType = 'recent' | 'file' | 'note';
-export function clearRecentChatsCache(deletedThreadId?: string) {
-    if (deletedThreadId) Zotero.Beaver.threads.removeThread(deletedThreadId);
-    Zotero.Beaver.threads.invalidateViews();
-}
 
 /**
  * Compact relative time: "now", "3m", "2h", "1d", "2w", "3mo"
@@ -60,13 +56,17 @@ const RecentChats: React.FC = () => {
     const views = useAtomValue(threadViewsAtom);
     const loadPage = useSetAtom(loadThreadPageAtom);
     const loadByItem = useSetAtom(loadThreadsByItemAtom);
-    const ctx = !isLibraryTab && selectedTabId ? getReaderOrNoteContextItem(selectedTabId) : null;
-    const lookup = ctx ? buildRecentChatsItemLookup(ctx.libraryId, ctx.keys, searchableLibraryIds) : null;
-    const scope = currentZoteroInstanceRef() ?? undefined;
-    const filter: ThreadItemFilter | null = lookup ? {
-        libraryId: lookup.libraryId, libraryRef: libraryRefForLibraryID(lookup.libraryId) ?? undefined,
-        keys: lookup.zoteroKeys, itemKey: ctx!.item.key, itemType: '', label: '',
-    } : null;
+    const { ctx, filter } = useMemo(() => {
+        const ctx = !isLibraryTab && selectedTabId ? getReaderOrNoteContextItem(selectedTabId) : null;
+        const lookup = ctx ? buildRecentChatsItemLookup(ctx.libraryId, ctx.keys, searchableLibraryIds) : null;
+        const filter: ThreadItemFilter | null = lookup ? {
+            libraryId: lookup.libraryId, libraryRef: libraryRefForLibraryID(lookup.libraryId) ?? undefined,
+            keys: lookup.zoteroKeys, itemKey: ctx!.item.key, itemType: '', label: '',
+        } : null;
+        return { ctx, filter };
+    }, [isLibraryTab, selectedTabId, searchableLibraryIds]);
+    const instance = currentZoteroInstanceRef();
+    const scope = useMemo(() => instance ?? undefined, [instance?.zoteroUserId, instance?.zoteroLocalId]);
     const pageKey = threadViewKey({ userId: user?.id ?? '', showAll: false, scope });
     const itemKey = filter ? threadViewKey({ userId: user?.id ?? '', showAll: false, filter }) : null;
     const itemView = itemKey ? views.get(itemKey) ?? EMPTY_THREAD_VIEW : EMPTY_THREAD_VIEW;
@@ -87,10 +87,10 @@ const RecentChats: React.FC = () => {
     useEffect(() => {
         if (!user) return;
         if (filter && itemKey) void loadByItem({ key: itemKey, filter });
-    }, [user?.id, itemKey, itemView.loadedAt]);
+    }, [user?.id, itemKey, filter, loadByItem, itemView.loadedAt]);
     useEffect(() => {
         if (user && !useItems) void loadPage({ key: pageKey, query: '', scope, includeOtherCount: scope !== undefined });
-    }, [user?.id, pageKey, useItems, activeView.loadedAt]);
+    }, [user?.id, pageKey, scope, useItems, loadPage, activeView.loadedAt]);
 
     const handleSelectThread = async (thread: ThreadData) => {
         if (!user || thread.id === currentThreadId) return;

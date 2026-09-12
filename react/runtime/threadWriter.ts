@@ -4,10 +4,9 @@ import { tryGetWindowRuntime } from "./windowRuntime";
 export interface WriterLease {
     claim: ThreadClaim;
     preparing: number;
-    epoch: number;
 }
 let lease: WriterLease | undefined;
-let epoch = 0;
+let draftSeq = 0;
 export function currentWriter(): WriterLease | undefined {
     return lease;
 }
@@ -35,11 +34,11 @@ export function acquireWriter(
         return lease;
     const claim = Zotero.Beaver.presence.claim(
         runtime.id,
-        threadId ?? `draft:${runtime.id}:${++epoch}`,
+        threadId ?? `draft:${runtime.id}:${++draftSeq}`,
         generation,
     );
     if (!claim) return null;
-    lease = { claim, preparing: 0, epoch: ++epoch };
+    lease = { claim, preparing: 0 };
     return lease;
 }
 export function bindWriter(

@@ -11,8 +11,7 @@ import { agentService } from "@beaver/agent-core/transport/agentService";
 import { threadService, ZoteroInstanceRef } from "@beaver/agent-core/transport/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes, currentZoteroInstanceRef } from "../../src/utils/zoteroUtils";
-import { isThreadInstanceMismatch, threadModelToThreadData } from "../utils/threadMatches";
-import { upsertThreadsAtom, threadWriteStampAtom } from "./threadList";
+import { isThreadInstanceMismatch } from "../../src/services/threads/threadMatches";
 import { getHost } from '@beaver/agent-ui/host';
 import { logger } from "@beaver/agent-core/platform/logger";
 import { isApiError } from "@beaver/agent-core/types/apiErrors";
@@ -443,10 +442,6 @@ export const loadThreadAtom = atom(
         const statefulChat = getPref('statefulChat');
         let identity = threadIdentity;
         let resolvedName = threadName ?? null;
-        // Captured before the fetch: a response that lands after a sign-out
-        // must not repopulate the store for the previous account, and one that
-        // predates a pin toggle must not write its stale flag back.
-        const threadWriteStamp = get(threadWriteStampAtom);
         if (identity === undefined && statefulChat) {
             try {
                 const thread = await Zotero.Beaver.threads.getThread(threadId);
@@ -456,10 +451,6 @@ export const loadThreadAtom = atom(
                     zoteroLocalId: thread.zotero_local_id ?? null,
                 };
                 resolvedName = resolvedName ?? (thread.name || null);
-                // Feed the thread store: this is the one fetch a deep-linked
-                // chat gets, and the chat lists and the header's pin entry all
-                // read their state from there.
-                set(upsertThreadsAtom, { threads: [threadModelToThreadData(thread)], stamp: threadWriteStamp });
             } catch (error) {
                 if (!isCurrent()) return false;
                 // An unknown identity must abort rather than degrade to

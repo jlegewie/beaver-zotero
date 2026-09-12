@@ -1,8 +1,8 @@
-import { threadEntitiesAtom as inspectedEntitiesAtom } from './atoms/threadList';
-import { currentThreadIdAtom as inspectedThreadIdAtom, currentThreadNameAtom as inspectedThreadNameAtom, activeRunAtom as inspectedActiveRunAtom } from '@beaver/agent-core/run-state/atoms';
-import { sendWSMessageAtom as inspectedSendAtom, closeWSConnectionAtom as inspectedStopAtom } from './atoms/agentRunAtoms';
-import { loadThreadAtom as inspectedLoadAtom } from './atoms/threads';
-import { userIdAtom as inspectedUserIdAtom } from './atoms/auth';
+import { threadEntitiesAtom } from './atoms/threadList';
+import { currentThreadIdAtom, currentThreadNameAtom, activeRunAtom } from '@beaver/agent-core/run-state/atoms';
+import { sendWSMessageAtom, closeWSConnectionAtom } from './atoms/agentRunAtoms';
+import { loadThreadAtom } from './atoms/threads';
+import { userIdAtom } from './atoms/auth';
 import { attachThreadProjection } from './runtime/threadProjection';
 import type { WSAgentActionExecuteRequest } from '@beaver/agent-core/protocol/agentProtocol';
 import { ZOTERO_AGENT_NAME, ZOTERO_PLUGIN_CLIENT_TYPE } from '@beaver/agent-core/protocol/agentProtocol';
@@ -375,16 +375,16 @@ export function inspectRuntime(request?: { command?: string; threadId?: string; 
     const runtime = getWindowRuntime();
     switch (request?.command) {
         case 'thread-cache':
-            return { entities: [...store.get(inspectedEntitiesAtom).values()] };
+            return { entities: [...store.get(threadEntitiesAtom).values()] };
         case 'thread-state':
-            return { id: runtime.id, threadId: store.get(inspectedThreadIdAtom), name: store.get(inspectedThreadNameAtom), run: store.get(inspectedActiveRunAtom), draft: store.get(currentMessageContentAtom), presence: Zotero.Beaver.presence.getSnapshot() };
+            return { id: runtime.id, threadId: store.get(currentThreadIdAtom), name: store.get(currentThreadNameAtom), run: store.get(activeRunAtom), draft: store.get(currentMessageContentAtom), presence: Zotero.Beaver.presence.getSnapshot() };
         case 'thread-send':
-            return store.set(inspectedSendAtom, request.text ?? 'Reply with OK.').then(() => ({ ok: true }));
+            return store.set(sendWSMessageAtom, request.text ?? 'Reply with OK.').then(() => ({ ok: true }));
         case 'thread-stop':
-            return store.set(inspectedStopAtom).then(() => ({ ok: true }));
+            return store.set(closeWSConnectionAtom).then(() => ({ ok: true }));
         case 'thread-load':
             if (!request.threadId) return { error: 'thread_required' };
-            return store.set(inspectedLoadAtom, { threadId: request.threadId, user_id: store.get(inspectedUserIdAtom) ?? '', preserveDraft: true, skipInstanceMismatchConfirm: true });
+            return store.set(loadThreadAtom, { threadId: request.threadId, user_id: store.get(userIdAtom) ?? '', preserveDraft: true, skipInstanceMismatchConfirm: true });
         case 'execute-action':
             if (!request.mutation) return { error: 'mutation_required' };
             return handleAgentActionExecuteRequest({ ...request.mutation, operation: captureOperationContext() }, {
