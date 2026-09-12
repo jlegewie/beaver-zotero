@@ -126,7 +126,7 @@ describe('/beaver/library/metadata', () => {
         const res = await post<MetadataResponse>('/beaver/library/metadata', { item_ids: ids });
         expect(res.error ?? null).toBeNull();
         const byId = new Map(res.items.map((it) => [it.item_id, it.library_ref]));
-        expect(byId.get(`${topo.personal.library_id}-${personalKey}`)).toBe('u');
+        expect(byId.get(`u-${personalKey}`)).toBe('u');
         if (groupItemId) expect(byId.get(groupItemId)).toBe(topo.group!.library_ref);
     });
 });

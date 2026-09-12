@@ -3,6 +3,17 @@ import { toCsv } from "@beaver/agent-core/layouts/table";
 import { getTablesApi } from "../services/artifacts/tablesApi";
 import type { TableRef } from "../services/artifacts/tableItemIdentity";
 
+import { excludedLibraryUserMessage } from "../utils/libraryMessages";
+
+/** Structural error codes survive the boundary between renderer bundles. */
+export function tableActionErrorMessage(error: unknown, ref: TableRef): string {
+    const failure = error as { code?: string; message?: string; error?: string } | null;
+    if (failure?.code === "library_excluded") {
+        return excludedLibraryUserMessage(ref.libraryID);
+    }
+    return String(failure?.message ?? failure?.error ?? error);
+}
+
 export function renderTableDocumentActions(
     doc: Document,
     ref: TableRef,
@@ -30,7 +41,7 @@ export function renderTableDocumentActions(
         try {
             await operation();
         } catch (error) {
-            status.textContent = `${String((error as Error)?.message ?? error)}${restoring ? " Restore was not confirmed. Check the current table before trying again." : ""}`;
+            status.textContent = `${tableActionErrorMessage(error, ref)}${restoring ? " Restore was not confirmed. Check the current table before trying again." : ""}`;
         } finally {
             busy = false;
             controls.forEach((control) => {

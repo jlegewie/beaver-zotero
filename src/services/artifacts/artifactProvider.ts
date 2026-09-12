@@ -260,7 +260,7 @@ export async function handleArtifactRequest(
                   });
         }
         if (request.op === "delete") {
-            await deleteTable(ref, guard);
+            await deleteTable(ref);
             return success({ saved: true });
         }
         if (request.op === "trim") {

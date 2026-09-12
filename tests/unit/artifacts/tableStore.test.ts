@@ -1418,8 +1418,8 @@ describe('artifact provider through the real file store', () => {
         expect(await request('read')).toMatchObject({ ok: true });
         await writeFile(htmlPath, '<html>Ordinary HTML</html>');
         expect(await request('read')).toMatchObject({ ok: false, error_code: 'no_spec' });
-        expect(await request('delete')).toMatchObject({ ok: false, error_code: 'no_spec' });
-        expect(item.deleted).toBe(false);
+        expect(await request('delete')).toMatchObject({ ok: true });
+        expect(item.deleted).toBe(true);
     });
     it('returns one bounded status per explicit key and no metadata for unavailable items', async () => {
         const response = await request('list', { key: null, keys: [remoteKey, 'u-MISSNGAB'], thread_id: 'new-thread' });
@@ -1438,11 +1438,31 @@ describe('artifact provider through the real file store', () => {
         await writeTable(ref, withSource, { actor: 'user' });
         await writeTable(ref, demoSpec('current'), { actor: 'user' });
         checkLibraryExcluded.mockImplementation((id) => id === 7 ? { message: 'excluded' } : null);
-        for (const op of ['read', 'versions', 'delete']) {
+        for (const op of ['read', 'versions']) {
             const response = await request(op);
             expect(response).toMatchObject({ ok: false, error_code: 'library_excluded' });
             for (const field of ['spec', 'summary', 'versions', 'version', 'sha256']) expect(response).not.toHaveProperty(field);
         }
+    });
+    it.each(['corrupt', 'missing', 'mismatched'])('trashes a %s table without reading or returning its content', async (damage) => {
+        if (damage === 'missing') await rm(htmlPath);
+        else if (damage === 'corrupt') await writeFile(htmlPath, '<html>Broken table</html>');
+        else await writeFile(htmlPath, buildTableDocument({ ...demoSpec(), key: 'OTHERABC', version: 1 }).html);
+        vi.mocked(Zotero.File.getContentsAsync).mockClear();
+        const response = await request('delete');
+        expect(response).toMatchObject({ ok: true });
+        expect(item.deleted).toBe(true);
+        expect(Zotero.File.getContentsAsync).not.toHaveBeenCalled();
+        for (const field of ['spec', 'summary', 'versions', 'version', 'sha256']) expect(response).not.toHaveProperty(field);
+    });
+    it('still refuses deletion in excluded and read-only libraries', async () => {
+        checkLibraryExcluded.mockReturnValue({ message: 'excluded' });
+        expect(await request('delete')).toMatchObject({ error_code: 'library_excluded' });
+        expect(item.deleted).toBe(false);
+        checkLibraryExcluded.mockReturnValue(null);
+        vi.mocked(Zotero.Libraries.get).mockReturnValue({ editable: false } as any);
+        expect(await request('delete')).toMatchObject({ ok: false });
+        expect(item.deleted).toBe(false);
     });
     it('rejects excluded incoming content before replay lookup and preserves current bytes', async () => {
         const before = await readFile(htmlPath, 'utf8');

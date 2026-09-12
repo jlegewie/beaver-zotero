@@ -183,3 +183,11 @@ it("selects a live renderer for a standalone reader and never calls a closed own
     entries.delete(live);
     expect(() => getTableLocalCommands(origin)).toThrow("unavailable");
 });
+
+it("addresses exclusion errors to the user during version restore", async () => {
+    await selectVersion();
+    revert.mockRejectedValueOnce({ code: "library_excluded", message: "Tell the user to re-enable access." });
+    await click("restore-version");
+    expect(root.textContent).toContain("You can re-enable access");
+    expect(root.textContent).not.toContain("Tell the user");
+});

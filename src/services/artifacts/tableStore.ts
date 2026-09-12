@@ -1987,14 +1987,12 @@ export async function trimTable(
  * Moves a table to the trash. Deleting outright is not offered: the file is the
  * only copy of the table's state, so the recoverable step is the only safe one.
  */
-export async function deleteTable(ref: TableRef, accessGuard?: TableAccessGuard): Promise<void> {
+export async function deleteTable(ref: TableRef): Promise<void> {
     requireWritable(ref);
     await withTableLock(ref, async () => {
         const item = await resolveTableItem(ref, true);
         requireWritable(ref);
-        const document = await readTableItemDocument(item);
-        if (accessGuard && !document.parsed.ok) throw tableReadError(document.parsed.code, document.parsed.message);
-        await guardStoredTable(ref, item, await readCurrentState(item, document), accessGuard);
+        // Trashing returns no document content and must work even when it is corrupt.
         await trashTableItem(item);
         // The shadow lives outside the storage directory, so nothing else would
         // ever collect it: a deleted table's retained specs would sit in the
