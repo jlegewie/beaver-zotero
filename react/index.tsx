@@ -1,3 +1,9 @@
+import { threadEntitiesAtom as inspectedEntitiesAtom } from './atoms/threadList';
+import { currentThreadIdAtom as inspectedThreadIdAtom, currentThreadNameAtom as inspectedThreadNameAtom, activeRunAtom as inspectedActiveRunAtom } from '@beaver/agent-core/run-state/atoms';
+import { sendWSMessageAtom as inspectedSendAtom, closeWSConnectionAtom as inspectedStopAtom } from './atoms/agentRunAtoms';
+import { loadThreadAtom as inspectedLoadAtom } from './atoms/threads';
+import { userIdAtom as inspectedUserIdAtom } from './atoms/auth';
+import { attachThreadProjection } from './runtime/threadProjection';
 import type { WSAgentActionExecuteRequest } from '@beaver/agent-core/protocol/agentProtocol';
 import { ZOTERO_AGENT_NAME, ZOTERO_PLUGIN_CLIENT_TYPE } from '@beaver/agent-core/protocol/agentProtocol';
 import { getTransportConfigurationError, setTransportConfig } from '@beaver/agent-core/transport/config';
@@ -370,6 +376,7 @@ export function initializeRuntime(runtime: WindowRuntime) {
     Zotero.Beaver.runtime.subscribeWindow(runtime, 'notification:popup', detail => {
         store.set(addPopupMessageAtom, detail);
     });
+    attachThreadProjection(runtime);
     initializeReactUI(runtime.hostWindow);
 }
 
@@ -383,10 +390,21 @@ export function disposeRuntime() {
 }
 
 /** Development commands execute inside the target renderer's atom graph. */
-export function inspectRuntime(request?: { command?: string; itemId?: number; draft?: string; mutation?: WSAgentActionExecuteRequest; undo?: AgentAction }) {
+export function inspectRuntime(request?: { command?: string; threadId?: string; text?: string; itemId?: number; draft?: string; mutation?: WSAgentActionExecuteRequest; undo?: AgentAction }) {
     if (process.env.NODE_ENV !== 'development') return undefined;
     const runtime = getWindowRuntime();
     switch (request?.command) {
+        case 'thread-cache':
+            return { entities: [...store.get(inspectedEntitiesAtom).values()] };
+        case 'thread-state':
+            return { id: runtime.id, threadId: store.get(inspectedThreadIdAtom), name: store.get(inspectedThreadNameAtom), run: store.get(inspectedActiveRunAtom), draft: store.get(currentMessageContentAtom), presence: Zotero.Beaver.presence.getSnapshot() };
+        case 'thread-send':
+            return store.set(inspectedSendAtom, request.text ?? 'Reply with OK.').then(() => ({ ok: true }));
+        case 'thread-stop':
+            return store.set(inspectedStopAtom).then(() => ({ ok: true }));
+        case 'thread-load':
+            if (!request.threadId) return { error: 'thread_required' };
+            return store.set(inspectedLoadAtom, { threadId: request.threadId, user_id: store.get(inspectedUserIdAtom) ?? '', preserveDraft: true, skipInstanceMismatchConfirm: true });
         case 'execute-action':
             if (!request.mutation) return { error: 'mutation_required' };
             return handleAgentActionExecuteRequest({ ...request.mutation, operation: captureOperationContext() }, {

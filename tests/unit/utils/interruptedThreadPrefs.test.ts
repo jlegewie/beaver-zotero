@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
     clearInterruptedThread,
+    getInterruptedThreads,
+    takeInterruptedThread,
     getInterruptedThread,
     saveInterruptedThread,
 } from '../../../src/utils/interruptedThreadPrefs';
@@ -55,7 +57,7 @@ describe('interrupted thread record', () => {
         expect(getInterruptedThread()?.closedAt).toBe('2026-08-20T12:00:00.000Z');
     });
 
-    it('keeps only the most recent interruption', () => {
+    it('offers the most recent interruption first', () => {
         saveInterruptedThread({ threadId: 'thread-1', userId: 'user-1', threadName: 'First' });
         saveInterruptedThread({ threadId: 'thread-2', userId: 'user-1', threadName: 'Second' });
 
@@ -132,5 +134,25 @@ describe('interrupted thread record', () => {
             saveInterruptedThread({ threadId: 'thread-1', userId: 'user-1', threadName: null }),
         ).not.toThrow();
         expect(() => clearInterruptedThread()).not.toThrow();
+    });
+});
+
+describe('interrupted run list', () => {
+    it('deduplicates by account, thread and run and presents each only once', () => {
+        const record = { threadId: 't', runId: 'r1', userId: 'u', threadName: null };
+        saveInterruptedThread(record); saveInterruptedThread(record);
+        saveInterruptedThread({ ...record, runId: 'r2' });
+        expect(getInterruptedThreads()).toHaveLength(2);
+        expect(takeInterruptedThread('u')?.runId).toBe('r2');
+        expect(takeInterruptedThread('u')?.runId).toBe('r1');
+        expect(takeInterruptedThread('u')).toBeNull();
+        saveInterruptedThread(record);
+        expect(takeInterruptedThread('u')).toBeNull();
+    });
+    it("bounds persisted records and never offers another account's chat", () => {
+        for (let index = 0; index < 30; index++) saveInterruptedThread({ threadId: String(index), runId: String(index), userId: 'u', threadName: null });
+        expect(getInterruptedThreads()).toHaveLength(20);
+        expect(takeInterruptedThread('other')).toBeNull();
+        expect(takeInterruptedThread('u')?.threadId).toBe('29');
     });
 });

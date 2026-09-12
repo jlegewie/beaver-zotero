@@ -408,6 +408,7 @@ describe('remembering the chat a shutdown interrupted', () => {
             threadId: 'thread-1',
             userId: 'user-1',
             threadName: 'Protein folding',
+            runId: 'run-1',
         });
     });
 
@@ -420,6 +421,7 @@ describe('remembering the chat a shutdown interrupted', () => {
             threadId: 'thread-from-run',
             userId: 'user-1',
             threadName: null,
+            runId: 'run-1',
         });
     });
 

@@ -67,6 +67,8 @@ function withShutdownTimeout<T>(
 }
 
 async function disposeAccountServices(): Promise<void> {
+    addon.threads.dispose();
+    addon.presence.dispose();
     try { addon.preferences?.dispose(); } catch (error) { ztoolkit.log(`disposePreferences: ${error}`); }
     try { if (addon.account) await withShutdownTimeout(addon.account.dispose(), 'disposeAccount'); }
     catch (error) { ztoolkit.log(`disposeAccount: ${error}`); }
@@ -273,6 +275,7 @@ async function onStartup() {
     addon.pluginVersion = version;
     addon.preferences ??= new InstancePreferences();
     addon.account ??= createInstanceAccount();
+    addon.threads.start(addon.account);
     addon.account.start();
     ztoolkit.log(`Plugin version: ${version}`);
 
@@ -520,7 +523,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         closeAgentConnection(
             win,
             appGoingAway ? "Zotero quitting" : "Main window closed",
-            { rememberInterruptedThread: appGoingAway || isLastMainWindow },
+            { rememberInterruptedThread: true },
         );
 
         // Worker-window hygiene: dispose a slot's client when the closing

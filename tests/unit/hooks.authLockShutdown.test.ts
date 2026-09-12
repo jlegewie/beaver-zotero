@@ -183,6 +183,8 @@ function setupGlobals() {
     };
 
     (globalThis as any).addon = {
+        threads: { start: vi.fn(), dispose: vi.fn() },
+        presence: { dispose: vi.fn() },
         account: { dispose: vi.fn().mockResolvedValue(undefined), start: vi.fn() },
         preferences: { dispose: vi.fn() },
         runtime: new BeaverInstance(),

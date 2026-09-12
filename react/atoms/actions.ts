@@ -24,7 +24,7 @@ import {
     EMPTY_VARIABLE_HINTS,
     type TargetTypeContext,
 } from '../utils/promptVariables';
-import { sendWSMessageAtom } from './agentRunAtoms';
+import { sendWSMessageAtom, withThreadWriter } from './agentRunAtoms';
 import {
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
@@ -658,6 +658,8 @@ export const sendComposedMessageAtom = atom(
             pills: SlashCommandDescriptor[];
         },
     ): Promise<boolean> => {
+        return (await withThreadWriter(get, set, async guardedSet => {
+        set = guardedSet;
         const { baseText, pills } = payload;
 
         const resolved = await set(resolvePillsToPromptActionsAtom, { pills });
@@ -686,6 +688,7 @@ export const sendComposedMessageAtom = atom(
 
         await set(sendWSMessageAtom, baseText.trim(), { actions: promptActions });
         return true;
+        })) ?? false;
     },
 );
 

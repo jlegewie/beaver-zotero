@@ -1,3 +1,6 @@
+import { store } from '../store';
+import { getWindowRuntime } from '../runtime/windowRuntime';
+import { getCredentialGeneration } from '@beaver/agent-core/transport/credentials';
 import ChatLoadFailure from './ChatLoadFailure';
 import { useChatReconnect } from '../hooks/useChatReconnect';
 import { useSurfaceWindow } from '../runtime/SurfaceWindowContext';
@@ -21,14 +24,12 @@ import {
     setThreadPinnedAtom,
     pinsPendingAtom,
     isPinPending,
-    updateThreadAtom,
     removeThreadAtom,
     EMPTY_THREAD_VIEW,
 } from '../atoms/threadList';
 import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { userAtom } from '../atoms/auth';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
-import { threadService } from '@beaver/agent-core/transport/threadService';
 import { currentZoteroInstanceRef } from '../../src/utils/zoteroUtils';
 import { getDateGroup } from '../utils/dateUtils';
 import { formatTimeAgo } from '../utils/formatTimeAgo';
@@ -104,7 +105,6 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     const loadByItem = useSetAtom(loadThreadsByItemAtom);
     const setThreadPinned = useSetAtom(setThreadPinnedAtom);
     const pinsPending = useAtomValue(pinsPendingAtom);
-    const updateThread = useSetAtom(updateThreadAtom);
     const removeThread = useSetAtom(removeThreadAtom);
 
     // Instance scoping: hide threads stamped by other Zotero accounts/installs
@@ -201,7 +201,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             // Only a scoped first page can report how many threads scoping hides.
             includeOtherCount: scope !== undefined,
         });
-    }, [user, viewKey, filter, activeQuery, scope, searchableLibraryIds, loadPage, loadByItem, setFilter]);
+    }, [user, viewKey, filter, activeQuery, scope, searchableLibraryIds, loadPage, loadByItem, setFilter, view.loadedAt]);
 
     // Pinned chats reach further back than the paginated window, so they are a
     // second discovery query into the same view. Only the plain list shows the
@@ -210,7 +210,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     useEffect(() => {
         if (!user || !showPinnedGroup) return;
         loadPinned({ key: viewKey, scope });
-    }, [user, showPinnedGroup, viewKey, scope, loadPinned]);
+    }, [user, showPinnedGroup, viewKey, scope, loadPinned, view.pinnedLoadedAt]);
 
     // Debounced search
     useEffect(() => {
@@ -310,13 +310,13 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         if (buttonIndex !== 0) return;
 
         try {
-            await threadService.deleteThread(threadId);
+            await Zotero.Beaver.threads.deleteThread(threadId, getWindowRuntime().id, getCredentialGeneration());
             clearRecentChatsCache(threadId);
             // Switch away first when this is the open chat: forgetting the
             // entity while it is still `currentThreadId` makes the header's pin
             // state read "unknown" and fire a GET for a chat that is gone.
             // The user already confirmed the delete, so skip the run confirm.
-            if (threadId === currentThreadId) {
+            if (threadId === store.get(currentThreadIdAtom)) {
                 await newThread({ skipActiveRunConfirm: true, window: surfaceWindow });
             }
             // One removal: every view resolves ids through the entity map and
@@ -344,8 +344,8 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         }
         setIsSavingRename(true);
         try {
-            await threadService.renameThread(threadId, newName);
-            updateThread({ id: threadId, update: t => ({ ...t, name: newName }) });
+            await Zotero.Beaver.threads.renameThread(threadId, newName);
+
             clearRecentChatsCache();
         } catch (error) {
             console.error('Error renaming thread:', error);

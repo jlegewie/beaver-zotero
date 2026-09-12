@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createStore } from 'jotai';
+import { createThreadStore as createStore } from '../../helpers/threadRepository';
 
 // =============================================================================
 // Module mocks — react/atoms/threads drags in the WS layer, citations, and
