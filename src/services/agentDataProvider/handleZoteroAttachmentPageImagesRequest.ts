@@ -1,3 +1,5 @@
+import { isWorkerAbortError } from '../../beaver-extract/MuPDFWorkerClient';
+import { isExtractionError } from '@beaver/agent-core/extract/types';
 /**
  * Agent Data Provider
  *
@@ -410,7 +412,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
     } catch (error) {
         if (
             signal.aborted
-            || error instanceof WorkerAbortError
+            || isWorkerAbortError(error)
             || error instanceof TimeoutError
             || isWorkerDeadlineError(error)
         ) {
@@ -427,7 +429,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
         logger(`handleZoteroAttachmentPageImagesRequest: Rendering failed: ${error}`, 1);
 
-        if (error instanceof ExtractionError) {
+        if (isExtractionError(error)) {
             // PAGE_OUT_OF_RANGE carries `pageCount` in payload (worker strict resolvers).
             const totalPagesForError = error.pageCount ?? resolvedCachedPageCount ?? null;
 

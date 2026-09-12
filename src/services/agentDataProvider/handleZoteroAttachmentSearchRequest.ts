@@ -1,3 +1,5 @@
+import { isWorkerAbortError } from '../../beaver-extract/MuPDFWorkerClient';
+import { isExtractionError } from '@beaver/agent-core/extract/types';
 /**
  * Agent Data Provider
  * 
@@ -301,7 +303,7 @@ export async function handleZoteroAttachmentSearchRequest(
     } catch (error) {
         if (
             signal.aborted
-            || error instanceof WorkerAbortError
+            || isWorkerAbortError(error)
             || error instanceof TimeoutError
             || isWorkerDeadlineError(error)
         ) {
@@ -319,7 +321,7 @@ export async function handleZoteroAttachmentSearchRequest(
         logger(`handleZoteroAttachmentSearchRequest: Search failed: ${error}`, 1);
 
         // Handle known extraction errors
-        if (error instanceof ExtractionError) {
+        if (isExtractionError(error)) {
             if (resolvedItem && resolvedFilePath && (error.code === ExtractionErrorCode.ENCRYPTED || error.code === ExtractionErrorCode.INVALID_PDF || error.code === ExtractionErrorCode.NO_TEXT_LAYER)) {
                 const cache = Zotero.Beaver?.documentCache;
                 const errorCode = error.code === ExtractionErrorCode.ENCRYPTED

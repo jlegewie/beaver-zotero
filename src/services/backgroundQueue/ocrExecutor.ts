@@ -9,9 +9,7 @@
  * re-extraction still uses the serialized background MuPDF lane via
  * `ctx.runOnMuPDFWorker`.
  *
- * Registered from the webpack `GlobalContextInitializer` (it needs the
- * Supabase-authenticated backend client); the esbuild dispatcher only knows the
- * `JobExecutor` interface.
+ * Registered once by the plugin-owned background runtime using instance credentials.
  */
 
 import type {
@@ -62,11 +60,6 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
 import { isApiError } from '@beaver/agent-core/types/apiErrors';
-import {
-    libraryScopeInitializedAtom,
-    searchableLibraryIdsAtom,
-} from '../../../react/atoms/profile';
-import { store } from '../../../react/store';
 import type {
     JobExecutionContext,
     JobExecutor,
@@ -335,7 +328,7 @@ export class OcrExecutor implements JobExecutor {
         ctx: JobExecutionContext,
     ): Promise<{ job: ResolvedJob } | { outcome: JobOutcome }> {
         let item: Zotero.Item | null = null;
-        if (!store.get(libraryScopeInitializedAtom)) {
+        if (!Zotero.Beaver.libraryScopeInitialized) {
             // Normally the lane is unregistered while scope is unknown. Release
             // defensively in case readiness changes after the row is claimed.
             return { outcome: { kind: 'release', reason: 'library_scope_uninitialized' } };
@@ -344,7 +337,7 @@ export class OcrExecutor implements JobExecutor {
                 `OcrExecutor: library not available on this device for ${record.libraryId}-${record.zoteroKey}`,
                 1,
             );
-        } else if (!store.get(searchableLibraryIdsAtom).includes(record.libraryId)) {
+        } else if (!(Zotero.Beaver.searchableLibraryIds ?? []).includes(record.libraryId)) {
             logger(
                 `OcrExecutor: ${record.libraryId}-${record.zoteroKey} skipped (library_excluded)`,
                 2,
@@ -836,8 +829,8 @@ export class OcrExecutor implements JobExecutor {
     private throwIfLibraryUnavailable(libraryId: number, ctx: JobExecutionContext): void {
         this.throwIfAborted(ctx);
         if (
-            !store.get(libraryScopeInitializedAtom)
-            || !store.get(searchableLibraryIdsAtom).includes(libraryId)
+            !Zotero.Beaver.libraryScopeInitialized
+            || !(Zotero.Beaver.searchableLibraryIds ?? []).includes(libraryId)
         ) {
             throw new OcrAbort();
         }

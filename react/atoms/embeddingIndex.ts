@@ -43,12 +43,6 @@ const defaultEmbeddingIndexState: EmbeddingIndexState = {
 export const embeddingIndexStateAtom = atom<EmbeddingIndexState>(defaultEmbeddingIndexState);
 
 /**
- * Counter that increments when a force reindex is requested.
- * useEmbeddingIndex hook watches this and triggers a full diff when it changes.
- */
-export const forceReindexCounterAtom = atom<number>(0);
-
-/**
  * Derived atom that indicates if indexing is currently in progress
  */
 export const isEmbeddingIndexingAtom = selectAtom(
@@ -135,8 +129,8 @@ export const hasFailedEmbeddingsAtom = selectAtom(
  */
 export const forceReindexAtom = atom(
     null,
-    (_get, set) => {
-        set(forceReindexCounterAtom, (prev) => prev + 1);
+    () => {
+        Zotero.Beaver.background?.reindex();
     }
 );
 

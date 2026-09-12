@@ -1,3 +1,4 @@
+import { DocumentWorkQueue } from "./DocumentWorkQueue";
 /**
  * MuPDFWorkerClient — main-thread client for the MuPDF WASM worker.
  *
@@ -333,6 +334,7 @@ export interface MuPDFWorkerStats {
     retryCount: number;
     consecutiveStartFailures: number;
     pendingCount: number;
+    queuedCount: number;
     nextId: number;
     dispatchCounts: Record<string, number>;
     lastSpawnTime: number | null;
@@ -400,6 +402,11 @@ export class WorkerDeadlineError extends Error {
 }
 
 /** Cross-bundle-safe classification for worker-level deadline expiration. */
+/** Worker cancellation crosses the host's bundle boundary. */
+export function isWorkerAbortError(error: unknown): error is WorkerAbortError {
+    return (error as { name?: unknown } | null)?.name === 'WorkerAbortError';
+}
+
 export function isWorkerDeadlineError(error: unknown): boolean {
     return error instanceof WorkerDeadlineError
         || (error as { name?: unknown } | null | undefined)?.name
@@ -407,6 +414,8 @@ export function isWorkerDeadlineError(error: unknown): boolean {
 }
 
 export class MuPDFWorkerClient {
+    private readonly workQueue = getConfig().maxQueuedOperations === undefined
+        ? null : new DocumentWorkQueue(getConfig().maxQueuedOperations);
     private readonly slotName: PDFWorkerSlotName;
     private idleTimeoutMs: number;
     private busyLeaseMs: number | null;
@@ -1061,8 +1070,8 @@ export class MuPDFWorkerClient {
             throw new Error("MuPDFWorkerClient: client has been disposed");
         }
         const cfg = getConfig();
-        const mainWindow = cfg.getWorkerHost();
-        if (!mainWindow) {
+        const mainWindow = cfg.createWorker ? null : cfg.getWorkerHost();
+        if (!mainWindow && !cfg.createWorker) {
             // Pre-spawn failure: no StartupEntry exists, so this never reaches
             // markStale. Count it here so repeated hot-slot spawn failures still
             // raise the restart prompt (this surfaces as worker_unavailable).
@@ -1083,8 +1092,8 @@ export class MuPDFWorkerClient {
 
         if (this.worker) return this.worker;
 
-        const WorkerCtor = (mainWindow as any).Worker as typeof Worker;
-        if (!WorkerCtor) {
+        const WorkerCtor = (mainWindow as any)?.Worker as typeof Worker;
+        if (!WorkerCtor && !cfg.createWorker) {
             this.recordStartFailure("spawn failed: no Worker constructor");
             throw new WorkerSpawnError(
                 "MuPDFWorkerClient: main window has no Worker constructor",
@@ -1093,7 +1102,7 @@ export class MuPDFWorkerClient {
 
         let worker: Worker;
         try {
-            worker = new WorkerCtor(cfg.workerUrl, { type: "module" });
+            worker = cfg.createWorker ? cfg.createWorker(cfg.workerUrl) : new WorkerCtor(cfg.workerUrl, { type: "module" });
         } catch (e) {
             // A synchronous construction failure is also a pre-spawn failure
             // (no StartupEntry yet). Count it and normalize to WorkerSpawnError
@@ -1365,6 +1374,15 @@ export class MuPDFWorkerClient {
         op: string,
         args: Record<string, unknown> = {},
         opts: { signal?: AbortSignal } = {},
+    ): Promise<T> {
+        return this.workQueue ? this.workQueue.run(() => this.callAdmitted<T>(op, args, opts), opts.signal)
+            : this.callAdmitted<T>(op, args, opts);
+    }
+
+    private async callAdmitted<T>(
+        op: string,
+        args: Record<string, unknown>,
+        opts: { signal?: AbortSignal },
     ): Promise<T> {
         if (opts.signal?.aborted) {
             throw new WorkerAbortError();
@@ -1931,6 +1949,7 @@ export class MuPDFWorkerClient {
             retryCount: this.retryCount,
             consecutiveStartFailures: this.consecutiveStartFailures,
             pendingCount: this.pending.size,
+            queuedCount: this.workQueue?.queued ?? 0,
             nextId: this.nextId,
             dispatchCounts: { ...this.dispatchCounts },
             lastSpawnTime: this.lastSpawnTime,
@@ -2128,6 +2147,7 @@ export class MuPDFWorkerClient {
     }
 
     dispose(): void {
+        this.workQueue?.close();
         // Set BEFORE markStale so that any rejection that races with this
         // call (or runs synchronously inside it) sees the disposed flag and
         // refuses to retry / respawn.
@@ -2177,7 +2197,7 @@ export function isTransientWorkerError(error: unknown): boolean {
         return true;
     }
     const name = (error as { name?: unknown } | null | undefined)?.name;
-    if (name === "StaleWorkerError" || name === "WorkerSpawnError") {
+    if (name === "StaleWorkerError" || name === "WorkerSpawnError" || name === "WorkerQueueFullError") {
         return true;
     }
     const code = (error as { code?: unknown } | null | undefined)?.code;
@@ -2348,7 +2368,7 @@ export function getMuPDFWorkerClient(
         }
         slot.set(undefined);
     }
-    const client = new MuPDFWorkerClient({ slotName: name });
+    const client = (getConfig().createClient?.(name) ?? new MuPDFWorkerClient({ slotName: name })) as MuPDFWorkerClient;
     slot.set(client);
     return client;
 }

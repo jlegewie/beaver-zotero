@@ -1,3 +1,4 @@
+import { isExtractionError } from '@beaver/agent-core/extract/types';
 /**
  * Dev-only HTTP handlers for the `/beaver/test/pdf-*` endpoints.
  *
@@ -116,7 +117,7 @@ async function runPdfExtractorCall<T>(
         const result = await fn(loaded.pdfData);
         return onSuccess(result);
     } catch (e: any) {
-        if (e instanceof ExtractionError) {
+        if (isExtractionError(e)) {
             return {
                 ok: false,
                 error: {
@@ -220,7 +221,7 @@ export async function handleTestPdfPageCountHttpRequest(request: any) {
         const count = await new BeaverExtractor().getPageCount(pdfData);
         return { ok: true, count };
     } catch (e: any) {
-        if (e instanceof ExtractionError) {
+        if (isExtractionError(e)) {
             return {
                 ok: false,
                 error: {
@@ -254,7 +255,7 @@ export async function handleTestPdfPageLabelsHttpRequest(request: any) {
         const metadata = await new BeaverExtractor().getMetadata(pdfData);
         return { ok: true, ...metadata };
     } catch (e: any) {
-        if (e instanceof ExtractionError) {
+        if (isExtractionError(e)) {
             return {
                 ok: false,
                 error: {
@@ -309,7 +310,7 @@ export async function handleTestPdfRenderPagesHttpRequest(request: any) {
         }));
         return { ok: true, pages };
     } catch (e: any) {
-        if (e instanceof ExtractionError) {
+        if (isExtractionError(e)) {
             return {
                 ok: false,
                 error: {
@@ -370,7 +371,7 @@ export async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) 
             pages,
         };
     } catch (e: any) {
-        if (e instanceof ExtractionError) {
+        if (isExtractionError(e)) {
             return {
                 ok: false,
                 error: {
@@ -422,7 +423,7 @@ export async function handleTestPdfExtractRawDetailedHttpRequest(request: any) {
         );
         return { ok: true, result };
     } catch (e: any) {
-        if (e instanceof ExtractionError) {
+        if (isExtractionError(e)) {
             return {
                 ok: false,
                 error: {
@@ -795,7 +796,7 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
                 error: { name: 'Error', message: e.message },
             };
         }
-        if (e instanceof ExtractionError) {
+        if (isExtractionError(e)) {
             // Wire-compat: pre-migration the analysis-window resolver
             // threw RangeError for invalid pageIndex (mapped to
             // `name:'Error'`). The worker path now produces
@@ -952,7 +953,7 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
             ...projectTracePage(out.result, out.debug, pageIndex, mode),
         };
     } catch (e) {
-        if (e instanceof ExtractionError) {
+        if (isExtractionError(e)) {
             return {
                 ok: false,
                 error: {
@@ -1076,7 +1077,7 @@ export async function handleTestPdfAnalyzeLayoutHttpRequest(request: any) {
         // projection so wire shape stays in lockstep across both surfaces.
         return { ok: true, ...projectAnalyzeLayout(result) };
     } catch (e: any) {
-        if (e instanceof ExtractionError) {
+        if (isExtractionError(e)) {
             if (e.code === ExtractionErrorCode.PAGE_OUT_OF_RANGE) {
                 return { ok: false, error: { name: 'Error', message: e.message } };
             }

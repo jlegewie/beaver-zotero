@@ -43,7 +43,6 @@ const BLOCKER_CAPTION: Record<string, string> = {
     sync_in_progress: 'Zotero is syncing.',
     hot_busy: 'Beaver is reading a file you asked for.',
     library_scope_unknown: 'Waiting for your Beaver account to load.',
-    no_window: 'Waiting for the Zotero window.',
 };
 
 function blockerCaption(blocker: string): string {

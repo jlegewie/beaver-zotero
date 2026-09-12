@@ -52,7 +52,7 @@ function getRealmSafeTimers(): PDFTimerFunctions | undefined {
 /**
  * Options for `configurePDFForBeaver`.
  *
- * `onWorkerStartFailure` is supplied only by the webpack (React) bundle
+ * The plugin publishes worker failures to attached renderers.
  */
 export interface ConfigurePDFForBeaverOptions {
     onWorkerStartFailure?: (info: WorkerStartFailureInfo) => void;
@@ -65,7 +65,10 @@ export interface ConfigurePDFForBeaverOptions {
 export function configurePDFForBeaver(options: ConfigurePDFForBeaverOptions = {}): void {
     configurePDF({
         workerUrl: "chrome://beaver/content/scripts/mupdf-worker.js",
-        getWorkerHost: () => Zotero.getMainWindow?.() ?? null,
+        getWorkerHost: () => null,
+        maxQueuedOperations: 32,
+        createWorker: url => Zotero.Beaver.documents!.createWorker(url),
+        createClient: name => Zotero.Beaver.documents!.createClient(name),
         onWorkerStartFailure: options.onWorkerStartFailure,
         timers: getRealmSafeTimers(),
         workerClientSlots: {

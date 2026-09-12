@@ -24,7 +24,7 @@ export async function purgeExcludedLibraries(
         const isStillExcluded = () =>
             !(Zotero.Beaver?.searchableLibraryIds ?? []).includes(libraryId);
         if (isCancelled()) return completed;
-        if (!isStillExcluded()) continue;
+        if (isCancelled() || !isStillExcluded()) continue;
         const rows = await db.getAttachmentProcessingStatesByLibrary(libraryId);
         const ledgerWasEmpty = rows.length === 0;
         const refs = new Map<string, {
@@ -45,6 +45,7 @@ export async function purgeExcludedLibraries(
 
         // Cancel all local work before adding the only allowed post-exclusion
         // intent: a remote membership removal that reads no library content.
+        if (isCancelled() || !isStillExcluded()) continue;
         await db.deleteBackgroundJobsByLibrary(libraryId);
 
         let remoteListingComplete = !hasSearchAccess;
@@ -81,7 +82,7 @@ export async function purgeExcludedLibraries(
             }
         }
 
-        if (!isStillExcluded()) continue;
+        if (isCancelled() || !isStillExcluded()) continue;
         if (hasSearchAccess && refs.size > 0 && !isCancelled()) {
             await db.enqueueBackgroundJobs([...refs.values()].map((ref) => ({
                 jobType: 'fulltext_untag' as const,
@@ -99,6 +100,7 @@ export async function purgeExcludedLibraries(
             })));
         }
 
+        if (isCancelled() || !isStillExcluded()) continue;
         await Zotero.Beaver?.documentCache?.invalidateByLibrary(libraryId);
         await db.deleteAttachmentProcessingStatesByLibrary(libraryId);
         await db.deleteProcessingIndexState(libraryId);

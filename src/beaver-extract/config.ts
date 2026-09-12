@@ -89,6 +89,11 @@ export interface PDFConfig {
     workerUrl: string;
     /** Returns the host window from which the Worker is constructed. */
     getWorkerHost: () => Window | null;
+    /** Optional instance-owned worker and client factories. */
+    /** Enable bounded serial admission for this host. */
+    maxQueuedOperations?: number;
+    createWorker?: (url: string) => Worker;
+    createClient?: (name: PDFWorkerSlotName) => unknown;
     /** Per-name cross-bundle slot accessors. */
     workerClientSlots: PDFWorkerClientSlots;
     /** Logger sink (see `PDFLogSink`). */

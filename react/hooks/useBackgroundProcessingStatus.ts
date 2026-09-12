@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../atoms/profile';
 import { backgroundProcessingStatusAtom } from '../atoms/backgroundProcessing';
-import { collectProcessingStatus } from '../../src/services/backgroundProcessing/statusSnapshot';
 
 export function useBackgroundProcessingStatus(options: {
     includeCoverage?: boolean;
@@ -19,13 +18,10 @@ export function useBackgroundProcessingStatus(options: {
         if (!Zotero.Beaver?.db) return;
         try {
             const { queue, ledger, failures, issues, worker, coverage, documentCache } =
-                await collectProcessingStatus(
-                    { hasOcrAccess, hasSearchIndexAccess: hasSearchAccess },
-                    {
+                await Zotero.Beaver.background!.collectStatus({
                         includeCoverage: options.includeCoverage,
                         includeFailures: options.includeFailures,
-                    },
-                );
+                });
             if (requestGeneration !== generation.current) return;
             const updatedAt = Date.now();
             setStatus((previous) => ({

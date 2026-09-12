@@ -1,3 +1,4 @@
+import { isExtractionError } from '@beaver/agent-core/extract/types';
 /**
  * Re-extract OCR'd PDF bytes and cache the result against the original
  * attachment's on-disk identity.
@@ -134,7 +135,7 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
                 abortSignal,
             );
         } catch (error) {
-            if (error instanceof ExtractionError && error.code === ExtractionErrorCode.NO_TEXT_LAYER) {
+            if (isExtractionError(error) && error.code === ExtractionErrorCode.NO_TEXT_LAYER) {
                 // The OCR layer produced no usable text. Structured is the
                 // primary mode, so treat its absence as terminal for this engine.
                 // A later mode failing after structured succeeded is unexpected;

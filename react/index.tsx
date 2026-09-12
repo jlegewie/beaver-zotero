@@ -36,17 +36,14 @@ import ReaderSidebar from './components/ReaderSidebar';
 import WindowSidebar from './components/WindowSidebar';
 import { eventManager } from './events/eventManager';
 import { useAuth } from './hooks/useAuth';
-import { useBackgroundProcessingScopeCleanup } from './hooks/useBackgroundProcessingScopeCleanup';
 import { useBackgroundProcessingStatus } from './hooks/useBackgroundProcessingStatus';
 import { useBackgroundProcessingWelcome } from './hooks/useBackgroundProcessingWelcome';
 import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
 import { useContextMenuActionHandler } from './hooks/useContextMenuActionHandler';
 import { useEmbeddingIndex } from './hooks/useEmbeddingIndex';
-import { useFulltextUpsertLane } from './hooks/useFulltextUpsertLane';
 import { useHttpEndpoints } from './hooks/useHttpEndpoints';
 import { useInterruptedThreadPopup } from './hooks/useInterruptedThreadPopup';
 import { useMcpServer } from './hooks/useMcpServer';
-import { useOcrLane } from './hooks/useOcrLane';
 import { useOnboardingPopups } from './hooks/useOnboardingPopups';
 import { useProfileSync } from './hooks/useProfileSync';
 import { useProviderWake } from './hooks/useProviderWake';
@@ -226,22 +223,8 @@ const GlobalContextInitializer = () => {
     // Mirror background extraction activity into the shared Jotai store
     useBackgroundWorkerStatus();
 
-    // Publish the searchable-library scope for esbuild background code. Runs
-    // before the lane hooks so the mirror is set when a lane first dispatches.
-
-
-    // Register the OCR background lane + mirror the OCR entitlement flag
-    useOcrLane();
-
-    // Mirror the cloud search-index entitlement flag (background-processing plan)
-
-
-    // Register the authenticated cloud-index lane and reconcile tag coverage.
-    useFulltextUpsertLane();
-
     useBackgroundProcessingWelcome();
 
-    useBackgroundProcessingScopeCleanup();
 
     // Command readiness follows the subscription effects above, not createRoot().render().
     React.useEffect(() => {

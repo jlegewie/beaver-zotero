@@ -45,22 +45,6 @@ vi.mock('../../../src/utils/zoteroItemUtils', () => ({
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 const libraryScope = vi.hoisted(() => ({ initialized: true, searchableIds: [1] }));
-const profileAtoms = vi.hoisted(() => ({
-    initialized: Symbol('libraryScopeInitializedAtom'),
-    searchableIds: Symbol('searchableLibraryIdsAtom'),
-}));
-vi.mock('../../../react/store', () => ({
-    store: {
-        get: vi.fn((target) => target === profileAtoms.initialized
-            ? libraryScope.initialized
-            : libraryScope.searchableIds),
-    },
-}));
-vi.mock('../../../react/atoms/profile', () => ({
-    libraryScopeInitializedAtom: profileAtoms.initialized,
-    searchableLibraryIdsAtom: profileAtoms.searchableIds,
-}));
-
 import { OcrExecutor } from '../../../src/services/backgroundQueue/ocrExecutor';
 import { ocrApiClient } from '../../../src/services/ocr/ocrApiClient';
 import {
@@ -157,6 +141,8 @@ beforeEach(() => {
     // The background track reaches the queue + dispatcher through `Zotero.Beaver`
     // (the slot's ctx is gone once parked). ctx.db mirrors Zotero.Beaver.db.
     (globalThis as any).Zotero.Beaver = {
+        get libraryScopeInitialized() { return libraryScope.initialized; },
+        get searchableLibraryIds() { return libraryScope.searchableIds; },
         documentCache: {
             getMetadata: vi.fn(async () => ({ pageCount: 5 })),
             getResult: vi.fn(async () => ({ pageCount: 5, pages: [] })),

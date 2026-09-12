@@ -1,3 +1,5 @@
+import { isWorkerAbortError } from '../../beaver-extract/MuPDFWorkerClient';
+import { isExtractionError } from '@beaver/agent-core/extract/types';
 /**
  * Agent Data Provider — unified view-images requests (`view` tool).
  *
@@ -653,7 +655,7 @@ async function handleExternalFileViewRequest(
     } catch (error) {
         if (
             signal.aborted
-            || error instanceof WorkerAbortError
+            || isWorkerAbortError(error)
             || error instanceof TimeoutError
             || isWorkerDeadlineError(error)
         ) {
@@ -662,7 +664,7 @@ async function handleExternalFileViewRequest(
                 { workerDispatched: workerDispatched.value, leaseReaped: isWorkerDeadlineError(error) },
             );
         }
-        if (error instanceof ExtractionError) {
+        if (isExtractionError(error)) {
             switch (error.code) {
                 case ExtractionErrorCode.ENCRYPTED:
                     return errorResponse(`The PDF file for ${requestKey} is password-protected`, 'encrypted');

@@ -124,6 +124,14 @@ describe('DocumentExtractExecutor OCR continuation', () => {
         expect(args!.priority ?? OCR_PRIORITY_ON_DEMAND).toBe(OCR_PRIORITY_ON_DEMAND);
     });
 
+    it('releases revoked extraction without recording a ledger failure or scheduling OCR', async () => {
+        mocks.extractAndCacheDocument.mockRejectedValueOnce({ code: 'DOCUMENT_ACCESS_REVOKED' });
+        const markFailure = vi.spyOn(db, 'markAttachmentExtractFailure');
+        expect(await runExtractJob(100)).toEqual({ kind: 'release', reason: 'external_abort' });
+        expect(markFailure).not.toHaveBeenCalled();
+        expect(mocks.enqueueOcrJob).not.toHaveBeenCalled();
+    });
+
     it('preserves indexed OCR identity while restoring the same scanned file', async () => {
         await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'SCANNED1', itemId: 7, contentKind: 'pdf' });
         await connection.queryAsync(`UPDATE attachment_processing_state SET

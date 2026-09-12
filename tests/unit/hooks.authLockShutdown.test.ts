@@ -183,7 +183,7 @@ function setupGlobals() {
     };
 
     (globalThis as any).addon = {
-        account: { dispose: vi.fn().mockResolvedValue(undefined), start: vi.fn() },
+        account: { subscribe: vi.fn(() => () => {}), dispose: vi.fn().mockResolvedValue(undefined), start: vi.fn() },
         preferences: { dispose: vi.fn() },
         runtime: new BeaverInstance(),
         mutations: { cancelOwner: vi.fn(), dispose: vi.fn().mockResolvedValue(undefined) },

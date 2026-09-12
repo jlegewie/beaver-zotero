@@ -1,3 +1,4 @@
+import { isExtractionError } from '@beaver/agent-core/extract/types';
 import React, { useState } from 'react';
 import { getContextWindow } from '../../../runtime/windowRuntime';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
@@ -225,7 +226,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             console.log("[PDF Test] Full result object:", result);
         } catch (error) {
             // Handle specific extraction errors
-            if (error instanceof ExtractionError) {
+            if (isExtractionError(error)) {
                 switch (error.code) {
                     case ExtractionErrorCode.ENCRYPTED:
                         console.warn("[PDF Test] Document is encrypted:", error.message);

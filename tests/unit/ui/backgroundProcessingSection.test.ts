@@ -473,7 +473,9 @@ it('disables Start now while a click is still preparing work', async () => {
 });
 
 it('lists metadata search failures under Problems with a Rebuild action and a summary that agrees', async () => {
-    const { embeddingIndexStateAtom, forceReindexCounterAtom } = await import('../../../react/atoms/embeddingIndex');
+    const reindex = vi.fn();
+    (Zotero as any).Beaver = { ...Zotero.Beaver, background: { reindex } };
+    const { embeddingIndexStateAtom } = await import('../../../react/atoms/embeddingIndex');
     const store = createStore();
     store.set(embeddingIndexStateAtom, { ...store.get(embeddingIndexStateAtom), failedItems: 3 });
     store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom), updatedAt: Date.now() });
@@ -484,7 +486,7 @@ it('lists metadata search failures under Problems with a Rebuild action and a su
         const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Rebuild')!;
         expect(button).toBeDefined();
         await act(async () => button.click());
-        expect(store.get(forceReindexCounterAtom)).toBe(1);
+        expect(reindex).toHaveBeenCalledTimes(1);
         await act(async () => store.set(embeddingIndexStateAtom, { ...store.get(embeddingIndexStateAtom), failedItems: 0 }));
         expect(container.textContent).not.toContain('missing from metadata search');
         expect(container.textContent).toContain('No problems found in the files Beaver has processed so far.');

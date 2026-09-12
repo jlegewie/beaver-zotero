@@ -1,3 +1,5 @@
+import { InstanceDocuments } from "./services/instanceDocuments";
+import { InstanceBackground } from "./services/instanceBackground";
 import { ZOTERO_PLUGIN_CLIENT_TYPE } from "@beaver/agent-core/protocol/agentProtocol";
 import { setActionClient } from "@beaver/agent-core/types/actions";
 import { version } from "../package.json";
@@ -67,6 +69,10 @@ function withShutdownTimeout<T>(
 }
 
 async function disposeAccountServices(): Promise<void> {
+    try { addon.documents?.dispose(); } catch (error) { ztoolkit.log(`disposeDocuments: ${error}`); }
+    try { if (addon.background) await withShutdownTimeout(addon.background.dispose(), "disposeBackground"); }
+    catch (error) { ztoolkit.log(`disposeBackground: ${error}`); }
+    addon.background = undefined;
     try { addon.preferences?.dispose(); } catch (error) { ztoolkit.log(`disposePreferences: ${error}`); }
     try { if (addon.account) await withShutdownTimeout(addon.account.dispose(), 'disposeAccount'); }
     catch (error) { ztoolkit.log(`disposeAccount: ${error}`); }
@@ -262,7 +268,8 @@ async function onStartup() {
     // -------- Configure the PDF package (esbuild bundle copy) --------
     // Idempotent. Must run before any PDF op. The webpack bundle calls the
     // same adapter from `react/index.tsx` for its own copy of the config.
-    configurePDFForBeaver();
+    addon.documents ??= new InstanceDocuments();
+    configurePDFForBeaver({ onWorkerStartFailure: info => addon.runtime.publish('document-worker:failure', info) });
 
     // -------- Declare the client actions are gated on --------
     // Each bundle holds its own copy of this seam, so the webpack bundle
@@ -297,10 +304,22 @@ async function onStartup() {
         addon.documentCache = documentCache;
         ztoolkit.log("DocumentCache initialized successfully");
 
+        // -------- Handle plugin upgrade --------
+        const lastVersion = getPref('installedVersion');
+        if (lastVersion && lastVersion !== version) {
+            await handleUpgrade(lastVersion, version);
+        }
+
+        // -------- Set installed version --------
+        setPref('installedVersion', version);
+        ztoolkit.log(`Installed version: ${getPref('installedVersion')}`);
+
         // -------- Initialize background extraction processor --------
         const backgroundExtractor = new BackgroundExtractor();
         addon.backgroundExtractor = backgroundExtractor;
         backgroundExtractor.start();
+        addon.background = new InstanceBackground();
+        addon.background.start(addon.account!);
         ztoolkit.log("BackgroundExtractor started");
 
         // Whole-library producers are independently pref-gated. They only
@@ -391,17 +410,8 @@ async function onStartup() {
                 mainWindows.map((win) => onMainWindowLoad(win)),
             );
         }
-
-        // -------- Handle plugin upgrade --------
-        const lastVersion = getPref('installedVersion');
-        if (lastVersion && lastVersion !== version) {
-            await handleUpgrade(lastVersion, version);
-        }
-
-        // -------- Set installed version --------
-        setPref('installedVersion', version);
-        ztoolkit.log(`Installed version: ${getPref('installedVersion')}`);
     } catch (error) {
+        await disposeAccountServices();
         // If startup fails after opening the DB, close it immediately
         // to prevent AsyncShutdown timeout → FATAL ERROR crash.
         ztoolkit.log(`Startup failed, closing database: ${error}`);
@@ -440,9 +450,10 @@ async function onMainWindowLoad(win: Window): Promise<void> {
     // Re-configure the PDF package on every main-window load. Required for
     // the macOS close-last-window-then-reopen lifecycle (see CLAUDE.md):
     // `onStartup()` does not re-run, but the package's module-scope config
-    // and the worker's per-window state must be valid for the new window.
+    // must be configured before this window can dispatch document work.
     // Idempotent — `configurePDF()` overwrites prior config.
-    configurePDFForBeaver();
+    addon.documents ??= new InstanceDocuments();
+    configurePDFForBeaver({ onWorkerStartFailure: info => addon.runtime.publish('document-worker:failure', info) });
 
     registerMainWindowFtl(win);
 
@@ -522,49 +533,6 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             appGoingAway ? "Zotero quitting" : "Main window closed",
             { rememberInterruptedThread: appGoingAway || isLastMainWindow },
         );
-
-        // Worker-window hygiene: dispose a slot's client when the closing
-        // window is either the realm that spawned its worker (the next
-        // postMessage would throw) or the realm whose bundle constructed
-        // the client itself.
-        try {
-            const hotClient = (Zotero as any).__beaverMuPDFWorkerClient_hot as
-                | { spawnedFromWindow: Window | null; createdFromWindow?: Window | null }
-                | undefined;
-            const backgroundClient = (Zotero as any).__beaverMuPDFWorkerClient_background as
-                | { spawnedFromWindow: Window | null; createdFromWindow?: Window | null }
-                | undefined;
-            const slots: Array<["hot" | "background", typeof hotClient]> = [
-                ["hot", hotClient],
-                ["background", backgroundClient],
-            ];
-            for (const [name, client] of slots) {
-                if (
-                    client
-                    && (client.spawnedFromWindow === win
-                        || client.createdFromWindow === win)
-                ) {
-                    // For the background slot, abort the processor's
-                    // in-flight job FIRST.
-                    if (name === "background" && addon.backgroundExtractor) {
-                        try {
-                            await withShutdownTimeout(
-                                addon.backgroundExtractor.abortInFlight(),
-                                "backgroundExtractor.abortInFlight",
-                            );
-                        } catch (_e) {
-                            // best-effort
-                        }
-                    }
-                    await withShutdownTimeout(
-                        disposeMuPDFWorker(name),
-                        `disposeMuPDFWorker(${name})`,
-                    );
-                }
-            }
-        } catch (_e) {
-            // best-effort
-        }
 
         // Determine cleanup scope BEFORE unmounting React, so we can set
         // the shutdown flag before React cleanup effects run.

@@ -40,6 +40,7 @@ export async function reconcileRemoteRefs(
         if (isCancelled()) return;
 
         const local = await db.getAttachmentProcessingStatesByLibrary(libraryId);
+        if (isCancelled()) return;
         const localPairs = new Map(
             local
                 .filter((row) => !!row.structuredDocumentHash)
@@ -54,6 +55,7 @@ export async function reconcileRemoteRefs(
 
         const jobs: BackgroundJobInput[] = [];
         for (const [pair, row] of localPairs) {
+            if (isCancelled()) return;
             if (remotePairs.has(pair)) {
                 const knownVersion = row.upsertIndexVersion == null
                     ? null
@@ -83,6 +85,7 @@ export async function reconcileRemoteRefs(
                 now: Date.now(),
             });
         }
+        if (isCancelled()) return;
         await db.enqueueBackgroundJobs(jobs);
 
         // Remote-only pairs are not safe deletion evidence. Scope refs are

@@ -44,6 +44,7 @@ export function useOnboardingPopups() {
         // Don't show if Beaver is already open
         if (isBeaverUIVisible) return;
 
+        if (!Zotero.Beaver.background?.claimNotification(WELCOME_POPUP_ID)) return;
         welcomeShownThisSessionRef.current = true;
         setPref('onboardingWelcomeShown', true);
         setPref('onboardingWelcomeShownAt', new Date().toISOString());
@@ -115,7 +116,8 @@ export function useOnboardingPopups() {
 
         // Only mark the tip as shown once it is actually displayed
         const timerId = setTimeout(() => {
-            readerTipShownThisSessionRef.current = true;
+            if (!Zotero.Beaver.background?.claimNotification(READER_TIP_POPUP_ID)) return;
+        readerTipShownThisSessionRef.current = true;
             setPref('onboardingReaderTipShownV2', true);
             logger('useOnboardingPopups: Showing reader tip popup');
             addFloatingPopupMessage({
@@ -163,7 +165,8 @@ export function useOnboardingPopups() {
         // the effect, and a pref written up front would retire the tip
         // without ever having shown it.
         const timerId = setTimeout(() => {
-            noteTipShownThisSessionRef.current = true;
+            if (!Zotero.Beaver.background?.claimNotification(NOTE_TIP_POPUP_ID)) return;
+        noteTipShownThisSessionRef.current = true;
             setPref('onboardingNoteTipShown', true);
             logger('useOnboardingPopups: Showing note tip popup');
             addFloatingPopupMessage({

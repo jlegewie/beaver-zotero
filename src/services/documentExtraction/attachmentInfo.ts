@@ -1,3 +1,4 @@
+import { isExtractionError } from '@beaver/agent-core/extract/types';
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode, isTransientWorkerError } from '../../beaver-extract';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { getPref } from '../../utils/prefs';
@@ -227,7 +228,7 @@ function delay(ms: number): Promise<void> {
 }
 
 function isHeapExhaustion(error: unknown): boolean {
-    return error instanceof ExtractionError
+    return isExtractionError(error)
         && error.code === ExtractionErrorCode.HEAP_EXHAUSTION;
 }
 
@@ -359,7 +360,7 @@ async function resolvePdfInfo(
         } catch (error) {
             // Deterministic content verdicts are not retried. Permanent ones
             // are cached so future reads skip analysis.
-            if (error instanceof ExtractionError) {
+            if (isExtractionError(error)) {
                 if (error.code === ExtractionErrorCode.ENCRYPTED) {
                     await cache?.putErrorMetadata({ item: attachment, filePath: availability.filePath, sourceSizeBytes, contentType: availability.contentType, errorCode: 'encrypted', pageCount: null, pageLabels: null, pages: null });
                     return { page_count: null, status: 'unreadable', status_code: 'pdf_encrypted' };

@@ -58,6 +58,12 @@ beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const claims = new Set<string>();
+    (Zotero as any).Beaver = { ...Zotero.Beaver, background: { claimNotification: (key: string) => {
+        if (claims.has(key)) return false;
+        claims.add(key);
+        return true;
+    } } };
     prefs.clear();
     // Already onboarded except for the note tip, so only that effect can fire.
     prefs.set('onboardingWelcomeShown', true);
