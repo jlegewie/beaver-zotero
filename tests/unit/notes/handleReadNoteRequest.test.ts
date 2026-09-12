@@ -203,14 +203,26 @@ describe('handleReadNoteRequest — success', () => {
         expect(response.parent_title).toBe('Parent Article');
     });
 
-    it('returns error for empty note', async () => {
-        const item = makeMockItem({ getNote: vi.fn(() => ''), getNoteTitle: vi.fn(() => '') });
-        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+    it.each(['', '   ', '<div data-schema-version="9"></div>'])(
+        'returns a successful zero-line read for an empty body: %s', async (html) => {
+            const item = makeMockItem({ getNote: vi.fn(() => html), getNoteTitle: vi.fn(() => '') });
+            (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+            vi.mocked(getOrSimplify).mockReturnValueOnce({
+                simplified: html.trim() ? '' : html,
+                metadata: { elements: new Map() },
+                isStale: false,
+            });
 
-        const response = await handleReadNoteRequest(makeRequest());
-        expect(response.success).toBe(false);
-        expect(response.error).toContain('is empty');
-    });
+            const response = await handleReadNoteRequest(makeRequest());
+            expect(response).toMatchObject({
+                success: true, note_id: '1-ABCD1234', title: '(untitled)',
+                total_lines: 0, content: '', has_more: false,
+            });
+            expect(response.error).toBeUndefined();
+            expect(response.lines_returned).toBeUndefined();
+            expect(response.next_offset).toBeUndefined();
+        },
+    );
 
     it('returns (untitled) for note without title', async () => {
         const item = makeMockItem({ getNoteTitle: vi.fn(() => '') });
@@ -494,18 +506,15 @@ describe('handleReadNoteRequest — read-only path', () => {
         expect(vi.mocked(getOrSimplify).mock.calls[0][1]).toBe(sentinel);
     });
 
-    it('returns empty_note error when getNoteHtmlForRead resolves empty', async () => {
-        vi.mocked(getNoteHtmlForRead).mockResolvedValueOnce('');
+    it.each(['', '   \n\t'])('reads an empty helper snapshot successfully: %j', async (html) => {
+        vi.mocked(getNoteHtmlForRead).mockResolvedValueOnce(html);
+        vi.mocked(getOrSimplify).mockReturnValueOnce({
+            simplified: html, metadata: { elements: new Map() }, isStale: false,
+        });
         const response = await handleReadNoteRequest(makeRequest());
-        expect(response.success).toBe(false);
-        expect(response.error).toContain('is empty');
-    });
-
-    it('returns empty_note error when helper resolves whitespace-only HTML', async () => {
-        vi.mocked(getNoteHtmlForRead).mockResolvedValueOnce('   \n\t');
-        const response = await handleReadNoteRequest(makeRequest());
-        expect(response.success).toBe(false);
-        expect(response.error).toContain('is empty');
+        expect(response).toMatchObject({ success: true, content: '', total_lines: 0 });
+        expect(response.error).toBeUndefined();
+        expect(getLatestNoteHtml).not.toHaveBeenCalled();
     });
 
     it('NEVER calls item.setNote from the read path (regression guard)', async () => {

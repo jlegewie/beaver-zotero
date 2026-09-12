@@ -1210,3 +1210,45 @@ describe('local single-edit citation recovery', () => {
         },
     );
 });
+
+
+describe('empty note batch edits', () => {
+    it.each(['', '   ', '<div data-schema-version="9"></div>', '<div data-schema-version="9"><p><br></p></div>'])(
+        'validates and applies anchor-free edits to %j', async (html) => {
+            for (const operation of ['append', 'rewrite'] as const) {
+                const item = useNote(html);
+                const edits = [{ index: 0, operation, new_string: '<p>First content</p>' }];
+                const validation = await handleAgentActionValidateRequest(makeValidateRequest(edits));
+                expect(validation.valid).toBe(true);
+                expect(item.saveTx).not.toHaveBeenCalled();
+                const result = await handleAgentActionExecuteRequest(makeExecuteRequest(edits));
+                expect(result.success).toBe(true);
+                expect(item.setNote.mock.calls[0][0]).toContain('<p>First content</p>');
+                expect(result.result_data!.undo[0].undo_old_html).toBe(operation === 'rewrite' ? html : '');
+                expect(result.result_data!.library_id).toBe(1);
+                expect(result.result_data!.zotero_key).toBe('NOTE0001');
+            }
+        },
+    );
+
+    it('rejects anchored edits on an empty note with actionable guidance', async () => {
+        const item = useNote('');
+        const validation = await handleAgentActionValidateRequest(makeValidateRequest([
+            { index: 0, operation: 'str_replace', old_string: 'missing', new_string: 'content' },
+        ]));
+        expect(validation.valid).toBe(false);
+        expect(validation.error).toContain('append');
+        expect(item.saveTx).not.toHaveBeenCalled();
+    });
+
+    it('applies multiple appends to an empty note in order', async () => {
+        const item = useNote('');
+        const edits = [
+            { index: 0, operation: 'append' as const, new_string: '<p>First</p>' },
+            { index: 1, operation: 'append' as const, new_string: '<p>Second</p>' },
+        ];
+        expect((await handleAgentActionValidateRequest(makeValidateRequest(edits))).valid).toBe(true);
+        expect((await handleAgentActionExecuteRequest(makeExecuteRequest(edits))).success).toBe(true);
+        expect(item.setNote.mock.calls[0][0]).toContain('<p>First</p><p>Second</p>');
+    });
+});

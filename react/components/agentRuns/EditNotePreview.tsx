@@ -204,7 +204,7 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
 
     // For rewrite mode when oldContent is missing (e.g. after undo),
     // fetch the current note content — the note is back to its original state.
-    const needsOldContentFetch = isRewrite && !oldContent && libraryId != null && !!zoteroKey;
+    const needsOldContentFetch = isRewrite && oldContent == null && libraryId != null && !!zoteroKey;
     const [fetchedOldContent, setFetchedOldContent] = useState<string | null>(null);
 
     useEffect(() => {
@@ -234,7 +234,7 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     }, [needsOldContentFetch, libraryId, zoteroKey]);
 
     // For rewrite mode, use oldContent prop, fetched content, or fall back to oldString
-    const effectiveOld = isRewrite && (oldContent || fetchedOldContent) ? (oldContent || fetchedOldContent!) : oldString;
+    const effectiveOld = isRewrite ? (oldContent ?? fetchedOldContent ?? oldString) : oldString;
     // For insert_after / insert_before, new_string is already normalized by
     // validation to merge old_string with new_string (via normalized_action_data):
     //   - insert_after:  new_string = old_string + new_string

@@ -1039,7 +1039,7 @@ export async function undoEditNoteAction(
     const library_id = item.libraryID;
 
     // ── rewrite undo: restore full note from undo_full_html ──
-    if (resultData?.undo_full_html) {
+    if (typeof resultData?.undo_full_html === 'string') {
         await item.loadDataType('note');
         const noteId = `${library_id}-${zotero_key}`;
 

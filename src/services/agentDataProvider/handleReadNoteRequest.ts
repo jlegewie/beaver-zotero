@@ -286,11 +286,6 @@ export async function handleReadNoteRequest(
         //    NEVER calls item.setNote() — flushLiveEditorToDB would persist a
         //    transient empty PM-render snapshot and erase the note's content.
         let rawHtml = await getNoteHtmlForRead(item);
-        if (!rawHtml || rawHtml.trim() === '') {
-            return errorResponse(
-                `Note ${note_id} is empty. There is no content to read.`
-            );
-        }
         // Recovery path: if diff-preview markup was ever accidentally
         // persisted into this note, read the stripped content so the model
         // sees the same HTML the edit_note validate/execute paths repair to.
@@ -311,7 +306,7 @@ export async function handleReadNoteRequest(
         const { simplified } = getOrSimplify(cacheNoteId, rawHtml, item.libraryID, pageLabelsByItemId);
 
         // 7. Apply offset/limit pagination
-        const lines = simplified.split('\n');
+        const lines = simplified.trim() ? simplified.split('\n') : [];
         const totalLines = lines.length;
         const start = Math.max(0, (offset ?? 1) - 1);
         const end = limit ? Math.min(start + limit, totalLines) : totalLines;

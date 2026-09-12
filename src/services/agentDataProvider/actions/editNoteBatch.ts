@@ -471,8 +471,9 @@ async function validateEditNoteBatchAction(
         rawHtml = stripPreviewMarkers(rawHtml);
     }
 
-    if (!rawHtml || rawHtml.trim() === '') {
-        return validateError(request.request_id, `Note ${modelObjectIdFromReference({ library_id: resolvedLibraryId, library_ref, zotero_key })} is empty`, 'empty_note');
+    if ((!rawHtml || rawHtml.trim() === '')
+        && edits.some(edit => edit.operation !== 'append' && edit.operation !== 'rewrite')) {
+        return validateError(request.request_id, `Note ${modelObjectIdFromReference({ library_id: resolvedLibraryId, library_ref, zotero_key })} is empty. Use operation="append" or "rewrite" with new_string and no old_string to add content to this note.`, 'empty_note');
     }
 
     // Simplify ONCE.
@@ -536,7 +537,7 @@ async function validateEditNoteBatchAction(
     }
 
     const isSingleRewrite = edits.length === 1 && opOf(edits[0]) === 'rewrite';
-    const totalLines = simplified.split('\n').length;
+    const totalLines = simplified.trim() ? simplified.split('\n').length : 0;
     const noteTitle = item.getNoteTitle() || '(untitled)';
 
     // A rewrite that discards or replaces most of the note is the one note edit

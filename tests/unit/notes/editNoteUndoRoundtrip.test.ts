@@ -90,6 +90,7 @@ import {
     executeEditNoteAction,
     executeEditNoteOrBatchAction,
     undoEditNoteAction,
+    undoEditNoteOrBatchAction,
 } from '../../../react/utils/editNoteActions';
 import type { AgentAction } from '../../../react/agents/agentActions';
 import { store } from '../../../react/store';
@@ -222,7 +223,7 @@ function makeAction(
     zoteroKey: string,
     oldString: string,
     newString: string,
-    operation: 'str_replace' | 'str_replace_all' = 'str_replace',
+    operation: 'str_replace' | 'str_replace_all' | 'append' | 'rewrite' = 'str_replace',
     resultData?: EditNoteResultData,
 ): AgentAction {
     return {
@@ -359,7 +360,7 @@ async function applyEdit(opts: {
     noteHtml: string;
     oldString: string;
     newString: string;
-    operation?: 'str_replace' | 'str_replace_all';
+    operation?: 'str_replace' | 'str_replace_all' | 'append' | 'rewrite';
     applyPMNormalization?: boolean;
 }): Promise<{
     item: ReturnType<typeof createMockNoteItem>;
@@ -2320,5 +2321,37 @@ describe('external-file citations through React apply and undo', () => {
         const result = await executeEditNoteOrBatchAction(action);
         expect(item._getHtml()).toContain('(Attached file ext-MRDTFYHP, p. 6)');
         expect(result.warnings?.[0]).toContain('no available filename metadata');
+    });
+});
+
+describe('empty note apply and undo', () => {
+    it.each(['append', 'rewrite'] as const)('%s can be undone to an empty body', async (operation) => {
+        const { item, action } = await applyEdit({
+            noteHtml: '', oldString: '', newString: '<p>First content</p>', operation,
+        });
+        expect(item._getHtml()).toContain('<p>First content</p>');
+        expect(await undoEdit(item, action)).toBe('');
+    });
+});
+
+describe('empty note batch apply and undo', () => {
+    beforeEach(() => {
+        Zotero.Libraries.get = vi.fn(() => ({ editable: true })) as any;
+    });
+
+    it.each(['append', 'rewrite'] as const)('batch %s restores the empty note on undo', async (operation) => {
+        const item = createMockNoteItem('');
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+        const action = makeAction(1, 'TESTKEY', '', '<p>First content</p>');
+        action.action_type = 'edit_note_batch';
+        action.proposed_data = {
+            library_id: 1, zotero_key: 'TESTKEY',
+            edits: [{ index: 0, operation, new_string: '<p>First content</p>' }],
+        } as any;
+        action.result_data = await executeEditNoteOrBatchAction(action);
+        action.status = 'applied';
+        expect(item._getHtml()).toContain('<p>First content</p>');
+        await undoEditNoteOrBatchAction(action);
+        expect(item._getHtml()).toBe('');
     });
 });
