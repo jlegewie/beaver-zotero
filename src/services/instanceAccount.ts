@@ -13,7 +13,7 @@ import {
     setSupabaseFetchAdapter,
 } from "@beaver/agent-core/transport/supabaseClient";
 import { setCredentialAdapter } from "@beaver/agent-core/transport/credentials";
-import { setTransportConfig } from "@beaver/agent-core/transport/config";
+import { setTransportConfig, getTransportConfig } from "@beaver/agent-core/transport/config";
 import { registerZoteroSupabaseStorage } from "./zoteroSupabaseStorage";
 import { registerZoteroClientIdentity } from "./zoteroClientIdentity";
 import { prepareServiceRealm } from "../runtime/realm";
@@ -74,6 +74,7 @@ export class InstanceAccount {
     private refreshing?: { generation: number; promise: Promise<void> };
     private refreshAgain = false;
     private attempts = 0;
+    private rejectionCheckAfter = 0;
     private mutationRevision = 0;
     private commandRevision = 0;
     private commands: Promise<unknown> = Promise.resolve();
@@ -306,6 +307,7 @@ export class InstanceAccount {
         this.settingsPending = null;
         this.refreshAgain = false;
         this.attempts = 0;
+        this.rejectionCheckAfter = 0;
         Zotero.Beaver?.voice?.authChanged(null);
         this.publish();
     }
@@ -382,6 +384,20 @@ export class InstanceAccount {
     private isOffline(): boolean {
         return typeof Services !== "undefined" && Services.io?.offline === true;
     }
+    getTransportConfig() {
+        return getTransportConfig();
+    }
+
+    /** Verify a current caller's rejection without bypassing outage backoff. */
+    reportSessionRejected(generation: number): Promise<void> {
+        if (this.disposed || generation !== this.snapshot.generation || !this.snapshot.session)
+            return Promise.resolve();
+        if (this.snapshot.status.kind === "transient" || Date.now() < this.rejectionCheckAfter)
+            return this.refreshing?.promise ?? Promise.resolve();
+        this.rejectionCheckAfter = Date.now() + 30_000;
+        return this.refreshing?.promise ?? this.refresh();
+    }
+
     refresh(force = false): Promise<void> {
         if (this.disposed || !this.snapshot.session) return Promise.resolve();
         if (this.isOffline()) {
@@ -404,7 +420,7 @@ export class InstanceAccount {
             !this.disposed && generation === this.snapshot.generation;
         const promise = (async () => {
             try {
-                let data = await accountService.getProfileWithPlan();
+                let data = await accountService.getProfileWithPlan({ timeoutMs: 15_000 });
                 if (!current()) return;
                 if (data.profile.data_version < data.required_data_version) {
                     this.snapshot.migrating = true;
@@ -412,7 +428,7 @@ export class InstanceAccount {
                     try {
                         await accountService.migrateData();
                         if (!current()) return;
-                        data = await accountService.getProfileWithPlan();
+                        data = await accountService.getProfileWithPlan({ timeoutMs: 15_000 });
                     } catch (error) {
                         if (
                             (error as any)?.code === "SESSION_EXPIRED" ||
@@ -475,11 +491,12 @@ export class InstanceAccount {
             } catch (error) {
                 if (!current()) return;
                 const e = error as any;
-                if (e?.code === "SESSION_EXPIRED") {
+                if (e?.code === "SESSION_EXPIRED" && !this.isOffline()) {
                     void this.auth.signOut();
                     return;
                 }
                 const transient =
+                    (e?.code === "SESSION_EXPIRED" && this.isOffline()) ||
                     e?.code === "SESSION_REFRESH_FAILED" ||
                     e?.status === 429 ||
                     e?.status >= 500 ||

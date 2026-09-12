@@ -41,6 +41,10 @@ import type { ExternalReference } from '@beaver/agent-core/types/externalReferen
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import {
+    formatExternalReferenceLabel,
+    getExternalReferenceUrl,
+} from '@beaver/agent-core/citations/externalReferences';
+import {
     citationIndexCandidateIdsForLocator,
     getPageLocator,
     normalizeCitationTag,
@@ -308,6 +312,8 @@ function resolvePageFromStructuredResult(
  * citation is saved without a locator) rather than triggering a full
  * extraction. Callers thread the returned `pages` map into `expandToRawHtml`
  * and surface `unresolved` as a save warning.
+ * External-file links use the same cached page lookup, but retain their
+ * structural locator when no page is available instead of dropping it.
  */
 export async function preloadStructuralLocatorPages(str: string): Promise<StructuralLocatorPreload> {
     const pages: ResolvedLocatorPages = {};
@@ -317,13 +323,14 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
 
     const seen = new Set<string>();
     const resultsByAttachment = new Map<number, Promise<StructuredExtractResult | null>>();
+    const resultsByExternalFile = new Map<string, Promise<StructuredExtractResult | null>>();
     const regex = noteCitationTagPattern();
     let match: RegExpExecArray | null;
 
     while ((match = regex.exec(str)) !== null) {
         const attrStr = match[1];
         const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
-        if (!normalized.ok || normalized.ref.kind !== 'zotero') continue;
+        if (!normalized.ok) continue;
         const loc = normalized.ref.loc;
         // Page locators and locator-less citations are handled elsewhere.
         if (!loc || loc.kind === 'page') continue;
@@ -331,6 +338,33 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
         const citationKey = requestedCitationKey(normalized.ref);
         if (seen.has(citationKey)) continue;
         seen.add(citationKey);
+
+        if (normalized.ref.kind === 'external_file') {
+            const key = normalized.ref.ext_key;
+            try {
+                let resultPromise = resultsByExternalFile.get(key);
+                if (!resultPromise) {
+                    resultPromise = (async () => {
+                        const record = await Zotero.Beaver?.db?.getExternalFileByKey(key);
+                        if (!record?.storedPath) return null;
+                        const { EXTERNAL_LIBRARY_ID } = await import('../services/externalFiles');
+                        const result = await cache.getResult(
+                            { libraryId: EXTERNAL_LIBRARY_ID, zoteroKey: key },
+                            'structured', record.storedPath,
+                        );
+                        return result?.mode === 'structured' ? result : null;
+                    })();
+                    resultsByExternalFile.set(key, resultPromise);
+                }
+                const result = await resultPromise;
+                const resolved = result && resolvePageFromStructuredResult(result, loc, true);
+                if (resolved) pages[citationKey] = resolved;
+            } catch {
+                // File links retain their structural locator when cached pages are unavailable.
+            }
+            continue;
+        }
+        if (normalized.ref.kind !== 'zotero') continue;
 
         // A portable ref whose library isn't on this device can't be looked
         // up; skip it here rather than misreport it as an unresolved locator —
@@ -641,48 +675,6 @@ export interface ExternalRefContext {
     externalItemMapping: Record<string, ZoteroItemReference | null>;
 }
 
-/** Format a compact "Author, Year" / "First et al., Year" label for a link. */
-function formatCompactAuthorYear(ref: ExternalReference): string {
-    const year = ref.year != null
-        ? String(ref.year)
-        : (ref.publication_date ? ref.publication_date.slice(0, 4) : '');
-
-    const firstAuthor = ref.authors && ref.authors.length > 0 ? ref.authors[0] : '';
-    let lastName = '';
-    if (firstAuthor) {
-        // Author may be "Last, First" or "First Last"
-        if (firstAuthor.includes(',')) {
-            lastName = firstAuthor.split(',')[0].trim();
-        } else {
-            const parts = firstAuthor.trim().split(/\s+/);
-            lastName = parts[parts.length - 1] || firstAuthor.trim();
-        }
-    }
-
-    if (lastName && (ref.authors?.length ?? 0) > 1) {
-        return year ? `${lastName} et al., ${year}` : `${lastName} et al.`;
-    }
-    if (lastName) {
-        return year ? `${lastName}, ${year}` : lastName;
-    }
-    return year;
-}
-
-/**
- * Pick the best URL for an external reference. Priority: DOI (most stable) →
- * publisher page → generic url → open-access PDF.
- */
-function pickExternalRefUrl(ref: ExternalReference): string | undefined {
-    const doi = ref.identifiers?.doi;
-    if (doi) {
-        // DOIs are passed through as-is to https://doi.org — they may contain
-        // slashes and parentheses but no characters that need URL encoding
-        // beyond what the surrounding attribute escape will handle.
-        return `https://doi.org/${doi}`;
-    }
-    return ref.publication_url || ref.url || ref.open_access_url || undefined;
-}
-
 /**
  * Build an inline `<a>` link representing an external reference. Used as the
  * non-Zotero fallback for `<citation external_id="..."/>` so external works
@@ -692,7 +684,7 @@ function pickExternalRefUrl(ref: ExternalReference): string | undefined {
  * pick a different source rather than emit a useless bare label.
  */
 function buildExternalRefLinkHTML(ref: ExternalReference, page?: string): string {
-    const url = pickExternalRefUrl(ref);
+    const url = getExternalReferenceUrl(ref);
     if (!url) {
         throw new Error(
             `Error: External reference "${ref.source_id ?? ''}" has no DOI or URL — `
@@ -700,8 +692,7 @@ function buildExternalRefLinkHTML(ref: ExternalReference, page?: string): string
         );
     }
 
-    let label = formatCompactAuthorYear(ref);
-    if (!label) label = ref.title || url;
+    let label = formatExternalReferenceLabel(ref) || url;
     if (page) label += `, p. ${page}`;
 
     // escapeAttr also escapes < > inside text — that's safe for the visible
@@ -781,9 +772,10 @@ export function expandToRawHtml(
                 if (!file) {
                     throw new Error(`External file ext-${fileRef.ext_key} was not preloaded for note expansion.`);
                 }
+                const resolved = resolvedLocatorPages?.[requestedCitationKey(fileRef)];
                 return formatExternalFileCitationHTML(
                     file.filename,
-                    externalFileLocatorSuffix(fileRef.loc),
+                    resolved ? `, p. ${resolved.label}` : externalFileLocatorSuffix(fileRef.loc),
                     file.href,
                 );
             }
@@ -800,12 +792,12 @@ export function expandToRawHtml(
                     if (itemId) {
                         const newAttrs = parseSimplifiedCitationAttrs(attrStr, resolvedLocatorPages);
                         if (attrsChanged(stored.originalAttrs, newAttrs)) {
-                            // Existing page citations are shown to the agent as
-                            // physical page numbers. When the page changes,
-                            // store the corresponding Zotero page label just
-                            // like a newly inserted citation.
-                            const shouldTranslatePage = stored.originalAttrs?.pageConvention === 'number'
-                                && (stored.originalAttrs.cslLabel == null || stored.originalAttrs.cslLabel === 'page');
+                            // Newly added locators use physical pages. Existing
+                            // locators retain the convention exposed when read.
+                            const original = stored.originalAttrs;
+                            const shouldTranslatePage = !original?.page
+                                || (original.pageConvention === 'number'
+                                    && (original.cslLabel == null || original.cslLabel === 'page'));
                             return buildCitation({ ...newAttrs, shouldTranslatePage, pageLabels });
                         }
                     }

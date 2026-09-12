@@ -847,6 +847,27 @@ describe('expandToRawHtml', () => {
         expect(expandToRawHtml(simplified, metadata, 'old')).toBe(saved);
     });
 
+    it('adds a physical-page locator to an existing standalone attachment link', () => {
+        const labels = { 5: '4', 7: '6' };
+        const item = {
+            id: 42, key: 'ATTACH12', libraryID: 1, parentID: false,
+            isAttachment: () => true, isFileAttachment: () => true, isPDFAttachment: () => true,
+            getField: () => 'Report.pdf',
+        };
+        vi.mocked(Zotero.Items.getByLibraryAndKey).mockReturnValue(item as any);
+        (Zotero.Libraries as any).get = vi.fn(() => ({ isGroup: false }));
+        const saved = '(<a href="zotero://open/library/items/ATTACH12"'
+            + ' rel="noopener noreferrer nofollow">Report.pdf</a>)';
+        const { simplified, metadata } = simplifyNoteHtml(wrap(`<p>${saved}</p>`), 1, { 'u-ATTACH12': labels });
+        expect(simplified).toContain('<citation id="u-ATTACH12" ref="c_ATTACH12_0"/>');
+
+        const edited = expandToRawHtml(
+            simplified.replace(' ref=', ' loc="page6" ref='), metadata, 'new', undefined, { 42: labels },
+        );
+        expect(edited).toContain('<a href="zotero://open/library/items/ATTACH12?page=6"'
+            + ' rel="noopener noreferrer nofollow">Report.pdf</a>, p. 4)');
+    });
+
     it('keeps the physical-page convention for a link citation whose labels are offset', () => {
         // Front matter puts printed page 3 on physical page 5. The agent works
         // in physical pages, so that is what the simplified locator must show,

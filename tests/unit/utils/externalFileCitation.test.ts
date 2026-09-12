@@ -6,7 +6,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
 }));
 
 import { preloadExternalFileCitations } from '../../../src/utils/externalFileCitation';
-import { expandToRawHtml } from '../../../src/utils/noteCitationExpand';
+import { expandToRawHtml, preloadStructuralLocatorPages } from '../../../src/utils/noteCitationExpand';
 import { simplifyNoteHtml } from '../../../src/utils/noteHtmlSimplifier';
 
 const tag = '<citation id="ext-MRDTFYHP" loc="page6"/>';
@@ -53,6 +53,36 @@ describe('external file citations in notes', () => {
         }[loc];
         expect(expandToRawHtml(`<citation id="ext-MRDTFYHP" loc="${loc}"/>`, metadata(), 'new',
             context({ MRDTFYHP: { filename: 'Report.pdf' } }))).toBe(`(Report.pdf, ${expected})`);
+    });
+
+    it.each([
+        ['s5', 'iv'],
+        ['s5-s6', 'iv-v'],
+    ])('resolves external locator %s to cached page labels', async (loc, label) => {
+        const getResult = vi.fn().mockResolvedValue({ mode: 'structured', document: { citationIndex: {
+            s5: { pageIndex: 5, pageLabel: 'iv' },
+            s6: { pageIndex: 6, pageLabel: 'v' },
+        } } });
+        (Zotero as any).Beaver.documentCache = { getResult };
+        const input = `<citation id="ext-MRDTFYHP" loc="${loc}"/>`;
+        const { files } = await preloadExternalFileCitations(input);
+        const resolved = await preloadStructuralLocatorPages(input + input);
+        expect(getResult).toHaveBeenCalledExactlyOnceWith(
+            { libraryId: -1, zoteroKey: 'MRDTFYHP' }, 'structured', '/stored/Report.pdf',
+        );
+        expect(resolved.unresolved).toEqual([]);
+        expect(expandToRawHtml(input, metadata(), 'new', context(files), undefined, resolved.pages))
+            .toBe(`(<a href="file:///stored/Report.pdf">Report.pdf</a>, p. ${label})`);
+    });
+
+    it('retains the structural locator when cached extraction is missing', async () => {
+        (Zotero as any).Beaver.documentCache = { getResult: vi.fn().mockResolvedValue(null) };
+        const input = '<citation id="ext-MRDTFYHP" loc="s5"/>';
+        const { files } = await preloadExternalFileCitations(input);
+        const resolved = await preloadStructuralLocatorPages(input);
+        expect(resolved.unresolved).toEqual([]);
+        expect(expandToRawHtml(input, metadata(), 'new', context(files), undefined, resolved.pages))
+            .toBe('(<a href="file:///stored/Report.pdf">Report.pdf</a>, sentence 5)');
     });
 
     it('escapes filenames, locators and link attributes', () => {

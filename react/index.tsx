@@ -53,12 +53,11 @@ import { useRunStatusTip } from './hooks/useRunStatusTip';
 import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
 import { useOcrLane } from './hooks/useOcrLane';
 import { useFulltextUpsertLane } from './hooks/useFulltextUpsertLane';
-import { useBackgroundProcessingStatus } from './hooks/useBackgroundProcessingStatus';
 import { useBackgroundProcessingWelcome } from './hooks/useBackgroundProcessingWelcome';
 import { useBackgroundProcessingScopeCleanup } from './hooks/useBackgroundProcessingScopeCleanup';
 import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
-import { setTransportConfig } from '@beaver/agent-core/transport/config';
+import { setTransportConfig, getTransportConfigurationError } from '@beaver/agent-core/transport/config';
 import { registerZoteroHost } from './host/zotero';
 import { registerZoteroDataProvider } from '../src/services/zoteroDataProvider';
 import { registerZoteroLibraryIdentity } from '../src/utils/libraryIdentity';
@@ -82,16 +81,6 @@ import { notifyWorkerStartFailure } from './utils/workerUnavailableNotice';
 //
 // Only the webpack copy wires `onWorkerStartFailure` to an in-app popup (hot worker only)
 configurePDFForBeaver({ onWorkerStartFailure: notifyWorkerStartFailure });
-
-// Register the backend endpoints. The `process.env` reads live here rather
-// than in the transport layer because they only work under a bundler that
-// substitutes them at build time; other hosts resolve the same values at
-// runtime. Must run before the first backend request or Supabase client use.
-setTransportConfig({
-    apiBaseUrl: process.env.API_BASE_URL ?? '',
-    supabaseUrl: process.env.SUPABASE_URL ?? '',
-    supabaseAnonKey: process.env.SUPABASE_ANON_KEY ?? '',
-});
 
 // Register the Zotero client host so rendered chat-history components can
 // resolve host-specific navigation and data lookups. Non-Zotero clients omit
@@ -128,8 +117,21 @@ setThreadAgentName(ZOTERO_AGENT_NAME);
 
 const instanceAccount = Zotero.Beaver.account;
 if (!instanceAccount) throw new Error('Instance account service unavailable');
+// Register the backend endpoints. The `process.env` reads live here rather
+// than in the transport layer because they only work under a bundler that
+// substitutes them at build time; other hosts resolve the same values at
+// runtime. Must run before the first backend request or Supabase client use.
+setTransportConfig({
+    apiBaseUrl: process.env.API_BASE_URL ?? '',
+    supabaseUrl: process.env.SUPABASE_URL ?? '',
+    supabaseAnonKey: process.env.SUPABASE_ANON_KEY ?? '',
+}, instanceAccount.getTransportConfig());
 setSupabaseClientProvider(() => instanceAccount.client);
-setCredentialAdapter({ auth: instanceAccount.auth, getGeneration: () => instanceAccount.getGeneration() });
+setCredentialAdapter({
+    auth: instanceAccount.auth,
+    getGeneration: () => instanceAccount.getGeneration(),
+    reportSessionRejected: generation => { void instanceAccount.reportSessionRejected(generation); },
+});
 
 // Register the Zotero busy-context snapshot attached to outgoing WS
 // diagnostics, and the sync-pause resume handler released when a mutating
@@ -230,12 +232,6 @@ const GlobalContextInitializer = () => {
     // Register the authenticated cloud-index lane and reconcile tag coverage.
     useFulltextUpsertLane();
 
-    // Poll queue, ledger, and remote coverage for status UI.
-    useBackgroundProcessingStatus({
-        onlyWhenEnabled: true,
-        pollIntervalMs: 15_000,
-    });
-
     useBackgroundProcessingWelcome();
 
     useBackgroundProcessingScopeCleanup();
@@ -259,7 +255,13 @@ function mountSurface(domElement: HTMLElement, children: React.ReactNode) {
     root.render(
         <Provider store={store}>
             <SurfaceWindowContext.Provider value={domElement.ownerDocument.defaultView}>
-                {children}
+                {getTransportConfigurationError() ? (
+                    <div role="alert" style={{ padding: 20 }}>
+                        <strong>Beaver couldn’t start</strong>
+                        <p>{getTransportConfigurationError()}</p>
+                        <p>Restart Zotero. If this continues, reinstall Beaver.</p>
+                    </div>
+                ) : children}
             </SurfaceWindowContext.Provider>
         </Provider>
     );
@@ -357,7 +359,7 @@ export function initializeRuntime(runtime: WindowRuntime) {
     initializeWindowRuntime(runtime);
     Zotero.Beaver.runtime.addWindowCleanup(runtime, registerTableLocalCommands(runtime.contextWindow));
     runtime.hostWindow.__beaverJotaiStore = store;
-    attachAccountProjection(runtime);
+    if (!getTransportConfigurationError()) attachAccountProjection(runtime);
     initializeReactUI(runtime.hostWindow);
 }
 

@@ -1,3 +1,6 @@
+import ChatLoadFailure from './ChatLoadFailure';
+import { classifyChatLoadError, type ChatLoadError } from '../utils/chatLoadError';
+import { useChatReconnect } from '../hooks/useChatReconnect';
 import { useSurfaceWindow } from '../runtime/SurfaceWindowContext';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
@@ -103,11 +106,16 @@ const RecentChats: React.FC = () => {
     const [contextType, setContextType] = useState<ContextType>('recent');
     const [isLoaded, setIsLoaded] = useState(false);
     const [isFetching, setIsFetching] = useState(false);
+    const [fetchError, setFetchError] = useState<ChatLoadError | null>(null);
+    const [retryRevision, setRetryRevision] = useState(0);
+    const handledRetryRevision = useRef(0);
+    const retry = useCallback(() => setRetryRevision(value => value + 1), []);
+    useChatReconnect(retry, !!fetchError);
 
     // Clear cache on mount so returning to home always shows fresh data
     const hasMountedRef = useRef(false);
 
-    const fetchRecentChats = useCallback(async (isCancelled: () => boolean) => {
+    const fetchRecentChats = useCallback(async (isCancelled: () => boolean, force = false) => {
         if (!user) return;
         // Read at call time, not subscribed: the stamp must be the value as
         // of this request, and subscribing would re-run this effect on every
@@ -157,8 +165,9 @@ const RecentChats: React.FC = () => {
 
         // Check cache
         const cached = recentCache.get(cacheKey);
-        if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        if (!force && cached && Date.now() - cached.timestamp < CACHE_TTL) {
             if (isCancelled()) return;
+            setFetchError(null);
             setThreads(cached.threads);
             setContextType(cached.contextType);
             setIsLoaded(true);
@@ -207,7 +216,7 @@ const RecentChats: React.FC = () => {
                     }
                 } catch (err) {
                     if (isCancelled()) return;
-                    console.error('RecentChats: error fetching item threads:', err);
+                    throw err;
                 }
             }
 
@@ -220,6 +229,7 @@ const RecentChats: React.FC = () => {
             }
 
             if (isCancelled()) return;
+            setFetchError(null);
             setThreads(resultThreads);
             setContextType(resultContextType);
             // Into the shared thread store too: opening one of these chats then
@@ -236,6 +246,7 @@ const RecentChats: React.FC = () => {
         } catch (error) {
             if (isCancelled()) return;
             console.error('RecentChats: error fetching threads:', error);
+            setFetchError(classifyChatLoadError(error));
         } finally {
             if (!isCancelled()) {
                 setIsLoaded(true);
@@ -247,10 +258,14 @@ const RecentChats: React.FC = () => {
     // Fetch on mount and when context changes (e.g. library ↔ reader tab switch)
     useEffect(() => {
         let cancelled = false;
-        const isCancelled = () => cancelled || !!Zotero.__beaverShuttingDown;
-        fetchRecentChats(isCancelled);
+        const generation = jotaiStore.get(threadWriteStampAtom).generation;
+        const isCancelled = () => cancelled || !!Zotero.__beaverShuttingDown
+            || jotaiStore.get(threadWriteStampAtom).generation !== generation;
+        const force = retryRevision !== handledRetryRevision.current;
+        handledRetryRevision.current = retryRevision;
+        fetchRecentChats(isCancelled, force);
         return () => { cancelled = true; };
-    }, [fetchRecentChats]);
+    }, [fetchRecentChats, retryRevision, jotaiStore]);
 
     // Register callback so external callers (ThreadListView, the header's
     // chat-actions menu) can remove a deleted thread from our local state
@@ -295,7 +310,7 @@ const RecentChats: React.FC = () => {
     // No data yet — render nothing until first load completes
     if (!isLoaded && threads.length === 0) return null;
     // Loaded but no threads exist
-    if (isLoaded && threads.length === 0 && !isFetching) return null;
+    if (isLoaded && threads.length === 0 && !isFetching && !fetchError) return null;
 
     const headerLabel = contextType === 'file' ? 'Related to this file'
         : contextType === 'note' ? 'Related to this note'
@@ -318,6 +333,7 @@ const RecentChats: React.FC = () => {
                     View All
                 </Button>
             </div>
+            {fetchError && <ChatLoadFailure error={fetchError} retry={retry} loading={isFetching} />}
             {threads.map(thread => (
                 <div
                     key={thread.id}

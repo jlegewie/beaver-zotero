@@ -211,6 +211,32 @@ async function handleUpgrade(lastVersion: string, currentVersion: string) {
     }
 }
 
+/**
+ * Open the plugin database, releasing Zotero's pane lock if the open takes it.
+ *
+ * Zotero 10 runs an integrity check whenever a database's WAL file wasn't
+ * truncated by a clean shutdown (force quit, crash, `kill`). The check displays
+ * the modal pane overlay ("Checking database integrity…") and locks the pane,
+ * but only the corruption path restores the previous display — a check that
+ * passes leaves the overlay up. That is invisible for Zotero's own database,
+ * which is opened while the pane is still locked during startup and unlocked
+ * afterwards by `ZoteroPane.makeVisible()`. We open after `uiReadyPromise`, so
+ * the overlay would instead stay up for the rest of the session, with no way
+ * for the user to dismiss it.
+ *
+ * Only clears a lock that this open introduced, so a lock held by another
+ * operation is left alone. Zotero 7-9 put plugin databases in rollback-journal
+ * mode and have no such check, so the lock never appears and this is a no-op.
+ */
+async function openPluginDatabase(dbConnection: _ZoteroTypes.DB): Promise<void> {
+    const wasLocked = Zotero.locked;
+    await dbConnection.test();
+    if (!wasLocked && Zotero.locked) {
+        ztoolkit.log("Database open locked the Zotero pane (unclean shutdown integrity check) — releasing it");
+        Zotero.hideZoteroPaneOverlays();
+    }
+}
+
 async function onStartup() {
     await Promise.all([
         Zotero.initializationPromise,
@@ -262,7 +288,7 @@ async function onStartup() {
 
     try {
         // Test connection and initialize schema
-        await dbConnection.test();
+        await openPluginDatabase(dbConnection);
         await beaverDB.initDatabase(version);
 
         // -------- Initialize Document Cache --------

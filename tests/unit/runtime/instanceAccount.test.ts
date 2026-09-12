@@ -123,6 +123,96 @@ describe("instance account ownership", () => {
         event("INITIAL_SESSION", session());
         await account.refresh();
     };
+    it("coalesces rejection verification and retains valid credentials", async () => {
+        await load();
+        const pending = deferred<any>();
+        mocks.profile.mockReturnValueOnce(pending.promise);
+        const generation = account.getGeneration();
+        const checks = Array.from({ length: 8 }, () => account.reportSessionRejected(generation));
+        expect(mocks.profile).toHaveBeenCalledTimes(2);
+        pending.resolve(profile());
+        await Promise.all(checks);
+        await account.reportSessionRejected(generation);
+        await vi.advanceTimersByTimeAsync(100);
+        expect(mocks.profile).toHaveBeenCalledTimes(2);
+        expect(sdk.auth.signOut).not.toHaveBeenCalled();
+        expect(account.getSnapshot().session).not.toBeNull();
+    });
+
+    it("joins an existing profile refresh without scheduling another verification", async () => {
+        await load();
+        const pending = deferred<any>();
+        mocks.profile.mockReturnValueOnce(pending.promise);
+        const refresh = account.refresh();
+        const check = account.reportSessionRejected(account.getGeneration());
+        pending.resolve(profile());
+        await Promise.all([refresh, check]);
+        await account.reportSessionRejected(account.getGeneration());
+        await vi.advanceTimersByTimeAsync(100);
+        expect(mocks.profile).toHaveBeenCalledTimes(2);
+    });
+
+    it("preserves the session when the network drops during verification", async () => {
+        await load();
+        const pending = deferred<any>();
+        mocks.profile.mockReturnValueOnce(pending.promise);
+        const check = account.reportSessionRejected(account.getGeneration());
+        Services.io.offline = true;
+        pending.reject({ code: "SESSION_EXPIRED" });
+        await check;
+        expect(sdk.auth.signOut).not.toHaveBeenCalled();
+        expect(account.getSnapshot().status).toMatchObject({ kind: "transient", offline: true });
+    });
+
+    it("signs out only after a current verification confirms rejection", async () => {
+        await load();
+        mocks.profile.mockRejectedValueOnce({ code: "SESSION_EXPIRED" });
+        await account.reportSessionRejected(account.getGeneration());
+        expect(account.getSnapshot().session).toBeNull();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(sdk.auth.signOut).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores obsolete rejection reports and verification results", async () => {
+        await load();
+        const generation = account.getGeneration();
+        const pending = deferred<any>();
+        mocks.profile.mockReturnValueOnce(pending.promise);
+        const check = account.reportSessionRejected(generation);
+        event("SIGNED_IN", session("b"));
+        pending.reject({ code: "SESSION_EXPIRED" });
+        await check;
+        await account.reportSessionRejected(generation);
+        expect(mocks.profile).toHaveBeenCalledTimes(2);
+        expect(account.getSnapshot().session?.user.id).toBe("b");
+        expect(sdk.auth.signOut).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        { code: "SESSION_REFRESH_FAILED", message: "Network failed" },
+        { status: 429, message: "Rate limited" },
+        { status: 503, message: "Unavailable" },
+    ])("preserves outage backoff despite repeated rejection reports: %j", async error => {
+        await load();
+        mocks.profile.mockRejectedValue(error);
+        const generation = account.getGeneration();
+        await account.reportSessionRejected(generation);
+        for (let i = 0; i < 5; i++) await account.reportSessionRejected(generation);
+        expect(mocks.profile).toHaveBeenCalledTimes(2);
+        expect(account.getSnapshot().status.kind).toBe("transient");
+        expect(sdk.auth.signOut).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(mocks.profile).toHaveBeenCalledTimes(3);
+    });
+
+    it("does not verify or sign out offline", async () => {
+        await load();
+        Services.io.offline = true;
+        await account.reportSessionRejected(account.getGeneration());
+        expect(mocks.profile).toHaveBeenCalledTimes(1);
+        expect(sdk.auth.signOut).not.toHaveBeenCalled();
+    });
+
     it("initializes search processing without a renderer and preserves a later pause", async () => {
         await load();
         expect(getPref("backgroundProcessingEnabled")).toBe(false);

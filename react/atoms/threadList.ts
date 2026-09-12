@@ -10,6 +10,7 @@ import type { ZoteroInstanceRef } from '@beaver/agent-core/transport/threadServi
 import { logger } from '@beaver/agent-core/platform/logger';
 import { deduplicateByThread, threadModelToThreadData, isThreadInstanceMismatch } from '../utils/threadMatches';
 import { isTransientNetworkError } from '../utils/isTransientNetworkError';
+import { classifyChatLoadError, type ChatLoadError } from '../utils/chatLoadError';
 // Type-only: `threads.ts` imports this module's writers, so a value import here
 // would close a runtime cycle between them.
 import type { ThreadData } from './threads';
@@ -163,8 +164,8 @@ export interface ThreadListViewState {
      */
     pinnedLoadedAt: number;
     status: ThreadViewStatus;
-    /** Set only for transient network failures, which offer a retry. */
-    error: { offline: boolean } | null;
+    /** A failed load must never be presented as an empty result. */
+    error: ChatLoadError | null;
     /** When the view last completed a load, for the staleness check. */
     loadedAt: number;
 }
@@ -354,10 +355,6 @@ const RETRY_BACKOFF_MS = 30_000;
 
 const pageRequestKey = (key: string) => `${key}|page`;
 
-function errorFor(error: unknown): { offline: boolean } | null {
-    if (!isTransientNetworkError(error)) return null;
-    return { offline: typeof navigator !== 'undefined' && navigator.onLine === false };
-}
 
 interface LoadPageParams {
     key: string;
@@ -434,7 +431,7 @@ async function runViewLoad(
         if (ownsStore()) retryAfter.set(requestKey, Date.now() + RETRY_BACKOFF_MS);
         if (tracksStatus) {
             patchView(get, set, key, stamp.generation, (v) => ({
-                ...v, status: 'error', error: errorFor(error),
+                ...v, status: 'error', error: classifyChatLoadError(error),
             }));
         }
     } finally {
