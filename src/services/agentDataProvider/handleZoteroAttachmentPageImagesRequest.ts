@@ -7,6 +7,9 @@
  * The Beaver agent is the primary agent that handles chat completions and tool execution.
  */
 
+import { isWorkerAbortError } from '../../beaver-extract/MuPDFWorkerClient';
+import { isExtractionError } from '@beaver/agent-core/extract/types';
+
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';  // kept for file_missing message check
 import {
@@ -17,9 +20,7 @@ import {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import {
     BeaverExtractor,
-    ExtractionError,
     ExtractionErrorCode,
-    WorkerAbortError,
     isWorkerDeadlineError,
 } from '../../beaver-extract';
 import { makeRemoteFilePath } from '../documentFileIdentity';
@@ -410,7 +411,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
     } catch (error) {
         if (
             signal.aborted
-            || error instanceof WorkerAbortError
+            || isWorkerAbortError(error)
             || error instanceof TimeoutError
             || isWorkerDeadlineError(error)
         ) {
@@ -427,7 +428,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
         logger(`handleZoteroAttachmentPageImagesRequest: Rendering failed: ${error}`, 1);
 
-        if (error instanceof ExtractionError) {
+        if (isExtractionError(error)) {
             // PAGE_OUT_OF_RANGE carries `pageCount` in payload (worker strict resolvers).
             const totalPagesForError = error.pageCount ?? resolvedCachedPageCount ?? null;
 

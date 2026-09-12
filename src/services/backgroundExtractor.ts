@@ -60,7 +60,6 @@ export type ProcessOnceReason =
     | 'stopped'
     | 'shutting_down'
     | 'disabled'
-    | 'no_window'
     | 'sync_in_progress'
     | 'hot_busy'
     | 'library_scope_unknown'
@@ -168,7 +167,6 @@ export class BackgroundExtractor {
         if (this.dbWritesPermanentlyDisabled || Zotero.__beaverShuttingDown === true) return 'shutting_down';
         if (!this.prefEnabled || (!this.started && getPref(PREF_ENABLED) === false)) return 'disabled';
         if (includeStartup && Date.now() < this.startupDelayUntil) return 'startup_delay';
-        if (!Zotero.getMainWindow?.()) return 'no_window';
         if (this.syncInProgress) return 'sync_in_progress';
         if (COOPERATIVE_THROTTLE) {
             const hot = getExistingMuPDFWorkerClient('hot');

@@ -76,6 +76,8 @@ declare namespace Zotero {
     let __beaverTableWriteLocks: Map<string, Promise<unknown>> | undefined;
 
     namespace Beaver {
+        let background: import("../src/services/instanceBackground").InstanceBackground | undefined;
+        let documents: import("../src/services/instanceDocuments").InstanceDocuments | undefined;
         let notePreviews: import("../src/services/notePreviews").NotePreviews;
         let libraryOperations: import("../src/services/libraryOperations").LibraryOperations;
         let backgroundTasks: import("../src/utils/backgroundTasks").BackgroundTaskSource;

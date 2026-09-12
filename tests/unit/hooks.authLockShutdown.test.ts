@@ -183,7 +183,7 @@ function setupGlobals() {
     };
 
     (globalThis as any).addon = {
-        account: { dispose: vi.fn().mockResolvedValue(undefined), start: vi.fn() },
+        account: { subscribe: vi.fn(() => () => {}), dispose: vi.fn().mockResolvedValue(undefined), start: vi.fn() },
         preferences: { dispose: vi.fn() },
         runtime: new BeaverInstance(),
         mutations: { cancelOwner: vi.fn(), dispose: vi.fn().mockResolvedValue(undefined) },
@@ -303,6 +303,17 @@ describe('hooks auth lock shutdown cleanup', () => {
 
         expect((globalThis as any).addon.account.dispose).toHaveBeenCalled();
         expect(mockCancelAllActiveTasks).toHaveBeenCalledOnce();
+    });
+
+    it.each([false, true])('clears the document owner after disposal (throws: %s)', async (throws) => {
+        const hooks = await loadHooks();
+        const win = makeWindow();
+        const dispose = vi.fn(() => { if (throws) throw new Error('disposed'); });
+        (globalThis as any).addon.documents = { dispose };
+        vi.mocked(Zotero.getMainWindows).mockReturnValue([win]);
+        await hooks.onMainWindowUnload(win);
+        expect(dispose).toHaveBeenCalledOnce();
+        expect((globalThis as any).addon.documents).toBeUndefined();
     });
 
     it('continues cleanup when instance auth disposal throws', async () => {

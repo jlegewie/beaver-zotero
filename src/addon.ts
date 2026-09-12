@@ -20,6 +20,8 @@ import type { DevelopmentVoiceHarness } from './services/voice/developmentHarnes
 import type { VoiceService } from './services/voice/voiceService';
 
 class Addon {
+    public documents?: import("./services/instanceDocuments").InstanceDocuments;
+    public background?: import("./services/instanceBackground").InstanceBackground;
     public backgroundTasks = createBackgroundTaskSource();
     public preferences?: import("./services/instancePreferences").InstancePreferences;
     public account?: import("./services/instanceAccount").InstanceAccount;

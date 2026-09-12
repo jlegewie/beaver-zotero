@@ -79,7 +79,7 @@ describe('MCP read_attachment tool', () => {
         });
         const text = expectText(result);
 
-        expect(text).toContain(`Attachment: ${attachmentId(SMALL_PDF)}`);
+        expect(text).toContain(`Attachment: u-${SMALL_PDF.zotero_key}`);
         expect(text).toContain(`Total pages: ${SMALL_PDF_PAGE_COUNT}`);
         expect(text).toContain(`Showing pages 1-${SMALL_PDF_PAGE_COUNT}`);
         expect(text).toContain('<page1>');

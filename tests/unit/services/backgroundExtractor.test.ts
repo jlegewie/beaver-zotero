@@ -170,7 +170,7 @@ describe('BackgroundExtractor', () => {
     });
 
     it.each(['drain', 'idle'].flatMap((mode) =>
-        ['startup_delay', 'sync_in_progress', 'hot_busy', 'library_scope_unknown', 'disabled', 'no_window']
+        ['startup_delay', 'sync_in_progress', 'hot_busy', 'library_scope_unknown', 'disabled']
             .map((blocker) => [mode, blocker]),
     ))('keeps the backlog gate closed in %s mode while blocked by %s', async (mode, blocker) => {
         (Zotero as any).Prefs.get = vi.fn((pref: string) =>
@@ -184,20 +184,19 @@ describe('BackgroundExtractor', () => {
         if (blocker === 'hot_busy') mockState.hotPendingCount = 1;
         if (blocker === 'library_scope_unknown') (Zotero as any).Beaver.libraryScopeInitialized = false;
         if (blocker === 'disabled') (proc as any).prefEnabled = false;
-        if (blocker === 'no_window') (Zotero as any).getMainWindow = () => null;
         expect(proc.getDispatchBlocker()).toBe(blocker);
         expect(proc.isBacklogGateOpen()).toBe(false);
         if (blocker !== 'startup_delay') expect(await proc.processOnce()).toMatchObject({ processed: false, reason: blocker });
     });
 
-    it('returns no_window when Zotero.getMainWindow returns null', async () => {
+    it('continues instance dispatch with no main window', async () => {
         (Zotero as any).getMainWindow = vi.fn(() => null);
         const { BackgroundExtractor } = await loadProcessor();
         const proc = new BackgroundExtractor();
 
         const result = await proc.processOnce();
 
-        expect(result).toEqual({ processed: false, reason: 'no_window' });
+        expect(result).toEqual({ processed: false, reason: 'empty' });
         expect(mockState.extractCalls).toHaveLength(0);
     });
 
@@ -914,7 +913,7 @@ describe('BackgroundExtractor', () => {
         expect(rows[0].lastError).toContain('timeout');
     });
 
-    it('external_abort releases the job without bumping attempt_count', async () => {
+    it.each(['external_abort', 'access_revoked'])('%s releases the job without bumping attempt_count', async (cancellation) => {
         await db.enqueueBackgroundJob({
             jobType: 'document_extract',
             libraryId: 1,
@@ -930,6 +929,11 @@ describe('BackgroundExtractor', () => {
             pageCount: null,
             resolvedAttachment: { libraryId: 1, zoteroKey: 'AAAAAAAA' },
         };
+
+        if (cancellation === 'access_revoked') {
+            // A structural error also covers calls across bundle boundaries.
+            mockState.nextResult = () => { throw { code: 'DOCUMENT_ACCESS_REVOKED' }; };
+        }
 
         const { BackgroundExtractor } = await loadProcessor();
         const proc = new BackgroundExtractor();
@@ -1024,7 +1028,7 @@ describe('BackgroundExtractor', () => {
         }
     });
 
-    it('event dispatch is window-guarded — no throw when no main window', async () => {
+    it('instance events remain safe with no window subscribers', async () => {
         await db.enqueueBackgroundJob({
             jobType: 'document_extract',
             libraryId: 1,
@@ -1050,7 +1054,7 @@ describe('BackgroundExtractor', () => {
         // Then null-window for a follow-up — should be a clean no-op
         (Zotero as any).getMainWindow = vi.fn(() => null);
         const result = await proc.processOnce();
-        expect(result).toEqual({ processed: false, reason: 'no_window' });
+        expect(result).toEqual({ processed: false, reason: 'empty' });
     });
 
     it('stop() aborts an in-flight job and disposes the background worker', async () => {

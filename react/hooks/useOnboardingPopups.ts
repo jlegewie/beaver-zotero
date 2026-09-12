@@ -1,5 +1,5 @@
 import { getContextWindow } from '../runtime/windowRuntime';
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { isBeaverUIVisibleAtom, isLibraryTabAtom } from '../atoms/ui';
@@ -30,13 +30,9 @@ export function useOnboardingPopups() {
     const noteItem = useAtomValue(currentNoteItemAtom);
     const floatingPopupMessages = useAtomValue(floatingPopupMessagesAtom);
     const addFloatingPopupMessage = useSetAtom(addFloatingPopupMessageAtom);
-    const welcomeShownThisSessionRef = useRef(false);
-    const readerTipShownThisSessionRef = useRef(false);
-    const noteTipShownThisSessionRef = useRef(false);
 
     // === Popup 1: Welcome popup on first install ===
     useEffect(() => {
-        if (welcomeShownThisSessionRef.current) return;
 
         const alreadyShown = getPref('onboardingWelcomeShown');
         if (alreadyShown) return;
@@ -44,7 +40,7 @@ export function useOnboardingPopups() {
         // Don't show if Beaver is already open
         if (isBeaverUIVisible) return;
 
-        welcomeShownThisSessionRef.current = true;
+        if (!Zotero.Beaver.background?.claimNotification(WELCOME_POPUP_ID)) return;
         setPref('onboardingWelcomeShown', true);
         setPref('onboardingWelcomeShownAt', new Date().toISOString());
         logger('useOnboardingPopups: Showing welcome onboarding popup');
@@ -59,7 +55,6 @@ export function useOnboardingPopups() {
 
     // === Popup 2: Reader tip on first PDF reader tab ===
     useEffect(() => {
-        if (readerTipShownThisSessionRef.current) return;
 
         // Only trigger when user is on a reader tab (not library)
         if (isLibraryTab) return;
@@ -115,7 +110,7 @@ export function useOnboardingPopups() {
 
         // Only mark the tip as shown once it is actually displayed
         const timerId = setTimeout(() => {
-            readerTipShownThisSessionRef.current = true;
+            if (!Zotero.Beaver.background?.claimNotification(READER_TIP_POPUP_ID)) return;
             setPref('onboardingReaderTipShownV2', true);
             logger('useOnboardingPopups: Showing reader tip popup');
             addFloatingPopupMessage({
@@ -131,7 +126,6 @@ export function useOnboardingPopups() {
 
     // === Popup 3: Note tip on first note tab ===
     useEffect(() => {
-        if (noteTipShownThisSessionRef.current) return;
 
         // Only trigger when a note is open in a tab
         if (!noteItem) return;
@@ -163,7 +157,7 @@ export function useOnboardingPopups() {
         // the effect, and a pref written up front would retire the tip
         // without ever having shown it.
         const timerId = setTimeout(() => {
-            noteTipShownThisSessionRef.current = true;
+            if (!Zotero.Beaver.background?.claimNotification(NOTE_TIP_POPUP_ID)) return;
             setPref('onboardingNoteTipShown', true);
             logger('useOnboardingPopups: Showing note tip popup');
             addFloatingPopupMessage({

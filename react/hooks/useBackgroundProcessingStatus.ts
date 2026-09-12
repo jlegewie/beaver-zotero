@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../atoms/profile';
 import { backgroundProcessingStatusAtom } from '../atoms/backgroundProcessing';
-import { collectProcessingStatus } from '../../src/services/backgroundProcessing/statusSnapshot';
 
 export function useBackgroundProcessingStatus(options: {
     includeCoverage?: boolean;
@@ -10,6 +9,7 @@ export function useBackgroundProcessingStatus(options: {
     pollIntervalMs?: number;
 } = {}): () => Promise<void> {
     const hasSearchAccess = useAtomValue(hasSearchIndexAccessAtom);
+    // Entitlement changes restart polling immediately with the new instance flags.
     const hasOcrAccess = useAtomValue(hasOcrAccessAtom);
     const setStatus = useSetAtom(backgroundProcessingStatusAtom);
     const generation = useRef(0);
@@ -18,15 +18,12 @@ export function useBackgroundProcessingStatus(options: {
         const requestGeneration = ++generation.current;
         if (!Zotero.Beaver?.db) return;
         try {
-            const { queue, ledger, failures, issues, worker, coverage, documentCache } =
-                await collectProcessingStatus(
-                    { hasOcrAccess, hasSearchIndexAccess: hasSearchAccess },
-                    {
-                        includeCoverage: options.includeCoverage,
-                        includeFailures: options.includeFailures,
-                    },
-                );
-            if (requestGeneration !== generation.current) return;
+            const result = await Zotero.Beaver.background!.collectStatus({
+                includeCoverage: options.includeCoverage,
+                includeFailures: options.includeFailures,
+                });
+            if (requestGeneration !== generation.current || !result) return;
+            const { queue, ledger, failures, issues, worker, coverage, documentCache } = result;
             const updatedAt = Date.now();
             setStatus((previous) => ({
                 queue,

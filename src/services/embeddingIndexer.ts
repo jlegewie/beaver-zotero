@@ -569,7 +569,9 @@ export class EmbeddingIndexer {
                 const texts = itemsToProcess.map(item => this.buildEmbeddingText(item.title, item.abstract));
                 const ids = itemsToProcess.map(item => item.itemId);
 
+                if (isCancelled?.()) return result;
                 const response = await embeddingsService.generateEmbeddingsWithRetry(texts, ids);
+                if (isCancelled?.()) return result;
 
                 // ----- Phase 5: process response -----
                 const embeddingRecords: Array<Omit<EmbeddingRecord, 'indexed_at'>> = [];
@@ -618,6 +620,7 @@ export class EmbeddingIndexer {
                 }
 
             } catch (error) {
+                if (isCancelled?.()) return result;
                 const errorName = (error as Error).name || 'Error';
                 const rawMessage = (error as Error).message || String(error);
                 logger(`indexItemIdsBatch: Batch failed at offset ${i} (${errorName}): ${rawMessage}`, 1);

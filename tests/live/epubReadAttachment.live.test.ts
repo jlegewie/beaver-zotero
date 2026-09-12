@@ -91,7 +91,7 @@ describe('MCP read_attachment over an EPUB', () => {
         });
         const text = expectText(result);
 
-        expect(text).toContain(`Attachment: ${attachmentId(NON_PDF)}`);
+        expect(text).toContain(`Attachment: u-${NON_PDF.zotero_key}`);
         expect(text).toContain(`Total pages: ${pageCount}`);
         expect(text).toContain(`Showing pages 1-${endPage}`);
         expect(text).toContain('<page1>');

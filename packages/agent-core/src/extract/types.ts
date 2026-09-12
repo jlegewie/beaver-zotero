@@ -1365,3 +1365,10 @@ export interface PDFMetadata {
     /** info:ModDate (raw PDF date string) */
     modDate?: string;
 }
+
+/** Recognize document verdicts returned by a different bundle or realm. */
+export function isExtractionError(value: unknown): value is ExtractionError {
+    return !!value && typeof value === 'object'
+        && (value as { name?: unknown }).name === 'ExtractionError'
+        && typeof (value as { code?: unknown }).code === 'string';
+}

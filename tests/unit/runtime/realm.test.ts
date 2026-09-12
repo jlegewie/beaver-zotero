@@ -54,6 +54,8 @@ describe("service realm console", () => {
         expect(importGlobalProperties).toHaveBeenCalledWith([
             "WebSocket",
             "AbortController",
+            "DOMParser",
+            "TextDecoder",
         ]);
     });
 });

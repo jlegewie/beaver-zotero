@@ -1,3 +1,4 @@
+import { notifyWorkerStartFailure } from '../utils/workerUnavailableNotice';
 import { useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { isBackgroundWorkerRunningAtom } from '../atoms/backgroundExtraction';
@@ -15,7 +16,8 @@ export function useBackgroundWorkerStatus() {
         const unsubscribe = Zotero.Beaver.runtime.subscribeWindow(
             runtime, 'background-worker:status', detail => setIsRunning(detail.running),
         );
+        const unsubscribeFailures = Zotero.Beaver.runtime.subscribeWindow(runtime, 'document-worker:failure', notifyWorkerStartFailure);
         setIsRunning(Zotero.Beaver?.backgroundExtractor?.getStatus?.().running ?? false);
-        return unsubscribe;
+        return () => { unsubscribe(); unsubscribeFailures(); };
     }, [setIsRunning]);
 }

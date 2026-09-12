@@ -8,6 +8,9 @@
  * (length 1 for image attachments).
  */
 
+import { isWorkerAbortError } from '../../beaver-extract/MuPDFWorkerClient';
+import { isExtractionError } from '@beaver/agent-core/extract/types';
+
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSZoteroViewImagesRequest,
@@ -38,9 +41,7 @@ import {
 } from './handleZoteroDocumentRequest';
 import {
     BeaverExtractor,
-    ExtractionError,
     ExtractionErrorCode,
-    WorkerAbortError,
     isWorkerDeadlineError,
 } from '../../beaver-extract';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '@beaver/agent-core/transport/attachmentLimits';
@@ -653,7 +654,7 @@ async function handleExternalFileViewRequest(
     } catch (error) {
         if (
             signal.aborted
-            || error instanceof WorkerAbortError
+            || isWorkerAbortError(error)
             || error instanceof TimeoutError
             || isWorkerDeadlineError(error)
         ) {
@@ -662,7 +663,7 @@ async function handleExternalFileViewRequest(
                 { workerDispatched: workerDispatched.value, leaseReaped: isWorkerDeadlineError(error) },
             );
         }
-        if (error instanceof ExtractionError) {
+        if (isExtractionError(error)) {
             switch (error.code) {
                 case ExtractionErrorCode.ENCRYPTED:
                     return errorResponse(`The PDF file for ${requestKey} is password-protected`, 'encrypted');
