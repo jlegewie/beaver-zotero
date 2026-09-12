@@ -424,10 +424,6 @@ export async function handleTestWorkerIdleProbeHttpRequest(request: any) {
  *    tracking, is its creating realm alive?
  *  - `identity` — two consecutive lookups return the same healthy
  *    instance (no replacement churn).
- *  - `simulate-dead-realm` — construct a client whose recorded creating
- *    window reports `closed === true` (via the module-window test hook),
- *    then look the slot up again and report whether the dead client was
- *    replaced by a fresh tracked one.
  *  - `legacy-stub` — plant a minimal instance without creator tracking in
  *    the slot and report whether lookup replaces and disposes it.
  *
@@ -437,8 +433,6 @@ export async function handleTestWorkerRealmProbeHttpRequest(request: any) {
     const {
         getMuPDFWorkerClient,
         disposeMuPDFWorker,
-        __setModuleWindowForTest,
-        __resetModuleWindowForTest,
     } = await import('../../../src/beaver-extract/MuPDFWorkerClient');
     const { isConfigured, getConfig } = await import('../../../src/beaver-extract/config');
 
@@ -459,27 +453,6 @@ export async function handleTestWorkerRealmProbeHttpRequest(request: any) {
         const first = getMuPDFWorkerClient();
         const second = getMuPDFWorkerClient();
         return { ok: true, sameInstance: first === second };
-    }
-
-    if (action === 'simulate-dead-realm') {
-        await disposeMuPDFWorker('hot', { force: true });
-        let doomed: any = null;
-        try {
-            __setModuleWindowForTest({ closed: true } as any);
-            doomed = getMuPDFWorkerClient();
-        } finally {
-            __resetModuleWindowForTest();
-        }
-        const doomedReportedDead = doomed.isCreatorRealmDead === true;
-        const replacement = getMuPDFWorkerClient();
-        return {
-            ok: true,
-            doomedReportedDead,
-            replaced: replacement !== doomed,
-            doomedDisposed: doomed.getStats().disposed === true,
-            replacementIsCreatorRealmDead: replacement.isCreatorRealmDead,
-            replacementHasTracking: 'isCreatorRealmDead' in replacement,
-        };
     }
 
     if (action === 'legacy-stub') {

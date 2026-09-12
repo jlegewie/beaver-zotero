@@ -2124,4 +2124,62 @@ describe('handleResolvePopulationRequest', () => {
         });
 
     });
+    it('includes standalone attachments and children in one native resolution', async () => {
+        seedItem(1, { attachments: [11, 12] });
+        seedItem(2, { itemType: 'attachment', key: 'ABCD2345' });
+        searchResultIds = [1, 2];
+        const response = await handleResolvePopulationRequest(makeRequest({
+            item_category: 'attachment', include_standalone_attachments: true,
+        }));
+        expect(response.standalone_attachments_included).toBe(true);
+        expect(response.total_count).toBe(3);
+        expect(response.matched_item_count).toBe(1);
+        expect(response.item_ids).toContain('u-ABCD2345');
+        expect(addedConditions()).not.toContainEqual(['itemType', 'isNot', 'attachment']);
+        expect(addedConditions()).toContainEqual(['noChildren', 'true', '']);
+        expect(mainSearch()?.search).toHaveBeenCalledTimes(1);
+    });
+
+    it('resolves a large standalone tranche with exclusions without paginated searches', async () => {
+        for (let id = 1; id <= 10000; id++) {
+            seedItem(id, { itemType: 'attachment', key: id.toString(16).toUpperCase().padStart(8, '0').replaceAll('0', 'G').replaceAll('1', 'H') });
+        }
+        searchResultIds = Array.from(itemRows.keys());
+        const excluded = [...itemRows.values()].slice(0, 100).map(row => `u-${row.key}`);
+        const response = await handleResolvePopulationRequest(makeRequest({
+            item_category: 'attachment', include_standalone_attachments: true,
+            max_items: 3, exclude_item_ids: excluded,
+        }));
+        expect(response.error).toBeUndefined();
+        expect(response.item_ids).toHaveLength(3);
+        expect(response.total_count).toBe(9900);
+        expect(response.excluded_count).toBe(100);
+        expect(response.standalone_attachments_included).toBe(true);
+        expect(response.item_ids?.some(id => excluded.includes(id))).toBe(false);
+        expect(mainSearch()?.search).toHaveBeenCalledTimes(1);
+        expect((globalThis as any).Zotero.Items.getAsync).not.toHaveBeenCalled();
+    });
+
+    it('acknowledges standalone coverage for count-only resolution', async () => {
+        seedItem(1, { itemType: 'attachment' });
+        searchResultIds = [1];
+        const response = await handleResolvePopulationRequest(makeRequest({
+            item_category: 'attachment', include_standalone_attachments: true, max_items: 0,
+        }));
+        expect(response.item_ids).toEqual([]);
+        expect(response.total_count).toBe(1);
+        expect(response.standalone_attachments_included).toBe(true);
+    });
+
+    it('refuses standalone resolution when the attachment type cannot be resolved', async () => {
+        searchResultIds = [];
+        const original = (globalThis as any).Zotero.ItemTypes.getID;
+        (globalThis as any).Zotero.ItemTypes.getID = (name: string) => name === 'attachment' ? false : original(name);
+        const response = await handleResolvePopulationRequest(makeRequest({
+            item_category: 'attachment', include_standalone_attachments: true,
+        }));
+        expect(response.error).toContain('Attachment item type is unavailable');
+        expect(response.standalone_attachments_included).not.toBe(true);
+    });
+
 });

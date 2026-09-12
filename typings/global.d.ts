@@ -78,6 +78,8 @@ declare namespace Zotero {
     namespace Beaver {
         const threads: import('../src/services/threads/threadRepository').ThreadRepository;
         const presence: import('../src/services/threads/threadPresence').ThreadPresence;
+        let background: import("../src/services/instanceBackground").InstanceBackground | undefined;
+        let documents: import("../src/services/instanceDocuments").InstanceDocuments | undefined;
         let notePreviews: import("../src/services/notePreviews").NotePreviews;
         let libraryOperations: import("../src/services/libraryOperations").LibraryOperations;
         let backgroundTasks: import("../src/utils/backgroundTasks").BackgroundTaskSource;

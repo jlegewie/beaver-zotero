@@ -1,3 +1,4 @@
+import { getHostWindow } from '../runtime/windowRuntime';
 import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
 import { syncedLibraryIdsAtom, profileWithPlanAtom } from '../atoms/profile';
@@ -55,12 +56,13 @@ export function useValidateSyncLibraries() {
 
             const accepted: number[] = [];
             for (const id of missing) {
+                if (!Zotero.Beaver.background?.claimNotification(`missing-library:${id}`)) continue;
                 const libMeta = profileWithPlan.libraries.find(l => l.library_id === id);
                 const name = libMeta?.name || `Library ${id}`;
                 const isGroup = !!libMeta?.is_group;
 
                 const buttonIndex = Zotero.Prompt.confirm({
-                    window: Zotero.getMainWindow(),
+                    window: getHostWindow(),
                     title: 'Remove Library from Syncing?',
                     text: `The library "${name}" is no longer available in Zotero.\n\nDo you want to remove it from Beaver? This will delete all associated data from Beaver.`,
                     button0: Zotero.Prompt.BUTTON_TITLE_YES,

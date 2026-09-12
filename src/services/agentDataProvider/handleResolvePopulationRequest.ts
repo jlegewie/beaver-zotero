@@ -109,20 +109,14 @@ async function attachmentIdsForItems(itemIds: number[]): Promise<number[]> {
     return attachmentIds;
 }
 
-/**
- * Item types the population search always excludes.
- *
- * Every filter describes a bibliographic item, so these never belong to a
- * population — an attachment population is DERIVED from the items that matched
- * rather than searched for. Shared with `searchableItemTypes`, so that a type
- * the search already drops is never counted as a reason to narrow further.
- */
+/** Non-bibliographic types excluded unless standalone attachments are requested. */
 const NON_BIBLIOGRAPHIC_ITEM_TYPES = ['attachment', 'note', 'annotation'];
 
 /** Item types a population can hold: everything the search does not exclude. */
-function searchableItemTypes(): { id: number; name: string }[] {
+function searchableItemTypes(includeStandalone = false): { id: number; name: string }[] {
     return Zotero.ItemTypes.getAll()
-        .filter(itemType => !NON_BIBLIOGRAPHIC_ITEM_TYPES.includes(itemType.name));
+        .filter(itemType => !NON_BIBLIOGRAPHIC_ITEM_TYPES.includes(itemType.name)
+            || (includeStandalone && itemType.name === 'attachment'));
 }
 
 /**
@@ -202,10 +196,11 @@ interface EmptyFieldTypeRestriction {
  */
 function emptyFieldTypeRestriction(
     conditions: ZoteroSearchCondition[],
+    includeStandalone = false,
 ): EmptyFieldTypeRestriction | null {
     let itemTypes: { id: number; name: string }[];
     try {
-        itemTypes = searchableItemTypes();
+        itemTypes = searchableItemTypes(includeStandalone);
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         logger(`handleResolvePopulationRequest: Skipped field-validity check: ${msg}`, 1);
@@ -467,6 +462,7 @@ export async function handleResolvePopulationRequest(
         // Item category. Anything other than 'attachment' resolves to the
         // 'regular' default: a bogus value must not widen the population.
         const itemCategory = request.item_category === 'attachment' ? 'attachment' : 'regular';
+        const includeStandalone = itemCategory === 'attachment' && request.include_standalone_attachments === true;
 
         // A filter this handler cannot apply must fail the request, never be
         // dropped: the population it resolves is about to be mutated, and a
@@ -673,7 +669,7 @@ export async function handleResolvePopulationRequest(
         // different disjunct, so the restriction is not true of it and is not
         // computed.
         const typeRestriction = conditionsJoinMode === 'all'
-            ? emptyFieldTypeRestriction(requestedConditions)
+            ? emptyFieldTypeRestriction(requestedConditions, includeStandalone)
             : null;
 
         // No item type has all of those fields at once. Items missing all of
@@ -699,14 +695,9 @@ export async function handleResolvePopulationRequest(
             search.setScope(scope, true);
         }
 
-        // Every filter above describes a bibliographic item, so the search
-        // always selects regular items — including for an attachment
-        // population, whose members are then derived from the matches below.
-        // Filtering attachments directly would evaluate `tag`, `unfiled` and
-        // `conditions` against the attachment rows instead, where a field like
-        // DOI is never present and the population silently becomes every
-        // attachment in the library.
+        // Standalone attachments match their own fields; children inherit parent filters.
         for (const itemType of NON_BIBLIOGRAPHIC_ITEM_TYPES) {
+            if (includeStandalone && itemType === 'attachment') continue;
             search.addCondition('itemType', 'isNot', itemType);
         }
         search.addCondition('noChildren', 'true', '');
@@ -758,19 +749,17 @@ export async function handleResolvePopulationRequest(
                 : itemIds.filter(id => !withAttachments.has(id));
         }
 
-        // How many bibliographic items the filters matched, captured before an
-        // attachment population is derived from them. From here on `total_count`
-        // counts attachments for an attachment scope, and is 0 when none of the
-        // matched items has one — reporting this alongside it is what lets the
-        // caller tell that apart from filters that matched nothing.
-        const matchedItemCount = itemIds.length;
-
-        // An attachment population is the matched items' own attachments, so
-        // it is derived here rather than searched for. Standalone attachments
-        // are not included: they have none of the bibliographic fields the
-        // filters describe.
+        let standaloneIds: number[] = [];
+        if (includeStandalone) {
+            const attachmentType = Zotero.ItemTypes.getID('attachment');
+            if (attachmentType === false) throw new Error('Attachment item type is unavailable');
+            standaloneIds = await filterItemIdsByTypes(itemIds, new Set([attachmentType]));
+        }
+        const standaloneSet = new Set(standaloneIds);
+        const parentIds = itemIds.filter(id => !standaloneSet.has(id));
+        const matchedItemCount = parentIds.length;
         const matchedIds = itemCategory === 'attachment'
-            ? await attachmentIdsForItems(itemIds)
+            ? [...await attachmentIdsForItems(parentIds), ...standaloneIds]
             : itemIds;
 
         // 0 is a real cap (return no ids, still report the count). Only omit /
@@ -808,6 +797,7 @@ export async function handleResolvePopulationRequest(
                 // rather than dropping a group it does not know — which would
                 // WIDEN the population.
                 any_conditions_applied: true,
+                standalone_attachments_included: includeStandalone,
                 excluded_count: 0,
             };
         }
@@ -816,14 +806,13 @@ export async function handleResolvePopulationRequest(
         // no serialization. The order must be deterministic across chunks
         // because the population is frozen and sliced against it.
         const rows = await readPopulationRows(matchedIds);
-        rows.sort((a, b) => {
-            if (a.dateAdded !== b.dateAdded) return a.dateAdded < b.dateAdded ? -1 : 1;
-            return a.itemID - b.itemID;
-        });
-
         const keptRows = hasExclusion
             ? rows.filter(row => !excludedKeys.has(row.key))
             : rows;
+        keptRows.sort((a, b) => {
+            if (a.dateAdded !== b.dateAdded) return a.dateAdded < b.dateAdded ? -1 : 1;
+            return a.itemID - b.itemID;
+        });
         const excludedCount = rows.length - keptRows.length;
 
         const totalCount = keptRows.length;
@@ -835,8 +824,7 @@ export async function handleResolvePopulationRequest(
             : matchedItemCount;
         const truncated = totalCount > maxItems;
 
-        const orderedIds = keptRows.map(row => modelObjectId(row.libraryID, row.key));
-        const resultIds = truncated ? orderedIds.slice(0, maxItems) : orderedIds;
+        const resultIds = keptRows.slice(0, maxItems).map(row => modelObjectId(row.libraryID, row.key));
 
         logger(
             `handleResolvePopulationRequest: Returning ${resultIds.length}/${totalCount} item ids`
@@ -862,6 +850,7 @@ export async function handleResolvePopulationRequest(
             // rather than dropping a group it does not know — which would
             // WIDEN the population.
             any_conditions_applied: true,
+            standalone_attachments_included: includeStandalone,
             // Always set, including 0. Presence tells the caller this build
             // applied `exclude_item_ids`.
             excluded_count: excludedCount,

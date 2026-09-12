@@ -157,7 +157,7 @@ function isWorkerLifecycleError(error: unknown): boolean {
         return true;
     }
     const name = (error as { name?: unknown } | null | undefined)?.name;
-    return name === 'StaleWorkerError' || name === 'WorkerSpawnError';
+    return name === 'StaleWorkerError' || name === 'WorkerSpawnError' || name === 'WorkerQueueFullError';
 }
 
 export interface ExtractAndCacheArgs {
@@ -409,7 +409,7 @@ function isAbortError(error: unknown): boolean {
     return error instanceof Error && /abort/i.test(error.message);
 }
 
-export async function extractAndCacheDocument(
+async function extractAndCacheDocumentOwned(
     args: ExtractAndCacheArgs,
 ): Promise<ExtractAndCacheResult> {
     const requestKey = `${args.libraryId}-${args.zoteroKey}`;
@@ -499,7 +499,8 @@ export async function extractAndCacheDocument(
             };
         }
 
-        return await extractAndCacheResolvedPdfDocument({
+        // Stay in the owning invocation so resolution and extraction share one deadline.
+        return await extractAndCacheResolvedPdfDocumentOwned({
             ...args,
             source: { kind: 'zotero', item: resolvedItem },
             resolvedKey: resolveResult.key,
@@ -534,7 +535,7 @@ export async function extractAndCacheDocument(
  * Run the EPUB extraction pipeline for an already-resolved EPUB attachment.
  * Expected outcomes are returned as a tagged union for caller-side mapping.
  */
-export async function extractAndCacheEpubDocument(
+async function extractAndCacheEpubDocumentOwned(
     args: ExtractAndCacheEpubArgs,
 ): Promise<ExtractAndCacheEpubResult> {
     const attemptedAt = Date.now();
@@ -734,7 +735,7 @@ async function extractAndCacheEpubDocumentImpl(
  * attachment. Expected outcomes are returned as a tagged union for caller-side
  * mapping, matching the EPUB extraction result shape.
  */
-export async function extractAndCacheSnapshotDocument(
+async function extractAndCacheSnapshotDocumentOwned(
     args: ExtractAndCacheSnapshotArgs,
 ): Promise<ExtractAndCacheSnapshotResult> {
     const attemptedAt = Date.now();
@@ -935,7 +936,7 @@ async function extractAndCacheSnapshotDocumentImpl(
  * Run the PDF extraction pipeline for an already-resolved PDF attachment.
  * Expected outcomes are returned as a tagged union for caller-side mapping.
  */
-export async function extractAndCacheResolvedPdfDocument(
+async function extractAndCacheResolvedPdfDocumentOwned(
     args: ExtractAndCacheResolvedPdfArgs,
 ): Promise<ExtractAndCacheResult> {
     const attemptedAt = Date.now();
@@ -1637,3 +1638,39 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         }
     }
 }
+
+export async function extractAndCacheDocument(
+    args: ExtractAndCacheArgs,
+): Promise<ExtractAndCacheResult> {
+    const owner = Zotero.Beaver?.documents;
+    return owner ? owner.extractAndCacheDocument(args) : extractAndCacheDocumentOwned(args);
+}
+
+export async function extractAndCacheResolvedPdfDocument(
+    args: ExtractAndCacheResolvedPdfArgs,
+): Promise<ExtractAndCacheResult> {
+    const owner = Zotero.Beaver?.documents;
+    return owner ? owner.extractAndCacheResolvedPdfDocument(args) : extractAndCacheResolvedPdfDocumentOwned(args);
+}
+
+export async function extractAndCacheEpubDocument(
+    args: ExtractAndCacheEpubArgs,
+): Promise<ExtractAndCacheEpubResult> {
+    const owner = Zotero.Beaver?.documents;
+    return owner ? owner.extractAndCacheEpubDocument(args) : extractAndCacheEpubDocumentOwned(args);
+}
+
+export async function extractAndCacheSnapshotDocument(
+    args: ExtractAndCacheSnapshotArgs,
+): Promise<ExtractAndCacheSnapshotResult> {
+    const owner = Zotero.Beaver?.documents;
+    return owner ? owner.extractAndCacheSnapshotDocument(args) : extractAndCacheSnapshotDocumentOwned(args);
+}
+
+/** Plugin-realm implementations; callers use the public instance-routed functions. */
+export const documentImplementations = {
+    extractAndCacheDocument: extractAndCacheDocumentOwned,
+    extractAndCacheResolvedPdfDocument: extractAndCacheResolvedPdfDocumentOwned,
+    extractAndCacheEpubDocument: extractAndCacheEpubDocumentOwned,
+    extractAndCacheSnapshotDocument: extractAndCacheSnapshotDocumentOwned,
+};

@@ -38,10 +38,14 @@ vi.mock('../../../src/services/documentExtraction', async () => {
         ...actual,
         validateZoteroItemReference: vi.fn(() => null),
         resolveToReadableAttachment: vi.fn(() => new Promise(() => {})),
+        resolveAttachmentFileSource: vi.fn(actual.resolveAttachmentFileSource),
+        loadAttachmentData: vi.fn(actual.loadAttachmentData),
     };
 });
 
 import { WorkerDeadlineError } from '../../../src/beaver-extract';
+import { InstanceDocuments } from '../../../src/services/instanceDocuments';
+import { resolveToReadableAttachment, resolveAttachmentFileSource, loadAttachmentData } from '../../../src/services/documentExtraction';
 import {
     extractAndCacheDocument,
     extractAndCacheResolvedPdfDocument,
@@ -56,6 +60,59 @@ describe('extractAndCacheDocument timeout handling', () => {
         // tests that rely on the unshared (no document cache) path are not
         // affected by a documentCache stub left behind by another test.
         delete (globalThis as any).Zotero.Beaver;
+    });
+
+    it.each(['hot', 'background'] as const)('keeps resolution within the instance-owned %s extraction deadline', async (workerName) => {
+        vi.useFakeTimers();
+        const item = { libraryID: 1, key: 'ABCD1234', loadAllData: vi.fn().mockResolvedValue(undefined) };
+        (Zotero as any).Items = {
+            getByLibraryAndKeyAsync: vi.fn(() => new Promise((resolve) => {
+                setTimeout(() => resolve(item), 600);
+            })),
+        };
+        vi.mocked(resolveToReadableAttachment).mockResolvedValueOnce({
+            resolved: true, item, key: '1-ABCD1234', contentKind: 'pdf', contentType: 'application/pdf',
+        } as any);
+        vi.mocked(resolveAttachmentFileSource).mockResolvedValueOnce({
+            kind: 'ok', source: { kind: 'local', filePath: '/tmp/deadline.pdf', isRemoteOnly: false },
+        } as any);
+        vi.mocked(loadAttachmentData).mockResolvedValueOnce({
+            kind: 'ok', data: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+        } as any);
+        const getOrCreateResult = vi.fn(() => new Promise(() => {}));
+        const listeners = new Set<() => void>();
+        (Zotero as any).Beaver = {
+            data: { env: 'production' },
+            libraryScopeInitialized: true,
+            searchableLibraryIds: [1],
+            account: {
+                getGeneration: () => 1,
+                subscribe: (fn: () => void) => { listeners.add(fn); return () => listeners.delete(fn); },
+            },
+            documents: new InstanceDocuments(),
+            documentCache: {
+                getSourceIdentitySnapshot: vi.fn().mockResolvedValue(null),
+                getMetadata: vi.fn().mockResolvedValue({ pageCount: 3 }),
+                getResult: vi.fn().mockResolvedValue(null),
+                getSerializedResult: vi.fn().mockResolvedValue(null),
+                getOrCreateResult,
+            },
+        };
+        let settled: unknown;
+        const pending = extractAndCacheDocument({
+            libraryId: 1, zoteroKey: 'ABCD1234', mode: 'structured', maxPages: null,
+            timeoutSeconds: 1, workerName,
+        }).then((result) => { settled = result; });
+        await vi.advanceTimersByTimeAsync(600);
+        expect(getOrCreateResult, JSON.stringify(settled)).toHaveBeenCalledOnce();
+        expect(settled).toBeUndefined();
+        await vi.advanceTimersByTimeAsync(400);
+        const atDeadline = settled;
+        await vi.advanceTimersByTimeAsync(600);
+        await pending;
+        expect(atDeadline).toMatchObject({ kind: 'timeout', timeoutSeconds: 1 });
+        expect(listeners.size).toBe(0);
+        expect(vi.getTimerCount()).toBe(0);
     });
 
     it('times out while resolving the Zotero item', async () => {

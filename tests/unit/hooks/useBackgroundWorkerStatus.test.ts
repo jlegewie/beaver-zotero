@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { useEmbeddingIndex } from '../../../react/hooks/useEmbeddingIndex';
+import { embeddingIndexStateAtom } from '../../../react/atoms/embeddingIndex';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
@@ -65,4 +67,18 @@ it('ignores a delayed effect after its runtime starts closing', () => {
     expect(getStatus).not.toHaveBeenCalled();
     act(() => instance.publish('background-worker:status', { running: true }));
     expect(store.get(isBackgroundWorkerRunningAtom)).toBe(false);
+});
+
+it('revokes embedding projections as soon as their runtime starts closing', () => {
+    binding.runtime = runtime;
+    const initial = { ...store.get(embeddingIndexStateAtom), totalItems: 9 };
+    (Zotero as any).Beaver.background = { getSnapshot: () => initial };
+    function IndexHarness() { useEmbeddingIndex(); return null; }
+    act(() => root.render(React.createElement(Provider, { store }, React.createElement(IndexHarness))));
+    expect(store.get(embeddingIndexStateAtom).totalItems).toBe(9);
+    act(() => instance.publish('embedding-index:status', { ...initial, totalItems: 10 }));
+    expect(store.get(embeddingIndexStateAtom).totalItems).toBe(10);
+    instance.markClosing(runtime.hostWindow);
+    act(() => instance.publish('embedding-index:status', { ...initial, totalItems: 99 }));
+    expect(store.get(embeddingIndexStateAtom).totalItems).toBe(10);
 });

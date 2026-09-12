@@ -3,7 +3,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { afterEach, expect, it, vi } from 'vitest';
-import { embeddingIndexStateAtom, forceReindexCounterAtom } from '../../../react/atoms/embeddingIndex';
+import { embeddingIndexStateAtom } from '../../../react/atoms/embeddingIndex';
 import RebuildSearchIndexRow from '../../../react/components/preferences/RebuildSearchIndexRow';
 
 vi.mock('../../../react/components/pages/onboarding/EmbeddingIndexProgress', async () => {
@@ -27,6 +27,8 @@ async function render(store: ReturnType<typeof createStore>, check: (container: 
 const button = (container: HTMLElement) => container.querySelector('button') as HTMLButtonElement;
 
 it('requests a rebuild once from an idle index and shows failure counts and errors', async () => {
+    const reindex = vi.fn();
+    (Zotero as any).Beaver = { ...Zotero.Beaver, background: { reindex } };
     const store = createStore();
     store.set(embeddingIndexStateAtom, { ...store.get(embeddingIndexStateAtom), failedItems: 2, status: 'error', error: 'offline' });
     await render(store, async (container) => {
@@ -38,11 +40,13 @@ it('requests a rebuild once from an idle index and shows failure counts and erro
         expect(failure?.closest('[aria-hidden="true"]')).toBeNull();
         expect(container.querySelector('[data-progress-card]')).toBeNull();
         await act(async () => button(container).click());
-        expect(store.get(forceReindexCounterAtom)).toBe(1);
+        expect(reindex).toHaveBeenCalledTimes(1);
     });
 });
 
 it('disables the button with a percentage while indexing and shows the card only for an initial build with items', async () => {
+    const reindex = vi.fn();
+    (Zotero as any).Beaver = { ...Zotero.Beaver, background: { reindex } };
     const store = createStore();
     store.set(embeddingIndexStateAtom, {
         ...store.get(embeddingIndexStateAtom), status: 'indexing', phase: 'initial', progress: 40, totalItems: 10, indexedItems: 4,
@@ -52,7 +56,7 @@ it('disables the button with a percentage while indexing and shows the card only
         expect(button(container).disabled).toBe(true);
         expect(container.querySelector('[data-progress-card]')).not.toBeNull();
         await act(async () => button(container).click());
-        expect(store.get(forceReindexCounterAtom)).toBe(0);
+        expect(reindex).not.toHaveBeenCalled();
         await act(async () => store.set(embeddingIndexStateAtom, {
             ...store.get(embeddingIndexStateAtom), status: 'updating', phase: 'incremental', progress: 0,
         }));

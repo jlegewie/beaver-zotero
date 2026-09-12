@@ -24,7 +24,7 @@ it('finishes slow polls and preserves separately dated server status after a fai
     vi.useFakeTimers();
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     const previous = Zotero.Beaver;
-    (Zotero as any).Beaver = { db: {} };
+    (Zotero as any).Beaver = { db: {}, background: { collectStatus: collect } };
     const store = createStore();
     const initial = store.get(backgroundProcessingStatusAtom);
     const snapshot = { ...initial,
@@ -58,7 +58,7 @@ it('finishes slow polls and preserves separately dated server status after a fai
 it('does not invalidate issue pages when a general status poll omits issues', async () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     const previous = Zotero.Beaver;
-    (Zotero as any).Beaver = { db: {} };
+    (Zotero as any).Beaver = { db: {}, background: { collectStatus: collect } };
     const store = createStore();
     const initial = store.get(backgroundProcessingStatusAtom);
     store.set(backgroundProcessingStatusAtom, {
@@ -81,6 +81,23 @@ it('does not invalidate issue pages when a general status poll omits issues', as
         )));
         expect(store.get(backgroundProcessingStatusAtom).updatedAt).not.toBeNull();
         expect(store.get(backgroundProcessingStatusAtom).issuesUpdatedAt).toBe(123);
+    } finally {
+        act(() => root.unmount());
+        Zotero.Beaver = previous;
+    }
+});
+
+it('ignores the stale-account status sentinel without displaying an error', async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const previous = Zotero.Beaver;
+    (Zotero as any).Beaver = { db: {}, background: { collectStatus: collect } };
+    const store = createStore();
+    const initial = store.get(backgroundProcessingStatusAtom);
+    collect.mockResolvedValue(null);
+    const root = createRoot(document.createElement('div'));
+    try {
+        await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(Consumer))));
+        expect(store.get(backgroundProcessingStatusAtom)).toBe(initial);
     } finally {
         act(() => root.unmount());
         Zotero.Beaver = previous;

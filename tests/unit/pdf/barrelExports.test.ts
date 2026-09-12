@@ -112,6 +112,7 @@ describe("pdf barrel exports", () => {
             "getExistingMuPDFWorkerClient",
             "getMuPDFWorkerClient",
             "isConfigured",
+            "isExtractionError",
             "isTransientWorkerError",
             "isWorkerDeadlineError",
             "logColumnDetection",

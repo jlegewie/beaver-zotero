@@ -22,6 +22,7 @@ export function useBackgroundProcessingWelcome(): void {
         if (shown.current || hasSearch || !hasOcr) return;
         if (getPref('backgroundProcessingEnabled') === true) return;
         if (getPref('backgroundProcessingWelcomeAck') === true) return;
+        if (!Zotero.Beaver.background?.claimNotification('background-processing-welcome')) return;
         shown.current = true;
         const reminder = getPref('backgroundProcessingWelcomeDeferred') === true;
         const title = reminder

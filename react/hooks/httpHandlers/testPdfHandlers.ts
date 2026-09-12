@@ -6,6 +6,8 @@
  * `useHttpEndpoints.ts` → `registerEndpoints()`.
  */
 
+import { isExtractionError } from '@beaver/agent-core/extract/types';
+
 import {
     buildColumnOverlayFromDebugPage,
     buildItemOverlayFromDebugPage,
@@ -109,14 +111,14 @@ async function runPdfExtractorCall<T>(
     fn: (pdfData: Uint8Array) => Promise<T>,
     onSuccess: (result: T) => any,
 ): Promise<any> {
-    const { ExtractionError } = await import('../../../src/beaver-extract');
+
     const loaded = await loadPdfBytesForTestEndpoint(request);
     if (!loaded.ok) return loaded;
     try {
         const result = await fn(loaded.pdfData);
         return onSuccess(result);
     } catch (e: any) {
-        if (e instanceof ExtractionError) {
+        if (isExtractionError(e)) {
             return {
                 ok: false,
                 error: {
@@ -163,7 +165,7 @@ async function runPdfExtractorCall<T>(
  *   resolution.
  */
 export async function handleTestPdfPageCountHttpRequest(request: any) {
-    const { BeaverExtractor, ExtractionError } = await import(
+    const { BeaverExtractor } = await import(
         '../../../src/beaver-extract'
     );
 
@@ -220,7 +222,7 @@ export async function handleTestPdfPageCountHttpRequest(request: any) {
         const count = await new BeaverExtractor().getPageCount(pdfData);
         return { ok: true, count };
     } catch (e: any) {
-        if (e instanceof ExtractionError) {
+        if (isExtractionError(e)) {
             return {
                 ok: false,
                 error: {
@@ -242,7 +244,7 @@ export async function handleTestPdfPageCountHttpRequest(request: any) {
  * @deprecated Prefer `npm run beaver-extract -- info <pdf>`.
  */
 export async function handleTestPdfPageLabelsHttpRequest(request: any) {
-    const { BeaverExtractor, ExtractionError } = await import(
+    const { BeaverExtractor } = await import(
         '../../../src/beaver-extract'
     );
 
@@ -254,7 +256,7 @@ export async function handleTestPdfPageLabelsHttpRequest(request: any) {
         const metadata = await new BeaverExtractor().getMetadata(pdfData);
         return { ok: true, ...metadata };
     } catch (e: any) {
-        if (e instanceof ExtractionError) {
+        if (isExtractionError(e)) {
             return {
                 ok: false,
                 error: {
@@ -279,7 +281,7 @@ export async function handleTestPdfPageLabelsHttpRequest(request: any) {
  *   The CLI writes PNGs to disk and avoids the base64 round-trip.
  */
 export async function handleTestPdfRenderPagesHttpRequest(request: any) {
-    const { BeaverExtractor, ExtractionError } = await import(
+    const { BeaverExtractor } = await import(
         '../../../src/beaver-extract'
     );
 
@@ -309,7 +311,7 @@ export async function handleTestPdfRenderPagesHttpRequest(request: any) {
         }));
         return { ok: true, pages };
     } catch (e: any) {
-        if (e instanceof ExtractionError) {
+        if (isExtractionError(e)) {
             return {
                 ok: false,
                 error: {
@@ -331,7 +333,7 @@ export async function handleTestPdfRenderPagesHttpRequest(request: any) {
  * @deprecated Prefer `npm run beaver-extract -- render <pdf> --pages <list> --out <dir> --json`.
  */
 export async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) {
-    const { BeaverExtractor, ExtractionError } = await import(
+    const { BeaverExtractor } = await import(
         '../../../src/beaver-extract'
     );
 
@@ -370,7 +372,7 @@ export async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) 
             pages,
         };
     } catch (e: any) {
-        if (e instanceof ExtractionError) {
+        if (isExtractionError(e)) {
             return {
                 ok: false,
                 error: {
@@ -396,7 +398,7 @@ export async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) 
  * @deprecated Prefer `npm run beaver-extract -- raw-detailed <pdf> --page <n> --json`.
  */
 export async function handleTestPdfExtractRawDetailedHttpRequest(request: any) {
-    const { ExtractionError } = await import('../../../src/beaver-extract');
+
     const { getMuPDFWorkerClient } = await import(
         '../../../src/beaver-extract/MuPDFWorkerClient'
     );
@@ -422,7 +424,7 @@ export async function handleTestPdfExtractRawDetailedHttpRequest(request: any) {
         );
         return { ok: true, result };
     } catch (e: any) {
-        if (e instanceof ExtractionError) {
+        if (isExtractionError(e)) {
             return {
                 ok: false,
                 error: {
@@ -665,7 +667,6 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
     const {
         getMuPDFWorkerClient,
         BeaverExtractor,
-        ExtractionError,
         ExtractionErrorCode,
     } = await import('../../../src/beaver-extract');
 
@@ -795,7 +796,7 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
                 error: { name: 'Error', message: e.message },
             };
         }
-        if (e instanceof ExtractionError) {
+        if (isExtractionError(e)) {
             // Wire-compat: pre-migration the analysis-window resolver
             // threw RangeError for invalid pageIndex (mapped to
             // `name:'Error'`). The worker path now produces
@@ -906,7 +907,7 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
  * `mode: "summary"` shape).
  */
 export async function handleTestPdfExtractTraceHttpRequest(request: any) {
-    const { ExtractionError, getMuPDFWorkerClient } = await import('../../../src/beaver-extract');
+    const { getMuPDFWorkerClient } = await import('../../../src/beaver-extract');
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
     if (!loaded.ok) return loaded;
@@ -952,7 +953,7 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
             ...projectTracePage(out.result, out.debug, pageIndex, mode),
         };
     } catch (e) {
-        if (e instanceof ExtractionError) {
+        if (isExtractionError(e)) {
             return {
                 ok: false,
                 error: {
@@ -1022,7 +1023,7 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
  *     metadata: { extractedAt, version, settings, timings } }
  */
 export async function handleTestPdfAnalyzeLayoutHttpRequest(request: any) {
-    const { BeaverExtractor, ExtractionError, ExtractionErrorCode } = await import(
+    const { BeaverExtractor, ExtractionErrorCode } = await import(
         '../../../src/beaver-extract'
     );
 
@@ -1076,7 +1077,7 @@ export async function handleTestPdfAnalyzeLayoutHttpRequest(request: any) {
         // projection so wire shape stays in lockstep across both surfaces.
         return { ok: true, ...projectAnalyzeLayout(result) };
     } catch (e: any) {
-        if (e instanceof ExtractionError) {
+        if (isExtractionError(e)) {
             if (e.code === ExtractionErrorCode.PAGE_OUT_OF_RANGE) {
                 return { ok: false, error: { name: 'Error', message: e.message } };
             }

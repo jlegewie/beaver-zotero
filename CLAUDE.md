@@ -289,11 +289,12 @@ scheduled from a closed window never fires — and the reference pins the dead w
 
 - Prefer ownership by the **plugin realm** (the esbuild bootstrap scope: `addon` /
   `Zotero.Beaver`), which is torn down in `onShutdown()`, not by a window bundle.
-- If a webpack-realm object must be shared, record its creating window and clear or replace the
-  slot when that window unloads — on **every** unload, not only on app quit — and schedule its
-  timers with `Timer.sys.mjs`, never the window's `setTimeout`. `MuPDFWorkerClient` is the
-  reference implementation (`createdFromWindow` / `isCreatorRealmDead`, plus
-  `getRealmSafeTimers()` in `src/utils/configurePDFForBeaver.ts`).
+- MuPDF clients and shared extraction closures belong to `addon.documents`. Worker
+  construction uses a system module, and watchdogs use `Timer.sys.mjs`; neither depends
+  on a main window. Never construct a renderer-owned client for a shared worker slot.
+  `addon.background` owns embedding/OCR/fulltext lanes, observers, reconciliation,
+  status reads and notification claims. Renderers only subscribe or issue commands.
+  See [document and background runtime](docs/document-runtime.md).
 - Same rule for callbacks handed to app-lifetime Zotero registries (`Zotero.Notifier` observers,
   `Zotero.Reader.onChangeSidebarWidth`): unregister them on their window's unload.
 

@@ -239,11 +239,10 @@ describe('closing the agent connection on window unload', () => {
         await hooks.onMainWindowUnload(win);
 
         expect(close).toHaveBeenCalled();
-        expect(mockDisposeMuPDFWorker).toHaveBeenCalled();
+        expect(mockDisposeMuPDFWorker).not.toHaveBeenCalled();
         expect(mockCloseWindowsRenderedBy).toHaveBeenCalled();
         expect(mockRemoveChatPanel).toHaveBeenCalled();
         for (const later of [
-            mockDisposeMuPDFWorker,
             mockCloseWindowsRenderedBy,
             mockRemoveChatPanel,
         ]) {

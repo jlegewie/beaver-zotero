@@ -1,16 +1,9 @@
 /**
- * Worker realm-safe timers + creator-realm self-heal suite.
+ * Plugin-owned worker timers and generic-host compatibility probes.
  *
- * Covers the live-verifiable surface of the dead-realm timer fix: the
- * MuPDFWorkerClient watchdogs (busy-age lease, idle reap) must run on
- * host-injected realm-independent timers, clients must record their
- * creating realm, and `getMuPDFWorkerClient` must replace an instance
- * whose creating realm is gone (or that predates creator tracking).
- *
- * What can NOT be covered here: an actually-dead window realm (macOS
- * close-last-window → reopen). These tests simulate a dead creator realm
- * via the module-window test hook; the real window lifecycle is a manual
- * test (see docs / memory notes on the close-reopen idle-probe repro).
+ * Beaver clients have no creating window. Injected system timers keep idle
+ * and busy-age watchdogs alive across window closure. The compatibility
+ * probes also exercise recovery of legacy window-created singleton clients.
  *
  * Prerequisites (per tests/README.md):
  *   - Dev build of Beaver loaded in a running Zotero (NODE_ENV=development).
@@ -43,7 +36,7 @@ describe('worker timer wiring', () => {
         skipIfNoZotero(ctx, available);
     });
 
-    it('injects realm-independent timers and creator-realm tracking', async () => {
+    it('injects realm-independent timers for a plugin-owned client', async () => {
         const info = await workerRealmProbe('info');
         expect(info.ok).toBe(true);
         // configurePDFForBeaver must wire Timer.sys.mjs timers in a real
@@ -52,7 +45,7 @@ describe('worker timer wiring', () => {
         expect(info.timersInjected).toBe(true);
         expect(info.hasCreatorTracking).toBe(true);
         expect(info.isCreatorRealmDead).toBe(false);
-        expect(info.createdFromWindowRecorded).toBe(true);
+        expect(info.createdFromWindowRecorded).toBe(false);
     });
 
     it('returns the same healthy instance on consecutive lookups (no churn)', async () => {
@@ -67,7 +60,7 @@ describe('busy-age lease watchdog (timer-based reap)', () => {
         skipIfNoZotero(ctx, available);
     });
 
-    it('reaps a genuinely long op when the lease expires and retries the innocent sibling', async () => {
+    it('reaps a genuinely long op and lets the queued sibling use a fresh worker', async () => {
         // LARGE_PDF (373 pages): extraction reliably outlives the shortened
         // lease + 1s watchdog slack even on a fast machine, so the reap is
         // driven by the timer, never by op completion racing it.
@@ -86,15 +79,14 @@ describe('busy-age lease watchdog (timer-based reap)', () => {
         expect(primary.status).toBe('rejected');
         expect(primary.errorName).toBe('WorkerDeadlineError');
 
-        // The sibling is rejected with a retriable stale error internally
-        // and transparently retried against a fresh worker.
+        // The bounded queue keeps the sibling out of the expiring worker.
         expect(sibling.status).toBe('fulfilled');
 
         expect(res.after!.leaseReapCount).toBe(res.before!.leaseReapCount + 1);
         expect(res.after!.lastLeaseReapOp).toBe('extractSerialized');
-        // The sibling retry respawned the worker.
+        // Admitting the sibling respawned the worker without retrying it.
         expect(res.after!.spawnCount).toBeGreaterThan(res.before!.spawnCount);
-        expect(res.after!.retryCount).toBeGreaterThan(res.before!.retryCount);
+        expect(res.after!.retryCount).toBe(res.before!.retryCount);
     });
 
     it('never reaps in-budget work under the production-scale lease', async () => {
@@ -130,16 +122,6 @@ describe('idle-timer reap (injected timers fire)', () => {
 describe('creator-realm self-heal in getMuPDFWorkerClient', () => {
     beforeEach((ctx) => {
         skipIfNoZotero(ctx, available);
-    });
-
-    it('replaces a client whose creating realm reports closed', async () => {
-        const res = await workerRealmProbe('simulate-dead-realm');
-        expect(res.ok).toBe(true);
-        expect(res.doomedReportedDead).toBe(true);
-        expect(res.replaced).toBe(true);
-        expect(res.doomedDisposed).toBe(true);
-        expect(res.replacementHasTracking).toBe(true);
-        expect(res.replacementIsCreatorRealmDead).toBe(false);
     });
 
     it('replaces and disposes a legacy instance without creator tracking', async () => {

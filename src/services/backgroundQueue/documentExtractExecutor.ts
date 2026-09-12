@@ -4,6 +4,7 @@ import {
     extractAndCacheSnapshotDocument,
 } from '../documentExtractionCore';
 import { liveAttachmentContentKind } from '../documentExtraction/attachmentResolution';
+import { isDocumentAccessRevokedError } from '../documentExtraction/accessRevoked';
 import {
     loadAttachmentData,
     resolveAttachmentFileSource,
@@ -141,6 +142,9 @@ export class DocumentExtractExecutor implements JobExecutor {
                 })
                 : await this.extractDom(record, item, kind, source.source, ctx, attemptedAt, extractionSource);
         } catch (error) {
+            if (isDocumentAccessRevokedError(error)) {
+                return { kind: 'release', reason: 'external_abort' };
+            }
             const message = error instanceof Error ? error.message : String(error);
             return { kind: 'retry', error: `unexpected: ${message}` };
         }
@@ -342,6 +346,9 @@ export class DocumentExtractExecutor implements JobExecutor {
                 externalAbortSignal: ctx.externalAbortSignal,
             });
         } catch (error) {
+            if (isDocumentAccessRevokedError(error)) {
+                return { kind: 'release', reason: 'external_abort' };
+            }
             return {
                 kind: 'retry',
                 error: `unexpected: ${error instanceof Error ? error.message : String(error)}`,

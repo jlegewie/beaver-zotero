@@ -4,7 +4,6 @@ import { setPref } from '../../src/utils/prefs';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { addFloatingPopupMessageAtom } from '../atoms/floatingPopup';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
-import { getPendingVersionNotifications, clearPendingVersionNotifications } from '../../src/utils/versionNotificationPrefs';
 import { compareVersions } from '../../src/utils/compareVersions';
 import { getVersionUpdateMessageConfig } from '../constants/versionUpdateMessages';
 import { versionUpdatePopupMessage } from '../utils/versionUpdatePopup';
@@ -23,16 +22,13 @@ export const useUpgradeHandler = () => {
     // and the most recent in-panel version separately.
     // No auth guard: floating popups are used to re-engage lapsed/unauthenticated users too.
     useEffect(() => {
-        const pendingVersions = getPendingVersionNotifications();
+        const pendingVersions = Zotero.Beaver.background?.claimVersionNotifications() ?? [];
         if (!pendingVersions.length) {
             return;
         }
 
         // Sort descending to find the most recent version
         const sorted = [...pendingVersions].sort((a, b) => compareVersions(b, a));
-
-        // Clear all pending notifications regardless
-        clearPendingVersionNotifications();
 
         // Resolve configs and split by display mode
         const configs = sorted
