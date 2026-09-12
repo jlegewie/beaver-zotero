@@ -1585,6 +1585,8 @@ export interface WSResolvePopulationRequest extends WSBaseEvent {
     any_conditions?: ZoteroSearchCondition[] | null;
     /** 'regular' = bibliographic items, 'attachment' = child attachments. */
     item_category: 'regular' | 'attachment';
+    /** Include matching standalone attachments before exclusions and truncation. */
+    include_standalone_attachments?: boolean;
     /** Filter regular items by attachment presence; null = no filter. */
     has_attachments?: boolean | null;
     /**
@@ -1684,6 +1686,8 @@ export interface WSResolvePopulationResponse {
      * resolves a WIDER population, which its ids alone cannot reveal.
      */
     any_conditions_applied?: boolean | null;
+    /** Confirms standalone attachments were included in resolution. */
+    standalone_attachments_included?: boolean | null;
     error?: string | null;
     error_code?: string | null;
     /** Available libraries (only included when error_code is 'library_not_found' or 'library_unavailable') */
