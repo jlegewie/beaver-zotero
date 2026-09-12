@@ -1,5 +1,5 @@
 import { atom } from 'jotai/vanilla';
-import { ExternalReference } from '../types/externalReferences';
+import { ExternalReference, extractAuthorLastName } from '../types/externalReferences';
 import { ZoteroItemReference } from '../types/zotero';
 import { logger } from '../platform/logger';
 
@@ -125,6 +125,36 @@ export const getCachedReferenceForObjectAtom = atom(
         return cache[refId]; // null or ZoteroItemReference
     }
 );
+
+/**
+ * Format the compact label used when an external work is cited inline.
+ *
+ * External citations embedded in agent-action arguments can be rendered before
+ * the run's resolved citation metadata arrives. The external-reference record
+ * is already available at that point, so keep the fallback here rather than
+ * requiring every renderer to reconstruct an author/year label independently.
+ */
+export function formatExternalReferenceLabel(ref: ExternalReference): string {
+    const firstAuthor = ref.authors?.[0];
+    const lastName = firstAuthor ? extractAuthorLastName(firstAuthor) : undefined;
+    const author = lastName
+        ? `${lastName}${(ref.authors?.length ?? 0) > 1 ? ' et al.' : ''}`
+        : '';
+    const year = ref.year != null
+        ? String(ref.year)
+        : ref.publication_date?.match(/^\d{4}/)?.[0] ?? '';
+
+    if (author && year) return `${author}, ${year}`;
+    return author || year || ref.title || ref.source_id || '';
+}
+
+/** Pick the most useful stable link available for an external work. */
+export function getExternalReferenceUrl(ref: ExternalReference): string | undefined {
+    const doi = ref.identifiers?.doi;
+    return doi
+        ? `https://doi.org/${doi}`
+        : ref.publication_url || ref.url || ref.open_access_url || undefined;
+}
 
 /**
  * Check if an external reference is currently being checked

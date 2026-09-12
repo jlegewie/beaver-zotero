@@ -44,6 +44,8 @@ const externalReference = {
     source: 'openalex',
     source_id: EXTERNAL_ID,
     title: 'The state of OA',
+    authors: ['Heather Piwowar', 'Jason Priem'],
+    year: 2018,
     url: 'https://example.org/state-of-oa',
     library_items: [],
 } as unknown as ExternalReference;
@@ -84,6 +86,24 @@ describe('Citation under the isolated note-export store', () => {
 
         expect(html).toContain('Piwowar et al., 2018');
         expect(html).not.toContain('<a');
+    });
+
+    it('derives the label from the external reference before citation metadata arrives', () => {
+        const store = createStore();
+        store.set(externalReferenceMappingAtom, { [EXTERNAL_ID]: externalReference });
+
+        const html = renderCitation(store);
+
+        expect(html).toContain('https://example.org/state-of-oa');
+        expect(html).toContain('Piwowar et al., 2018');
+        expect(html).not.toContain('>()</');
+    });
+
+    it('never emits empty parentheses when external metadata is unavailable', () => {
+        const html = renderCitation(createStore());
+
+        expect(html).toContain(EXTERNAL_ID);
+        expect(html).not.toContain('()');
     });
 
     it('does not leak state between two isolated stores', () => {

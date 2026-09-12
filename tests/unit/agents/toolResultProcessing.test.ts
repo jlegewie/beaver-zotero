@@ -69,6 +69,46 @@ function makePart(): any {
 // =============================================================================
 
 describe('processToolReturnResults — eager item loading', () => {
+    it('hydrates references from a find_related_works view for citation details', async () => {
+        mockExtractZoteroReferences.mockReturnValue([]);
+        const references = [{
+            source: 'openalex',
+            source_id: 'W4403128292',
+            title: 'A citing work',
+            library_items: [],
+        }];
+        const relatedWork = {
+            source: 'openalex',
+            source_id: 'W4294712395',
+            title: 'Long-Term Exposure to Neighborhood Policing',
+            library_items: [],
+        };
+        const part = {
+            ...makePart(),
+            tool_name: 'find_related_works',
+            metadata: {
+                view: {
+                    view_type: 'external_reference_list',
+                    tool_name: 'find_related_works',
+                    references,
+                    tool_info: {
+                        info_type: 'related_works',
+                        relation: 'cited_by',
+                        total_count: 13,
+                        work: relatedWork,
+                    },
+                },
+            },
+        };
+        const set = vi.fn();
+
+        await processToolReturnResults(part, set as any);
+
+        expect(set).toHaveBeenCalledTimes(2);
+        const expected = [...references, relatedWork];
+        expect(set.mock.calls.map(([, value]) => value)).toEqual([expected, expected]);
+    });
+
     it('loads resolvable refs and skips an unresolvable portable group ref without rejecting', async () => {
         mockExtractZoteroReferences.mockReturnValue([
             { library_id: 1, zotero_key: 'GOODKEY1' },
