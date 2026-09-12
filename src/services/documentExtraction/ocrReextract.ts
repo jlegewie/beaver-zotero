@@ -168,7 +168,7 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
                 sourceSizeBytes,
                 contentType: item.attachmentContentType || 'application/pdf',
                 result: extracted,
-                metadata: buildExtractedDocumentCacheMetadata(extracted),
+                metadata: { ...buildExtractedDocumentCacheMetadata(extracted), extractionSource: 'ocr' },
                 expectedSourceIdentity: sourceIdentity,
             });
             if (abortSignal?.aborted) return { kind: 'aborted' };

@@ -6,6 +6,8 @@ import { fileStatusAtom } from "./files";
 import { compareVersions } from "../utils/compareVersions";
 import { effectiveMaxPageCount } from "@beaver/agent-core/transport/attachmentLimits";
 
+export const cloudConsentAtom = atom<'pending' | 'declined' | 'accepted'>('pending');
+
 export const accountGenerationAtom = atom(-1);
 export const accountRevisionAtom = atom(-1);
 

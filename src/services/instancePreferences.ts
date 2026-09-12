@@ -1,3 +1,4 @@
+import { getPref, setPref } from "../utils/prefs";
 import { config } from "../../package.json";
 
 /** One native preference observer and subscriptions, independent of renderer lifetime. */
@@ -10,6 +11,12 @@ export class InstancePreferences {
     private readonly prefix = `${config.prefsPrefix}.`;
     private readonly observer = {
         observe: (_subject: unknown, _topic: string, key: string) => {
+            if (key === `${this.prefix}backgroundProcessingEnabled`
+                && (Zotero.Beaver?.hasOcrAccess || Zotero.Beaver?.hasSearchIndexAccess)
+                && getPref('backgroundProcessingEnabled') !== true) {
+                setPref('backgroundProcessingEnabled', true);
+                return;
+            }
             const change = {
                 revision: ++this.revision,
                 key: key.slice(this.prefix.length),

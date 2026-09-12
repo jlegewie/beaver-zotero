@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../../atoms/profile';
+import { accountGenerationAtom, cloudConsentAtom, hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../../atoms/profile';
 import {
     backgroundProcessingStatusAtom,
     type BackgroundProcessingStatus,
@@ -213,8 +213,12 @@ const MetadataIndexProblemRow: React.FC<{ indexState: EmbeddingIndexState }> = (
 };
 
 export default function BackgroundProcessingSection(): React.ReactElement | null {
+    const consent = useAtomValue(cloudConsentAtom);
+    const generation = useAtomValue(accountGenerationAtom);
     const hasOcrAccess = useAtomValue(hasOcrAccessAtom);
     const hasSearchAccess = useAtomValue(hasSearchIndexAccessAtom);
+    const cloudRequired = hasOcrAccess || hasSearchAccess;
+    const locked = cloudRequired && consent === 'accepted';
     const status = useAtomValue(backgroundProcessingStatusAtom);
     const indexState = useAtomValue(embeddingIndexStateAtom);
     const [enabled, setEnabled] = useState(
@@ -244,6 +248,7 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
     }, []);
 
     const updateEnabled = (next: boolean) => {
+        if (locked) return;
         setEnabled(next);
         setPref('backgroundProcessingEnabled', next);
         if (!next) Zotero.Beaver?.backgroundExtractor?.cancelImmediateDrain();
@@ -324,23 +329,30 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                 <SettingsRow
                     title={hasSearchAccess ? 'Keep Full-Text Search Up to Date' : 'Process Files in the Background'}
                     announceDescription={hasSearchAccess}
-                    description={hasSearchAccess
-                        ? <>
-                            Background processing keeps full-text search up to date. Turn it off to pause updates; existing search results are retained.
-                            <span className="display-flex mt-1">
-                                {!enabled && 'Updates paused. '}{searchIndexStatusLine(status)}
-                            </span>
-                        </>
-                        : 'By default, Beaver processes files when you use them. Turn this on to process files ahead of time, while Zotero is idle, for faster responses.'}
+                    description={<>{locked
+                        ? 'Background processing is required for cloud preparation. Files process after 30 seconds idle. Use Start now to process immediately, or Stop to return to idle processing.'
+                        : cloudRequired
+                            ? 'Cloud setup is incomplete. Local preparation can continue, but OCR uploads and search preparation require your confirmation.'
+                            : 'Process files ahead of time while Zotero is idle for faster responses.'}
+                        {hasSearchAccess && <span className="display-flex mt-1">{searchIndexStatusLine(status)}</span>}
+                    </>}
                     onClick={() => updateEnabled(!enabled)}
                     control={<input
                         type="checkbox"
                         aria-label={hasSearchAccess ? 'Keep full-text search up to date' : 'Process files in the background'}
+                        disabled={locked}
                         checked={enabled}
                         onChange={(event) => updateEnabled(event.target.checked)}
                         onClick={(event) => event.stopPropagation()}
                     />}
                 />
+                {cloudRequired && !locked && (
+                    <div className="text-base font-color-secondary border-top-quinary" style={{ padding: '10px 12px' }}>
+                        Cloud preparation uploads scanned PDFs for OCR and extracted text for search when available, from included libraries on this computer. Remote downloads follow your remote-file permission. Acceptance covers both features and keeps background processing enabled while either is active.
+                        <Button variant="outline" onClick={() => Zotero.Beaver?.account?.setCloudConsent(true, generation)}>Accept and finish setup</Button>
+                        {consent === 'pending' && <Button variant="ghost" onClick={() => Zotero.Beaver?.account?.setCloudConsent(false, generation)}>Not now</Button>}
+                    </div>
+                )}
                 {(enabled || (status.worker?.inFlight ?? 0) > 0) && (
                     <ProcessingStatusRow
                         status={status}

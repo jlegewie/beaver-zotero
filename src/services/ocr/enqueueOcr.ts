@@ -66,7 +66,7 @@ export async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
     // searchable-library mirror is published in the same turn as the exclusion,
     // so the scope can change under any suspension point in this function.
     const inScope = (): boolean => {
-        if (isLibraryInScope(args.libraryId)) return true;
+        if (Zotero.Beaver?.hasOcrAccess === true && isLibraryInScope(args.libraryId)) return true;
         logger(`maybeEnqueueOcrJob: ${args.libraryId}-${args.zoteroKey} skipped, library is not searchable`, 4);
         return false;
     };

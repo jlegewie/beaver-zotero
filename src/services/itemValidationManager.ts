@@ -334,7 +334,6 @@ class ItemValidationManager {
 
             const info = await getAttachmentInfo(item, {
                 nonPdfReadableEnabled: true,
-                enqueueOcrIfNeeded: true,
             });
             return resultFromAttachmentInfo(info, options);
         } catch (error: any) {
@@ -374,7 +373,6 @@ class ItemValidationManager {
         const batchData = await prepareAttachmentInfoBatchData([item]);
         const attachmentInfos = await processAttachmentInfoBatch(item, batchData, {
             nonPdfReadableEnabled: true,
-            enqueueOcrIfNeeded: true,
         });
 
         const attachmentResults = new Map<string, AttachmentValidationResult>();

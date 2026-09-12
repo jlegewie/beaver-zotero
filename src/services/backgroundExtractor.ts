@@ -542,6 +542,8 @@ export class BackgroundExtractor {
         let scopeUnknown = false;
         for (const [jobType, registration] of this.executors) {
             if (scopeUnknown) break;
+            if (jobType === 'document_ocr' && Zotero.Beaver?.hasOcrAccess !== true) continue;
+            if (jobType === 'fulltext_upsert' && Zotero.Beaver?.hasSearchIndexAccess !== true) continue;
             const freeSlots = this.laneCapacityFree(jobType);
             for (let slot = 0; slot < freeSlots; slot += 1) {
                 if (this.stopRequested) return launched;

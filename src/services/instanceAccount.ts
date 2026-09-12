@@ -1,5 +1,5 @@
 import { InstanceRealtime } from "./instanceRealtime";
-import { initializeSearchProcessing } from "./backgroundProcessing/searchProcessingInitialization";
+import { readCloudConsent, writeCloudConsent } from "./backgroundProcessing/cloudConsent";
 import { claimPreSyncThreads } from "./claimPreSyncThreads";
 import type { ExcludedLibrary } from "@beaver/agent-core/types/profile";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
@@ -25,6 +25,7 @@ type ProfileResponse = Awaited<
     ReturnType<typeof accountService.getProfileWithPlan>
 >;
 export interface AccountSnapshot {
+    cloudConsent?: "pending" | "declined" | "accepted";
     generation: number;
     revision: number;
     initialized: boolean;
@@ -238,6 +239,14 @@ export class InstanceAccount {
             }
         }
     }
+    setCloudConsent(accepted: boolean, generation: number): void {
+        if (this.disposed || generation !== this.snapshot.generation || !this.snapshot.session) return;
+        const profile = this.snapshot.data?.profile;
+        if (!profile?.has_ocr_access && !profile?.has_search_index_access) return;
+        writeCloudConsent(this.snapshot.session.user.id, accepted);
+        this.publish();
+    }
+
     private publishAccess(): void {
         const beaver = Zotero.Beaver;
         if (!beaver) return;
@@ -267,13 +276,19 @@ export class InstanceAccount {
                       )
                       .map((lib) => lib.library_id)
                 : [];
+        const consent = readCloudConsent(this.snapshot.session?.user.id);
+        this.snapshot.cloudConsent = consent;
+        const accepted = consent === "accepted";
+        if (accepted && (profile?.has_ocr_access || profile?.has_search_index_access)
+            && getPref("backgroundProcessingEnabled") !== true) {
+            setPref("backgroundProcessingEnabled", true);
+        }
         beaver.hasOcrAccess =
-            !!this.snapshot.session && !!profile?.has_ocr_access;
+            accepted && !!this.snapshot.session && !!profile?.has_ocr_access;
         beaver.hasSearchIndexAccess =
-            !!this.snapshot.session && !!profile?.has_search_index_access;
+            accepted && !!this.snapshot.session && !!profile?.has_search_index_access;
         beaver.libraryScopeInitialized =
             this.snapshot.scopeReady && !!this.snapshot.session;
-        initializeSearchProcessing(beaver.hasSearchIndexAccess);
         const next = JSON.stringify([
             beaver.libraryScopeInitialized,
             beaver.searchableLibraryIds,

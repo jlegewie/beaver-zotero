@@ -1,3 +1,4 @@
+import { handleTestProtectedCacheHttpRequest } from './httpHandlers/testProtectedCacheHandlers';
 import { handleArtifactRequest } from '../../src/services/artifacts/artifactProvider';
 import { captureOperationContext } from '../runtime/operationContext';
 import { tryGetWindowRuntime } from '../runtime/windowRuntime';
@@ -938,6 +939,7 @@ function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/cache-invalidate'] =
             createEndpoint(handleTestCacheInvalidateHttpRequest);
 
+        endpoints['/beaver/test/protected-cache-check'] = createEndpoint(handleTestProtectedCacheHttpRequest);
         endpoints['/beaver/test/cache-seed-page-labels'] =
             createEndpoint(handleTestCacheSeedPageLabelsHttpRequest);
 
