@@ -239,7 +239,7 @@ function buildValidateSuccess(
     warnings: string[] | undefined,
 ): WSAgentActionValidateResponse {
     const noteTitle = item.getNoteTitle() || '(untitled)';
-    const totalLines = simplified.split('\n').length;
+    const totalLines = simplified.trim() ? simplified.split('\n').length : 0;
     const preference = getDeferredToolPreference('edit_note', { library_id, zotero_key }, request.operation);
     return {
         type: 'agent_action_validate_response',
@@ -416,18 +416,6 @@ async function validateEditNoteAction(
         rawHtml = stripPreviewMarkers(rawHtml);
     }
 
-    // 7. Note not empty
-    if (!rawHtml || rawHtml.trim() === '') {
-        return {
-            type: 'agent_action_validate_response',
-            request_id: request.request_id,
-            valid: false,
-            error: `Note ${modelObjectIdFromReference({ library_id: resolvedLibraryId, library_ref, zotero_key })} is empty`,
-            error_code: 'empty_note',
-            preference: 'always_ask',
-        };
-    }
-
     // 8. Simplify note (needed for both modes)
     const noteId = `${resolvedLibraryId}-${zotero_key}`;
     const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, resolvedLibraryId, { extractOnCacheMiss: true });
@@ -443,7 +431,7 @@ async function validateEditNoteAction(
         if (!pre.ok) return pre.response;
 
         const noteTitle = item.getNoteTitle() || '(untitled)';
-        const totalLines = simplified.split('\n').length;
+        const totalLines = simplified.trim() ? simplified.split('\n').length : 0;
         const preference = getDeferredToolPreference('edit_note', {
             library_id: resolvedLibraryId,
             zotero_key,
@@ -481,7 +469,7 @@ async function validateEditNoteAction(
         if (!pre.ok) return pre.response;
 
         const noteTitle = item.getNoteTitle() || '(untitled)';
-        const totalLines = simplified.split('\n').length;
+        const totalLines = simplified.trim() ? simplified.split('\n').length : 0;
         const preference = getDeferredToolPreference('edit_note', {
             library_id: resolvedLibraryId,
             zotero_key,
@@ -498,6 +486,18 @@ async function validateEditNoteAction(
             },
             warnings: collectWarnings(...(externalRefContext.externalFileWarnings ?? [])),
             preference,
+        };
+    }
+
+    // Anchored edits require existing content.
+    if (!rawHtml || rawHtml.trim() === '') {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Note ${modelObjectIdFromReference({ library_id: resolvedLibraryId, library_ref, zotero_key })} is empty. Use operation="append" or "rewrite" with new_string and no old_string to add content to this note.`,
+            error_code: 'empty_note',
+            preference: 'always_ask',
         };
     }
 

@@ -330,7 +330,7 @@ export const ActionPreview: React.FC<{
         // For rewrite, get old content from validation's current_value
         // or from undo_full_html in result_data (post-apply)
         const oldContent = isRewrite
-            ? (previewData.currentValue?.old_content || previewData.resultData?.undo_full_html)
+            ? (previewData.currentValue?.old_content ?? previewData.resultData?.undo_full_html)
             : undefined;
 
         // Resolve the portable library_ref to a local id before handing it to

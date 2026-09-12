@@ -659,6 +659,23 @@ describe('validateEditNoteAction — failures', () => {
         expect(response.error_code).toBe('library_not_editable');
     });
 
+    it.each(['append', 'rewrite'] as const)('validates %s on an empty note', async (operation) => {
+        const item = makeMockItem({ getNote: vi.fn(() => '') });
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        vi.mocked(getOrSimplify).mockReturnValueOnce({
+            simplified: '', metadata: { elements: new Map() }, isStale: false,
+        });
+        const response = await handleAgentActionValidateRequest(makeValidateRequest({
+            action_data: {
+                library_id: 1, zotero_key: 'NOTE0001', operation,
+                new_string: '<p>First content</p>',
+            },
+        }));
+        expect(response.valid).toBe(true);
+        expect(response.current_value).toMatchObject({ total_lines: 0, match_count: 1 });
+        expect(item.saveTx).not.toHaveBeenCalled();
+    });
+
     it('empty_note', async () => {
         const item = makeMockItem({ getNote: vi.fn(() => '') });
         (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
