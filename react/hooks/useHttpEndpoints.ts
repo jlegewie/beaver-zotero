@@ -575,6 +575,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         conditions_join_mode: request.conditions_join_mode ?? null,
         any_conditions: request.any_conditions || [],
         item_category: request.item_category === 'attachment' ? 'attachment' : 'regular',
+        include_standalone_attachments: request.include_standalone_attachments ?? false,
         has_attachments: request.has_attachments ?? null,
         max_items: request.max_items ?? 1000,
         exclude_item_ids: request.exclude_item_ids ?? [],
@@ -607,6 +608,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         // provider that predates the field drops the group and resolves a
         // WIDER population than the caller described.
         any_conditions_applied: response.any_conditions_applied,
+        standalone_attachments_included: response.standalone_attachments_included,
         // A dropped condition widens the population; the caller must not act on
         // ids that came back with a warning.
         warnings: response.warnings,
