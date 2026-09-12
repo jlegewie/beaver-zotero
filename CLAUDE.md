@@ -404,7 +404,7 @@ Three tiers — **`tests/README.md` has the details, templates, and shared-state
 ## Dev-only HTTP endpoints
 
 The plugin registers dev-only endpoints under `/beaver/test/*` (see
-`react/hooks/useHttpEndpoints.ts`) for inspecting extraction, cache, and run state without
+`src/services/localEndpoints/http.ts`) for inspecting extraction, cache, and run state without
 driving the UI:
 
 ```bash
@@ -412,8 +412,11 @@ curl -sS -X POST http://127.0.0.1:<port>/beaver/test/<name> \
   -H 'Content-Type: application/json' -d '{}'
 ```
 
-They are registered from the React bundle and gated on authentication, so **they exist only
-once Beaver is logged in on that instance**. `/connector/ping` answering while
+They are registered by `addon.localEndpoints` and gated on authentication, so **they exist
+only once Beaver is logged in on that instance**, including with zero windows. UI commands
+accept `windowId` and resolve it once at entry; a missing or closing target returns
+`window_unavailable`. Enumerate stable ids with `/beaver/test/window-runtime` and
+`{ command: 'list' }`. `/connector/ping` answering while
 `/beaver/test/ping` 404s means "logged out", not "wrong port". Zotero's HTTP port is not
 necessarily the default `23119` — read it at runtime (`Zotero.Server.port`) or from the
 worktree metadata below.

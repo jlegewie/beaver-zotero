@@ -41,12 +41,10 @@ import { useBackgroundProcessingWelcome } from './hooks/useBackgroundProcessingW
 import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
 import { useContextMenuActionHandler } from './hooks/useContextMenuActionHandler';
 import { useEmbeddingIndex } from './hooks/useEmbeddingIndex';
-import { useHttpEndpoints } from './hooks/useHttpEndpoints';
+import { registerWindowTestCommands } from './hooks/useHttpEndpoints';
 import { useInterruptedThreadPopup } from './hooks/useInterruptedThreadPopup';
-import { useMcpServer } from './hooks/useMcpServer';
 import { useOnboardingPopups } from './hooks/useOnboardingPopups';
 import { useProfileSync } from './hooks/useProfileSync';
-import { useProviderWake } from './hooks/useProviderWake';
 import { useReaderAnnotationActionHandler } from './hooks/useReaderAnnotationActionHandler';
 import { useReaderSelectionActionHandler } from './hooks/useReaderSelectionActionHandler';
 import { useReaderTabSelection } from './hooks/useReaderTabSelection';
@@ -181,17 +179,6 @@ const GlobalContextInitializer = () => {
 
     // Control visibility of the sidebar (e.g., setup global listeners/state)
     useToggleSidebar();
-
-    // Register HTTP endpoints for local FrontendCapability (when authenticated)
-    useHttpEndpoints();
-
-    // Register MCP server endpoint (when mcpServerEnabled pref is true)
-    useMcpServer();
-
-    // Provider-wake subscription: lets agent runs started from other Beaver
-    // clients request library data from this Zotero on demand
-    // (when dataProviderEnabled pref is true)
-    useProviderWake();
 
     // Handle zotero://beaver protocol links (thread deep-linking)
     useThreadProtocolHandler();
@@ -343,6 +330,7 @@ export function closeAgentConnection(
 
 /** Called by the plugin before mounting any surface. */
 export function initializeRuntime(runtime: WindowRuntime) {
+    registerWindowTestCommands(runtime, inspectRuntime);
     initializeWindowRuntime(runtime);
     Zotero.Beaver.runtime.addWindowCleanup(runtime, registerTableLocalCommands(runtime.hostWindow, runtime.id));
     runtime.hostWindow.__beaverJotaiStore = store;

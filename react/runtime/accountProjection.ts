@@ -40,7 +40,6 @@ import {
     clearMessageContextAtom,
 } from "../atoms/messageComposition";
 import { agentService } from "@beaver/agent-core/transport/agentService";
-import { providerConnection } from "@beaver/agent-core/transport/providerConnection";
 import {
     firstRunNextStepsDismissedAtom,
     firstRunReturnRequestedAtom,
@@ -92,14 +91,12 @@ export function attachAccountProjection(runtime: WindowRuntime): void {
         const scope = Zotero.Beaver.searchableLibraryIds ?? [];
         if (previousScope.some((id) => !scope.includes(id))) {
             agentService.close(1000, "Library access changed");
-            providerConnection.close(1000, "Library access changed");
             store.set(abandonActiveRunLocallyAtom);
         }
         previousScope = [...scope];
         if (generation !== snapshot.generation) {
             modelsKey = "";
             agentService.close(1000, "Account changed");
-            providerConnection.close(1000, "Account changed");
             store.set(abandonActiveRunLocallyAtom);
             store.set(threadNavigationSeqAtom, (value) => value + 1);
             store.set(recentThreadsAtom, []);

@@ -183,51 +183,35 @@ describe('independently evaluated renderer modules', () => {
     });
 });
 
-describe('window-owned global endpoints', () => {
-    const path = '/beaver/test/window-runtime';
-    beforeEach(() => { (Zotero as any).Server = { Endpoints: {} }; });
-
-    it.each(['first', 'last'])('keeps a live handler when the %s registrant closes', (closing) => {
+describe('targeted window commands', () => {
+    it('pins the default renderer while focus changes across an await', async () => {
         const instance = new BeaverInstance();
-        const a = instance.attachWindow(makeWindow());
-        const b = instance.attachWindow(makeWindow());
-        const handlerA = vi.fn(), handlerB = vi.fn();
-        const releaseA = instance.registerWindowEndpoint(a, path, handlerA);
-        const releaseB = instance.registerWindowEndpoint(b, path, handlerB);
-        expect(Zotero.Server.Endpoints[path]).toBe(handlerB);
-        const [closed, surviving, handler] = closing === 'first' ? [a, b, handlerB] : [b, a, handlerA];
-        instance.markClosing(closed.hostWindow);
-        (closing === 'first' ? releaseA : releaseB)();
-        expect(Zotero.Server.Endpoints[path]).toBe(handler);
-        instance.detachWindow(surviving.hostWindow);
-        releaseA();
-        releaseB();
-        expect(Zotero.Server.Endpoints[path]).toBeUndefined();
+        const a = instance.attachWindow(makeWindow()), b = instance.attachWindow(makeWindow());
+        a.status = b.status = 'ready';
+        let finish!: (value: string) => void;
+        const second = vi.fn(async () => 'second');
+        instance.registerWindowCommands(a, { inspect: () => new Promise(resolve => { finish = resolve; }) });
+        instance.registerWindowCommands(b, { inspect: second });
+        (Zotero as any).getMainWindow = () => a.hostWindow;
+        const result = instance.dispatchWindowCommand('inspect', {});
+        await Promise.resolve();
+        (Zotero as any).getMainWindow = () => b.hostWindow;
+        finish('first');
+        expect(await result).toBe('first');
+        expect(second).not.toHaveBeenCalled();
+        expect(await instance.dispatchWindowCommand('inspect', { windowId: b.id })).toBe('second');
     });
 
-    it('transfers ownership on auth cleanup and ignores obsolete cleanup after re-registration', () => {
+    it('rejects missing and closing targets and settles even when a closed renderer never resolves', async () => {
         const instance = new BeaverInstance();
-        const a = instance.attachWindow(makeWindow());
-        const b = instance.attachWindow(makeWindow());
-        const handlerA = vi.fn(), handlerB = vi.fn(), replacement = vi.fn();
-        const oldRelease = instance.registerWindowEndpoint(a, path, handlerA);
-        instance.registerWindowEndpoint(a, path, replacement);
-        oldRelease();
-        const signOut = instance.registerWindowEndpoint(b, path, handlerB);
-        signOut();
-        expect(Zotero.Server.Endpoints[path]).toBe(replacement);
-        instance.disposeInstance();
-        expect(Zotero.Server.Endpoints[path]).toBeUndefined();
-    });
-
-    it('does not delete an externally replaced handler or accept stale runtimes', () => {
-        const instance = new BeaverInstance();
-        const runtime = instance.attachWindow(makeWindow());
-        instance.registerWindowEndpoint(runtime, path, vi.fn());
-        const external = vi.fn();
-        Zotero.Server.Endpoints[path] = external;
-        instance.detachWindow(runtime.hostWindow);
-        instance.registerWindowEndpoint(runtime, path, vi.fn());
-        expect(Zotero.Server.Endpoints[path]).toBe(external);
+        const a = instance.attachWindow(makeWindow()); a.status = 'ready';
+        instance.registerWindowCommands(a, { inspect: () => new Promise(() => {}) });
+        const result = instance.dispatchWindowCommand('inspect', { windowId: a.id });
+        const assertion = expect(result).rejects.toMatchObject({ code: 'window_unavailable' });
+        await Promise.resolve();
+        instance.markClosing(a.hostWindow);
+        await assertion;
+        await expect(instance.dispatchWindowCommand('inspect', { windowId: a.id })).rejects.toMatchObject({ code: 'window_unavailable' });
+        await expect(instance.dispatchWindowCommand('inspect', { windowId: 'missing' })).rejects.toMatchObject({ code: 'window_unavailable' });
     });
 });

@@ -1,3 +1,4 @@
+vi.mock('../../src/services/instanceLocalEndpoints', () => ({ InstanceLocalEndpoints: class { start() {} dispose() {} } }));
 import { BeaverInstance } from '../../src/runtime/instance';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -220,6 +221,21 @@ async function loadHooks() {
 }
 
 describe('hooks auth lock shutdown cleanup', () => {
+    it.each(['onShutdown', 'onAppShutdown'] as const)('stops ingress before waiting for mutations in %s', async entry => {
+        const hooks = await loadHooks();
+        const disposeIngress = vi.fn();
+        const instance = (globalThis as any).addon;
+        instance.localEndpoints = { dispose: disposeIngress };
+        let finish!: () => void;
+        instance.mutations.dispose = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+        const shutdown = hooks[entry]();
+        expect(disposeIngress).toHaveBeenCalledOnce();
+        expect(instance.localEndpoints).toBeUndefined();
+        expect(instance.account.dispose).not.toHaveBeenCalled();
+        finish();
+        await shutdown;
+    });
+
     beforeEach(() => {
         vi.resetModules();
         vi.clearAllMocks();

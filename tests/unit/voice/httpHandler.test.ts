@@ -1,12 +1,10 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ get: vi.fn(), start: vi.fn(), harness: vi.fn() }));
-vi.mock('../../../react/store', () => ({ store: { get: mocks.get } }));
-vi.mock('../../../react/atoms/auth', () => ({ sessionAtom: {} }));
 import { handleTestVoiceHttpRequest } from '../../../react/hooks/httpHandlers/testVoiceHandlers';
 
 beforeEach(() => {
     vi.clearAllMocks();
-    (Zotero as any).Beaver = { data: { env: 'development' }, voice: { start: mocks.start }, voiceHarness: { run: mocks.harness, start: mocks.start } };
+    (Zotero as any).Beaver = { account: { getSnapshot: () => ({ session: mocks.get() }) }, data: { env: 'development' }, voice: { start: mocks.start }, voiceHarness: { run: mocks.harness, start: mocks.start } };
 });
 it('rejects production requests before invoking any voice operation', async () => {
     (Zotero.Beaver.data as any).env = 'production';
