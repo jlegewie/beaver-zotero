@@ -9,6 +9,9 @@ development-only. MCP retains its independent enable preference and write-tool o
 tool execution checks instance authentication. Registration cleanup checks constructor
 identity and revokes retained/in-flight endpoint invocations. Account replacement discards
 late results, and library-scope revocation closes the provider.
+Revoked HTTP registrations return `503 endpoint_unavailable` to retained or in-flight
+invocations. An account change returns `409 account_changed` when the registration
+remains active; removal of the registration takes precedence over that response.
 
 Library, document, cache, processing, table-store, and MCP adapters run in the plugin
 realm. Originless writes capture instance account identity and tool preferences, with no
@@ -30,11 +33,17 @@ Instance-safe routes continue to serve requests subject to access and capability
 
 Unit coverage includes registration replacement/revocation, command pinning and closure,
 account/pref/build gates, singleton wake ownership, and MCP contracts. Live validation
-should include two separately evaluated main-window bundles, closing each window, zero
-windows, reopening, concurrent relay/local requests, wake reconnection, preference changes,
-and plugin disposal/reload. Use a development backend for relay verification.
+should include closing the main window, zero windows, reopening, concurrent relay/local
+requests, wake reconnection, preference changes, and plugin disposal/reload. Multiple main
+windows are not supported by Zotero before Zotero 11; programmatically opening extra main
+windows is experimental validation only. On Zotero 11, also validate two separately
+evaluated main-window bundles and closing each window. Use a development backend for relay
+verification.
 
 The live `localEndpoints.live.test.ts` suite works with or without windows. Set
 `BEAVER_ZERO_WINDOW_TEST=1` to assert that the registry is empty, rather than just
 allowing an empty registry. Always pin `ZOTERO_HTTP_PORT` to the test instance.
 Live setup waits for account hydration before normalizing library exclusions.
+The MCP contract suite uses the same zero-window flag to verify that Markdown note
+creation reports an unavailable renderer without saving a note; its citation-rendering
+check runs with a main window open.
