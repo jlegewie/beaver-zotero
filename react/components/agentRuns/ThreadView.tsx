@@ -11,6 +11,9 @@ import { store } from "../../store";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
 import { toolExpandedAtom, messageSourcesVisibilityAtom, annotationPanelStateAtom } from "../../atoms/messageUIState";
 import { logger } from "@beaver/agent-core/platform/logger";
+import { usePreference } from '../../hooks/usePreference';
+import { getPref } from '../../../src/utils/prefs';
+import { normalizeChatLineSpacing } from '../../utils/chatLineSpacing';
 
 const RESTORE_THRESHOLD = 100; // pixels - threshold for restoring scroll position
 const RESTORE_DEBOUNCE_MS = 50; // ms - debounce delay for scroll restoration
@@ -50,6 +53,9 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         const contentRef = useRef<HTMLDivElement | null>(null);
         const pendingRunId = useAtomValue(pendingScrollToRunAtom);
         const isLoadingThread = useAtomValue(isLoadingThreadAtom);
+        const [chatLineSpacing] = usePreference(() =>
+            normalizeChatLineSpacing(getPref('chatLineSpacing')),
+        );
         const setPendingScrollToRun = useSetAtom(pendingScrollToRunAtom);
         const restoredFromAtomRef = useRef(false);
         const currentThreadId = useAtomValue(currentThreadIdAtom);
@@ -582,7 +588,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             return (
                 <div 
                     id="beaver-thread-view"
-                    className={`display-flex flex-col flex-1 min-h-0 items-center justify-center ${className || ''}`}
+                    className={`chat-line-spacing chat-line-spacing-${chatLineSpacing} display-flex flex-col flex-1 min-h-0 items-center justify-center ${className || ''}`}
                     ref={setScrollContainerRef}
                 >
                     <p className="text-secondary">No messages yet</p>
@@ -595,7 +601,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 id="beaver-thread-view"
                 role="log"
                 aria-label="Chat history"
-                className={`display-flex flex-col flex-1 min-h-0 overflow-y-auto scrollbar min-w-0 pb-4 ${className || ''}`}
+                className={`chat-line-spacing chat-line-spacing-${chatLineSpacing} display-flex flex-col flex-1 min-h-0 overflow-y-auto scrollbar min-w-0 pb-4 ${className || ''}`}
                 onScroll={handleScroll}
                 ref={setScrollContainerRef}
             >

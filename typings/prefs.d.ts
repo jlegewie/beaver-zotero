@@ -24,6 +24,7 @@ declare namespace _ZoteroTypes {
       "addSelectedItemsOnNewThread": boolean;
       "addBeaverProvenanceNote": boolean;
       "focusResponseForScreenReaders": boolean;
+      "chatLineSpacing": string;
       "annotationToolEnabled": boolean;
       "annotationAuthorName": string;
       "maxAddAttachmentToMessage": number;

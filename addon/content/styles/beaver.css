@@ -1649,11 +1649,25 @@
 }
 
 
-/* [id^="beaver-pane-"] .markdown {
-    margin-top: 0px !important;
-    width: 100%;
-    line-height: 1.5;
-} */
+/* Chat typography presets. These live on ThreadView so note previews, tables,
+   the composer, and other markdown surfaces retain their own spacing. */
+[id^="beaver-pane-"] .chat-line-spacing-compact {
+    --beaver-chat-line-height: 1.35;
+}
+
+[id^="beaver-pane-"] .chat-line-spacing-default {
+    --beaver-chat-line-height: 1.5;
+}
+
+[id^="beaver-pane-"] .chat-line-spacing-relaxed {
+    --beaver-chat-line-height: 1.7;
+}
+
+[id^="beaver-pane-"] .chat-line-spacing .markdown,
+[id^="beaver-pane-"] .chat-line-spacing .markdown li,
+[id^="beaver-pane-"] .chat-line-spacing .user-request-content {
+    line-height: var(--beaver-chat-line-height);
+}
 
 [id^="beaver-pane-"] .markdown p {
     margin-block-start: 0px !important;
