@@ -16,14 +16,9 @@
  *
  * ## Where the numbers come from
  *
- * The version log's tip entry carries the `summarize()` of the spec that was
- * written ({@link readTableHistory}), so the section reads counts without
- * parsing the megabyte of JSON embedded in the document. Only a table with no
- * usable log falls back to reading the spec — and a table the log gives reason
- * to suspect a sync conflict on, because that claim is the document's to make
- * and not the log's. The arithmetic and the wording live in
- * `tableItemPaneModel.ts`, which is pure; this file is the Zotero half:
- * registration, reading, DOM, and the buttons.
+ * Counts and identity come from the current document. The version log supplies
+ * history metadata only; it may lag behind a committed write or survive a
+ * damaged document. Wording lives in `tableItemPaneModel.ts`.
  *
  * ## Constraints
  *
@@ -45,6 +40,7 @@
  * machine, not whether a user may look at an item already in their library.
  */
 
+import { renderTableDocumentActions, tableActionErrorMessage } from './tableDocumentActions';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { summarize } from '@beaver/agent-core/layouts/tableMutations';
 import type { TableSpec } from '@beaver/agent-core/layouts/table';
@@ -64,7 +60,6 @@ import {
 } from '../services/artifacts/recoveryShadow';
 import {
     buildTableSectionFields,
-    tipVersionEntry,
     type TableSectionConflict,
     type TableSectionFields,
     type TableSectionInput,
@@ -186,20 +181,6 @@ function couldBeTableItem(item: Zotero.Item | null | undefined): boolean {
     }
 }
 
-/**
- * The real test, on an item whose lazy data may not be loaded.
- *
- * `isTableItem` reads tags, which throws on an unloaded item rather than
- * answering false, so "we cannot tell yet" is a third answer here and not a no.
- */
-function knownTableItem(item: Zotero.Item): boolean | null {
-    try {
-        return isTableItem(item);
-    } catch {
-        return null;
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Reading what the section shows
 // ---------------------------------------------------------------------------
@@ -240,12 +221,7 @@ async function annotationDates(item: Zotero.Item): Promise<string[]> {
     }
 }
 
-/**
- * Everything the section shows for one item.
- *
- * The log is tried first and the spec only as a fallback, because the log's tip
- * entry already holds the summary and the spec is the megabyte we are avoiding.
- */
+/** Read the current document before presenting counts or recovery actions. */
 export async function readTableSectionData(
     item: Zotero.Item
 ): Promise<TableSectionData> {
@@ -257,40 +233,18 @@ export async function readTableSectionData(
         annotationDates: await annotationDates(item),
     };
     let reason: string | null = null;
-    // The spec, when the fallback below already had to read it. Handed to the
-    // conflict check so it never reads the document twice.
-    let documentSpec: TableSpec | null = null;
-
-    const history = await readTableHistory(item);
-    input.history = history.versions;
-
-    const tip = tipVersionEntry(history.versions);
-    if (tip) {
-        input.summary = tip.summary;
-        input.source = 'history';
-        input.version = Math.max(history.tip, tip.version);
+    const read = await readTableItemSpec(item);
+    if (read.ok) {
+        const history = await readTableHistory(item);
+        input.history = history.versions;
+        input.summary = summarize(read.spec);
+        input.source = 'spec';
+        input.version = read.spec.version ?? null;
+        input.headers = headersOf(read.spec);
+        input.conflict = await readTableConflict(item, read.spec);
     } else {
-        const read = await readTableItemSpec(item);
-        if (read.ok) {
-            documentSpec = read.spec;
-            input.summary = summarize(read.spec);
-            input.source = 'spec';
-            input.version =
-                typeof read.spec.version === 'number' ? read.spec.version : null;
-            input.headers = headersOf(read.spec);
-        } else {
-            reason = read.message;
-        }
+        reason = read.message;
     }
-
-    const logVersion = tip ? Math.max(history.tip, tip.version) : null;
-    input.conflict = await readTableConflict(item, {
-        logVersion,
-        // Paired with a version only when the log's own two answers agree about
-        // which version is the tip.
-        logSha256: tip && tip.version === logVersion ? (tip.sha256 ?? null) : null,
-        spec: documentSpec,
-    });
 
     let hasFile = false;
     try {
@@ -302,60 +256,14 @@ export async function readTableSectionData(
     return { fields: buildTableSectionFields(input), reason, hasFile };
 }
 
-/** What the section already knows about the table when it asks about a conflict. */
-interface ConflictSources {
-    /** The version log's tip, or null when it has no usable entry. */
-    logVersion: number | null;
-    /** The tip's digest, when it is the digest of `logVersion`. */
-    logSha256: string | null;
-    /** The document's spec, when the section already read it. */
-    spec: TableSpec | null;
-}
-
-/**
- * Whether this table went backwards under this device.
- *
- * **The document decides.** It is the store's commit point, so it — not the log
- * — is the authority on what version a table is at, and it is what the store's
- * own check compares against. Judging the log instead reports a conflict on an
- * ordinary interrupted write: a commit that landed before its log entry did
- * leaves a log one version behind, which is a state the next open silently
- * repairs, and calling it "another device replaced your table" is exactly the
- * false positive `recoveryShadow.ts` says is worse than the loss it warns about.
- *
- * The log still keeps this cheap. It is never *ahead* of the document — the
- * document is written first — so a log level with or above the shadow rules a
- * conflict out on its own, and the common case answers without parsing the
- * megabyte of JSON in the file. Only a log that would raise the alarm is worth
- * reading the document for, and then the document's answer is the one reported.
- */
+/** Compare the recovery shadow with the validated document, never the sidecar. */
 async function readTableConflict(
     item: Zotero.Item,
-    sources: ConflictSources
+    spec: TableSpec
 ): Promise<TableSectionConflict | null> {
     try {
-        const shadow = await lastTableShadow({
-            libraryID: item.libraryID,
-            key: item.key,
-        });
-        if (!shadow) return null;
-
-        // Already read, so there is nothing cheaper to screen with.
-        if (sources.spec) return await judgeDocument(shadow, sources.spec);
-
-        if (typeof sources.logVersion !== 'number' || sources.logVersion <= 0) {
-            return null;
-        }
-        const screened = detectTableSyncConflict(shadow, {
-            version: sources.logVersion,
-            sha256: sources.logSha256,
-        });
-        if (!screened) return null;
-
-        const read = await readTableItemSpec(item);
-        // A document that cannot be read cannot support the claim, and the
-        // section says nothing rather than repeating the log's word for it.
-        return read.ok ? await judgeDocument(shadow, read.spec) : null;
+        const shadow = await lastTableShadow({ libraryID: item.libraryID, key: item.key });
+        return shadow ? await judgeDocument(shadow, spec) : null;
     } catch (error) {
         logger(`tableItemPane: could not read the recovery shadow: ${String(error)}`, 2);
         return null;
@@ -382,6 +290,8 @@ type HookArgs = _ZoteroTypes.ItemPaneManagerSection.SectionHookArgs;
 
 /** Stamped on the body so an async render can tell it is still wanted. */
 const ITEM_ATTRIBUTE = 'data-beaver-table-item';
+let renderGeneration = 0;
+const pendingRenders = new WeakMap<HTMLElement, Promise<void>>();
 
 function handleItemChange({ item, setEnabled }: HookArgs): void {
     try {
@@ -395,16 +305,17 @@ function handleItemChange({ item, setEnabled }: HookArgs): void {
  * The synchronous half: reset the body and put the actions up.
  *
  * The actions need no I/O, so they render immediately and the section has its
- * height before the counts arrive. If the item's data happens to be loaded and
- * says this is not one of ours, the section hides itself here — before anything
- * paints — and the asynchronous half is skipped.
+ * height before the counts arrive. Only primary data is checked here: the URL
+ * and tags can still be unloaded, and hiding the section prevents asyncRender
+ * from loading and validating them.
  */
-function handleRender({ doc, body, item, setEnabled, setSectionSummary }: HookArgs): void {
+function handleRender(args: HookArgs): void {
+    const { doc, body, item, setEnabled, setSectionSummary } = args;
     try {
-        body.setAttribute(ITEM_ATTRIBUTE, String(item?.id ?? ''));
+        body.setAttribute(ITEM_ATTRIBUTE, String(++renderGeneration));
         body.replaceChildren();
         setSectionSummary('');
-        if (knownTableItem(item) === false) {
+        if (!couldBeTableItem(item)) {
             setEnabled(false);
             return;
         }
@@ -414,13 +325,20 @@ function handleRender({ doc, body, item, setEnabled, setSectionSummary }: HookAr
         facts.className = 'beaver-table-section-facts';
         root.append(facts, renderActions(doc, item));
         body.append(root);
+        // Zotero may skip its async hook for sections below the visible pane.
+        // Start the read here and let that hook await the same work if called.
+        pendingRenders.set(body, populateSection(args));
     } catch (error) {
         logger(`tableItemPane: onRender failed: ${String(error)}`, 2);
     }
 }
 
 /** The half that reads from disk: the counts, the version, the caveat. */
-async function handleAsyncRender({
+async function handleAsyncRender(args: HookArgs): Promise<void> {
+    await pendingRenders.get(args.body);
+}
+
+async function populateSection({
     doc,
     body,
     item,
@@ -431,6 +349,7 @@ async function handleAsyncRender({
         const stamp = body.getAttribute(ITEM_ATTRIBUTE);
 
         await loadTableItemFields([item]);
+        if (body.getAttribute(ITEM_ATTRIBUTE) !== stamp) return;
         if (!isTableItem(item)) {
             setEnabled(false);
             return;
@@ -618,23 +537,12 @@ async function openTable(ref: TableRef): Promise<void> {
  * *write*, and every write goes through `tableStore.ts`, which is webpack-only
  * so its single-flight lock stays single. This module cannot import it at all.
  */
-async function restoreShadow(ref: TableRef): Promise<void> {
+async function restoreShadow(ref: TableRef): Promise<string> {
     const api = getTablesApi();
-    if (!api) {
-        logger('tableItemPane: the table surfaces are not registered', 1);
-        return;
-    }
+    if (!api) return 'Table document actions are unavailable.';
     const result = await api.shadow.restore(ref);
-    if (!result.ok) {
-        logger(`tableItemPane: restore refused (${result.code}): ${result.error}`, 1);
-        return;
-    }
-    // The store announces the write, so whatever is showing the table re-reads
-    // it; the section itself re-renders on the next selection change.
-    logger(
-        `tableItemPane: restored ${ref.key} v${result.restoredFrom} as v${result.version}`,
-        3
-    );
+    if (!result.ok) return tableActionErrorMessage(result, ref);
+    return `Restored this device's version ${result.restoredFrom} as version ${result.version}. Close and reopen any open snapshot to see the current table.`;
 }
 
 function showInLibrary(win: Window | null, item: Zotero.Item): void {
@@ -659,6 +567,8 @@ function renderActions(doc: Document, item: Zotero.Item): HTMLElement {
     wrapper.className = 'beaver-table-section-actions';
 
     const ref = refOf(item);
+    const status = doc.createElement('div');
+    status.setAttribute('role', 'status');
     wrapper.append(
         // Enabled optimistically; the async half disables it when the item has
         // no file, which is the only way to know.
@@ -672,11 +582,16 @@ function renderActions(doc: Document, item: Zotero.Item): HTMLElement {
         // table, so it starts disabled and the async half enables it only for a
         // table that is actually in the conflicted state.
         hidden(
-            button(doc, 'restore-shadow', 'Restore my version', false, () =>
-                void restoreShadow(ref)
-            )
+            button(doc, 'restore-shadow', 'Restore my version', false, () => {
+                const restore = wrapper.querySelector<HTMLButtonElement>('[data-beaver-action="restore-shadow"]')!;
+                restore.disabled = true;
+                void restoreShadow(ref).then((message) => { status.textContent = message; })
+                    .catch((error) => { status.textContent = `${tableActionErrorMessage(error, ref)} Check the current table before trying again.`; })
+                    .finally(() => { restore.disabled = false; });
+            })
         )
     );
+    wrapper.append(status, renderTableDocumentActions(doc, ref));
     return wrapper;
 }
 

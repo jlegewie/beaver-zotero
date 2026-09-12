@@ -167,7 +167,7 @@ describe('isTableItem', () => {
         expect(isTableItem(fakeItem({ url: 'https://example.org/page' }))).toBe(false);
     });
 
-    it('needs both marks: a beaver:// url alone is not enough', () => {
+    it('keeps automatic discovery limited to marked candidates', () => {
         expect(isTableItem(fakeItem({ tags: [] }))).toBe(false);
     });
 

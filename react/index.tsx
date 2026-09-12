@@ -10,6 +10,7 @@ import { Provider } from 'jotai';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import type { WindowRuntime } from '../src/runtime/instance';
+import { registerTableLocalCommands } from '../src/services/artifacts/tableStore';
 import { handleAgentActionExecuteRequest } from '../src/services/agentDataProvider/handleAgentActionExecuteRequest';
 import { registerZoteroBusyContext } from '../src/services/busyContext';
 import { registerZoteroSyncPause } from '../src/services/syncPause';
@@ -363,6 +364,7 @@ export function closeAgentConnection(
 /** Called by the plugin before mounting any surface. */
 export function initializeRuntime(runtime: WindowRuntime) {
     initializeWindowRuntime(runtime);
+    Zotero.Beaver.runtime.addWindowCleanup(runtime, registerTableLocalCommands(runtime.hostWindow, runtime.id));
     runtime.hostWindow.__beaverJotaiStore = store;
     if (!getTransportConfigurationError()) attachAccountProjection(runtime);
     Zotero.Beaver.runtime.subscribeWindow(runtime, 'notification:popup', detail => {

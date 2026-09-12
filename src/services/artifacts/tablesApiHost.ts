@@ -23,13 +23,15 @@ import { inspectTableShadow } from './recoveryShadow';
 import {
     TABLE_SHADOW_RESTORE_UNAVAILABLE,
     clearTableWriteLocks,
+    tableLocalCommands,
+    getTableLocalCommands,
     getTableShadowRestore,
     setTableShadowRestore,
     setTablesApi,
     tableWriteLocks,
     type TablesApi,
 } from './tablesApi';
-import { listReaderTableViews, openTableInReader } from './view/readerTableView';
+import { listReaderTableViews, openTableInReader, markTableReadersStale } from './view/readerTableView';
 
 /**
  * Registers the namespace. Safe to call twice — a plugin reload replaces the
@@ -39,6 +41,8 @@ export function registerTablesApi(): void {
     registerTableShadowRestore();
     const api: TablesApi = {
         openTable,
+        tableChanged: markTableReadersStale,
+        local: { commands: getTableLocalCommands },
         listViews: () => listReaderTableViews(),
         openInReader: (item, options) => openTableInReader(item, options),
         itemPane: {
@@ -67,6 +71,7 @@ export function registerTablesApi(): void {
     // Seed the registry in the plugin realm (`onShutdown` tears it down), not
     // in whichever window bundle first takes a lock.
     tableWriteLocks();
+    tableLocalCommands();
     logger('tablesApiHost: registered Zotero.__beaverTables', 3);
 }
 
@@ -79,6 +84,8 @@ export function registerTablesApi(): void {
  */
 export function unregisterTablesApi(): void {
     setTablesApi(null);
+    Zotero.__beaverTableLocalCommands?.clear();
+    Zotero.__beaverTableLocalCommands = undefined;
     unregisterTableShadowRestore();
     // Dropped with the realm that created it. Teardown means no write is in
     // flight to lose its turn.

@@ -1,0 +1,54 @@
+{
+    "name": "reset-not-reported",
+    "before": {
+        "id": "outcomes",
+        "columns": [
+            {
+                "id": "answer",
+                "header": "Answer",
+                "type": "text",
+                "description": "What is reported?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r",
+                "cells": {
+                    "answer": {
+                        "outcome": "not_reported",
+                        "provenance": "extracted"
+                    }
+                }
+            }
+        ]
+    },
+    "mutations": [
+        {
+            "op": "set_cells",
+            "cells": [
+                {
+                    "row": "r",
+                    "column": "answer",
+                    "cell": {}
+                }
+            ]
+        }
+    ],
+    "after": {
+        "id": "outcomes",
+        "columns": [
+            {
+                "id": "answer",
+                "header": "Answer",
+                "type": "text",
+                "description": "What is reported?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r",
+                "cells": {}
+            }
+        ]
+    }
+}

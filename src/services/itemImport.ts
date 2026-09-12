@@ -4,12 +4,11 @@ import { ExternalReference, NormalizedPublicationType } from '@beaver/agent-core
 import { generateTaskId, isPdfFetchInProgress, scheduleBackgroundTask } from '../utils/backgroundTasks';
 import { libraryRefForLibraryID, resolveLibraryRef } from '../utils/libraryIdentity';
 import { createProvenanceNote } from '../utils/noteProvenance';
-import { refuseCaptchaChallengeUrls } from '../utils/pdfChallengeUrls';
 import { buildPdfResolvers, PdfFetchOptions } from '../utils/pdfResolvers';
 import { getPref } from '../utils/prefs';
 import { TimingAccumulator } from '../utils/timing';
 import type { AttachmentResolvedPayload } from './attachmentResolved';
-import { coordinateLibraryMutation } from './libraryMutations';
+import { fetchPdfAttachment } from './pdfAttachmentFetch';
 
 const SAVE_ATTACHMENTS_WITH_TRANSLATORS = false;
 const BEAVER_PROVENANCE_MARKER = 'Added by Beaver';
@@ -557,46 +556,27 @@ async function filterPdfAttachments(attachmentIds: number[]): Promise<Zotero.Ite
     );
 }
 
-/**
- * How long the resolver cascade may keep starting new downloads.
- *
- * Enforced by refusing further URLs in `onBeforeRequest`, which really does end
- * the cascade — Zotero skips a refused URL and moves on, so once the budget is
- * spent the remaining downloads are skipped and the call returns. A timeout
- * race would not do this: it only stops us waiting, while Zotero keeps
- * downloading and may attach a PDF after we have reported there is none.
- *
- * It does not stop everything. A resolver supplied as a *function* — Zotero's
- * open-access one, which queries its Unpaywall mirror — is expanded before any
- * URL exists to refuse, so one such lookup can still run past the budget.
- */
-const PDF_FETCH_BUDGET_MS = 60_000;
-
-/**
- * Schedule a background task to fetch and attach a PDF for an item.
- *
- * One `addFileFromURLs` pass over the ranked resolver list. Zotero handles the
- * cascade: HTTPS forcing, normalised-URL dedupe so the same file is never
- * fetched twice, 3-try backoff with `Retry-After` / 429 / 5xx handling, per-site
- * cookie sandboxes, landing-page-to-PDF translation for `pageURL` entries, and
- * content-type enforcement.
- *
- * `onBeforeRequest` refuses URLs that would open a CAPTCHA window — it runs
- * before every download attempt, including the file a landing-page translation
- * resolves to.
- */
+/** Schedule PDF discovery outside the mutation queue and coordinate only its attachment save. */
 function schedulePdfFetchTask(
     libraryId: number,
     itemKey: string,
     options: PdfFetchOptions
 ): void {
     const taskId = generateTaskId('pdf_fetch', libraryId, itemKey);
+    const generation = Zotero.Beaver.account?.getGeneration();
+    const assertAccess = () => {
+        const library = Zotero.Libraries.get(libraryId);
+        if (generation !== Zotero.Beaver.account?.getGeneration()) throw new Error('Account changed');
+        if (!Zotero.Beaver.libraryScopeInitialized || !Zotero.Beaver.searchableLibraryIds?.includes(libraryId)
+            || !library || !library.editable || library.filesEditable === false) {
+            throw new Error('Library is excluded or unavailable');
+        }
+    };
 
     scheduleBackgroundTask(
         taskId,
         'pdf_fetch',
-        async (signal: AbortSignal) => coordinateLibraryMutation(async () => {
-            if (!Zotero.Beaver.libraryScopeInitialized || !Zotero.Beaver.searchableLibraryIds?.includes(libraryId)) throw new Error('Library is excluded or unavailable');
+        async (signal: AbortSignal) => {
             const startedAt = Date.now();
             let item: Zotero.Item | null = null;
             let attachedPdf: Zotero.Item | null = null;
@@ -607,6 +587,7 @@ function schedulePdfFetchTask(
             let attachedByFetch = false;
 
             try {
+                assertAccess();
                 const fetched = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, itemKey);
                 if (!fetched) {
                     throw new Error(`Item not found: ${libraryId}-${itemKey}`);
@@ -633,33 +614,12 @@ function schedulePdfFetchTask(
                 }
 
                 logger(`schedulePdfFetchTask: Trying ${resolvers.length} resolvers for ${itemKey}`, 2);
-                const fetchOutcome = (Zotero.Attachments as any)
-                    .addFileFromURLs(item, resolvers, {
-                        onBeforeRequest: (url: string) => {
-                            if (signal.aborted) {
-                                throw new Error('PDF fetch cancelled');
-                            }
-                            if (Date.now() - startedAt > PDF_FETCH_BUDGET_MS) {
-                                throw new Error(`PDF fetch budget spent before ${url}`);
-                            }
-                            refuseCaptchaChallengeUrls(url);
-                        },
-                        onAccessMethodStart: (method: string) => {
-                            accessMethod = method;
-                        },
-                    })
-                    .then((attachment: unknown) => ({ attachment }))
-                    .catch((error: any) => ({ error }));
-                const outcome: any = await fetchOutcome;
-                if (outcome.error) {
-                    logger(
-                        `schedulePdfFetchTask: addFileFromURLs failed: ${outcome.error?.message || outcome.error}`,
-                        2,
-                    );
-                } else if (outcome.attachment) {
-                    attachedPdf = outcome.attachment as Zotero.Item;
-                    attachedByFetch = true;
-                    logger(`schedulePdfFetchTask: Attached PDF via ${accessMethod ?? 'unknown'}`, 2);
+                const outcome = await fetchPdfAttachment(item, resolvers, signal, assertAccess);
+                if (outcome.attachment) {
+                    attachedPdf = outcome.attachment;
+                    accessMethod = outcome.accessMethod;
+                    attachedByFetch = !!accessMethod;
+                    logger(`schedulePdfFetchTask: Attached PDF via ${accessMethod ?? 'existing'}`, 2);
                 }
 
                 if (signal.aborted) return;
@@ -674,7 +634,8 @@ function schedulePdfFetchTask(
                 );
             } finally {
                 // Always emit the attachment_resolved ws event
-                if (!signal.aborted) {
+                if (!signal.aborted && generation === Zotero.Beaver.account?.getGeneration()
+                    && Zotero.Beaver.searchableLibraryIds?.includes(libraryId)) {
                     // If we don't yet have a PDF, re-check attachments: a
                     // translator can save one out of band.
                     if (!attachedPdf && item) {
@@ -696,6 +657,8 @@ function schedulePdfFetchTask(
                         }
                     }
 
+                    if (!signal.aborted && generation === Zotero.Beaver.account?.getGeneration()
+                        && Zotero.Beaver.searchableLibraryIds?.includes(libraryId)) {
                         options.onAttachmentResolved?.({
                             threadId: options.threadId,
                             actionId: options.actionId,
@@ -706,10 +669,10 @@ function schedulePdfFetchTask(
                             accessMethod: attachedByFetch ? accessMethod : undefined,
                             elapsedMs: Date.now() - startedAt,
                         });
-
+                    }
                 }
             }
-        }, { signal }),
+        },
         {
             itemKey,
             libraryId,

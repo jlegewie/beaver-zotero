@@ -524,6 +524,8 @@ function RowDetail({
             !!cell?.value ||
             !!cell?.details ||
             !!cell?.status ||
+            !!cell?.outcome ||
+            cell?.provenance === "user" ||
             hiddenColumns.includes(column)
         );
     });

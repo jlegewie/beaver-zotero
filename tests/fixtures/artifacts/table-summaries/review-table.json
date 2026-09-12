@@ -236,7 +236,9 @@
                 "filled": 4,
                 "unsure": 0,
                 "unsourced": 0,
-                "stale": 0
+                "stale": 0,
+                "completed": 4,
+                "not_reported": 0
             },
             "year": {
                 "type": "number",
@@ -244,7 +246,9 @@
                 "filled": 3,
                 "unsure": 0,
                 "unsourced": 0,
-                "stale": 0
+                "stale": 0,
+                "completed": 3,
+                "not_reported": 0
             },
             "decision": {
                 "type": "select",
@@ -256,7 +260,9 @@
                 "distribution": {
                     "include": 2,
                     "exclude": 1
-                }
+                },
+                "completed": 3,
+                "not_reported": 0
             },
             "open_access": {
                 "type": "boolean",
@@ -267,14 +273,18 @@
                 "distribution": {
                     "true": 2,
                     "false": 1
-                }
+                },
+                "completed": 3,
+                "not_reported": 0
             },
             "notes": {
                 "type": "text",
                 "filled": 3,
                 "unsure": 1,
                 "unsourced": 1,
-                "stale": 2
+                "stale": 2,
+                "completed": 3,
+                "not_reported": 0
             }
         }
     }

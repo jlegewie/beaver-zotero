@@ -14,7 +14,7 @@
  *   switch on `value.kind` without consulting the column. `validateTableSpec`
  *   flags the two disagreeing.
  * - Default-valued fields are omitted on the wire: `status` absent means
- *   filled, a missing `value` means "not reported" and renders as an em dash.
+ *   filled, a missing `value` is unattempted unless an explicit outcome is recorded.
  * - The spec is also the stored file. A snapshot embeds it verbatim and is then
  *   the only copy of the table's state, so it carries its own format version
  *   (`spec_version`), identity (`key`) and revision (`version`), and
@@ -368,7 +368,7 @@ export type CellValueKind = CellValue["kind"];
 
 /**
  * Secondary content revealed on expand — of a cell, or of a column header.
- * Never participates in sorting, filtering or export.
+ * Never participates in sorting or filtering; CSV exports it as evidence.
  */
 export type Details =
     | { kind: "text"; text: string; label?: string }
@@ -378,7 +378,9 @@ export type Details =
 export type CellDetails = Details;
 
 export interface Cell {
-    /** Absent ⇒ the producer reports nothing for this cell ("—"). */
+    /** Completed inspection with no answer in the material. */
+    outcome?: "not_reported";
+    /** Absent ⇒ no answer value; only `outcome` establishes a completed inspection. */
     value?: CellValue;
     details?: CellDetails;
     /** Absent ⇒ filled. */
@@ -396,7 +398,7 @@ export interface Cell {
     /**
      * A caveat about a value that is present. `unsure`: a best guess.
      * `unsourced`: a real value that no citation could be attached to. Both are
-     * distinct from an absent value, which means the source reports nothing.
+     * distinct from the completion outcome and from an unattempted cell.
      */
     flag?: "unsure" | "unsourced";
     /**
@@ -712,7 +714,7 @@ export function columnAlign(column: Column): "start" | "end" | "center" {
 }
 
 export function isCellEmpty(cell: Cell | undefined): boolean {
-    return cell?.value == null;
+    return cell?.value == null && cell?.outcome !== "not_reported";
 }
 
 /**
@@ -749,8 +751,8 @@ export function cellValueText(value: CellValue | undefined): string {
  * point of it, so the counts a footer reports are computed once, here, rather
  * than by each renderer walking the rows its own way.
  *
- * `empty` counts cells the producer reports nothing for — in an extraction
- * table that is "the paper does not report this", a finding rather than a gap.
+ * `empty` counts cells without values; `notReported` counts explicit completed
+ * inspections within that set. Legacy empty cells are not completed findings.
  */
 export interface TableCoverage {
     rows: number;
@@ -758,11 +760,7 @@ export interface TableCoverage {
     filled: number;
     /** Cells with no value, in any column. */
     empty: number;
-    /**
-     * Empty cells in question columns (those with a `description`) — the ones
-     * that mean "the source does not report this". An empty year in a system
-     * column is not a finding and is not counted here.
-     */
+    /** Explicitly completed inspections with no reported answer. */
     notReported: number;
     pending: number;
     error: number;
@@ -792,7 +790,7 @@ export function summarizeCoverage(
             else if (cell?.value) coverage.filled += 1;
             else {
                 coverage.empty += 1;
-                if (column.description) coverage.notReported += 1;
+                if (cell?.outcome === "not_reported") coverage.notReported += 1;
             }
         }
     }
@@ -1060,7 +1058,9 @@ export function pruneTableCitations(spec: TableSpec): TableSpec {
     const citations = spec.citations.filter((citation) =>
         [...collectCitationKeys(citation)].some((key) => live.has(key)),
     );
-    return citations.length === spec.citations.length ? spec : { ...spec, citations };
+    return citations.length === spec.citations.length
+        ? spec
+        : { ...spec, citations };
 }
 
 // ---------------------------------------------------------------------------
@@ -1081,6 +1081,9 @@ export interface TableSpecIssue {
         | "invalid_column_progress"
         | "missing_cost_estimate"
         | "missing_decision_details"
+        | "invalid_cell_outcome"
+        | "invalid_cell_value"
+        | "invalid_column_definition"
         | "missing_provenance"
         | "unresolved_citation";
     message: string;
@@ -1104,6 +1107,19 @@ export function validateTableSpec(spec: TableSpec): TableSpecIssue[] {
     const columns = new Map<string, Column>();
 
     for (const column of spec.columns) {
+        if (
+            !Object.prototype.hasOwnProperty.call(
+                VALUE_KINDS_BY_COLUMN_TYPE,
+                column.type,
+            ) ||
+            typeof column.header !== "string"
+        ) {
+            issues.push({
+                code: "invalid_column_definition",
+                column_id: column.id,
+                message: "Columns need a supported type and a text header.",
+            });
+        }
         if (columns.has(column.id)) {
             issues.push({
                 code: "duplicate_column_id",
@@ -1214,9 +1230,45 @@ export function validateTableSpec(spec: TableSpec): TableSpecIssue[] {
                 });
             }
 
+            if (
+                cell.outcome !== undefined &&
+                (cell.outcome !== "not_reported" ||
+                    cell.value ||
+                    cell.status ||
+                    cell.error !== undefined ||
+                    cell.flag)
+            ) {
+                issues.push({
+                    code: "invalid_cell_outcome",
+                    row_id: row.id,
+                    column_id: columnId,
+                    message:
+                        "Not-reported cells cannot carry a value, pending/error status, or answer flag.",
+                });
+            }
+            if (cell.outcome && !cell.provenance) {
+                issues.push({
+                    code: "missing_provenance",
+                    row_id: row.id,
+                    column_id: columnId,
+                    message: "Completed outcomes require provenance.",
+                });
+            }
             const value = cell.value;
             if (!value) continue;
 
+            if (
+                value.kind === "number" &&
+                (typeof value.value !== "number" ||
+                    !Number.isFinite(value.value))
+            ) {
+                issues.push({
+                    code: "invalid_cell_value",
+                    row_id: row.id,
+                    column_id: columnId,
+                    message: "A numeric answer must be finite.",
+                });
+            }
             if (!cell.provenance) {
                 issues.push({
                     code: "missing_provenance",
@@ -1238,7 +1290,9 @@ export function validateTableSpec(spec: TableSpec): TableSpecIssue[] {
                 });
             }
 
-            if (!VALUE_KINDS_BY_COLUMN_TYPE[column.type].includes(value.kind)) {
+            if (
+                !VALUE_KINDS_BY_COLUMN_TYPE[column.type]?.includes(value.kind)
+            ) {
                 issues.push({
                     code: "value_kind_mismatch",
                     row_id: row.id,
@@ -1277,19 +1331,67 @@ export function validateTableSpec(spec: TableSpec): TableSpecIssue[] {
 // ---------------------------------------------------------------------------
 
 function csvEscape(field: string): string {
+    if (/^[\s]*[=+@-]/.test(field)) field = "'" + field;
     return /[",\r\n]/.test(field) ? `"${field.replace(/"/g, '""')}"` : field;
 }
 
 /**
  * RFC 4180 CSV of the table: one header row of column headers, then one row per
- * table row in the given order (pass `sortRows(...)` / `filterRows(...)` output
- * to export a view). Details are not exported; citation tags stay inline.
+ * table row in the given order. Companion fields retain evidence, citation
+ * identities with locators, and state. Formula-like values are escaped.
  */
 export function toCsv(spec: TableSpec, rows: Row[] = spec.rows): string {
-    const header = spec.columns.map((c) => csvEscape(c.header)).join(",");
+    const citations = citationsByKey(spec.citations);
+    const header = spec.columns
+        .flatMap((c) => [
+            c.header,
+            `${c.header} — evidence`,
+            `${c.header} — sources`,
+            `${c.header} — state`,
+        ])
+        .map(csvEscape)
+        .join(",");
     const lines = rows.map((row) =>
         spec.columns
-            .map((c) => csvEscape(cellValueText(row.cells[c.id]?.value)))
+            .flatMap((c) => {
+                const cell = row.cells[c.id];
+                const evidence =
+                    cell?.details?.kind === "text"
+                        ? cell.details.text
+                        : (cell?.details?.items.join("\n") ?? "");
+                const keys = cell ? citationKeysInCell(cell) : [];
+                const evidenceParts = [
+                    stripCitationTags(evidence),
+                    ...keys.map((key) => citations[key]?.preview ?? ""),
+                ].filter(Boolean);
+                const sources = keys.map((key) => {
+                    const citation = citations[key];
+                    const label =
+                        citation?.formatted_citation || citation?.display_name;
+                    return [
+                        label ? `${label} [${key}]` : key,
+                        citation?.invalid ? "Invalid citation" : "",
+                    ]
+                        .filter(Boolean)
+                        .join(" · ");
+                });
+                return [
+                    cell?.outcome === "not_reported"
+                        ? "Not reported"
+                        : cellValueText(cell?.value),
+                    [...new Set(evidenceParts)].join("\n"),
+                    sources.join("; "),
+                    [
+                        cell?.status,
+                        cell?.flag,
+                        cell?.stale ? "stale" : "",
+                        cell?.provenance,
+                    ]
+                        .filter(Boolean)
+                        .join("; "),
+                ];
+            })
+            .map(csvEscape)
             .join(","),
     );
     return [header, ...lines].join("\r\n");

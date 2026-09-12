@@ -62,6 +62,9 @@ declare namespace Zotero {
      * webpack-only (it imports the library-exclusion check), so the
      * esbuild-side item pane reaches it through here.
      */
+    let __beaverTableLocalCommands:
+        | Map<Window, import("../src/services/artifacts/tablesApi").TableLocalCommands>
+        | undefined;
     let __beaverTableShadowRestore:
         | import("../src/services/artifacts/tablesApi").TableShadowRestore
         | undefined;

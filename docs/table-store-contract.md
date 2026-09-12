@@ -25,7 +25,10 @@ A distinct operation from an outdated base returns `ok: false, conflict: true` w
 the current `version`, `sha256` and `spec`. Reapply mutations to that state and use a
 new operation ID for the new request. A transport retry must keep its original ID
 and payload. `request_id` identifies a transport attempt and is not an operation ID.
-Local `editTable` applies mutations inside the lock and needs no remote guard.
+Local `editTable` applies mutations inside the lock. A persistent editor passes
+an optional `{version, sha256}` fourth argument from the displayed snapshot; a
+stale draft is rejected before its mutations are applied. Immediate callers may
+omit that guard.
 
 The retry fingerprint sorts object keys recursively, preserves array order, omits
 undefined object values, and excludes the spec’s caller-supplied `key` and `version`.
@@ -174,3 +177,55 @@ The future wire adapter maps `expected_version` to `expectedVersion`, transports
 same digest/operation fields and preserves the structured trim outcomes. In addition
 to conflicts and library errors, it must explicitly map `operation_mismatch`,
 `operation_pending`, `invalid_request`, unsupported formats and corrupt versions.
+
+
+## Provider and persistent editor
+
+`artifact_request` and `/beaver/artifact` use the same adapter and portable item
+identities. Request envelopes are defined in `agent-core/protocol/artifactProtocol`;
+`tests/fixtures/artifacts/provider-contract.json` records the transport examples.
+Non-applicable null fields are accepted. Malformed envelopes are refused before
+identity lookup. List is bounded to 200 explicit, unique keys and returns a status
+for each key; it does not enumerate a library.
+
+Explicit reads validate the embedded key, version, format, and attachment type;
+cosmetic tag removal does not invalidate a document. Automatic discovery may still
+use its tag as a candidate hint. Trashed identities and unavailable local files
+are distinct failures. Reads remain available in read-only libraries; mutations
+check library and file permissions under the store lock.
+
+Remote access checks the current document, identifiable source references, and
+retained history before exposing content, summaries, operation receipts, or
+conflicts. A now-excluded source withholds the whole table. Incoming content is
+checked before operation lookup, and mutation guards repeat inside the lock.
+Local reading preserves the user's document. No filtered replacement is returned.
+Provider access checks readable sidecar content before repairing interrupted
+bookkeeping from the canonical document, then verifies all retained digests before
+returning history. Missing or corrupt older versions remain unavailable.
+
+The item-pane Edit action opens one persistent React editor in the existing Beaver
+window. Ordinary Open continues to use the snapshot reader. Local edits, explicit
+history restore, and resets do not call the backend. Notifications reload current
+content, while unsaved drafts require an explicit reload after concurrent changes.
+Saving one editor section refreshes its saved fields and revision without discarding
+drafts in the other sections. Only explicit reload discards all drafts.
+Window teardown removes the editor entry point, subscriptions, and item observer.
+Correction inputs use raw cell payloads rather than formatted display strings.
+Evidence-only edits preserve value metadata; changing a number or date clears its
+old display override so it cannot mask the corrected value.
+Extraction callbacks are optional and do not start paid work by themselves.
+
+## Completed outcomes and evidence
+
+`Cell.outcome: "not_reported"` records a completed inspection with no answer. It
+requires provenance and cannot coexist with a value, pending/error status, or
+answer flag. Staleness remains independent. Existing empty cells stay unattempted.
+A blank user correction stores `{provenance: "user"}`; only an explicit reset to
+`{}` removes ownership. Summary columns distinguish `filled`, `completed`, and
+`not_reported`, and table coverage counts only explicit not-reported outcomes.
+The shared mutation and summary fixtures specify these semantics for other clients.
+
+React and saved HTML render outcome, uncertainty, source, failure, staleness, and
+user-edit indicators. CSV includes per-column evidence, citation identities with
+locators, and state. CSV quotes delimiters/newlines and prefixes formula-like
+values so spreadsheet applications do not execute them as formulas.

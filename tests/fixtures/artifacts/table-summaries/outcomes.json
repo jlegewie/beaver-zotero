@@ -1,0 +1,77 @@
+{
+    "name": "completed inspection is separate from missing values and protected blank corrections",
+    "spec": {
+        "id": "outcomes",
+        "columns": [
+            {
+                "id": "answer",
+                "header": "Answer",
+                "type": "text",
+                "description": "What is reported?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r",
+                "cells": {
+                    "answer": {
+                        "outcome": "not_reported",
+                        "provenance": "extracted"
+                    }
+                }
+            },
+            {
+                "id": "empty",
+                "cells": {}
+            },
+            {
+                "id": "blank",
+                "cells": {
+                    "answer": {
+                        "provenance": "user"
+                    }
+                }
+            },
+            {
+                "id": "failed",
+                "cells": {
+                    "answer": {
+                        "status": "error",
+                        "error": "Failed"
+                    }
+                }
+            },
+            {
+                "id": "answered",
+                "cells": {
+                    "answer": {
+                        "value": {
+                            "kind": "text",
+                            "text": "Tentative"
+                        },
+                        "provenance": "extracted",
+                        "flag": "unsure",
+                        "stale": true
+                    }
+                }
+            }
+        ]
+    },
+    "summary": {
+        "rows": 5,
+        "columns": 1,
+        "failed_rows": 0,
+        "user_edits": 1,
+        "columns_detail": {
+            "answer": {
+                "type": "text",
+                "filled": 1,
+                "completed": 2,
+                "not_reported": 1,
+                "unsure": 1,
+                "unsourced": 0,
+                "stale": 1
+            }
+        }
+    }
+}

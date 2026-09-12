@@ -46,7 +46,7 @@ const spec: TableSpec = {
                 ref: { value: { kind: "reference", display_name: "Beta" } },
                 year: { value: { kind: "number", value: 2021 } },
                 type: { value: { kind: "select", label: "Book" } },
-                // `notes` absent — not reported.
+                // `notes` absent — unattempted.
             },
         },
         {
@@ -112,8 +112,8 @@ describe("table chrome", () => {
         mount(React.createElement(TableSurface, { table: spec }));
         const footer = text(".bt-footer");
         expect(footer).toContain("3 rows");
-        // One absent cell in `notes` plus two absent elsewhere are findings…
-        expect(footer).toContain("not reported");
+        // Empty cells are unattempted; only explicit outcomes are findings.
+        expect(footer).not.toContain("not reported");
         // …and the failed cell is reported separately from them.
         expect(footer).toContain("1 failed");
     });
@@ -222,7 +222,7 @@ describe("table chrome", () => {
         );
 
         const csv: string = onExport.mock.calls[0][0];
-        expect(csv.split("\r\n")[0]).toBe("Item,Year,Type,Notes");
+        expect(csv.split("\r\n")[0]).toBe("Item,Item — evidence,Item — sources,Item — state,Year,Year — evidence,Year — sources,Year — state,Type,Type — evidence,Type — sources,Type — state,Notes,Notes — evidence,Notes — sources,Notes — state");
         expect(csv).toContain("Alpha");
         expect(csv).toContain("Gamma");
         expect(csv).not.toContain("Beta"); // filtered out of the view

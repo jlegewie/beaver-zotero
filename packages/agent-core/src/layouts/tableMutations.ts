@@ -30,6 +30,7 @@
 import type { Citation } from "../types/citations";
 import {
     hasFixedVocabulary,
+    validateTableSpec,
     pruneTableCitations,
     normalizeSelectLabel,
     SELECT_COLORS,
@@ -278,6 +279,15 @@ export function applyMutations(
         const failure = applyOne(draft, mutation);
         if (failure) return failure;
     }
+    const invalid = validateTableSpec(draft.spec).find(
+        (issue) =>
+            issue.code === "invalid_cell_outcome" ||
+            (issue.code === "missing_provenance" &&
+                draft.spec.rows.find((row) => row.id === issue.row_id)?.cells[
+                    issue.column_id!
+                ]?.outcome),
+    );
+    if (invalid) return fail("invalid_mutation", invalid.message);
     return { ok: true, spec: pruneTableCitations(draft.spec) };
 }
 
@@ -817,6 +827,8 @@ export interface TableSummaryColumn {
     system?: true;
     /** Cells with a value. */
     filled: number;
+    completed: number;
+    not_reported: number;
     unsure: number;
     unsourced: number;
     stale: number;
@@ -857,6 +869,8 @@ export function summarize(spec: TableSpec): TableSummary {
         const detail: TableSummaryColumn = {
             type: column.type,
             filled: 0,
+            completed: 0,
+            not_reported: 0,
             unsure: 0,
             unsourced: 0,
             stale: 0,
@@ -878,6 +892,9 @@ export function summarize(spec: TableSpec): TableSummary {
             if (cell.stale) detail.stale += 1;
             if (cell.flag === "unsure") detail.unsure += 1;
             else if (cell.flag === "unsourced") detail.unsourced += 1;
+            if (cell.outcome === "not_reported") detail.not_reported += 1;
+            if (cell.outcome === "not_reported" || (cell.value && !cell.status))
+                detail.completed += 1;
             const value = cell.value;
             if (!value) continue;
             detail.filled += 1;

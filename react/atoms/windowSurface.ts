@@ -38,12 +38,9 @@ export interface TableWindowSurface {
  * it and the separate window — which reuses the main window's React bundle —
  * renders the result.
  *
- * This is the surface for a table that has no Zotero item behind it, and the
- * one an editing UI belongs on: it renders the real `DataTable`. A *stored*
- * table goes to Zotero's snapshot reader instead (`view/readerTableView.ts`),
- * which can never host an editor — its document is a sandboxed iframe with no
- * scripts. So a future main-window tab for editing is a second reader of this
- * atom rather than another host for the stored document.
+ * This surface displays transient tables without a Zotero item. Stored tables
+ * open in Zotero's snapshot reader. Future host-owned reader controls remain
+ * separate from the sandboxed document, whose scripts stay disabled.
  */
 export const windowSurfaceAtom = atom<WindowSurface>({ kind: "thread" });
 

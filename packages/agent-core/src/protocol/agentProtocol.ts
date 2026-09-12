@@ -1,3 +1,5 @@
+export { validateArtifactRequest } from './artifactProtocol';
+import type { ArtifactRequest } from './artifactProtocol';
 import { SubscriptionStatus, ProcessingMode, ChargeType } from '../types/profile';
 import { TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, RetryPromptPart, RunUsage } from '../agents/types';
 import { ZoteroItemReference } from '../types/zotero';
@@ -2500,6 +2502,7 @@ export type WSEvent =
     | WSZoteroViewImagesRequest
     | WSZoteroAttachmentSearchRequest
     | WSExternalReferenceCheckRequest
+    | ArtifactRequest
     | WSZoteroDataRequest
     | WSItemSearchByMetadataRequest
     | WSItemSearchByTopicRequest

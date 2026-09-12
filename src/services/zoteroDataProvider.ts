@@ -1,3 +1,4 @@
+import { handleArtifactRequest, artifactFailure } from './artifacts/artifactProvider';
 import type { OperationContext } from './agentDataProvider/operationContext';
 /**
  * Zotero implementation of the agent data-provider map.
@@ -52,6 +53,16 @@ export interface ZoteroDataProviderOptions {
 export function createZoteroDataProvider(options: ZoteroDataProviderOptions = {}): AgentDataProviderMap {
 
     return {
+        artifact_request: {
+            handle: (event, context) => {
+                const operation = options.operationContext?.();
+                return handleArtifactRequest(event, {
+                    ...context,
+                    owner: operation?.owner ?? context?.owner,
+                });
+            },
+            errorResponse: (event) => artifactFailure(event),
+        },
         zotero_document_request: {
             handle: (event) => handleZoteroDocumentRequest(event, { responseMode: 'websocket' }),
             errorResponse: (event, err) => ({

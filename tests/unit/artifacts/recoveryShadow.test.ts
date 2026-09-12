@@ -702,6 +702,7 @@ describe('what the item-pane section reports', () => {
 
         const data = await readTableSectionData(item);
         expect(data.fields.conflict).toBeNull();
+        expect(data.fields.versionLine).toContain("3");
     });
 
     it('reports a table a sync conflict really did take back', async () => {
@@ -734,7 +735,16 @@ describe('what the item-pane section reports', () => {
         });
     });
 
-    it('says nothing on an ordinary table, without reading the document', async () => {
+    it('does not present healthy history counts for a corrupt document', async () => {
+        await createTable({ spec: demoSpec('One') });
+        await writeFile(htmlPath, '<html>Broken table</html>');
+        const data = await readTableSectionData(item);
+        expect(data.reason).toBeTruthy();
+        expect(data.fields.dimensionsLine).toBe('');
+        expect(data.fields.conflict).toBeNull();
+    });
+
+    it('validates the document once on an ordinary table', async () => {
         await createTable({ spec: demoSpec('One') });
         expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
 
@@ -748,9 +758,7 @@ describe('what the item-pane section reports', () => {
         const data = await readTableSectionData(item);
 
         expect(data.fields.conflict).toBeNull();
-        // The log answered it. Parsing the megabyte of JSON in the document on
-        // every selection is the cost this screen exists to avoid.
-        expect(reads).not.toContain(htmlPath);
+        expect(reads.filter((path) => path === htmlPath)).toHaveLength(1);
     });
 });
 

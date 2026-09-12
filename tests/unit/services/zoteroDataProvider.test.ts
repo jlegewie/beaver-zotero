@@ -43,6 +43,7 @@ import { pauseSyncForMutatingRun } from '../../../src/services/syncPause';
 // backend adds a new data-request type for the Zotero data plane, add it here
 // AND to the provider map — this list is the deliberate contract.
 const EXPECTED_EVENTS = [
+    'artifact_request',
     'zotero_document_request',
     'zotero_attachment_page_images_request',
     'zotero_attachment_image_request',

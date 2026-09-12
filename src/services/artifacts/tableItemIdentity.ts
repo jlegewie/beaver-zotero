@@ -153,22 +153,23 @@ export async function loadTableItemFields(items: Zotero.Item[]): Promise<void> {
 /**
  * Whether this item is a table Beaver stored.
  *
- * Both available marks are required, because neither is reliable alone: the
- * `beaver-table` tag is user-editable (anyone can add it to an unrelated item,
- * or remove it from one of ours), while the `url` field is not surfaced for
- * editing but is trivially shared by any snapshot the user happens to have
- * imported from a `beaver://` URL. Together they identify the item as ours
- * without a database of our own.
+ * This is only a candidate check. The URL and attachment type narrow local
+ * discovery; explicit access validates the embedded document and identity.
+ * Cosmetic tags are not part of document identity.
  *
  * Synchronous. The tag and the attachment properties are on the item; the URL
  * needs `itemData` loaded — see {@link loadTableItemFields}.
  */
 export function isTableItem(item: Zotero.Item | null | undefined): boolean {
+    return isTableAttachment(item) && !!item?.hasTag(TABLE_TAG);
+}
+
+/** Candidate attachment for explicit addressing; the embedded document is checked on read. */
+export function isTableAttachment(item: Zotero.Item | null | undefined): boolean {
     if (!item || !item.isAttachment() || !item.isTopLevelItem()) return false;
     if (item.attachmentLinkMode !== Zotero.Attachments.LINK_MODE_IMPORTED_URL)
         return false;
     if (item.attachmentContentType !== 'text/html') return false;
-    if (!item.hasTag(TABLE_TAG)) return false;
     return tableUrlField(item)?.startsWith(TABLE_URL_PREFIX) ?? false;
 }
 
@@ -240,7 +241,7 @@ export async function readTableItemDocument(
     item: Zotero.Item
 ): Promise<{ html: string | null; parsed: ReadTableItemResult }> {
     await loadTableItemFields([item]);
-    if (!isTableItem(item)) {
+    if (!isTableAttachment(item)) {
         return {
             html: null,
             parsed: {
@@ -282,7 +283,11 @@ export async function readTableItemDocument(
 
 function parseTableItemSpec(item: Zotero.Item, html: string): ReadTableItemResult {
     const parsed = parseTableDocument(html);
-    if (parsed.ok) return { ok: true, spec: parsed.spec };
+    if (parsed.ok) {
+        if (parsed.spec.key !== item.key || !Number.isInteger(parsed.spec.version) || (parsed.spec.version ?? 0) < 1)
+            return { ok: false, code: 'invalid', message: 'The embedded table identity does not match its attachment.' };
+        return { ok: true, spec: parsed.spec };
+    }
     if (parsed.reason === 'unsupported_version') {
         return {
             ok: false,
@@ -416,18 +421,18 @@ export interface TableRef {
  * Reading is never gated on library exclusion — an existing table is the user's
  * to look at. The store's `requireWritable` is where the exclusion boundary is.
  */
-export async function resolveTableItem(ref: TableRef): Promise<Zotero.Item> {
+export async function resolveTableItem(ref: TableRef, allowTrashed = false): Promise<Zotero.Item> {
     const item = Zotero.Items.getByLibraryAndKey(ref.libraryID, ref.key) as
         | Zotero.Item
         | false;
-    if (!item) {
+    if (!item || (item.deleted && !allowTrashed)) {
         throw new TableItemError(
             `No item ${ref.key} in library ${ref.libraryID}.`,
             'not_found'
         );
     }
     await loadTableItemFields([item]);
-    if (!isTableItem(item)) {
+    if (!isTableAttachment(item)) {
         throw new TableItemError(
             `Item ${ref.key} is not a Beaver table.`,
             'not_a_table'

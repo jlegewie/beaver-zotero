@@ -1,0 +1,55 @@
+{
+    "name": "blank-user-correction",
+    "before": {
+        "id": "outcomes",
+        "columns": [
+            {
+                "id": "answer",
+                "header": "Answer",
+                "type": "text",
+                "description": "What is reported?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r",
+                "cells": {}
+            }
+        ]
+    },
+    "mutations": [
+        {
+            "op": "set_cells",
+            "cells": [
+                {
+                    "row": "r",
+                    "column": "answer",
+                    "cell": {
+                        "provenance": "user"
+                    }
+                }
+            ]
+        }
+    ],
+    "after": {
+        "id": "outcomes",
+        "columns": [
+            {
+                "id": "answer",
+                "header": "Answer",
+                "type": "text",
+                "description": "What is reported?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r",
+                "cells": {
+                    "answer": {
+                        "provenance": "user"
+                    }
+                }
+            }
+        ]
+    }
+}

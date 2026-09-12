@@ -7,12 +7,6 @@
  * so the item-pane button and the dev endpoints share it rather than each
  * calling `Zotero.Reader.open` with their own preflight.
  *
- * There is deliberately no second surface and no choice to make. The tab that
- * used to exist here rendered the *same bytes* as the stored file through the
- * same enhancer, so it was a second host for one document rather than a second
- * view of it. A future editing surface is a React one and will not be this
- * (`react/atoms/windowSurface.ts`).
- *
  * Two rules shape the file:
  *
  * 1. **Nothing throws.** Every caller is a UI path that must degrade, so
@@ -35,6 +29,7 @@
  * to look at.
  */
 
+import { closeStaleTableReaders } from '../services/artifacts/view/readerTableView';
 import { resolveTableItem, type TableRef } from '../services/artifacts/tableItemIdentity';
 
 export type OpenTableOutcome = { ok: true } | { error: string };
@@ -86,6 +81,7 @@ export async function openTable(ref: TableRef): Promise<OpenTableOutcome> {
         if (!path) {
             return { error: `Could not open table ${ref.key} — it has no file on disk.` };
         }
+        await closeStaleTableReaders(item.id);
         const openInWindow = openReaderInNewWindow();
         // `allowDuplicate` mirrors `Zotero.FileHandlers.open`, and is not
         // decoration: without it `Zotero.Reader.open` short-circuits to any

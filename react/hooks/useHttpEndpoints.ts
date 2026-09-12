@@ -1,3 +1,4 @@
+import { handleArtifactRequest } from '../../src/services/artifacts/artifactProvider';
 import { captureOperationContext } from '../runtime/operationContext';
 import { tryGetWindowRuntime } from '../runtime/windowRuntime';
 /**
@@ -892,6 +893,8 @@ function registerEndpoints(): (() => void) | undefined {
 
     endpoints['/beaver/library/find-annotations'] =
         createEndpoint(handleFindAnnotationsHttpRequest);
+
+    endpoints['/beaver/artifact'] = createEndpoint(handleArtifactRequest);
 
     endpoints['/beaver/library/libraries'] =
         createEndpoint(handleListLibrariesHttpRequest);

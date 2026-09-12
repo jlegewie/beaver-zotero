@@ -2,6 +2,7 @@ import { executeRequest } from './agentDataProvider/handleAgentActionExecuteRequ
 import type { OperationContext } from './agentDataProvider/operationContext';
 import { hydrateOperationRendering } from './agentDataProvider/prepareOperationRendering';
 import * as tables from './artifacts/tableStore';
+import { handleArtifactRequestUncoordinated } from './artifacts/artifactProvider';
 import * as imports from './itemImport';
 import { coordinateLibraryMutation, type MutationOptions } from './libraryMutations';
 import * as createAnnotations from './manualActions/createAnnotationsActions';
@@ -17,6 +18,7 @@ import * as organizeItems from './manualActions/organizeItemsActions';
 import { savePreparedNote } from './savePreparedNote';
 
 const operations = {
+    artifact_request: handleArtifactRequestUncoordinated,
     executeRequest,
     savePreparedNote,
     createZoteroItem: imports.createZoteroItem,
