@@ -6,7 +6,11 @@ import {
     getContentKind,
     getSymbolicLocation,
 } from '@beaver/agent-core/types/citations';
-import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import {
+    externalReferenceMappingAtom,
+    formatExternalReferenceLabel,
+    getExternalReferenceUrl,
+} from '@beaver/agent-core/citations/externalReferences';
 import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '@beaver/agent-core/citations/atoms';
 import { useCitationMarker } from './useCitationMarker';
 import { getHost } from '../host';
@@ -138,19 +142,26 @@ const Citation: React.FC<CitationProps> = (props) => {
 
         // External citations cannot be exported as proper Zotero citations
         if (isExternal && !mappedZoteroItem) {
-            if (externalSourceId) {
-                const externalReference = externalReferenceMap[externalSourceId];
-                if (externalReference && externalReference.url) {
-                    return (
-                        <span>
-                            (
-                            <a href={externalReference.url} target="_blank" rel="noopener noreferrer">{citation}</a>
-                            )
-                        </span>
-                    );
-                }
+            const externalReference = externalSourceId
+                ? externalReferenceMap[externalSourceId]
+                : undefined;
+            const label = citation
+                || (externalReference ? formatExternalReferenceLabel(externalReference) : '')
+                || externalSourceId
+                || 'External reference';
+            const url = externalReference
+                ? getExternalReferenceUrl(externalReference)
+                : undefined;
+            if (url) {
+                return (
+                    <span>
+                        (
+                        <a href={url} target="_blank" rel="noopener noreferrer">{label}</a>
+                        )
+                    </span>
+                );
             }
-            return (<span>{`(${citation})`}</span>);
+            return (<span>{`(${label})`}</span>);
         }
 
         // External-file citations have no Zotero item to format and are excluded
