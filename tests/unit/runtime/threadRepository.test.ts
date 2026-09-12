@@ -5,10 +5,9 @@ const api = vi.hoisted(() => ({
     deleteThread: vi.fn(),
     starThread: vi.fn(),
 }));
-vi.mock("@beaver/agent-core/transport/threadService", () => ({
+vi.mock("@beaver/agent-core/transport/threadService", async (importOriginal) => ({
+    ...await importOriginal<typeof import("@beaver/agent-core/transport/threadService")>(),
     threadService: api,
-    isThreadAgentMismatch: () => false,
-    setThreadAgentName: vi.fn(),
     PIN_RECONCILE_TIMEOUT_MS: 100,
 }));
 import { ThreadRepository } from "../../../src/services/threads/threadRepository";
@@ -106,6 +105,61 @@ describe("shared thread cache", () => {
             code: "thread_busy",
         });
         expect(api.deleteThread).not.toHaveBeenCalled();
+    });
+    it("reconciles a confirmed deletion after its requesting window closes", async () => {
+        repo.upsertThreads({ threads: [entity], stamp: repo.stamp() });
+        const pending = deferred<void>();
+        api.deleteThread.mockReturnValue(pending.promise);
+        const operation = repo.deleteThread("t", "a", 0);
+        expect(api.deleteThread).toHaveBeenCalledWith("t");
+        Zotero.Beaver.presence.view("b", "t");
+        Zotero.Beaver.presence.detach("a");
+        pending.resolve();
+        await operation;
+
+        expect(repo.getSnapshot().entities.has("t")).toBe(false);
+        expect(Zotero.Beaver.presence.getSnapshot().deleted).toContain("t");
+        expect(Zotero.Beaver.presence.claim("b", "t", 0)).toBeNull();
+        repo.upsertThreads({ threads: [entity], stamp: repo.stamp() });
+        expect(repo.getSnapshot().entities.has("t")).toBe(false);
+    });
+    it("does not apply an old-account deletion to the replacement cache", async () => {
+        const pending = deferred<void>();
+        api.deleteThread.mockReturnValue(pending.promise);
+        const operation = repo.deleteThread("t", "a", 0);
+        repo.resetThreadStore();
+        Zotero.Beaver.presence.reset(1);
+        repo.upsertThreads({ threads: [entity], stamp: repo.stamp() });
+        const successor = Zotero.Beaver.presence.claim("b", "t", 1)!;
+        pending.resolve();
+        await operation;
+
+        expect(repo.getSnapshot().entities.has("t")).toBe(true);
+        expect(Zotero.Beaver.presence.getSnapshot().deleted).toEqual([]);
+        expect(Zotero.Beaver.presence.owns(successor)).toBe(true);
+    });
+    it("ignores foreign-agent realtime inserts and updates, including identity-free pinned rows", () => {
+        let event!: (payload: any) => void;
+        repo.start({
+            subscribe: (listener: any) => {
+                listener({ generation: 0, session: { user: { id: "u" } } });
+                return vi.fn();
+            },
+            realtime: { subscribe: (_kind: string, _user: string, callback: typeof event) => {
+                event = callback;
+                return vi.fn();
+            } },
+        } as any);
+        for (const eventType of ["INSERT", "UPDATE"]) {
+            event({ eventType, new: { ...row(), agent_name: "other-agent", starred: true } });
+            expect(repo.getSnapshot().entities.size).toBe(0);
+        }
+        event({ eventType: "INSERT", new: { ...row(), agent_name: "beaver", starred: true } });
+        expect(repo.getSnapshot().entities.get("t")?.isPinned).toBe(true);
+        event({ eventType: "UPDATE", new: { ...row("foreign"), agent_name: "other-agent" } });
+        expect(repo.getSnapshot().entities.get("t")?.name).toBe("old");
+        event({ eventType: "INSERT", new: { ...row(), id: "legacy" } });
+        expect(repo.getSnapshot().entities.has("legacy")).toBe(true);
     });
     it('subscribes after session acceptance, preserves same-user refresh, and rejects revoked realtime callbacks', () => {
         let notify!: (snapshot: any) => void;

@@ -633,6 +633,7 @@ export class ThreadRepository {
                             payload.eventType === "INSERT" ||
                             payload.eventType === "UPDATE"
                         ) {
+                            if (isThreadAgentMismatch(payload.new as any)) return;
                             const row = threadModelToThreadData(
                                 payload.new as any,
                             );
@@ -760,8 +761,10 @@ export class ThreadRepository {
         return this.mutate(id, async () => {
             if (!presence.owns(claim))
                 throw new Error("Chat operation was canceled");
+            const stamp = this.stamp();
             await threadService.deleteThread(id);
-            if (!presence.owns(claim)) return;
+            // A confirmed instance mutation survives the requesting window.
+            if (stamp.generation !== this.generation) return;
             this.removeThread(id);
             presence.invalidate(id, true);
             this.invalidateViews();
