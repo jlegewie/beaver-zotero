@@ -18,6 +18,7 @@ import {
     isWaitingForProfileAtom,
 } from "../atoms/auth";
 import {
+    cloudConsentAtom,
     accountGenerationAtom,
     accountRevisionAtom,
     profileProjectionAtom,
@@ -89,6 +90,7 @@ export function attachAccountProjection(runtime: WindowRuntime): void {
             snapshot.generation < generation
         )
             return;
+        store.set(cloudConsentAtom, snapshot.cloudConsent ?? 'pending');
         const scope = Zotero.Beaver.searchableLibraryIds ?? [];
         if (previousScope.some((id) => !scope.includes(id))) {
             agentService.close(1000, "Library access changed");

@@ -334,6 +334,82 @@ describe('DocumentCache payloads', () => {
         expect(calls).toEqual(['first', 'second']);
     });
 
+    it.each(['object', 'serialized'].flatMap(mode =>
+        ['same-library-other-item', 'other-library', 'same-item', 'same-library', 'clear-all']
+            .map(scope => [mode, scope]),
+    ))('scopes %s extraction invalidation to %s', async (mode, scope) => {
+        const item = createCacheAttachment();
+        let release!: () => void;
+        const barrier = new Promise<void>(resolve => { release = resolve; });
+        const jsonBytes = new TextEncoder().encode(JSON.stringify(structuredResult));
+        const metadata = { pageCount: 1, pageLabels: null, pages: onePageGeometry };
+        const serialized = {
+            schemaVersion: structuredResult.schemaVersion, mode: 'structured' as const,
+            pageCount: 1, byteLength: jsonBytes.byteLength, jsonBytes, cacheMetadata: metadata,
+        };
+        const create = vi.fn(async () => { await barrier; return structuredResult; });
+        const createSerialized = vi.fn(async () => { await barrier; return serialized; });
+        const input = { item, filePath: sourcePath, mode: 'structured' as const,
+            sourceSizeBytes: 3, contentType: 'application/pdf' };
+        const pending = mode === 'object'
+            ? cache.getOrCreateResult({ ...input, create, metadata: () => metadata })
+            : cache.getOrCreateSerializedResult({ ...input, create: createSerialized });
+        await vi.waitFor(() => expect(create.mock.calls.length + createSerialized.mock.calls.length).toBe(1));
+        if (scope === 'same-library-other-item') await cache.invalidate(item.libraryID, 'OTHER123');
+        else if (scope === 'other-library') await cache.invalidateByLibrary(item.libraryID + 1);
+        else if (scope === 'same-item') await cache.invalidate(item.libraryID, item.key);
+        else if (scope === 'same-library') await cache.invalidateByLibrary(item.libraryID);
+        else await cache.clearAll();
+        release();
+        const result = await pending;
+        if (scope === 'same-library-other-item' || scope === 'other-library') {
+            expect(result).not.toBeNull();
+            expect(await cache.getResult({ libraryId: item.libraryID, zoteroKey: item.key }, 'structured', sourcePath)).toEqual(structuredResult);
+        } else {
+            expect(result).toBeNull();
+            expect(await db.getDocumentCachePayloadCount()).toBe(0);
+        }
+    });
+
+    it.each(['attachment', 'library'])('does not wait for an unrelated payload write during %s invalidation', async scope => {
+        let release!: () => void;
+        const barrier = new Promise<void>(resolve => { release = resolve; });
+        mockIOUtils.write.mockImplementationOnce(async (path: string, bytes: Uint8Array) => {
+            await barrier;
+            files.set(path, bytes);
+        });
+        const pending = cache.putResult({
+            item: createCacheAttachment(), filePath: sourcePath, mode: 'structured', sourceSizeBytes: 3,
+            contentType: 'application/pdf', result: structuredResult,
+            metadata: { pageCount: 1, pageLabels: null, pages: onePageGeometry },
+        });
+        await vi.waitFor(() => expect(mockIOUtils.write).toHaveBeenCalled());
+        let invalidated = false;
+        const invalidation = (scope === 'attachment' ? cache.invalidate(1, 'OTHER123') : cache.invalidateByLibrary(2))
+            .then(() => { invalidated = true; });
+        try { await vi.waitFor(() => expect(invalidated).toBe(true)); }
+        finally { release(); await Promise.all([pending, invalidation]); }
+        expect(await db.getDocumentCachePayloadCount()).toBe(1);
+    });
+
+    it('starts fresh extraction instead of joining an invalidated attachment operation', async () => {
+        const item = createCacheAttachment();
+        let release!: () => void;
+        const barrier = new Promise<void>(resolve => { release = resolve; });
+        const create = vi.fn(async () => { await barrier; return structuredResult; });
+        const input = { item, filePath: sourcePath, mode: 'structured' as const,
+            sourceSizeBytes: 3, contentType: 'application/pdf',
+            metadata: () => ({ pageCount: 1, pageLabels: null, pages: onePageGeometry }) };
+        const old = cache.getOrCreateResult({ ...input, create });
+        await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
+        await cache.invalidate(item.libraryID, item.key);
+        const freshCreate = vi.fn(async () => structuredResult);
+        expect(await cache.getOrCreateResult({ ...input, create: freshCreate })).toEqual(structuredResult);
+        expect(freshCreate).toHaveBeenCalledOnce();
+        release();
+        expect(await old).toBeNull();
+    });
+
     it('does not let an extraction that ignores cancellation repopulate a cleared cache', async () => {
         let release!: () => void;
         const barrier = new Promise<void>((resolve) => { release = resolve; });
@@ -376,10 +452,65 @@ describe('DocumentCache payloads', () => {
     });
 
     it('reports disk deletion failures so cache deletion can be retried', async () => {
-        (globalThis as any).IOUtils.getChildren.mockResolvedValue(['/cache/payload']);
+        (globalThis as any).IOUtils.getChildren.mockResolvedValue(['/cache/payload.json.gz']);
         mockIOUtils.remove.mockRejectedValueOnce(new Error('permission denied'));
         await expect(cache.clearAll()).rejects.toThrow('permission denied');
         await expect(cache.clearAll()).resolves.toMatchObject({ metadataRows: 0, payloadRows: 0 });
+    });
+
+    it('retains an OCR write arriving during clear and rejects a later native error verdict', async () => {
+        let release!: () => void;
+        const barrier = new Promise<void>(resolve => { release = resolve; });
+        mockIOUtils.write.mockImplementationOnce(async (path: string, bytes: Uint8Array) => {
+            await barrier;
+            files.set(path, bytes);
+        });
+        const input = {
+            item: createCacheAttachment(), filePath: sourcePath, mode: 'structured' as const,
+            sourceSizeBytes: 3, contentType: 'application/pdf', result: structuredResult,
+            metadata: { pageCount: 1, pageLabels: null, pages: onePageGeometry },
+        };
+        const native = cache.putResult(input);
+        await vi.waitFor(() => expect(mockIOUtils.write).toHaveBeenCalled());
+        const clear = cache.clearAll();
+        const protectedWrite = cache.putResult({ ...input, metadata: { ...input.metadata, extractionSource: 'ocr' } });
+        release();
+        await Promise.all([native, clear, protectedWrite]);
+        await cache.putErrorMetadata({ ...input, pageCount: 1, pageLabels: null, pages: null, errorCode: 'no_text_layer' });
+        await cache.putResult(input);
+        const payload = await db.getDocumentCachePayload(input.item.libraryID, input.item.key, 'structured');
+        expect(payload?.extractionSource).toBe('ocr');
+        expect((await cache.getMetadata({ libraryId: input.item.libraryID, zoteroKey: input.item.key }, sourcePath))?.errorCode).toBeNull();
+        expect(await cache.getResult({ libraryId: input.item.libraryID, zoteroKey: input.item.key }, 'structured', sourcePath)).not.toBeNull();
+    });
+
+    it.each(['replacement', 'deletion', 'exclusion'])('invalidates protected text for explicit %s', async reason => {
+        const item = createCacheAttachment();
+        await cache.putResult({ item, filePath: sourcePath, mode: 'structured', sourceSizeBytes: 3,
+            contentType: 'application/pdf', result: structuredResult,
+            metadata: { pageCount: 1, pageLabels: null, pages: onePageGeometry, extractionSource: 'ocr' } });
+        if (reason === 'replacement') {
+            mockIOUtils.stat.mockResolvedValue({ lastModified: 20, size: 4 } as any);
+            expect(await cache.getMetadata({ libraryId: item.libraryID, zoteroKey: item.key }, sourcePath)).toBeNull();
+        } else if (reason === 'deletion') {
+            trashedItemKeys.add(item.key);
+            await cache.runStartupGC();
+        } else await cache.invalidateByLibrary(item.libraryID);
+        expect(await db.getDocumentCachePayloadCount()).toBe(0);
+        expect(await db.getDocumentCacheMetadataCount()).toBe(0);
+    });
+
+    it('retains incompatible OCR bytes without serving them', async () => {
+        const item = createCacheAttachment();
+        await cache.putResult({ item, filePath: sourcePath, mode: 'structured', sourceSizeBytes: 3,
+            contentType: 'application/pdf', result: structuredResult,
+            metadata: { pageCount: 1, pageLabels: null, pages: onePageGeometry, extractionSource: 'ocr' } });
+        const payload = await db.getDocumentCachePayload(item.libraryID, item.key, 'structured');
+        await conn.queryAsync("UPDATE document_cache_payloads SET extraction_schema_version = 'incompatible'");
+        expect(await cache.getResult({ libraryId: item.libraryID, zoteroKey: item.key }, 'structured', sourcePath)).toBeNull();
+        await cache.clearAll();
+        expect(await db.getDocumentCachePayloadCount()).toBe(1);
+        expect(files.has(payload!.payloadPath)).toBe(true);
     });
 
     it('coalesces concurrent cold result creation for the same source identity', async () => {

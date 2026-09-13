@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { afterEach, expect, it, vi } from 'vitest';
 import { backgroundProcessingStatusAtom } from '../../../react/atoms/backgroundProcessing';
+import { cloudConsentAtom } from '../../../react/atoms/profile';
 import BackgroundProcessingSection from '../../../react/components/preferences/BackgroundProcessingSection';
 
 const { refresh, prefs, prepareCache, access } = vi.hoisted(() => ({
@@ -16,6 +17,8 @@ vi.mock('../../../src/services/backgroundProcessing/cachePreparation', () => ({ 
 vi.mock('../../../react/atoms/profile', async () => {
     const { atom } = await import('jotai');
     return {
+        cloudConsentAtom: atom('pending'),
+        accountGenerationAtom: atom(1),
         hasOcrAccessAtom: atom(false),
         hasSearchIndexAccessAtom: atom(() => access.search),
         localZoteroLibrariesAtom: atom([]),
@@ -284,7 +287,7 @@ it('keeps known problems visible with background processing off, without status,
         documentCache: cacheStats, updatedAt: Date.now(), issues: [{ reason: 'file_unavailable', count: 1 }],
     });
     await withView(store, (container) => {
-        expect(container.textContent).toContain('By default, Beaver processes files when you use them.');
+        expect(container.textContent).toContain('Process files ahead of time while Zotero is idle for faster responses.');
         expect(container.textContent).not.toContain('documents cached');
         expect(container.textContent).not.toContain('Clear local cache');
         expect(container.textContent).toContain('Of the files Beaver has processed so far, 1 attachment could not be read or indexed.');
@@ -332,8 +335,8 @@ it.each([
     store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom), updatedAt: Date.now(), ...coverageState });
     await withView(store, (container) => {
         expect(container.querySelector('[role="status"]')).toBeNull();
-        expect(container.textContent).toContain(`Updates paused. ${line}`);
-        const paused = Array.from(container.querySelectorAll('span')).find((node) => node.textContent?.startsWith('Updates paused.'));
+        expect(container.textContent).toContain(line);
+        const paused = Array.from(container.querySelectorAll('span')).find((node) => node.textContent?.startsWith(line));
         expect(paused?.closest('[aria-hidden="true"]')).toBeNull();
         expect(container.textContent).toContain('No problems found in the files Beaver has processed so far.');
     });
@@ -538,4 +541,28 @@ it('reports a metadata index error without failed items, and disables Rebuild wh
         expect(button).toBeDefined();
         expect(button.disabled).toBe(true);
     });
+});
+
+it.each(['pending', 'declined', 'accepted'] as const)('shows cloud consent state %s and locks accepted preparation', async consent => {
+    access.search = true;
+    const store = createStore();
+    store.set(cloudConsentAtom, consent);
+    const previous = Zotero.Beaver;
+    const setCloudConsent = vi.fn();
+    (Zotero as any).Beaver = { account: { setCloudConsent } };
+    try {
+        await withView(store, async container => {
+            const toggle = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+            expect(toggle.disabled).toBe(consent === 'accepted');
+            if (consent === 'accepted') {
+                expect(container.textContent).toContain('required for cloud preparation');
+                expect(container.textContent).not.toContain('Accept and finish setup');
+            } else {
+                expect(container.textContent).toContain('Cloud setup is incomplete');
+                const accept = Array.from(container.querySelectorAll('button')).find(b => b.textContent === 'Accept and finish setup')!;
+                await act(async () => accept.click());
+                expect(setCloudConsent).toHaveBeenCalledWith(true, 1);
+            }
+        });
+    } finally { Zotero.Beaver = previous; }
 });

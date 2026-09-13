@@ -153,6 +153,8 @@ export class FulltextUpsertExecutor implements JobExecutor {
                 return { kind: 'complete', reason: 'stale_payload' };
             }
             try {
+                if (ctx.externalAbortSignal.aborted || Zotero.Beaver?.hasSearchIndexAccess !== true
+                    || !isBackgroundProcessingLibraryEnabled(record.libraryId)) return { kind: 'release', reason: 'access_changed' };
                 return await this.api.upsertPayload({ ...baseRequest, payload });
             } catch (payloadError) {
                 return this.mapApiError(record, row, payloadError, ctx);
@@ -169,6 +171,8 @@ export class FulltextUpsertExecutor implements JobExecutor {
             response = result;
         } else {
             try {
+                if (ctx.externalAbortSignal.aborted || Zotero.Beaver?.hasSearchIndexAccess !== true
+                    || !isBackgroundProcessingLibraryEnabled(record.libraryId)) return { kind: 'release', reason: 'access_changed' };
                 response = await this.api.upsertHash(baseRequest);
             } catch (error) {
                 if (!(isApiError(error))
