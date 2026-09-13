@@ -82,6 +82,8 @@ function stopLocalIngress(): void {
 
 async function disposeAccountServices(): Promise<void> {
     stopLocalIngress();
+    addon.threads.dispose();
+    addon.presence.dispose();
     try { addon.documents?.dispose(); } catch (error) { ztoolkit.log(`disposeDocuments: ${error}`); }
     addon.documents = undefined;
     try { if (addon.background) await withShutdownTimeout(addon.background.dispose(), "disposeBackground"); }
@@ -294,6 +296,7 @@ async function onStartup() {
     addon.pluginVersion = version;
     addon.preferences ??= new InstancePreferences();
     addon.account ??= createInstanceAccount();
+    addon.threads.start(addon.account);
     addon.account.start();
     addon.localEndpoints ??= new InstanceLocalEndpoints();
     addon.localEndpoints.start(addon.account, addon.preferences);
@@ -546,7 +549,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         closeAgentConnection(
             win,
             appGoingAway ? "Zotero quitting" : "Main window closed",
-            { rememberInterruptedThread: appGoingAway || isLastMainWindow },
+            { rememberInterruptedThread: true },
         );
 
         // Determine cleanup scope BEFORE unmounting React, so we can set

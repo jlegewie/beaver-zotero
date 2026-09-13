@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createStore } from 'jotai';
+import { createThreadStore as createStore } from '../../helpers/threadRepository';
 
 // =============================================================================
 // Module mocks — react/atoms/threads drags in the WS layer, citations, and
@@ -132,6 +132,7 @@ vi.mock('@beaver/agent-core/run-state/atoms', async () => {
 vi.mock('../../../react/atoms/agentRunAtoms', async () => {
     const { atom } = await import('jotai');
     return {
+        abandonActiveRunLocallyAtom: atom(null, () => {}),
         isWSChatPendingAtom: atom(false),
         isWSConnectedAtom: atom(false),
         isWSReadyAtom: atom(false),
@@ -368,7 +369,7 @@ describe('loadThreadAtom instance-mismatch gate', () => {
         expect(getThreadRunsMock).not.toHaveBeenCalled();
     });
 
-    it('a 404 while loading runs returns false and resets to the empty state', async () => {
+    it('a 404 while loading runs returns false, resets to the empty state, and marks the thread deleted', async () => {
         const threadId = nextThreadId();
         getThreadRunsMock.mockRejectedValue(new ApiError(404, 'Not Found'));
 
@@ -379,6 +380,29 @@ describe('loadThreadAtom instance-mismatch gate', () => {
         expect(loaded).toBe(false);
         expect(store.get(currentThreadIdAtom)).toBeNull();
         expect(store.get(isLoadingThreadAtom)).toBe(false);
+        expect(Zotero.Beaver.presence.getSnapshot().deleted).toEqual([threadId]);
+    });
+
+    it('a 404 on the identity fetch marks the thread deleted for the instance instead of leaving it stale', async () => {
+        const threadId = nextThreadId();
+        // Realtime cannot be relied on to have delivered the deletion, so the
+        // failed refresh is the instance's first sign the chat is gone.
+        getThreadMock.mockRejectedValue(new ApiError(404, 'Not Found'));
+
+        const loaded = await store.set(loadThreadAtom, { user_id: 'u1', threadId });
+
+        expect(loaded).toBe(false);
+        expect(getThreadRunsMock).not.toHaveBeenCalled();
+        expect(Zotero.Beaver.presence.getSnapshot().deleted).toEqual([threadId]);
+        expect(store.get(isLoadingThreadAtom)).toBe(false);
+    });
+
+    it('a non-404 identity-fetch failure does not mark the thread deleted', async () => {
+        const threadId = nextThreadId();
+        getThreadMock.mockRejectedValue(new ApiError(500, 'Server Error'));
+
+        expect(await store.set(loadThreadAtom, { user_id: 'u1', threadId })).toBe(false);
+        expect(Zotero.Beaver.presence.getSnapshot().deleted).toEqual([]);
     });
     it.each(['identity', 'runs'])('does not let a stale %s response overwrite a new reader-action draft', async (phase) => {
         let finish!: (value: any) => void;

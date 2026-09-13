@@ -191,6 +191,7 @@ export interface DocumentCacheMetadataRecord {
 }
 
 export interface DocumentCachePayloadRecord {
+    extractionSource?: "native" | "ocr";
     id: number;
     metadataId: number;
     itemId: number;
@@ -470,15 +471,9 @@ export const MAX_OCR_FAILURES = 5;
 export const MAX_UPSERT_FAILURES = 5;
 export const DOC_PROCESSING_RETRY_BASE_DELAY_MS = 60 * 60 * 1000; // 1 hour
 
-// Schema versions for the disposable, drop-and-recreate tables. These tables
-// hold derived/ephemeral state (a re-warmable document cache and a re-enqueable
-// job queue), so on an incompatible schema change we drop and recreate them
-// rather than migrating. Bump the relevant constant on ANY change to the
-// corresponding table shapes (columns, constraints, or a correctness-affecting
-// index such as the queue dedupe key). The recorded version lives in the
-// `schema_versions` table and survives the table drops, so existing installs
-// reset exactly once when the version changes.
-export const DOCUMENT_CACHE_SCHEMA_VERSION = 1;
+// Cache schema changes require a preserving migration. Queue and processing
+// tables remain disposable; bump their versions when their shape changes.
+export const DOCUMENT_CACHE_SCHEMA_VERSION = 2;
 export const BACKGROUND_JOBS_SCHEMA_VERSION = 2;
 export const ATTACHMENT_PROCESSING_STATE_SCHEMA_VERSION = 1;
 export const PROCESSING_INDEX_STATE_SCHEMA_VERSION = 1;
@@ -849,19 +844,33 @@ export class BeaverDB {
         await this.queryAsync(`DROP TABLE IF EXISTS attachment_file_cache`);
         await this.queryAsync(`DROP TABLE IF EXISTS document_cache_recovery`);
 
-        // Drop and recreate the document cache tables when their schema version
-        // changes. The cache re-warms on demand, so resetting is safe. Bump
-        // DOCUMENT_CACHE_SCHEMA_VERSION on any change to the tables below.
-        if (await this.disposableSchemaNeedsReset(
-            'document_cache',
-            DOCUMENT_CACHE_SCHEMA_VERSION,
-            ['document_cache_metadata', 'document_cache_payloads'],
-            () => this.documentCacheSchemaIsCurrent(),
-        )) {
-            await this.queryAsync(`DROP TABLE IF EXISTS document_cache_payloads`);
-            await this.queryAsync(`DROP TABLE IF EXISTS document_cache_metadata`);
-            await this.setSchemaVersion('document_cache', DOCUMENT_CACHE_SCHEMA_VERSION);
+        // Compatible cache upgrades preserve prepared text and its source identity.
+        if ((await this.getSchemaVersion('document_cache') ?? 0) > DOCUMENT_CACHE_SCHEMA_VERSION) {
+            throw new Error('Document cache was written by a newer Beaver version; retained without modification.');
         }
+        if (await this.tableExists('document_cache_payloads') || await this.tableExists('document_cache_metadata')) {
+            if (!(await this.documentCacheSchemaIsCurrent())) {
+                throw new Error('Document cache needs a compatible migration; prepared OCR data has been retained.');
+            }
+            const columns = await this.getTableColumns('document_cache_payloads');
+            if (!columns.has('extraction_source')) {
+                await this.conn.executeTransaction(async () => {
+                    await this.queryAsync(`ALTER TABLE document_cache_payloads
+                        ADD COLUMN extraction_source TEXT NOT NULL DEFAULT 'native'`);
+                    if (await this.tableExists('attachment_processing_state')) {
+                        await this.queryAsync(`UPDATE document_cache_payloads SET extraction_source = 'ocr'
+                            WHERE EXISTS (SELECT 1 FROM attachment_processing_state s
+                                WHERE s.library_id = document_cache_payloads.library_id
+                                AND s.zotero_key = document_cache_payloads.zotero_key
+                                AND s.ocr_status = 'done'
+                                AND ((s.file_mtime_ms IS NULL AND s.file_size_bytes IS NULL)
+                                    OR (s.file_mtime_ms = document_cache_payloads.source_file_mtime_ms
+                                        AND s.file_size_bytes = document_cache_payloads.source_file_size_bytes)))`);
+                    }
+                });
+            }
+        }
+        await this.setSchemaVersion('document_cache', DOCUMENT_CACHE_SCHEMA_VERSION);
 
         await this.queryAsync(`
             CREATE TABLE IF NOT EXISTS document_cache_metadata (
@@ -912,6 +921,7 @@ export class BeaverDB {
                 payload_path               TEXT NOT NULL,
                 payload_size_bytes         INTEGER NOT NULL,
                 payload_sha256             TEXT,
+                extraction_source          TEXT NOT NULL DEFAULT 'native',
                 extraction_schema_version  TEXT NOT NULL,
                 cache_format_version       INTEGER NOT NULL,
                 created_at                 TEXT NOT NULL DEFAULT (datetime('now')),
@@ -3316,6 +3326,7 @@ export class BeaverDB {
             payloadPath: row.payload_path,
             payloadSizeBytes: row.payload_size_bytes,
             payloadSha256: row.payload_sha256 ?? null,
+            extractionSource: row.extraction_source === "ocr" ? "ocr" : "native",
             extractionSchemaVersion: row.extraction_schema_version,
             cacheFormatVersion: row.cache_format_version,
             createdAt: row.created_at,
@@ -3673,6 +3684,7 @@ export class BeaverDB {
                     created_at: row.getResultByIndex(16),
                     updated_at: row.getResultByIndex(17),
                     last_accessed_at: row.getResultByIndex(18),
+                    extraction_source: row.getResultByIndex(19),
                 });
             },
         });
@@ -3693,7 +3705,7 @@ export class BeaverDB {
                        content_kind, source_file_path, source_file_mtime_ms, source_file_size_bytes,
                        source_size_bytes, payload_path, payload_size_bytes,
                        payload_sha256, extraction_schema_version, cache_format_version,
-                       created_at, updated_at, last_accessed_at
+                       created_at, updated_at, last_accessed_at, extraction_source
                 FROM document_cache_payloads`;
     }
 
@@ -3871,8 +3883,8 @@ export class BeaverDB {
                 (metadata_id, item_id, library_id, zotero_key, payload_kind, content_kind,
                  source_file_path, source_file_mtime_ms, source_file_size_bytes,
                  source_size_bytes, payload_path, payload_size_bytes, payload_sha256,
-                 extraction_schema_version, cache_format_version, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                 extraction_schema_version, cache_format_version, extraction_source, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
              ON CONFLICT(metadata_id, payload_kind) DO UPDATE SET
                 metadata_id = excluded.metadata_id,
                 item_id = excluded.item_id,
@@ -3888,6 +3900,7 @@ export class BeaverDB {
                 payload_sha256 = excluded.payload_sha256,
                 extraction_schema_version = excluded.extraction_schema_version,
                 cache_format_version = excluded.cache_format_version,
+                extraction_source = excluded.extraction_source,
                 updated_at = datetime('now')`,
             [
                 record.metadataId,
@@ -3905,6 +3918,7 @@ export class BeaverDB {
                 record.payloadSha256,
                 record.extractionSchemaVersion,
                 record.cacheFormatVersion,
+                record.extractionSource ?? "native",
             ],
         );
         const payload = await this.getDocumentCachePayload(record.libraryId, record.zoteroKey, record.payloadKind);
@@ -3960,6 +3974,23 @@ export class BeaverDB {
             { onRow: (row: any) => rows.push(Number(row.getResultByIndex(0))) },
         );
         return rows[0] ?? 0;
+    }
+
+    public async getProtectedDocumentCacheStats(versions: { metadata: number; payload: number; pdf: string | null }): Promise<{ bytes: number; incompatible: number }> {
+        const stats = { bytes: 0, incompatible: 0 };
+        await this.queryAsync(`SELECT COALESCE(SUM(p.payload_size_bytes), 0),
+            COUNT(DISTINCT CASE WHEN p.cache_format_version != ? OR p.extraction_schema_version != ?
+                OR m.metadata_format_version != ? OR m.extraction_schema_version != ?
+                THEN m.id END)
+            FROM document_cache_payloads p JOIN document_cache_metadata m ON m.id = p.metadata_id
+            WHERE p.extraction_source = 'ocr'`,
+        [versions.payload, versions.pdf, versions.metadata, versions.pdf], {
+            onRow: (row: any) => {
+                stats.bytes = Number(row.getResultByIndex(0));
+                stats.incompatible = Number(row.getResultByIndex(1));
+            },
+        });
+        return stats;
     }
 
     /**
@@ -4029,7 +4060,8 @@ export class BeaverDB {
                AND payload_size_bytes = ?
                AND COALESCE(payload_sha256, '') = COALESCE(?, '')
                AND extraction_schema_version = ?
-               AND cache_format_version = ?`,
+               AND cache_format_version = ?
+               AND extraction_source = ?`,
             [
                 payload.id,
                 payload.metadataId,
@@ -4047,6 +4079,7 @@ export class BeaverDB {
                 payload.payloadSha256,
                 payload.extractionSchemaVersion,
                 payload.cacheFormatVersion,
+                payload.extractionSource ?? "native",
             ],
         );
 

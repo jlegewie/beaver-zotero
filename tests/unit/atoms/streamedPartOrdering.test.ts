@@ -112,9 +112,10 @@ function streamedText(run: AgentRun | null): string | undefined {
 }
 
 describe('streamed parts and the other WebSocket callbacks', () => {
-    const callbacks = createWSCallbacks(store.set);
+    let callbacks: ReturnType<typeof createWSCallbacks>;
 
     beforeEach(() => {
+        callbacks = createWSCallbacks(store.set);
         vi.mocked(Zotero.getMainWindow).mockReturnValue(frozenWindow as unknown as Window);
         store.set(threadRunsAtom, []);
         store.set(activeRunAtom, streamingRun());

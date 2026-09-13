@@ -56,7 +56,6 @@ import {
 } from './documentExtraction';
 import { readableToExtractKind, type ExtractContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import { recordReadingOutcome } from './documentExtraction/readingOutcome';
-import { maybeEnqueueOcrJob } from './ocr/enqueueOcr';
 import {
     EpubStructureError,
     extractEpubDocumentFromFile,
@@ -185,8 +184,6 @@ export interface ExtractAndCacheArgs {
      * internally)
      */
     onRemoteDownloadFailure?: (error: unknown) => void;
-    /** Queue priority forwarded to the existing no-text-layer OCR producer. */
-    ocrPriority?: number;
     /** Carry explicit cache preparation through fresh no-text-layer detection. */
     prepareCache?: boolean;
 }
@@ -1118,7 +1115,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                     return {
                         kind: 'cached_error',
                         code: 'no_text_layer',
-                        message: `The PDF file for ${resolvedKeyStr} requires OCR (no text layer)`,
+                        message: `The PDF file for ${resolvedKeyStr} is not prepared (no text layer). Enable cloud preparation in Beaver Preferences; reading does not start OCR`,
                         pageCount: preflight.pageCount,
                         resolvedAttachment,
                     };
@@ -1473,20 +1470,6 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                     pages: null,
                 });
 
-                // Queue OCR for Zotero attachments that lack a text layer.
-                // External files have no attachment hash, so they are skipped.
-                if (extractionError.code === ExtractionErrorCode.NO_TEXT_LAYER && zoteroItem) {
-                    maybeEnqueueOcrJob({
-                        item: zoteroItem,
-                        libraryId: zoteroItem.libraryID,
-                        zoteroKey: zoteroItem.key,
-                        itemId: zoteroItem.id,
-                        pageCount: extractionError.pageCount ?? totalPages,
-                        priority: args.ocrPriority,
-                        prepareCache: args.prepareCache,
-                    });
-                }
-
                 const cachedCode = extractionError.code === ExtractionErrorCode.ENCRYPTED
                     ? 'encrypted'
                     : extractionError.code === ExtractionErrorCode.INVALID_PDF
@@ -1499,7 +1482,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                         ? `The PDF file for ${errorKey} is password-protected`
                         : cachedCode === 'invalid_pdf'
                             ? `The PDF file for ${errorKey} is invalid or corrupted`
-                            : `The PDF file for ${errorKey} requires OCR (no text layer)`,
+                            : `The PDF file for ${errorKey} is not prepared (no text layer). Enable cloud preparation in Beaver Preferences; reading does not start OCR`,
                     pageCount: extractionError.pageCount ?? totalPages,
                     resolvedAttachment,
                 };
@@ -1519,7 +1502,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                     return {
                         kind: 'response_error',
                         code: 'no_text_layer',
-                        message: `The PDF file for ${errorKey} requires OCR (no text layer)`,
+                        message: `The PDF file for ${errorKey} is not prepared (no text layer). Enable cloud preparation in Beaver Preferences; reading does not start OCR`,
                         pageCount: totalPagesForError,
                         resolvedAttachment,
                     };

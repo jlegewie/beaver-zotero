@@ -141,6 +141,7 @@ beforeEach(() => {
     // The background track reaches the queue + dispatcher through `Zotero.Beaver`
     // (the slot's ctx is gone once parked). ctx.db mirrors Zotero.Beaver.db.
     (globalThis as any).Zotero.Beaver = {
+        hasOcrAccess: true,
         get libraryScopeInitialized() { return libraryScope.initialized; },
         get searchableLibraryIds() { return libraryScope.searchableIds; },
         documentCache: {
@@ -171,6 +172,15 @@ describe('OcrExecutor', () => {
 
     beforeEach(() => {
         executor = new OcrExecutor(fakePoller as any);
+    });
+
+    it('does not request, upload, or resume OCR without effective access', async () => {
+        Zotero.Beaver.hasOcrAccess = false;
+        const outcome = await executor.execute(record, makeCtx());
+        expect(outcome).toEqual({ kind: 'release', reason: 'aborted' });
+        expect(api.requestOcr).not.toHaveBeenCalled();
+        expect(api.markUploaded).not.toHaveBeenCalled();
+        expect(api.status).not.toHaveBeenCalled();
     });
 
     it('exposes the document_ocr job type', () => {

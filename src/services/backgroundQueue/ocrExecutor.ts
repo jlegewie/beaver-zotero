@@ -829,7 +829,8 @@ export class OcrExecutor implements JobExecutor {
     private throwIfLibraryUnavailable(libraryId: number, ctx: JobExecutionContext): void {
         this.throwIfAborted(ctx);
         if (
-            !Zotero.Beaver.libraryScopeInitialized
+            Zotero.Beaver.hasOcrAccess !== true
+            || !Zotero.Beaver.libraryScopeInitialized
             || !(Zotero.Beaver.searchableLibraryIds ?? []).includes(libraryId)
         ) {
             throw new OcrAbort();

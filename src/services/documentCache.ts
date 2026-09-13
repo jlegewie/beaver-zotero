@@ -78,6 +78,8 @@ export interface DocumentCacheStats {
     payload_cache_dir: string;
     /** Total compressed size of all cached payloads. */
     payload_total_bytes: number;
+    protected_ocr_bytes?: number;
+    ocr_repreparation_required_count?: number;
     /** Configured size budget; 0 when the budget is disabled. */
     payload_budget_bytes: number;
 }
@@ -102,6 +104,7 @@ export interface DocumentCacheSourceIdentity {
 }
 
 interface CacheMetadataInput {
+    extractionSource?: "native" | "ocr";
     contentKind?: ExtractContentKind;
     pageCount: number | null;
     pageLabels: PageLabels | Record<number, string> | null;
@@ -151,8 +154,11 @@ export class DocumentCache {
     private payloadCacheDir = '';
     private clearing: Promise<{ metadataRows: number; payloadRows: number }> | null = null;
     private cacheGeneration = 0;
+    private libraryGenerations = new Map<number, number>();
+    private attachmentGenerations = new Map<string, number>();
     private maintenance: Promise<void> | null = null;
     private activeWrites = new Set<Promise<void>>();
+    private itemWriteLocks = new Map<string, Promise<void>>();
     private writeLocks = new Map<string, Promise<void>>();
     private extractionLocks = new Map<string, ExtractionLockEntry<CacheablePayload>>();
     /** Wall-clock time of the last size-budget pass; 0 = never run. */
@@ -164,8 +170,9 @@ export class DocumentCache {
     /** Set while a follow-up pass is already armed behind the in-flight one. */
     private budgetPassFollowUp = false;
 
-    constructor(db: BeaverDB) {
+    constructor(db: BeaverDB, payloadCacheDir = '') {
         this.db = db;
+        this.payloadCacheDir = payloadCacheDir;
     }
 
     /** Initialize the cache directory under the Zotero profile. */
@@ -196,6 +203,15 @@ export class DocumentCache {
             if (!record) return null;
 
             if (await this.isMetadataStale(record, filePath)) {
+                const protectedPayload = (await this.db.getDocumentCachePayloadsForMetadata(record.id))
+                    .some(p => p.extractionSource === 'ocr');
+                const source = protectedPayload ? await this.getSourceIdentity(filePath, record.sourceSizeBytes) : null;
+                if (source && this.sourceIdentityMatches(source, {
+                    filePath: record.filePath, fileSignature: record.fileSignature, sourceSizeBytes: record.sourceSizeBytes,
+                })) {
+                    logger('Prepared OCR cache requires re-preparation for this extraction version; retained on disk.', 1);
+                    return null;
+                }
                 const deletedPayloads = await this.db.deleteDocumentCacheMetadataIfUnchanged(record);
                 if (deletedPayloads) {
                     await this.removePayloadFiles(deletedPayloads);
@@ -511,7 +527,7 @@ export class DocumentCache {
         metadata: (result: T) => CacheMetadataInput;
     }): Promise<T | null> {
         if (this.clearing) return null;
-        const generation = this.cacheGeneration;
+        const generation = this.extractionGeneration(input.item);
         const ref = {
             libraryId: input.item.libraryID,
             zoteroKey: input.item.key,
@@ -525,17 +541,19 @@ export class DocumentCache {
         if (input.maxSourceSizeBytes != null && source.sourceSizeBytes > input.maxSourceSizeBytes) {
             return null;
         }
+        if (generation !== this.extractionGeneration(input.item) || this.clearing) return null;
         const payloadKind = DocumentCache.payloadKindForMode(input.mode);
         const contentKind = input.contentKind ?? 'pdf';
         const suffix = contentKind === 'pdf' ? '' : `/${contentKind}`;
         const lockScope = input.lockScope ?? 'default';
-        const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${payloadKind}/${this.sourceIdentityKey(source)}${suffix}/scope:${lockScope}`;
+        const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${payloadKind}/${this.sourceIdentityKey(source)}${suffix}/scope:${lockScope}/generation:${generation}`;
         const existing = this.extractionLocks.get(lockKey) as ExtractionLockEntry<T> | undefined;
         if (existing) {
             return this.waitForSharedExtraction(existing, input.abortSignal, input.sharedTimeoutMs);
         }
 
         const cached = await readCached(ref);
+        if (generation !== this.extractionGeneration(input.item) || this.clearing) return null;
         if (cached) return cached;
 
         const refreshedExisting = this.extractionLocks.get(lockKey) as ExtractionLockEntry<T> | undefined;
@@ -543,7 +561,7 @@ export class DocumentCache {
             return this.waitForSharedExtraction(refreshedExisting, input.abortSignal, input.sharedTimeoutMs);
         }
 
-        if (generation !== this.cacheGeneration || this.clearing) return null;
+        if (generation !== this.extractionGeneration(input.item) || this.clearing) return null;
         const controller = createAbortController();
         const entry: ExtractionLockEntry<T> = {
             controller,
@@ -555,6 +573,7 @@ export class DocumentCache {
         };
         entry.promise = (async () => {
             const refreshed = await readCached(ref);
+            if (generation !== this.extractionGeneration(input.item) || this.clearing) return null;
             if (refreshed) return refreshed;
 
             let result: T;
@@ -563,7 +582,7 @@ export class DocumentCache {
             } finally {
                 this.clearSharedExtractionTimer(entry);
             }
-            if (controller.signal.aborted || generation !== this.cacheGeneration) return null;
+            if (controller.signal.aborted || generation !== this.extractionGeneration(input.item)) return null;
             await this.putResult({
                 item: input.item,
                 filePath: input.filePath,
@@ -608,7 +627,7 @@ export class DocumentCache {
         create: (signal: AbortSignal) => Promise<SerializedBeaverExtractResult>;
     }): Promise<SerializedDocumentCacheResult | null> {
         if (this.clearing) return null;
-        const generation = this.cacheGeneration;
+        const generation = this.extractionGeneration(input.item);
         const ref = {
             libraryId: input.item.libraryID,
             zoteroKey: input.item.key,
@@ -624,15 +643,17 @@ export class DocumentCache {
         if (input.maxSourceSizeBytes != null && source.sourceSizeBytes > input.maxSourceSizeBytes) {
             return null;
         }
+        if (generation !== this.extractionGeneration(input.item) || this.clearing) return null;
         const payloadKind = DocumentCache.payloadKindForMode(input.mode);
         const lockScope = input.lockScope ?? 'default';
-        const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${payloadKind}/${this.sourceIdentityKey(source)}/serialized/scope:${lockScope}`;
+        const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${payloadKind}/${this.sourceIdentityKey(source)}/serialized/scope:${lockScope}/generation:${generation}`;
         const existing = this.extractionLocks.get(lockKey) as ExtractionLockEntry<SerializedDocumentCacheResult> | undefined;
         if (existing) {
             return this.waitForSharedExtraction(existing, input.abortSignal, input.sharedTimeoutMs);
         }
 
         const cached = await readCached(ref);
+        if (generation !== this.extractionGeneration(input.item) || this.clearing) return null;
         if (cached) return cached;
 
         const refreshedExisting = this.extractionLocks.get(lockKey) as ExtractionLockEntry<SerializedDocumentCacheResult> | undefined;
@@ -640,7 +661,7 @@ export class DocumentCache {
             return this.waitForSharedExtraction(refreshedExisting, input.abortSignal, input.sharedTimeoutMs);
         }
 
-        if (generation !== this.cacheGeneration || this.clearing) return null;
+        if (generation !== this.extractionGeneration(input.item) || this.clearing) return null;
         const controller = createAbortController();
         const entry: ExtractionLockEntry<SerializedDocumentCacheResult> = {
             controller,
@@ -652,6 +673,7 @@ export class DocumentCache {
         };
         entry.promise = (async () => {
             const refreshed = await readCached(ref);
+            if (generation !== this.extractionGeneration(input.item) || this.clearing) return null;
             if (refreshed) return refreshed;
 
             let created: SerializedBeaverExtractResult;
@@ -660,7 +682,7 @@ export class DocumentCache {
             } finally {
                 this.clearSharedExtractionTimer(entry);
             }
-            if (controller.signal.aborted || generation !== this.cacheGeneration) return null;
+            if (controller.signal.aborted || generation !== this.extractionGeneration(input.item)) return null;
             const stored: SerializedDocumentCacheResult = {
                 schemaVersion: created.schemaVersion,
                 mode: created.mode,
@@ -798,6 +820,9 @@ export class DocumentCache {
             try {
                 const source = await this.getSourceIdentity(input.filePath, input.sourceSizeBytes);
                 if (Zotero.__beaverShuttingDown) return;
+                const existing = await this.db.getDocumentCacheMetadataByKey(input.item.libraryID, input.item.key);
+                if (existing && this.sourceIdentityMatches(source, { filePath: existing.filePath, fileSignature: existing.fileSignature, sourceSizeBytes: existing.sourceSizeBytes })
+                    && (await this.db.getDocumentCachePayloadsForMetadata(existing.id)).some(p => p.extractionSource === 'ocr')) return;
                 const record = this.buildMetadataInput(
                     input.item,
                     source,
@@ -809,7 +834,7 @@ export class DocumentCache {
             } catch (error) {
                 logger(`DocumentCache.putMetadata error: ${error}`, 1);
             }
-        });
+        }, false, input.item);
     }
 
     /** Store fresh source-level metadata and a compressed full-document payload. */
@@ -831,7 +856,10 @@ export class DocumentCache {
             const next = previous
                 .catch(() => undefined)
                 .then(() => this.putResultUnlocked(input))
-                .catch((error) => logger(`DocumentCache.putResult error: ${error}`, 1))
+                .catch((error) => {
+                    logger(`DocumentCache.putResult error: ${error}`, 1);
+                    if (input.metadata.extractionSource === 'ocr') throw error;
+                })
                 .finally(() => {
                     if (this.writeLocks.get(lockKey) === next) {
                         this.writeLocks.delete(lockKey);
@@ -839,7 +867,7 @@ export class DocumentCache {
                 });
             this.writeLocks.set(lockKey, next);
             await next;
-        });
+        }, input.metadata.extractionSource === "ocr", input.item);
     }
 
     /** Store fresh source-level metadata and a pre-serialized compressed payload. */
@@ -861,7 +889,10 @@ export class DocumentCache {
             const next = previous
                 .catch(() => undefined)
                 .then(() => this.putSerializedResultUnlocked(input))
-                .catch((error) => logger(`DocumentCache.putSerializedResult error: ${error}`, 1))
+                .catch((error) => {
+                    logger(`DocumentCache.putSerializedResult error: ${error}`, 1);
+                    if (input.metadata.extractionSource === 'ocr') throw error;
+                })
                 .finally(() => {
                     if (this.writeLocks.get(lockKey) === next) {
                         this.writeLocks.delete(lockKey);
@@ -869,7 +900,7 @@ export class DocumentCache {
                 });
             this.writeLocks.set(lockKey, next);
             await next;
-        });
+        }, input.metadata.extractionSource === "ocr", input.item);
     }
 
     /** Store authoritative error metadata and delete any payloads for the attachment. */
@@ -894,6 +925,9 @@ export class DocumentCache {
                 };
                 const source = await this.getSourceIdentity(input.filePath, input.sourceSizeBytes);
                 if (Zotero.__beaverShuttingDown) return;
+                const existing = await this.db.getDocumentCacheMetadataByKey(input.item.libraryID, input.item.key);
+                if (existing && this.sourceIdentityMatches(source, { filePath: existing.filePath, fileSignature: existing.fileSignature, sourceSizeBytes: existing.sourceSizeBytes })
+                    && (await this.db.getDocumentCachePayloadsForMetadata(existing.id)).some(p => p.extractionSource === 'ocr')) return;
                 const record = this.buildMetadataInput(input.item, source, input.contentType, metadata);
                 const { metadata: stored, deletedPayloads } = await this.db.upsertDocumentCacheMetadata(record);
                 const payloads = await this.db.deleteDocumentCachePayloadsForMetadata(stored.id);
@@ -901,11 +935,20 @@ export class DocumentCache {
             } catch (error) {
                 logger(`DocumentCache.putErrorMetadata error: ${error}`, 1);
             }
-        });
+        }, false, input.item);
+    }
+
+    /** Whole-cache maintenance and targeted invalidation have independent lifetimes. */
+    private extractionGeneration(item: DocumentCacheItemRef): string {
+        return `${this.cacheGeneration}/${this.libraryGenerations.get(item.libraryID) ?? 0}`
+            + `/${this.attachmentGenerations.get(DocumentCache.itemKey(item.libraryID, item.key)) ?? 0}`;
     }
 
     /** Invalidate all document-cache state for one attachment. */
     async invalidate(libraryId: number, zoteroKey: string): Promise<void> {
+        const key = DocumentCache.itemKey(libraryId, zoteroKey);
+        this.attachmentGenerations.set(key, (this.attachmentGenerations.get(key) ?? 0) + 1);
+        await this.itemWriteLocks.get(key)?.catch(() => undefined);
         try {
             const payloads = await this.db.deleteDocumentCacheMetadata(libraryId, zoteroKey);
             await this.removePayloadFiles(payloads);
@@ -916,6 +959,10 @@ export class DocumentCache {
 
     /** Invalidate all document-cache state for a library. */
     async invalidateByLibrary(libraryId: number): Promise<void> {
+        this.libraryGenerations.set(libraryId, (this.libraryGenerations.get(libraryId) ?? 0) + 1);
+        await Promise.allSettled([...this.itemWriteLocks]
+            .filter(([key]) => key.startsWith(`${libraryId}/`))
+            .map(([, write]) => write));
         try {
             const payloads = await this.db.deleteDocumentCacheMetadataByLibrary(libraryId);
             await this.removePayloadFiles(payloads);
@@ -940,8 +987,7 @@ export class DocumentCache {
     }
 
     /**
-     * Completely clear the document cache: delete every metadata row, every
-     * payload row, and every file stored on disk under the cache directory.
+     * Clear native extracted text while retaining OCR payloads and their metadata.
      */
     clearAll(): Promise<{ metadataRows: number; payloadRows: number }> {
         if (this.clearing) return this.clearing;
@@ -950,10 +996,20 @@ export class DocumentCache {
         return this.clearing;
     }
 
-    private trackCacheWrite(write: () => Promise<void>): Promise<void> {
-        if (this.clearing) return Promise.resolve();
-        const pending = write().finally(() => this.activeWrites.delete(pending));
+    private trackCacheWrite(write: () => Promise<void>, protectedWrite = false, item?: DocumentCacheItemRef): Promise<void> {
+        if (this.clearing && !protectedWrite) return Promise.resolve();
+        const key = item ? DocumentCache.itemKey(item.libraryID, item.key) : '';
+        const before = this.itemWriteLocks.get(key) ?? Promise.resolve();
+        const clearing = this.clearing;
+        const pending = before.catch(() => undefined)
+            .then(() => clearing)
+            .then(write)
+            .finally(() => {
+                this.activeWrites.delete(pending);
+                if (this.itemWriteLocks.get(key) === pending) this.itemWriteLocks.delete(key);
+            });
         this.activeWrites.add(pending);
+        this.itemWriteLocks.set(key, pending);
         return pending;
     }
 
@@ -965,15 +1021,21 @@ export class DocumentCache {
         this.extractionLocks.clear();
         // Finish writes that already entered the cache before deleting their output.
         await Promise.allSettled([...this.activeWrites]);
-        const metadataRows = await this.db.getDocumentCacheMetadataCount();
-        const payloadRows = await this.db.getDocumentCachePayloadCount();
-        if (this.payloadCacheDir) {
-            const children = await IOUtils.getChildren(this.payloadCacheDir);
-            for (const child of children) {
-                await IOUtils.remove(child, { recursive: true } as any);
-            }
+        const allPayloads = await this.db.getAllDocumentCachePayloads();
+        const protectedIds = new Set(allPayloads.filter(p => p.extractionSource === 'ocr').map(p => p.metadataId));
+        let payloadRows = 0;
+        for (const payload of allPayloads) {
+            if (payload.extractionSource !== 'ocr' && await this.deletePayload(payload)) payloadRows++;
         }
-        await this.db.deleteAllDocumentCache();
+        let metadataRows = 0;
+        for (const metadata of await this.db.getAllDocumentCacheMetadata()) {
+            if (protectedIds.has(metadata.id)) continue;
+            await this.db.deleteDocumentCacheMetadataIfUnchanged(metadata);
+            metadataRows++;
+        }
+        await this.removeOrphanPayloadFiles(new Set(
+            (await this.db.getAllDocumentCachePayloads()).map(p => p.payloadPath),
+        ), true);
         return { metadataRows, payloadRows };
     }
 
@@ -996,6 +1058,11 @@ export class DocumentCache {
                 if (!stale && !isRemoteFilePath(metadata.filePath)) {
                     stale = !(await IOUtils.exists(metadata.filePath).catch(() => false));
                 }
+                const protectedPayload = (await this.db.getDocumentCachePayloadsForMetadata(metadata.id)).some(p => p.extractionSource === 'ocr');
+                if (protectedPayload && !missingOrTrashed.has(DocumentCache.itemKey(metadata.libraryId, metadata.zoteroKey))) {
+                    if (stale) logger('Prepared OCR cache is unavailable or requires re-preparation; retained on disk.', 1);
+                    continue;
+                }
                 if (stale) {
                     const payloads = await this.db.deleteDocumentCacheMetadata(metadata.libraryId, metadata.zoteroKey);
                     await this.removePayloadFiles(payloads);
@@ -1013,7 +1080,7 @@ export class DocumentCache {
                     || expectedSchemaVersion === null
                     || payload.extractionSchemaVersion !== expectedSchemaVersion
                     || !(await IOUtils.exists(payload.payloadPath).catch(() => false));
-                if (invalid) {
+                if (invalid && payload.extractionSource !== "ocr") {
                     const deleted = await this.db.deleteDocumentCachePayload(payload.libraryId, payload.zoteroKey, payload.payloadKind);
                     if (deleted) {
                         await this.removePayloadFiles([deleted]);
@@ -1036,6 +1103,10 @@ export class DocumentCache {
 
     /** Return compact document-cache counts and directory information. */
     async getStats(): Promise<DocumentCacheStats> {
+        const protectedStats = await this.db.getProtectedDocumentCacheStats({
+            metadata: DOCUMENT_METADATA_FORMAT_VERSION, payload: DOCUMENT_PAYLOAD_FORMAT_VERSION,
+            pdf: expectedExtractionSchemaVersion('pdf'),
+        });
         // Polling uses registered cache state. Reads and startup GC reconcile external
         // file changes; cache writes, eviction, and clearing update these rows directly.
         return {
@@ -1050,6 +1121,8 @@ export class DocumentCache {
             payload_count: await this.db.getDocumentCachePayloadCount(),
             payload_cache_dir: this.payloadCacheDir,
             payload_total_bytes: await this.db.getDocumentCachePayloadTotalBytes(),
+            protected_ocr_bytes: protectedStats.bytes,
+            ocr_repreparation_required_count: protectedStats.incompatible,
             payload_budget_bytes: DocumentCache.budgetBytes(),
         };
     }
@@ -1126,7 +1199,8 @@ export class DocumentCache {
             for (const candidate of candidates) {
                 if (Zotero.__beaverShuttingDown) break;
                 examined++;
-                const keep = this.isLockedInFlight(candidate)
+                const keep = candidate.extractionSource === "ocr"
+                    || this.isLockedInFlight(candidate)
                     || retained.has(DocumentCache.itemKey(candidate.libraryId, candidate.zoteroKey))
                     || !(await this.deletePayload(candidate));
                 if (keep) {
@@ -1232,6 +1306,10 @@ export class DocumentCache {
         }
         if (Zotero.__beaverShuttingDown) return;
 
+        const existing = await this.db.getDocumentCacheMetadataByKey(input.item.libraryID, input.item.key);
+        if (input.metadata.extractionSource !== 'ocr' && existing
+            && this.sourceIdentityMatches(source, { filePath: existing.filePath, fileSignature: existing.fileSignature, sourceSizeBytes: existing.sourceSizeBytes })
+            && (await this.db.getDocumentCachePayloadsForMetadata(existing.id)).some(p => p.extractionSource === 'ocr')) return;
         const payloadKind = DocumentCache.payloadKindForMode(input.mode);
         const metadataInput = this.buildMetadataInput(input.item, source, input.contentType, input.metadata);
         const result = input.result as { mode?: string; schemaVersion: string };
@@ -1264,6 +1342,7 @@ export class DocumentCache {
             payloadSha256: payloadWrite.sha256,
             extractionSchemaVersion: metadataInput.extractionSchemaVersion,
             cacheFormatVersion: DOCUMENT_PAYLOAD_FORMAT_VERSION,
+            extractionSource: input.metadata.extractionSource ?? "native",
         });
         const cleanup = oldPayload && oldPayload.payloadPath !== payloadWrite.path
             ? [...deletedPayloads, oldPayload]
@@ -1291,6 +1370,10 @@ export class DocumentCache {
         }
         if (Zotero.__beaverShuttingDown) return;
 
+        const existing = await this.db.getDocumentCacheMetadataByKey(input.item.libraryID, input.item.key);
+        if (input.metadata.extractionSource !== 'ocr' && existing
+            && this.sourceIdentityMatches(source, { filePath: existing.filePath, fileSignature: existing.fileSignature, sourceSizeBytes: existing.sourceSizeBytes })
+            && (await this.db.getDocumentCachePayloadsForMetadata(existing.id)).some(p => p.extractionSource === 'ocr')) return;
         const payloadKind = DocumentCache.payloadKindForMode(input.mode);
         const metadataInput = this.buildMetadataInput(input.item, source, input.contentType, input.metadata);
         if (
@@ -1322,6 +1405,7 @@ export class DocumentCache {
             payloadSha256: payloadWrite.sha256,
             extractionSchemaVersion: metadataInput.extractionSchemaVersion,
             cacheFormatVersion: DOCUMENT_PAYLOAD_FORMAT_VERSION,
+            extractionSource: input.metadata.extractionSource ?? "native",
         });
         const cleanup = oldPayload && oldPayload.payloadPath !== payloadWrite.path
             ? [...deletedPayloads, oldPayload]
@@ -1621,6 +1705,8 @@ export class DocumentCache {
      * copy is stale.
      */
     private async deletePayload(payload: DocumentCachePayloadRecord, removeFile = true): Promise<boolean> {
+        // Read-time validation never discards protected bytes, including older formats.
+        if (payload.extractionSource === 'ocr') return false;
         const deleted = await this.db.deleteDocumentCachePayloadIfUnchanged(payload);
         if (!deleted) return false;
         if (removeFile) {
@@ -1643,17 +1729,18 @@ export class DocumentCache {
         }
     }
 
-    private async removeOrphanPayloadFiles(referencedPaths: Set<string>): Promise<number> {
+    private async removeOrphanPayloadFiles(referencedPaths: Set<string>, strict = false): Promise<number> {
         if (!this.payloadCacheDir) return 0;
         let removed = 0;
-        const libraryDirs = await IOUtils.getChildren(this.payloadCacheDir).catch(() => []);
+        const libraryDirs = await IOUtils.getChildren(this.payloadCacheDir).catch((error) => { if (strict) throw error; return []; });
         for (const libraryDir of libraryDirs) {
-            const children = await IOUtils.getChildren(libraryDir).catch(() => []);
+            const children = await IOUtils.getChildren(libraryDir).catch((error) => { if (strict) throw error; return []; });
             for (const child of children) {
                 const isTemp = child.endsWith('.tmp');
                 const isPayload = child.endsWith('.json.gz');
                 if ((isTemp || isPayload) && !referencedPaths.has(child)) {
-                    await IOUtils.remove(child).then(() => removed++).catch(() => undefined);
+                    try { await IOUtils.remove(child); removed++; }
+                    catch (error) { if (strict) throw error; }
                 }
             }
         }

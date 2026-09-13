@@ -1,3 +1,4 @@
+import { threadReadOnlyAtom } from '../../runtime/threadProjection';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { useComposerVoice } from "../../hooks/useComposerVoice";
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -21,6 +22,7 @@ import { selectedModelAtom, isUsingBeaverCreditsAtom } from '../../atoms/models'
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
+import ThreadPresenceBar from './ThreadPresenceBar';
 import BatchProgressPanel from './BatchProgressPanel';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
@@ -61,6 +63,10 @@ const InputArea: React.FC<InputAreaProps> = ({
     hideAttachmentMenu = false,
 }) => {
     const surfaceWindow = useSurfaceWindow();
+    // This window cannot write to the chat: another window is responding in
+    // it, it was deleted, or its history changed elsewhere. ThreadPresenceBar
+    // says which and offers the way out; here it only holds Send.
+    const threadReadOnly = useAtomValue(threadReadOnlyAtom);
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
     const [messagePills, setMessagePills] = useAtom(currentMessagePillsAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
@@ -257,26 +263,30 @@ const InputArea: React.FC<InputAreaProps> = ({
     const rejectVerdictLabel = `Reject${verdictCountSuffix}`;
 
     // Exactly one band between the batch panel and the attachment row.
-    // Priority: blocked decision, then the standing grant that stops decisions
-    // being asked for at all, then the offer to finish an unfinished response,
-    // then first-run guidance, then the cost warning.
+    // Priority: the chat being closed to this window (nothing below can be
+    // acted on until that clears), then a blocked decision, then the standing
+    // grant that stops decisions being asked for at all, then the offer to
+    // finish an unfinished response, then first-run guidance, then the cost
+    // warning.
     // One ordered list (not a suppression clause in each predicate) so a new
     // band takes a place here instead of stacking. Laid out lowest-priority
     // first so the winner sits nearest the composer.
-    const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'continue' | 'approvals' | 'full-access' | null =
-        isAwaitingApproval
-            ? 'approvals'
-            : fullAccessRunId
-                ? 'full-access'
-                : continuation
-                    ? 'continue'
-                    : canShowNextSteps
-                        ? 'next-steps'
-                        : canShowBackToSuggestions
-                            ? 'back-to-suggestions'
-                            : canShowHighTokenWarning
-                                ? 'high-token'
-                                : null;
+    const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'continue' | 'approvals' | 'full-access' | 'thread-presence' | null =
+        threadReadOnly
+            ? 'thread-presence'
+            : isAwaitingApproval
+                ? 'approvals'
+                : fullAccessRunId
+                    ? 'full-access'
+                    : continuation
+                        ? 'continue'
+                        : canShowNextSteps
+                            ? 'next-steps'
+                            : canShowBackToSuggestions
+                                ? 'back-to-suggestions'
+                                : canShowHighTokenWarning
+                                    ? 'high-token'
+                                    : null;
 
     const {
         isSlashMenuOpen,
@@ -680,6 +690,10 @@ const InputArea: React.FC<InputAreaProps> = ({
                 />
             )}
 
+            {/* The chat is closed to this window. Outranks every other band:
+                until it clears, nothing they offer can be acted on here. */}
+            {composerBand === 'thread-presence' && <ThreadPresenceBar />}
+
             {/* Message attachments — absent entirely when nothing is attached.
                 Hidden during approval: the message cannot be sent until the
                 decision is made. */}
@@ -867,7 +881,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             className="composer-send"
                             ariaLabel="Send message"
                             onClick={handleSubmit}
-                            disabled={voice.busy || messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles}
+                            disabled={threadReadOnly || voice.busy || messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles}
                         />
                     )}
                 </div>

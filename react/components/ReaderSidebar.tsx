@@ -3,7 +3,6 @@ import { useAtomValue } from "jotai";
 import Sidebar from "./Sidebar";
 import { isSidebarVisibleAtom, isLibraryTabAtom } from "../atoms/ui";
 import { useObservePaneCollapse } from '../hooks/useObservePaneCollapse';
-import { useRecentThreads } from '../hooks/useRecentThreads';
 
 // ReaderSidebarContent handles library-specific features
 // Reader context tracking (attachment + text selection) is NOT mounted here:
@@ -13,7 +12,6 @@ const ReaderSidebarContent = () => {
 
     useObservePaneCollapse("reader");
     // Recent threads subscription
-    // useRecentThreads();
     // Render the sidebar
     return <Sidebar location="reader" />;
 }

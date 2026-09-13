@@ -2,33 +2,25 @@ import React from 'react';
 import { useSetAtom } from 'jotai';
 import Button from '@beaver/agent-ui/primitives/Button';
 import { removeFloatingPopupMessageAtom } from '../../../atoms/floatingPopup';
-import { setPref } from '../../../../src/utils/prefs';
 import { openPreferencesWindow } from '../../../ui/openPreferencesWindow';
 
 export default function BackgroundProcessingWelcomeContent(props: {
     messageId: string;
     reminder: boolean;
+    generation: number;
 }): React.ReactElement {
     const remove = useSetAtom(removeFloatingPopupMessageAtom);
     const dismiss = () => remove(props.messageId);
     const enable = () => {
-        setPref('backgroundProcessingEnabled', true);
-        setPref('backgroundProcessingWelcomeAck', true);
-        Zotero.Beaver?.processingReconciler?.notify();
-        void Zotero.Beaver?.processingReconciler?.reconcileNow();
-        Zotero.Beaver?.backgroundExtractor?.notify();
+        Zotero.Beaver?.account?.setCloudConsent(true, props.generation);
         dismiss();
     };
     const later = () => {
-        if (props.reminder) {
-            setPref('backgroundProcessingWelcomeAck', true);
-        } else {
-            setPref('backgroundProcessingWelcomeDeferred', true);
-        }
+        Zotero.Beaver?.account?.setCloudConsent(false, props.generation);
         dismiss();
     };
     const chooseLibraries = () => {
-        setPref('backgroundProcessingWelcomeDeferred', true);
+        Zotero.Beaver?.account?.setCloudConsent(false, props.generation);
         openPreferencesWindow('sync');
         dismiss();
     };
@@ -36,19 +28,18 @@ export default function BackgroundProcessingWelcomeContent(props: {
     return (
         <div className="display-flex flex-col gap-3">
             <div className="font-color-secondary text-base">
-                {props.reminder
-                    ? 'Background processing keeps the document search features available to you up to date. You can turn it on whenever you are ready.'
-                    : 'To get started, turn on background processing. Beaver will extract your readable attachments and keep entitled OCR and search coverage current.'}
+                Cloud preparation uploads scanned PDFs for OCR and extracted attachment text for search when those features are available. It covers included libraries on this computer and uses your remote-file permission. Background processing is required while either feature is active. It runs after 30 seconds idle; Start now and Stop control immediate processing. You can exclude libraries in Preferences.
+
             </div>
             <div className="display-flex flex-row gap-2 justify-end flex-wrap">
                 {!props.reminder && (
                     <Button variant="ghost" onClick={chooseLibraries}>Choose libraries…</Button>
                 )}
                 <Button variant="outline" onClick={later}>
-                    {props.reminder ? 'Keep off' : 'Later'}
+                    Not now
                 </Button>
                 <Button variant="solid" onClick={enable}>
-                    {props.reminder ? 'Turn on' : 'Enable & run now'}
+                    Accept and enable
                 </Button>
             </div>
         </div>

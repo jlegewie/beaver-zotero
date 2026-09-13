@@ -84,13 +84,13 @@ it('does nothing when the confirmation is cancelled', async () => {
     });
 });
 
-it('mentions OCR and the server index in the confirmation only for entitled accounts', async () => {
+it('explains retained OCR and unchanged server membership', async () => {
     access.ocr = true;
     access.search = true;
     await render(async (container) => {
         await act(async () => clearButton(container).click());
         const text = (confirm.mock.calls[0][0] as any).text as string;
-        expect(text).toContain('Scanned files will need to be processed again.');
+        expect(text).toContain('Prepared OCR text is retained, including after cloud access ends.');
         expect(text).toContain('Your full-text search index is not affected.');
     });
 });

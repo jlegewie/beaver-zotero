@@ -31,15 +31,14 @@ function describeCache(cache: DocumentCacheStats): string {
         ? `${plural(cache.cached_document_count, 'document')} cached · `
         : '';
     const budget = cache.payload_budget_bytes > 0 ? ` of ${formatBytes(cache.payload_budget_bytes)}` : '';
-    return `${count}${formatBytes(cache.payload_total_bytes)}${budget}`;
+    return `${count}${formatBytes(cache.payload_total_bytes)}${budget}. ${formatBytes(cache.protected_ocr_bytes ?? 0)} of OCR text retained, even above the cache budget.`;
 }
 
 /**
  * Size of the text Beaver extracted from attachments, with a Clear action.
  * Lives under Storage on the Advanced page beside the other data Beaver keeps
  * on this computer. Clearing is safe for the originals and for the server
- * search index; it costs a re-read on next use, and for scans another OCR
- * pass, which is why the action confirms first.
+ * search index. Native text is read again on next use; prepared OCR text stays.
  */
 const LocalDocumentCacheRow: React.FC<{ hasBorder?: boolean }> = ({ hasBorder = false }) => {
     const surfaceWindow = useSurfaceWindow();
@@ -81,13 +80,13 @@ const LocalDocumentCacheRow: React.FC<{ hasBorder?: boolean }> = ({ hasBorder = 
         if (!cache) return;
         const notes = [
             'Your original files are not affected. Beaver reads a file again the next time it is needed.',
-            hasOcrAccess ? 'Scanned files will need to be processed again.' : null,
+            'Prepared OCR text is retained, including after cloud access ends.',
             hasSearchAccess ? 'Your full-text search index is not affected.' : null,
         ].filter(Boolean).join(' ');
         const buttonIndex = Zotero.Prompt.confirm({
             window: surfaceWindow,
             title: 'Clear Local Document Cache?',
-            text: `Delete the cached text for ${describeCache(cache)}?\n\n${notes}`,
+            text: `Clear native extracted text from ${describeCache(cache)}?\n\n${notes}`,
             button0: 'Clear',
             // Cancel at button1 so Escape/dialog-close routes here.
             button1: Zotero.Prompt.BUTTON_TITLE_CANCEL,
@@ -119,8 +118,11 @@ const LocalDocumentCacheRow: React.FC<{ hasBorder?: boolean }> = ({ hasBorder = 
                     <span className="display-flex mt-1">
                         {cache === undefined ? 'Checking local storage…' : cache === null ? 'Cache status unavailable' : describeCache(cache)}
                     </span>
+                    {!!cache?.ocr_repreparation_required_count && <span role="status" className="display-flex mt-1">
+                        {plural(cache.ocr_repreparation_required_count, 'prepared scan')} need re-preparation after an extraction update. Their cached data is retained and will not be served until compatible preparation is available.
+                    </span>}
                     {cleared && <span role="status" className="display-flex mt-1">
-                        Cache cleared. Files will be read again when needed. To prepare them ahead of time, enable Background Processing, then use Rebuild cache when pending processing has finished and the button appears.
+                        Native cache cleared. Prepared OCR text is retained. Other files will be read again when needed. To prepare them ahead of time, enable Background Processing, then use Rebuild cache when pending processing has finished and the button appears.
                     </span>}
                     {error && <span role="alert" className="display-flex font-color-red mt-1">{error}</span>}
                 </>

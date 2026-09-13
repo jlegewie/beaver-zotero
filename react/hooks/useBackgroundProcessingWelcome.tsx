@@ -1,12 +1,13 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
+    accountGenerationAtom,
+    cloudConsentAtom,
     hasOcrAccessAtom,
     hasSearchIndexAccessAtom,
     indexingPlanLabelAtom,
 } from '../atoms/profile';
 import { addFloatingPopupMessageAtom } from '../atoms/floatingPopup';
-import { getPref } from '../../src/utils/prefs';
 import BackgroundProcessingWelcomeContent from '../components/ui/popup/BackgroundProcessingWelcomeContent';
 
 const POPUP_ID = 'background-processing-welcome';
@@ -16,15 +17,13 @@ export function useBackgroundProcessingWelcome(): void {
     const hasSearch = useAtomValue(hasSearchIndexAccessAtom);
     const label = useAtomValue(indexingPlanLabelAtom);
     const addPopup = useSetAtom(addFloatingPopupMessageAtom);
-    const shown = useRef(false);
+    const consent = useAtomValue(cloudConsentAtom);
+    const generation = useAtomValue(accountGenerationAtom);
 
     useEffect(() => {
-        if (shown.current || hasSearch || !hasOcr) return;
-        if (getPref('backgroundProcessingEnabled') === true) return;
-        if (getPref('backgroundProcessingWelcomeAck') === true) return;
-        if (!Zotero.Beaver.background?.claimNotification('background-processing-welcome')) return;
-        shown.current = true;
-        const reminder = getPref('backgroundProcessingWelcomeDeferred') === true;
+        if ((!hasSearch && !hasOcr) || consent !== 'pending') return;
+        if (!Zotero.Beaver.background?.claimNotification('cloud-preparation-consent')) return;
+        const reminder = false;
         const title = reminder
             ? 'Keep document search up to date'
             : label === 'pro'
@@ -42,8 +41,9 @@ export function useBackgroundProcessingWelcome(): void {
                 <BackgroundProcessingWelcomeContent
                     messageId={POPUP_ID}
                     reminder={reminder}
+                    generation={generation}
                 />
             ),
         });
-    }, [addPopup, hasOcr, hasSearch, label]);
+    }, [addPopup, hasOcr, hasSearch, label, consent, generation]);
 }

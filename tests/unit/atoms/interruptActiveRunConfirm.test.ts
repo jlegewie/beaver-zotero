@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createStore } from 'jotai';
+import { createThreadStore as createStore } from '../../helpers/threadRepository';
 
 // =============================================================================
 // Module mocks — react/atoms/threads drags in the WS layer, citations, and
@@ -124,6 +124,7 @@ vi.mock('@beaver/agent-core/run-state/atoms', async () => {
 vi.mock('../../../react/atoms/agentRunAtoms', async () => {
     const { atom } = await import('jotai');
     return {
+        abandonActiveRunLocallyAtom: atom(null, () => {}),
         isWSChatPendingAtom: atom(false),
         isWSConnectedAtom: atom(false),
         isWSReadyAtom: atom(false),

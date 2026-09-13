@@ -114,6 +114,8 @@ function setupGlobals({ appShuttingDown }: { appShuttingDown: boolean }) {
     };
 
     (globalThis as any).addon = {
+        threads: { start: vi.fn(), dispose: vi.fn() },
+        presence: { dispose: vi.fn() },
         runtime: new BeaverInstance(),
         mutations: { cancelOwner: vi.fn(), dispose: vi.fn().mockResolvedValue(undefined) },
         notePreviews: { detachOwner: vi.fn().mockResolvedValue(undefined) },
@@ -180,7 +182,7 @@ describe('closing the agent connection on window unload', () => {
         });
     });
 
-    it('names the window close, and leaves no record, while another window keeps the run on screen', async () => {
+    it('records a window interruption even when another main window remains', async () => {
         setupGlobals({ appShuttingDown: false });
         const hooks = await loadHooks();
         const close = vi.fn();
@@ -190,7 +192,7 @@ describe('closing the agent connection on window unload', () => {
         await hooks.onMainWindowUnload(win);
 
         expect(close).toHaveBeenCalledExactlyOnceWith('Main window closed', {
-            rememberInterruptedThread: false,
+            rememberInterruptedThread: true,
         });
     });
 

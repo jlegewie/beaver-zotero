@@ -421,7 +421,6 @@ export class DocumentExtractExecutor implements JobExecutor {
             timeoutSeconds: payload.timeoutSeconds,
             workerName: 'background',
             externalAbortSignal: ctx.externalAbortSignal,
-            ocrPriority: record.priority >= 100 ? OCR_PRIORITY_BACKFILL : undefined,
             prepareCache: payload.prepare_cache === true,
         });
         switch (result.kind) {

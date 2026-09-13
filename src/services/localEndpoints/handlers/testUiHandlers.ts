@@ -213,7 +213,7 @@ export async function handleTestWindowRuntimeHttpRequest(request: any) {
         ? Zotero.Items.getIDFromLibraryAndKey(request.library_id, request.zotero_key) : undefined);
     try {
         const result = await instance.dispatchWindowCommand('inspect-runtime',
-            { windowId: runtime.id, command: request?.command, itemId, draft: request?.draft, mutation: request?.mutation, undo: request?.undo },
+            { windowId: runtime.id, command: request?.command, threadId: request?.threadId, text: request?.text, itemId, draft: request?.draft, mutation: request?.mutation, undo: request?.undo },
         );
         return runtime.status === 'closing' || runtime.hostWindow.closed ? { error: 'window_unavailable' } : result;
     } catch (error) {

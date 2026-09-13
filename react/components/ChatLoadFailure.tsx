@@ -1,6 +1,6 @@
 import React from 'react';
 import Button from '@beaver/agent-ui/primitives/Button';
-import type { ChatLoadError } from '../utils/chatLoadError';
+import type { ChatLoadError } from '../../src/services/threads/chatLoadError';
 
 /** Shared failure state for empty lists and lists retaining previously loaded rows. */
 export default function ChatLoadFailure({ error, retry, loading = false }: {

@@ -133,6 +133,25 @@ describe('DocumentCache size budget', () => {
         return keys;
     }
 
+    it('retains OCR above budget through clearing, reset and restart while evicting native text', async () => {
+        const protectedPath = await seedPayload({ key: 'OCR00001', sizeBytes: 2000 });
+        const nativePath = await seedPayload({ key: 'NATIVE01', sizeBytes: 500 });
+        await conn.queryAsync("UPDATE document_cache_payloads SET extraction_source = 'ocr' WHERE zotero_key = 'OCR00001'");
+        prefs[BUDGET_PREF] = 100;
+        expect(await cache.enforceSizeBudget()).toEqual({ evicted: 1, bytesFreed: 500 });
+        expect(files.has(protectedPath)).toBe(true);
+        expect(files.has(nativePath)).toBe(false);
+        await cache.clearAll();
+        await db.resetLocalProcessingState();
+        await db.initDatabase('0.99.0');
+        expect((await db.getDocumentCachePayload(1, 'OCR00001', 'structured'))?.extractionSource).toBe('ocr');
+        expect(await db.getDocumentCacheMetadataByKey(1, 'OCR00001')).not.toBeNull();
+        expect((await cache.getStats()).protected_ocr_bytes).toBe(2000);
+        await cache.invalidate(1, 'OCR00001');
+        expect(files.has(protectedPath)).toBe(false);
+        expect(await db.getDocumentCachePayloadCount()).toBe(0);
+    });
+
     /**
      * Same shape as `seedManyPayloads` but built from literal multi-row
      * INSERTs, fast enough for the tens-of-thousands-of-rows case.

@@ -132,19 +132,16 @@ describe('getAttachmentInfo', () => {
         expect(maybeEnqueueOcrJobMock).not.toHaveBeenCalled();
     });
 
-    it('enqueues OCR for a cached scan when enqueueOcrIfNeeded is set', async () => {
+    it('never enqueues OCR for a cached scan', async () => {
         (globalThis as any).Zotero.Beaver = {
             documentCache: {
                 getMetadata: vi.fn(async () => ({ contentKind: 'pdf', errorCode: 'no_text_layer', pageCount: 7 })),
             },
         };
 
-        await getAttachmentInfo(makeAttachment(), { enqueueOcrIfNeeded: true });
+        await getAttachmentInfo(makeAttachment());
 
-        expect(maybeEnqueueOcrJobMock).toHaveBeenCalledTimes(1);
-        expect(maybeEnqueueOcrJobMock).toHaveBeenCalledWith(
-            expect.objectContaining({ libraryId: 1, zoteroKey: 'ATTACH1', pageCount: 7 }),
-        );
+        expect(maybeEnqueueOcrJobMock).not.toHaveBeenCalled();
     });
 
     it('does not enqueue OCR for a cached readable PDF even with enqueueOcrIfNeeded', async () => {
@@ -154,7 +151,7 @@ describe('getAttachmentInfo', () => {
             },
         };
 
-        await getAttachmentInfo(makeAttachment(), { enqueueOcrIfNeeded: true });
+        await getAttachmentInfo(makeAttachment());
 
         expect(maybeEnqueueOcrJobMock).not.toHaveBeenCalled();
     });

@@ -213,37 +213,61 @@ describe("instance account ownership", () => {
         expect(sdk.auth.signOut).not.toHaveBeenCalled();
     });
 
-    it("initializes search processing without a renderer and preserves a later pause", async () => {
+    it("consent covers the second feature and rejects a previous account's open prompt", async () => {
         await load();
-        expect(getPref("backgroundProcessingEnabled")).toBe(false);
-        expect(getPref("backgroundProcessingSearchInitialized")).toBe(false);
-
-        const entitled = profile();
-        entitled.profile.has_search_index_access = true;
-        mocks.profile.mockResolvedValue(entitled);
-        vi.mocked(Zotero.Beaver.backgroundExtractor!.notify).mockClear();
+        const granted = profile();
+        granted.profile.has_ocr_access = true;
+        granted.profile.has_search_index_access = false;
+        mocks.profile.mockResolvedValue(granted);
+        await account.refresh();
+        const generation = account.getGeneration();
+        account.setCloudConsent(true, generation);
+        granted.profile.has_search_index_access = true;
         await account.refresh();
         expect(Zotero.Beaver.hasSearchIndexAccess).toBe(true);
-        expect(getPref("backgroundProcessingEnabled")).toBe(true);
-        expect(getPref("backgroundProcessingSearchInitialized")).toBe(true);
-        expect(Zotero.Beaver.backgroundExtractor!.notify).toHaveBeenCalledOnce();
-
-        setPref("backgroundProcessingEnabled", false);
-        vi.mocked(Zotero.Beaver.backgroundExtractor!.notify).mockClear();
-        event("TOKEN_REFRESHED", session("a", "rotated"));
+        event("SIGNED_IN", session("b"));
         await account.refresh();
-        expect(getPref("backgroundProcessingEnabled")).toBe(false);
-        expect(Zotero.Beaver.backgroundExtractor!.notify).not.toHaveBeenCalled();
-
-        mocks.profile.mockResolvedValue(profile());
+        account.setCloudConsent(true, generation);
+        expect(account.getSnapshot().cloudConsent).toBe("pending");
+        expect(Zotero.Beaver.hasOcrAccess).toBe(false);
+        event("SIGNED_IN", session("a"));
         await account.refresh();
-        expect(Zotero.Beaver.hasSearchIndexAccess).toBe(false);
-        expect(Zotero.Beaver.backgroundExtractor!.notify).toHaveBeenCalledOnce();
-        mocks.profile.mockResolvedValue(entitled);
-        await account.refresh();
-        expect(getPref("backgroundProcessingEnabled")).toBe(false);
-        expect(Zotero.Beaver.backgroundExtractor!.notify).toHaveBeenCalledTimes(2);
+        expect(account.getSnapshot().cloudConsent).toBe("accepted");
+        expect(Zotero.Beaver.hasOcrAccess).toBe(true);
     });
+
+    it.each([[false, false], [true, false], [false, true], [true, true]])(
+        "requires account consent for OCR=%s search=%s, including local processing users",
+        async (ocr, search) => {
+            await load();
+            setPref("backgroundProcessingEnabled", true);
+            const entitled = profile();
+            entitled.profile.has_ocr_access = ocr;
+            entitled.profile.has_search_index_access = search;
+            mocks.profile.mockResolvedValue(entitled);
+            await account.refresh();
+            expect(Zotero.Beaver.hasOcrAccess).toBe(false);
+            expect(Zotero.Beaver.hasSearchIndexAccess).toBe(false);
+            account.setCloudConsent(false, account.getGeneration());
+            expect(account.getSnapshot().cloudConsent).toBe(ocr || search ? "declined" : "pending");
+            account.setCloudConsent(true, account.getGeneration());
+            expect(Zotero.Beaver.hasOcrAccess).toBe(ocr);
+            expect(Zotero.Beaver.hasSearchIndexAccess).toBe(search);
+            await account.refresh();
+            expect(Zotero.Beaver.hasSearchIndexAccess).toBe(search);
+            const lost = profile();
+            lost.profile.has_ocr_access = false;
+            lost.profile.has_search_index_access = false;
+            mocks.profile.mockResolvedValue(lost);
+            await account.refresh();
+            expect(Zotero.Beaver.hasOcrAccess).toBe(false);
+            mocks.profile.mockResolvedValue(entitled);
+            await account.refresh();
+            expect(Zotero.Beaver.hasOcrAccess).toBe(ocr);
+            expect(Zotero.Beaver.hasSearchIndexAccess).toBe(search);
+        },
+    );
+
     it("starts one SDK listener and hydrates subscribers without an update gap", async () => {
         account.start();
         await load();

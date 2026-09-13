@@ -188,6 +188,29 @@ describe('BeaverDB document cache methods', () => {
         expect(ready?.errorCode).toBeNull();
     });
 
+    it.each([false, true])('migrates v1 OCR provenance with an unobserved signature=%s and keeps it after reset', async (unobserved) => {
+        const { metadata } = await db.upsertDocumentCacheMetadata(makeMetadata());
+        await db.upsertDocumentCachePayload(makePayload({ metadataId: metadata.id }));
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'ABCD1234', contentKind: 'pdf' });
+        const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
+        await conn.queryAsync("UPDATE attachment_processing_state SET ocr_status = 'done', file_mtime_ms = ?, file_size_bytes = ?",
+            [unobserved ? null : payload!.sourceFileSignature.mtime_ms, unobserved ? null : payload!.sourceFileSignature.size_bytes]);
+        conn.getRawDB().exec('ALTER TABLE document_cache_payloads DROP COLUMN extraction_source');
+        await db.initDatabase('0.99.0');
+        expect((await db.getDocumentCachePayload(1, 'ABCD1234', 'structured'))?.extractionSource).toBe('ocr');
+        await db.resetLocalProcessingState();
+        await db.initDatabase('0.99.0');
+        expect((await db.getDocumentCachePayload(1, 'ABCD1234', 'structured'))?.extractionSource).toBe('ocr');
+    });
+
+    it('does not evict a candidate whose provenance became OCR after inspection', async () => {
+        const { metadata } = await db.upsertDocumentCacheMetadata(makeMetadata());
+        const native = await db.upsertDocumentCachePayload(makePayload({ metadataId: metadata.id }));
+        await db.upsertDocumentCachePayload({ ...native, extractionSource: 'ocr' });
+        expect(await db.deleteDocumentCachePayloadIfUnchanged(native)).toBeNull();
+        expect((await db.getDocumentCachePayload(1, 'ABCD1234', 'structured'))?.extractionSource).toBe('ocr');
+    });
+
     it('keeps the durable document cache schema on repeated init', async () => {
         const { metadata } = await db.upsertDocumentCacheMetadata(makeMetadata());
         await db.upsertDocumentCachePayload(makePayload({ metadataId: metadata.id }));
@@ -201,7 +224,7 @@ describe('BeaverDB document cache methods', () => {
         expect(row?.documentMetadata).toEqual(makeMetadata().documentMetadata);
     });
 
-    it('wipes the document cache when the recorded schema version is older, then persists', async () => {
+    it('preserves compatible cache when the recorded schema version is older', async () => {
         await db.upsertDocumentCacheMetadata(makeMetadata());
         await db.upsertDocumentCachePayload(makePayload({ metadataId: 1 }));
 
@@ -213,8 +236,8 @@ describe('BeaverDB document cache methods', () => {
         await rebuilt.initDatabase('0.99.0');
 
         // Both cache tables are reset on the version mismatch.
-        expect(await rebuilt.getDocumentCacheMetadataCount()).toBe(0);
-        expect(await rebuilt.getDocumentCachePayloadCount()).toBe(0);
+        expect(await rebuilt.getDocumentCacheMetadataCount()).toBe(1);
+        expect(await rebuilt.getDocumentCachePayloadCount()).toBe(1);
 
         // The current version is now recorded, so a second init keeps the data.
         await rebuilt.upsertDocumentCacheMetadata(makeMetadata());
@@ -246,10 +269,10 @@ describe('BeaverDB document cache methods', () => {
         const version = raw
             .prepare(`SELECT version FROM schema_versions WHERE component = 'document_cache'`)
             .get() as { version: number };
-        expect(version.version).toBe(1);
+        expect(version.version).toBe(2);
     });
 
-    it('wipes stale document cache tables on upgrade from an unversioned install', async () => {
+    it('retains incompatible cache tables and reports the required migration', async () => {
         const raw = conn.getRawDB();
         raw.exec(`DELETE FROM schema_versions WHERE component = 'document_cache'`);
         raw.exec('DROP TABLE IF EXISTS document_cache_payloads');
@@ -269,12 +292,8 @@ describe('BeaverDB document cache methods', () => {
         raw.exec(`INSERT INTO document_cache_metadata (library_id, zotero_key) VALUES (1, 'STALE001')`);
 
         const rebuilt = new BeaverDB(conn);
-        await rebuilt.initDatabase('0.99.0');
-
-        expect(await rebuilt.getDocumentCacheMetadataCount()).toBe(0);
-        await rebuilt.upsertDocumentCacheMetadata(makeMetadata());
-        const row = await rebuilt.getDocumentCacheMetadataByKey(1, 'ABCD1234');
-        expect(row?.contentKind).toBe('pdf');
+        await expect(rebuilt.initDatabase('0.99.0')).rejects.toThrow('compatible migration');
+        expect(raw.prepare('SELECT zotero_key FROM document_cache_metadata').get()).toEqual({ zotero_key: 'STALE001' });
     });
 
     it('creates the durable schema when document cache tables are absent', async () => {

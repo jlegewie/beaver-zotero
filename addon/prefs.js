@@ -187,3 +187,5 @@ pref("maxAttachmentFileSizeMB", 100);
 // the user library. Never overrides a library the user excluded in Beaver
 // preferences — see resolveTableLibrary().
 pref("tables.defaultLibraryID", 0);
+
+pref("cloudPreparationConsent", "");

@@ -158,6 +158,8 @@ describe('BackgroundExtractor', () => {
         // mirrored, so every case starts with library 1 (the id all fixtures
         // use) in scope.
         (Zotero as any).Beaver = {
+            hasOcrAccess: true,
+            hasSearchIndexAccess: true,
             runtime: new BeaverInstance(),
             db,
             libraryScopeInitialized: true,
@@ -765,6 +767,8 @@ describe('BackgroundExtractor', () => {
 
     it('rejects an excluded library before looking up the queued item', async () => {
         (Zotero as any).Beaver = {
+            hasOcrAccess: true,
+            hasSearchIndexAccess: true,
             runtime: new BeaverInstance(),
             db,
             libraryScopeInitialized: true,
