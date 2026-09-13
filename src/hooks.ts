@@ -1,3 +1,4 @@
+import { InstanceLocalEndpoints } from './services/instanceLocalEndpoints';
 import { InstanceDocuments } from "./services/instanceDocuments";
 import { InstanceBackground } from "./services/instanceBackground";
 import { ZOTERO_PLUGIN_CLIENT_TYPE } from "@beaver/agent-core/protocol/agentProtocol";
@@ -73,7 +74,14 @@ function ensureDocumentRuntime(): void {
     configurePDFForBeaver({ onWorkerStartFailure: info => addon.runtime.publish('document-worker:failure', info) });
 }
 
+function stopLocalIngress(): void {
+    const endpoints = addon.localEndpoints;
+    addon.localEndpoints = undefined;
+    try { endpoints?.dispose(); } catch (error) { ztoolkit.log(`disposeLocalEndpoints: ${error}`); }
+}
+
 async function disposeAccountServices(): Promise<void> {
+    stopLocalIngress();
     addon.threads.dispose();
     addon.presence.dispose();
     try { addon.documents?.dispose(); } catch (error) { ztoolkit.log(`disposeDocuments: ${error}`); }
@@ -125,6 +133,7 @@ let quitObserverRegistered = false;
 const quitObserver = {
     observe(_subject: any, topic: string) {
         if (topic === "quit-application-granted" || topic === "quit-application") {
+            stopLocalIngress();
             isAppQuitting = true;
             Zotero.__beaverShuttingDown = true;
         }
@@ -289,6 +298,8 @@ async function onStartup() {
     addon.account ??= createInstanceAccount();
     addon.threads.start(addon.account);
     addon.account.start();
+    addon.localEndpoints ??= new InstanceLocalEndpoints();
+    addon.localEndpoints.start(addon.account, addon.preferences);
     ztoolkit.log(`Plugin version: ${version}`);
 
     // -------- Initialize database --------
@@ -877,6 +888,7 @@ function onAppShutdown(): Promise<void> {
 }
 
 async function disposeAppServices(): Promise<void> {
+    stopLocalIngress();
     Zotero.__beaverShuttingDown = true;
     addon.data.alive = false;
     const attempt = async (label: string, cleanup: () => void | Promise<unknown>) => {
@@ -917,6 +929,7 @@ function onShutdown(): Promise<void> {
 }
 
 async function disposePlugin(): Promise<void> {
+    stopLocalIngress();
     await addon.mutations.dispose();
     addon.syncPause.resumeSyncNow();
     Zotero.__beaverShuttingDown = true;

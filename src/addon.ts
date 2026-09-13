@@ -22,6 +22,7 @@ import type { DevelopmentVoiceHarness } from './services/voice/developmentHarnes
 import type { VoiceService } from './services/voice/voiceService';
 
 class Addon {
+    public localEndpoints?: import("./services/instanceLocalEndpoints").InstanceLocalEndpoints;
     public threads = new ThreadRepository();
     public presence = new ThreadPresence();
     public documents?: import("./services/instanceDocuments").InstanceDocuments;

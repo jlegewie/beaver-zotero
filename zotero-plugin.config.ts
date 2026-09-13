@@ -62,6 +62,7 @@ export default defineConfig({
           ...definitions,
           __env__: JSON.stringify(mode),
           "process.env.NODE_ENV": JSON.stringify(mode),
+          "process.env.BUILD_ENV": JSON.stringify(process.env.BUILD_ENV ?? ""),
         },
         bundle: true,
         target: "firefox115",
@@ -77,6 +78,7 @@ export default defineConfig({
         entryPoints: ["src/beaver-extract/worker/index.ts"],
         define: {
           "process.env.NODE_ENV": JSON.stringify(mode),
+          "process.env.BUILD_ENV": JSON.stringify(process.env.BUILD_ENV ?? ""),
         },
         bundle: true,
         format: "esm",

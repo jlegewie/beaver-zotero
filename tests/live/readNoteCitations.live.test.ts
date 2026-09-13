@@ -266,17 +266,14 @@ describe('/beaver/note/read — cited_items extraction', () => {
     it('resolves cited_items across multiple distinct citations preserving first-seen order', async () => {
         const cite1 = rawCitation({ key: PARENT_ITEM.zotero_key });
         const cite2 = rawCitation({ key: SMALL_PDF.zotero_key });
-        // Second one is an attachment — resolveCitedItems filters
-        // non-regular items, so it should NOT appear in cited_items even
-        // though it parses cleanly.
+        // Regular items and attachments both retain their first-seen citation order.
         const ref = await seedNote(`<p>${cite1}</p><p>${cite2}</p>`);
 
         const res = await readNote(`${ref.library_id}-${ref.zotero_key}`);
         expect(res.success, res.error).toBe(true);
         const ids = (res.cited_items ?? []).map(citedItemId);
-        expect(ids).toContain(`${LIBRARY_ID}-${PARENT_ITEM.zotero_key}`);
-        // Attachment cite is parsed but filtered downstream.
-        expect(ids).not.toContain(`${LIBRARY_ID}-${SMALL_PDF.zotero_key}`);
+        expect(ids).toEqual([`${LIBRARY_ID}-${PARENT_ITEM.zotero_key}`, `${LIBRARY_ID}-${SMALL_PDF.zotero_key}`]);
+        expect(res.cited_items?.[1].item_type).toBe('attachment');
     });
 
     it('omits cited_items when the note has no citations at all', async () => {

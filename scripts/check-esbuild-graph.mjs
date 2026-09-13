@@ -129,6 +129,7 @@ const result = await build({
         ...definitions,
         __env__: JSON.stringify(mode),
         'process.env.NODE_ENV': JSON.stringify(mode),
+        'process.env.BUILD_ENV': JSON.stringify(process.env.BUILD_ENV ?? ''),
     },
     outfile: resolve(root, '.scaffold/check-bundle/beaver.js'),
     logLevel: 'error',

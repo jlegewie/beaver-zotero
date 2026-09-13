@@ -9,6 +9,7 @@ import { PARENT_ITEM } from '../helpers/fixtures';
 import { deleteNote } from './helpers/noteTestClient';
 
 let available = false;
+const zeroWindowTest = process.env.BEAVER_ZERO_WINDOW_TEST === '1';
 const collections: string[] = [];
 const duplicateName = `MCP contract test ${Date.now()}`;
 async function call(
@@ -135,7 +136,34 @@ describe('MCP argument and result contracts', () => {
         );
         expect(pdf?.content_type).toBe('application/pdf');
     });
-    it('includes directly cited PDF attachments in note citation summaries', async () => {
+    it.runIf(zeroWindowTest)('rejects Markdown note creation without a renderer and saves no note', async () => {
+        const { windows } = await post<any>('/beaver/test/window-runtime', { command: 'list' });
+        expect(windows).toEqual([]);
+        const noteIds = async (): Promise<string[]> => {
+            const ids: string[] = [];
+            for (let offset = 0; ; offset += 100) {
+                const page = await call('list_items', { library: 'u', item_category: 'note', limit: 100, offset });
+                ids.push(...page.items.map((item: any) => item.item_id));
+                if (!page.has_more) return ids.sort();
+            }
+        };
+        const before = await noteIds();
+        const result = await call('create_note', {
+            title: 'MCP contract unavailable renderer',
+            content: 'This note requires Markdown rendering.',
+        }, true);
+        try {
+            expect(result.isError).toBe(true);
+            expect(result.content[0].text).toContain('Note rendering is unavailable');
+            expect(await noteIds()).toEqual(before);
+        } finally {
+            if (!result.isError) {
+                const note = JSON.parse(result.content[0].text);
+                if (note.note_id) await deleteNote(1, note.note_id.split('-')[1]);
+            }
+        }
+    });
+    it.skipIf(zeroWindowTest)('includes directly cited PDF attachments in note citation summaries', async () => {
         let attachment: any;
         for (let offset = 0; !attachment; offset += 100) {
             const page = await call('list_items', {
