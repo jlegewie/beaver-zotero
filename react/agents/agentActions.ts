@@ -439,7 +439,7 @@ export const undoAgentActionAtom = atom(
                 if (action.result_data?.old_creators && !proposed_data?.old_creators) {
                     proposed_data = { ...proposed_data, old_creators: action.result_data.old_creators };
                 }
-                if (action.result_data?.undo_full_html && !proposed_data?.undo_full_html) {
+                if (typeof action.result_data?.undo_full_html === 'string' && proposed_data?.undo_full_html == null) {
                     proposed_data = { ...proposed_data, undo_full_html: action.result_data.undo_full_html };
                 }
                 return { ...action, proposed_data, status: 'undone' as ActionStatus, result_data: undefined, error_message: undefined };
