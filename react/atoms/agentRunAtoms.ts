@@ -3687,7 +3687,7 @@ export async function withThreadWriter<T>(get: Getter, set: Setter, operation: (
             return;
         }
         if (snapshot.deleted.includes(id) || (!ownsWriter(currentWriter()) && (snapshot.history[id] ?? 0) !== get(viewedHistoryRevisionAtom))) {
-            set(addPopupMessageAtom, { type: 'warning', title: 'This chat was updated elsewhere', text: 'Refresh the chat before continuing. Your draft and attachments are preserved.', expire: false });
+            set(addPopupMessageAtom, { type: 'warning', title: 'This chat was updated in another window', text: 'Refresh the chat before continuing. Your draft and attachments are preserved.', expire: false });
             return;
         }
     }

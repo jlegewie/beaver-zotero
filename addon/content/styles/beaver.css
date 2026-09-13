@@ -994,6 +994,13 @@
     border-bottom: 1px solid var(--fill-quinary);
 }
 
+/* The chat is closed to this window: responding elsewhere, deleted, or its
+   history changed in another window. */
+[id^="beaver-pane-"] .thread-presence-bar {
+    background-color: var(--beaver-fill-bar);
+    border-bottom: 1px solid var(--fill-quinary);
+}
+
 /* Disclosure hover, shared by the batch progress bar and the run receipt. The
    bar's own surface and its bleed into the composer's top edge live in
    agent-ui-components.css, with the composer whose padding they cancel; the
