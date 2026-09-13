@@ -16,11 +16,11 @@ export interface SeededItem {
     key?: string;
     itemType?: string;       // 'journalArticle', 'book', 'note', 'attachment', etc.
     title?: string;          // stored in 'title' field by default
-    titleFieldName?: 'title' | 'publicationTitle' | 'bookTitle';  // for testing mapped fields
+    titleFieldName?: 'title' | 'caseName' | 'bookTitle';  // for testing mapped fields
     doi?: string;
     isbn?: string;
     date?: string;           // stored in 'date' field
-    filingDate?: string;     // stored in mapped 'filingDate' field, for date-precedence tests
+    dateDecided?: string;    // stored in the date-mapped 'dateDecided' field, for date-precedence tests
     creators?: string[];     // last names in order
     deleted?: boolean;
 }
@@ -162,7 +162,7 @@ export async function seedZoteroItem(
     await addField('DOI', item.doi);
     await addField('ISBN', item.isbn);
     await addField('date', item.date);
-    await addField('filingDate', item.filingDate);
+    await addField('dateDecided', item.dateDecided);
 
     if (item.deleted) {
         await conn.queryAsync(`INSERT INTO deletedItems (itemID) VALUES (?)`, [itemID]);

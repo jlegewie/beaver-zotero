@@ -6,6 +6,7 @@ import { resolveItemReference } from "../../src/utils/libraryIdentity";
 import { extractExternalSearchData, extractLookupWorkData, isExternalSearchResult, isLookupWorkResult } from "@beaver/agent-core/run-state/toolResultTypes";
 import { ToolReturnPart, isUnsuccessfulToolReturn } from "@beaver/agent-core/agents/types";
 import { extractZoteroReferences } from "@beaver/agent-core/run-state/toolResultTypes";
+import { isExternalReferenceListView, isToolResultView } from "@beaver/agent-core/run-state/toolResultViews";
 import { logger } from "@beaver/agent-core/platform/logger";
 
 /**
@@ -23,8 +24,28 @@ export async function processToolReturnResults(
     // payload would be, so there are no references to cache or items to preload.
     if (isUnsuccessfulToolReturn(part)) return;
 
-    // Check for external references and populate cache
-    if (
+    // Prefer the backend's canonical, fully hydrated view. This covers every
+    // tool that returns external references (including find_related_works),
+    // without requiring this ingestion path to maintain a second tool-name
+    // allowlist alongside the render layer.
+    const view = part.metadata?.view;
+    if (isToolResultView(view) && isExternalReferenceListView(view)) {
+        const references = [...view.references];
+        const relatedWork = view.tool_info?.info_type === 'related_works'
+            ? view.tool_info.work
+            : null;
+        if (
+            relatedWork?.source_id
+            && !references.some((reference) => reference.source_id === relatedWork.source_id)
+        ) {
+            references.push(relatedWork);
+        }
+        if (references.length > 0) {
+            logger(`processToolReturnResults: Adding ${references.length} external references from view`, 1);
+            set(addExternalReferencesToMappingAtom, references);
+            set(checkExternalReferencesAtom, references);
+        }
+    } else if (
         part.metadata &&
         isExternalSearchResult(part.tool_name, part.content, part.metadata)
     ) {
