@@ -5,8 +5,8 @@ import type {
 } from "@beaver/agent-core/transport/threadService";
 import type { ThreadData } from "./types";
 
-/** The `ThreadModel` fields the UI mapping needs (sources like the Supabase
- * realtime feed select exactly these columns rather than full rows). */
+/** The `ThreadModel` fields the UI mapping needs; some sources select exactly
+ * these columns rather than full rows. */
 type ThreadDataSource = Pick<
     ThreadModel,
     | "id"

@@ -138,49 +138,47 @@ describe("shared thread cache", () => {
         expect(Zotero.Beaver.presence.getSnapshot().deleted).toEqual([]);
         expect(Zotero.Beaver.presence.owns(successor)).toBe(true);
     });
-    it("ignores foreign-agent realtime inserts and updates, including identity-free pinned rows", () => {
-        let event!: (payload: any) => void;
-        repo.start({
-            subscribe: (listener: any) => {
-                listener({ generation: 0, session: { user: { id: "u" } } });
-                return vi.fn();
-            },
-            realtime: { subscribe: (_kind: string, _user: string, callback: typeof event) => {
-                event = callback;
-                return vi.fn();
-            } },
-        } as any);
-        for (const eventType of ["INSERT", "UPDATE"]) {
-            event({ eventType, new: { ...row(), agent_name: "other-agent", starred: true } });
-            expect(repo.getSnapshot().entities.size).toBe(0);
-        }
-        event({ eventType: "INSERT", new: { ...row(), agent_name: "beaver", starred: true } });
-        expect(repo.getSnapshot().entities.get("t")?.isPinned).toBe(true);
-        event({ eventType: "UPDATE", new: { ...row("foreign"), agent_name: "other-agent" } });
-        expect(repo.getSnapshot().entities.get("t")?.name).toBe("old");
-        event({ eventType: "INSERT", new: { ...row(), id: "legacy" } });
-        expect(repo.getSnapshot().entities.has("legacy")).toBe(true);
+    it("marks a thread deleted for every viewer when a fetch reports it gone", () => {
+        repo.upsertThreads({ threads: [entity, { ...entity, id: "t2" }], stamp: repo.stamp() });
+        // A deletion this instance only learns of from a failed fetch.
+        repo.markThreadDeleted("t2");
+        expect(repo.getSnapshot().entities.has("t2")).toBe(false);
+        expect(repo.getSnapshot().entities.has("t")).toBe(true);
+        expect(Zotero.Beaver.presence.getSnapshot().deleted).toEqual(["t2"]);
+        expect(Zotero.Beaver.presence.claim("a", "t2", 0)).toBeNull();
+        // It does not come back through a late list response.
+        repo.upsertThreads({ threads: [{ ...entity, id: "t2", name: "late" }], stamp: repo.stamp() });
+        expect(repo.getSnapshot().entities.has("t2")).toBe(false);
     });
-    it('subscribes after session acceptance, preserves same-user refresh, and rejects revoked realtime callbacks', () => {
+    it("propagates a rename to every subscriber and marks their views stale", async () => {
+        api.renameThread.mockResolvedValue({ ...row("renamed") });
+        repo.upsertThreads({ threads: [entity], stamp: repo.stamp() });
+        const views = new Map([[params.key, { ids: ["t"], cursor: null, hasMore: false, otherInstanceCount: null, pinnedLoadedAt: Date.now(), status: "ready" as const, error: null, loadedAt: Date.now() }]]);
+        (repo as any).views = views;
+        const seen: string[] = [];
+        repo.subscribe((snapshot) => { seen.push(snapshot.entities.get("t")?.name ?? ""); });
+        await repo.renameThread("t", "renamed");
+        expect(seen.at(-1)).toBe("renamed");
+        expect(repo.getSnapshot().views.get(params.key)!.loadedAt).toBeLessThan(0);
+    });
+    it('resets the cache and presence on account replacement, preserving same-user refresh, and never opens a realtime channel', () => {
         let notify!: (snapshot: any) => void;
-        const events: Array<(payload: any) => void> = [];
-        const subscribe = vi.fn((_kind, _user, callback) => { events.push(callback); return vi.fn(); });
+        const subscribe = vi.fn();
         const account = {
             subscribe: (listener: typeof notify) => { notify = listener; listener({ generation: 0, session: null }); return vi.fn(); },
             realtime: { subscribe },
         };
         repo.start(account as any);
-        notify({ generation: 1, session: null });
         notify({ generation: 1, session: { user: { id: 'u' } } });
+        repo.upsertThreads({ threads: [entity], stamp: repo.stamp() });
+        const claim = Zotero.Beaver.presence.claim('a', 't', 1);
         notify({ generation: 1, session: { user: { id: 'u' }, access_token: 'refreshed' } });
-        expect(subscribe).toHaveBeenCalledTimes(1);
-        events[0]({ eventType: 'INSERT', new: row('accepted') });
-        expect(repo.getSnapshot().entities.get('t')?.name).toBe('accepted');
-        notify({ generation: 2, session: null });
+        expect(repo.getSnapshot().entities.has('t')).toBe(true);
+        expect(claim && Zotero.Beaver.presence.owns(claim)).toBe(true);
         notify({ generation: 2, session: { user: { id: 'other' } } });
-        events[0]({ eventType: 'UPDATE', new: row('revoked') });
         expect(repo.getSnapshot().entities.size).toBe(0);
-        expect(subscribe).toHaveBeenCalledTimes(2);
+        expect(Zotero.Beaver.presence.getSnapshot().claims).toEqual([]);
+        expect(subscribe).not.toHaveBeenCalled();
     });
 
     it('copies metadata supplied by a renderer rather than retaining its realm object', () => {

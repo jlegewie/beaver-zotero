@@ -432,6 +432,12 @@ export const loadThreadAtom = atom(
                 };
                 resolvedName = resolvedName ?? (thread.name || null);
             } catch (error) {
+                // Gone from the backend: another device deleted it. Flag it
+                // before bailing so this window (and any other in the instance
+                // showing it) reads as deleted instead of stale.
+                if (isApiError(error) && error.status === 404) {
+                    Zotero.Beaver.threads.markThreadDeleted(threadId);
+                }
                 if (!isCurrent()) return false;
                 // An unknown identity must abort rather than degrade to
                 // "matching": without it we cannot decide whether applied
@@ -686,6 +692,9 @@ export const loadThreadAtom = atom(
 
             if (isApiError(error) && error.status === 404) {
                 logger(`loadThreadAtom: Thread ${threadId} not found, resetting to empty thread state`, 1);
+                // See the identity fetch above: a 404 here is a deletion made
+                // on another device.
+                Zotero.Beaver.threads.markThreadDeleted(threadId);
                 set(currentThreadIdAtom, null);
                 resetRunSelectorCaches();
                 set(threadRunsAtom, []);

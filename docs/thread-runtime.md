@@ -9,9 +9,15 @@ The repository retains normalized entities, scoped query identities, pagination,
 pin reconciliation and error backoff. Reads share in-flight requests; metadata
 mutations execute in order in the plugin realm. Account generations reject old
 responses, per-entity revisions protect newer mutations, and deletion tombstones
-prevent late fetches from recreating deleted entries. Realtime subscriptions and
-network continuations belong to the instance, so closing their original caller
-cannot strand them. Subscriber snapshots do not expose mutable cache objects.
+prevent late fetches from recreating deleted entries. Network continuations
+belong to the instance, so closing their original caller cannot strand them.
+Subscriber snapshots do not expose mutable cache objects.
+
+There is no server push for thread metadata. Every window mutates through the
+repository, so a rename, pin, or deletion in one window reaches the others
+synchronously. Changes made on another device surface through the view TTL, and
+a deletion through the 404 of a stale fetch, which marks the chat deleted for
+every viewer in this instance.
 
 A writer claim contains an account generation, runtime id, thread identity and
 unique token. Send (including slash-command preparation), continuation, retry,

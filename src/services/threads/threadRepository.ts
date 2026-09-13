@@ -129,8 +129,6 @@ export class ThreadRepository {
     private changedAt = new Map<string, number>();
     private mutationTails = new Map<string, Promise<unknown>>();
     private disposeSubscription?: () => void;
-    private disposeRealtime?: () => void;
-    private realtimeUser: string | undefined;
     private entities = new Map<string, ThreadData>();
     private views = new Map<string, ThreadListViewState>();
     private generation = 0;
@@ -599,58 +597,21 @@ export class ThreadRepository {
         this.inFlight.clear();
         this.retryAfter.clear();
     }
+    /**
+     * Follow the instance account: an account replacement discards the cache
+     * and presence so a new user never sees the previous user's chats.
+     * Cross-window propagation needs no server push, since every window
+     * mutates through this repository and presence; cross-device changes are
+     * picked up by the view TTL and by 404s on stale fetches.
+     */
     start(account: import("../instanceAccount").InstanceAccount): void {
         if (this.disposeSubscription) return;
         setThreadAgentName(ZOTERO_AGENT_NAME);
         this.disposeSubscription = account.subscribe((snapshot) => {
-            if (snapshot.generation !== this.accountGeneration) {
-                this.accountGeneration = snapshot.generation;
-                this.disposeRealtime?.();
-                this.realtimeUser = undefined;
-                this.resetThreadStore();
-                Zotero.Beaver.presence.reset(snapshot.generation);
-            }
-            const userId = snapshot.session?.user.id;
-            if (userId === this.realtimeUser) return;
-            this.realtimeUser = userId;
-            this.disposeRealtime?.();
-            if (userId)
-                this.disposeRealtime = account.realtime.subscribe(
-                    "threads",
-                    userId,
-                    (payload) => {
-                        if (
-                            snapshot.generation !== this.accountGeneration ||
-                            userId !== this.realtimeUser
-                        )
-                            return;
-                        if (payload.eventType === "DELETE") {
-                            const id = String(payload.old.id);
-                            this.removeThread(id);
-                            Zotero.Beaver.presence.invalidate(id, true);
-                        } else if (
-                            payload.eventType === "INSERT" ||
-                            payload.eventType === "UPDATE"
-                        ) {
-                            if (isThreadAgentMismatch(payload.new as any)) return;
-                            const row = threadModelToThreadData(
-                                payload.new as any,
-                            );
-                            const previous = this.entities.get(row.id);
-                            if (
-                                previous &&
-                                previous.updatedAt !== row.updatedAt
-                            )
-                                Zotero.Beaver.presence.invalidate(row.id);
-                            this.upsertThreads({
-                                threads: [row],
-                                stamp: this.stamp(),
-                            });
-                            this.changedAt.set(row.id, ++this.revision);
-                            this.invalidateViews();
-                        }
-                    },
-                );
+            if (snapshot.generation === this.accountGeneration) return;
+            this.accountGeneration = snapshot.generation;
+            this.resetThreadStore();
+            Zotero.Beaver.presence.reset(snapshot.generation);
         });
     }
     invalidateViews(): void {
@@ -744,6 +705,17 @@ export class ThreadRepository {
             this.invalidateViews();
         });
     }
+    /**
+     * Record that a thread no longer exists on the backend: drop it from the
+     * cache and flag it in presence so every viewer in this instance blocks
+     * further operations on it. Used for deletions observed rather than
+     * performed here: a fetch that comes back 404 after another device deleted
+     * the thread.
+     */
+    markThreadDeleted(id: string): void {
+        this.removeThread(id);
+        Zotero.Beaver.presence.invalidate(id, true);
+    }
     deleteThread(
         id: string,
         windowId: string,
@@ -771,7 +743,6 @@ export class ThreadRepository {
     }
     dispose(): void {
         this.disposeSubscription?.();
-        this.disposeRealtime?.();
         this.listeners.clear();
         this.resetThreadStore();
     }
