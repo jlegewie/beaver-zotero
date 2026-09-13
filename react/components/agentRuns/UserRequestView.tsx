@@ -1,3 +1,4 @@
+import { threadReadOnlyAtom } from '../../runtime/threadProjection';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -109,6 +110,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     maxContentHeight = 200,
     canEdit = true
 }) => {
+    const threadReadOnly = useAtomValue(threadReadOnlyAtom);
     const surfaceWindow = useSurfaceWindow();
     const contentRef = useRef<HTMLDivElement | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
@@ -793,7 +795,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                                 ariaLabel="Send edited message"
                                 onClick={handleSubmit}
                                 disabled={
-                                    editedContent.length === 0
+                                    threadReadOnly || editedContent.length === 0
                                     || isPending
                                     || isStagingSources
                                     || !selectedModel

@@ -1,3 +1,4 @@
+import { viewedHistoryRevisionAtom } from '../runtime/threadProjection';
 import { atom } from "jotai";
 import { readerActionContextAtom, currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateMessageCollectionsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import { isAtBottomAtom, isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowIsAtBottomAtom, windowUserScrolledAtom } from "./ui";
@@ -9,8 +10,7 @@ import { agentService } from "@beaver/agent-core/transport/agentService";
 import { threadService, ZoteroInstanceRef } from "@beaver/agent-core/transport/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes, currentZoteroInstanceRef } from "../../src/utils/zoteroUtils";
-import { isThreadInstanceMismatch, threadModelToThreadData } from "../utils/threadMatches";
-import { upsertThreadsAtom, threadWriteStampAtom } from "./threadList";
+import { isThreadInstanceMismatch } from "../../src/services/threads/threadMatches";
 import { getHost } from '@beaver/agent-ui/host';
 import { logger } from "@beaver/agent-core/platform/logger";
 import { isApiError } from "@beaver/agent-core/types/apiErrors";
@@ -20,7 +20,7 @@ import { clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } f
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom, resetRunSelectorCaches } from "@beaver/agent-core/run-state/atoms";
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
-import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
+import { abandonActiveRunLocallyAtom, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
 import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
 import { 
     threadAgentActionsAtom, 
@@ -41,7 +41,6 @@ import { enrichMessageAttachmentStub } from "../types/attachments/converters";
 import { zoteroReferenceKey } from "@beaver/agent-core/types/attachments/apiTypes";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
 import type { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
-import { flushPendingPartEvents } from "../utils/streamingPartQueue";
 
 /**
  * Stores a run ID that ThreadView should scroll to after a thread finishes loading.
@@ -121,30 +120,8 @@ function reconcileToolcallIds(runs: AgentRun[], actions: AgentAction[]): void {
 }
 
 // Thread types
-export interface ThreadData {
-    id: string;
-    name: string;
-    createdAt: string;
-    updatedAt: string;
-    // Zotero install identity of the device that created the thread; null for
-    // unattributed threads (visible on every instance). Map these through
-    // wherever ThreadData is built — a dropped field makes a foreign thread
-    // masquerade as unattributed and bypass the mismatch confirm.
-    zoteroUserId?: string | null;
-    zoteroLocalId?: string | null;
-    /**
-     * Whether the user pinned this chat to the top of the history list. The
-     * wire field is `starred` (backend column and route vocabulary); every
-     * user-facing string says "pinned".
-     */
-    isPinned: boolean;
-    /**
-     * Agent the thread belongs to. Absent from a backend that predates the
-     * field. Needed so a scoped response is not treated as authoritative about
-     * another agent's threads.
-     */
-    agentName?: string | null;
-}
+import type { ThreadData } from '../../src/services/threads/types';
+export type { ThreadData } from '../../src/services/threads/types';
 
 // Thread messages and attachments
 // These are defined alongside the run state in the shared core and re-exported
@@ -258,30 +235,14 @@ function confirmOpenMismatchedThread(window?: Window): boolean {
  * This ensures the WebSocket connection is closed and UI state is consistent.
  */
 async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any, value?: any) => void, isCurrent = () => true): Promise<void> {
-    // A run canceled mid-response is archived as it stands, so it has to
-    // include the streamed text still sitting in the frame queue.
-    flushPendingPartEvents();
-    const isPending = get(isWSChatPendingAtom);
-    const activeRun = get(activeRunAtom);
-    
-    if (isPending || activeRun) {
+    const hadActiveWork = get(isWSChatPendingAtom) || get(activeRunAtom);
+    // Navigation revokes socket callbacks, so cleanup must be synchronous and
+    // complete even when the connection's close notification is ignored.
+    set(abandonActiveRunLocallyAtom);
+    set(activeRunAtom, null);
+
+    if (hadActiveWork) {
         logger('cancelActiveRunIfNeeded: Canceling active run before switching threads', 1);
-        
-        // Set pending to false immediately for responsive UI
-        set(isWSChatPendingAtom, false);
-        
-        // Mark active run as canceled if it exists
-        if (activeRun && activeRun.status === 'in_progress') {
-            const canceledRun: AgentRun = {
-                ...activeRun,
-                status: 'canceled',
-                completed_at: new Date().toISOString(),
-            };
-            // Move canceled run to completed runs before clearing
-            set(threadRunsAtom, (runs: AgentRun[]) => [...runs, canceledRun]);
-        }
-        set(activeRunAtom, null);
-        
         // Cancel the WebSocket connection
         await agentService.cancel();
         if (!isCurrent()) return;
@@ -407,7 +368,7 @@ export const loadThreadAtom = atom(
     async (
         get,
         set,
-        { user_id, threadId, threadName, threadIdentity, skipInstanceMismatchConfirm, window }: {
+        { user_id, threadId, threadName, threadIdentity, skipInstanceMismatchConfirm, window, preserveDraft = false }: {
             window?: Window;
             user_id: string;
             threadId: string;
@@ -422,6 +383,7 @@ export const loadThreadAtom = atom(
             threadIdentity?: ZoteroInstanceRef;
             /** Skip the instance-mismatch confirm (headless test drivers). */
             skipInstanceMismatchConfirm?: boolean;
+            preserveDraft?: boolean;
         }
     ): Promise<boolean> => {
         // Confirm before interrupting a run that's actively streaming in the
@@ -442,6 +404,7 @@ export const loadThreadAtom = atom(
         set(isLoadingThreadAtom, true);
         // Preflight can still be cancelled. Keep the committed navigation generation
         // intact so in-flight retries are not abandoned unless a switch is accepted.
+        const loadedHistoryRevision = Zotero.Beaver?.presence?.getSnapshot().history[threadId] ?? 0;
         const previousNavigation = get(threadNavigationSeqAtom);
         const request = get(threadLoadRequestSeqAtom) + 1;
         set(threadLoadRequestSeqAtom, request);
@@ -459,24 +422,22 @@ export const loadThreadAtom = atom(
         const statefulChat = getPref('statefulChat');
         let identity = threadIdentity;
         let resolvedName = threadName ?? null;
-        // Captured before the fetch: a response that lands after a sign-out
-        // must not repopulate the store for the previous account, and one that
-        // predates a pin toggle must not write its stale flag back.
-        const threadWriteStamp = get(threadWriteStampAtom);
         if (identity === undefined && statefulChat) {
             try {
-                const thread = await threadService.getThread(threadId);
+                const thread = await Zotero.Beaver.threads.getThread(threadId);
                 if (!isCurrent()) return false;
                 identity = {
                     zoteroUserId: thread.zotero_user_id ?? null,
                     zoteroLocalId: thread.zotero_local_id ?? null,
                 };
                 resolvedName = resolvedName ?? (thread.name || null);
-                // Feed the thread store: this is the one fetch a deep-linked
-                // chat gets, and the chat lists and the header's pin entry all
-                // read their state from there.
-                set(upsertThreadsAtom, { threads: [threadModelToThreadData(thread)], stamp: threadWriteStamp });
             } catch (error) {
+                // Gone from the backend: another device deleted it. Flag it
+                // before bailing so this window (and any other in the instance
+                // showing it) reads as deleted instead of stale.
+                if (isApiError(error) && error.status === 404) {
+                    Zotero.Beaver.threads.markThreadDeleted(threadId);
+                }
                 if (!isCurrent()) return false;
                 // An unknown identity must abort rather than degrade to
                 // "matching": without it we cannot decide whether applied
@@ -731,6 +692,9 @@ export const loadThreadAtom = atom(
 
             if (isApiError(error) && error.status === 404) {
                 logger(`loadThreadAtom: Thread ${threadId} not found, resetting to empty thread state`, 1);
+                // See the identity fetch above: a 404 here is a deletion made
+                // on another device.
+                Zotero.Beaver.threads.markThreadDeleted(threadId);
                 set(currentThreadIdAtom, null);
                 resetRunSelectorCaches();
                 set(threadRunsAtom, []);
@@ -744,6 +708,8 @@ export const loadThreadAtom = atom(
             if (isCurrent()) set(isLoadingThreadAtom, false);
         }
         if (!isCurrent()) return false;
+        if (loaded) set(viewedHistoryRevisionAtom, loadedHistoryRevision);
+        if (preserveDraft) return loaded;
         // Clear sources for now
         set(currentMessageItemsAtom, []);
         set(readerActionContextAtom, null);

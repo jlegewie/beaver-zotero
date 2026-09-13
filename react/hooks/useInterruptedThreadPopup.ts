@@ -1,12 +1,13 @@
+import { preferencesRevisionAtom } from '../atoms/preferences';
 /**
- * Offers to reopen the chat that was cut off when Beaver last shut down.
+ * Offers to reopen chats interrupted by a renderer closing.
  *
  * The shutdown path records the thread in a preference
- * (`src/utils/interruptedThreadPrefs.ts`); this hook consumes that record once
+ * (`src/utils/interruptedThreadPrefs.ts`); this hook consumes each pending record once
  * and shows a floating popup whose button reopens the thread.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { isAuthenticatedAtom, userIdAtom } from '../atoms/auth';
 import { currentThreadIdAtom } from '../atoms/threads';
@@ -15,8 +16,7 @@ import { eventManager } from '../events/eventManager';
 import { ArrowRightIcon } from '../components/icons/icons';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
-    clearInterruptedThread,
-    getInterruptedThread,
+    takeInterruptedThread,
 } from '../../src/utils/interruptedThreadPrefs';
 
 /** Shared with `useOnboardingPopups`, which stands down while this popup is up. */
@@ -29,10 +29,9 @@ export function useInterruptedThreadPopup() {
     const floatingPopupMessages = useAtomValue(floatingPopupMessagesAtom);
     const addFloatingPopupMessage = useSetAtom(addFloatingPopupMessageAtom);
     const jotaiStore = useStore();
-    const shownThisSessionRef = useRef(false);
-
+    const revision = useAtomValue(preferencesRevisionAtom);
     useEffect(() => {
-        if (shownThisSessionRef.current) return;
+        if (jotaiStore.get(floatingPopupMessagesAtom).some(msg => msg.id === INTERRUPTED_THREAD_POPUP_ID)) return;
 
         // Reopening a thread needs an account; auth is restored asynchronously
         // at start, so wait for it rather than dropping the record.
@@ -53,18 +52,9 @@ export function useInterruptedThreadPopup() {
 
         // Read as late as possible: clearing the record and adding the popup
         // happen together, so a second window cannot show it twice.
-        const interrupted = getInterruptedThread();
+        const interrupted = takeInterruptedThread(userId);
         if (!interrupted) return;
 
-        shownThisSessionRef.current = true;
-        clearInterruptedThread();
-
-        // Another account signed in since the interruption: that thread is not
-        // theirs to reopen, and loading it would only fail against their token.
-        if (interrupted.userId !== userId) {
-            logger('useInterruptedThreadPopup: Discarding a record from another account');
-            return;
-        }
 
         // Nothing to go back to when that thread is already open.
         if (interrupted.threadId === currentThreadId) return;
@@ -76,8 +66,8 @@ export function useInterruptedThreadPopup() {
             type: 'info',
             title: 'Beaver chat was interrupted',
             text: interrupted.threadName
-                ? `Beaver closed before it finished working on “${interrupted.threadName}”.`
-                : 'Beaver closed before it finished working on your last chat.',
+                ? `The window closed before Beaver finished working on “${interrupted.threadName}”.`
+                : 'The window closed before Beaver finished working on your last chat.',
             expire: false,
             button: {
                 text: 'Open chat',
@@ -92,5 +82,5 @@ export function useInterruptedThreadPopup() {
         });
         // `floatingPopupMessages` is a dependency, not a read: it re-runs this
         // effect when the version-update popup is dismissed.
-    }, [isAuthenticated, userId, currentThreadId, floatingPopupMessages, addFloatingPopupMessage, jotaiStore]);
+    }, [isAuthenticated, userId, currentThreadId, floatingPopupMessages, addFloatingPopupMessage, jotaiStore, revision]);
 }

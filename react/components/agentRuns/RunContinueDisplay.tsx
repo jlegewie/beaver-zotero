@@ -1,5 +1,6 @@
+import { threadReadOnlyAtom } from '../../runtime/threadProjection';
 import React, { useState } from 'react';
-import { useSetAtom } from 'jotai';
+import { useSetAtom, useAtomValue } from 'jotai';
 import type { ContinuationOffer } from '@beaver/agent-core/protocol/agentProtocol';
 import { Icon, AlertCircleIcon, ArrowRightIcon, LayersIcon } from '../icons/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
@@ -58,7 +59,8 @@ export const RunContinueDisplay: React.FC<RunContinueDisplayProps> = ({
     const [isResuming, setIsResuming] = useState(false);
     const [wantsInstructions, setWantsInstructions] = useState(false);
     const [instructions, setInstructions] = useState('');
-    const isBlocked = isResuming || isPostProcessing;
+    const threadReadOnly = useAtomValue(threadReadOnlyAtom);
+    const isBlocked = threadReadOnly || isResuming || isPostProcessing;
     const icon = KIND_ICONS[offer.kind] ?? FALLBACK_ICON;
 
     const handleResume = async () => {

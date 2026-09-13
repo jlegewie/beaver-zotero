@@ -1,3 +1,4 @@
+import { threadReadOnlyAtom } from '../../runtime/threadProjection';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -36,6 +37,7 @@ interface RunErrorDisplayProps {
  */
 export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, isLastRun }) => {
     const surfaceWindow = useSurfaceWindow();
+    const threadReadOnly = useAtomValue(threadReadOnlyAtom);
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
     const resumeFromRun = useSetAtom(resumeFromRunAtom);
     const updateSelectedModel = useSetAtom(updateSelectedModelAtom);
@@ -179,7 +181,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                                         iconClassName="font-color-red"
                                         rightIcon={DollarCircleIcon}
                                         onClick={handleRetryWithBeaver}
-                                        disabled={!defaultBeaverModel || isRetryPending}
+                                        disabled={threadReadOnly || !defaultBeaverModel || isRetryPending}
                                         loading={isRetryPending && clickedAction === 'try-with-beaver'}
                                         data-run-error-action="try-with-beaver"
                                         data-run-error-primary-action={primaryActionAttr('try-with-beaver')}
@@ -205,7 +207,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                                         iconClassName="font-color-red"
                                         rightIcon={LinkForwardIcon}
                                         onClick={handleResume}
-                                        disabled={isRetryPending}
+                                        disabled={threadReadOnly || isRetryPending}
                                         data-run-error-action="resume"
                                         data-run-error-primary-action={primaryActionAttr('resume')}
                                     >
@@ -218,7 +220,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                                         iconClassName="font-color-red"
                                         rightIcon={RepeatIcon}
                                         onClick={handleRetry}
-                                        disabled={isRetryPending}
+                                        disabled={threadReadOnly || isRetryPending}
                                         loading={isRetryPending && clickedAction === 'retry'}
                                         data-run-error-action="retry"
                                         data-run-error-primary-action={primaryActionAttr('retry')}

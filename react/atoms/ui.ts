@@ -116,14 +116,8 @@ export const showFileStatusDetailsAtom = atom(false);
  * Serializable descriptor of a Zotero item used to filter the thread list
  * view (`ThreadListView`) to chats related to that item.
  */
-export interface ThreadItemFilter {
-    libraryId: number;
-    libraryRef?: string;   // libraryRefForLibraryID(item.libraryID)
-    itemKey: string;       // identity for chip + active-row checkmark
-    keys: string[];        // expanded keys sent to /by-item
-    itemType: string;      // item.getItemTypeIconName() → CSSItemTypeIcon
-    label: string;         // getDisplayNameFromItem(item)
-}
+import type { ThreadItemFilter } from '../../src/services/threads/types';
+export type { ThreadItemFilter } from '../../src/services/threads/types';
 
 /**
  * Active item filter for the thread list view, or null when unfiltered.

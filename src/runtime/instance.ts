@@ -87,6 +87,7 @@ export class BeaverInstance {
         const runtime = this.windows.get(win);
         if (!runtime || runtime.status === 'closing') return false;
         runtime.status = 'closing';
+        Zotero.Beaver?.presence?.detach(runtime.id);
         this.widthListeners.get(runtime)?.();
         this.widthListeners.delete(runtime);
         for (const unsubscribe of this.subscriptions.get(runtime) ?? []) unsubscribe();

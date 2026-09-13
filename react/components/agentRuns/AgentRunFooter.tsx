@@ -1,3 +1,4 @@
+import { threadReadOnlyAtom } from '../../runtime/threadProjection';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useMemo, useEffect, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -269,6 +270,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         await copyToClipboard(store.get(currentThreadIdAtom ) || '');
     };
 
+    const threadReadOnly = useAtomValue(threadReadOnlyAtom);
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
     // Loading state while this run's retry commits its removal on the
     // backend (truncate POST + undo), before the replacement run appears.
@@ -345,6 +347,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                             className="scale-11"
                             ariaLabel="Retry"
                             loading={isRetryPending}
+                            disabled={threadReadOnly}
                         />
                     </Tooltip>
 
