@@ -4,7 +4,7 @@ import { isReaderAnnotationEvent, acceptsTabEvent, contextMainWindow, resolveNav
 function main(id: string) {
     return {
         closed: false, focus: vi.fn(),
-        ZoteroPane: { itemsView: {} },
+        ZoteroPane: { itemsView: { waitForLoad: vi.fn(async () => {}) }, collectionsView: { waitForLoad: vi.fn(async () => {}) } },
         Zotero_Tabs: { windowID: id, selectedID: 'zotero-pane' },
         __beaverEventBus: new EventTarget(),
     } as any;
@@ -51,7 +51,7 @@ describe('navigation ownership', () => {
             if (++ticks === 1) vi.mocked(Zotero.getMainWindow).mockReturnValue(a);
             else {
                 vi.mocked(Zotero.getMainWindow).mockReturnValue(b);
-                a.ZoteroPane.itemsView = {};
+                a.ZoteroPane.itemsView = { waitForLoad: vi.fn(async () => {}) };
             }
         });
         expect(await resolveNavigationWindow()).toBe(a);

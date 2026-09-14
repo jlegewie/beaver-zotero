@@ -3,7 +3,7 @@ import { openReader, openNote, viewAttachment } from '../../../react/runtime/nav
 vi.mock('../../../react/utils/navigationNotice', () => ({ notifyNavigationUnavailable: vi.fn() }));
 let a: any, b: any;
 beforeEach(() => {
-    const main = () => ({ closed: false, focus: vi.fn(), ZoteroPane: {}, Zotero_Tabs: { _tabs: [], select: vi.fn(), isOwnTabEvent: vi.fn() } });
+    const main = () => ({ closed: false, focus: vi.fn(), ZoteroPane: { itemsView: { waitForLoad: vi.fn(async () => {}) }, collectionsView: { waitForLoad: vi.fn(async () => {}) } }, Zotero_Tabs: { _tabs: [], select: vi.fn(), isOwnTabEvent: vi.fn() } });
     a = main(); b = main();
     let active = b;
     a.focus.mockImplementation(() => { active = a; });
@@ -152,7 +152,7 @@ it('rejects a note tab closed while its editor initializes', async () => {
     const editor = { itemID: 17, tabID: 'local-note', _initPromise: new Promise<void>(resolve => { initialize = resolve; }) };
     (Zotero as any).Notes._editorInstances = [editor];
     const pending = openNote(17, a);
-    await Promise.resolve();
+    await vi.waitFor(() => expect(a.Zotero_Tabs.select).toHaveBeenCalledWith('local-note'));
     a.Zotero_Tabs._tabs = [];
     initialize();
     await expect(pending).rejects.toMatchObject({ code: 'window_unavailable' });

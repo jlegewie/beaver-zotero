@@ -181,6 +181,7 @@ it("boots the standalone through instance hooks without reading its opener", asy
     const context = {
         window: win,
         document: { getElementById: () => ({}) },
+        Services: { scriptloader: { loadSubScript: vi.fn() } },
         ChromeUtils: {
             importESModule: () => ({
                 Zotero: {
