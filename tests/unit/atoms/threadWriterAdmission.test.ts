@@ -1,3 +1,7 @@
+import {
+    threadAdmissionAtom,
+    threadConflictAtom,
+} from "../../../react/runtime/threadAdmission";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ConnectionFailureEvidence } from "@beaver/agent-core/transport/connectionFailure";
@@ -22,6 +26,16 @@ const {
 // `instanceof` check still narrows against: the mocked specifier and the loop's
 // own relative import resolve to one module, so both see this same class.
 vi.mock("@beaver/agent-core/transport/agentService", () => ({
+    agentRunService: {
+        getThreadRuns: vi
+            .fn()
+            .mockResolvedValue({
+                runs: [],
+                agent_actions: [],
+                tail_run_id: null,
+                activity: { state: "idle", run_id: null },
+            }),
+    },
     agentService: {
         connect: connectMock,
         close: closeMock,
@@ -65,7 +79,8 @@ import { newThreadAtom, loadThreadAtom } from '../../../react/atoms/threads';
 import { citationsAtom } from '@beaver/agent-core/citations/atoms';
 import { runApprovalPolicyAtom } from '../../../react/atoms/runApprovalPolicy';
 import { streamingDoneRunIdsAtom, approvalResponseIntentsAtom, closeWSConnectionAtom, isWSConnectedAtom } from '../../../react/atoms/agentRunAtoms';
-import { AgentConnectionError } from "@beaver/agent-core/transport/agentService";
+import { refreshFinishedChatAvailabilityAtom, canOpenFinishedChatAtom } from "../../../react/runtime/windowCommands";
+import { agentRunService, AgentConnectionError } from "@beaver/agent-core/transport/agentService";
 import {
     activeRunAtom,
     wsReconnectingAtom,
@@ -102,6 +117,8 @@ const runtime = { id: "a", status: "ready", hostWindow: {} } as any;
 initializeWindowRuntime(runtime);
 let presence: ThreadPresence;
 beforeEach(() => {
+    store.set(threadAdmissionAtom, null);
+    store.set(threadConflictAtom, null);
     releaseWriter();
     vi.clearAllMocks();
     clearClientShutDownLatch();
@@ -129,6 +146,27 @@ beforeEach(() => {
     });
 });
 describe("writer admission at the real send entry point", () => {
+    it("keeps unseen server history behind the send admission check after opening the menu", async () => {
+        const admission = { threadId: "t", tailRunId: "displayed", activity: { state: "idle" as const, run_id: null } };
+        store.set(threadAdmissionAtom, admission);
+        const displayed = store.get(threadRunsAtom);
+        const attachment = { key: "DRAFT", libraryID: 1 } as any;
+        store.set(currentMessageItemsAtom, [attachment]);
+        const unseen = { runs: [], agent_actions: [], tail_run_id: "unseen-successor", activity: { state: "idle" as const, run_id: null } };
+        vi.mocked(agentRunService.getThreadRuns).mockResolvedValueOnce(unseen).mockResolvedValueOnce(unseen);
+
+        await store.set(refreshFinishedChatAvailabilityAtom);
+        expect(store.get(canOpenFinishedChatAtom)).toBe(true);
+        expect(store.get(threadAdmissionAtom)).toBe(admission);
+        expect(store.get(threadRunsAtom)).toBe(displayed);
+
+        await store.set(sendWSMessageAtom, "hello");
+        expect(connectMock).not.toHaveBeenCalled();
+        expect(store.get(threadConflictAtom)).toBe("thread_tail_mismatch");
+        expect(store.get(currentMessageContentAtom)).toBe("my draft");
+        expect(store.get(currentMessageItemsAtom)).toEqual([attachment]);
+        expect(store.get(threadRunsAtom)).toBe(displayed);
+    });
     it("refuses a competing send before preparation and preserves the draft", async () => {
         const owner = presence.claim("b", "t", getCredentialGeneration())!;
         await store.set(sendWSMessageAtom, "hello");
@@ -207,55 +245,68 @@ describe("writer admission at the real send entry point", () => {
     });
 });
 
-
 describe('navigation after streaming finishes with a writer lease', () => {
-    it.each(['new chat', 'switch chat', 'stop'] as const)('clears abandoned source linking on %s and reopening', async (navigation) => {
-        let callbacks: any;
-        connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
-        await store.set(sendWSMessageAtom, 'hello');
-        const run = store.get(activeRunAtom)!;
-        callbacks.onStreamingDone({ run_id: run.id });
-        store.set(approvalResponseIntentsAtom, new Map([['approval', true]]));
-        store.set(runApprovalPolicyAtom, { runId: run.id, fullAccess: true, approvedResources: new Set(['item']) });
-        expect(store.get(streamingDoneRunIdsAtom).has(run.id)).toBe(true);
-        cancelMock.mockImplementation(async () => { callbacks.onClose(1000, 'User cancelled', true); });
-        loadThreadRunsMock.mockResolvedValue({ runs: [], citations: [], agentActions: [] });
-        if (navigation === 'new chat') {
+    it.each(['new chat', 'switch chat', 'stop'] as const)(
+        'clears abandoned source linking on %s and reopening',
+        async (navigation) => {
+            let callbacks: any;
+            connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
+            await store.set(sendWSMessageAtom, 'hello');
+            const run = store.get(activeRunAtom)!;
+            callbacks.onStreamingDone({ run_id: run.id });
+            store.set(approvalResponseIntentsAtom, new Map([['approval', true]]));
+            store.set(runApprovalPolicyAtom, { runId: run.id, fullAccess: true, approvedResources: new Set(['item']) });
+            expect(store.get(streamingDoneRunIdsAtom).has(run.id)).toBe(true);
+            cancelMock.mockImplementation(async () => { callbacks.onClose(1000, 'User cancelled', true); });
+            loadThreadRunsMock.mockResolvedValue({
+                runs: [],
+                citations: [],
+                agentActions: [],
+                tailRunId: null,
+                activity: { state: "idle", run_id: null },
+            });
+            if (navigation === 'new chat') {
             await store.set(newThreadAtom, { skipAutoPopulate: true, skipActiveRunConfirm: true });
         } else if (navigation === 'switch chat') {
             expect(await store.set(loadThreadAtom, { threadId: 'other', user_id: 'user-1', threadName: 'Other', threadIdentity: { zoteroUserId: null, zoteroLocalId: null } })).toBe(true);
         } else {
             await store.set(closeWSConnectionAtom);
         }
-        if (navigation === 'stop') expect(store.get(threadReadOnlyAtom)).toBe(false);
-        expect(cancelMock).toHaveBeenCalledOnce();
-        expect(store.get(streamingDoneRunIdsAtom).size).toBe(0);
-        expect(store.get(approvalResponseIntentsAtom).size).toBe(0);
-        expect(store.get(runApprovalPolicyAtom).runId).toBeNull();
-        expect(presence.getSnapshot().claims).toHaveLength(0);
-        const canceled = { ...run, status: 'canceled', completed_at: new Date().toISOString() };
-        loadThreadRunsMock.mockResolvedValue({ runs: [canceled], citations: [], agentActions: [] });
-        expect(await store.set(loadThreadAtom, { threadId: 't', user_id: 'user-1', threadName: 'Original', threadIdentity: { zoteroUserId: null, zoteroLocalId: null } })).toBe(true);
-        expect(store.get(threadRunsAtom)[0].status).toBe('canceled');
-        expect(store.get(citationsAtom)).toEqual([]);
-        expect(store.get(streamingDoneRunIdsAtom).has(run.id)).toBe(false);
-        callbacks.onStreamingDone({ run_id: run.id });
-        callbacks.onDone();
-        expect(store.get(streamingDoneRunIdsAtom).size).toBe(0);
-        expect(store.get(threadRunsAtom)).toEqual([canceled]);
-        const abandonedCallbacks = callbacks;
-        await store.set(sendWSMessageAtom, 'next response');
-        const successor = store.get(activeRunAtom)!;
-        callbacks.onStreamingDone({ run_id: successor.id });
-        abandonedCallbacks.onClose(1000, 'Late close', true);
-        abandonedCallbacks.onDone();
-        abandonedCallbacks.onRunCitations({ run_id: run.id, citations: [] });
-        expect(store.get(activeRunAtom)?.id).toBe(successor.id);
-        expect(store.get(isWSChatPendingAtom)).toBe(true);
-        expect([...store.get(streamingDoneRunIdsAtom)]).toEqual([successor.id]);
-    });
+            if (navigation === 'stop') expect(store.get(threadReadOnlyAtom)).toBe(false);
+            expect(cancelMock).toHaveBeenCalledOnce();
+            expect(store.get(streamingDoneRunIdsAtom).size).toBe(0);
+            expect(store.get(approvalResponseIntentsAtom).size).toBe(0);
+            expect(store.get(runApprovalPolicyAtom).runId).toBeNull();
+            expect(presence.getSnapshot().claims).toHaveLength(0);
+            const canceled = { ...run, status: 'canceled', completed_at: new Date().toISOString() };
+            loadThreadRunsMock.mockResolvedValue({
+                runs: [canceled],
+                citations: [],
+                agentActions: [],
+                tailRunId: null,
+                activity: { state: "idle", run_id: null },
+            });
+            expect(await store.set(loadThreadAtom, { threadId: 't', user_id: 'user-1', threadName: 'Original', threadIdentity: { zoteroUserId: null, zoteroLocalId: null } })).toBe(true);
+            expect(store.get(threadRunsAtom)[0].status).toBe('canceled');
+            expect(store.get(citationsAtom)).toEqual([]);
+            expect(store.get(streamingDoneRunIdsAtom).has(run.id)).toBe(false);
+            callbacks.onStreamingDone({ run_id: run.id });
+            callbacks.onDone();
+            expect(store.get(streamingDoneRunIdsAtom).size).toBe(0);
+            expect(store.get(threadRunsAtom)).toEqual([canceled]);
+            const abandonedCallbacks = callbacks;
+            await store.set(sendWSMessageAtom, 'next response');
+            const successor = store.get(activeRunAtom)!;
+            callbacks.onStreamingDone({ run_id: successor.id });
+            abandonedCallbacks.onClose(1000, 'Late close', true);
+            abandonedCallbacks.onDone();
+            abandonedCallbacks.onRunCitations({ run_id: run.id, citations: [] });
+            expect(store.get(activeRunAtom)?.id).toBe(successor.id);
+            expect(store.get(isWSChatPendingAtom)).toBe(true);
+            expect([...store.get(streamingDoneRunIdsAtom)]).toEqual([successor.id]);
+        },
+    );
 });
-
 
 describe('terminal cleanup before writer revocation', () => {
     it('clears connection state when an error releases ownership before socket close', async () => {

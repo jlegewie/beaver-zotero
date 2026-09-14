@@ -54,11 +54,8 @@ async function waitForReaderByTabID(tabID: string, mainWindow: Window, timeoutMs
  * (`currentReaderAttachmentAtom`), its text selection
  * (`readerTextSelectionAtom`), and newly created annotations.
  *
- * Mounted once globally (`GlobalContextInitializer`) and active whenever a
- * Beaver chat surface is open — the main-window sidebar OR the separate Beaver
- * window. Both share one store, so this must not be tied to either surface's
- * own mount; window-only users would otherwise get no reader context at all
- * (no current attachment, no page number in `application_state`, no selection).
+ * Mounted once per renderer, bound to its current main-window context.
+ * Context replacement tears down the old reader listeners before rebinding.
  */
 export function useReaderTabSelection() {
     const isBeaverUIVisible = useAtomValue(isBeaverUIVisibleAtom);
@@ -313,12 +310,11 @@ export function useReaderTabSelection() {
 
     }, [detachActiveReader, clearReaderAttachment, notifyReaderLibraryExcluded, setReaderTextSelection, updateReaderAttachment, waitForInternalReader]); // Dependencies
 
-
     useEffect(() => {
         // Inert while no Beaver surface is open. Re-running the effect with the
         // gate closed first runs the previous run's cleanup, which clears the
         // reader atoms and unregisters the observers.
-        if (!isBeaverUIVisible) return;
+        if (!mainWindow || !isBeaverUIVisible) return;
         if (!isAuthenticated || !hasAuthorized || !isDeviceAuthorized || !isLibraryAccessReady) return;
         logger("useReaderTabSelection: Hook mounted");
 
@@ -525,7 +521,7 @@ export function useReaderTabSelection() {
         }
 
         logger("useReaderTabSelection: Registering tab selection observer");
-        
+
         const myObserverId = Zotero.Notifier.registerObserver(readerObserver, ['tab', 'item'], 'beaver-readerSidebarTabObserver');
         moduleReaderTabNotifierId = myObserverId;
 
@@ -556,5 +552,4 @@ export function useReaderTabSelection() {
             });
         };
     }, [setupReader, detachActiveReader, setReaderTextSelection, updateReaderAttachment, clearReaderAttachment, notifyReaderLibraryExcluded, mainWindow, waitForInternalReader, isBeaverUIVisible, isAuthenticated, isDeviceAuthorized, hasAuthorized, isLibraryAccessReady, searchableLibraryIdsKey]);
-
 }

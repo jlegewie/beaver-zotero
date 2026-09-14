@@ -1,3 +1,6 @@
+import { canOpenFinishedChatAtom, refreshFinishedChatAvailabilityAtom } from '../../../runtime/windowCommands';
+import { RESPONSE_FINISH_MESSAGE } from '../../../../src/services/threads/finishedChat';
+import { BeaverUIFactory } from "../../../../src/ui/ui";
 import { getWindowRuntime } from '../../../runtime/windowRuntime';
 import { getCredentialGeneration } from '@beaver/agent-core/transport/credentials';
 import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
@@ -47,6 +50,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     const surfaceWindow = useSurfaceWindow();
     const [, forceUpdate] = useState({});
     const threadId = useAtomValue(currentThreadIdAtom);
+    const canOpenFinishedChat = useAtomValue(canOpenFinishedChatAtom);
     // Derived from the thread store, so this entry cannot disagree with the
     // chat lists. `null` means the open chat is not in the store yet — a
     // zotero://beaver deep link, or a chat created in this session — which is
@@ -78,6 +82,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         if (!isOpen) return;
         forceUpdate({});
         void resolvePinnedState();
+        void store.set(refreshFinishedChatAvailabilityAtom);
     }, [resolvePinnedState]);
 
     // The menu's content is built when it is opened, so the runs and their tool
@@ -300,6 +305,20 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
         const items: MenuItem[] = [
             {
+                label: "Open in Beaver window",
+                disabled: !canOpenFinishedChat,
+                customContent: !canOpenFinishedChat ? <div>
+                    <div>Open in Beaver window</div>
+                    <div className="text-xs">{RESPONSE_FINISH_MESSAGE}</div>
+                </div> : undefined,
+                onClick: () => {
+                    if (threadId)
+                        void BeaverUIFactory.commandBeaverWindow("open-chat", {
+                            threadId,
+                        }).then(result => { if (result?.message) surfaceWindow.alert(result.message); }).catch(Zotero.logError);
+                },
+            },
+            {
                 // MenuItem carries no shortcut field, so the ⌘F / Ctrl+F chord
                 // that also opens the bar is not shown here.
                 label: 'Find in chat',
@@ -343,7 +362,9 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
                 customContent: pinPending ? (
                     <span className="display-flex items-center gap-2">
                         <Spinner size={14} />
-                        <span>{isPinned ? 'Unpinning chat' : 'Pinning chat'}</span>
+                        <span>
+                            {isPinned ? 'Unpinning chat' : 'Pinning chat'}
+                        </span>
                     </span>
                 ) : undefined,
             },

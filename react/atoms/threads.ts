@@ -1,7 +1,18 @@
+import {
+    setAdmission,
+    readAdmission,
+    threadConflictAtom,
+} from "../runtime/threadAdmission";
 import { viewedHistoryRevisionAtom } from '../runtime/threadProjection';
 import { atom } from "jotai";
 import { readerActionContextAtom, currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateMessageCollectionsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
-import { isAtBottomAtom, isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowIsAtBottomAtom, windowUserScrolledAtom } from "./ui";
+import {
+    isAtBottomAtom,
+    isLibraryTabAtom,
+    isWebSearchEnabledAtom,
+    removePopupMessagesByTypeAtom,
+    userScrolledAtom,
+} from "./ui";
 
 import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "@beaver/agent-core/citations/atoms";
 import { maybeShowCitationTipAtom } from "./citationTip";
@@ -165,41 +176,6 @@ export const currentThreadScrollPositionAtom = atom(
     }
 );
 
-/**
- * The same, for the separate window, which scrolls independently of the sidebars.
- */
-export const windowScrollPositionsAtom = atom<Record<string, number>>({});
-
-/**
- * Atom to get the scroll position of the current thread for separate window
- */
-export const windowScrollPositionAtom = atom(
-    (get) => {
-        const threadId = get(currentThreadIdAtom);
-        if (!threadId) {
-            return undefined;
-        }
-        const positions = get(windowScrollPositionsAtom);
-        return positions[threadId];
-    },
-    (get, set, scrollTop: number | null) => {
-        const threadId = get(currentThreadIdAtom);
-        if (!threadId) {
-            return;
-        }
-        set(windowScrollPositionsAtom, (prevPositions) => {
-            const nextPositions = { ...prevPositions };
-            if (scrollTop === null) {
-                delete nextPositions[threadId];
-            } else {
-                nextPositions[threadId] = scrollTop;
-            }
-            return nextPositions;
-        });
-    }
-);
-
-
 // Atom to store recent threads
 export const recentThreadsAtom = atom<ThreadData[]>([]);
 
@@ -298,12 +274,12 @@ export const newThreadAtom = atom(
             // Cancel any active run before switching threads
             await cancelActiveRunIfNeeded(get, set, isCurrent);
             if (!isCurrent()) return;
-            
+
             // Clean up any temporary annotations from previous thread
             await BeaverTemporaryAnnotations.cleanupAll().catch(error => {
                 logger(`newThreadAtom: Error cleaning up temporary annotations: ${error}`);
             });
-            
+
             if (!isCurrent()) return;
             const isLibraryTab = get(isLibraryTabAtom);
             set(currentThreadIdAtom, null);
@@ -317,9 +293,9 @@ export const newThreadAtom = atom(
             set(clearAllPendingQuestionsAtom);
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearAllPendingBatchApprovalsAtom);
-            
+
             set(isWebSearchEnabledAtom, false);
-            
+
             set(currentMessageItemsAtom, []);
             set(readerActionContextAtom, null);
             set(currentMessageCollectionsAtom, []);
@@ -344,20 +320,18 @@ export const newThreadAtom = atom(
                 }
             }
             if (!isCurrent()) return;
-            // Reset scroll state for both sidebar and window. The measured
+            // Reset this renderer’s scroll state. The measured
             // position is reset with the intent: the thread being opened has
             // not been measured yet, and the previous thread's reading would
             // otherwise decide whether the scroll-down button shows.
             set(userScrolledAtom, false);
-            set(windowUserScrolledAtom, false);
             set(isAtBottomAtom, true);
-            set(windowIsAtBottomAtom, true);
             return navigation;
         } finally {
             // A superseding navigation owns its loading state.
             if (isCurrent()) set(isLoadingThreadAtom, false);
         }
-    }
+    },
 );
 
 /**
@@ -368,7 +342,7 @@ export const loadThreadAtom = atom(
     async (
         get,
         set,
-        { user_id, threadId, threadName, threadIdentity, skipInstanceMismatchConfirm, window, preserveDraft = false }: {
+        { user_id, threadId, threadName, threadIdentity, skipInstanceMismatchConfirm, window, preserveDraft = false, canCommit }: {
             window?: Window;
             user_id: string;
             threadId: string;
@@ -384,11 +358,14 @@ export const loadThreadAtom = atom(
             /** Skip the instance-mismatch confirm (headless test drivers). */
             skipInstanceMismatchConfirm?: boolean;
             preserveDraft?: boolean;
-        }
+            /** Finished-chat navigation stages all state until loading succeeds. */
+            canCommit?: () => boolean;
+        },
     ): Promise<boolean> => {
         // Confirm before interrupting a run that's actively streaming in the
         // current thread. Status, not presence — see newThreadAtom.
         const hasActiveWork = get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom));
+        if (canCommit && (hasActiveWork || !canCommit())) return false;
         if (hasActiveWork && !confirmInterruptActiveRun(
             'Switch chat?',
             'Beaver is still generating a response in this chat. Switching chats will stop it.',
@@ -400,19 +377,32 @@ export const loadThreadAtom = atom(
             return false;
         }
 
-        // Show loading state immediately for instant UI feedback
-        set(isLoadingThreadAtom, true);
         // Preflight can still be cancelled. Keep the committed navigation generation
         // intact so in-flight retries are not abandoned unless a switch is accepted.
         const loadedHistoryRevision = Zotero.Beaver?.presence?.getSnapshot().history[threadId] ?? 0;
         const previousNavigation = get(threadNavigationSeqAtom);
         const request = get(threadLoadRequestSeqAtom) + 1;
         set(threadLoadRequestSeqAtom, request);
+        // The new request owns loading presentation, including when it supersedes
+        // an ordinary preflight. Finished-chat commands keep the destination usable.
+        set(isLoadingThreadAtom, !canCommit);
         const navigation = previousNavigation + 1;
         let committed = false;
-        const isCurrent = () => !committed
-            ? get(threadNavigationSeqAtom) === previousNavigation && get(threadLoadRequestSeqAtom) === request
-            : get(threadNavigationSeqAtom) === navigation;
+        // A replacement preflight may be abandoned. Keep hydrating the displayed
+        // navigation until another navigation commits, independently of spinner ownership.
+        const isCurrent = () => committed
+            ? get(threadNavigationSeqAtom) === navigation
+            : get(threadLoadRequestSeqAtom) === request &&
+                (!canCommit || canCommit()) && get(threadNavigationSeqAtom) === previousNavigation;
+        const liveSet = set;
+        // Queue writes, including action atoms, while hydration can still fail.
+        // No destination state is replaced until the final admission/draft check.
+        const staged: Array<() => void> = [];
+        if (canCommit) {
+            set = ((...args: any[]) => {
+                staged.push(() => (liveSet as any)(...args));
+            }) as typeof set;
+        }
         // Hydration callbacks can finish after this navigation is superseded.
         const guardedSet = ((...args: any[]) => isCurrent() ? (set as any)(...args) : undefined) as typeof set;
 
@@ -444,7 +434,7 @@ export const loadThreadAtom = atom(
                 // actions are safe to validate against this library.
                 logger(`loadThreadAtom: Failed to fetch thread ${threadId}: ${error}`, 1);
                 set(pendingScrollToRunAtom, null);
-                set(isLoadingThreadAtom, false);
+                if (!canCommit) liveSet(isLoadingThreadAtom, false);
                 return false;
             }
         }
@@ -465,40 +455,41 @@ export const loadThreadAtom = atom(
             if (!isCurrent()) return false;
             if (!confirmed) {
                 set(pendingScrollToRunAtom, null);
-                set(isLoadingThreadAtom, false);
+                if (!canCommit) liveSet(isLoadingThreadAtom, false);
                 return false;
             }
             confirmedMismatchedThreadIds.add(threadId);
         }
 
         if (!isCurrent()) return false;
-        committed = true;
-        set(threadNavigationSeqAtom, navigation);
+        if (!canCommit) {
+            committed = true;
+            set(threadNavigationSeqAtom, navigation);
+        }
 
         let loaded = false;
         try {
             // Cancel any active run before loading a different thread
-            await cancelActiveRunIfNeeded(get, set, isCurrent);
+            if (!canCommit) await cancelActiveRunIfNeeded(get, set, isCurrent);
             if (!isCurrent()) return false;
             // Clean up any temporary annotations from previous thread
-            await BeaverTemporaryAnnotations.cleanupAll().catch(error => {
+            if (!canCommit) await BeaverTemporaryAnnotations.cleanupAll().catch(error => {
                 logger(`loadThreadAtom: Error cleaning up temporary annotations: ${error}`);
             });
 
             if (!isCurrent()) return false;
-            // Reset scroll state for both sidebar and window. The measured
+            // Reset this renderer’s scroll state. The measured
             // position is reset with the intent: the thread being opened has
             // not been measured yet, and the previous thread's reading would
             // otherwise decide whether the scroll-down button shows.
             set(userScrolledAtom, false);
-            set(windowUserScrolledAtom, false);
             set(isAtBottomAtom, true);
-            set(windowIsAtBottomAtom, true);
             // Set the current thread ID and name
+            if (canCommit) set(activeRunAtom, null);
             set(currentThreadIdAtom, threadId);
             set(currentThreadNameAtom, resolvedName);
             set(clearExternalReferenceCacheAtom);
-            set(isWebSearchEnabledAtom, false);
+            if (!preserveDraft) set(isWebSearchEnabledAtom, false);
             set(resetCitationMarkersAtom);
 
             // Clear all pending approvals/questions when loading a different thread
@@ -525,6 +516,8 @@ export const loadThreadAtom = atom(
             // Load agent runs with actions from the backend, and hydrate each
             // tool return as the shared loader walks the runs.
             const {
+                tailRunId,
+                activity,
                 runs: processedRuns,
                 citations: citationMetadata,
                 agentActions: agent_actions,
@@ -541,6 +534,9 @@ export const loadThreadAtom = atom(
             });
 
             if (!isCurrent()) return false;
+            if (canCommit && activity.state !== "idle") return false;
+            setAdmission(set, threadId, tailRunId, activity);
+            set(threadConflictAtom, null);
             // Protocol deep-links can request a run that does not exist in the target thread.
             // Clear the pending scroll target deterministically once thread data is loaded.
             const pendingRunId = get(pendingScrollToRunAtom);
@@ -548,7 +544,7 @@ export const loadThreadAtom = atom(
                 logger(`loadThreadAtom: Pending run ${pendingRunId} not found in thread ${threadId}, clearing target`, 1);
                 set(pendingScrollToRunAtom, null);
             }
-            
+
             if (processedRuns.length > 0) {
                 // Load item data for user attachments. Citations no longer
                 // need item preloading: they render from backend metadata
@@ -614,7 +610,8 @@ export const loadThreadAtom = atom(
                 // Set agent runs. The scoped run selectors are dropped in the
                 // same breath: reset any earlier and the old thread's runs, still
                 // in the store while this load ran, would populate them again.
-                resetRunSelectorCaches();
+                if (canCommit) staged.push(resetRunSelectorCaches);
+                else resetRunSelectorCaches();
                 set(threadRunsAtom, processedRuns);
 
                 // Reconcile toolcall_id mismatches between REST API and model messages
@@ -670,7 +667,8 @@ export const loadThreadAtom = atom(
                 }
             } else {
                 // No runs found, clear state
-                resetRunSelectorCaches();
+                if (canCommit) staged.push(resetRunSelectorCaches);
+                else resetRunSelectorCaches();
                 set(threadRunsAtom, []);
                 set(threadAgentActionsAtom, []);
                 set(citationsAtom, []);
@@ -684,19 +682,23 @@ export const loadThreadAtom = atom(
                     set(currentThreadNameAtom, fetchedName);
                 }
             }
+            if (canCommit) {
+                const latest = await readAdmission(threadId);
+                if (!isCurrent() || latest.activity.state !== 'idle' || latest.tailRunId !== tailRunId) return false;
+            }
             loaded = true;
         } catch (error) {
             if (!isCurrent()) return false;
             // Load failed, so any pending deep-link target can no longer be fulfilled.
             set(pendingScrollToRunAtom, null);
 
-            if (isApiError(error) && error.status === 404) {
+            if (!canCommit && isApiError(error) && error.status === 404) {
                 logger(`loadThreadAtom: Thread ${threadId} not found, resetting to empty thread state`, 1);
                 // See the identity fetch above: a 404 here is a deletion made
                 // on another device.
                 Zotero.Beaver.threads.markThreadDeleted(threadId);
                 set(currentThreadIdAtom, null);
-                resetRunSelectorCaches();
+                if (!canCommit) resetRunSelectorCaches();
                 set(threadRunsAtom, []);
                 set(activeRunAtom, null);
                 set(threadAgentActionsAtom, []);
@@ -705,11 +707,22 @@ export const loadThreadAtom = atom(
                 console.error('Error loading thread:', error);
             }
         } finally {
-            if (isCurrent()) set(isLoadingThreadAtom, false);
+            if (!canCommit && get(threadLoadRequestSeqAtom) === request && isCurrent())
+                liveSet(isLoadingThreadAtom, false);
         }
         if (!isCurrent()) return false;
+        if (canCommit) {
+            if (!loaded || !canCommit()) return false;
+            committed = true;
+            liveSet(threadNavigationSeqAtom, navigation);
+            staged.forEach(apply => apply());
+            set = liveSet;
+            if (!preserveDraft) void BeaverTemporaryAnnotations.cleanupAll().catch(error => {
+                logger(`loadThreadAtom: Error cleaning up temporary annotations: ${error}`);
+            });
+        }
         if (loaded) set(viewedHistoryRevisionAtom, loadedHistoryRevision);
-        if (preserveDraft) return loaded;
+        if (preserveDraft || !loaded) return loaded;
         // Clear sources for now
         set(currentMessageItemsAtom, []);
         set(readerActionContextAtom, null);
@@ -718,5 +731,5 @@ export const loadThreadAtom = atom(
         set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(clearComposerAtom);
         return loaded;
-    }
+    },
 );

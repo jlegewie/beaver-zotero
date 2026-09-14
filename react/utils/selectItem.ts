@@ -9,7 +9,7 @@ import { logger } from "@beaver/agent-core/platform/logger";
  * @param collectionId - Optional collection ID to navigate to instead of library root
  * @returns True if item was successfully selected, false otherwise
  */
-export async function selectItemById(itemId: number, changeView: boolean = true, collectionId?: number, win = getContextWindow()) {
+export async function selectItemById(itemId: number, changeView: boolean = true, collectionId?: number, win: Window | null = getContextWindow()) {
     if (!itemId) return false;
 
     win = await resolveNavigationWindow(win);

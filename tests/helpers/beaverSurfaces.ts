@@ -55,6 +55,7 @@ export interface SettleResponse {
 }
 
 export interface WindowResponse extends SettleResponse {
+    window_id: string | null;
     /** Null when no separate window is open. */
     owner_is_main_window: boolean | null;
 }
@@ -91,8 +92,8 @@ const settlePost = <T>(path: string, body: Record<string, unknown>) =>
     post<T>(path, { timeout_ms: SETTLE_TIMEOUT_MS, ...body }, { timeout: REQUEST_TIMEOUT_MS });
 
 /** The `application_state` an agent run would send right now. */
-export const applicationState = () =>
-    post<ApplicationStateResponse>('/beaver/test/application-state', {});
+export const applicationState = (windowId?: string) =>
+    post<ApplicationStateResponse>('/beaver/test/application-state', { windowId });
 
 /** Open or close the separate Beaver window. */
 export const setBeaverWindow = (open: boolean) =>

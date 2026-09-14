@@ -23,31 +23,45 @@ export function contextMainWindow(origin?: Window | null): MainWindow | null {
 
 /** Originless user commands choose once; local commands never fall through to another chat. */
 export async function resolveNavigationWindow(origin?: Window | null): Promise<MainWindow> {
+    let target: MainWindow | null;
     if (origin) {
-        const target = contextMainWindow(origin);
-        if (target) return target;
-        throw new WindowUnavailableError();
+        target = contextMainWindow(origin);
+        if (!target) throw new WindowUnavailableError();
     }
-    let target = Zotero.getMainWindow();
-    if (!target || target.closed) {
-        // Zotero opens asynchronously and does not return the new window.
-        (Zotero as any).openMainWindow();
-        target = null as any;
+    else {
+        target = Zotero.getMainWindow();
+        if (!target || target.closed) {
+            // Zotero opens asynchronously and does not return the new window.
+            (Zotero as any).openMainWindow();
+            target = null;
+        }
     }
     const deadline = Date.now() + 15000;
     for (;;) {
         // Reacquire until a window appears, then retain that command's target.
         if (!target) target = Zotero.getMainWindow();
-        if (target?.closed) throw new WindowUnavailableError();
-        if (isMainWindow(target) && (target.ZoteroPane as any).itemsView) return target;
+        if (target && (target.closed || target.__beaverRuntime?.status === 'closing')) throw new WindowUnavailableError();
+        if (isMainWindow(target) && target.ZoteroPane.itemsView && target.ZoteroPane.collectionsView) {
+            // The items view exists before the collections tree restores its initial
+            // selection. Wait for that restoration before navigating or scrolling.
+            await target.ZoteroPane.collectionsView.waitForLoad();
+            if (contextMainWindow(target) !== target) throw new WindowUnavailableError();
+            await target.ZoteroPane.itemsView.waitForLoad();
+            if (contextMainWindow(target) !== target) throw new WindowUnavailableError();
+            return target;
+        }
         if (Date.now() >= deadline) throw new WindowUnavailableError();
         await Zotero.Promise.delay(50);
     }
 }
 
 /** Main origins stay local; standalone reader/note commands choose a live chat. */
-export async function resolveChatWindow(origin?: Window | null): Promise<MainWindow> {
+export async function resolveChatWindow(
+    origin?: Window | null,
+): Promise<MainWindow> {
     if (origin?.closed) throw new WindowUnavailableError();
+    const own = origin && Zotero.Beaver?.runtime.resolveWindowFrom(origin);
+    if (own) return own.hostWindow as MainWindow;
     const hasLocalOwner = origin && (isMainWindow(origin) || origin.__beaverRuntime || origin.__beaverOwnerWindowRef);
     const win = await resolveNavigationWindow(hasLocalOwner ? origin : undefined);
     const deadline = Date.now() + 15000;

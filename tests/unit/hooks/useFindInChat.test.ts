@@ -57,7 +57,7 @@ let hook: Hook | null = null;
 let thread: HTMLDivElement;
 
 function Harness({ container }: { container: HTMLElement | null }) {
-    hook = useFindInChat({ container, isWindow: false });
+    hook = useFindInChat({ container });
     return null;
 }
 

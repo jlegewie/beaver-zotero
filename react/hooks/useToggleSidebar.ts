@@ -1,4 +1,4 @@
-import { getContextWindow } from '../runtime/windowRuntime';
+import { getContextWindow, getWindowRuntime } from '../runtime/windowRuntime';
 import { useSetAtom } from 'jotai';
 import { store } from '../store';
 import { isSidebarVisibleAtom } from '../atoms/ui';
@@ -16,8 +16,12 @@ export function useToggleSidebar() {
     const removePopupMessagesByType = useSetAtom(removePopupMessagesByTypeAtom);
     const updateMessageItemsFromZoteroSelection = useSetAtom(updateMessageItemsFromZoteroSelectionAtom);
     const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
-    
+
     useEventSubscription('toggleChat', (detail) => {
+        if (getWindowRuntime().kind === "standalone") {
+            getWindowRuntime().hostWindow.focus();
+            return;
+        }
         // Update atoms
         setSidebarVisible((prev) => {
             const currentlyOpen = prev;

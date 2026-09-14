@@ -45,7 +45,12 @@ vi.mock('../../../react/agents/agentActions', () => ({
     toAgentAction: vi.fn((action) => action),
 }));
 
-import { AgentConnectionError, AgentService, ConnectTimeoutError } from '@beaver/agent-core/transport/agentService';
+import {
+    AgentConnectionError,
+    AgentService,
+    AgentRunService,
+    ConnectTimeoutError,
+} from '@beaver/agent-core/transport/agentService';
 import { setTransportConfig } from '@beaver/agent-core/transport/config';
 import type { AgentRunRequest, WSCallbacks } from '@beaver/agent-core/protocol/agentProtocol';
 
@@ -184,6 +189,47 @@ describe('AgentService reconnect handling', () => {
         vi.unstubAllGlobals();
         vi.useRealTimers();
     });
+
+    it.each([undefined, 1])(
+        "requires admission v1 before sending a tail-asserting chat (server: %s)",
+        async (version) => {
+            const service = new AgentService("http://localhost:8000");
+            const callbacks = createCallbacks();
+            const request = {
+                type: "chat",
+                run_id: "run",
+                thread_id: null,
+                expected_tail_run_id: null,
+                user_prompt: { content: "hello" },
+            } as AgentRunRequest;
+            const pending = service.connect(request, callbacks);
+            const outcome = pending.catch((error) => error);
+            await flushMicrotasks();
+            const socket = MockWebSocket.instances[0];
+            socket.emitOpen();
+            socket.emitMessage({
+                event: "ready",
+                thread_admission_version: version,
+                subscription_status: "active",
+                processing_mode: "fast",
+                indexing_complete: true,
+            });
+            await outcome;
+            const sent = socket.send.mock.calls.map(([payload]) =>
+                JSON.parse(payload),
+            );
+            expect(sent.some((payload) => payload.type === "chat")).toBe(
+                version === 1,
+            );
+            if (version !== 1)
+                expect(callbacks.onError).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        type: "thread_admission_unavailable",
+                    }),
+                );
+            service.close();
+        },
+    );
 
     // The exported singleton is constructed with no URL, so its socket address
     // comes from the transport config at connect time.
@@ -989,5 +1035,21 @@ describe('AgentService request acks and keepalives', () => {
 
         resolveHandler({ type: 'zotero_data', request_id: 'req-1', items: [] });
         await flushMicrotasks();
+    });
+});
+
+it("keeps admission metadata across the history REST adapter", async () => {
+    const service = new AgentRunService("http://localhost:8000");
+    vi.spyOn(service as any, "get").mockResolvedValue({
+        runs: [],
+        agent_actions: null,
+        tail_run_id: "hidden-tail",
+        activity: { state: "active", run_id: "reserved" },
+    });
+    expect(await service.getThreadRuns("thread", true)).toEqual({
+        runs: [],
+        agent_actions: null,
+        tail_run_id: "hidden-tail",
+        activity: { state: "active", run_id: "reserved" },
     });
 });

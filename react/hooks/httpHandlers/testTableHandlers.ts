@@ -59,7 +59,6 @@ import { BeaverUIFactory } from '../../../src/ui/ui';
 import { showTableInWindowAtom, windowSurfaceAtom } from '../../atoms/windowSurface';
 import { store } from '../../store';
 import { openBeaverWindow } from '../../ui/openBeaverWindow';
-import { borrowedWindowCommandError } from './borrowedWindowCommand';
 // The reader views and the item-pane section keep module state and are compiled
 // into the *esbuild* bundle by `src/hooks.ts`. Importing them here would give
 // this bundle a second, permanently empty copy — the endpoint would then report
@@ -111,23 +110,21 @@ import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
 const TABLE_WINDOW_SIZE = { width: 1180, height: 780 };
 
 export async function handleTestOpenTableHttpRequest(
-    request: OpenTableRequest = {}
+    request: OpenTableRequest = {},
 ): Promise<any> {
-    const initialError = borrowedWindowCommandError();
-    if (initialError) return initialError;
     const variant = request.variant === 'extraction' ? 'extraction' : 'search';
     const table =
         request.table ??
         (await buildDemoTable(variant, request.limit ?? DEMO_ROW_LIMIT));
 
     // Building the demo may yield while another renderer opens the singleton.
-    const ownerError = borrowedWindowCommandError();
-    if (ownerError) return ownerError;
-    store.set(showTableInWindowAtom, {
-        variant,
-        table,
-        title: request.title,
-        subtitle: request.subtitle,
+    await BeaverUIFactory.commandBeaverWindow("show-table", {
+        surface: {
+            variant,
+            table,
+            title: request.title,
+            subtitle: request.subtitle,
+        },
     });
 
     if (request.open !== false) {
@@ -175,9 +172,7 @@ export async function handleTestOpenStoredTableHttpRequest(
 
 /** Hands the window back to the thread. */
 export async function handleTestCloseTableHttpRequest(): Promise<any> {
-    const ownerError = borrowedWindowCommandError();
-    if (ownerError) return ownerError;
-    store.set(windowSurfaceAtom, { kind: 'thread' });
+    await BeaverUIFactory.commandBeaverWindow("show-chat");
     return { ok: true, window_open: !!BeaverUIFactory.findBeaverWindow() };
 }
 

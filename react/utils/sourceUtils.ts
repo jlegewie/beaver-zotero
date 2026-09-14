@@ -196,6 +196,8 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
  * @param collectionKey - Optional collection key to navigate to before revealing
  */
 export function revealSource(source: ZoteroItemReference | SourceAttachment, collectionKey?: string) {
+    const runtime = tryGetWindowRuntime();
+    if (!runtime || runtime.hostWindow.closed) return;
     if (!source.zotero_key) return;
     const libraryID = resolveLibraryRef(source);
     if (!libraryID) {
@@ -209,18 +211,18 @@ export function revealSource(source: ZoteroItemReference | SourceAttachment, col
         notifyReferenceUnavailable('item');
         return;
     }
-    const win = tryGetWindowRuntime()?.contextWindow;
-    if (win && !win.closed) {
-        // Convert collection key to collection ID if provided
-        let collectionId: number | undefined;
-        if (collectionKey) {
-            const id = Zotero.Collections.getIDFromLibraryAndKey(libraryID, collectionKey);
-            if (id !== false) {
-                collectionId = id;
-            }
+    // Convert collection key to collection ID if provided
+    let collectionId: number | undefined;
+    if (collectionKey) {
+        const id = Zotero.Collections.getIDFromLibraryAndKey(libraryID, collectionKey);
+        if (id !== false) {
+            collectionId = id;
         }
-        selectItemById(itemID, true, collectionId, getContextWindow());
     }
+    // A standalone with no context lets navigation open and await a main window.
+    void selectItemById(itemID, true, collectionId, runtime.contextWindow).catch(error => {
+        logger(`revealSource: unable to reveal item ${itemID}: ${error}`, 2);
+    });
 }
 
 /**

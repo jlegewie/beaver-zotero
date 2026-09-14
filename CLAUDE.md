@@ -185,8 +185,8 @@ into `registerZoteroHost()` → add the folder to the lint guard.
 ## Windows and React mounting points
 
 Beaver runs in the **main Zotero window** and in a **separate Beaver window**
-(`addon/content/beaverWindow.xhtml`), which reuses the main window's React instance rather
-than loading its own bundle.
+(`addon/content/beaverWindow.xhtml`). Each main window and the standalone evaluate their
+own React bundle and own their chat store and socket.
 
 **Never use bare `window`** in plugin code. Use the `win` parameter threaded through UI methods, `useSurfaceWindow()` for the
 rendered surface, or `ownerDocument.defaultView`. Context reads use `getContextWindow()`;
@@ -203,12 +203,13 @@ A hidden `#beaver-global-initializer-root` mounts `<GlobalContextInitializer />`
 hooks (auth, tab tracking, …).
 
 - **Each main-window renderer owns its Jotai store and atom identities** (`react/store.ts`).
-  Its library/reader sidebars and borrowed Beaver/preferences surfaces share that store.
+  Its library/reader sidebars and borrowed preferences surface share that store. The
+  standalone owns another store and may also host preferences.
   `win.__beaverJotaiStore` is a lifetime-bounded diagnostic handle, never a cross-window API.
-  **Scroll state is separate**: `useAutoScroll()` picks sidebar vs. borrowed-window atoms from
-  the `isWindow` prop — pass it correctly.
+  **Scroll state belongs to the renderer**: library/reader sidebars share it; the
+  standalone store isolates its scroll state. `isWindow` selects presentation.
 - `addon.runtime` owns stable runtime ids, the window registry, instance notifications and
-  one reader-width dispatcher. Attach installs a targeted UI bus on each main window;
+  one reader-width dispatcher. Attach installs a targeted UI bus on each chat window;
   `BeaverReact.initializeRuntime` binds the renderer before any React roots mount. Renderer
   code uses `getHostWindow()` / `getContextWindow()` from `react/runtime/windowRuntime.ts`.
 - UI events target the owning renderer's bus (`react/events/eventManager.ts`). Background
@@ -542,3 +543,25 @@ These paths are inert and should not be extended or used as a pattern:
   (`useZoteroSync.ts`, `sync.ts`), file upload (`FileUploader.ts`), file status reporting
   (`FileStatusDisplay.tsx`).
 - `profile.plan` and derived atoms such as `PlanFeatures`. (`profile.credit_plan` is current.)
+
+
+### Independent chat windows and admission
+
+The standalone survives main-window closure. Its context follows activation of a live main
+window and becomes empty when none remain. Rebinding replaces context observers, preserving
+its chat and explicit attachments. Preferences borrows the actual initiating renderer and
+closes with it. Use `BeaverUIFactory.commandBeaverWindow` with `open-chat`, `show-table`, or
+`show-chat`; commands pass persisted thread ids or plain table data, never stores or atoms.
+Ordinary window opening only focuses it. Explicit chat opening requires settled history,
+preserves a same-chat draft, and confirms replacement of user-authored drafts. It never
+stops a response in the destination; guarded loads commit only while the destination and
+draft are unchanged. Automatic selection attachments retain their origin and do not count
+as user drafts.
+
+Chat execution requires server admission v1. Every request carries `expected_tail_run_id`,
+including an explicit null for empty history. History retains the server tail and reservation
+activity independently of rendered run status. Busy/unknown activity blocks writes and is
+polled with bounded backoff. Admission conflicts preserve drafts and require explicit refresh
+and retry, never automatic resubmission. Stop-and-retry retains its lock through settlement,
+reconciles saved history before truncation, and refuses unseen successors. Canceling the undo
+confirmation leaves the stopped response stopped.

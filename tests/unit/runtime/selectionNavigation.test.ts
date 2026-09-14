@@ -9,6 +9,7 @@ it.each(['library', 'collection'])('reveals a %s in the resolved owner of a borr
         Zotero_Tabs: { select: vi.fn() },
         ZoteroPane: {
             collectionsView: {
+                waitForLoad: vi.fn(async () => {}),
                 selectLibrary: vi.fn(async () => true),
                 selectCollection: vi.fn(async () => true),
             },

@@ -1,9 +1,9 @@
 /**
  * Agent Service
- * 
+ *
  * This service provides WebSocket communication for agent runs,
  * enabling bidirectional communication between the Zotero plugin and the backend.
- * 
+ *
  * The Beaver agent is the primary agent that handles chat completions and tool execution.
  */
 
@@ -270,7 +270,7 @@ export class AgentService {
 
     /**
      * Connect to the WebSocket endpoint and send an agent run request
-     * 
+     *
      * Protocol flow:
      * 1. Client connects with clean URL (no sensitive data in params)
      * 2. Client sends WSAuthMessage with token only
@@ -278,7 +278,7 @@ export class AgentService {
      * 4. Client sends agent run request (with model selection: model_id/api_key or custom_model)
      * 5. Server validates model and sends "request_ack" event
      * 6. Server streams delta events and sends complete event
-     * 
+     *
      * @param request The agent run request to send (should include model_id/api_key or custom_model)
      * @param callbacks Event callbacks
      * @returns Promise that resolves when connection is established and ready, rejects on error
@@ -454,6 +454,22 @@ export class AgentService {
                 onReady: (data: WSReadyData) => {
                     attempt.stage = 'mid_run';
                     attempt.readyReceived = true;
+                    if (
+                        request.expected_tail_run_id !== undefined &&
+                        data.thread_admission_version !== 1
+                    ) {
+                        const message =
+                            "This server does not support safe concurrent chats. Update the server before continuing.";
+                        callbacks.onError({
+                            event: "error",
+                            type: "thread_admission_unavailable",
+                            message,
+                            is_retryable: false,
+                        });
+                        finish(new Error(message));
+                        this.close();
+                        return;
+                    }
                     logger('AgentService: Server ready, sending agent run request', 1);
                     // Call the original onReady callback first
                     callbacks.onReady(data);
@@ -563,7 +579,7 @@ export class AgentService {
                 this.messageQueue = this.messageQueue.then(() => {
                     if (this.connectionId !== connId) return;
                     return this.handleMessage(parsed, receivedAt);
-                }).catch(err => {
+                }).catch((err) => {
                     logger(`AgentService: Unhandled error in message queue: ${err}`, 1);
                 }).finally(() => {
                     // Entries stay until their handler settles, so the count
@@ -662,7 +678,7 @@ export class AgentService {
         const message = isPreparedJsonMessage(data)
             ? materializePreparedJsonMessage(data)
             : JSON.stringify(data);
-        
+
         // Sanitize sensitive data for logging
         const sanitizedData: Record<string, any> = isPreparedJsonMessage(data)
             ? { ...preparedJsonEnvelope(data), result: '[stripped document result for log]' }
@@ -836,6 +852,8 @@ export class AgentService {
                     this.serverSupportsRequestKeepalive = event.supports_request_keepalive === true;
                     // Convert snake_case backend response to camelCase frontend data
                     const readyData: WSReadyData = {
+                        thread_admission_version:
+                            event.thread_admission_version,
                         subscriptionStatus: event.subscription_status,
                         processingMode: event.processing_mode,
                         indexingComplete: event.indexing_complete,
@@ -863,7 +881,7 @@ export class AgentService {
                 case 'tool_return':
                     await this.callbacks.onToolReturn(event);
                     break;
-                
+
                 case 'tool_call_progress':
                     this.callbacks.onToolCallProgress(event);
                     break;
@@ -899,7 +917,7 @@ export class AgentService {
                 case 'error': {
                     // Call onError callback
                     this.callbacks.onError(event);
-                    // Backend behavior: some errors close connection (auth, internal), 
+                    // Backend behavior: some errors close connection (auth, internal),
                     // others keep it open (LLM errors, rate limits, invalid_request).
                     // Since each connect() is for a single run (for now), close on any error.
                     // Use a small delay to avoid race with server-initiated close.
@@ -1061,8 +1079,8 @@ export class AgentService {
                     const runRequest = (): Promise<void> => {
                         keepalive.setPhase('running');
                         return entry.handle(dataEvent, context)
-                            .then(res => { keepalive.stop(); this.send(res); })
-                            .catch(err => {
+                            .then((res) => { keepalive.stop(); this.send(res); })
+                            .catch((err) => {
                                 keepalive.stop();
                                 logger(`AgentService: ${eventName} failed: ${err}`, 1);
                                 this.send(entry.errorResponse(dataEvent, err));
@@ -1175,7 +1193,7 @@ export class AgentService {
         this.ws.send(JSON.stringify({ type: 'cancel' }));
 
         // Wait briefly to allow the message to be flushed
-        await new Promise(resolve => setTimeout(resolve, waitMs));
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
 
         // Close the connection (no-op if a newer connection superseded it)
         this.close(1000, 'User cancelled', { onlyIfConnectionId: connectionIdToCancel });
@@ -1286,8 +1304,16 @@ export class AgentService {
 // Agent Run REST API Types
 // =============================================================================
 
+/** Reservation activity is independent of the persisted run's display status. */
+export interface ThreadActivity {
+    state: "active" | "expired" | "idle";
+    run_id: string | null;
+}
+
 /** Response for getting thread runs with optional actions */
 export interface ThreadRunsResponse {
+    tail_run_id?: string | null;
+    activity?: ThreadActivity;
     runs: AgentRun[];
     agent_actions: AgentAction[] | null;
 }
@@ -1332,11 +1358,16 @@ export class AgentRunService extends ApiService {
         if (includeActions) {
             endpoint += '?include_actions=true';
         }
-        
-        const response = await this.get<{ runs: AgentRun[]; agent_actions?: Record<string, any>[] | null }>(endpoint);
-        
+
+        const response = await this.get<{ runs: AgentRun[]; agent_actions?: Record<string, any>[] | null
+            tail_run_id?: string | null;
+            activity?: ThreadActivity;
+        }>(endpoint, { timeoutMs: 15000 });
+
         return {
             runs: response.runs,
+            tail_run_id: response.tail_run_id,
+            activity: response.activity,
             agent_actions: response.agent_actions?.map(toAgentAction) ?? null
         };
     }
@@ -1355,9 +1386,9 @@ export class AgentRunService extends ApiService {
         if (includeActions) {
             endpoint += '?include_actions=true';
         }
-        
+
         const response = await this.get<{ run: AgentRun; agent_actions?: Record<string, any>[] | null }>(endpoint);
-        
+
         return {
             run: response.run,
             agent_actions: response.agent_actions?.map(toAgentAction) ?? null
@@ -1378,7 +1409,7 @@ export class AgentRunService extends ApiService {
         if (after) {
             endpoint += `&after=${after}`;
         }
-        
+
         return this.get<PaginatedRunsResponse>(endpoint);
     }
 }

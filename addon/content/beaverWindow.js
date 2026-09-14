@@ -1,103 +1,28 @@
 /* eslint-disable no-undef, no-restricted-globals */
-// Get Zotero using the modern ES module import (same as Zotero's note window)
 var { Zotero } = ChromeUtils.importESModule("chrome://zotero/content/zotero.mjs");
 
-var BeaverReact;
-var root;
+Services.scriptloader.loadSubScript(
+    "chrome://zotero/content/platformKeys.js",
+    window,
+);
+if (Zotero.isMac) {
+    Services.scriptloader.loadSubScript(
+        "chrome://global/content/macWindowMenu.js",
+        window,
+    );
+}
 
 async function onLoad() {
-    // Pin the initiating owner before initialization can yield to another window.
-    const ownerRef = window.arguments?.[0]?.ownerWindowRef ?? window.__beaverOwnerWindowRef;
-    const mainWindow = ownerRef ? ownerRef.deref() : window.opener;
-    if (!mainWindow || mainWindow.closed || !mainWindow.ZoteroPane || !mainWindow.Zotero_Tabs
-        || mainWindow.__beaverRuntime?.status === 'closing') {
-        window.close();
-        return;
-    }
-    window.__beaverOwnerWindowRef = new WeakRef(mainWindow);
-
-    // Wait for Zotero initialization
     await Zotero.initializationPromise;
-    await Zotero.uiReadyPromise;
-    if (window.closed || mainWindow.closed || mainWindow.__beaverRuntime?.status === 'closing'
-        || !mainWindow.BeaverReact) {
-        if (!window.closed) window.close();
-        return;
-    }
-
-    // Apply Zotero's font-size and UI density preferences to the React mount point.
-    // This mirrors how Zotero's own windows do it (e.g. zoteroPane.js calls registerRoot
-    // on #zotero-pane, advancedSearch.js on #zotero-search-box-container).
-    const mountContainer = document.getElementById('beaver-pane-window');
-    if (mountContainer) {
-        Zotero.UIProperties.registerRoot(mountContainer);
-    }
-
-    // Register keyboard shortcut for closing the window (Cmd+W on Mac, Ctrl+W on Windows)
-    window.addEventListener("keydown", (event) => {
-        // Check for Cmd+W (Mac) or Ctrl+W (Windows)
-        const isMacClose = Zotero.isMac && event.key === 'w' && event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
-        const isWindowsClose = !Zotero.isMac && event.key === 'w' && event.ctrlKey && !event.altKey && !event.shiftKey;
-        
-        if (isMacClose || isWindowsClose) {
-            event.preventDefault();
-            window.close();
-        }
-    });
-
-    // Use the main window's BeaverReact instance to ensure shared state (Jotai store)
-    // This allows the separate window to share the same Atom instances and Store as the main window
-    
-    if (mainWindow && mainWindow.BeaverReact) {
-        BeaverReact = mainWindow.BeaverReact;
-
-        // Record which main window's bundle renders this one. That bundle owns
-        // our React root and Jotai store, so the plugin closes this window when
-        // that main window unloads (a surviving window would be frozen against
-        // a dead bundle).
-        window.__beaverOwnerWindowRef = new WeakRef(mainWindow);
-        
-        if (typeof BeaverReact.renderWindowSidebar === "function") {
-            // Note: We use "beaver-pane-window" to match the CSS selectors in beaver.css
-            const container = document.getElementById("beaver-pane-window");
-            if (container) {
-                // Render into this window's container using the main window's React instance
-                root = BeaverReact.renderWindowSidebar(container);
-                Zotero.debug("Beaver: Separate window React component mounted using Main Window instance");
-            } else {
-                Zotero.debug("Beaver Error: Container element #beaver-pane-window not found");
-            }
-        } else {
-            Zotero.debug("Beaver Error: renderWindowSidebar function not found on Main Window instance");
-        }
-    } else {
-        Zotero.debug("Beaver Error: Main Window BeaverReact instance not found");
-        
-        // Fallback: If for some reason we can't get the main window instance,
-        // we could try to load the bundle locally, but that causes the state split issue.
-        // Better to fail and log than to show a broken login screen.
-    }
+    if (window.closed || !Zotero.Beaver?.data.alive) return;
+    Zotero.UIProperties.registerRoot(
+        document.getElementById("beaver-pane-window"),
+    );
+    Zotero.Beaver.hooks.onStandaloneWindowLoad(window);
 }
-
-function onUnload() {
-    // Use the stored BeaverReact reference (which points to Main Window's instance)
-    try {
-        if (BeaverReact && typeof BeaverReact.unmountFromElement === "function") {
-            const container = document.getElementById("beaver-pane-window");
-            if (container) {
-                BeaverReact.unmountFromElement(container);
-                Zotero.debug("Beaver: Separate window React component unmounted");
-            }
-        }
-    } catch (e) {
-        Zotero.debug("Beaver: Error unmounting separate window: " + e);
-    }
-    
-    // Clear references to help garbage collection
-    BeaverReact = null;
-    root = null;
-}
-
-// Set up event listeners
 window.addEventListener("load", onLoad, { once: true });
-window.addEventListener("unload", onUnload, { once: true });
+window.addEventListener(
+    "unload",
+    () => Zotero.Beaver?.hooks.onStandaloneWindowUnload(window),
+    { once: true },
+);

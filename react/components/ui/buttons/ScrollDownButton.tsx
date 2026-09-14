@@ -2,7 +2,7 @@ import React from 'react';
 import { Icon, ArrowDownIcon } from '../../icons/icons';
 import { activeDialogAtom, hasPopupMessagesAtom } from '../../../atoms/ui';
 import { isWSChatPendingAtom } from '../../../atoms/agentRunAtoms';
-import { getScrollAtoms } from '../../../utils/scrollPosition';
+import { scrollAtoms } from '../../../utils/scrollPosition';
 import { useAtomValue } from 'jotai';
 
 /** How long the dots take to cross-fade out; keep in sync with `.scroll-down-icon`'s transition. */
@@ -10,8 +10,6 @@ const DOTS_FADE_MS = 200;
 
 interface ScrollDownButtonProps extends React.HTMLProps<HTMLButtonElement> {
     onClick: () => void;
-    /** Whether this is rendered in the separate window (uses independent scroll state) */
-    isWindow?: boolean;
 }
 
 /**
@@ -52,9 +50,8 @@ export const ScrollDownButton: React.FC<ScrollDownButtonProps> = ({
     onClick,
     className,
     style,
-    isWindow = false,
 }) => {
-    const isAtBottom = useAtomValue(getScrollAtoms(isWindow).isAtBottom);
+    const isAtBottom = useAtomValue(scrollAtoms.isAtBottom);
     const hasPopupMessages = useAtomValue(hasPopupMessagesAtom);
     const activeDialog = useAtomValue(activeDialogAtom);
     const isStreaming = useAtomValue(isWSChatPendingAtom);

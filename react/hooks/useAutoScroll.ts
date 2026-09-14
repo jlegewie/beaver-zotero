@@ -1,6 +1,6 @@
 import { useRef, useCallback, useEffect, useState, ForwardedRef, RefObject } from 'react';
 import { store } from '../store';
-import { AT_BOTTOM_EPSILON, BOTTOM_THRESHOLD, getScrollAtoms, publishDistanceFromBottom, resumeFollowing, wasProgrammaticScroll } from '../utils/scrollPosition';
+import { AT_BOTTOM_EPSILON, BOTTOM_THRESHOLD, scrollAtoms, publishDistanceFromBottom, resumeFollowing, wasProgrammaticScroll } from '../utils/scrollPosition';
 
 const SCROLL_POSITION_UPDATE_THRESHOLD = 10; // pixels - minimum change to update scroll position atom
 
@@ -16,12 +16,6 @@ interface UseAutoScrollOptions {
      * @default 120
      */
     threshold?: number;
-    /**
-     * Whether this is being used in the separate window (uses independent scroll state)
-     *
-     * @default false
-     */
-    isWindow?: boolean;
 }
 
 interface UseAutoScrollReturn {
@@ -60,15 +54,12 @@ interface UseAutoScrollReturn {
  */
 export function useAutoScroll(
     forwardedRef?: ForwardedRef<HTMLDivElement>,
-    options: UseAutoScrollOptions = {}
+    options: UseAutoScrollOptions = {},
 ): UseAutoScrollReturn {
     const {
-        threshold = BOTTOM_THRESHOLD,
-        isWindow = false
+        threshold = BOTTOM_THRESHOLD
     } = options;
 
-    // Select the correct atoms based on whether we're in the separate window
-    const scrollAtoms = getScrollAtoms(isWindow);
     const scrolledAtom = scrollAtoms.userScrolled;
     const scrollPositionAtom = scrollAtoms.position;
 
@@ -231,7 +222,6 @@ export function useAutoScroll(
             lastTouchYRef.current = null;
         };
 
-
         // Passive: none of these handlers calls preventDefault, and saying so
         // keeps them off the scrolling critical path.
         scrollContainer.addEventListener('wheel', handleWheel, { passive: true });
@@ -343,4 +333,3 @@ export function useAutoScroll(
         handleScroll
     };
 }
-

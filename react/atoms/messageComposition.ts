@@ -2,7 +2,7 @@ import type { ReaderActionLocation } from '../../src/runtime/readerActionLocatio
 import { getContextWindow, tryGetWindowRuntime } from '../runtime/windowRuntime';
 import { getSelectedCollections } from '../../src/utils/zoteroSelection';
 import { collectionToReference } from '../utils/zoteroReferences';
-import { atom } from "jotai";
+import { atom, type Getter, type Setter } from "jotai";
 import { truncateText } from "@beaver/agent-ui/utils/stringUtils";
 import { allUserAttachmentKeysAtom } from "@beaver/agent-core/run-state/atoms";
 import { createElement } from 'react';
@@ -101,7 +101,22 @@ export const currentMessageContentAtom = atom<string>('');
 * Current message items
 * Items that are currently being added to the message
 */
-export const currentMessageItemsAtom = atom<Zotero.Item[]>([]);
+export const automaticMessageItemKeysAtom = atom<Set<string>>(new Set<string>());
+export const automaticMessageCollectionsAtom = atom<CollectionReference[]>([]);
+
+const messageItemsAtom = atom<Zotero.Item[]>([]);
+export const currentMessageItemsAtom = atom(
+    get => get(messageItemsAtom),
+    (get, set, update: Zotero.Item[] | ((previous: Zotero.Item[]) => Zotero.Item[])) => {
+        const previous = get(messageItemsAtom);
+        const items = typeof update === 'function' ? update(previous) : update;
+        const retained = new Set(previous.filter(item => items.some(next => messageItemKey(next) === messageItemKey(item))).map(messageItemKey));
+        const origins = get(automaticMessageItemKeysAtom);
+        const nextOrigins = new Set([...origins].filter(key => retained.has(key)));
+        if (nextOrigins.size !== origins.size) set(automaticMessageItemKeysAtom, nextOrigins);
+        set(messageItemsAtom, items);
+    },
+);
 
 /**
  * Current message collection attachments.
@@ -197,6 +212,51 @@ export const currentMessagePillsAtom = atom<SlashCommandDescriptor[]>([]);
  * published afterwards, restoring a draft into a thread the user has left.
  */
 export const composerResetTokenAtom = atom<number>(0);
+
+/** Capture the editable draft independently of an expanded submission prompt. */
+export function readComposerDraft(get: Getter) {
+    return {
+        content: get(currentMessageContentAtom),
+        pills: get(currentMessagePillsAtom),
+        readerAction: get(readerActionContextAtom),
+        items: get(currentMessageItemsAtom),
+        collections: get(currentMessageCollectionsAtom),
+        files: get(currentMessageExternalFilesAtom),
+        automaticItemKeys: get(automaticMessageItemKeysAtom),
+        automaticCollections: get(automaticMessageCollectionsAtom),
+        pendingPills: get(pendingPillInsertsAtom),
+        pendingAttachments: get(pendingAttachmentTokensAtom),
+        resetToken: get(composerResetTokenAtom),
+    };
+}
+
+export const composerDraftAtom = atom(readComposerDraft);
+
+export const hasComposerDraftAtom = atom(get => {
+    const draft = readComposerDraft(get);
+    return !!(draft.content.trim() || draft.pills.length || draft.pendingPills.length ||
+        draft.pendingAttachments.includes(draft.resetToken) ||
+        draft.items.some(item => !draft.automaticItemKeys.has(messageItemKey(item))) ||
+        (draft.collections.length && draft.collections !== draft.automaticCollections) || draft.files.length);
+});
+
+/** Restore rejected input without overwriting edits made while the request was pending. */
+export function restoreMissingComposerDraft(get: Getter, set: Setter, draft: ReturnType<typeof readComposerDraft>): void {
+    if (!get(currentMessageContentAtom) && !get(currentMessagePillsAtom).length) {
+        set(currentMessageContentAtom, draft.content);
+        set(currentMessagePillsAtom, draft.pills);
+        set(readerActionContextAtom, draft.readerAction);
+    }
+    if (!get(currentMessageItemsAtom).length) {
+        set(currentMessageItemsAtom, draft.items);
+        set(automaticMessageItemKeysAtom, draft.automaticItemKeys);
+    }
+    if (!get(currentMessageCollectionsAtom).length) {
+        set(currentMessageCollectionsAtom, draft.collections);
+        set(automaticMessageCollectionsAtom, draft.automaticCollections);
+    }
+    if (!get(currentMessageExternalFilesAtom).length) set(currentMessageExternalFilesAtom, draft.files);
+}
 
 /**
  * Clear the composer's text and pills programmatically (new thread, thread
@@ -379,6 +439,7 @@ export const clearMessageContextAtom = atom(
 export const addItemToCurrentMessageItemsAtom = atom(
     null,
     async (get, set, item: Zotero.Item) => {
+        set(automaticMessageItemKeysAtom, prev => new Set([...prev].filter(key => key !== messageItemKey(item))));
         const currentItems = get(currentMessageItemsAtom);
         if(currentItems.some((i) => messageItemKey(i) === messageItemKey(item))) return;
         
@@ -396,7 +457,11 @@ export const addItemToCurrentMessageItemsAtom = atom(
 */
 export const addItemsToCurrentMessageItemsAtom = atom(
     null,
-    async (get, set, items: Zotero.Item[]) => {
+    async (get, set, input: Zotero.Item[] | { items: Zotero.Item[]; automatic: true }) => {
+        const items = Array.isArray(input) ? input : input.items;
+        const automatic = !Array.isArray(input);
+        const keys = new Set(items.map(messageItemKey));
+        if (!automatic) set(automaticMessageItemKeysAtom, previous => new Set([...previous].filter(key => !keys.has(key))));
         // Filter out already added items
         const currentItems = get(currentMessageItemsAtom);
         const currentKeys = new Set(currentItems.map(messageItemKey));
@@ -410,6 +475,7 @@ export const addItemsToCurrentMessageItemsAtom = atom(
 
         // Add items immediately (optimistic update)
         set(currentMessageItemsAtom, [...currentItems, ...preValidatedItems]);
+        if (automatic) set(automaticMessageItemKeysAtom, previous => new Set([...previous, ...preValidatedItems.map(messageItemKey)]));
 
         // Validate items in background (non-blocking)
         // This will update itemValidationResultsAtom as validation progresses
@@ -618,9 +684,11 @@ export const updateMessageCollectionsFromZoteroSelectionAtom = atom(null, (get, 
     try {
         const searchableLibraryIds = get(searchableLibraryIdsAtom);
         const collections = getSelectedCollections(getContextWindow()?.ZoteroPane);
-        set(currentMessageCollectionsAtom, collections
+        const references = collections
             .filter(collection => !collection.deleted && searchableLibraryIds.includes(collection.libraryID))
-            .map(collectionToReference));
+            .map(collectionToReference);
+        set(currentMessageCollectionsAtom, references);
+        set(automaticMessageCollectionsAtom, references);
     } catch (error) {
         logger(`Could not attach selected collections: ${error}`, 1);
     }
@@ -672,7 +740,7 @@ export const updateMessageItemsFromZoteroSelectionAtom = atom(
         }).some(key => existingKeys.has(key)));
         
         if (!limit || newItems.length <= limit) {
-            await set(addItemsToCurrentMessageItemsAtom, newItems.slice(0, limit));
+            await set(addItemsToCurrentMessageItemsAtom, { items: newItems.slice(0, limit), automatic: true });
         }
     }
 );

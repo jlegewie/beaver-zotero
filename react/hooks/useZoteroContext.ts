@@ -8,6 +8,7 @@ import {
     selectedZoteroItemsAtom,
     selectedZoteroItemCountAtom,
     libraryViewAtom,
+    emptyLibraryView,
     selectedTagsAtom,
     recentlyAddedTodayCountAtom,
     libraryItemCountAtom,
@@ -201,6 +202,11 @@ export function useZoteroContext() {
         const mainWindow = getContextWindow();
         const zp = mainWindow?.ZoteroPane;
         if (!zp) {
+            setSelectedItems([]);
+            setSelectedItemCount(0);
+            setSelectedTags([]);
+            setNoteItem(null);
+            setLibraryView(emptyLibraryView);
             logger('useZoteroContext: ZoteroPane not available', 2);
             return;
         }

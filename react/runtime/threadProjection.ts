@@ -1,3 +1,4 @@
+import { serverThreadBlockedAtom, threadConflictAtom } from "./threadAdmission";
 import { tryGetWindowRuntime } from "./windowRuntime";
 import { atom } from "jotai";
 import {
@@ -85,6 +86,8 @@ export function attachThreadProjection(runtime: WindowRuntime): void {
 export const threadReadOnlyAtom = atom(
     (get) =>
         !!get(otherThreadWriterAtom) ||
+        get(serverThreadBlockedAtom) ||
+        !!get(threadConflictAtom) ||
         get(threadDeletedAtom) ||
         get(threadHistoryStaleAtom),
 );

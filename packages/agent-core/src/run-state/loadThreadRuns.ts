@@ -1,3 +1,4 @@
+import type { ThreadActivity, ThreadRunsResponse } from "../transport/agentService";
 import { agentRunService } from '../transport/agentService';
 import type { AgentAction } from '../agents/agentActionTypes';
 import type { AgentRun, ToolCallPart, ToolReturnPart } from '../agents/types';
@@ -20,6 +21,8 @@ export type ToolReturnHandler = (
 
 /** The client-neutral result of loading a thread's run history. */
 export interface LoadedThreadRuns {
+    tailRunId: string | null;
+    activity: ThreadActivity | { state: "unknown"; run_id: null };
     /** The thread's runs, with stale `in_progress` runs marked `canceled`. */
     runs: AgentRun[];
     /** Every run's citations, each stamped with its `run_id`. */
@@ -41,9 +44,10 @@ export interface LoadedThreadRuns {
  */
 export async function loadThreadRuns(
     threadId: string,
-    options?: { onToolReturn?: ToolReturnHandler }
+    options?: { onToolReturn?: ToolReturnHandler; history?: ThreadRunsResponse },
 ): Promise<LoadedThreadRuns> {
-    const { runs, agent_actions } = await agentRunService.getThreadRuns(threadId, true);
+    const { runs, agent_actions, tail_run_id, activity } =
+        options?.history ?? await agentRunService.getThreadRuns(threadId, true);
 
     // Mark any in_progress runs as canceled since they're no longer active
     const processedRuns = runs.map(run => {
@@ -99,5 +103,11 @@ export async function loadThreadRuns(
         }
     }
 
-    return { runs: processedRuns, citations, agentActions: agent_actions };
+    return {
+        runs: processedRuns,
+        citations,
+        agentActions: agent_actions,
+        tailRunId: tail_run_id ?? null,
+        activity: activity ?? { state: "unknown", run_id: null },
+    };
 }

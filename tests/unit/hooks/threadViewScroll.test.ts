@@ -29,7 +29,7 @@ vi.mock('../../../react/components/agentRuns/AgentRunView', () => ({
 import { ThreadView } from '../../../react/components/agentRuns/ThreadView';
 import { allRunsAtom, activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { store } from '../../../react/store';
-import { getScrollAtoms } from '../../../react/utils/scrollPosition';
+import { scrollAtoms } from '../../../react/utils/scrollPosition';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 const observers: ResizeObserverStub[] = [];
@@ -43,7 +43,7 @@ let root: Root;
 let host: HTMLDivElement;
 let container: HTMLDivElement;
 let height: number;
-const scrollAtoms = getScrollAtoms(false);
+
 const run = (status: string, id = 'one') => ({ id, status }) as any;
 function resizeContent() {
     // Deliver only to observers whose targets are still in the rendered tree.

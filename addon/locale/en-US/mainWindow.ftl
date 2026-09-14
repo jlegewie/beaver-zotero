@@ -27,3 +27,10 @@ beaver-table-section-header =
     .label = Beaver Table
 beaver-table-section-sidenav =
     .tooltiptext = Beaver Table
+
+beaver-window-new-chat =
+    .label = New Chat
+beaver-window-settings =
+    .label = Beaver settings
+beaver-window-close =
+    .label = Close

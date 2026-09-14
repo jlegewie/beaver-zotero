@@ -9,8 +9,12 @@ async function onLoad() {
     // Pin the initiating owner before initialization can yield to another window.
     const ownerRef = window.arguments?.[0]?.ownerWindowRef ?? window.__beaverOwnerWindowRef;
     const mainWindow = ownerRef ? ownerRef.deref() : window.opener;
-    if (!mainWindow || mainWindow.closed || !mainWindow.ZoteroPane || !mainWindow.Zotero_Tabs
-        || mainWindow.__beaverRuntime?.status === 'closing') {
+    if (
+        !mainWindow ||
+        mainWindow.closed ||
+        !mainWindow.__beaverRuntime ||
+        mainWindow.__beaverRuntime?.status === 'closing'
+    ) {
         window.close();
         return;
     }

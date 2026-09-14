@@ -20,7 +20,6 @@ export { isRenderableMessage } from '../agents/messageVisibility';
 // WebSocket Event Types (matching backend ws_events.py)
 // =============================================================================
 
-
 /** Base interface for all WebSocket events from the server */
 export interface WSBaseEvent {
     event: string;
@@ -28,6 +27,7 @@ export interface WSBaseEvent {
 
 /** Ready event sent after connection validation completes */
 export interface WSReadyEvent extends WSBaseEvent {
+    thread_admission_version?: number;
     event: 'ready';
     subscription_status: SubscriptionStatus;
     processing_mode: ProcessingMode;
@@ -636,7 +636,7 @@ export type ItemSearchErrorCode =
     | 'library_not_found'      // libraries_filter matched no library on this device
     | 'library_not_searchable' // a filter matched only in a library excluded from Beaver
     | 'tag_not_found'          // tags_filter matched no tag in the searched libraries
-    | 'timeout';               // Operation timed out
+    | 'timeout'; // Operation timed out
 
 /** Response to item metadata search request */
 export interface WSItemSearchByMetadataResponse {
@@ -1049,7 +1049,7 @@ export type AttachmentPageImagesErrorCode =
     | 'timeout'             // Rendering timed out
     | 'library_excluded'    // Attachment is in a library the user excluded from Beaver
     | 'library_unavailable' // Attachment is in a library unavailable on this computer
-    | 'render_failed';      // General rendering failure
+    | 'render_failed'; // General rendering failure
 
 /** Response to zotero attachment page images request */
 export interface WSZoteroAttachmentPageImagesResponse {
@@ -1083,7 +1083,7 @@ export type AttachmentImageErrorCode =
     | 'timeout'                    // Processing timed out
     | 'library_excluded'           // Attachment is in a library the user excluded from Beaver
     | 'library_unavailable'        // Attachment is in a library unavailable on this computer
-    | 'image_processing_failed';   // General resize/encode failure
+    | 'image_processing_failed'; // General resize/encode failure
 
 /** A processed attachment image. Field shapes align with WSPageImage. */
 export interface WSAttachmentImage {
@@ -1127,7 +1127,7 @@ export type ViewImagesErrorCode =
     | AttachmentPageImagesErrorCode
     | AttachmentImageErrorCode
     | 'unsupported_type'   // Attachment is neither a PDF nor an image
-    | 'view_failed';       // General dispatch-level failure
+    | 'view_failed'; // General dispatch-level failure
 
 /** A single rendered image returned by a zotero_view_images request. */
 export interface WSViewImage {
@@ -1198,7 +1198,7 @@ export type AttachmentSearchErrorCode =
     | 'timeout'             // Search timed out
     | 'library_excluded'    // Attachment is in a library the user excluded from Beaver
     | 'library_unavailable' // Attachment is in a library unavailable on this computer
-    | 'search_failed';      // General search failure
+    | 'search_failed'; // General search failure
 
 /** Request from backend to search text within an attachment */
 export interface WSZoteroAttachmentSearchRequest extends WSBaseEvent {
@@ -2538,7 +2538,6 @@ export type WSEvent =
     // User interaction events
     | WSAskUserQuestionRequest;
 
-
 // =============================================================================
 // Client Message Types (sent from frontend to backend)
 // =============================================================================
@@ -2926,6 +2925,8 @@ export interface AgentRunRequest {
     run_id: string;
     /** Thread ID (new UUID for new thread, existing UUID for continuation) */
     thread_id: string | null;
+    /** Authoritative tail observed by the caller; null asserts an empty thread. */
+    expected_tail_run_id?: string | null;
     /** The user's message */
     user_prompt: BeaverAgentPrompt;
     /** Permissions for the agent run */
@@ -2963,13 +2964,13 @@ export interface AgentRunRequest {
     assistant_message_id?: string;
 }
 
-
 // =============================================================================
 // Callback Types
 // =============================================================================
 
 /** Data received in the ready event */
 export interface WSReadyData {
+    thread_admission_version?: number;
     subscriptionStatus: SubscriptionStatus;
     processingMode: ProcessingMode;
     indexingComplete: boolean;

@@ -33,15 +33,7 @@ export interface TableWindowSurface {
     subtitle?: string;
 }
 
-/**
- * Lives in the shared store like every other atom, so the main window can set
- * it and the separate window — which reuses the main window's React bundle —
- * renders the result.
- *
- * This surface displays transient tables without a Zotero item. Stored tables
- * open in Zotero's snapshot reader. Future host-owned reader controls remain
- * separate from the sandboxed document, whose scripts stay disabled.
- */
+/** Local standalone presentation state. Cross-window commands deliver plain data. */
 export const windowSurfaceAtom = atom<WindowSurface>({ kind: "thread" });
 
 let nextTableSurfaceId = 0;

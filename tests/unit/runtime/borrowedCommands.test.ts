@@ -16,24 +16,28 @@ beforeEach(() => { vi.clearAllMocks(); state.runtime = undefined; });
 
 it('passes the renderer context to both window factories', () => {
     const owner = { closed: false };
-    state.runtime = { contextWindow: owner };
+    state.runtime = { contextWindow: owner, hostWindow: owner };
     openBeaverWindow({ width: 900 });
     openPreferencesWindow('actions', '', 'action-id');
     expect(openChat).toHaveBeenCalledWith({ width: 900 }, owner);
     expect(openPreferences).toHaveBeenCalledWith('actions', '', 'action-id', owner);
 });
-it.each(['missing', 'closed'])('ignores late window commands when their renderer is %s', condition => {
-    if (condition === 'closed') state.runtime = { contextWindow: { closed: true } };
-    expect(() => openBeaverWindow()).not.toThrow();
-    expect(() => openPreferencesWindow()).not.toThrow();
-    expect(openChat).not.toHaveBeenCalled();
-    expect(openPreferences).not.toHaveBeenCalled();
-});
+it.each(['missing', 'closed'])(
+    'ignores late window commands when their renderer is %s',
+    (condition) => {
+        if (condition === 'closed')
+            state.runtime = { hostWindow: { closed: true } };
+        expect(() => openBeaverWindow()).not.toThrow();
+        expect(() => openPreferencesWindow()).not.toThrow();
+        expect(openChat).not.toHaveBeenCalled();
+        expect(openPreferences).not.toHaveBeenCalled();
+    },
+);
 it('reports activation failures only in their live owning renderer', () => {
     const owner = { closed: false } as Window;
     const foreign = { closed: false } as Window;
     notifyNavigationUnavailable(owner);
-    state.runtime = { contextWindow: owner };
+    state.runtime = { contextWindow: owner, hostWindow: owner };
     notifyNavigationUnavailable(foreign);
     expect(store.set).not.toHaveBeenCalled();
     notifyNavigationUnavailable(owner);

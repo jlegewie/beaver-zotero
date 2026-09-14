@@ -20,13 +20,8 @@
  */
 
 import type { PrimitiveAtom, WritableAtom } from 'jotai';
-import {
-    isAtBottomAtom,
-    userScrolledAtom,
-    windowIsAtBottomAtom,
-    windowUserScrolledAtom,
-} from '../atoms/ui';
-import { currentThreadScrollPositionAtom, windowScrollPositionAtom } from '../atoms/threads';
+import { isAtBottomAtom, userScrolledAtom } from '../atoms/ui';
+import { currentThreadScrollPositionAtom } from '../atoms/threads';
 import { store } from '../store';
 
 /**
@@ -70,25 +65,11 @@ export interface ScrollAtoms {
 // Frozen module constants rather than fresh objects: these are read during
 // render and used as hook dependencies, where a new object each call would
 // re-run every effect that depends on them.
-const SIDEBAR_ATOMS: ScrollAtoms = Object.freeze({
+export const scrollAtoms: ScrollAtoms = Object.freeze({
     isAtBottom: isAtBottomAtom,
     userScrolled: userScrolledAtom,
     position: currentThreadScrollPositionAtom,
 });
-
-const WINDOW_ATOMS: ScrollAtoms = Object.freeze({
-    isAtBottom: windowIsAtBottomAtom,
-    userScrolled: windowUserScrolledAtom,
-    position: windowScrollPositionAtom,
-});
-
-/**
- * The scroll atoms for a surface. The separate Beaver window scrolls
- * independently of the sidebars, so it keeps its own set.
- */
-export function getScrollAtoms(isWindow: boolean): ScrollAtoms {
-    return isWindow ? WINDOW_ATOMS : SIDEBAR_ATOMS;
-}
 
 /**
  * Resume following the bottom: clear the reader's scroll-back intent, and

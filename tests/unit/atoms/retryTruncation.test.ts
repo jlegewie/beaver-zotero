@@ -1,3 +1,12 @@
+import { viewedHistoryRevisionAtom } from "../../../react/runtime/threadProjection";
+import { ThreadPresence } from "../../../src/services/threads/threadPresence";
+import { getCredentialGeneration } from "@beaver/agent-core/transport/credentials";
+import { initializeWindowRuntime } from "../../../react/runtime/windowRuntime";
+import { releaseWriter } from "../../../react/runtime/threadWriter";
+import {
+    threadAdmissionAtom,
+    threadConflictAtom,
+} from "../../../react/runtime/threadAdmission";
 import { isProfileLoadedAtom } from '../../../react/atoms/profile';
 /**
  * A retry commits its removal on the backend before anything local changes:
@@ -20,7 +29,11 @@ const {
     undoEditMetadataMock,
     cleanupAnnotationsMock,
     cancelMock,
+    historyMock,
+    runtimeState,
 } = vi.hoisted(() => ({
+    runtimeState: { value: undefined as any },
+    historyMock: vi.fn(),
     connectMock: vi.fn().mockResolvedValue(undefined),
     truncateMock: vi.fn(),
     loadThreadRunsMock: vi.fn(),
@@ -32,6 +45,7 @@ const {
     cancelMock: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
+    agentRunService: { getThreadRuns: historyMock },
     agentService: { connect: connectMock, close: vi.fn(), cancel: cancelMock },
     AgentConnectionError: class AgentConnectionError extends Error {},
 }));
@@ -96,6 +110,8 @@ import {
     retryPendingRunIdAtom,
     sendWSMessageAtom,
     wsErrorAtom,
+    closeWSConnectionAtom,
+    createWSCallbacks,
 } from '../../../react/atoms/agentRunAtoms';
 import { selectedModelAtom } from '../../../react/atoms/models';
 import { sessionAtom } from '../../../react/atoms/auth';
@@ -182,10 +198,20 @@ const promptConfirmMock = vi.fn();
 
 describe('retry via synchronous truncation', () => {
     beforeEach(() => {
+        releaseWriter();
+        runtimeState.value = undefined;
+        delete (Zotero as any).Beaver?.presence;
+        store.set(viewedHistoryRevisionAtom, 0);
+        store.set(threadAdmissionAtom, null);
+        store.set(threadConflictAtom, null);
         vi.clearAllMocks();
         connectMock.mockResolvedValue(undefined);
         truncateMock.mockResolvedValue(okReport([]));
-        loadThreadRunsMock.mockResolvedValue({ runs: [], citations: [], agentActions: [] });
+        loadThreadRunsMock.mockResolvedValue({
+            runs: [],
+            citations: [],
+            agentActions: [],
+        });
         undoEditMetadataMock.mockResolvedValue(undefined);
         cleanupAnnotationsMock.mockResolvedValue(undefined);
         cancelMock.mockResolvedValue(undefined);
@@ -193,16 +219,19 @@ describe('retry via synchronous truncation', () => {
         promptConfirmMock.mockReturnValue(2);
         (globalThis as any).Zotero.Prompt = {
             confirm: promptConfirmMock,
-            BUTTON_TITLE_CANCEL: 'Cancel',
+            BUTTON_TITLE_CANCEL: "Cancel",
         };
 
-        store.set(sessionAtom, { user: { id: 'user-1' } } as any);
-        store.set(selectedModelAtom, { name: 'test-model', provider: 'test' } as any);
+        store.set(sessionAtom, { user: { id: "user-1" } } as any);
+        store.set(selectedModelAtom, {
+            name: "test-model",
+            provider: "test",
+        } as any);
         // The store is a module singleton, so a send left pending by the
         // previous test would silently block the next one.
         store.set(isWSChatPendingAtom, false);
         store.set(wsErrorAtom, null);
-        store.set(currentThreadIdAtom, 'thread-1');
+        store.set(currentThreadIdAtom, "thread-1");
         store.set(activeRunAtom, null);
         store.set(threadRunsAtom, []);
         store.set(threadAgentActionsAtom, []);
@@ -210,6 +239,229 @@ describe('retry via synchronous truncation', () => {
         store.set(popupMessagesAtom, []);
         store.set(retryPendingRunIdAtom, null);
         store.set(threadNavigationSeqAtom, 0);
+    });
+
+    describe("stop-and-retry settlement", () => {
+        beforeEach(() => {
+            const runtime = {
+                id: "settlement",
+                status: "ready",
+                hostWindow: Zotero.getMainWindow(),
+            } as any;
+            // One evaluated renderer for this test file.
+            initializeWindowRuntime(runtime);
+            const presence = new ThreadPresence();
+            presence.reset(getCredentialGeneration());
+            (Zotero as any).Beaver = {
+                presence,
+                threads: { invalidateViews: vi.fn() },
+            };
+            historyMock.mockImplementation(async () => ({
+                runs: store.get(threadRunsAtom),
+                agent_actions: [],
+                tail_run_id: "live",
+                activity: { state: "idle", run_id: null },
+            }));
+            loadThreadRunsMock.mockImplementation(async () => ({
+                runs: store.get(threadRunsAtom),
+                citations: [],
+                agentActions: store.get(threadAgentActionsAtom),
+                tailRunId: "live",
+                activity: { state: "idle", run_id: null },
+            }));
+            store.set(threadRunsAtom, [makeRun("a"), makeRun("b")]);
+            store.set(
+                activeRunAtom,
+                makeRun("live", { status: "in_progress" }),
+            );
+        });
+        function unpersistedFollowUp() {
+            store.set(threadRunsAtom, [makeRun("a")]);
+            store.set(activeRunAtom, makeRun("local", { status: "error" }));
+            store.set(threadAdmissionAtom, { threadId: "thread-1", tailRunId: "a", activity: { state: "idle", run_id: null } });
+            historyMock.mockResolvedValue({ tail_run_id: "a", activity: { state: "idle", run_id: null } });
+            loadThreadRunsMock.mockResolvedValue({ runs: [makeRun("a")], citations: [], agentActions: [], tailRunId: "a", activity: { state: "idle", run_id: null } });
+        }
+        it("retries a locally failed follow-up without truncating persisted history", async () => {
+            unpersistedFollowUp();
+            store.set(currentMessageContentAtom, "keep this draft");
+            await store.set(regenerateFromRunAtom, { runId: "local" });
+            expect(truncateMock).not.toHaveBeenCalled();
+            expect(sentRequest().user_prompt.content).toBe("prompt for local");
+            expect(sentRequest().expected_tail_run_id).toBe("a");
+            expect(threadRunIds()).toEqual(["a"]);
+            expect(store.get(threadConflictAtom)).toBeNull();
+            expect(store.get(currentMessageContentAtom)).toBe("keep this draft");
+        });
+        it("truncates only persisted members of a mixed retry suffix", async () => {
+            unpersistedFollowUp();
+            await store.set(regenerateFromRunAtom, { runId: "a" });
+            expect(truncateMock).toHaveBeenCalledWith("thread-1", ["a"], null);
+            expect(sentRequest().expected_tail_run_id).toBeNull();
+        });
+        it("keeps the local failed message when a mixed suffix truncate fails", async () => {
+            unpersistedFollowUp();
+            truncateMock.mockRejectedValue(new Error("offline"));
+            await store.set(regenerateFromRunAtom, { runId: "a" });
+            expect(threadRunIds()).toEqual(["a", "local"]);
+            expect(connectMock).not.toHaveBeenCalled();
+        });
+        it("does not reinterpret a remotely removed accepted run as a local failure", async () => {
+            unpersistedFollowUp();
+            store.set(threadAdmissionAtom, { threadId: "thread-1", tailRunId: "local", activity: { state: "idle", run_id: null } });
+            await store.set(regenerateFromRunAtom, { runId: "local" });
+            expect(store.get(threadConflictAtom)).toBe("thread_tail_mismatch");
+            expect(truncateMock).not.toHaveBeenCalled();
+            expect(connectMock).not.toHaveBeenCalled();
+        });
+        it("does not restore a canceled send's draft during another chat's retry conflict", async () => {
+            store.set(activeRunAtom, null);
+            store.set(threadRunsAtom, []);
+            store.set(currentMessageContentAtom, "draft A");
+            await store.set(sendWSMessageAtom, "draft A");
+            await store.set(closeWSConnectionAtom);
+            store.set(threadNavigationSeqAtom, 1);
+            store.set(currentThreadIdAtom, "thread-B");
+            store.set(viewedHistoryRevisionAtom, 0);
+            store.set(threadAdmissionAtom, null);
+            store.set(threadRunsAtom, [makeRun("b", { thread_id: "thread-B" })]);
+            store.set(currentMessageContentAtom, "draft B");
+            historyMock.mockResolvedValue({ tail_run_id: "b", activity: { state: "idle", run_id: null } });
+            loadThreadRunsMock.mockResolvedValue({ runs: [makeRun("b", { thread_id: "thread-B" })], citations: [], agentActions: [], tailRunId: "b", activity: { state: "idle", run_id: null } });
+            await store.set(regenerateFromRunAtom, { runId: "b" });
+            const callbacks = connectMock.mock.calls.at(-1)![1];
+            const runId = store.get(activeRunAtom)!.id;
+            expect(() => callbacks.onError({ type: "thread_tail_mismatch", run_id: runId, error: "Changed" })).not.toThrow();
+            expect(store.get(wsErrorAtom)?.type).toBe("thread_tail_mismatch");
+            expect(store.get(activeRunAtom)?.status).toBe("error");
+            expect(store.get(isWSChatPendingAtom)).toBe(false);
+            expect(store.get(currentMessageContentAtom)).toBe("draft B");
+        });
+        it("waits after cancellation resolves, preserves the draft, and includes the follow-up in the suffix", async () => {
+            let settle!: (value: any) => void;
+            historyMock.mockImplementationOnce(
+                () =>
+                    new Promise((resolve) => {
+                        settle = resolve;
+                    }),
+            );
+            store.set(currentMessageContentAtom, "keep my draft");
+            const pending = store.set(regenerateFromRunAtom, { runId: "b" });
+            await vi.waitFor(() => expect(historyMock).toHaveBeenCalled());
+            expect(cancelMock).toHaveBeenCalledOnce();
+            expect(truncateMock).not.toHaveBeenCalled();
+            expect(store.get(retryPendingRunIdAtom)).toBe("b");
+            await store.set(sendWSMessageAtom, "competing send");
+            expect(connectMock).not.toHaveBeenCalled();
+            settle({
+                tail_run_id: "live",
+                activity: { state: "idle", run_id: null },
+            });
+            await pending;
+            expect(truncateMock).toHaveBeenCalledWith(
+                "thread-1",
+                ["b", "live"],
+                "a",
+            );
+            expect(store.get(currentMessageContentAtom)).toBe("keep my draft");
+            expect(connectMock.mock.calls[0][0].expected_tail_run_id).toBe("a");
+        });
+        it("allows an explicit retry to recover an expired reservation", async () => {
+            historyMock.mockResolvedValue({
+                tail_run_id: "live",
+                activity: { state: "expired", run_id: "live" },
+            });
+            await store.set(regenerateFromRunAtom, { runId: "b" });
+            expect(truncateMock).toHaveBeenCalledOnce();
+            expect(connectMock).toHaveBeenCalledOnce();
+        });
+        it("keeps the stopped history and draft when settlement cannot be read", async () => {
+            historyMock.mockRejectedValue(new Error("offline"));
+            store.set(currentMessageContentAtom, "keep this");
+            await store.set(regenerateFromRunAtom, { runId: "b" });
+            expect(truncateMock).not.toHaveBeenCalled();
+            expect(threadRunIds()).toEqual(["a", "b", "live"]);
+            expect(store.get(currentMessageContentAtom)).toBe("keep this");
+            expect(store.get(retryPendingRunIdAtom)).toBeNull();
+        });
+        it("treats a busy truncate as settling and never reloads or resends", async () => {
+            truncateMock.mockRejectedValue({
+                code: "thread_busy",
+                status: 409,
+            });
+            await store.set(regenerateFromRunAtom, { runId: "b" });
+            expect(connectMock).not.toHaveBeenCalled();
+            expect(store.get(threadConflictAtom)).toBe("thread_busy");
+            expect(threadRunIds()).toEqual(["a", "b", "live"]);
+            expect(loadThreadRunsMock).toHaveBeenCalledTimes(1);
+        });
+        it("refuses to delete a successor discovered after stopping", async () => {
+            loadThreadRunsMock.mockResolvedValueOnce({
+                runs: [makeRun("a"), makeRun("b"), makeRun("live"), makeRun("unseen")],
+                citations: [], agentActions: [], tailRunId: "unseen",
+                activity: { state: "idle", run_id: null },
+            });
+            await store.set(regenerateFromRunAtom, { runId: "b" });
+            expect(cancelMock).toHaveBeenCalledOnce();
+            expect(truncateMock).not.toHaveBeenCalled();
+            expect(connectMock).not.toHaveBeenCalled();
+            expect(threadRunIds()).toEqual(["a", "b", "live", "unseen"]);
+        });
+        it("leaves the follow-up stopped when the undo confirmation is canceled", async () => {
+            store.set(threadAgentActionsAtom, [makeAppliedMetadataEdit("action", "b")]);
+            promptConfirmMock.mockReturnValue(1);
+            await store.set(regenerateFromRunAtom, { runId: "b" });
+            expect(cancelMock).toHaveBeenCalledOnce();
+            expect(promptConfirmMock).toHaveBeenCalled();
+            expect(truncateMock).not.toHaveBeenCalled();
+            expect(connectMock).not.toHaveBeenCalled();
+            expect(store.get(activeRunAtom)).toBeNull();
+            expect(threadRunIds()).toEqual(["a", "b", "live"]);
+        });
+        it("rejects a late settlement result after navigation", async () => {
+            let settle!: (value: any) => void;
+            historyMock.mockImplementationOnce(
+                () =>
+                    new Promise((resolve) => {
+                        settle = resolve;
+                    }),
+            );
+            const pending = store.set(regenerateFromRunAtom, { runId: "b" });
+            await vi.waitFor(() => expect(historyMock).toHaveBeenCalled());
+            store.set(threadNavigationSeqAtom, 1);
+            store.set(currentThreadIdAtom, "destination");
+            store.set(currentMessageContentAtom, "destination draft");
+            settle({
+                tail_run_id: "live",
+                activity: { state: "idle", run_id: null },
+            });
+            await pending;
+            expect(truncateMock).not.toHaveBeenCalled();
+            expect(store.get(currentMessageContentAtom)).toBe(
+                "destination draft",
+            );
+        });
+    });
+
+    it("restores only the normal send that receives an admission conflict", async () => {
+        store.set(currentMessageContentAtom, "original draft");
+        await store.set(sendWSMessageAtom, "expanded prompt");
+        const callbacks = connectMock.mock.calls.at(-1)![1];
+        expect(store.get(currentMessageContentAtom)).toBe("");
+        callbacks.onError({ type: "thread_tail_mismatch", run_id: store.get(activeRunAtom)!.id, error: "Changed" });
+        expect(store.get(currentMessageContentAtom)).toBe("original draft");
+        expect(store.get(isWSChatPendingAtom)).toBe(false);
+    });
+    it.each(["navigation", "run", "ordinary error", "cancellation"])("invalidates restoration after %s", async (transition) => {
+        store.set(activeRunAtom, makeRun("restore", { status: "in_progress" }));
+        const restore = vi.fn();
+        const callbacks = createWSCallbacks(store.set, () => null, restore);
+        if (transition === "navigation") store.set(threadNavigationSeqAtom, 1);
+        if (transition === "run") store.set(activeRunAtom, makeRun("different", { status: "in_progress" }));
+        if (transition === "ordinary error") callbacks.onError!({ type: "connection_error", error: "Offline" } as any);
+        if (transition === "cancellation") await store.set(closeWSConnectionAtom);
+        callbacks.onError!({ type: "thread_tail_mismatch", run_id: "restore", error: "Changed" } as any);
+        expect(restore).not.toHaveBeenCalled();
     });
 
     describe('new-run continuation offers', () => {
@@ -409,7 +661,7 @@ describe('retry via synchronous truncation', () => {
         expect(connectMock).toHaveBeenCalled();
     });
 
-    it('a refusal reloads the thread and removes nothing locally', async () => {
+    it("a refusal preserves history and requires an explicit refresh", async () => {
         const runs = [makeRun('a'), makeRun('b'), makeRun('c')];
         store.set(threadRunsAtom, runs);
         truncateMock.mockResolvedValue(refusedReport(['b', 'c']));
@@ -421,7 +673,7 @@ describe('retry via synchronous truncation', () => {
         expect(connectMock).not.toHaveBeenCalled();
         expect(popupTitles()).toContain('Chat changed elsewhere');
         // The thread was reloaded rather than truncated.
-        expect(loadThreadRunsMock).toHaveBeenCalledWith('thread-1', expect.anything());
+        expect(loadThreadRunsMock).not.toHaveBeenCalled();
         expect(threadRunIds()).toEqual(['a', 'b', 'c']);
         expect(store.get(isWSChatPendingAtom)).toBe(false);
     });
@@ -438,7 +690,7 @@ describe('retry via synchronous truncation', () => {
 
         expect(connectMock).not.toHaveBeenCalled();
         expect(popupTitles()).toContain('Chat changed elsewhere');
-        expect(loadThreadRunsMock).toHaveBeenCalledWith('thread-1', expect.anything());
+        expect(loadThreadRunsMock).not.toHaveBeenCalled();
         expect(threadRunIds()).toEqual(['a', 'b']);
     });
 
@@ -537,7 +789,7 @@ describe('retry via synchronous truncation', () => {
         expect(promptConfirmMock).not.toHaveBeenCalled();
         expect(connectMock).not.toHaveBeenCalled();
         // The other chat's state is left exactly as the switch left it.
-        expect(threadRunIds()).toEqual(['a']);
+        expect(threadRunIds()).toEqual(['a', "live"]);
         expect(store.get(citationsAtom)).toHaveLength(1);
         expect(store.get(activeRunAtom)).toBeNull();
         expect(store.get(isWSChatPendingAtom)).toBe(false);
@@ -790,7 +1042,7 @@ describe('retry via synchronous truncation', () => {
             expect(store.get(retryPendingRunIdAtom)).toBeNull();
         });
 
-        it('a refusal reloads the thread instead of raising a retry error', async () => {
+        it("an automatic retry conflict preserves history and requires explicit refresh", async () => {
             // The auto-retry raced a rewrite from another client. There is no
             // user decision to retry against unseen history — the UI must
             // show the server's thread, not a generic auto-retry error over
@@ -806,7 +1058,7 @@ describe('retry via synchronous truncation', () => {
             expect(connectMock).not.toHaveBeenCalled();
             expect(store.get(wsErrorAtom)).toBeNull();
             expect(popupTitles()).toContain('Chat changed elsewhere');
-            expect(loadThreadRunsMock).toHaveBeenCalledWith('thread-1', expect.anything());
+            expect(loadThreadRunsMock).not.toHaveBeenCalled();
             expect(store.get(isWSChatPendingAtom)).toBe(false);
             expect(store.get(retryPendingRunIdAtom)).toBeNull();
         });
@@ -1034,9 +1286,14 @@ describe('retry via synchronous truncation', () => {
 // Bind this suite's single-window fixture as the originating renderer.
 vi.mock('../../../react/runtime/windowRuntime', async () => {
     const { singleWindowRuntimeMock } = await import('../../helpers/singleWindowRuntime');
-    return singleWindowRuntimeMock();
+    return {
+        ...singleWindowRuntimeMock(),
+        tryGetWindowRuntime: () => runtimeState.value,
+        initializeWindowRuntime: (value: any) => {
+            runtimeState.value = value;
+        },
+    };
 });
-
 
 it('does not let an older new-thread cleanup overwrite a later navigation', async () => {
     let finish!: () => void;

@@ -4,9 +4,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ card: null as any, batch: null as string | null }));
+const mocks = vi.hoisted(() => ({ card: null as any, batch: null as string | null, kind: 'main' as 'main' | 'standalone' }));
 vi.mock('../../../../react/components/runStatusPopup/useRunStatusPopupCard', () => ({
     useRunStatusPopupCard: () => mocks.card,
+}));
+vi.mock('../../../../react/runtime/windowRuntime', () => ({
+    tryGetWindowRuntime: () => ({ kind: mocks.kind }),
 }));
 vi.mock('../../../../react/atoms/ui', async () => {
     const { atom } = await import('jotai');
@@ -34,6 +37,8 @@ vi.mock('../../../../react/components/input/BatchProgressPanel', () => ({
 }));
 vi.mock('../../../../react/components/runStatusPopup/RunPulse', () => ({ default: () => null }));
 
+import { isSidebarVisibleAtom } from '../../../../react/atoms/ui';
+import { runStatusPopupForceVisibleAtom } from '../../../../react/atoms/runStatusPopup';
 import RunStatusPopup from '../../../../react/components/runStatusPopup/RunStatusPopup';
 
 let store = createStore();
@@ -43,6 +48,7 @@ let container: HTMLDivElement;
 beforeEach(() => {
     store = createStore();
     (window as any).ResizeObserver = class { observe() {} disconnect() {} };
+    mocks.kind = 'main';
     mocks.batch = null;
     mocks.card = {
         kind: 'approval', runId: 'run-1', threadName: 'Test', label: 'Create collection', stackDepth: 0,
@@ -64,6 +70,25 @@ function render() {
 function press(target: HTMLElement, options: KeyboardEventInit = {}) {
     act(() => { target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...options })); });
 }
+describe('RunStatusPopup visibility', () => {
+    beforeEach(() => {
+        mocks.card = { ...mocks.card, kind: 'completed', outcome: 'completed', detail: 'Response finished', artifacts: [], changes: null };
+    });
+    it('shows a completed response in a main window with its sidebar closed', () => {
+        expect(render()).not.toBeNull();
+    });
+    it('hides a completed response while the main sidebar is open', () => {
+        store.set(isSidebarVisibleAtom, true);
+        expect(render()).toBeNull();
+    });
+    it('hides a completed response in the standalone window, even with preview forced', () => {
+        mocks.kind = 'standalone';
+        expect(render()).toBeNull();
+        act(() => store.set(runStatusPopupForceVisibleAtom, true));
+        expect(render()).toBeNull();
+    });
+});
+
 describe('RunStatusPopup keyboard decisions', () => {
     it('gives the card background the same Open Beaver action for mouse and keyboard', () => {
         const card = render();

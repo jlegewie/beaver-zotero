@@ -10,9 +10,9 @@ beforeAll(async () => { available = await isZoteroAvailable(); });
 describe.runIf(process.env.BEAVER_MULTI_WINDOW_TEST === '1')('context in independent renderer bundles', () => {
     beforeEach(ctx => skipIfNoZotero(ctx, available));
     it('reveals items and snapshots selections only in the explicitly targeted window', async () => {
-        const { windows } = await post<{ windows: { id: string }[] }>(path, { command: 'list' });
+        const { windows } = await post<{ windows: { id: string; kind: string }[] }>(path, { command: 'list' });
         expect(windows.length).toBeGreaterThanOrEqual(2);
-        const [a, b] = windows;
+        const [a, b] = windows.filter(win => win.kind === 'main');
         await post(path, { command: 'reveal', windowId: a.id, ...SMALL_PDF });
         await post(path, { command: 'reveal', windowId: b.id, ...NORMAL_PDF });
         const firstA = await post<ApplicationStateInput>(path, { command: 'context', windowId: a.id });

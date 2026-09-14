@@ -39,12 +39,12 @@ vi.mock('../../../react/atoms/threads', async () => {
 });
 
 import { store } from '../../../react/store';
-import { getScrollAtoms, latchIntentFromDistance, resumeFollowing } from '../../../react/utils/scrollPosition';
+import { scrollAtoms, latchIntentFromDistance, resumeFollowing } from '../../../react/utils/scrollPosition';
 import { useAutoScroll } from '../../../react/hooks/useAutoScroll';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const atoms = getScrollAtoms(false);
+const atoms = scrollAtoms;
 
 type Hook = ReturnType<typeof useAutoScroll>;
 
@@ -54,7 +54,7 @@ let hook: Hook | null = null;
 let container: HTMLDivElement | null = null;
 
 function Harness() {
-    hook = useAutoScroll(undefined, { isWindow: false });
+    hook = useAutoScroll();
     return React.createElement('div', { ref: hook.setScrollContainerRef });
 }
 

@@ -27,6 +27,11 @@ export function useZoteroTabSelection() {
 
     useEffect(() => {
         logger("useZoteroTabSelection: initializing tab selection hook");
+        if (!window) {
+            setIsLibraryTab(true);
+            setSelectedTabId("zotero-pane");
+            return;
+        }
         // Set initial state
         const initialIsLibrary = window.Zotero_Tabs.selectedType === 'library';
         setIsLibraryTab(initialIsLibrary);
@@ -84,7 +89,7 @@ export function useZoteroTabSelection() {
         const myObserverId = Zotero.Notifier.registerObserver(tabObserver, ['tab'], 'beaver-tabSelectionObserver');
         moduleTabNotifierId = myObserverId;
         logger("useZoteroTabSelection: registered tab selection observer");
-        
+
         // Cleanup function
         return () => {
             logger("useZoteroTabSelection: cleaning up tab observer");
@@ -95,4 +100,4 @@ export function useZoteroTabSelection() {
             }
         };
     }, [setIsLibraryTab, setSelectedTabId, window]);
-} 
+}
