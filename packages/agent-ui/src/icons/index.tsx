@@ -54,6 +54,7 @@ export { default as BubbleChatQuestionIcon } from './BubbleChatQuestionIcon';
 export { default as TickIcon } from './TickIcon';
 export { default as ShareIcon } from './ShareIcon';
 export { default as Share05Icon } from './Share05Icon';
+export { default as SidebarLeftIcon } from './SidebarLeftIcon';
 export { default as AlertIcon } from './AlertIcon';
 export { default as StopIcon } from './StopIcon';
 export { default as QuillWriteIcon } from './QuillWriteIcon';

@@ -15,12 +15,10 @@ interface UserAccountMenuButtonProps {
 }
 
 /**
- * Button component that shows user account menu in a dropdown menu
+ * The account menu's entries. Shared by the header button and the separate
+ * window's account footer, so the two surfaces offer the same actions.
  */
-const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({ 
-    className = '',
-    ariaLabel = 'User Account Menu',
-}) => {
+export function useAccountMenuItems(): MenuItem[] {
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
     const updateRequired = useAtomValue(updateRequiredAtom);
     const profile = useAtomValue(profileWithPlanAtom);
@@ -36,9 +34,8 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
         setFirstRunReturnRequested(true);
     };
 
-    // Create menu items (filter out settings when update is required)
-    const menuItems: MenuItem[] = [
-        // Hide settings when update is required
+    // Settings is hidden when an update is required.
+    return [
         ...(!updateRequired ? [{
             label: "Settings",
             onClick: () => openPreferencesWindow(),
@@ -77,12 +74,16 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
             icon: LogoutIcon,
         }
     ];
+}
 
-    const emailHeader = user?.email ? (
-        <div className="px-2 pt-15 p-15 border-top-quinary">
-            <span className="text-sm font-color-tertiary block" style={{ userSelect: 'text' }}>{user.email}</span>
-        </div>
-    ) : undefined;
+/**
+ * Button component that shows user account menu in a dropdown menu
+ */
+const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
+    className = '',
+    ariaLabel = 'User Account Menu',
+}) => {
+    const menuItems = useAccountMenuItems();
 
     return (
         <MenuButton
@@ -93,9 +94,8 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
             ariaLabel={ariaLabel}
             tooltipContent="User account and settings"
             showArrow={true}
-            // footer={emailHeader}
         />
     );
 };
 
-export default UserAccountMenuButton; 
+export default UserAccountMenuButton;

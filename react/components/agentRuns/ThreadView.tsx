@@ -597,7 +597,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 onScroll={handleScroll}
                 ref={setScrollContainerRef}
             >
-                <div ref={contentRef} className="display-flex flex-col flex-shrink-0 min-w-0 gap-4">
+                <div ref={contentRef} className="display-flex flex-col flex-shrink-0 min-w-0 gap-4 beaver-content-column">
                     {runs.map((run, index) => (
                         <AgentRunView
                             key={run.id}

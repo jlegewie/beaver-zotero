@@ -50,6 +50,11 @@ import FindBar from './ui/FindBar';
 interface SidebarProps {
     location: 'library' | 'reader';
     isWindow?: boolean;
+    /**
+     * Replaces the default header. Rendered inside the sidebar's providers, so
+     * a header's chat actions (find in chat, …) keep working.
+     */
+    header?: ReactNode;
 }
 
 interface SidebarShellProps {
@@ -166,11 +171,12 @@ const SidebarShell = ({
     );
 };
 
-const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
+const Sidebar = ({ location, isWindow = false, header: headerOverride }: SidebarProps) => {
     // Input element is now a contenteditable div (Lexical editor) rather than
     // a textarea. Typed as HTMLElement so `.focus()` keeps working.
     const inputRef = useRef<HTMLElement | null>(null);
     const loginEmailRef = useRef<HTMLInputElement>(null);
+    const header = headerOverride ?? <Header isWindow={isWindow} />;
     // Two booleans rather than the runs behind them: subscribing to the runs
     // re-renders the whole shell on every frame of a streaming response.
     const runsCount = useAtomValue(runsCountAtom);
@@ -266,7 +272,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                 className="display-flex flex-col flex-1 w-full"
                 isWindow={isWindow}
             >
-                <Header isWindow={isWindow} />
+                {header}
                 <div className="display-flex flex-1 items-center justify-center">
                     <div className="display-flex flex-col items-center gap-3">
                         <Spinner size={22}/>
@@ -283,7 +289,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     if (chatAccessGate === 'signed-out') {
         return (
             <SidebarShell isWindow={isWindow}>
-                <Header isWindow={isWindow} />
+                {header}
                 <LoginPage emailInputRef={loginEmailRef} />
                 <DialogContainer />
             </SidebarShell>
@@ -296,7 +302,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     if (chatAccessGate === 'connecting') {
         return (
             <SidebarShell isWindow={isWindow}>
-                <Header isWindow={isWindow} />
+                {header}
                 <ProfileLoadingPage />
                 <DialogContainer />
             </SidebarShell>
@@ -307,7 +313,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     if (chatAccessGate === 'update-required') {
         return (
             <SidebarShell isWindow={isWindow}>
-                <Header isWindow={isWindow} />
+                {header}
                 <UpdateRequiredPage />
                 <DialogContainer />
             </SidebarShell>
@@ -318,7 +324,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     if (chatAccessGate === 'downgrade-ack') {
         return (
             <SidebarShell isWindow={isWindow}>
-                <Header isWindow={isWindow} />
+                {header}
                 <DowngradeAcknowledgmentPage />
                 <DialogContainer />
             </SidebarShell>
@@ -329,7 +335,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     if (chatAccessGate === 'upgrade-consent') {
         return (
             <SidebarShell isWindow={isWindow}>
-                <Header isWindow={isWindow} />
+                {header}
                 <UpgradeConsentPage />
                 <DialogContainer />
             </SidebarShell>
@@ -341,7 +347,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     if (chatAccessGate === 'onboarding') {
         return (
             <SidebarShell isWindow={isWindow}>
-                <Header isWindow={isWindow} />
+                {header}
                 <OnboardingRouter />
                 <DialogContainer />
             </SidebarShell>
@@ -357,7 +363,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         return (
             <SidebarShell isWindow={isWindow}>
                 <ScreenReaderRunAnnouncer inputRef={inputRef} surface={isWindow ? 'window' : 'sidebar'} />
-                <Header isWindow={isWindow} />
+                {header}
                 {showWhereToStart ? (
                     <WhereToStartPage />
                 ) : (
@@ -374,7 +380,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     if (isWhereToStartVisible) {
         return (
             <SidebarShell isWindow={isWindow}>
-                <Header isWindow={isWindow} />
+                {header}
                 <WhereToStartPage />
                 <DialogContainer />
             </SidebarShell>
@@ -395,7 +401,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                 <ScreenReaderRunAnnouncer inputRef={inputRef} surface={isWindow ? 'window' : 'sidebar'} />
 
                 {/* Header */}
-                <Header isWindow={isWindow} />
+                {header}
 
                 {/* Content area - relative container for overlay positioning */}
                 <div className="flex-1 min-h-0 display-flex flex-col relative overflow-hidden">
@@ -428,7 +434,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
 
                     {/* Prompt area (footer) - only in thread view */}
                     {isThreadView && (
-                        <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
+                        <div id="beaver-prompt" className="flex-none px-3 pb-3 relative beaver-content-column">
                             <PopupOverlayContainer />
                             <ScrollDownButton onClick={handleScrollToBottom} />
                             {composerTakeover.kind === 'batch-approval' ? (

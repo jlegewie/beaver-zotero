@@ -41,11 +41,14 @@ import { MoreHorizontalIcon } from '../../icons/icons';
 interface ThreadMenuButtonProps {
     className?: string;
     ariaLabel?: string;
+    /** Rendered in the separate Beaver window, where "open in window" is moot. */
+    inWindow?: boolean;
 }
 
 const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     className = '',
     ariaLabel = 'Chat actions',
+    inWindow = false,
 }) => {
     const surfaceWindow = useSurfaceWindow();
     const [, forceUpdate] = useState({});
@@ -78,11 +81,17 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         }
     }, []);
 
+    // Whether the finished-chat check started on open is still in flight.
+    // `canOpenFinishedChat` reads as unavailable until it lands, and the
+    // explanation for an unavailable entry must not flash in the meantime.
+    const [availabilityPending, setAvailabilityPending] = useState(false);
+
     const handleMenuToggle = useCallback((isOpen: boolean) => {
         if (!isOpen) return;
         forceUpdate({});
         void resolvePinnedState();
-        void store.set(refreshFinishedChatAvailabilityAtom);
+        setAvailabilityPending(true);
+        void store.set(refreshFinishedChatAvailabilityAtom).finally(() => setAvailabilityPending(false));
     }, [resolvePinnedState]);
 
     // The menu's content is built when it is opened, so the runs and their tool
@@ -303,11 +312,48 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         const hasParent = context.parentReference !== null;
         const pinPending = !!threadId && isPinPending(pinsPending, threadId);
 
+        // The chat's own housekeeping first, then ways to look at it, then
+        // ways to take it elsewhere.
         const items: MenuItem[] = [
             {
+                label: 'Rename chat',
+                onClick: handleRenameChat,
+                disabled: !threadId,
+            },
+            {
+                label: isPinned ? 'Unpin chat' : 'Pin chat',
+                onClick: handleTogglePin,
+                disabled: !threadId || isPinned === null || pinPending,
+                customContent: pinPending ? (
+                    <span className="display-flex items-center gap-2">
+                        <Spinner size={14} />
+                        <span>
+                            {isPinned ? 'Unpinning chat' : 'Pinning chat'}
+                        </span>
+                    </span>
+                ) : undefined,
+            },
+            {
+                label: 'Delete chat',
+                onClick: handleDeleteChat,
+                disabled: !threadId,
+            },
+            {
+                label: 'thread-actions-divider',
+                onClick: () => {},
+                isDivider: true,
+            },
+            {
+                // MenuItem carries no shortcut field, so the ⌘F / Ctrl+F chord
+                // that also opens the bar is not shown here.
+                label: 'Find in chat',
+                onClick: findControls.open,
+                disabled: !hasRuns || !findControls.isAvailable,
+            },
+            ...(!inWindow ? [{
                 label: "Open in Beaver window",
                 disabled: !canOpenFinishedChat,
-                customContent: !canOpenFinishedChat ? <div>
+                customContent: !canOpenFinishedChat && !availabilityPending ? <div>
                     <div>Open in Beaver window</div>
                     <div className="text-xs">{RESPONSE_FINISH_MESSAGE}</div>
                 </div> : undefined,
@@ -317,14 +363,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
                             threadId,
                         }).then(result => { if (result?.message) surfaceWindow.alert(result.message); }).catch(Zotero.logError);
                 },
-            },
-            {
-                // MenuItem carries no shortcut field, so the ⌘F / Ctrl+F chord
-                // that also opens the bar is not shown here.
-                label: 'Find in chat',
-                onClick: findControls.open,
-                disabled: !hasRuns || !findControls.isAvailable,
-            },
+            }] : []),
             {
                 label: 'find-in-chat-divider',
                 onClick: () => {},
@@ -348,34 +387,6 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
             {
                 label: 'Copy link to chat',
                 onClick: handleCopyThreadUrl,
-                disabled: !threadId,
-            },
-            {
-                label: 'thread-actions-divider',
-                onClick: () => {},
-                isDivider: true,
-            },
-            {
-                label: isPinned ? 'Unpin chat' : 'Pin chat',
-                onClick: handleTogglePin,
-                disabled: !threadId || isPinned === null || pinPending,
-                customContent: pinPending ? (
-                    <span className="display-flex items-center gap-2">
-                        <Spinner size={14} />
-                        <span>
-                            {isPinned ? 'Unpinning chat' : 'Pinning chat'}
-                        </span>
-                    </span>
-                ) : undefined,
-            },
-            {
-                label: 'Rename chat',
-                onClick: handleRenameChat,
-                disabled: !threadId,
-            },
-            {
-                label: 'Delete chat',
-                onClick: handleDeleteChat,
                 disabled: !threadId,
             },
         ];
