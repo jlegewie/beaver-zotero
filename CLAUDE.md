@@ -552,8 +552,11 @@ window and becomes empty when none remain. Rebinding replaces context observers,
 its chat and explicit attachments. Preferences borrows the actual initiating renderer and
 closes with it. Use `BeaverUIFactory.commandBeaverWindow` with `open-chat`, `show-table`, or
 `show-chat`; commands pass persisted thread ids or plain table data, never stores or atoms.
-Ordinary window opening only focuses it. Explicit chat opening confirms draft replacement
-and uses the normal stop-and-switch confirmation.
+Ordinary window opening only focuses it. Explicit chat opening requires settled history,
+preserves a same-chat draft, and confirms replacement of user-authored drafts. It never
+stops a response in the destination; guarded loads commit only while the destination and
+draft are unchanged. Automatic selection attachments retain their origin and do not count
+as user drafts.
 
 Chat execution requires server admission v1. Every request carries `expected_tail_run_id`,
 including an explicit null for empty history. History retains the server tail and reservation

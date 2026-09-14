@@ -1,3 +1,4 @@
+import { isFinishedChat, RESPONSE_FINISH_MESSAGE } from "../services/threads/finishedChat";
 import { getLocaleID, getString } from "../utils/locale";
 import { triggerToggleChat, triggerToggleQuickPrompt } from "./toggleChat";
 import { KeyboardManager } from "../utils/keyboardManager";
@@ -631,9 +632,10 @@ export class BeaverUIFactory {
      * this window keeps their size unless it is too small for what is about to
      * be shown.
      */
-    static openBeaverWindow(minSize?: { width?: number; height?: number }, origin?: Window): Window {
+    static openBeaverWindow(minSize?: { width?: number; height?: number }, origin?: Window, skipInitialSelection = false): Window {
         const existingWindow = this.findBeaverWindow();
         if (existingWindow) {
+            if (skipInitialSelection) existingWindow.__beaverSkipInitialSelection = true;
             this.growWindowTo(existingWindow, minSize);
             existingWindow.focus();
             Zotero.debug("Beaver: Focusing existing separate window");
@@ -659,6 +661,7 @@ export class BeaverUIFactory {
             features,
             null as any,
         ) as unknown as Window;
+        opened.__beaverSkipInitialSelection = skipInitialSelection;
         if (Zotero.Beaver?.runtime) Zotero.Beaver.runtime.standaloneWindow = opened;
         // A persisted width smaller than the feature string's is reapplied once
         // the window's attributes load, so grow it again after that.
@@ -678,7 +681,13 @@ export class BeaverUIFactory {
         command: string,
         payload: Record<string, unknown> = {},
     ): Promise<any> {
-        const win = this.openBeaverWindow();
+        const generation = Zotero.Beaver.account?.getSnapshot().generation;
+        const allowed = async () => command !== "open-chat" || (
+            await isFinishedChat(String(payload.threadId ?? "")) &&
+            generation === Zotero.Beaver.account?.getSnapshot().generation
+        );
+        if (!await allowed()) return { ok: false, reason: "thread_active", message: RESPONSE_FINISH_MESSAGE };
+        const win = this.openBeaverWindow(undefined, undefined, command === "open-chat");
         if (!win)
             throw Object.assign(new Error("Beaver window unavailable"), {
                 code: "window_unavailable",
@@ -696,6 +705,7 @@ export class BeaverUIFactory {
                 code: "window_unavailable",
             });
         }
+        if (!await allowed()) return { ok: false, reason: "thread_active", message: RESPONSE_FINISH_MESSAGE };
         return Zotero.Beaver.runtime.dispatchWindowCommand(command, {
             ...JSON.parse(JSON.stringify(payload)),
             windowId: win.__beaverRuntime.id,

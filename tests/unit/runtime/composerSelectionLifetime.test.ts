@@ -73,3 +73,26 @@ it('stages only the live owner selection and preserves exclusions and existing d
     expect(Zotero.getMainWindow).not.toHaveBeenCalled();
     expect(popup).toHaveBeenCalledWith(expect.objectContaining({ libraryIDs: [2] }));
 });
+
+it('counts manual attachments as drafts but excludes automatic selection and whitespace', async () => {
+    const { hasComposerDraftAtom, currentMessageContentAtom, addItemToCurrentMessageItemsAtom } = await import('../../../react/atoms/messageComposition');
+    const store = createStore();
+    const item = note('AUTO');
+    selected.mockReturnValue([item]);
+    await store.set(updateMessageItemsFromZoteroSelectionAtom);
+    store.set(currentMessageContentAtom, '  \n ');
+    expect(store.get(hasComposerDraftAtom)).toBe(false);
+    await store.set(addItemToCurrentMessageItemsAtom, item);
+    expect(store.get(hasComposerDraftAtom)).toBe(true);
+});
+
+it('does not retain automatic origin after removal and manual reattachment', async () => {
+    const { hasComposerDraftAtom } = await import('../../../react/atoms/messageComposition');
+    const store = createStore();
+    const item = note('AUTO');
+    selected.mockReturnValue([item]);
+    await store.set(updateMessageItemsFromZoteroSelectionAtom);
+    store.set(currentMessageItemsAtom, []);
+    store.set(currentMessageItemsAtom, [item]);
+    expect(store.get(hasComposerDraftAtom)).toBe(true);
+});

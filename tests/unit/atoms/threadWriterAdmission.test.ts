@@ -79,7 +79,8 @@ import { newThreadAtom, loadThreadAtom } from '../../../react/atoms/threads';
 import { citationsAtom } from '@beaver/agent-core/citations/atoms';
 import { runApprovalPolicyAtom } from '../../../react/atoms/runApprovalPolicy';
 import { streamingDoneRunIdsAtom, approvalResponseIntentsAtom, closeWSConnectionAtom, isWSConnectedAtom } from '../../../react/atoms/agentRunAtoms';
-import { AgentConnectionError } from "@beaver/agent-core/transport/agentService";
+import { refreshFinishedChatAvailabilityAtom, canOpenFinishedChatAtom } from "../../../react/runtime/windowCommands";
+import { agentRunService, AgentConnectionError } from "@beaver/agent-core/transport/agentService";
 import {
     activeRunAtom,
     wsReconnectingAtom,
@@ -145,6 +146,27 @@ beforeEach(() => {
     });
 });
 describe("writer admission at the real send entry point", () => {
+    it("keeps unseen server history behind the send admission check after opening the menu", async () => {
+        const admission = { threadId: "t", tailRunId: "displayed", activity: { state: "idle" as const, run_id: null } };
+        store.set(threadAdmissionAtom, admission);
+        const displayed = store.get(threadRunsAtom);
+        const attachment = { key: "DRAFT", libraryID: 1 } as any;
+        store.set(currentMessageItemsAtom, [attachment]);
+        const unseen = { runs: [], agent_actions: [], tail_run_id: "unseen-successor", activity: { state: "idle" as const, run_id: null } };
+        vi.mocked(agentRunService.getThreadRuns).mockResolvedValueOnce(unseen).mockResolvedValueOnce(unseen);
+
+        await store.set(refreshFinishedChatAvailabilityAtom);
+        expect(store.get(canOpenFinishedChatAtom)).toBe(true);
+        expect(store.get(threadAdmissionAtom)).toBe(admission);
+        expect(store.get(threadRunsAtom)).toBe(displayed);
+
+        await store.set(sendWSMessageAtom, "hello");
+        expect(connectMock).not.toHaveBeenCalled();
+        expect(store.get(threadConflictAtom)).toBe("thread_tail_mismatch");
+        expect(store.get(currentMessageContentAtom)).toBe("my draft");
+        expect(store.get(currentMessageItemsAtom)).toEqual([attachment]);
+        expect(store.get(threadRunsAtom)).toBe(displayed);
+    });
     it("refuses a competing send before preparation and preserves the draft", async () => {
         const owner = presence.claim("b", "t", getCredentialGeneration())!;
         await store.set(sendWSMessageAtom, "hello");

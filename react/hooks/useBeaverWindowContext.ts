@@ -1,3 +1,4 @@
+import { getHostWindow } from '../runtime/windowRuntime';
 /** Mark the independent standalone visible and stage its initial selection once. */
 
 import { useEffect, useRef } from 'react';
@@ -36,6 +37,7 @@ export function useBeaverWindowContext() {
         didAutoPopulateRef.current = true;
 
 
+        if (getHostWindow().__beaverSkipInitialSelection) return;
         if (!getPref('addSelectedItemsOnOpen')) return;
         // Reader context is handled by useReaderTabSelection, which starts
         // tracking as soon as this window marks Beaver as visible.
