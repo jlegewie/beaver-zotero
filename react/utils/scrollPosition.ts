@@ -65,16 +65,11 @@ export interface ScrollAtoms {
 // Frozen module constants rather than fresh objects: these are read during
 // render and used as hook dependencies, where a new object each call would
 // re-run every effect that depends on them.
-const SIDEBAR_ATOMS: ScrollAtoms = Object.freeze({
+export const scrollAtoms: ScrollAtoms = Object.freeze({
     isAtBottom: isAtBottomAtom,
     userScrolled: userScrolledAtom,
     position: currentThreadScrollPositionAtom,
 });
-
-/** Each renderer owns its own scroll state; sidebar surfaces share it. */
-export function getScrollAtoms(): ScrollAtoms {
-    return SIDEBAR_ATOMS;
-}
 
 /**
  * Resume following the bottom: clear the reader's scroll-back intent, and

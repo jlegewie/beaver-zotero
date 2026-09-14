@@ -4,6 +4,8 @@ import {
     threadConflictAtom,
     serverThreadBlockedAtom,
     readAdmission,
+    readAdmissionHistory,
+    setAdmission,
     reconcileThread,
 } from "../runtime/threadAdmission";
 import { acquireWriter, assertWriter, bindWriter, currentWriter, ownsWriter, releaseWriter, type WriterLease } from '../runtime/threadWriter';
@@ -76,9 +78,8 @@ import {
 } from './profile';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import {
-    currentMessageContentAtom,
-    currentMessagePillsAtom,
-    readerActionContextAtom,
+    readComposerDraft,
+    restoreMissingComposerDraft,
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
     currentMessageExternalFilesAtom,
@@ -246,11 +247,11 @@ export async function processImageAnnotations(attachments: MessageAttachment[]):
             try {
                 // Get image path
                 const imagePath = Zotero.Annotations.getCacheImagePath(item);
-                
+
                 // Read the image file and convert to base64
                 const imageData = await IOUtils.read(imagePath);
                 const image_base64 = uint8ArrayToBase64(imageData);
-                
+
                 // Return attachment with image data
                 return {
                     ...attachment,
@@ -432,6 +433,24 @@ function retryCommitInFlight(get: Getter, logPrefix: string): boolean {
     return true;
 }
 
+function reportTruncateConflict(
+    set: Setter, threadId: string, tailRunId: string | null,
+    outcome: 'refused' | 'busy', automatic: boolean,
+): void {
+    set(retryPendingRunIdAtom, null);
+    set(isWSChatPendingAtom, false);
+    set(threadConflictAtom, outcome === 'busy' ? 'thread_busy' : 'thread_tail_mismatch');
+    if (outcome === 'busy') setAdmission(set, threadId, tailRunId, 'unknown');
+    set(addPopupMessageAtom, {
+        type: 'warning',
+        title: !automatic && outcome === 'busy' ? 'Response still settling' : 'Chat changed elsewhere',
+        text: automatic
+            ? 'The response was not retried automatically. Refresh the chat and retry explicitly. Your draft and attachments are preserved.'
+            : 'The retry was not sent. Your draft and attachments are preserved. Refresh the chat and retry explicitly.',
+        expire: false,
+    });
+}
+
 /**
  * Commit a retry's removal on the backend before anything local changes.
  *
@@ -589,9 +608,6 @@ function createAgentRunShell(
         type: 'chat',
         run_id: runId,
         thread_id: threadId,
-        expected_tail_run_id: threadId
-            ? (store.get(threadAdmissionAtom)?.tailRunId ?? null)
-            : null,
         user_prompt: {
             ...userPrompt,
             ...(customInstructions ? { custom_instructions: customInstructions } : {}),
@@ -855,37 +871,14 @@ async function startAutoRetryRunOwned(
                 })) {
                     return;
                 }
-                if (outcome === "refused" || outcome === "busy") {
-                    set(retryPendingRunIdAtom, null);
-                    set(isWSChatPendingAtom, false);
-                    set(
-                        threadConflictAtom,
-                        outcome === "busy"
-                            ? "thread_busy"
-                            : "thread_tail_mismatch",
-                    );
-                    if (outcome === "busy")
-                        set(threadAdmissionAtom, {
-                            threadId,
-                            tailRunId: expectedTailRunId,
-                            activity: { state: "unknown", run_id: null },
-                        });
-                    set(addPopupMessageAtom, {
-                        type: "warning",
-                        title: "Chat changed elsewhere",
-                        text: "The response was not retried automatically. Refresh the chat and retry explicitly. Your draft and attachments are preserved.",
-                        expire: false,
-                    });
+                if (outcome === 'refused' || outcome === "busy") {
+                    reportTruncateConflict(set, threadId, expectedTailRunId, outcome, true);
                     return;
                 }
                 if (outcome === 'failed') {
                     throw new Error('Failed to automatically retry run');
                 }
-                set(threadAdmissionAtom, {
-                    threadId,
-                    tailRunId: expectedTailRunId,
-                    activity: { state: "idle", run_id: null },
-                });
+                setAdmission(set, threadId, expectedTailRunId, "idle");
             }
 
             await cleanupTemporaryAnnotationsForRunReplacement(logPrefix);
@@ -1101,7 +1094,7 @@ function confirmUndoAppliedActions(actions: ActionsToUndo, win: Window): UndoCon
     if (createNotes.length > 0) {
         changeLines.push(`• ${createNotes.length} created note${createNotes.length === 1 ? '' : 's'}`);
     }
-    
+
     const title = 'Retry?';
     const message = `The following changes were applied and can be undone:\n\n${changeLines.join('\n')}\n\nUndo them and retry, or retry without undoing?`;
 
@@ -1122,12 +1115,13 @@ function confirmUndoAppliedActions(actions: ActionsToUndo, win: Window): UndoCon
     return 'cancel';
 }
 
+
 // =============================================================================
 // Missing Zotero Data Handling
 // =============================================================================
 
 /** Reason why an item might be missing from the backend */
-type MissingItemReason = 
+type MissingItemReason =
     | 'not_found'           // Item doesn't exist in Zotero
     | 'library_unavailable' // Library is not available on this computer
     | 'in_trash'            // Item is in trash
@@ -1135,7 +1129,7 @@ type MissingItemReason =
     | 'filtered_from_sync'  // Doesn't pass sync filters (e.g., not a PDF)
     | 'pending_sync'        // Added after last sync
     | 'file_unavailable_locally_and_on_server' // File unavailable locally and on server
-    | 'unknown'; // Unknown reason
+    | 'unknown';            // Unknown reason
 
 /**
  * Determine why an item is missing from the backend.
@@ -1212,13 +1206,11 @@ async function determineMissingReason(ref: ZoteroItemReference, userId: string |
 /** Human-readable messages for each missing reason */
 const MISSING_REASON_MESSAGES: Record<MissingItemReason, string> = {
     not_found: 'Item not found in your Zotero library',
-    library_unavailable:
-        "Library is not available on this computer. It may be a group library you haven't joined on this device",
+    library_unavailable: "Library is not available on this computer. It may be a group library you haven't joined on this device",
     in_trash: 'Item is in trash',
     library_not_synced: 'Library is not configured to sync with Beaver',
     filtered_from_sync: 'Item type not supported',
-    pending_sync:
-        'Item was added after the last sync. Please wait for sync to complete or sync manually in settings',
+    pending_sync: 'Item was added after the last sync. Please wait for sync to complete or sync manually in settings',
     file_unavailable_locally_and_on_server: 'File is unavailable',
     unknown: `Unexpected error. Please read about <a href="${process.env.WEBAPP_BASE_URL + '/docs/trouble-file-sync'}" className="text-link">sync issues</a> in the documentation and contact support if the issue persists.`,
 };
@@ -1257,24 +1249,24 @@ async function handleMissingZoteroData(
     // Prioritize 'unknown' as it's most severe, otherwise show the most common reason
     const unknownEntry = sortedReasons.find(([reason]) => reason === 'unknown');
     const [primaryReason, primaryCount] = unknownEntry || sortedReasons[0];
-    
+
     // Build user-friendly message
     const itemCount = event.items.length;
     const itemWord = itemCount === 1 ? 'attachment' : 'attachments';
     const otherCount = itemCount - primaryCount;
-    
+
     let message = `Unable to process ${itemCount} ${itemWord}: ${MISSING_REASON_MESSAGES[primaryReason]}`;
-    
+
     // Add count if not all items have the same reason
     if (primaryCount < itemCount) {
         message += ` (${primaryCount}/${itemCount})`;
     }
-    
+
     // Mention other reasons exist without listing them all
     if (otherCount > 0) {
         message += `\n\n${otherCount} other ${itemWord} ${otherCount === 1 ? 'has a' : 'have'} different reason.`;
     }
-    
+
     // Add sync documentation link if any sync-related reasons are present
     const syncRelatedReasons: MissingItemReason[] = ['pending_sync'];
     const hasSyncRelatedReason = sortedReasons.some(([reason]) => syncRelatedReasons.includes(reason));
@@ -1560,11 +1552,7 @@ export function createWSCallbacks(
             set(wsRequestAckDataAtom, data);
             const id = store.get(currentThreadIdAtom);
             if (id)
-                set(threadAdmissionAtom, {
-                    threadId: id,
-                    tailRunId: data.runId,
-                    activity: { state: "idle", run_id: null },
-                });
+                setAdmission(set, id, data.runId, "idle");
         },
 
         onPart: async (event: WSPartEvent) => {
@@ -1587,7 +1575,7 @@ export function createWSCallbacks(
                     });
                     const items = (await Promise.all(itemPromises)).filter((item): item is Zotero.Item => !!item);
                     if (items.length > 0) {
-                        await loadFullItemDataWithAllTypes(items).catch(err => 
+                        await loadFullItemDataWithAllTypes(items).catch(err =>
                             logger(`WS onPart: Failed to load item data for tool call: ${err}`, 1)
                         );
                     }
@@ -1729,7 +1717,7 @@ export function createWSCallbacks(
                 const actions = event.agent_actions.map(toAgentAction);
                 set(addAgentActionsAtom, actions);
                 // Load item data for agent actions
-                await loadItemDataForAgentActions(actions).catch(err => 
+                await loadItemDataForAgentActions(actions).catch(err =>
                     logger(`WS onRunComplete: Failed to load item data for agent actions: ${err}`, 1)
                 );
                 // Auto-apply annotations if enabled
@@ -1788,11 +1776,7 @@ export function createWSCallbacks(
             restoreComposer = undefined;
             const completed = store.get(activeRunAtom);
             if (completed?.thread_id)
-                set(threadAdmissionAtom, {
-                    threadId: completed.thread_id,
-                    tailRunId: completed.id,
-                    activity: { state: "idle", run_id: null },
-                });
+                setAdmission(set, completed.thread_id, completed.id, "idle");
             streamActivity.reset();
 
             // Clear any remaining streaming-done state (safety net)
@@ -1832,12 +1816,7 @@ export function createWSCallbacks(
                 set(threadConflictAtom, event.type);
                 const id = store.get(currentThreadIdAtom);
                 if (id && event.type === "thread_busy")
-                    set(threadAdmissionAtom, {
-                        threadId: id,
-                        tailRunId:
-                            store.get(threadAdmissionAtom)?.tailRunId ?? null,
-                        activity: { state: "unknown", run_id: null },
-                    });
+                    setAdmission(set, id, store.get(threadAdmissionAtom)?.tailRunId ?? null, 'unknown');
                 if (restore && navigation === store.get(threadNavigationSeqAtom)
                     && composerRunId === store.get(activeRunAtom)?.id
                     && (!event.run_id || event.run_id === composerRunId)) {
@@ -1960,7 +1939,7 @@ export function createWSCallbacks(
             }, 1);
             const actions = event.actions.map(toAgentAction);
             set(upsertAgentActionsAtom, actions);
-            
+
             // Mark external references as imported for applied create_items actions
             // This handles cases where actions are applied via PendingActionsBar
             for (const action of actions) {
@@ -1971,7 +1950,7 @@ export function createWSCallbacks(
                 ) {
                     const proposedData = action.proposed_data as CreateItemProposedData;
                     const resultData = action.result_data as CreateItemResultData;
-                    
+
                     if (proposedData?.item?.source_id && resultData.library_id && resultData.zotero_key) {
                         set(markExternalReferenceImportedAtom, proposedData.item.source_id, {
                             library_id: resultData.library_id,
@@ -1982,9 +1961,9 @@ export function createWSCallbacks(
                     }
                 }
             }
-            
+
             // Load item data for agent actions
-            await loadItemDataForAgentActions(actions).catch(err => 
+            await loadItemDataForAgentActions(actions).catch(err =>
                 logger(`WS onAgentActions: Failed to load item data for agent actions: ${err}`, 1)
             );
             // Auto-apply annotations if enabled
@@ -2004,7 +1983,7 @@ export function createWSCallbacks(
                 event,
                 userId,
                 (params) => set(addWarningAtom, params)
-            ).catch(err => 
+            ).catch(err =>
                 logger(`WS onMissingZoteroData: Failed to handle missing data: ${err}`, 1)
             );
         },
@@ -2194,7 +2173,7 @@ export function createWSCallbacks(
                     );
                 }
             }
-        },
+        }
     });
     const guarded: Record<string, unknown> = { ...callbacks };
     for (const [name, callback] of Object.entries(callbacks)) {
@@ -2282,7 +2261,7 @@ async function executeWSRequest(
         : null;
     // Every send/retry/resume lands here; stop if the client is already gone.
     if (clientShutDown) {
-        logger("executeWSRequest: client is shutting down, not connecting", 1);
+        logger('executeWSRequest: client is shutting down, not connecting', 1);
         set(abandonActiveRunLocallyAtom);
         return;
     }
@@ -2305,8 +2284,7 @@ async function executeWSRequest(
         return (
             !!activeRun &&
             activeRun.id !== run.id &&
-            (activeRun.status === "in_progress" ||
-                activeRun.status === "awaiting_deferred")
+            (activeRun.status === 'in_progress' || activeRun.status === 'awaiting_deferred')
         );
     };
 
@@ -2334,17 +2312,15 @@ async function executeWSRequest(
         // with a generic connection_error.
         isAlreadyReported: () => {
             const currentError = get(wsErrorAtom);
-            return !!currentError && currentError.type !== "connection_error";
+            return !!currentError && currentError.type !== 'connection_error';
         },
         // The run may have been cancelled, replaced, or rolled back during the
         // backoff wait — a retry whose tail was restored drops its shell here.
         isStillWanted: () => {
             const activeRun = store.get(activeRunAtom);
             return (
-                ownsWriter(requestWriter) &&
-                activeRun?.id === run.id &&
-                (activeRun.status === "in_progress" ||
-                    activeRun.status === "awaiting_deferred")
+                ownsWriter(requestWriter) && activeRun?.id === run.id &&
+                (activeRun.status === 'in_progress' || activeRun.status === 'awaiting_deferred')
             );
         },
     }).finally(() => {
@@ -2354,14 +2330,11 @@ async function executeWSRequest(
     if (!ownsWriter(requestWriter)) return;
     attemptsMade = result.attemptsMade;
 
-    if (result.kind === "connected") return;
+    if (result.kind === 'connected') return;
 
-    if (result.kind === "abandoned") {
-        if (result.reason === "already_reported") {
-            logger(
-                "WS connection error: Error already set by onError callback, not overwriting",
-                1,
-            );
+    if (result.kind === 'abandoned') {
+        if (result.reason === 'already_reported') {
+            logger('WS connection error: Error already set by onError callback, not overwriting', 1);
             // The onError that set this error may have dispatched an auto-retry
             // whose commit is now in flight and owns the pending flag (see
             // retryPendingRunIdAtom) — or a newer run may be holding it, which
@@ -2371,10 +2344,7 @@ async function executeWSRequest(
             }
             return;
         }
-        logger(
-            `WS connect retry abandoned: run ${run.id} is no longer active`,
-            1,
-        );
+        logger(`WS connect retry abandoned: run ${run.id} is no longer active`, 1);
         // Release the flag the quiet retry raised. Nothing downstream clears it
         // on this path, and a stuck flag leaves the composer blocked with no run
         // to finish and no error to show. Unless the run that superseded this one
@@ -2384,12 +2354,7 @@ async function executeWSRequest(
         return;
     }
 
-    surfaceAndDiagnoseConnectionFailure(
-        set,
-        run.id,
-        result.evidence,
-        result.attemptsMade,
-    );
+    surfaceAndDiagnoseConnectionFailure(set, run.id, result.evidence, result.attemptsMade);
     // Guarded like the abandoned paths above, because this one is reachable with
     // a newer run live too: an attempt can be in flight for twenty seconds, and a
     // run that starts in that window has already raised the flag for itself
@@ -2421,54 +2386,54 @@ export interface SendWSMessageOptions {
 }
 
 const sendWSMessage = async (
-    get: Getter,
-    set: Setter,
-    message: string,
-    options?: SendWSMessageOptions,
-) => {
-    const accountGeneration = getCredentialGeneration();
-    const originalSet = set;
-    set = ((...args: Parameters<Setter>) => {
+        get: Getter,
+        set: Setter,
+        message: string,
+        options?: SendWSMessageOptions,
+    ) => {
+        const accountGeneration = getCredentialGeneration();
+        const originalSet = set;
+        set = ((...args: Parameters<Setter>) => {
             assertCredentialGeneration(accountGeneration);
             return originalSet(...args);
         }) as Setter;
-    const { runIdOverride, permissionsOverride, origin, actions } = options ?? {};
-    const isPending = get(isWSChatPendingAtom);
-    logger('sendWSMessageAtom: Called at ' + Date.now() + ' with message: ' + message.substring(0, 50) + ' (isPending: ' + isPending + ')', 1);
+        const { runIdOverride, permissionsOverride, origin, actions } = options ?? {};
+        const isPending = get(isWSChatPendingAtom);
+        logger('sendWSMessageAtom: Called at ' + Date.now() + ' with message: ' + message.substring(0, 50) + ' (isPending: ' + isPending + ')', 1);
 
-    // Guard: Don't allow concurrent requests. The retry lock is checked
-    // separately because the failed run's dying socket can clear the
-    // pending flag mid-commit — the lock is released only by the retry
-    // flow itself.
-    if (isPending) {
+        // Guard: Don't allow concurrent requests. The retry lock is checked
+        // separately because the failed run's dying socket can clear the
+        // pending flag mid-commit — the lock is released only by the retry
+        // flow itself.
+        if (isPending) {
             logger('sendWSMessageAtom: Blocked - already have request in progress', 1);
             return;
         }
-    if (retryCommitInFlight(get, 'sendWSMessageAtom')) return;
+        if (retryCommitInFlight(get, 'sendWSMessageAtom')) return;
 
-    // Dismiss any open diff preview before sending
-    dismissDiffPreview();
+        // Dismiss any open diff preview before sending
+        dismissDiffPreview();
 
-    // Reset state
-    set(prepareForNewRunAtom);
-    prewarmMuPDFWorker();
-    set(isWSChatPendingAtom, true);
+        // Reset state
+        set(prepareForNewRunAtom);
+        prewarmMuPDFWorker();
+        set(isWSChatPendingAtom, true);
 
-    try {
-        const applicationStatePromise = getApplicationStateProvider()(get);
-        // Attach a rejection handler immediately while attachment preparation runs.
-        void applicationStatePromise.catch(() => {});
-        const readerActionContext = get(stagedReaderActionContextAtom);
-        // Routed reader actions carry their own document; destination tabs
-        // must not add unrelated reader or note attachments.
-        const submissionReaderAttachment = readerActionContext ? null : get(currentReaderAttachmentAtom);
-        const submissionNoteItem = readerActionContext ? null : get(currentNoteItemAtom);
-        // Get current model and build model selection options for the request
-        const model = get(selectedModelAtom);
-        const modelOptions = buildModelSelectionOptions(model);
+        try {
+            const applicationStatePromise = getApplicationStateProvider()(get);
+            // Attach a rejection handler immediately while attachment preparation runs.
+            void applicationStatePromise.catch(() => {});
+            const readerActionContext = get(stagedReaderActionContextAtom);
+            // Routed reader actions carry their own document; destination tabs
+            // must not add unrelated reader or note attachments.
+            const submissionReaderAttachment = readerActionContext ? null : get(currentReaderAttachmentAtom);
+            const submissionNoteItem = readerActionContext ? null : get(currentNoteItemAtom);
+            // Get current model and build model selection options for the request
+            const model = get(selectedModelAtom);
+            const modelOptions = buildModelSelectionOptions(model);
 
-        // Log model and model selection info
-        logger('Selected model:', model ? {
+            // Log model and model selection info
+            logger('Selected model:', model ? {
                 id: model.id,
                 name: model.name,
                 provider: model.provider,
@@ -2477,12 +2442,12 @@ const sendWSMessage = async (
                 allow_byok: model.allow_byok,
                 access_mode: model.access_mode,
             } : null);
-        logger('Model selection options:', {
+            logger('Model selection options:', {
                 model_id: modelOptions.model_id || '(not set - using custom model or plan default)',
                 hasApiKey: !!modelOptions.api_key,
             });
 
-        // Custom instructions (if any)
+            // Custom instructions (if any)
         const customInstructions = getPref('customInstructions') || undefined;
 
         // Build attachments from current message items. Final send gate: drop
@@ -2698,28 +2663,28 @@ const sendWSMessage = async (
         // Get current thread ID (null for new thread)
         const threadId = get(currentThreadIdAtom);
 
-        // Set temporary thread name for new threads (mirrors backend thread_name_hint[:35])
-        if (!threadId && message) {
+            // Set temporary thread name for new threads (mirrors backend thread_name_hint[:35])
+            if (!threadId && message) {
                 set(currentThreadNameAtom, message.substring(0, 35));
             }
 
-        assertCredentialGeneration(accountGeneration);
-        // Get user ID for the run
-        const userId = get(userIdAtom);
-        if (!userId) {
+            assertCredentialGeneration(accountGeneration);
+            // Get user ID for the run
+            const userId = get(userIdAtom);
+            if (!userId) {
                 logger('User ID not found', 1);
                 set(isWSChatPendingAtom, false);
                 return;
             }
 
-        // A failed run still in the active slot has to stay in local
-        // history: the server persisted it, and overwriting the slot
-        // without archiving would drop it from the client's view — a
-        // ghost in the middle of the server thread.
-        archiveTerminalActiveRun(get, set);
+            // A failed run still in the active slot has to stay in local
+            // history: the server persisted it, and overwriting the slot
+            // without archiving would drop it from the client's view — a
+            // ghost in the middle of the server thread.
+            archiveTerminalActiveRun(get, set);
 
-        // Create AgentRun shell and request
-        const { run, request } = createAgentRunShell(
+            // Create AgentRun shell and request
+            const { run, request } = createAgentRunShell(
                 userPrompt,
                 threadId,
                 userId,
@@ -2731,38 +2696,22 @@ const sendWSMessage = async (
                 { runIdOverride, permissionsOverride },
             );
 
-        // Set active run - UI now shows user message + spinner
-        set(activeRunAtom, run);
+            // Set active run - UI now shows user message + spinner
+            set(activeRunAtom, run);
 
-        const savedContent = get(currentMessageContentAtom) || message;
-        const savedPills = get(currentMessagePillsAtom);
-        const savedReaderAction = get(readerActionContextAtom);
-        const savedItems = get(currentMessageItemsAtom);
-        const savedCollections = get(currentMessageCollectionsAtom);
-        const savedFiles = get(currentMessageExternalFilesAtom);
-        const restoreComposer = () => {
-            if (!get(currentMessageContentAtom) && !get(currentMessagePillsAtom).length) {
-                set(currentMessageContentAtom, savedContent);
-                set(currentMessagePillsAtom, savedPills);
-                set(readerActionContextAtom, savedReaderAction);
-            }
-            if (!get(currentMessageItemsAtom).length)
-                set(currentMessageItemsAtom, savedItems);
-            if (!get(currentMessageCollectionsAtom).length)
-                set(currentMessageCollectionsAtom, savedCollections);
-            if (!get(currentMessageExternalFilesAtom).length)
-                set(currentMessageExternalFilesAtom, savedFiles);
-        };
-        // Reset user message input after creating the run
-        set(clearComposerAtom);
-        set(removePopupMessagesByTypeAtom, ['items_summary']);
-        set(currentMessageItemsAtom, []);
-        set(currentMessageCollectionsAtom, []);
-        set(currentMessageExternalFilesAtom, []);
+            const draft = readComposerDraft(get);
+            if (!draft.content) draft.content = message;
+            const restoreComposer = () => restoreMissingComposerDraft(get, set, draft);
+            // Reset user message input after creating the run
+            set(clearComposerAtom);
+            set(removePopupMessagesByTypeAtom, ['items_summary']);
+            set(currentMessageItemsAtom, []);
+            set(currentMessageCollectionsAtom, []);
+            set(currentMessageExternalFilesAtom, []);
 
-        // Execute the WebSocket request
-        await executeWSRequest(run, request, get, set, restoreComposer);
-    } catch (error) {
+            // Execute the WebSocket request
+            await executeWSRequest(run, request, get, set, restoreComposer);
+        } catch (error) {
             if (accountGeneration !== getCredentialGeneration()) return;
             // Catch any unexpected errors during message preparation
             logger('sendWSMessageAtom: Unexpected error:', error, 1);
@@ -2775,7 +2724,8 @@ const sendWSMessage = async (
             set(activeRunAtom, null);
             set(isWSChatPendingAtom, false);
         }
-};
+    };
+
 export const sendWSMessageAtom = atom(null, (get, set, message: string, options?: SendWSMessageOptions) =>
     withThreadWriter(get, set, guardedSet => sendWSMessage(get, guardedSet, message, options)));
 
@@ -2885,14 +2835,12 @@ async function startRegenerateRunOwned(
             // A live follow-up belongs to the suffix being replaced too.
             // Keep its stopped response in history until truncation succeeds,
             // including when the request fails or the undo dialog is canceled.
-            {
-                threadRuns = appendRunIfMissing(threadRuns, {
-                    ...activeRun,
-                    status: "canceled",
-                    completed_at: new Date().toISOString(),
-                });
-                set(threadRunsAtom, threadRuns);
-            }
+            threadRuns = appendRunIfMissing(threadRuns, {
+                ...activeRun,
+                status: 'canceled',
+                completed_at: new Date().toISOString(),
+            });
+            set(threadRunsAtom, threadRuns);
             // Clear the active run before awaiting cancel: agentService.cancel()
             // waits for the cancel message to flush, and if the socket closes
             // uncleanly during that window, the onclose handler must not see this
@@ -2908,14 +2856,12 @@ async function startRegenerateRunOwned(
             // after the POST would let a switch made during this flush put
             // that dialog in front of the new chat and aim the removal at it.
             // Ahead of the clear below, which abandoning does for itself.
-            if (
-                abandonReplacementIfThreadChanged(get, set, {
-                    navSeqBeforeAwait,
-                    pendingRetryRunId: runId,
-                    logPrefix,
-                    popupText: USER_RETRY_ABANDONED_TEXT,
-                })
-            ) {
+            if (abandonReplacementIfThreadChanged(get, set, {
+                navSeqBeforeAwait,
+                pendingRetryRunId: runId,
+                logPrefix,
+                popupText: USER_RETRY_ABANDONED_TEXT,
+            })) {
                 return;
             }
             set(isWSChatPendingAtom, false);
@@ -2929,7 +2875,7 @@ async function startRegenerateRunOwned(
         const settlementThreadId =
             get(currentThreadIdAtom) || targetRun.thread_id;
         if (settlementThreadId && Zotero.Beaver?.presence) {
-            set(threadAdmissionAtom, { threadId: settlementThreadId, tailRunId: get(threadAdmissionAtom)?.tailRunId ?? null, activity: { state: 'unknown', run_id: null } });
+            setAdmission(set, settlementThreadId, get(threadAdmissionAtom)?.tailRunId ?? null, 'unknown');
             const generation = getCredentialGeneration();
             const current = () =>
                 navSeqBeforeAwait === get(threadNavigationSeqAtom) &&
@@ -2937,11 +2883,16 @@ async function startRegenerateRunOwned(
                 ownsWriter(currentWriter());
             const deadline = Date.now() + 130000;
             let delay = 250;
+            let settledHistory: Awaited<ReturnType<typeof readAdmissionHistory>>;
             for (;;) {
-                const snapshot = await readAdmission(settlementThreadId);
+                const history = await readAdmissionHistory(settlementThreadId, true);
+                const snapshot = { threadId: settlementThreadId, tailRunId: history.tail_run_id, activity: history.activity };
                 if (!current()) return;
                 set(threadAdmissionAtom, snapshot);
-                if (snapshot.activity.state !== "active") break;
+                if (snapshot.activity.state !== 'active') {
+                    settledHistory = history;
+                    break;
+                }
                 if (Date.now() >= deadline)
                     throw new Error(
                         "The response is still settling. Retry once it finishes.",
@@ -2950,7 +2901,7 @@ async function startRegenerateRunOwned(
                 if (!current()) return;
                 delay = Math.min(delay * 2, 3000);
             }
-            if (!(await reconcileThread(get, set, current))) return;
+            if (!(await reconcileThread(get, set, current, settledHistory))) return;
             threadRuns = get(threadRunsAtom);
             persistedRunIds = new Set(threadRuns.map(run => run.id));
             // A failed pre-admission request exists only in this renderer. Keep
@@ -3124,35 +3075,11 @@ async function startRegenerateRunOwned(
                 });
                 return;
             }
-            if (outcome === "refused" || outcome === "busy") {
-                set(retryPendingRunIdAtom, null);
-                set(isWSChatPendingAtom, false);
-                set(
-                    threadConflictAtom,
-                    outcome === "busy" ? "thread_busy" : "thread_tail_mismatch",
-                );
-                if (outcome === "busy")
-                    set(threadAdmissionAtom, {
-                        threadId,
-                        tailRunId: expectedTailRunId,
-                        activity: { state: "unknown", run_id: null },
-                    });
-                set(addPopupMessageAtom, {
-                    type: "warning",
-                    title:
-                        outcome === "busy"
-                            ? "Response still settling"
-                            : "Chat changed elsewhere",
-                    text: "The retry was not sent. Your draft and attachments are preserved. Refresh the chat and retry explicitly.",
-                    expire: false,
-                });
+            if (outcome === 'refused' || outcome === "busy") {
+                reportTruncateConflict(set, threadId, expectedTailRunId, outcome, false);
                 return;
             }
-            set(threadAdmissionAtom, {
-                threadId,
-                tailRunId: expectedTailRunId,
-                activity: { state: "idle", run_id: null },
-            });
+            setAdmission(set, threadId, expectedTailRunId, "idle");
         }
 
         if (confirmResult === 'undo') {
@@ -3868,11 +3795,7 @@ function settleWriter(get: Getter, writer: WriterLease | undefined): void {
     if (id) store.set(viewedHistoryRevisionAtom, Zotero.Beaver.presence.getSnapshot().history[id] ?? 0);
 }
 /** Admit before preparation; nested composer/run phases retain the same lease. */
-export async function withThreadWriter<T>(
-    get: Getter,
-    set: Setter,
-    operation: (set: Setter) => Promise<T>,
-): Promise<T | undefined> {
+export async function withThreadWriter<T>(get: Getter, set: Setter, operation: (set: Setter) => Promise<T>): Promise<T | undefined> {
     const id = get(currentThreadIdAtom);
     const presence = Zotero.Beaver?.presence;
     if (
@@ -3898,7 +3821,6 @@ export async function withThreadWriter<T>(
         return;
     }
     if (writer) writer.preparing++;
-
     const nav = get(threadNavigationSeqAtom);
     const guardedSet = ((...args: any[]) => {
         assertWriter(writer);
@@ -3932,9 +3854,7 @@ export async function withThreadWriter<T>(
         }
         return await operation(guardedSet);
     } catch (error) {
-        if (
-            (error as { code?: string })?.code !== 'thread_operation_canceled'
-        ) {
+        if ((error as { code?: string })?.code !== 'thread_operation_canceled') {
             if (ownsWriter(writer) && nav === get(threadNavigationSeqAtom))
                 set(addPopupMessageAtom, {
                     type: "error",

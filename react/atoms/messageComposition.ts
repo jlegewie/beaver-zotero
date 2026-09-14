@@ -2,7 +2,7 @@ import type { ReaderActionLocation } from '../../src/runtime/readerActionLocatio
 import { getContextWindow, tryGetWindowRuntime } from '../runtime/windowRuntime';
 import { getSelectedCollections } from '../../src/utils/zoteroSelection';
 import { collectionToReference } from '../utils/zoteroReferences';
-import { atom } from "jotai";
+import { atom, type Getter, type Setter } from "jotai";
 import { truncateText } from "@beaver/agent-ui/utils/stringUtils";
 import { allUserAttachmentKeysAtom } from "@beaver/agent-core/run-state/atoms";
 import { createElement } from 'react';
@@ -197,6 +197,35 @@ export const currentMessagePillsAtom = atom<SlashCommandDescriptor[]>([]);
  * published afterwards, restoring a draft into a thread the user has left.
  */
 export const composerResetTokenAtom = atom<number>(0);
+
+/** Capture the editable draft independently of an expanded submission prompt. */
+export function readComposerDraft(get: Getter) {
+    return {
+        content: get(currentMessageContentAtom),
+        pills: get(currentMessagePillsAtom),
+        readerAction: get(readerActionContextAtom),
+        items: get(currentMessageItemsAtom),
+        collections: get(currentMessageCollectionsAtom),
+        files: get(currentMessageExternalFilesAtom),
+    };
+}
+
+export const hasComposerDraftAtom = atom(get => {
+    const draft = readComposerDraft(get);
+    return !!(draft.content || draft.pills.length || draft.items.length || draft.collections.length || draft.files.length);
+});
+
+/** Restore rejected input without overwriting edits made while the request was pending. */
+export function restoreMissingComposerDraft(get: Getter, set: Setter, draft: ReturnType<typeof readComposerDraft>): void {
+    if (!get(currentMessageContentAtom) && !get(currentMessagePillsAtom).length) {
+        set(currentMessageContentAtom, draft.content);
+        set(currentMessagePillsAtom, draft.pills);
+        set(readerActionContextAtom, draft.readerAction);
+    }
+    if (!get(currentMessageItemsAtom).length) set(currentMessageItemsAtom, draft.items);
+    if (!get(currentMessageCollectionsAtom).length) set(currentMessageCollectionsAtom, draft.collections);
+    if (!get(currentMessageExternalFilesAtom).length) set(currentMessageExternalFilesAtom, draft.files);
+}
 
 /**
  * Clear the composer's text and pills programmatically (new thread, thread

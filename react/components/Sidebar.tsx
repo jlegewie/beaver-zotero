@@ -15,7 +15,7 @@ import { isFirstRunThreadAtom, runsCountAtom } from '@beaver/agent-core/run-stat
 import { useAtomValue, useSetAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
-import { getScrollAtoms, publishScrollPosition } from '../utils/scrollPosition';
+import { scrollAtoms, publishScrollPosition } from '../utils/scrollPosition';
 import { isSkippedFilesDialogVisibleAtom, isThreadListViewAtom } from '../atoms/ui';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
@@ -224,7 +224,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     // Find in chat. Component state, not an atom: one Jotai store is shared by
     // the sidebars and the separate Beaver window, so an atom would put every
     // surface on the same query and the same current match.
-    const find = useFindInChat({ container: messagesContainer, isWindow });
+    const find = useFindInChat({ container: messagesContainer });
 
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
@@ -236,7 +236,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     });
 
     // Select the correct atoms based on whether we're in the separate window
-    const scrollAtoms = getScrollAtoms();
+
     const scrolledAtom = scrollAtoms.userScrolled;
     const scrollPositionAtom = scrollAtoms.position;
 
@@ -420,7 +420,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                         it does without find-in-chat. */}
                     {isThreadView ? (
                         <FindQueryProvider query={find.activeQuery}>
-                            <ThreadView ref={setMessagesContainerRef} isWindow={isWindow} />
+                            <ThreadView ref={setMessagesContainerRef} />
                         </FindQueryProvider>
                     ) : (
                         <HomePage isWindow={isWindow} inputRef={inputRef} />
@@ -430,7 +430,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                     {isThreadView && (
                         <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
                             <PopupOverlayContainer />
-                            <ScrollDownButton onClick={handleScrollToBottom} isWindow={isWindow} />
+                            <ScrollDownButton onClick={handleScrollToBottom} />
                             {composerTakeover.kind === 'batch-approval' ? (
                                 // key resets local decision state per approval request
                                 <BatchApprovalPanel

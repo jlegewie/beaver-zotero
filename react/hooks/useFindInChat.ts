@@ -3,7 +3,7 @@ import { useAtomValue } from 'jotai';
 import { runsCountAtom } from '@beaver/agent-core/run-state/atoms';
 import { FIND_CURRENT_CLASS, FIND_HIT_ATTR, isFindQueryActive } from '@beaver/agent-ui/chat/findContext';
 import { currentThreadIdAtom } from '../atoms/threads';
-import { getScrollAtoms, latchIntentFromDistance, markProgrammaticScroll } from '../utils/scrollPosition';
+import { scrollAtoms, latchIntentFromDistance, markProgrammaticScroll } from '../utils/scrollPosition';
 import { findFirstHitAtOrBelow, stepMatchIndex } from '../utils/findNavigation';
 
 /**
@@ -98,8 +98,6 @@ export interface UseFindInChatOptions {
      * assignment notifies nobody.
      */
     container: HTMLElement | null;
-    /** Whether this surface is the separate Beaver window, which scrolls independently. */
-    isWindow: boolean;
 }
 
 export interface FindInChatState {
@@ -145,7 +143,7 @@ export interface FindInChatState {
  * they emitted are the only description of the result set that is guaranteed to
  * agree with what the reader can see.
  */
-export function useFindInChat({ container, isWindow }: UseFindInChatOptions): FindInChatState {
+export function useFindInChat({ container }: UseFindInChatOptions): FindInChatState {
     const [isOpen, setIsOpen] = useState(false);
     const [query, setQuery] = useState('');
     const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -160,7 +158,6 @@ export function useFindInChat({ container, isWindow }: UseFindInChatOptions): Fi
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const runsCount = useAtomValue(runsCountAtom);
 
-    const scrollAtoms = getScrollAtoms();
 
     // The hits, in document order, and the one the reader is on. Kept in refs
     // rather than state: the navigation callbacks read them, and re-creating

@@ -3,13 +3,7 @@ import {
     currentThreadIdAtom,
     activeRunAtom,
 } from "@beaver/agent-core/run-state/atoms";
-import {
-    currentMessageContentAtom,
-    currentMessagePillsAtom,
-    currentMessageItemsAtom,
-    currentMessageCollectionsAtom,
-    currentMessageExternalFilesAtom,
-} from "../atoms/messageComposition";
+import { hasComposerDraftAtom } from "../atoms/messageComposition";
 import { loadThreadAtom } from "../atoms/threads";
 import { userIdAtom } from "../atoms/auth";
 import {
@@ -34,14 +28,8 @@ export const windowCommands = {
     "open-chat": async (request: { threadId: string }) => {
         if (!request.threadId) throw new Error("A persisted chat is required");
         if (store.get(currentThreadIdAtom) !== request.threadId) {
-            const hasDraft =
-                !!store.get(currentMessageContentAtom) ||
-                store.get(currentMessagePillsAtom).length ||
-                store.get(currentMessageItemsAtom).length ||
-                store.get(currentMessageCollectionsAtom).length ||
-                store.get(currentMessageExternalFilesAtom).length;
             if (
-                hasDraft &&
+                store.get(hasComposerDraftAtom) &&
                 !getHostWindow().confirm(
                     "Replace the unsent draft in this window and open the requested chat?",
                 )

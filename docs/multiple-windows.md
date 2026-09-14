@@ -44,7 +44,7 @@ leaves the response stopped.
 ## Validation and compatibility
 
 Verified on macOS with Zotero **10.0.1-beta.1+16a79acf7**, using an isolated profile
-and a server advertising admission v1. The final unit run passed **8,383 tests in
+and a server advertising admission v1. The final unit run passed **8,395 tests in
 531 files**. Live suites passed **20 selected tests across eight files**, with
 additional real chat/lifecycle probes described below. Development build, root and
 package type checks, bundle boundary checks, ESLint, and `git diff --check` passed:

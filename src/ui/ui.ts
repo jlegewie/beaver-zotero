@@ -72,14 +72,14 @@ export class BeaverUIFactory {
             // utility layer stops matching inside this pane.
             mountPoint.setAttribute("class", "beaver-root display-flex flex-1 h-full min-w-0");
             mountPoint.setAttribute("style", "min-width: 0px; display: none;");
-            
+
             // Create a div inside the vbox as mount point for the React component
             const reactContainer = win.document.createElement("div");
             reactContainer.setAttribute("id", `beaver-react-root-${location}`);
             reactContainer.setAttribute("data-location", location);
             reactContainer.setAttribute("class", "display-flex flex-1 flex-col h-full min-w-0");
             mountPoint.appendChild(reactContainer);
-            
+
             return { mountPoint, reactContainer };
         }
 
@@ -123,11 +123,12 @@ export class BeaverUIFactory {
                     typeof win.BeaverReact.renderAiSidebar === 'function' &&
                     typeof win.BeaverReact.renderGlobalInitializer === 'function' &&
                     typeof win.BeaverReact.unmountFromElement === 'function') {
-                
+
                     ztoolkit.log("registerChatPanel: BeaverReact API verified");
                 } else {
                     throw new Error("Beaver renderer API incomplete");
                 }
+
 
                 // Initialize roots tracking for this window
                 if (!this.windowRoots.has(win)) {
@@ -143,7 +144,7 @@ export class BeaverUIFactory {
                     globalInitializerRoot.style.display = "none";
                     win.document.documentElement.appendChild(globalInitializerRoot);
                     ztoolkit.log("registerChatPanel: created global initializer root element");
-                
+
                     if (typeof win.BeaverReact?.renderGlobalInitializer === 'function') {
                         const root = win.BeaverReact.renderGlobalInitializer(globalInitializerRoot);
                         if (root) roots.add(root);
@@ -184,6 +185,7 @@ export class BeaverUIFactory {
                             win.BeaverReact.renderWindowSidebar(container),
                         );
                 }
+
                 // Render React components for actual sidebars
                 const libraryRootEl = win.document.getElementById("beaver-react-root-library");
                 const readerRootEl = win.document.getElementById("beaver-react-root-reader");
@@ -440,7 +442,7 @@ export class BeaverUIFactory {
                     }
                 });
             }
-            
+
             win.BeaverReact?.disposeRuntime?.();
 
             // Fallback: try to unmount using stored roots
@@ -508,7 +510,7 @@ export class BeaverUIFactory {
 
         // Always unregister all existing shortcuts first to prevent duplicates
         manager.unregisterAll();
-        
+
         if (typeof ztoolkit !== 'undefined') {
             ztoolkit.log("Registering keyboard shortcuts...");
         }
@@ -524,16 +526,16 @@ export class BeaverUIFactory {
             (ev, keyOptions) => {
                 const isMacToggle = Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.metaKey && !ev.ctrlKey && !ev.altKey && !ev.shiftKey;
                 const isWindowsToggle = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && !ev.altKey && !ev.shiftKey && !ev.metaKey;
-                
+
                 if (isMacToggle || isWindowsToggle) {
                     const now = Date.now();
                     const timeSinceLastToggle = now - lastToggleTime;
-                    
+
                     const timestamp = new Date().toISOString();
                     if (typeof ztoolkit !== 'undefined') {
                         ztoolkit.log(`keyboardManager [${timestamp}]: Keyboard shortcut detected - key: ${ev.key}, metaKey: ${ev.metaKey}, ctrlKey: ${ev.ctrlKey}, shiftKey: ${ev.shiftKey}, altKey: ${ev.altKey}, timeSinceLastToggle: ${timeSinceLastToggle}ms`);
                     }
-                    
+
                     // Debounce: ignore if called too soon after last toggle
                     if (timeSinceLastToggle < TOGGLE_DEBOUNCE_MS) {
                         if (typeof ztoolkit !== 'undefined') {
@@ -542,7 +544,7 @@ export class BeaverUIFactory {
                         ev.preventDefault();
                         return;
                     }
-                    
+
                     ev.preventDefault();
                     lastToggleTime = now;
 
@@ -558,7 +560,7 @@ export class BeaverUIFactory {
             (ev, keyOptions) => {
                 const isMacShortcut = Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.metaKey && ev.shiftKey && !ev.ctrlKey && !ev.altKey;
                 const isWindowsShortcut = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && ev.shiftKey && !ev.altKey && !ev.metaKey;
-                
+
                 if (isMacShortcut || isWindowsShortcut) {
                     ev.preventDefault();
                     const origin = (ev.target as HTMLElement)?.ownerDocument?.defaultView;
@@ -629,10 +631,7 @@ export class BeaverUIFactory {
      * this window keeps their size unless it is too small for what is about to
      * be shown.
      */
-    static openBeaverWindow(
-        minSize?: { width?: number; height?: number },
-        origin?: Window,
-    ): Window {
+    static openBeaverWindow(minSize?: { width?: number; height?: number }, origin?: Window): Window {
         const existingWindow = this.findBeaverWindow();
         if (existingWindow) {
             this.growWindowTo(existingWindow, minSize);
@@ -643,19 +642,19 @@ export class BeaverUIFactory {
 
         const mainWindow = origin ?? Zotero.getMainWindow();
         const features = [
-            "chrome",
-            "resizable",
-            "centerscreen",
-            "dialog=false",
-            minSize?.width ? `width=${minSize.width}` : "",
-            minSize?.height ? `height=${minSize.height}` : "",
+            'chrome',
+            'resizable',
+            'centerscreen',
+            'dialog=false',
+            minSize?.width ? `width=${minSize.width}` : '',
+            minSize?.height ? `height=${minSize.height}` : '',
         ]
             .filter(Boolean)
-            .join(",");
+            .join(',');
 
         const opened = Services.ww.openWindow(
             (mainWindow ?? null) as any,
-            "chrome://beaver/content/beaverWindow.xhtml",
+            'chrome://beaver/content/beaverWindow.xhtml',
             BEAVER_WINDOW_NAME,
             features,
             null as any,
@@ -665,9 +664,9 @@ export class BeaverUIFactory {
         // the window's attributes load, so grow it again after that.
         if (opened && minSize) {
             opened.addEventListener(
-                "load",
+                'load',
                 () => this.growWindowTo(opened, minSize),
-                { once: true },
+                { once: true }
             );
         }
         Zotero.debug("Beaver: Opened separate window");
@@ -761,12 +760,7 @@ export class BeaverUIFactory {
      * that the Actions tab pre-filter its list to that category (or "uncategorized").
      * `actionId` requests that the Actions tab reveal that action in edit mode.
      */
-    static openPreferencesWindow(
-        tab?: PreferencePageTab,
-        actionsCategoryFilter?: ActionCategoryFilter,
-        actionId?: string,
-        window?: Window,
-    ): void {
+    static openPreferencesWindow(tab?: PreferencePageTab, actionsCategoryFilter?: ActionCategoryFilter, actionId?: string, window?: Window): void {
         const existingWindow = this.findPreferencesWindow();
         if (existingWindow) {
             // Switch tab (and apply the category filter / action-edit request)

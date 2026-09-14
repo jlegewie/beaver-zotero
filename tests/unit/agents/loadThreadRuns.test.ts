@@ -67,6 +67,29 @@ describe('loadThreadRuns', () => {
         expect(result.agentActions).toBe(actions);
     });
 
+    it('normalizes missing admission metadata to an unknown state', async () => {
+        const result = await loadThreadRuns('thread-1');
+        expect(result.tailRunId).toBeNull();
+        expect(result.activity).toEqual({ state: 'unknown', run_id: null });
+    });
+
+    it('hydrates a supplied settlement snapshot without fetching it again', async () => {
+        const onToolReturn = vi.fn();
+        const history = {
+            runs: [makeRun('run-1', { model_messages: [
+                toolCallMessage([{ id: 'call', args: { query: 'rain' } }]),
+                toolReturnMessage([{ id: 'call' }]),
+            ] })],
+            agent_actions: null,
+            tail_run_id: 'run-1',
+            activity: { state: 'idle' as const, run_id: null },
+        };
+        const result = await loadThreadRuns('thread-1', { history, onToolReturn });
+        expect(getThreadRunsMock).not.toHaveBeenCalled();
+        expect(result.tailRunId).toBe('run-1');
+        expect(onToolReturn).toHaveBeenCalledWith(expect.objectContaining({ tool_call_id: 'call' }), { query: 'rain' });
+    });
+
     it('marks a stale in_progress run canceled and stamps a completion time', async () => {
         getThreadRunsMock.mockResolvedValue({
             runs: [

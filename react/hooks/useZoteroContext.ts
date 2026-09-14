@@ -8,6 +8,7 @@ import {
     selectedZoteroItemsAtom,
     selectedZoteroItemCountAtom,
     libraryViewAtom,
+    emptyLibraryView,
     selectedTagsAtom,
     recentlyAddedTodayCountAtom,
     libraryItemCountAtom,
@@ -205,17 +206,7 @@ export function useZoteroContext() {
             setSelectedItemCount(0);
             setSelectedTags([]);
             setNoteItem(null);
-            setLibraryView({
-                treeRowType: "library",
-                libraryId: 0,
-                libraryName: "",
-                collectionId: null,
-                collectionName: null,
-                searchName: null,
-                selectedRowCount: 0,
-                selectedCollections: [],
-                selectedLibraryIds: [],
-            });
+            setLibraryView(emptyLibraryView);
             logger('useZoteroContext: ZoteroPane not available', 2);
             return;
         }

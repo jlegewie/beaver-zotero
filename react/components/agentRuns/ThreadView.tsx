@@ -4,7 +4,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { activeRunAtom, allRunsAtom } from "@beaver/agent-core/run-state/atoms";
 import { AgentRunView } from "./AgentRunView";
 import { pinToBottom, scrollToBottom } from "../../utils/scrollToBottom";
-import { AT_BOTTOM_EPSILON, BOTTOM_THRESHOLD, getScrollAtoms, latchIntentFromDistance, markProgrammaticScroll, measureDistanceFromBottom, publishDistanceFromBottom, publishScrollPosition, resumeFollowing } from "../../utils/scrollPosition";
+import { AT_BOTTOM_EPSILON, BOTTOM_THRESHOLD, scrollAtoms, latchIntentFromDistance, markProgrammaticScroll, measureDistanceFromBottom, publishDistanceFromBottom, publishScrollPosition, resumeFollowing } from "../../utils/scrollPosition";
 import { currentThreadIdAtom, pendingScrollToRunAtom, isLoadingThreadAtom } from "../../atoms/threads";
 import { pendingApprovalsAtom } from "../../agents/agentActions";
 import { store } from "../../store";
@@ -34,8 +34,6 @@ const TERMINAL_SETTLE_MS = 1000;
 type ThreadViewProps = {
     /** Optional className for styling */
     className?: string;
-    /** Whether this is rendered in the separate window (uses independent scroll state) */
-    isWindow?: boolean;
 };
 
 /**
@@ -44,7 +42,7 @@ type ThreadViewProps = {
  */
 export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
     function ThreadView(
-        { className, isWindow = false }: ThreadViewProps,
+        { className }: ThreadViewProps,
         ref: React.ForwardedRef<HTMLDivElement>,
     ) {
         const surfaceWindow = useSurfaceWindow();
@@ -78,8 +76,6 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         // How long the layout that follows a finished response is still followed
         const terminalSettleUntilRef = useRef(0);
 
-        // Select the correct atoms based on whether we're in the separate window
-        const scrollAtoms = getScrollAtoms();
         const scrollPositionAtom = scrollAtoms.position;
         const scrolledAtom = scrollAtoms.userScrolled;
         // Read scroll position imperatively inside restoreScrollPosition rather than subscribing.
@@ -95,10 +91,9 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         const prevSourcesVisibilityRef = useRef(sourcesVisibilityState);
         const prevAnnotationPanelRef = useRef(annotationPanelState);
 
-        // Use the auto-scroll hook with window-aware state
+        // Use the renderer-owned auto-scroll state
         const { scrollContainerRef, setScrollContainerRef, handleScroll } = useAutoScroll(ref, {
             threshold: BOTTOM_THRESHOLD,
-            isWindow
         });
 
         const isProtocolScrollLocked = useCallback(() => {

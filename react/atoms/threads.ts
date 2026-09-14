@@ -1,5 +1,5 @@
 import {
-    threadAdmissionAtom,
+    setAdmission,
     threadConflictAtom,
 } from "../runtime/threadAdmission";
 import { viewedHistoryRevisionAtom } from '../runtime/threadProjection';
@@ -514,11 +514,7 @@ export const loadThreadAtom = atom(
             });
 
             if (!isCurrent()) return false;
-            set(threadAdmissionAtom, {
-                threadId,
-                tailRunId: tailRunId ?? null,
-                activity: activity ?? { state: "unknown", run_id: null },
-            });
+            setAdmission(set, threadId, tailRunId, activity);
             set(threadConflictAtom, null);
             // Protocol deep-links can request a run that does not exist in the target thread.
             // Clear the pending scroll target deterministically once thread data is loaded.

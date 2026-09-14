@@ -5,6 +5,7 @@ import type { Getter, Setter } from "jotai";
 import {
     agentRunService,
     type ThreadActivity,
+    type ThreadRunsResponse,
 } from "@beaver/agent-core/transport/agentService";
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
 import {
@@ -46,12 +47,14 @@ export async function reconcileThread(
     get: Getter,
     set: Setter,
     isCurrent: () => boolean,
+    history?: ThreadRunsResponse,
 ): Promise<boolean> {
     const id = get(currentThreadIdAtom);
     if (!id) return false;
     const guardedSet = ((...args: any[]) =>
         isCurrent() ? (set as any)(...args) : undefined) as Setter;
     const loaded = await loadThreadRuns(id, {
+        history,
         onToolReturn: async (part, args) => {
             if (!isCurrent()) return;
             await processToolReturnResults(part, guardedSet);
@@ -59,15 +62,8 @@ export async function reconcileThread(
         },
     });
     if (!isCurrent() || get(currentThreadIdAtom) !== id) return false;
-    const activity = loaded.activity ?? {
-        state: "unknown" as const,
-        run_id: null,
-    };
-    set(threadAdmissionAtom, {
-        threadId: id,
-        tailRunId: loaded.tailRunId ?? null,
-        activity,
-    });
+    const { activity } = loaded;
+    setAdmission(set, id, loaded.tailRunId, activity);
     if (activity.state === "active" || activity.state === "unknown")
         return false;
     set(threadRunsAtom, loaded.runs);
@@ -144,16 +140,53 @@ export function attachThreadAdmission(runtime: WindowRuntime): void {
     });
 }
 
-/** Admission metadata must come from the server, including runs hidden by rendering. */
-export async function readAdmission(
+/** Small admission updates share one shape; server activity retains its run id. */
+export function setAdmission(
+    set: Setter,
     threadId: string,
-): Promise<AdmissionSnapshot> {
-    const history = await agentRunService.getThreadRuns(threadId, true);
+    tailRunId: string | null,
+    activity: AdmissionSnapshot["activity"] | "idle" | "unknown",
+): void {
+    set(threadAdmissionAtom, {
+        threadId,
+        tailRunId,
+        activity:
+            typeof activity === "string"
+                ? { state: activity, run_id: null }
+                : activity,
+    });
+}
+
+/** Validate raw capability metadata before normalizing history for presentation. */
+export async function readAdmissionHistory(
+    threadId: string,
+    includeActions = false,
+): Promise<
+    ThreadRunsResponse & {
+        tail_run_id: string | null;
+        activity: ThreadActivity;
+    }
+> {
+    const history = await agentRunService.getThreadRuns(
+        threadId,
+        includeActions,
+    );
     if (history.tail_run_id === undefined || !history.activity) {
         throw new Error(
             "This server does not support safe concurrent chats. Update the server before continuing.",
         );
     }
+    return {
+        ...history,
+        tail_run_id: history.tail_run_id,
+        activity: history.activity,
+    };
+}
+
+export async function readAdmission(
+    threadId: string,
+): Promise<AdmissionSnapshot> {
+    const history = await readAdmissionHistory(threadId);
     return {
         threadId,
         tailRunId: history.tail_run_id,

@@ -141,7 +141,7 @@ export async function handleTestBeaverWindowHttpRequest(
     const open = request?.open !== false;
 
     if (open) {
-        const snapshot = await BeaverUIFactory.commandBeaverWindow('/beaver/test/application-state', {
+        const snapshot = await BeaverUIFactory.commandBeaverWindow('application-state', {
             waitForContext: true, timeout_ms: settleTimeout(request),
         });
         return { ok: true, reader_context_settled: snapshot.reader_context_settled,

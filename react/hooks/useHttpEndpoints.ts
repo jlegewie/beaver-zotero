@@ -88,6 +88,7 @@ export function registerWindowTestCommands(
         '/beaver/test/confirm-credits': handleTestConfirmCreditsHttpRequest,
         '/beaver/test/undo-action': handleTestUndoActionHttpRequest,
         '/beaver/test/application-state': handleTestApplicationStateHttpRequest,
+        'application-state': handleTestApplicationStateHttpRequest,
         '/beaver/test/beaver-window': handleTestBeaverWindowHttpRequest,
         '/beaver/test/open-table': handleTestOpenTableHttpRequest,
         '/beaver/test/close-table': handleTestCloseTableHttpRequest,

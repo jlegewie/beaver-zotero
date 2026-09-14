@@ -51,6 +51,19 @@ export interface LibraryViewInfo {
     selectedLibraryIds: number[];
 }
 
+/** Automatic context when no main Zotero window is available. */
+export const emptyLibraryView: LibraryViewInfo = {
+    treeRowType: 'library',
+    libraryId: 0,
+    libraryName: '',
+    collectionId: null,
+    collectionName: null,
+    searchName: null,
+    selectedRowCount: 0,
+    selectedCollections: [],
+    selectedLibraryIds: [],
+};
+
 const defaultLibraryView: LibraryViewInfo = {
     treeRowType: 'library',
     libraryId: 1,
