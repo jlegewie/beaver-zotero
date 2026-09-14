@@ -10,6 +10,13 @@ an unsent draft and uses the usual stop-and-switch confirmation if it is respond
 Tables temporarily replace the standalone's presentation; returning to chat keeps
 that window's history and draft.
 
+The separate window is laid out as an application rather than a pane: a collapsible
+chat history sidebar on the left (new chat, search, pinned and recent chats, the
+account), a header with the open chat's title, its actions and the account menu, and
+the chat itself in a centered column whose margins grow with the window. The sidebar
+state is persisted in the `windowSidebarCollapsed` preference. The chat is the same
+`Sidebar` component the panes render, given the window's header in place of its own.
+
 The standalone follows the most recently active main window for automatic library,
 selection, reader, and note context. With no main windows open, automatic context is
 empty and explicit attachments remain. Closing main windows does not close the

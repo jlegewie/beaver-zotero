@@ -45,7 +45,7 @@
  * Root font-size is mirrored from the main Zotero window in beaverWindow.js
  * so `rem` units resolve identically to the sidebar. */
 #beaver-window {
-    min-width: 400px;
+    min-width: 560px;
     min-height: 600px;
 }
 
@@ -3375,4 +3375,461 @@
 .beaver-table-section-action:disabled {
     color: var(--fill-tertiary);
     cursor: default;
+}
+
+/* ───── Separate window: application shell ─────
+ * The window is a full application: a collapsible chat history sidebar, a
+ * header for the open chat, and the chat in a width-limited column. The chat
+ * itself is the same `Sidebar` the panes render. */
+
+#beaver-pane-window .beaver-window-app {
+    --beaver-window-nav-width: 264px;
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    background-color: var(--material-sidepane);
+}
+
+/* The sidebar animates its width; its content keeps a fixed width so the
+ * rows do not reflow while it slides. */
+#beaver-pane-window .beaver-window-nav {
+    flex: 0 0 auto;
+    width: var(--beaver-window-nav-width);
+    min-height: 0;
+    /* Clipped only while collapsed: expanded, the row menus may extend past
+     * the sidebar's edge. The class flips at the start of a collapse, so the
+     * slide out is clipped; the slide in is covered by the chat pane above. */
+    overflow: visible;
+    background-color: var(--material-sidepane);
+    border-right: 1px solid var(--beaver-border-subtle);
+    transition: width 240ms cubic-bezier(0.4, 0, 0.2, 1), border-color 240ms ease;
+}
+
+#beaver-pane-window .beaver-window-app-nav-collapsed .beaver-window-nav {
+    width: 0;
+    overflow: hidden;
+    border-right-color: transparent;
+}
+
+#beaver-pane-window .beaver-window-nav-content {
+    display: flex;
+    flex-direction: column;
+    width: var(--beaver-window-nav-width);
+    height: 100%;
+    min-height: 0;
+    opacity: 1;
+    /* No transform while expanded: a transformed ancestor would become the
+     * containing block of the row menus, which are fixed, and let the scroll
+     * area clip them. */
+    transition: opacity 160ms ease, transform 240ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#beaver-pane-window .beaver-window-app-nav-collapsed .beaver-window-nav-content {
+    opacity: 0;
+    transform: translateX(-16px);
+    pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #beaver-pane-window .beaver-window-nav,
+    #beaver-pane-window .beaver-window-nav-content {
+        transition: none;
+    }
+}
+
+/* The chat column sits on the plain background so it reads as the working
+ * surface, with the sidebar on the sidepane material beside it. */
+#beaver-pane-window .beaver-window-main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    /* Paints over the sidebar's content while it slides in or out. Menus in
+     * the sidebar are fixed and far above this, so they are unaffected. */
+    position: relative;
+    z-index: 1;
+    /* The chat column's gutters are measured against this pane, not the
+     * window, so they do not jump when the sidebar collapses. Derived from the
+     * sidebar's known width rather than a size container: containment would
+     * make this pane the containing block for the fixed-position menus inside
+     * it on older Gecko builds, shifting them by the sidebar's width. */
+    --beaver-pane-width: calc(100vw - var(--beaver-window-nav-width));
+}
+
+#beaver-pane-window .beaver-window-app-nav-collapsed .beaver-window-main {
+    --beaver-pane-width: 100vw;
+}
+
+#beaver-pane-window .beaver-window-main > [role="main"] {
+    background-color: var(--material-background);
+}
+
+/* ── Header ── */
+
+#beaver-pane-window .beaver-window-header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    height: 46px;
+    padding: 0 12px 0 8px;
+}
+
+#beaver-pane-window .beaver-window-header-lead {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+}
+
+#beaver-pane-window .beaver-window-header-title-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    margin-left: 4px;
+}
+
+#beaver-pane-window .beaver-window-header-title {
+    margin: 0;
+    min-width: 0;
+    font-size: 1.05rem;
+    font-weight: 500;
+    line-height: 1.3;
+    color: var(--fill-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#beaver-pane-window .beaver-window-header-trail {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex: none;
+}
+
+/* ── Sidebar content ── */
+
+#beaver-pane-window .beaver-window-nav-top {
+    flex: none;
+    padding: 12px 10px 0;
+}
+
+/* Base for the sidebar's plain buttons (new chat, chat rows, the account):
+ * the chrome default look removed, a rounded hover fill and a focus ring. */
+#beaver-pane-window .beaver-window-nav-button {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    border: none;
+    border-radius: 8px;
+    background-color: transparent;
+    color: var(--fill-primary);
+    font: inherit;
+    font-size: 1rem;
+    line-height: 1.3;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+#beaver-pane-window .beaver-window-nav-button:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+}
+
+#beaver-pane-window .beaver-window-nav-item {
+    gap: 9px;
+    padding: 7px 10px;
+    white-space: nowrap;
+}
+
+#beaver-pane-window .beaver-window-nav-item:hover {
+    background-color: var(--fill-quinary);
+}
+
+#beaver-pane-window .beaver-window-nav-item svg {
+    flex-shrink: 0;
+    width: 15px;
+    height: 15px;
+}
+
+#beaver-pane-window .beaver-window-nav-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: none;
+    margin: 14px 10px 4px;
+}
+
+#beaver-pane-window .beaver-window-nav-search-icon {
+    position: absolute;
+    left: 9px;
+    color: var(--fill-tertiary);
+    pointer-events: none;
+}
+
+#beaver-pane-window .beaver-window-nav-search-input {
+    width: 100%;
+    padding: 6px 26px 6px 29px;
+    background-color: var(--beaver-fill-subtle);
+    border: 1px solid var(--beaver-border-subtle);
+    border-radius: 8px;
+    color: var(--fill-primary);
+    font-size: 1rem;
+    outline: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+#beaver-pane-window .beaver-window-nav-search-input:focus {
+    border-color: var(--fill-quarternary);
+}
+
+#beaver-pane-window .beaver-window-nav-search-input::placeholder {
+    color: var(--fill-tertiary);
+}
+
+#beaver-pane-window .beaver-window-nav-search-trailing {
+    position: absolute;
+    right: 7px;
+    display: flex;
+    align-items: center;
+    color: var(--fill-tertiary);
+}
+
+#beaver-pane-window .beaver-window-nav-search-clear {
+    padding: 3px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+}
+
+#beaver-pane-window .beaver-window-nav-search-clear:hover {
+    background-color: var(--fill-quinary);
+    color: var(--fill-primary);
+}
+
+#beaver-pane-window .beaver-window-nav-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 2px 10px 8px;
+}
+
+#beaver-pane-window .beaver-window-nav-group {
+    margin-top: 12px;
+}
+
+#beaver-pane-window .beaver-window-nav-group-label {
+    padding: 0 8px 4px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--fill-tertiary);
+}
+
+#beaver-pane-window .beaver-window-nav-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    border-radius: 8px;
+    transition: background-color 0.12s ease;
+}
+
+#beaver-pane-window .beaver-window-nav-row:hover,
+#beaver-pane-window .beaver-window-nav-row-menu-open,
+#beaver-pane-window .beaver-window-nav-row:focus-within {
+    background-color: var(--fill-quinary);
+}
+
+#beaver-pane-window .beaver-window-nav-row-current,
+#beaver-pane-window .beaver-window-nav-row-current:hover {
+    background-color: var(--fill-quarternary);
+}
+
+#beaver-pane-window .beaver-window-nav-row-button {
+    flex: 1;
+    width: auto;
+    padding: 6px 8px;
+}
+
+#beaver-pane-window .beaver-window-nav-row-name {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* A truncated name scrolls to its end while hovered (the distance and pace
+ * are set inline by the row), after a short pause so a passing pointer does
+ * not set every row in motion. */
+#beaver-pane-window .beaver-window-nav-row-name-scrolling {
+    text-overflow: clip;
+}
+
+/* Inline until it moves: an inline-block child is clipped rather than
+ * ellipsized, and only a block can be transformed. */
+#beaver-pane-window .beaver-window-nav-row-name-scrolling .beaver-window-nav-row-name-text {
+    display: inline-block;
+    transform: translateX(calc(-1 * var(--beaver-nav-name-overflow, 0px)));
+    transition: transform var(--beaver-nav-name-scroll-duration, 2s) linear 0.6s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #beaver-pane-window .beaver-window-nav-row-name-scrolling .beaver-window-nav-row-name-text {
+        transition: none;
+    }
+}
+
+/* The row's actions appear on hover, fading the name out under them rather
+ * than pushing it. */
+#beaver-pane-window .beaver-window-nav-row:hover .beaver-window-nav-row-name,
+#beaver-pane-window .beaver-window-nav-row-menu-open .beaver-window-nav-row-name,
+#beaver-pane-window .beaver-window-nav-row:focus-within .beaver-window-nav-row-name {
+    mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent calc(100% - 14px));
+}
+
+#beaver-pane-window .beaver-window-nav-row-actions {
+    position: absolute;
+    top: 0;
+    right: 4px;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+}
+
+#beaver-pane-window .beaver-window-nav-row:hover .beaver-window-nav-row-actions,
+#beaver-pane-window .beaver-window-nav-row-menu-open .beaver-window-nav-row-actions,
+#beaver-pane-window .beaver-window-nav-row:focus-within .beaver-window-nav-row-actions {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+#beaver-pane-window .beaver-window-nav-row-menu {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+}
+
+#beaver-pane-window .beaver-window-nav-row-spinner {
+    display: flex;
+    align-items: center;
+    padding: 0 6px;
+    color: var(--fill-tertiary);
+}
+
+#beaver-pane-window .beaver-window-nav-rename {
+    width: 100%;
+    margin: 0;
+    padding: 6px 8px;
+    border: 1px solid var(--color-accent);
+    border-radius: 8px;
+    background-color: var(--material-background);
+    color: var(--fill-primary);
+    font: inherit;
+    font-size: 1rem;
+    line-height: 1.3;
+    outline: none;
+    box-sizing: border-box;
+}
+
+#beaver-pane-window .beaver-window-nav-empty {
+    display: flex;
+    justify-content: center;
+    padding: 28px 8px;
+    color: var(--fill-tertiary);
+    font-size: 0.95rem;
+    text-align: center;
+}
+
+#beaver-pane-window .beaver-window-nav-more {
+    padding: 10px 4px 4px;
+}
+
+/* ── Account footer ── */
+
+#beaver-pane-window .beaver-window-nav-footer {
+    flex: none;
+    padding: 8px 10px 10px;
+    border-top: 1px solid var(--beaver-border-subtle);
+}
+
+#beaver-pane-window .beaver-window-nav-account {
+    padding: 6px 8px;
+    border-radius: 10px;
+}
+
+#beaver-pane-window .beaver-window-nav-account:hover {
+    background-color: var(--fill-quinary);
+}
+
+#beaver-pane-window .beaver-window-nav-account-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
+}
+
+#beaver-pane-window .beaver-window-nav-avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background-color: var(--fill-quarternary);
+    color: var(--fill-primary);
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+#beaver-pane-window .beaver-window-nav-account-email {
+    font-size: 0.95rem;
+    font-weight: 500;
+    line-height: 1.3;
+    color: var(--fill-primary);
+}
+
+#beaver-pane-window .beaver-window-nav-account-plan {
+    font-size: 0.85rem;
+    line-height: 1.3;
+    color: var(--fill-secondary);
+}
+
+/* ── Chat column ──
+ * The chat, composer and home page share one reading column: capped in width
+ * and centered, so a wide window grows its margins, with side gutters that
+ * shrink to nothing as the window narrows. The gutter is added on top of the
+ * element's own padding (`--beaver-column-pad`), which is otherwise lost to
+ * this rule's higher specificity. */
+#beaver-pane-window .beaver-content-column {
+    --beaver-column-pad: 0px;
+    --beaver-column-gutter: clamp(0px, calc((var(--beaver-pane-width) - 520px) * 0.14), 72px);
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 960px;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: calc(var(--beaver-column-pad) + var(--beaver-column-gutter));
+    padding-right: calc(var(--beaver-column-pad) + var(--beaver-column-gutter));
+}
+
+#beaver-pane-window #beaver-prompt.beaver-content-column {
+    --beaver-column-pad: 0.75rem;
 }

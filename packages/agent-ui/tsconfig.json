@@ -150,6 +150,7 @@
     "./src/icons/SettingsIcon.tsx",
     "./src/icons/SettingsSolidIcon.tsx",
     "./src/icons/Share05Icon.tsx",
+    "./src/icons/SidebarLeftIcon.tsx",
     "./src/icons/ShareIcon.tsx",
     "./src/icons/SpeedIcon.tsx",
     "./src/icons/Spinner.tsx",

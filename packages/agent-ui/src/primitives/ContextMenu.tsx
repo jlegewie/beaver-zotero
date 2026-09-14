@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, ReactNode } from 'react';
 import React from 'react';
 import ReactDOM from 'react-dom';
 import Icon from '../icons/Icon';
@@ -249,8 +249,11 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         };
     }, [isOpen]);
     
-    // Calculate adjusted position when menu opens
-    useEffect(() => {
+    // Calculate adjusted position when menu opens. A layout effect, so the
+    // menu is measured and moved before the browser paints: with a passive
+    // effect the first frame shows it at the stale (initially 0,0) position
+    // before it jumps to the anchor.
+    useLayoutEffect(() => {
         if (!isOpen || !menuRef.current) return;
         
         // Get the correct window context for this component

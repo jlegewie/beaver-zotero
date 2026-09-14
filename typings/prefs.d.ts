@@ -44,6 +44,7 @@ declare namespace _ZoteroTypes {
       "enableSystemNotifications": boolean;
       "enableResponseCompleteNotifications": boolean;
       "enableRunStatusPopup": boolean;
+      "windowSidebarCollapsed": boolean;
       "deferredToolPreferences": string;
       "customInstructions": string;
       "googleGenerativeAiApiKey": string;
