@@ -20,9 +20,10 @@ let pane: any;
 function stubZotero(overrides: { pane?: any } = {}) {
     pane = overrides.pane !== undefined ? overrides.pane : {
         collectionsView: {
+            waitForLoad: async () => {},
             selectLibrary: async (id: number) => { selectedLibrary = id; return true; },
         },
-        itemsView: { setFilter: async () => {} },
+        itemsView: { waitForLoad: async () => {}, setFilter: async () => {} },
         tagSelectorShown: () => true,
         tagSelector: {
             clearTagSelection: () => { appliedTags = []; },
