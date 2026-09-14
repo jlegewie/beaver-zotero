@@ -332,6 +332,49 @@ describe('retry via synchronous truncation', () => {
         expect(store.get(isWSChatPendingAtom)).toBe(false);
     });
 
+    it('retrying the first turn stops and removes its streaming follow-up before sending', async () => {
+        store.set(threadRunsAtom, [makeRun('a')]);
+        store.set(activeRunAtom, makeRun('b', { status: 'in_progress' }));
+        store.set(isWSChatPendingAtom, true);
+        store.set(threadAgentActionsAtom, [makeAppliedMetadataEdit('act-b', 'b')]);
+        store.set(citationsAtom, [{ run_id: 'b' } as any]);
+        promptConfirmMock.mockReturnValue(0);
+        truncateMock.mockImplementation(async (_thread, ids, tail) => {
+            expect(cancelMock).toHaveBeenCalledOnce();
+            expect(store.get(activeRunAtom)).toBeNull();
+            expect(ids).toEqual(['a', 'b']);
+            expect(tail).toBeNull();
+            return okReport(ids);
+        });
+
+        await store.set(regenerateFromRunAtom, { runId: 'a' });
+
+        expect(truncateMock).toHaveBeenCalledOnce();
+        expect(undoEditMetadataMock).toHaveBeenCalledOnce();
+        expect(threadRunIds()).toEqual([]);
+        expect(store.get(threadAgentActionsAtom)).toEqual([]);
+        expect(store.get(citationsAtom)).toEqual([]);
+        expect(sentRequest().user_prompt.content).toBe('prompt for a');
+        expect(loadThreadRunsMock).not.toHaveBeenCalled();
+        expect(popupTitles()).not.toContain('Chat changed elsewhere');
+        expect(promptConfirmMock).toHaveBeenCalledOnce();
+    });
+
+    it('retains the stopped follow-up when truncation fails', async () => {
+        store.set(threadRunsAtom, [makeRun('a')]);
+        store.set(activeRunAtom, makeRun('b', { status: 'in_progress' }));
+        store.set(isWSChatPendingAtom, true);
+        truncateMock.mockRejectedValue(new Error('network down'));
+
+        await store.set(regenerateFromRunAtom, { runId: 'a' });
+
+        expect(threadRunIds()).toEqual(['a', 'b']);
+        expect(store.get(threadRunsAtom)[1].status).toBe('canceled');
+        expect(store.get(activeRunAtom)).toBeNull();
+        expect(store.get(isWSChatPendingAtom)).toBe(false);
+        expect(connectMock).not.toHaveBeenCalled();
+    });
+
     it('a failed POST is a popup over an intact thread', async () => {
         store.set(threadRunsAtom, [makeRun('a'), makeRun('b'), makeRun('c')]);
         store.set(citationsAtom, [{ run_id: 'c' } as any]);

@@ -2761,7 +2761,7 @@ async function startRegenerateRunOwned(
 
         // Find the run — a terminal run was archived into threadRuns above,
         // so only a still-live run is found through the active slot.
-        const threadRuns = get(threadRunsAtom);
+        let threadRuns = get(threadRunsAtom);
         const activeRun = get(activeRunAtom);
 
         let targetRun: AgentRun | null = null;
@@ -2773,6 +2773,25 @@ async function startRegenerateRunOwned(
             // The run is currently active - cancel it and resubmit
             targetRun = activeRun;
             runIndex = threadRuns.length;
+        }
+
+        if (!targetRun) {
+            logger(`${logPrefix}: Run ${runId} not found`, 1);
+            return;
+        }
+
+        if (activeRun) {
+            // A live follow-up belongs to the suffix being replaced too.
+            // Keep its stopped response in history until truncation succeeds,
+            // including when the request fails or the undo dialog is canceled.
+            if (activeRun.id !== targetRun.id) {
+                threadRuns = appendRunIfMissing(threadRuns, {
+                    ...activeRun,
+                    status: 'canceled',
+                    completed_at: new Date().toISOString(),
+                });
+                set(threadRunsAtom, threadRuns);
+            }
             // Clear the active run before awaiting cancel: agentService.cancel()
             // waits for the cancel message to flush, and if the socket closes
             // uncleanly during that window, the onclose handler must not see this
@@ -2797,11 +2816,6 @@ async function startRegenerateRunOwned(
                 return;
             }
             set(isWSChatPendingAtom, false);
-        }
-
-        if (!targetRun) {
-            logger(`${logPrefix}: Run ${runId} not found`, 1);
-            return;
         }
 
         // If the target is a resume run, walk the resume chain back to the
