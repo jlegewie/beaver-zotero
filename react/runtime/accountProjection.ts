@@ -1,3 +1,4 @@
+import { backgroundProcessingStatusAtom, EMPTY_BACKGROUND_PROCESSING_STATUS } from '../atoms/backgroundProcessing';
 import { threadNavigationSeqAtom } from "../atoms/threads";
 import { preferencesRevisionAtom } from "../atoms/preferences";
 import {
@@ -96,6 +97,7 @@ export function attachAccountProjection(runtime: WindowRuntime): void {
         }
         previousScope = [...scope];
         if (generation !== snapshot.generation) {
+            store.set(backgroundProcessingStatusAtom, EMPTY_BACKGROUND_PROCESSING_STATUS);
             modelsKey = "";
             agentService.close(1000, "Account changed");
             store.set(abandonActiveRunLocallyAtom);

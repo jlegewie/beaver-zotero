@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { accountGenerationAtom, cloudConsentAtom, hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../../atoms/profile';
 import {
@@ -32,7 +32,7 @@ const TONE_COLOR: Record<StatusTone, string> = {
     error: 'var(--tag-red)',
 };
 
-/** Background worker activity: one headline, a reason, and the one action that applies. */
+/** Activity and its explanation, followed by progress and cumulative file problems. */
 const ProcessingStatusRow: React.FC<{
     status: BackgroundProcessingStatus;
     canRestoreCache: boolean;
@@ -42,29 +42,16 @@ const ProcessingStatusRow: React.FC<{
     onStopDrain: () => void;
 }> = ({ status, canRestoreCache, processing, onProcessNow, onStopDrain }) => {
     const sentence = describeStatus(status, { canRestoreCache });
-    // Progress through the current run, from how the queue depth moves between
-    // polls: a drop is work completed, a rise is work added (the reconciler
-    // keeps queueing new files during a run), so `total - done` always equals
-    // the depth shown in the caption. A poll that nets the two against each
-    // other under-reports both, which only delays the bar. Forgotten once the
-    // lane settles, so the next run starts its own bar. Updating the ref
-    // during render is safe: a repeated render sees a zero delta.
-    const run = useRef<{ seen: number; done: number; total: number } | null>(null);
-    if (sentence.outstanding === undefined) {
-        run.current = null;
-    } else if (run.current === null) {
-        run.current = { seen: sentence.outstanding, done: 0, total: sentence.outstanding };
-    } else {
-        const delta = sentence.outstanding - run.current.seen;
-        if (delta < 0) run.current.done -= delta;
-        else run.current.total += delta;
-        run.current.seen = sentence.outstanding;
-    }
-    const progress = run.current && run.current.total > 0 ? run.current : null;
+    const run = status.progress;
+    const issueCount = status.issues.reduce((sum, group) => sum + group.count, 0);
+    const progress = run && run.total > 0 && (run.pending > 0 || (status.worker?.inFlight ?? 0) > 0) ? {
+        total: run.total,
+        done: run.succeeded + run.problems + run.removed,
+    } : null;
 
     return (
-        <div className="display-flex flex-col gap-1 border-top-quinary" style={{ padding: '10px 12px 12px' }}>
-            <div className="display-flex flex-row items-center gap-3">
+        <div className="display-flex flex-col gap-1 border-top-quinary" style={{ padding: '8px 12px 12px' }}>
+            <div className="display-flex flex-row items-center gap-3" style={{ minHeight: '24px' }}>
                 <div className="display-flex flex-row items-start gap-2 flex-1 min-w-0">
                     <div
                         className="display-flex items-center justify-center flex-shrink-0"
@@ -78,24 +65,16 @@ const ProcessingStatusRow: React.FC<{
                             />
                         }
                     </div>
-                    <div className="display-flex flex-col gap-05 min-w-0 flex-1">
-                        <div
-                            role="status"
-                            className={`text-base font-medium ${sentence.tone === 'error' ? 'font-color-red' : 'font-color-primary'}`}
-                        >
-                            {sentence.headline}
-                        </div>
-                        <div className="text-base font-color-secondary">
-                            {sentence.caption}
-                            {sentence.tone === 'error' && status.error && (
-                                <span className="font-color-tertiary"> ({status.error})</span>
-                            )}
-                        </div>
+                    <div
+                        role="status"
+                        className={`text-base font-medium flex-1 min-w-0 ${sentence.tone === 'error' ? 'font-color-red' : 'font-color-primary'}`}
+                    >
+                        {sentence.headline}
                     </div>
                 </div>
                 {sentence.stopDrain ? (
                     <Tooltip
-                        content="The current file finishes first. Processing then waits until Zotero is idle."
+                        content="The current file finishes first. Processing then waits until your computer is idle."
                         placement="top"
                     >
                         <Button
@@ -110,14 +89,14 @@ const ProcessingStatusRow: React.FC<{
                 ) : sentence.processNow || sentence.rebuildCache ? (
                     <Tooltip
                         content={sentence.caption}
-                        disabled={!sentence.processNowBlocked}
+                        disabled={!sentence.processNowBlocked && !sentence.rebuildCache}
                         placement="top"
                     >
                         <Button
                             variant="outline"
                             className="flex-shrink-0"
                             rightIcon={PlayIcon}
-                            disabled={sentence.processNowBlocked || processing}
+                            disabled={sentence.processNowBlocked || processing || status.progress?.discovering}
                             loading={processing}
                             ariaLabel={sentence.processNowBlocked
                                 ? `Start now. ${sentence.caption}`
@@ -129,13 +108,19 @@ const ProcessingStatusRow: React.FC<{
                     </Tooltip>
                 ) : null}
             </div>
+            <div className="text-base font-color-secondary" style={{ paddingLeft: '22px', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
+                {sentence.caption}
+                {sentence.tone === 'error' && status.error && (
+                    <span className="font-color-tertiary"> ({status.error})</span>
+                )}
+            </div>
             {progress && (
                 <div
                     role="progressbar"
                     aria-valuemin={0}
                     aria-valuemax={progress.total}
                     aria-valuenow={progress.done}
-                    aria-label={`${progress.done.toLocaleString()} of ${progress.total.toLocaleString()} files processed in this run`}
+                    aria-label={`${progress.done.toLocaleString()} of ${progress.total.toLocaleString()} attachments finished in this run`}
                     className="display-flex flex-row items-start gap-3"
                     style={{ paddingLeft: '22px' }}
                 >
@@ -147,6 +132,9 @@ const ProcessingStatusRow: React.FC<{
                     </span>
                 </div>
             )}
+            {issueCount > 0 && <div className="text-sm font-color-secondary" style={{ paddingLeft: '22px' }}>
+                {status.error ? 'Last reported: ' : ''}{plural(issueCount, 'file')} could not be read or indexed. See Problems below.
+            </div>}
         </div>
     );
 };
@@ -270,9 +258,9 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
         try {
             if (action === 'rebuild') {
                 await prepareUncachedFiles().catch(report);
-            } else {
-                await Zotero.Beaver?.processingReconciler?.reconcileNow().catch(report);
             }
+            // Starting the waiting queue must not force a library-wide source
+            // recheck, which also retries settled availability failures.
             Zotero.Beaver?.backgroundExtractor?.requestImmediateDrain();
             await refresh();
         } finally {
@@ -330,10 +318,10 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                     title={hasSearchAccess ? 'Keep Full-Text Search Up to Date' : 'Process Files in the Background'}
                     announceDescription={hasSearchAccess}
                     description={<>{locked
-                        ? 'Background processing is required for cloud preparation. Files process after 30 seconds idle. Use Start now to process immediately, or Stop to return to idle processing.'
+                        ? 'Background processing is required for cloud preparation. Files process after 30 seconds without keyboard or mouse activity on your computer. Use Start now to process immediately, or Stop to return to idle processing.'
                         : cloudRequired
                             ? 'Cloud setup is incomplete. Local preparation can continue, but OCR uploads and search preparation require your confirmation.'
-                            : 'Process files ahead of time while Zotero is idle for faster responses.'}
+                            : 'Process files ahead of time while your computer is idle for faster responses.'}
                         {hasSearchAccess && <span className="display-flex mt-1">{searchIndexStatusLine(status)}</span>}
                     </>}
                     onClick={() => updateEnabled(!enabled)}

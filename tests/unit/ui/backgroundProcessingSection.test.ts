@@ -55,16 +55,16 @@ afterEach(() => {
     access.search = false;
 });
 
-it('starts pending files without rebuilding missing cached text', async () => {
+it('starts one pending file without rechecking five settled failures or rebuilding cached text', async () => {
     const store = createStore();
     store.set(backgroundProcessingStatusAtom, {
         ...store.get(backgroundProcessingStatusAtom),
         documentCache: { ...cacheStats, can_prepare_uncached_files: true },
-        ledger: { ...store.get(backgroundProcessingStatusAtom).ledger, total: 1 },
+        ledger: { ...store.get(backgroundProcessingStatusAtom).ledger, total: 6, unreadable: 5 },
+        issues: [{ reason: 'file_unavailable', count: 5 }],
         worker: { available: 1, deferred: 0, inFlight: 0, dispatchBlocker: null, drainNow: false, backlogGateOpen: false },
     });
-    let finishReconcile!: () => void;
-    const reconcileNow = vi.fn(() => new Promise<void>((resolve) => { finishReconcile = resolve; }));
+    const reconcileNow = vi.fn();
     const requestImmediateDrain = vi.fn();
     const previousBeaver = Zotero.Beaver;
     (Zotero as any).Beaver = {
@@ -78,10 +78,13 @@ it('starts pending files without rebuilding missing cached text', async () => {
         const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Start now');
         expect(button).toBeDefined();
         await act(async () => button!.click());
-        expect(reconcileNow).toHaveBeenCalledOnce();
-        expect(requestImmediateDrain).not.toHaveBeenCalled();
-        expect(refresh).not.toHaveBeenCalled();
-        await act(async () => finishReconcile());
+        expect(reconcileNow).not.toHaveBeenCalled();
+        const headline = container.querySelector<HTMLElement>('[role="status"]')!;
+        expect(headline.textContent).toBe('1 file waiting');
+        const substatus = headline.parentElement!.parentElement!.nextElementSibling as HTMLElement;
+        expect(substatus.textContent).toBe('Starts after about 30 seconds without keyboard or mouse activity on your computer.');
+        expect(substatus.style.whiteSpace).toBe('normal');
+        expect(substatus.style.textOverflow).not.toBe('ellipsis');
         expect(requestImmediateDrain).toHaveBeenCalledOnce();
         expect(refresh).toHaveBeenCalledOnce();
         // Missing cached text must not expand the scope of Start now.
@@ -150,57 +153,94 @@ it('cancels a Start now drain from Stop without touching the reconciler', async 
     }
 });
 
-it('offers neither Start now nor Stop while the dispatcher keeps the gate open without a drain', async () => {
+it('renders service progress unchanged across remounts, pauses, errors and discovery', async () => {
     const store = createStore();
+    const progress = { runId: 1, startedAt: 1, finishedAt: null, total: 4000, pending: 3000,
+        succeeded: 1000, problems: 0, removed: 0, discovering: false, discovered: 0 };
     store.set(backgroundProcessingStatusAtom, {
-        ...store.get(backgroundProcessingStatusAtom),
-        ledger: { ...store.get(backgroundProcessingStatusAtom).ledger, total: 3 },
-        worker: { available: 2, deferred: 0, inFlight: 1, dispatchBlocker: null, drainNow: false, backlogGateOpen: true },
+        ...store.get(backgroundProcessingStatusAtom), updatedAt: 1, progress,
+        worker: { available: 2999, deferred: 0, inFlight: 1, dispatchBlocker: null, drainNow: false, backlogGateOpen: true },
     });
-    const container = document.createElement('div');
-    const root = createRoot(container);
-    try {
-        await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(BackgroundProcessingSection))));
-        const labels = Array.from(container.querySelectorAll('button')).map((node) => node.textContent);
+    const assertProgress = (container: HTMLElement, done = 1000, total = 4000) => {
+        const bar = container.querySelector('[role="progressbar"]')!;
+        expect(bar.getAttribute('aria-valuenow')).toBe(String(done));
+        expect(bar.getAttribute('aria-valuemax')).toBe(String(total));
+    };
+    await withView(store, async container => {
+        assertProgress(container);
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Processing files…');
+        const labels = Array.from(container.querySelectorAll('button')).map(node => node.textContent);
         expect(labels).not.toContain('Start now');
         expect(labels).not.toContain('Stop');
-        expect(container.querySelector('[aria-label="Also run while Zotero is in use"]')).toBeNull();
-        expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-label')).toBe('0 of 3 files processed in this run');
-        // The run's size is the largest queue depth seen; progress is what has drained since.
+        for (const worker of [
+            { available: 3000, deferred: 0, inFlight: 0, dispatchBlocker: null, drainNow: false, backlogGateOpen: false },
+            { available: 0, deferred: 3000, inFlight: 0, dispatchBlocker: null, drainNow: true, backlogGateOpen: true },
+            { available: 3000, deferred: 0, inFlight: 0, dispatchBlocker: 'sync_in_progress', drainNow: true, backlogGateOpen: false },
+        ]) {
+            await act(async () => store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom), worker }));
+            assertProgress(container);
+        }
+        await act(async () => store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom), error: 'temporary' }));
+        assertProgress(container);
+    });
+    await withView(store, async container => {
+        assertProgress(container);
         await act(async () => store.set(backgroundProcessingStatusAtom, {
-            ...store.get(backgroundProcessingStatusAtom),
-            ledger: { ...store.get(backgroundProcessingStatusAtom).ledger, total: 3, readable: 2 },
-            worker: { available: 0, deferred: 0, inFlight: 1, dispatchBlocker: null, drainNow: false, backlogGateOpen: true },
+            ...store.get(backgroundProcessingStatusAtom), error: null, progress: { ...progress, discovering: true },
         }));
-        expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-label')).toBe('2 of 3 files processed in this run');
-        expect(container.textContent).toContain('2 of 3');
-        // Five files queued mid-run grow the total; completed work is not undone.
+        assertProgress(container);
+        expect(container.querySelectorAll('[role="status"]')).toHaveLength(1);
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Checking for additional files…');
         await act(async () => store.set(backgroundProcessingStatusAtom, {
-            ...store.get(backgroundProcessingStatusAtom),
-            worker: { available: 5, deferred: 0, inFlight: 1, dispatchBlocker: null, drainNow: false, backlogGateOpen: true, queuedFiles: 6 },
+            ...store.get(backgroundProcessingStatusAtom), progress: { ...progress, total: 4003, pending: 3003, discovered: 3 },
         }));
-        expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-label')).toBe('2 of 8 files processed in this run');
-        // Draining again counts from there.
+        assertProgress(container, 1000, 4003);
+        expect(container.textContent).not.toContain('additional attachments found');
+        expect(container.querySelectorAll('[role="status"]')).toHaveLength(1);
+    });
+});
+
+it('shows cumulative problems instead of last-run outcomes or a completed progress bar', async () => {
+    const store = createStore();
+    store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom), updatedAt: 1,
+        issues: [{ reason: 'file_unavailable', count: 3 }, { reason: 'index_failed', count: 2 }],
+        progress: { runId: 1, startedAt: 1, finishedAt: 2, total: 4, pending: 0,
+            succeeded: 2, problems: 1, removed: 1, discovering: false, discovered: 1 },
+    });
+    await withView(store, async container => {
+        expect(container.querySelector('[role="progressbar"]')).toBeNull();
+        expect(container.textContent).toContain('5 files could not be read or indexed. See Problems below.');
+        expect(container.textContent).toContain('5 attachments could not be read or indexed.');
+        expect(container.textContent).not.toContain('attachments ready');
+        expect(container.textContent).not.toContain('attachment needs attention');
+        expect(container.textContent).not.toContain('no longer included');
+        expect(container.textContent).not.toContain('additional attachment');
         await act(async () => store.set(backgroundProcessingStatusAtom, {
-            ...store.get(backgroundProcessingStatusAtom),
-            worker: { available: 1, deferred: 0, inFlight: 1, dispatchBlocker: null, drainNow: false, backlogGateOpen: true, queuedFiles: 2 },
+            ...store.get(backgroundProcessingStatusAtom), error: 'temporary',
         }));
-        expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-label')).toBe('6 of 8 files processed in this run');
-        // Settled: the bar goes, and the next run starts from its own size.
-        await act(async () => store.set(backgroundProcessingStatusAtom, {
-            ...store.get(backgroundProcessingStatusAtom),
-            ledger: { ...store.get(backgroundProcessingStatusAtom).ledger, total: 3, readable: 3 },
-            worker: { available: 0, deferred: 0, inFlight: 0, dispatchBlocker: null, drainNow: false, backlogGateOpen: false },
-        }));
+        expect(container.textContent).toContain('Last reported: 5 files could not be read or indexed.');
+    });
+});
+
+it('replaces discovery with a settled status once the discovered file finishes', async () => {
+    const store = createStore();
+    const progress = { runId: 1, startedAt: 1, finishedAt: null, total: 1, pending: 0,
+        succeeded: 1, problems: 0, removed: 0, discovering: true, discovered: 1 };
+    store.set(backgroundProcessingStatusAtom, {
+        ...store.get(backgroundProcessingStatusAtom), updatedAt: 1, progress,
+    });
+    await withView(store, async container => {
+        expect(container.querySelectorAll('[role="status"]')).toHaveLength(1);
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Checking for additional files…');
         expect(container.querySelector('[role="progressbar"]')).toBeNull();
         await act(async () => store.set(backgroundProcessingStatusAtom, {
-            ...store.get(backgroundProcessingStatusAtom),
-            worker: { available: 1, deferred: 0, inFlight: 1, dispatchBlocker: null, drainNow: false, backlogGateOpen: true, queuedFiles: 1 },
+            ...store.get(backgroundProcessingStatusAtom), progress: { ...progress, discovering: false, finishedAt: 2 },
         }));
-        expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-label')).toBe('0 of 1 files processed in this run');
-    } finally {
-        act(() => root.unmount());
-    }
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Up to date');
+        expect(container.querySelector('[role="progressbar"]')).toBeNull();
+        expect(container.textContent).not.toContain('additional attachment');
+        expect(container.textContent).not.toContain('1 of 1');
+    });
 });
 
 it('leaves unreadable files to the issue list instead of a red status headline', async () => {
@@ -287,7 +327,7 @@ it('keeps known problems visible with background processing off, without status,
         documentCache: cacheStats, updatedAt: Date.now(), issues: [{ reason: 'file_unavailable', count: 1 }],
     });
     await withView(store, (container) => {
-        expect(container.textContent).toContain('Process files ahead of time while Zotero is idle for faster responses.');
+        expect(container.textContent).toContain('Process files ahead of time while your computer is idle for faster responses.');
         expect(container.textContent).not.toContain('documents cached');
         expect(container.textContent).not.toContain('Clear local cache');
         expect(container.textContent).toContain('Of the files Beaver has processed so far, 1 attachment could not be read or indexed.');
@@ -313,7 +353,7 @@ it('lists server indexing problems with reading problems and keeps the search st
         expect(container.textContent).not.toContain('Full-text Search');
         expect(container.textContent).toContain('Keep Full-Text Search Up to Date');
         expect(container.querySelector('[role="status"]')?.textContent).toBe('Up to date');
-        expect(container.textContent).toContain('Some files need attention. See the problems below.');
+        expect(container.textContent).toContain('2 files could not be read or indexed. See Problems below.');
         expect(container.textContent).toContain('Full-text search index available. Last checked');
         expect(container.textContent).not.toContain('Updates paused.');
         expect(container.textContent).toContain('2 attachments could not be read or indexed');
@@ -445,19 +485,19 @@ it('rebuilds cached text independently of reconciliation', async () => {
     }
 });
 
-it('disables Start now while a click is still preparing work', async () => {
+it('disables Start now until the status refresh completes', async () => {
     const store = createStore();
     store.set(backgroundProcessingStatusAtom, {
         ...store.get(backgroundProcessingStatusAtom),
         ledger: { ...store.get(backgroundProcessingStatusAtom).ledger, total: 1 },
         worker: { available: 1, deferred: 0, inFlight: 0, dispatchBlocker: null, drainNow: false, backlogGateOpen: false },
     });
-    let finishReconcile!: () => void;
-    const reconcileNow = vi.fn(() => new Promise<void>((resolve) => { finishReconcile = resolve; }));
+    let finishRefresh!: () => void;
+    refresh.mockImplementationOnce(() => new Promise<void>((resolve) => { finishRefresh = resolve; }));
+    const requestImmediateDrain = vi.fn();
     const previousBeaver = Zotero.Beaver;
     (Zotero as any).Beaver = {
-        processingReconciler: { reconcileNow },
-        backgroundExtractor: { requestImmediateDrain: vi.fn() },
+        backgroundExtractor: { requestImmediateDrain },
     };
     try {
         await withView(store, async (container) => {
@@ -466,8 +506,8 @@ it('disables Start now while a click is still preparing work', async () => {
             await act(async () => find().click());
             expect(find().disabled).toBe(true);
             await act(async () => find().click());
-            expect(reconcileNow).toHaveBeenCalledOnce();
-            await act(async () => finishReconcile());
+            expect(requestImmediateDrain).toHaveBeenCalledOnce();
+            await act(async () => finishRefresh());
             expect(find().disabled).toBe(false);
         });
     } finally {

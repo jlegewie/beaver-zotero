@@ -244,91 +244,96 @@ export class ReconcilerService {
     async retryAttachments(refs: AttachmentRef[]): Promise<number> {
         const db = Zotero.Beaver?.db;
         if (!db) return 0;
-        const jobs: BackgroundJobInput[] = [];
-        let retried = 0;
-        for (const ref of refs) {
-            if (!isBackgroundProcessingLibraryEnabled(ref.libraryId)) continue;
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.libraryId, ref.zoteroKey);
-            if (!item || safeIsInTrash(item) === true || !isBackgroundProcessingLibraryEnabled(ref.libraryId)) continue;
-            const kind = getReadableContentKind(item);
-            if (kind === 'text') {
-                const attemptedAt = Date.now();
-                const source = await resolveAttachmentFileSource({ item, localSizeStrategy: 'stat' });
+        const finishDiscovery = await Zotero.Beaver?.background?.beginProcessingDiscovery();
+        try {
+            const jobs: BackgroundJobInput[] = [];
+            let retried = 0;
+            for (const ref of refs) {
                 if (!isBackgroundProcessingLibraryEnabled(ref.libraryId)) continue;
-                const outcome = source.kind === 'error' ? source : await loadAttachmentData({ item, source: source.source });
-                await recordReadingOutcome(item, 'text', outcome.kind === 'error'
-                    ? { kind: 'response_error', code: outcome.code } : { kind: 'ok' }, attemptedAt);
-                retried += 1;
-                continue;
-            }
-            if (kind !== 'pdf' && kind !== 'epub' && kind !== 'snapshot') continue;
-            let row = await db.getAttachmentProcessingState(ref.libraryId, ref.zoteroKey);
-            const readingError = await db.getAttachmentReadingError(ref.libraryId, ref.zoteroKey);
-            if (!row && readingError) row = await db.ensureAttachmentProcessingState({
-                libraryId: ref.libraryId, zoteroKey: ref.zoteroKey, itemId: item.id, contentKind: kind,
-            });
-            if (!row) continue;
-
-            const extractFailed = row.extractStatus === 'failed' || row.extractStatus === 'skipped';
-            const ocrFailed = row.ocrStatus === 'failed';
-            // The original scan observation can remain after OCR prepares the text.
-            // It must not turn a subsequent index retry into another extraction.
-            const unresolvedReadingError = Boolean(readingError)
-                && !(readingError === 'ocr_required' && row.ocrStatus === 'done');
-            const restartExtraction = unresolvedReadingError || extractFailed
-                || (ocrFailed && (
-                    hasRecoverableAvailabilityFailure(row)
-                    || !(await this.hasOcrDetectionMetadata(item))
-                ));
-            if (ocrFailed && row.fileHash) {
-                await db.clearDocumentProcessingFailure(row.fileHash, 'ocr', OCR_ENGINE_VERSION);
-            }
-            if (restartExtraction) {
-                await Zotero.Beaver?.documentCache?.invalidate(ref.libraryId, ref.zoteroKey);
-                await db.resetAttachmentExtraction(ref.libraryId, ref.zoteroKey, 'user_retry');
-                if (ocrFailed) await db.resetAttachmentOcr(ref.libraryId, ref.zoteroKey, 'user_retry');
-                row = {
-                    ...row,
-                    extractStatus: null,
-                    ocrStatus: ocrFailed ? null : row.ocrStatus,
-                    lastError: 'user_retry',
-                };
-            } else if (ocrFailed) {
-                await db.requeueAttachmentOcr(ref.libraryId, ref.zoteroKey, 'user_retry');
-                await db.deleteBackgroundDeadLetters(ref.libraryId, ref.zoteroKey);
-                await enqueueOcrJob({
-                    item,
-                    libraryId: ref.libraryId,
-                    zoteroKey: ref.zoteroKey,
-                    itemId: item.id,
-                    pageCount: null,
-                    priority: OCR_PRIORITY_ON_DEMAND,
-                });
-                retried += 1;
-                continue;
-            } else if (row.upsertStatus === 'failed') {
-                await db.resetAttachmentUpsert(ref.libraryId, ref.zoteroKey, 'user_retry');
-                if (row.structuredDocumentHash) {
-                    await db.clearDocumentProcessingFailure(row.structuredDocumentHash, 'fulltext_upsert');
+                const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.libraryId, ref.zoteroKey);
+                if (!item || safeIsInTrash(item) === true || !isBackgroundProcessingLibraryEnabled(ref.libraryId)) continue;
+                const kind = getReadableContentKind(item);
+                if (kind === 'text') {
+                    const attemptedAt = Date.now();
+                    const source = await resolveAttachmentFileSource({ item, localSizeStrategy: 'stat' });
+                    if (!isBackgroundProcessingLibraryEnabled(ref.libraryId)) continue;
+                    const outcome = source.kind === 'error' ? source : await loadAttachmentData({ item, source: source.source });
+                    await recordReadingOutcome(item, 'text', outcome.kind === 'error'
+                        ? { kind: 'response_error', code: outcome.code } : { kind: 'ok' }, attemptedAt);
+                    retried += 1;
+                    continue;
                 }
-                row = { ...row, upsertStatus: null, lastError: 'user_retry' };
+                if (kind !== 'pdf' && kind !== 'epub' && kind !== 'snapshot') continue;
+                let row = await db.getAttachmentProcessingState(ref.libraryId, ref.zoteroKey);
+                const readingError = await db.getAttachmentReadingError(ref.libraryId, ref.zoteroKey);
+                if (!row && readingError) row = await db.ensureAttachmentProcessingState({
+                    libraryId: ref.libraryId, zoteroKey: ref.zoteroKey, itemId: item.id, contentKind: kind,
+                });
+                if (!row) continue;
+
+                const extractFailed = row.extractStatus === 'failed' || row.extractStatus === 'skipped';
+                const ocrFailed = row.ocrStatus === 'failed';
+                // The original scan observation can remain after OCR prepares the text.
+                // It must not turn a subsequent index retry into another extraction.
+                const unresolvedReadingError = Boolean(readingError)
+                    && !(readingError === 'ocr_required' && row.ocrStatus === 'done');
+                const restartExtraction = unresolvedReadingError || extractFailed
+                    || (ocrFailed && (
+                        hasRecoverableAvailabilityFailure(row)
+                        || !(await this.hasOcrDetectionMetadata(item))
+                    ));
+                if (ocrFailed && row.fileHash) {
+                    await db.clearDocumentProcessingFailure(row.fileHash, 'ocr', OCR_ENGINE_VERSION);
+                }
+                if (restartExtraction) {
+                    await Zotero.Beaver?.documentCache?.invalidate(ref.libraryId, ref.zoteroKey);
+                    await db.resetAttachmentExtraction(ref.libraryId, ref.zoteroKey, 'user_retry');
+                    if (ocrFailed) await db.resetAttachmentOcr(ref.libraryId, ref.zoteroKey, 'user_retry');
+                    row = {
+                        ...row,
+                        extractStatus: null,
+                        ocrStatus: ocrFailed ? null : row.ocrStatus,
+                        lastError: 'user_retry',
+                    };
+                } else if (ocrFailed) {
+                    await db.requeueAttachmentOcr(ref.libraryId, ref.zoteroKey, 'user_retry');
+                    await db.deleteBackgroundDeadLetters(ref.libraryId, ref.zoteroKey);
+                    await enqueueOcrJob({
+                        item,
+                        libraryId: ref.libraryId,
+                        zoteroKey: ref.zoteroKey,
+                        itemId: item.id,
+                        pageCount: null,
+                        priority: OCR_PRIORITY_ON_DEMAND,
+                    });
+                    retried += 1;
+                    continue;
+                } else if (row.upsertStatus === 'failed') {
+                    await db.resetAttachmentUpsert(ref.libraryId, ref.zoteroKey, 'user_retry');
+                    if (row.structuredDocumentHash) {
+                        await db.clearDocumentProcessingFailure(row.structuredDocumentHash, 'fulltext_upsert');
+                    }
+                    row = { ...row, upsertStatus: null, lastError: 'user_retry' };
+                }
+                // A dead letter can outlive a non-terminal ledger row (the job died
+                // before an executor recorded a verdict); dropping it is what lets
+                // the fresh job be counted as progress rather than as the old failure.
+                await db.deleteBackgroundDeadLetters(ref.libraryId, ref.zoteroKey);
+                await this.reconcileAttachment(db, item, kind, false, jobs, row);
+                retried += 1;
             }
-            // A dead letter can outlive a non-terminal ledger row (the job died
-            // before an executor recorded a verdict); dropping it is what lets
-            // the fresh job be counted as progress rather than as the old failure.
-            await db.deleteBackgroundDeadLetters(ref.libraryId, ref.zoteroKey);
-            await this.reconcileAttachment(db, item, kind, false, jobs, row);
-            retried += 1;
+            // An explicit retry is scoped to these attachments and works with the
+            // library-wide background sweep off. Its OCR continuation inherits the priority.
+            for (const job of jobs) job.priority = OCR_PRIORITY_ON_DEMAND;
+            if (jobs.length > 0) await db.enqueueBackgroundJobs(jobs);
+            if (retried > 0) {
+                Zotero.Beaver?.backgroundExtractor?.requestImmediateDrain();
+                Zotero.Beaver?.backgroundExtractor?.notify();
+            }
+            return retried;
+        } finally {
+            await finishDiscovery?.();
         }
-        // An explicit retry is scoped to these attachments and works with the
-        // library-wide background sweep off. Its OCR continuation inherits the priority.
-        for (const job of jobs) job.priority = OCR_PRIORITY_ON_DEMAND;
-        if (jobs.length > 0) await db.enqueueBackgroundJobs(jobs);
-        if (retried > 0) {
-            Zotero.Beaver?.backgroundExtractor?.requestImmediateDrain();
-            Zotero.Beaver?.backgroundExtractor?.notify();
-        }
-        return retried;
     }
 
     /**
@@ -372,7 +377,9 @@ export class ReconcilerService {
         this.running = true;
         this.activeForce = force;
         const generation = this.generation;
+        let finishDiscovery: (() => Promise<void>) | undefined;
         try {
+            finishDiscovery = await Zotero.Beaver?.background?.beginProcessingDiscovery();
             if (Zotero.Beaver?.libraryScopeInitialized !== true) {
                 return;
             }
@@ -398,6 +405,7 @@ export class ReconcilerService {
         } catch (error) {
             logger(`ReconcilerService: reconcile failed: ${error}`, 1);
         } finally {
+            await finishDiscovery?.();
             this.running = false;
             for (const resolve of this.idleWaiters.splice(0)) resolve();
             this.activeForce = false;
@@ -440,8 +448,8 @@ export class ReconcilerService {
             || previous.ledgerRowCount !== (await db.getAttachmentProcessingAggregates(libraryId)).total;
         if (!cursorChanged && !fullDiffDue) return;
 
-        // Weekly file stats are deliberately idle-only. An explicit Process Now
-        // is user initiated and may run the safety diff immediately. Do not
+        // Weekly file stats are deliberately idle-only. A forced diagnostic pass
+        // may run the safety diff immediately. Do not
         // advance the weekly timestamp when an active user prevented the stat
         // sweep, or external byte changes could be postponed indefinitely.
         const idleForStats = force || getSystemIdleTimeMs() >= IDLE_THRESHOLD_MS;

@@ -80,6 +80,7 @@ type LaneEntry = {
     abort: AbortController;
     /** Library of the running job, so a scope change can target its abort. */
     libraryId: number;
+    zoteroKey: string;
 };
 
 type ExecutorRegistration = {
@@ -187,6 +188,17 @@ export class BackgroundExtractor {
             };
         }
         return status;
+    }
+
+    /** Distinct attachments currently occupying the requested lanes. */
+    getInFlightFileCount(jobTypes: string[]): number {
+        const refs = new Set<string>();
+        for (const type of jobTypes) {
+            for (const job of this.laneInFlight.get(type as BackgroundJobType)?.values() ?? []) {
+                refs.add(`${job.libraryId}/${job.zoteroKey}`);
+            }
+        }
+        return refs.size;
     }
 
     /** Register a queue executor and activate its lane. */
@@ -636,7 +648,7 @@ export class BackgroundExtractor {
                     this.notify();
                 }
             });
-        lane.set(record.id, { promise, abort, libraryId: record.libraryId });
+        lane.set(record.id, { promise, abort, libraryId: record.libraryId, zoteroKey: record.zoteroKey });
         return promise;
     }
 

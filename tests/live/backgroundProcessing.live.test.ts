@@ -217,6 +217,20 @@ describe('reconcile builds the ledger', () => {
         expect(reconcileMs).toBeGreaterThan(0);
     });
 
+    it('keeps attachment progress through repeated checks while dispatch is paused', SLOW, async () => {
+        const before = (await processingStatus({ includeCoverage: false, includeFailures: false })).progress;
+        expect(before).toBeTruthy();
+        expect(before!.pending).toBeGreaterThan(0);
+        expect(before!.pending + before!.succeeded + before!.problems + before!.removed).toBe(before!.total);
+        expect(before!.queue!.attachments).toBeLessThanOrEqual(before!.pending);
+        expect((await processingReconcileNow()).ok).toBe(true);
+        const after = (await processingStatus({ includeCoverage: false, includeFailures: false })).progress;
+        expect(after).toMatchObject({
+            runId: before!.runId, total: before!.total, succeeded: before!.succeeded,
+            pending: before!.pending, finishedAt: null, discovering: false, discovered: 0,
+        });
+    });
+
     it('advances the per-library scan cursor', SLOW, async () => {
         const ledger = await processingLedger({ limit: 0 });
         expect(ledger.ok).toBe(true);

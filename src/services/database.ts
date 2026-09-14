@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import { ProcessingProgressStore, type ProcessingProgressScope } from './backgroundProcessing/progress';
 import { ThreadData } from '../../react/atoms/threads';
 import { getPref } from '../utils/prefs';
 import { SyncMethod, SyncType } from '../../react/atoms/sync';
@@ -536,13 +537,39 @@ export class BeaverDB {
      * into the SQL rather than bound; see `inlineNullParams` for why Zotero
      * cannot be trusted to do that itself.
      */
+    private processingListeners = new Set<() => void>();
+    private processingProgress = new ProcessingProgressStore((...args) => this.queryAsync(...args));
+
+    public subscribeProcessingChanges(listener: () => void): () => void {
+        this.processingListeners.add(listener);
+        return () => { this.processingListeners.delete(listener); };
+    }
+
+    public async configureProcessingProgress(scope: ProcessingProgressScope): Promise<void> {
+        await this.conn.executeTransaction(() => this.processingProgress.configure(scope));
+    }
+
+    public getProcessingProgress(discovering: boolean, inFlight: number, libraryId?: number, jobTypes?: string[]) {
+        return this.processingProgress.read(discovering, inFlight, libraryId, jobTypes);
+    }
+
     private queryAsync(
         sql: string,
         params: readonly unknown[] = [],
         options?: { onRow?: (row: any) => void },
     ): Promise<any[]> {
         const [preparedSql, preparedParams] = inlineNullParams(sql, params);
-        return this.conn.queryAsync(preparedSql, preparedParams, options);
+        const result = this.conn.queryAsync(preparedSql, preparedParams, options);
+        if (/^\s*(INSERT|UPDATE|DELETE)\b/i.test(sql)
+            && /\b(attachment_processing_state|background_jobs|background_jobs_dead)\b/.test(sql)) {
+            return result.then((rows: any[]) => {
+                for (const listener of this.processingListeners) {
+                    try { listener(); } catch (error) { logger(`Processing status listener: ${error}`, 2); }
+                }
+                return rows;
+            });
+        }
+        return result;
     }
 
     /**
@@ -1101,6 +1128,7 @@ export class BeaverDB {
                 last_error      TEXT
             );
         `);
+        await this.processingProgress.init();
     }
 
     /**
@@ -4884,53 +4912,31 @@ export class BeaverDB {
         const laneFilter = jobTypes === undefined ? '1' : jobTypes.length === 0
             ? '0' : `job_type IN (${jobTypes.map(() => '?').join(', ')})`;
         const laneParams = jobTypes ?? [];
-        const totalsRows: number[] = [];
-        await this.queryAsync(
-            `SELECT COUNT(*) FROM background_jobs WHERE ${laneFilter}`,
-            laneParams,
-            { onRow: (row: any) => totalsRows.push(row.getResultByIndex(0)) },
-        );
-        const pending = totalsRows[0] ?? 0;
-
-        const availableRows: number[] = [];
-        await this.queryAsync(
-            `SELECT COUNT(*) FROM background_jobs WHERE available_at <= ? AND ${laneFilter}`,
-            [now, ...laneParams],
-            { onRow: (row: any) => availableRows.push(row.getResultByIndex(0)) },
-        );
-        const available = availableRows[0] ?? 0;
-        const deferred = pending - available;
-
-        const attachmentRows: number[] = [];
-        await this.queryAsync(
-            `SELECT COUNT(DISTINCT library_id || '/' || zotero_key) FROM background_jobs WHERE ${laneFilter}`,
-            laneParams,
-            { onRow: (row: any) => attachmentRows.push(row.getResultByIndex(0)) },
-        );
-        const attachments = attachmentRows[0] ?? 0;
-
-        const deadRows: number[] = [];
-        await this.queryAsync(
-            `SELECT COUNT(*) FROM background_jobs_dead WHERE ${laneFilter}`,
-            laneParams,
-            { onRow: (row: any) => deadRows.push(row.getResultByIndex(0)) },
-        );
-        const dead = deadRows[0] ?? 0;
-
-        const byJobType: Record<string, number> = {};
-        await this.queryAsync(
-            `SELECT job_type, COUNT(*) FROM background_jobs WHERE ${laneFilter} GROUP BY job_type`,
-            laneParams,
-            {
-                onRow: (row: any) => {
-                    const jobType: string = row.getResultByIndex(0);
-                    const count: number = row.getResultByIndex(1);
-                    byJobType[jobType] = count;
-                },
+        const stats: BackgroundQueueStats = {
+            pending: 0, available: 0, deferred: 0, attachments: 0, dead: 0, byJobType: {},
+        };
+        await this.queryAsync(`SELECT * FROM (
+            WITH jobs AS (SELECT * FROM background_jobs WHERE ${laneFilter})
+            SELECT NULL AS job_type, COUNT(*) AS pending,
+                COALESCE(SUM(CASE WHEN available_at <= ? THEN 1 ELSE 0 END), 0) AS available,
+                COUNT(DISTINCT library_id || '/' || zotero_key) AS attachments,
+                (SELECT COUNT(*) FROM background_jobs_dead WHERE ${laneFilter}) AS dead
+            FROM jobs
+            UNION ALL
+            SELECT job_type, COUNT(*), 0, 0, 0 FROM jobs GROUP BY job_type
+        )`, [...laneParams, now, ...laneParams], {
+            onRow: row => {
+                const type = row.getResultByIndex(0);
+                if (type === null) {
+                    stats.pending = Number(row.getResultByIndex(1));
+                    stats.available = Number(row.getResultByIndex(2));
+                    stats.attachments = Number(row.getResultByIndex(3));
+                    stats.dead = Number(row.getResultByIndex(4));
+                    stats.deferred = stats.pending - stats.available;
+                } else stats.byJobType[type] = Number(row.getResultByIndex(1));
             },
-        );
-
-        return { pending, available, deferred, dead, byJobType, attachments };
+        });
+        return stats;
     }
 
     private async selectBackgroundJobs(

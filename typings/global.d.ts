@@ -558,6 +558,9 @@ declare namespace Zotero {
             deleteAttachmentReadingState(libraryId: number, zoteroKey: string): Promise<void>;
             resetLocalProcessingState(libraryId?: number, discardRemoteState?: boolean): Promise<void>;
             getUncachedProcessingCandidates: import('../src/services/database').BeaverDB['getUncachedProcessingCandidates'];
+            configureProcessingProgress: import('../src/services/database').BeaverDB['configureProcessingProgress'];
+            getProcessingProgress: import('../src/services/database').BeaverDB['getProcessingProgress'];
+            subscribeProcessingChanges: import('../src/services/database').BeaverDB['subscribeProcessingChanges'];
         }
 
         const backgroundExtractor:

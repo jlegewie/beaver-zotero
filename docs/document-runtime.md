@@ -36,6 +36,29 @@ Debounced embedding events stay with the instance across generation changes;
 the next generation drains them using its current searchable-library scope.
 Upgrade flags are set before background initialization.
 
+`Start now` opens the dispatcher’s idle gate for pending work. It does not force
+a library-wide source recheck or retry settled failures; those are handled by
+explicit problem retries, source-change notifications, and scheduled safety checks.
+
+Attachment progress belongs to `addon.background`, with current-run membership
+stored in SQLite. Admission triggers record each attachment alongside its ledger
+or queue write, so work that starts and finishes between status reads is counted.
+Only the current run is retained. Its pending set is the union of entitled queue
+work and unfinished required ledger stages, deduplicated by library and attachment
+key. Extraction, OCR and search indexing settle one attachment; terminal problems
+and attachments removed from scope are reported separately from success.
+
+Discovery holds a run open across empty queue intervals. Pauses, remote waits and
+renderer closure do not end it. The next admission after a settled run starts a new
+run. A reopened attachment within an active run becomes pending again; its identity
+is still counted once. Restarting Zotero resumes the same account's run, while an
+account replacement discards its membership. Unknown authentication disables
+admission and hides progress until scope is available.
+
+The instance coalesces database and dispatcher changes into status notifications
+and settles runs even with no windows open. Renderers subscribe with polling as a
+fallback. Cloud coverage is refreshed separately and cannot delay local progress.
+
 Window detach removes only renderer subscriptions. Instance shutdown closes
 admission, cancels document requests and background generations, settles protected
 work, stops the dispatcher and producers, and disposes workers before closing the

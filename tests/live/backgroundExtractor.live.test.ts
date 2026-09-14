@@ -22,7 +22,7 @@
  *
  * Run with: `npm run test:live -- backgroundExtractor`
  */
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
     isZoteroAvailable,
@@ -39,6 +39,7 @@ import {
     waitForQueueDrain,
 } from '../helpers/cacheInspector';
 import { fetchDocument } from '../helpers/zoteroHttpClient';
+import { processingStatus, setPref } from '../helpers/processingInspector';
 import {
     ENCRYPTED_PDF,
     GROUP_LIB_PDF,
@@ -49,8 +50,25 @@ import {
 } from '../helpers/fixtures';
 
 let available = false;
+let originalProcessing: boolean | undefined;
 beforeAll(async () => {
     available = await isZoteroAvailable();
+    if (!available) return;
+    originalProcessing = (await processingStatus({ includeCoverage: false, includeFailures: false }))
+        .prefs?.backgroundProcessingEnabled;
+    await setPref('backgroundProcessingEnabled', false);
+    // A producer already inside a batch may finish after the preference changes.
+    // Let it and any running file settle before testing individual queue rows.
+    const deadline = Date.now() + 25_000;
+    while (true) {
+        const status = await processingStatus({ includeCoverage: false, includeFailures: false });
+        if (!status.progress?.discovering && (status.worker?.inFlight ?? 0) === 0) break;
+        if (Date.now() >= deadline) throw new Error('Background activity did not settle before queue tests');
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+}, 30_000);
+afterAll(async () => {
+    if (originalProcessing !== undefined) await setPref('backgroundProcessingEnabled', originalProcessing);
 });
 
 /** Generous timeout for whole-document extraction round-trips. */

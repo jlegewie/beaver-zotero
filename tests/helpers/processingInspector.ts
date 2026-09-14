@@ -7,6 +7,7 @@
  */
 
 import { getBaseUrl } from './fixtures';
+import type { ProcessingProgress } from '../../src/services/backgroundProcessing/progress';
 import type { BackgroundQueueStats } from './cacheInspector';
 
 async function post<T>(path: string, body: unknown = {}): Promise<T> {
@@ -87,6 +88,7 @@ export interface DocumentCacheStats {
 }
 
 export interface ProcessingStatusResponse {
+    progress?: ProcessingProgress | null;
     ok: boolean;
     error?: string;
     queue?: BackgroundQueueStats;

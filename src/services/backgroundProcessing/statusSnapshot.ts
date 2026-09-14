@@ -1,3 +1,4 @@
+import type { ProcessingProgress } from './progress';
 import type {
     AttachmentProcessingAggregates,
     BackgroundProcessingFailureSummary,
@@ -43,6 +44,8 @@ export interface BackgroundWorkerSnapshot {
     queuedFiles?: number;
     /** Jobs currently running across the file-processing lanes. */
     inFlight: number;
+    /** Distinct running attachments, since multiple stages can overlap. */
+    inFlightFiles?: number;
     /** A one-off "process now" is bypassing the idle gate until the queue drains. */
     drainNow: boolean;
     /** Queued backlog work may run right now (idle or draining). */
@@ -63,6 +66,7 @@ export async function collectProcessingStatus(
     entitlements: ProcessingStatusEntitlements,
     options: ProcessingStatusOptions = {},
 ): Promise<{
+    progress: ProcessingProgress | null;
     queue: BackgroundQueueStats;
     ledger: AttachmentProcessingAggregates;
     failures: BackgroundProcessingFailureSummary[] | undefined;
@@ -74,6 +78,7 @@ export async function collectProcessingStatus(
     const db = Zotero.Beaver?.db;
     if (!db) throw new Error('db not available');
     const { hasOcrAccess, hasSearchIndexAccess } = entitlements;
+    const progress = await Zotero.Beaver?.background?.getProcessingProgress(options.libraryId) ?? null;
     const [queue, ledger, failures, issues, coverage, documentCache] = await Promise.all([
         db.getBackgroundQueueStats(Date.now()),
         db.getAttachmentProcessingAggregates(options.libraryId, {
@@ -104,7 +109,7 @@ export async function collectProcessingStatus(
         type !== 'fulltext_untag'
         && (type !== 'fulltext_upsert' || hasSearchIndexAccess)
         && (type !== 'document_ocr' || hasOcrAccess));
-    const activeQueue = await db.getBackgroundQueueStats(Date.now(), activeTypes);
+    const activeQueue = progress?.queue ?? await db.getBackgroundQueueStats(Date.now(), activeTypes);
     const worker: BackgroundWorkerSnapshot = {
         dispatchBlocker: extractor?.getDispatchBlocker?.() ?? null,
         available: activeQueue.available,
@@ -114,8 +119,9 @@ export async function collectProcessingStatus(
             (sum, type) => sum + ((lanes as Record<string, { inFlight: number } | undefined>)[type]?.inFlight ?? 0),
             0,
         ),
+        inFlightFiles: extractor?.getInFlightFileCount?.(activeTypes),
         drainNow: extractor?.isImmediateDrainRequested?.() ?? false,
         backlogGateOpen: extractor?.isBacklogGateOpen?.() ?? false,
     };
-    return { queue, ledger, failures, issues, worker, coverage, documentCache };
+    return { progress, queue, ledger, failures, issues, worker, coverage, documentCache };
 }
