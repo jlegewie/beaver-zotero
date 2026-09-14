@@ -3383,6 +3383,7 @@
  * itself is the same `Sidebar` the panes render. */
 
 #beaver-pane-window .beaver-window-app {
+    --beaver-window-nav-width: 264px;
     display: flex;
     flex-direction: row;
     width: 100%;
@@ -3396,7 +3397,7 @@
  * rows do not reflow while it slides. */
 #beaver-pane-window .beaver-window-nav {
     flex: 0 0 auto;
-    width: 264px;
+    width: var(--beaver-window-nav-width);
     min-height: 0;
     /* Clipped only while collapsed: expanded, the row menus may extend past
      * the sidebar's edge. The class flips at the start of a collapse, so the
@@ -3416,7 +3417,7 @@
 #beaver-pane-window .beaver-window-nav-content {
     display: flex;
     flex-direction: column;
-    width: 264px;
+    width: var(--beaver-window-nav-width);
     height: 100%;
     min-height: 0;
     opacity: 1;
@@ -3456,7 +3457,7 @@
      * sidebar's known width rather than a size container: containment would
      * make this pane the containing block for the fixed-position menus inside
      * it on older Gecko builds, shifting them by the sidebar's width. */
-    --beaver-pane-width: calc(100vw - 264px);
+    --beaver-pane-width: calc(100vw - var(--beaver-window-nav-width));
 }
 
 #beaver-pane-window .beaver-window-app-nav-collapsed .beaver-window-main {
@@ -3521,13 +3522,14 @@
     padding: 12px 10px 0;
 }
 
-#beaver-pane-window .beaver-window-nav-item {
+/* Base for the sidebar's plain buttons (new chat, chat rows, the account):
+ * the chrome default look removed, a rounded hover fill and a focus ring. */
+#beaver-pane-window .beaver-window-nav-button {
     display: flex;
     align-items: center;
-    gap: 9px;
     width: 100%;
+    min-width: 0;
     margin: 0;
-    padding: 7px 10px;
     border: none;
     border-radius: 8px;
     background-color: transparent;
@@ -3536,23 +3538,23 @@
     font-size: 1rem;
     line-height: 1.3;
     text-align: left;
-    white-space: nowrap;
     cursor: pointer;
     transition: background-color 0.15s ease;
 }
 
-#beaver-pane-window .beaver-window-nav-item:hover:not(:disabled) {
-    background-color: var(--fill-quinary);
-}
-
-#beaver-pane-window .beaver-window-nav-item:disabled {
-    color: var(--fill-tertiary);
-    cursor: default;
-}
-
-#beaver-pane-window .beaver-window-nav-item:focus-visible {
+#beaver-pane-window .beaver-window-nav-button:focus-visible {
     outline: 2px solid var(--color-accent);
     outline-offset: -2px;
+}
+
+#beaver-pane-window .beaver-window-nav-item {
+    gap: 9px;
+    padding: 7px 10px;
+    white-space: nowrap;
+}
+
+#beaver-pane-window .beaver-window-nav-item:hover {
+    background-color: var(--fill-quinary);
 }
 
 #beaver-pane-window .beaver-window-nav-item svg {
@@ -3657,23 +3659,8 @@
 
 #beaver-pane-window .beaver-window-nav-row-button {
     flex: 1;
-    min-width: 0;
-    margin: 0;
+    width: auto;
     padding: 6px 8px;
-    border: none;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--fill-primary);
-    font: inherit;
-    font-size: 1rem;
-    line-height: 1.3;
-    text-align: left;
-    cursor: pointer;
-}
-
-#beaver-pane-window .beaver-window-nav-row-button:focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: -2px;
 }
 
 #beaver-pane-window .beaver-window-nav-row-name {
@@ -3744,11 +3731,6 @@
     color: var(--fill-tertiary);
 }
 
-#beaver-pane-window .beaver-window-nav-match {
-    color: var(--accent-blue);
-    font-weight: 500;
-}
-
 #beaver-pane-window .beaver-window-nav-rename {
     width: 100%;
     margin: 0;
@@ -3786,27 +3768,12 @@
 }
 
 #beaver-pane-window .beaver-window-nav-account {
-    display: flex;
-    width: 100%;
-    min-width: 0;
-    margin: 0;
     padding: 6px 8px;
-    border: none;
     border-radius: 10px;
-    background-color: transparent;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-    transition: background-color 0.15s ease;
 }
 
 #beaver-pane-window .beaver-window-nav-account:hover {
     background-color: var(--fill-quinary);
-}
-
-#beaver-pane-window .beaver-window-nav-account:focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: -2px;
 }
 
 #beaver-pane-window .beaver-window-nav-account-content {

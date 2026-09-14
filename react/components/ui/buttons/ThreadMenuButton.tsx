@@ -1,8 +1,6 @@
 import { canOpenFinishedChatAtom, refreshFinishedChatAvailabilityAtom } from '../../../runtime/windowCommands';
 import { RESPONSE_FINISH_MESSAGE } from '../../../../src/services/threads/finishedChat';
 import { BeaverUIFactory } from "../../../../src/ui/ui";
-import { getWindowRuntime } from '../../../runtime/windowRuntime';
-import { getCredentialGeneration } from '@beaver/agent-core/transport/credentials';
 import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { allRunsAtom, runsCountAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
@@ -21,7 +19,7 @@ import {
     setThreadPinnedAtom,
     threadViewKey,
 } from '../../../atoms/threadList';
-import { recentThreadsAtom, currentThreadIdAtom, currentThreadNameAtom, newThreadAtom, ThreadData } from '../../../atoms/threads';
+import { recentThreadsAtom, currentThreadIdAtom, currentThreadNameAtom, ThreadData } from '../../../atoms/threads';
 import { showAllThreadInstancesAtom } from '../../../atoms/ui';
 import { useFindInChatControls } from '../../../hooks/useFindInChat';
 import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
@@ -34,6 +32,7 @@ import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
 import { selectItem, selectItemById } from '../../../utils/selectItem';
 import { flushPendingPartEvents } from '../../../utils/streamingPartQueue';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
+import { confirmAndDeleteThread, renameThread } from '../../../utils/threadActions';
 import { resolveToolCallLabelEnrichMap } from '../../../utils/toolCallLabelEnrich';
 import { getZoteroTargetContextSync } from '../../../utils/zoteroTargetContext';
 import { MoreHorizontalIcon } from '../../icons/icons';
@@ -250,12 +249,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
         const newName = input.value.trim();
         if (!newName || newName === threadName) return;
-
-        try {
-            await Zotero.Beaver.threads.renameThread(threadId, newName);
-        } catch (error) {
-            console.error('Error renaming thread:', error);
-        }
+        await renameThread(threadId, newName);
     };
 
     /**
@@ -286,24 +280,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     const handleDeleteChat = async () => {
         const threadId = store.get(currentThreadIdAtom);
         if (!threadId) return;
-
-        const buttonIndex = Zotero.Prompt.confirm({
-            window: surfaceWindow,
-            title: 'Delete chat?',
-            text: 'Are you sure you want to delete this chat? This action cannot be undone.',
-            button0: Zotero.Prompt.BUTTON_TITLE_YES,
-            button1: Zotero.Prompt.BUTTON_TITLE_NO,
-            defaultButton: 1,
-        });
-        if (buttonIndex !== 0) return;
-
-        try {
-            await Zotero.Beaver.threads.deleteThread(threadId, getWindowRuntime().id, getCredentialGeneration());
-            // The delete was confirmed; leave only if this is still the open chat.
-            if (store.get(currentThreadIdAtom) === threadId) await store.set(newThreadAtom, { skipActiveRunConfirm: true });
-        } catch (error) {
-            console.error('Error deleting thread:', error);
-        }
+        await confirmAndDeleteThread(threadId, surfaceWindow);
     };
 
     const getMenuItems = (): MenuItem[] => {

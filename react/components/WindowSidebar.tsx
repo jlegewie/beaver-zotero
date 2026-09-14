@@ -57,7 +57,7 @@ const WindowSidebar = () => {
                 <Sidebar
                     location="library"
                     isWindow={true}
-                    header={<WindowHeader showNavToggle={hasHistory} />}
+                    header={<WindowHeader showChat={hasHistory} />}
                 />
             </div>
         </div>

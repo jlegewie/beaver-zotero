@@ -1,8 +1,6 @@
 import { useSurfaceWindow } from '../runtime/SurfaceWindowContext';
 import React, { useRef, useCallback } from 'react';
 import { CancelIcon, PlusSignIcon, PictureInPictureIcon, ChattingIcon } from './icons/icons';
-import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
-import EmbeddingIndexStatusButton from './ui/buttons/EmbeddingIndexStatusButton';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { openBeaverWindow } from '../ui/openBeaverWindow';
 import { newThreadAtom } from '../atoms/threads';
@@ -10,15 +8,12 @@ import { currentThreadIdAtom, runsCountAtom } from '@beaver/agent-core/run-state
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import { isAuthenticatedAtom, isWaitingForProfileAtom } from '../atoms/auth';
+import { isAuthenticatedAtom } from '../atoms/auth';
 import { isThreadListViewAtom } from '../atoms/ui';
-import UserAccountMenuButton from './ui/buttons/UserAccountMenuButton';
-import DevToolsMenuButton from './ui/buttons/DevToolsMenuButton';
 import ThreadMenuButton from './ui/buttons/ThreadMenuButton';
-import { hasCompletedOnboardingAtom, isDatabaseSyncSupportedAtom, updateRequiredAtom, isProfileLoadedAtom, profileSyncStatusAtom } from '../atoms/profile';
+import HeaderTrailingActions, { useShowHeaderStatus } from './HeaderTrailingActions';
 import { isFirstRunVisibleAtom } from '../atoms/firstRun';
 import { getWindowFromElement } from '@beaver/agent-ui/utils/windowContext';
-import { currentMessageContentAtom } from '../atoms/messageComposition';
 import { getPref } from '../../src/utils/prefs';
 
 
@@ -32,30 +27,11 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
     const runsCount = useAtomValue(runsCountAtom);
     const newThread = useSetAtom(newThreadAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
-    const isWaitingForProfile = useAtomValue(isWaitingForProfileAtom);
-    const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
-    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
-    const updateRequired = useAtomValue(updateRequiredAtom);
-    const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
-    const currentMessageContent = useAtomValue(currentMessageContentAtom);
+    const showStatus = useShowHeaderStatus();
     const threadId = useAtomValue(currentThreadIdAtom);
     const [isThreadListView, setIsThreadListView] = useAtom(isThreadListViewAtom);
     const isFirstRunVisible = useAtomValue(isFirstRunVisibleAtom);
-    const profileSyncStatus = useAtomValue(profileSyncStatusAtom);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
-
-    // Reconnecting / sync-issue indicator: only shown after the profile is loaded
-    // (cold-start covered by ProfileLoadingPage). Visible for both transient retries
-    // and fatal non-transient errors.
-    const showReconnectingIndicator = isAuthenticated && isProfileLoaded && profileSyncStatus.kind !== 'ok';
-    const reconnectingTooltip =
-        profileSyncStatus.kind === 'transient' && profileSyncStatus.offline
-            ? "You're offline"
-            : profileSyncStatus.kind === 'transient'
-                ? `Reconnecting…${profileSyncStatus.attempt > 1 ? ` (attempt ${profileSyncStatus.attempt})` : ''}`
-                : profileSyncStatus.kind === 'fatal'
-                    ? 'Profile sync issue'
-                    : '';
 
     const handleNewThread = async () => {
         setIsThreadListView(false);
@@ -103,7 +79,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                 )}
 
                 {/* Chat history and new chat */}
-                {isAuthenticated && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && !isFirstRunVisible && (
+                {isAuthenticated && showStatus && (
                     <>
                     <Tooltip content="Chat history" showArrow singleLine>
                         <IconButton
@@ -129,61 +105,25 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
             {/* Right side: Current Context & Global Actions */}
             {isAuthenticated && (
                 <div className="display-flex gap-4 items-center">
-                    {/* Reconnecting indicator: subtle dot shown while a profile refresh is failing
-                        or the browser reports offline. Hidden during initial load and on success. */}
-                    {showReconnectingIndicator && (
-                        <Tooltip content={reconnectingTooltip} showArrow singleLine>
-                            <div
-                                aria-label={reconnectingTooltip}
-                                className="reconnecting-indicator"
-                                style={{
-                                    width: 8,
-                                    height: 8,
-                                    borderRadius: 8,
-                                    backgroundColor: 'var(--color-yellow-50, #d9a300)',
-                                    opacity: 0.8,
-                                }}
-                            />
-                        </Tooltip>
-                    )}
-                    {/* Embedding index status for users without databaseSync */}
-                    {!isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && !isFirstRunVisible && (
-                        <EmbeddingIndexStatusButton />
-                    )}
-                    {/* Database status for users with databaseSync */}
-                    {isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && !isFirstRunVisible && (
-                        <DatabaseStatusButton />
-                    )}
-                    {/* Development tools */}
-                    {process.env.NODE_ENV === 'development' && (
-                        <DevToolsMenuButton
-                            className="scale-14"
-                            ariaLabel="Development tools"
-                            currentMessageContent={currentMessageContent}
-                        />
-                    )}
-                    {threadId && !isFirstRunVisible && (
-                        <ThreadMenuButton
-                            className="scale-14"
-                            ariaLabel="Chat actions"
-                        />
-                    )}
-                    {/* Open in separate window */}
-                    {!isWindow && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && !isFirstRunVisible && (
-                        <Tooltip content="Open in separate window" secondaryContent={openWindowShortcut} showArrow singleLine>
-                            <IconButton
-                                icon={PictureInPictureIcon}
-                                onClick={() => openBeaverWindow()}
+                    <HeaderTrailingActions>
+                        {threadId && !isFirstRunVisible && (
+                            <ThreadMenuButton
                                 className="scale-14"
-                                ariaLabel="Open in separate window"
+                                ariaLabel="Chat actions"
                             />
-                        </Tooltip>
-                    )}
-                    {/* User account menu */}
-                    <UserAccountMenuButton
-                        className="scale-14"
-                        ariaLabel="Beaver settings"
-                    />
+                        )}
+                        {/* Open in separate window */}
+                        {!isWindow && showStatus && (
+                            <Tooltip content="Open in separate window" secondaryContent={openWindowShortcut} showArrow singleLine>
+                                <IconButton
+                                    icon={PictureInPictureIcon}
+                                    onClick={() => openBeaverWindow()}
+                                    className="scale-14"
+                                    ariaLabel="Open in separate window"
+                                />
+                            </Tooltip>
+                        )}
+                    </HeaderTrailingActions>
                 </div>
             )}
         </div>

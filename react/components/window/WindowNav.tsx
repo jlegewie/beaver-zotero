@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { newThreadAtom, ThreadData } from '../../atoms/threads';
 import { userAtom } from '../../atoms/auth';
@@ -7,6 +7,7 @@ import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { useThreadHistory } from '../../hooks/useThreadHistory';
 import { useAccountMenuItems } from '../ui/buttons/UserAccountMenuButton';
 import { formatPlanName } from '../preferences/BillingSection';
+import { highlightMatch } from '../../utils/highlightMatch';
 import ChatLoadFailure from '../ChatLoadFailure';
 import { Icon, MoreHorizontalIcon, PlusSignIcon, SearchIcon, UserIcon, CancelIcon } from '../icons/icons';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
@@ -15,21 +16,47 @@ import Button from '@beaver/agent-ui/primitives/Button';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 
-/** Width of the sidebar when expanded, in px. Mirrored by `.beaver-window-nav` in CSS. */
-export const WINDOW_NAV_WIDTH = 264;
-
 const UNNAMED_CHAT = 'Unnamed conversation';
 
-const highlightMatch = (text: string, query: string): React.ReactNode => {
-    if (!query) return text;
-    const idx = text.toLowerCase().indexOf(query.toLowerCase());
-    if (idx === -1) return text;
+interface RenameInputProps {
+    name: string;
+    onCommit: (name: string) => void;
+    onCancel: () => void;
+}
+
+/** The inline rename field. Mounted only while a row is being renamed. */
+const RenameInput: React.FC<RenameInputProps> = ({ name, onCommit, onCancel }) => {
+    const [draft, setDraft] = useState(name);
+    const inputRef = useRef<HTMLInputElement | null>(null);
+
+    useEffect(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+    }, []);
+
+    const commit = () => {
+        const next = draft.trim();
+        if (next && next !== name) onCommit(next);
+        else onCancel();
+    };
+
     return (
-        <>
-            {text.slice(0, idx)}
-            <span className="beaver-window-nav-match">{text.slice(idx, idx + query.length)}</span>
-            {text.slice(idx + query.length)}
-        </>
+        <div className="beaver-window-nav-row beaver-window-nav-row-editing">
+            <input
+                ref={inputRef}
+                type="text"
+                className="beaver-window-nav-rename"
+                value={draft}
+                aria-label="Chat name"
+                onChange={e => setDraft(e.target.value)}
+                onBlur={commit}
+                onKeyDown={e => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+                    if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+                }}
+            />
+        </div>
     );
 };
 
@@ -38,53 +65,30 @@ interface ThreadRowProps {
     isCurrent: boolean;
     query: string;
     pinPending: boolean;
-    isEditing: boolean;
     onSelect: (thread: ThreadData) => void;
     onTogglePin: (thread: ThreadData) => void;
     onStartRename: (thread: ThreadData) => void;
-    onCommitRename: (thread: ThreadData, name: string) => void;
-    onCancelRename: () => void;
     onDelete: (thread: ThreadData) => void;
 }
 
 /**
  * One chat in the history. The row itself opens the chat; its trailing menu
- * carries pin, rename and delete. Renaming happens inline in the row.
+ * carries rename, pin and delete.
  */
 const ThreadRow: React.FC<ThreadRowProps> = ({
     thread,
     isCurrent,
     query,
     pinPending,
-    isEditing,
     onSelect,
     onTogglePin,
     onStartRename,
-    onCommitRename,
-    onCancelRename,
     onDelete,
 }) => {
     const name = thread.name || UNNAMED_CHAT;
-    const [draft, setDraft] = useState(name);
-    const inputRef = useRef<HTMLInputElement | null>(null);
     // Menus render inline, so the row must stay "hovered" while its menu is
     // open even when the pointer travels into the menu.
     const [menuOpen, setMenuOpen] = useState(false);
-
-    useEffect(() => {
-        if (!isEditing) return;
-        setDraft(name);
-        const input = inputRef.current;
-        if (!input) return;
-        input.focus();
-        input.select();
-    }, [isEditing, name]);
-
-    const commit = () => {
-        const next = draft.trim();
-        if (next && next !== name) onCommitRename(thread, next);
-        else onCancelRename();
-    };
 
     // A truncated name scrolls slowly to its end while the row is hovered, so
     // the whole name can be read without opening the chat. The distance is
@@ -102,9 +106,7 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
         el.classList.add('beaver-window-nav-row-name-scrolling');
     };
     const handleRowLeave = () => {
-        const el = nameRef.current;
-        if (!el) return;
-        el.classList.remove('beaver-window-nav-row-name-scrolling');
+        nameRef.current?.classList.remove('beaver-window-nav-row-name-scrolling');
     };
 
     const menuItems: MenuItem[] = [
@@ -128,27 +130,6 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
         },
     ];
 
-    if (isEditing) {
-        return (
-            <div className="beaver-window-nav-row beaver-window-nav-row-editing" data-thread-id={thread.id}>
-                <input
-                    ref={inputRef}
-                    type="text"
-                    className="beaver-window-nav-rename"
-                    value={draft}
-                    aria-label="Chat name"
-                    onChange={e => setDraft(e.target.value)}
-                    onBlur={commit}
-                    onKeyDown={e => {
-                        e.stopPropagation();
-                        if (e.key === 'Enter') { e.preventDefault(); commit(); }
-                        if (e.key === 'Escape') { e.preventDefault(); onCancelRename(); }
-                    }}
-                />
-            </div>
-        );
-    }
-
     return (
         <div
             className={`beaver-window-nav-row ${isCurrent ? 'beaver-window-nav-row-current' : ''} ${menuOpen ? 'beaver-window-nav-row-menu-open' : ''}`}
@@ -158,7 +139,7 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
         >
             <button
                 type="button"
-                className="beaver-window-nav-row-button"
+                className="beaver-window-nav-button beaver-window-nav-row-button"
                 aria-current={isCurrent ? 'page' : undefined}
                 title={name}
                 onClick={() => onSelect(thread)}
@@ -204,23 +185,6 @@ const WindowNav: React.FC<WindowNavProps> = ({ collapsed }) => {
     const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
     const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-    const handleNewChat = useCallback(async () => {
-        await newThread({ window: surfaceWindow });
-    }, [newThread, surfaceWindow]);
-
-    const handleSelect = useCallback((thread: ThreadData) => {
-        void history.selectThread(thread);
-    }, [history]);
-
-    const handleCommitRename = useCallback((thread: ThreadData, name: string) => {
-        setEditingThreadId(null);
-        void history.renameThread(thread.id, name);
-    }, [history]);
-
-    const handleDelete = useCallback((thread: ThreadData) => {
-        void history.deleteThread(thread.id);
-    }, [history]);
-
     const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Escape') {
             e.preventDefault();
@@ -235,23 +199,30 @@ const WindowNav: React.FC<WindowNavProps> = ({ collapsed }) => {
     const newChatShortcut = Zotero.isMac ? '⌘N' : 'Ctrl+N';
 
     const renderRow = (thread: ThreadData) => (
-        <ThreadRow
-            key={thread.id}
-            thread={thread}
-            isCurrent={thread.id === history.currentThreadId}
-            query={history.activeQuery}
-            pinPending={history.isPinPending(thread.id)}
-            isEditing={editingThreadId === thread.id}
-            onSelect={handleSelect}
-            onTogglePin={history.togglePin}
-            onStartRename={t => setEditingThreadId(t.id)}
-            onCommitRename={handleCommitRename}
-            onCancelRename={() => setEditingThreadId(null)}
-            onDelete={handleDelete}
-        />
+        editingThreadId === thread.id ? (
+            <RenameInput
+                key={thread.id}
+                name={thread.name || UNNAMED_CHAT}
+                onCommit={name => { setEditingThreadId(null); void history.renameThread(thread.id, name); }}
+                onCancel={() => setEditingThreadId(null)}
+            />
+        ) : (
+            <ThreadRow
+                key={thread.id}
+                thread={thread}
+                isCurrent={thread.id === history.currentThreadId}
+                query={history.activeQuery}
+                pinPending={history.isPinPending(thread.id)}
+                onSelect={t => { void history.selectThread(t); }}
+                onTogglePin={history.togglePin}
+                onStartRename={t => setEditingThreadId(t.id)}
+                onDelete={t => { void history.deleteThread(t.id); }}
+            />
+        )
     );
 
-    const showEmpty = !history.isLoading && !history.hasRows && !history.error;
+    const hasRows = history.visibleRows.length > 0 || history.pinnedThreads.length > 0;
+    const showEmpty = !history.isLoading && !hasRows && !history.view.error;
 
     return (
         <nav
@@ -266,8 +237,8 @@ const WindowNav: React.FC<WindowNavProps> = ({ collapsed }) => {
                 <Tooltip content="New chat" secondaryContent={newChatShortcut} showArrow singleLine>
                     <button
                         type="button"
-                        className="beaver-window-nav-item beaver-window-nav-new-chat"
-                        onClick={handleNewChat}
+                        className="beaver-window-nav-button beaver-window-nav-item"
+                        onClick={() => { void newThread({ window: surfaceWindow }); }}
                     >
                         <Icon icon={PlusSignIcon} aria-hidden="true" focusable="false" />
                         <span className="truncate">New chat</span>
@@ -310,18 +281,18 @@ const WindowNav: React.FC<WindowNavProps> = ({ collapsed }) => {
                         {history.pinnedThreads.map(renderRow)}
                     </section>
                 )}
-                {history.groups.map(group => (
+                {history.groups.map((group, index) => (
                     <section key={group.label} className="beaver-window-nav-group" aria-label={`${group.label} chats`}>
                         <div className="beaver-window-nav-group-label">
-                            {history.activeQuery && group === history.groups[0] ? 'Results' : group.label}
+                            {history.activeQuery && index === 0 ? 'Results' : group.label}
                         </div>
                         {group.threads.map(renderRow)}
                     </section>
                 ))}
 
-                {history.error && !history.isLoading && (
+                {history.view.error && !history.isLoading && (
                     <div className="px-2">
-                        <ChatLoadFailure error={history.error} retry={history.reload} />
+                        <ChatLoadFailure error={history.view.error} retry={history.reload} />
                     </div>
                 )}
 
@@ -331,11 +302,11 @@ const WindowNav: React.FC<WindowNavProps> = ({ collapsed }) => {
                     </div>
                 )}
 
-                {history.isLoading && !history.hasRows && (
+                {history.isLoading && !hasRows && (
                     <div className="beaver-window-nav-empty"><Spinner size={16} /></div>
                 )}
 
-                {history.hasMore && !history.error && (
+                {history.view.hasMore && !history.view.error && (
                     <div className="beaver-window-nav-more">
                         <Button
                             variant="ghost-secondary"
@@ -374,7 +345,7 @@ const WindowAccountFooter: React.FC = () => {
                 <MenuButton
                     menuItems={menuItems}
                     variant="ghost"
-                    className="beaver-window-nav-account"
+                    className="beaver-window-nav-button beaver-window-nav-account"
                     ariaLabel={`Account ${user.email}, ${planLabel}. Open account menu`}
                     // The footer sits at the window's bottom edge, so the menu
                     // always flips upward; anchor it above the button instead of

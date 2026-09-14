@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
-import { getCredentialGeneration } from '@beaver/agent-core/transport/credentials';
-import { store } from '../store';
-import { getWindowRuntime } from '../runtime/windowRuntime';
 import { useSurfaceWindow } from '../runtime/SurfaceWindowContext';
 import { useChatReconnect } from './useChatReconnect';
 import { userAtom } from '../atoms/auth';
+import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { showAllThreadInstancesAtom } from '../atoms/ui';
-import { ThreadData, loadThreadAtom, newThreadAtom } from '../atoms/threads';
+import { ThreadData, loadThreadAtom } from '../atoms/threads';
 import {
     threadEntitiesAtom,
     threadViewsAtom,
@@ -18,17 +16,35 @@ import {
     loadThreadPageAtom,
     loadMoreThreadsAtom,
     loadPinnedThreadsAtom,
+    loadThreadsByItemAtom,
     setThreadPinnedAtom,
     pinsPendingAtom,
     isPinPending,
     EMPTY_THREAD_VIEW,
 } from '../atoms/threadList';
 import { currentZoteroInstanceRef } from '../../src/utils/zoteroUtils';
+import { isThreadInstanceMismatch } from '../../src/services/threads/threadMatches';
 import { groupThreadsByDate, type ThreadDateGroupRows } from '../utils/threadDateGroups';
-import type { ChatLoadError } from '../../src/services/threads/chatLoadError';
+import { confirmAndDeleteThread, renameThread as renameThreadAction } from '../utils/threadActions';
+import type { ThreadItemFilter, ThreadListViewState } from '../../src/services/threads/types';
 
 /** Stable identity for "no rows", so the memos below are not invalidated per render. */
 const EMPTY_THREADS: ThreadData[] = [];
+
+export interface ThreadInstanceRef {
+    zoteroUserId: string | null;
+    zoteroLocalId: string | null;
+}
+
+export interface UseThreadHistoryOptions {
+    /**
+     * Show only chats about this item. Item-filtered mode answers a different
+     * question, so it uses its own loader and partitions client-side.
+     */
+    filter?: ThreadItemFilter | null;
+    /** Called when the filter's library is no longer searchable, so the caller can drop it. */
+    onFilterUnavailable?: () => void;
+}
 
 export interface ThreadHistory {
     /** The raw search text, as the input shows it. */
@@ -39,23 +55,32 @@ export interface ThreadHistory {
     /** Applies the typed query immediately, or reloads when it is already showing. */
     submitSearch: () => void;
     isLoading: boolean;
-    error: ChatLoadError | null;
-    hasMore: boolean;
+    view: ThreadListViewState;
+    viewKey: string;
     loadMore: () => void;
     reload: () => void;
-    /** Pinned chats; empty while searching, which shows only its results. */
+    /** This Zotero profile, or null when it has no identity yet. */
+    instanceRef: ThreadInstanceRef | null;
+    /** The instance scope the list is loaded for; undefined when showing all profiles. */
+    scope: ThreadInstanceRef | undefined;
+    /** Every row of the view, before instance and query filtering. */
+    rows: ThreadData[];
+    /** The rows on screen: pinned group plus date groups. */
+    visibleRows: ThreadData[];
+    /** Whether the Pinned group is shown. Off while searching or filtering by item. */
+    showPinnedGroup: boolean;
+    /** Pinned chats; empty when the group is not shown. */
     pinnedThreads: ThreadData[];
-    /** The unpinned chats of the view, grouped by date. */
+    /** The unpinned visible rows, grouped by date. */
     groups: ThreadDateGroupRows[];
-    /** Whether the view has any row at all. */
-    hasRows: boolean;
     currentThreadId: string | null;
     isPinPending: (threadId: string) => boolean;
+    /** Opens the chat. Resolves to whether it is now the open chat. */
     selectThread: (thread: ThreadData) => Promise<boolean>;
     togglePin: (thread: ThreadData) => void;
     renameThread: (threadId: string, name: string) => Promise<void>;
-    /** Confirms with the user, then deletes. Resolves to whether it was deleted. */
-    deleteThread: (threadId: string) => Promise<boolean>;
+    /** Confirms with the user, then deletes. */
+    deleteThread: (threadId: string) => Promise<void>;
 }
 
 /**
@@ -66,20 +91,21 @@ export interface ThreadHistory {
  * Scoped to the current Zotero profile unless the user opted into showing all
  * instances (`showAllThreadInstancesAtom`).
  */
-export function useThreadHistory(): ThreadHistory {
+export function useThreadHistory({ filter = null, onFilterUnavailable }: UseThreadHistoryOptions = {}): ThreadHistory {
     const surfaceWindow = useSurfaceWindow();
     const user = useAtomValue(userAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const showAllInstances = useAtomValue(showAllThreadInstancesAtom);
+    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     const entities = useAtomValue(threadEntitiesAtom);
     const views = useAtomValue(threadViewsAtom);
     const pinsPending = useAtomValue(pinsPendingAtom);
     const loadPage = useSetAtom(loadThreadPageAtom);
     const loadMoreThreads = useSetAtom(loadMoreThreadsAtom);
     const loadPinned = useSetAtom(loadPinnedThreadsAtom);
+    const loadByItem = useSetAtom(loadThreadsByItemAtom);
     const setThreadPinned = useSetAtom(setThreadPinnedAtom);
     const loadThread = useSetAtom(loadThreadAtom);
-    const newThread = useSetAtom(newThreadAtom);
 
     const [searchQuery, setSearchQuery] = useState('');
     const [activeQuery, setActiveQuery] = useState('');
@@ -91,7 +117,7 @@ export function useThreadHistory(): ThreadHistory {
     const liveInstance = currentZoteroInstanceRef();
     const instanceUserId = liveInstance?.zoteroUserId ?? null;
     const instanceLocalId = liveInstance?.zoteroLocalId ?? null;
-    const instanceRef = useMemo(
+    const instanceRef = useMemo<ThreadInstanceRef | null>(
         () => (instanceUserId === null && instanceLocalId === null
             ? null
             : { zoteroUserId: instanceUserId, zoteroLocalId: instanceLocalId }),
@@ -99,24 +125,46 @@ export function useThreadHistory(): ThreadHistory {
     );
     const scope = showAllInstances ? undefined : (instanceRef ?? undefined);
 
+    // Which view this render is showing. Search, item filter and instance scope
+    // each produce a different one, so a response can only ever land in the
+    // view that asked for it.
     const viewKey = useMemo(
         () => (user
-            ? threadViewKey({ userId: user.id, query: activeQuery, showAll: showAllInstances, scope: instanceRef })
+            ? threadViewKey({ userId: user.id, query: filter ? '' : activeQuery, showAll: showAllInstances, scope: instanceRef, filter })
             : ''),
-        [user, activeQuery, showAllInstances, instanceRef]
+        [user, activeQuery, showAllInstances, instanceRef, filter]
     );
     const view = views.get(viewKey) ?? EMPTY_THREAD_VIEW;
     const isLoading = view.status === 'loading';
 
+    // Load this view. Item-filtered mode uses its own loader; both merge into
+    // the same entity store.
     useEffect(() => {
         if (!user) return;
-        loadPage({ key: viewKey, query: activeQuery, scope, includeOtherCount: scope !== undefined });
-    }, [user, viewKey, activeQuery, scope, loadPage, view.loadedAt]);
+        if (filter) {
+            // Exclusions can change (Beaver Preferences) while the view is open,
+            // so re-check at load time instead of trusting a stale atom.
+            if (!searchableLibraryIds.includes(filter.libraryId)) {
+                onFilterUnavailable?.();
+                return;
+            }
+            loadByItem({ key: viewKey, filter });
+            return;
+        }
+        loadPage({
+            key: viewKey,
+            query: activeQuery,
+            scope,
+            // Only a scoped first page can report how many threads scoping hides.
+            includeOtherCount: scope !== undefined,
+        });
+    }, [user, viewKey, filter, activeQuery, scope, searchableLibraryIds, loadPage, loadByItem, onFilterUnavailable, view.loadedAt]);
 
     // Pinned chats reach further back than the paginated window, so they are
     // a second discovery query into the same view. A search shows only its
-    // results, so only the plain list needs them.
-    const showPinnedGroup = !activeQuery;
+    // results and an item filter answers "chats about X", so neither shows
+    // the group.
+    const showPinnedGroup = !activeQuery && !filter;
     useEffect(() => {
         if (!user || !showPinnedGroup) return;
         loadPinned({ key: viewKey, scope });
@@ -132,11 +180,16 @@ export function useThreadHistory(): ThreadHistory {
         };
     }, [searchQuery, activeQuery]);
 
+    /** Reloads the current view from the server, ignoring its freshness. */
     const reload = useCallback(() => {
         if (!user) return;
+        if (filter) {
+            loadByItem({ key: viewKey, filter, force: true });
+            return;
+        }
         loadPage({ key: viewKey, query: activeQuery, scope, includeOtherCount: scope !== undefined, force: true });
         if (showPinnedGroup) loadPinned({ key: viewKey, scope, force: true });
-    }, [user, viewKey, activeQuery, scope, showPinnedGroup, loadPage, loadPinned]);
+    }, [user, filter, viewKey, activeQuery, scope, showPinnedGroup, loadPage, loadByItem, loadPinned]);
 
     useChatReconnect(reload, !!view.error);
 
@@ -145,6 +198,7 @@ export function useThreadHistory(): ThreadHistory {
         if (searchQuery !== activeQuery) {
             setActiveQuery(searchQuery);
         } else {
+            // Already showing this query — asks for fresh results.
             reload();
         }
     }, [searchQuery, activeQuery, reload]);
@@ -153,7 +207,23 @@ export function useThreadHistory(): ThreadHistory {
         loadMoreThreads({ key: viewKey, query: activeQuery, scope });
     }, [loadMoreThreads, viewKey, activeQuery, scope]);
 
+    /** The view's rows, newest first, with dead ids dropped. */
     const rows = useMemo(() => resolveThreadView(view, entities), [view, entities]);
+
+    // Item-filtered mode fetches unscoped and partitions client-side (the
+    // deduplicated match set is bounded); the other modes are server-scoped.
+    const visibleRows = useMemo(() => {
+        let visible = rows;
+        if (filter && !showAllInstances) {
+            visible = visible.filter(t => !isThreadInstanceMismatch(instanceRef, {
+                zoteroUserId: t.zoteroUserId, zoteroLocalId: t.zoteroLocalId,
+            }));
+        }
+        if (filter && activeQuery) {
+            visible = visible.filter(t => (t.name || 'Unnamed conversation').toLowerCase().includes(activeQuery.toLowerCase()));
+        }
+        return visible;
+    }, [filter, activeQuery, rows, showAllInstances, instanceRef]);
 
     // The Pinned group is taken over every known chat, not over this view's
     // window: pinning from elsewhere must show up here even when the paginated
@@ -164,8 +234,8 @@ export function useThreadHistory(): ThreadHistory {
         [showPinnedGroup, entities, scope]
     );
     const groups = useMemo(
-        () => groupThreadsByDate(showPinnedGroup ? rows.filter(t => !t.isPinned) : rows),
-        [showPinnedGroup, rows]
+        () => groupThreadsByDate(showPinnedGroup ? visibleRows.filter(t => !t.isPinned) : visibleRows),
+        [showPinnedGroup, visibleRows]
     );
 
     const selectThread = useCallback(async (thread: ThreadData): Promise<boolean> => {
@@ -194,38 +264,9 @@ export function useThreadHistory(): ThreadHistory {
         void setThreadPinned({ threadId: thread.id, pinned: !thread.isPinned, viewKey });
     }, [setThreadPinned, viewKey]);
 
-    const renameThread = useCallback(async (threadId: string, name: string) => {
-        const trimmed = name.trim();
-        if (!threadId || !trimmed) return;
-        try {
-            await Zotero.Beaver.threads.renameThread(threadId, trimmed);
-        } catch (error) {
-            console.error('Error renaming thread:', error);
-        }
-    }, []);
-
-    const deleteThread = useCallback(async (threadId: string): Promise<boolean> => {
-        const buttonIndex = Zotero.Prompt.confirm({
-            window: surfaceWindow,
-            title: 'Delete chat?',
-            text: 'Are you sure you want to delete this chat? This action cannot be undone.',
-            button0: Zotero.Prompt.BUTTON_TITLE_YES,
-            button1: Zotero.Prompt.BUTTON_TITLE_NO,
-            defaultButton: 1,
-        });
-        if (buttonIndex !== 0) return false;
-        try {
-            await Zotero.Beaver.threads.deleteThread(threadId, getWindowRuntime().id, getCredentialGeneration());
-            // The delete was confirmed; leave only if this is still the open chat.
-            if (threadId === store.get(currentThreadIdAtom)) {
-                await newThread({ skipActiveRunConfirm: true, window: surfaceWindow });
-            }
-            return true;
-        } catch (error) {
-            console.error('Error deleting thread:', error);
-            return false;
-        }
-    }, [surfaceWindow, newThread]);
+    const deleteThread = useCallback(async (threadId: string) => {
+        await confirmAndDeleteThread(threadId, surfaceWindow);
+    }, [surfaceWindow]);
 
     const isPinPendingFor = useCallback(
         (threadId: string) => isPinPending(pinsPending, threadId),
@@ -238,18 +279,22 @@ export function useThreadHistory(): ThreadHistory {
         activeQuery,
         submitSearch,
         isLoading,
-        error: view.error,
-        hasMore: view.hasMore,
+        view,
+        viewKey,
         loadMore,
         reload,
+        instanceRef,
+        scope,
+        rows,
+        visibleRows,
+        showPinnedGroup,
         pinnedThreads,
         groups,
-        hasRows: rows.length > 0 || pinnedThreads.length > 0,
         currentThreadId,
         isPinPending: isPinPendingFor,
         selectThread,
         togglePin,
-        renameThread,
+        renameThread: renameThreadAction,
         deleteThread,
     };
 }
