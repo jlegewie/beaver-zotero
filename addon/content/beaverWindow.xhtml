@@ -25,11 +25,17 @@
     <linkset>
         <html:link rel="localization" href="browser/menubar.ftl"/>
         <html:link rel="localization" href="browser/browserSets.ftl"/>
+        <html:link rel="localization" href="beaver-mainWindow.ftl"/>
     </linkset>
 
     <script type="application/javascript" src="chrome://beaver/content/beaverWindow.js"/>
 
     <commandset>
+        <command id="cmd_beaverNewChat"
+                 oncommand="window.BeaverReact?.handleWindowMenuCommand('new-chat').catch(error => Zotero.logError(error));"/>
+        <command id="cmd_beaverSettings"
+                 oncommand="window.BeaverReact?.handleWindowMenuCommand('settings').catch(error => Zotero.logError(error));"/>
+        <command id="cmd_close" oncommand="window.close();"/>
         <command id="minimizeWindow"
                  data-l10n-id="window-minimize-command"
                  oncommand="window.minimize();"/>
@@ -37,6 +43,10 @@
                  data-l10n-id="window-zoom-command"
                  oncommand="zoomWindow();"/>
     </commandset>
+    <keyset>
+        <key id="key_beaverNewChat" key="N" modifiers="accel" command="cmd_beaverNewChat"/>
+        <key id="key_close" key="W" modifiers="accel" command="cmd_close"/>
+    </keyset>
     <keyset id="macKeyset">
         <key id="key_minimizeWindow"
              command="minimizeWindow"
@@ -46,6 +56,14 @@
     </keyset>
     <!-- Zotero's platform keys add Library and its shortcut to this menu. -->
     <menubar>
+        <menu id="fileMenu" data-l10n-id="menu-file">
+            <menupopup>
+                <menuitem data-l10n-id="beaver-window-new-chat" command="cmd_beaverNewChat" key="key_beaverNewChat"/>
+                <menuitem data-l10n-id="beaver-window-settings" command="cmd_beaverSettings"/>
+                <menuseparator/>
+                <menuitem data-l10n-id="beaver-window-close" command="cmd_close" key="key_close"/>
+            </menupopup>
+        </menu>
         <menu id="windowMenu" data-l10n-id="menu-window-menu">
             <menupopup id="windowPopup">
                 <menuitem command="minimizeWindow" key="key_minimizeWindow"/>

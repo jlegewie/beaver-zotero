@@ -19,17 +19,6 @@ async function onLoad() {
         document.getElementById("beaver-pane-window"),
     );
     Zotero.Beaver.hooks.onStandaloneWindowLoad(window);
-    window.addEventListener("keydown", (event) => {
-        if (
-            event.key === "w" &&
-            (Zotero.isMac ? event.metaKey : event.ctrlKey) &&
-            !event.altKey &&
-            !event.shiftKey
-        ) {
-            event.preventDefault();
-            window.close();
-        }
-    });
 }
 window.addEventListener("load", onLoad, { once: true });
 window.addEventListener(

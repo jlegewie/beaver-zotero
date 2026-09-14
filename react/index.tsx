@@ -6,7 +6,7 @@ import { attachThreadAdmission } from "./runtime/threadAdmission";
 import { threadEntitiesAtom } from './atoms/threadList';
 import { currentThreadIdAtom, currentThreadNameAtom, activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { sendWSMessageAtom, closeWSConnectionAtom } from './atoms/agentRunAtoms';
-import { loadThreadAtom } from './atoms/threads';
+import { loadThreadAtom, newThreadAtom } from './atoms/threads';
 import { userIdAtom } from './atoms/auth';
 import { attachThreadProjection } from './runtime/threadProjection';
 import type { WSAgentActionExecuteRequest } from '@beaver/agent-core/protocol/agentProtocol';
@@ -366,6 +366,17 @@ export function disposeRuntime() {
     }
     rootsMap.clear();
     uiManager.cleanup();
+}
+
+/** Native menu commands use the owning renderer's chat and preferences context. */
+export async function handleWindowMenuCommand(command: 'new-chat' | 'settings'): Promise<void> {
+    const runtime = getWindowRuntime();
+    if (runtime.status === 'closing' || runtime.hostWindow.closed) return;
+    if (command === 'new-chat') {
+        await store.set(newThreadAtom, { window: runtime.hostWindow });
+    } else if (command === 'settings') {
+        openPreferencesWindow();
+    }
 }
 
 /** Development commands execute inside the target renderer's atom graph. */
