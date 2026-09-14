@@ -1,9 +1,17 @@
+import { isThreadConflict } from "@beaver/agent-core/types/apiErrors";
+import {
+    threadAdmissionAtom,
+    threadConflictAtom,
+    serverThreadBlockedAtom,
+    readAdmission,
+    reconcileThread,
+} from "../runtime/threadAdmission";
 import { acquireWriter, assertWriter, bindWriter, currentWriter, ownsWriter, releaseWriter, type WriterLease } from '../runtime/threadWriter';
 import { viewedHistoryRevisionAtom } from '../runtime/threadProjection';
 import { getCredentialGeneration, assertCredentialGeneration } from '@beaver/agent-core/transport/credentials';
 /**
  * WebSocket-based message generation atoms
- * 
+ *
  * This module provides Jotai atoms for WebSocket-based chat completion,
  * using AgentRun for structured run management.
  */
@@ -68,6 +76,9 @@ import {
 } from './profile';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import {
+    currentMessageContentAtom,
+    currentMessagePillsAtom,
+    readerActionContextAtom,
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
     currentMessageExternalFilesAtom,
@@ -207,7 +218,7 @@ import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValid
 
 /**
  * Processes annotation attachments of type image to add base64 data.
- * 
+ *
  * @param attachments - Array of MessageAttachment objects to process
  * @returns Array of MessageAttachment objects with base64 data
  */
@@ -256,7 +267,7 @@ export async function processImageAnnotations(attachments: MessageAttachment[]):
 
 /**
  * Get the user's API key for a model.
- * 
+ *
  * Returns a key in these cases:
  * - Custom models: Use the API key from the custom model config
  * - BYOK models (access_mode='byok'): Use the user's configured API key for the provider
@@ -443,7 +454,7 @@ async function truncateThreadOnServer(
     removedRunIds: string[],
     expectedTailRunId: string | null,
     logPrefix: string,
-): Promise<'ok' | 'refused' | 'failed'> {
+): Promise<'ok' | 'refused' | "busy" | 'failed'> {
     try {
         const report = await threadService.truncateThread(
             threadId,
@@ -465,6 +476,8 @@ async function truncateThreadOnServer(
         );
         return 'ok';
     } catch (error) {
+        if ((error as { code?: string })?.code === "thread_busy") return "busy";
+        if (isThreadConflict(error)) return "refused";
         logger(`${logPrefix}: truncation failed: ${error}`, 1);
         return 'failed';
     }
@@ -515,7 +528,6 @@ function abandonReplacementIfThreadChanged(
     // chat they moved to, and let them send a second one on top of it.
     if (get(retryPendingRunIdAtom) === options.pendingRetryRunId) {
         set(retryPendingRunIdAtom, null);
-        set(isWSChatPendingAtom, false);
     }
     set(addPopupMessageAtom, {
         type: 'warning',
@@ -577,6 +589,9 @@ function createAgentRunShell(
         type: 'chat',
         run_id: runId,
         thread_id: threadId,
+        expected_tail_run_id: threadId
+            ? (store.get(threadAdmissionAtom)?.tailRunId ?? null)
+            : null,
         user_prompt: {
             ...userPrompt,
             ...(customInstructions ? { custom_instructions: customInstructions } : {}),
@@ -840,30 +855,37 @@ async function startAutoRetryRunOwned(
                 })) {
                     return;
                 }
-                if (outcome === 'refused') {
-                    // The thread was rewritten by another client. There is no
-                    // user decision to retry against a history this client has
-                    // never seen — reload instead, so the UI shows the thread
-                    // whole (including the failed run's error card, from which
-                    // the user can retry deliberately).
+                if (outcome === "refused" || outcome === "busy") {
                     set(retryPendingRunIdAtom, null);
                     set(isWSChatPendingAtom, false);
+                    set(
+                        threadConflictAtom,
+                        outcome === "busy"
+                            ? "thread_busy"
+                            : "thread_tail_mismatch",
+                    );
+                    if (outcome === "busy")
+                        set(threadAdmissionAtom, {
+                            threadId,
+                            tailRunId: expectedTailRunId,
+                            activity: { state: "unknown", run_id: null },
+                        });
                     set(addPopupMessageAtom, {
-                        type: 'warning',
-                        title: 'Chat changed elsewhere',
-                        text: 'This chat was changed somewhere else, so the failed run was not retried automatically. Reloading the chat.',
-                        expire: true,
-                    });
-                    await set(loadThreadAtom, {
-                        user_id: userId,
-                        threadId,
-                        skipInstanceMismatchConfirm: true,
+                        type: "warning",
+                        title: "Chat changed elsewhere",
+                        text: "The response was not retried automatically. Refresh the chat and retry explicitly. Your draft and attachments are preserved.",
+                        expire: false,
                     });
                     return;
                 }
                 if (outcome === 'failed') {
                     throw new Error('Failed to automatically retry run');
                 }
+                set(threadAdmissionAtom, {
+                    threadId,
+                    tailRunId: expectedTailRunId,
+                    activity: { state: "idle", run_id: null },
+                });
             }
 
             await cleanupTemporaryAnnotationsForRunReplacement(logPrefix);
@@ -1100,7 +1122,6 @@ function confirmUndoAppliedActions(actions: ActionsToUndo, win: Window): UndoCon
     return 'cancel';
 }
 
-
 // =============================================================================
 // Missing Zotero Data Handling
 // =============================================================================
@@ -1114,7 +1135,7 @@ type MissingItemReason =
     | 'filtered_from_sync'  // Doesn't pass sync filters (e.g., not a PDF)
     | 'pending_sync'        // Added after last sync
     | 'file_unavailable_locally_and_on_server' // File unavailable locally and on server
-    | 'unknown';            // Unknown reason
+    | 'unknown'; // Unknown reason
 
 /**
  * Determine why an item is missing from the backend.
@@ -1190,14 +1211,16 @@ async function determineMissingReason(ref: ZoteroItemReference, userId: string |
 
 /** Human-readable messages for each missing reason */
 const MISSING_REASON_MESSAGES: Record<MissingItemReason, string> = {
-    'not_found': 'Item not found in your Zotero library',
-    'library_unavailable': "Library is not available on this computer. It may be a group library you haven't joined on this device",
-    'in_trash': 'Item is in trash',
-    'library_not_synced': 'Library is not configured to sync with Beaver',
-    'filtered_from_sync': 'Item type not supported',
-    'pending_sync': 'Item was added after the last sync. Please wait for sync to complete or sync manually in settings',
-    'file_unavailable_locally_and_on_server': 'File is unavailable',
-    'unknown': `Unexpected error. Please read about <a href="${process.env.WEBAPP_BASE_URL + '/docs/trouble-file-sync'}" className="text-link">sync issues</a> in the documentation and contact support if the issue persists.`,
+    not_found: 'Item not found in your Zotero library',
+    library_unavailable:
+        "Library is not available on this computer. It may be a group library you haven't joined on this device",
+    in_trash: 'Item is in trash',
+    library_not_synced: 'Library is not configured to sync with Beaver',
+    filtered_from_sync: 'Item type not supported',
+    pending_sync:
+        'Item was added after the last sync. Please wait for sync to complete or sync manually in settings',
+    file_unavailable_locally_and_on_server: 'File is unavailable',
+    unknown: `Unexpected error. Please read about <a href="${process.env.WEBAPP_BASE_URL + '/docs/trouble-file-sync'}" className="text-link">sync issues</a> in the documentation and contact support if the issue persists.`,
 };
 
 /**
@@ -1489,7 +1512,10 @@ function applyRunCitations(
 export function createWSCallbacks(
     set: Setter,
     connectAttempts: () => number | null = () => null,
+    restoreComposer?: () => void,
 ): WSCallbacks {
+    const navigation = store.get(threadNavigationSeqAtom);
+    const composerRunId = store.get(activeRunAtom)?.id;
     const generation = getCredentialGeneration();
     const writer = currentWriter();
     const callbackEpoch = ++writerCallbackEpoch;
@@ -1532,6 +1558,13 @@ export function createWSCallbacks(
         onRequestAck: (data: WSRequestAckData) => {
             logger('WS onRequestAck:', data, 1);
             set(wsRequestAckDataAtom, data);
+            const id = store.get(currentThreadIdAtom);
+            if (id)
+                set(threadAdmissionAtom, {
+                    threadId: id,
+                    tailRunId: data.runId,
+                    activity: { state: "idle", run_id: null },
+                });
         },
 
         onPart: async (event: WSPartEvent) => {
@@ -1752,6 +1785,14 @@ export function createWSCallbacks(
 
         onDone: () => {
             logger('WS onDone: Request fully complete', 1);
+            restoreComposer = undefined;
+            const completed = store.get(activeRunAtom);
+            if (completed?.thread_id)
+                set(threadAdmissionAtom, {
+                    threadId: completed.thread_id,
+                    tailRunId: completed.id,
+                    activity: { state: "idle", run_id: null },
+                });
             streamActivity.reset();
 
             // Clear any remaining streaming-done state (safety net)
@@ -1782,6 +1823,27 @@ export function createWSCallbacks(
 
         onError: (event: WSErrorEvent) => {
             logger('WS onError:', event, 1);
+            const restore = restoreComposer;
+            restoreComposer = undefined;
+            if (
+                isThreadConflict(event) ||
+                event.type === "thread_admission_unavailable"
+            ) {
+                set(threadConflictAtom, event.type);
+                const id = store.get(currentThreadIdAtom);
+                if (id && event.type === "thread_busy")
+                    set(threadAdmissionAtom, {
+                        threadId: id,
+                        tailRunId:
+                            store.get(threadAdmissionAtom)?.tailRunId ?? null,
+                        activity: { state: "unknown", run_id: null },
+                    });
+                if (restore && navigation === store.get(threadNavigationSeqAtom)
+                    && composerRunId === store.get(activeRunAtom)?.id
+                    && (!event.run_id || event.run_id === composerRunId)) {
+                    restore();
+                }
+            }
             const errorRunId = resolveErrorRunId(event, store.get(activeRunAtom));
 
             // An error can release the writer before onClose arrives. Retire
@@ -1818,6 +1880,7 @@ export function createWSCallbacks(
             set(clearRunApprovalPolicyAtom);
 
             if (
+                !isThreadConflict(event) &&
                 event.try_auto_resume &&
                 errorRunId &&
                 !store.get(scheduledAutoResumeRunIdsAtom).has(errorRunId)
@@ -2131,7 +2194,7 @@ export function createWSCallbacks(
                     );
                 }
             }
-        }
+        },
     });
     const guarded: Record<string, unknown> = { ...callbacks };
     for (const [name, callback] of Object.entries(callbacks)) {
@@ -2210,12 +2273,16 @@ async function executeWSRequest(
     run: AgentRun,
     request: AgentRunRequest,
     get: Getter,
-    set: Setter
+    set: Setter,
+    restoreComposer?: () => void,
 ): Promise<void> {
     assertWriter(currentWriter());
+    request.expected_tail_run_id = request.thread_id
+        ? (get(threadAdmissionAtom)?.tailRunId ?? null)
+        : null;
     // Every send/retry/resume lands here; stop if the client is already gone.
     if (clientShutDown) {
-        logger('executeWSRequest: client is shutting down, not connecting', 1);
+        logger("executeWSRequest: client is shutting down, not connecting", 1);
         set(abandonActiveRunLocallyAtom);
         return;
     }
@@ -2238,7 +2305,8 @@ async function executeWSRequest(
         return (
             !!activeRun &&
             activeRun.id !== run.id &&
-            (activeRun.status === 'in_progress' || activeRun.status === 'awaiting_deferred')
+            (activeRun.status === "in_progress" ||
+                activeRun.status === "awaiting_deferred")
         );
     };
 
@@ -2246,7 +2314,7 @@ async function executeWSRequest(
     const result = await connectWithRetry({
         service: agentService,
         request,
-        callbacks: createWSCallbacks(set, () => attemptsMade),
+        callbacks: createWSCallbacks(set, () => attemptsMade, restoreComposer),
         logLabel: `run ${run.id}`,
         // Every attempt starts from a clean ready state.
         onAttempt: () => set(isWSReadyAtom, false),
@@ -2266,15 +2334,17 @@ async function executeWSRequest(
         // with a generic connection_error.
         isAlreadyReported: () => {
             const currentError = get(wsErrorAtom);
-            return !!currentError && currentError.type !== 'connection_error';
+            return !!currentError && currentError.type !== "connection_error";
         },
         // The run may have been cancelled, replaced, or rolled back during the
         // backoff wait — a retry whose tail was restored drops its shell here.
         isStillWanted: () => {
             const activeRun = store.get(activeRunAtom);
             return (
-                ownsWriter(requestWriter) && activeRun?.id === run.id &&
-                (activeRun.status === 'in_progress' || activeRun.status === 'awaiting_deferred')
+                ownsWriter(requestWriter) &&
+                activeRun?.id === run.id &&
+                (activeRun.status === "in_progress" ||
+                    activeRun.status === "awaiting_deferred")
             );
         },
     }).finally(() => {
@@ -2284,11 +2354,14 @@ async function executeWSRequest(
     if (!ownsWriter(requestWriter)) return;
     attemptsMade = result.attemptsMade;
 
-    if (result.kind === 'connected') return;
+    if (result.kind === "connected") return;
 
-    if (result.kind === 'abandoned') {
-        if (result.reason === 'already_reported') {
-            logger('WS connection error: Error already set by onError callback, not overwriting', 1);
+    if (result.kind === "abandoned") {
+        if (result.reason === "already_reported") {
+            logger(
+                "WS connection error: Error already set by onError callback, not overwriting",
+                1,
+            );
             // The onError that set this error may have dispatched an auto-retry
             // whose commit is now in flight and owns the pending flag (see
             // retryPendingRunIdAtom) — or a newer run may be holding it, which
@@ -2298,7 +2371,10 @@ async function executeWSRequest(
             }
             return;
         }
-        logger(`WS connect retry abandoned: run ${run.id} is no longer active`, 1);
+        logger(
+            `WS connect retry abandoned: run ${run.id} is no longer active`,
+            1,
+        );
         // Release the flag the quiet retry raised. Nothing downstream clears it
         // on this path, and a stuck flag leaves the composer blocked with no run
         // to finish and no error to show. Unless the run that superseded this one
@@ -2308,7 +2384,12 @@ async function executeWSRequest(
         return;
     }
 
-    surfaceAndDiagnoseConnectionFailure(set, run.id, result.evidence, result.attemptsMade);
+    surfaceAndDiagnoseConnectionFailure(
+        set,
+        run.id,
+        result.evidence,
+        result.attemptsMade,
+    );
     // Guarded like the abandoned paths above, because this one is reachable with
     // a newer run live too: an attempt can be in flight for twenty seconds, and a
     // run that starts in that window has already raised the flag for itself
@@ -2321,7 +2402,7 @@ async function executeWSRequest(
 
 /**
  * Send a chat message via WebSocket
- * 
+ *
  * Flow:
  * 1. Create AgentRun shell → set activeRunAtom → UI shows user message + spinner
  * 2. Connect WebSocket with auth params
@@ -2340,54 +2421,54 @@ export interface SendWSMessageOptions {
 }
 
 const sendWSMessage = async (
-        get: Getter,
-        set: Setter,
-        message: string,
-        options?: SendWSMessageOptions,
-    ) => {
-        const accountGeneration = getCredentialGeneration();
-        const originalSet = set;
-        set = ((...args: Parameters<Setter>) => {
+    get: Getter,
+    set: Setter,
+    message: string,
+    options?: SendWSMessageOptions,
+) => {
+    const accountGeneration = getCredentialGeneration();
+    const originalSet = set;
+    set = ((...args: Parameters<Setter>) => {
             assertCredentialGeneration(accountGeneration);
             return originalSet(...args);
         }) as Setter;
-        const { runIdOverride, permissionsOverride, origin, actions } = options ?? {};
-        const isPending = get(isWSChatPendingAtom);
-        logger('sendWSMessageAtom: Called at ' + Date.now() + ' with message: ' + message.substring(0, 50) + ' (isPending: ' + isPending + ')', 1);
-        
-        // Guard: Don't allow concurrent requests. The retry lock is checked
-        // separately because the failed run's dying socket can clear the
-        // pending flag mid-commit — the lock is released only by the retry
-        // flow itself.
-        if (isPending) {
+    const { runIdOverride, permissionsOverride, origin, actions } = options ?? {};
+    const isPending = get(isWSChatPendingAtom);
+    logger('sendWSMessageAtom: Called at ' + Date.now() + ' with message: ' + message.substring(0, 50) + ' (isPending: ' + isPending + ')', 1);
+
+    // Guard: Don't allow concurrent requests. The retry lock is checked
+    // separately because the failed run's dying socket can clear the
+    // pending flag mid-commit — the lock is released only by the retry
+    // flow itself.
+    if (isPending) {
             logger('sendWSMessageAtom: Blocked - already have request in progress', 1);
             return;
         }
-        if (retryCommitInFlight(get, 'sendWSMessageAtom')) return;
-        
-        // Dismiss any open diff preview before sending
-        dismissDiffPreview();
+    if (retryCommitInFlight(get, 'sendWSMessageAtom')) return;
 
-        // Reset state
-        set(prepareForNewRunAtom);
-        prewarmMuPDFWorker();
-        set(isWSChatPendingAtom, true);
+    // Dismiss any open diff preview before sending
+    dismissDiffPreview();
 
-        try {
-            const applicationStatePromise = getApplicationStateProvider()(get);
-            // Attach a rejection handler immediately while attachment preparation runs.
-            void applicationStatePromise.catch(() => {});
-            const readerActionContext = get(stagedReaderActionContextAtom);
-            // Routed reader actions carry their own document; destination tabs
-            // must not add unrelated reader or note attachments.
-            const submissionReaderAttachment = readerActionContext ? null : get(currentReaderAttachmentAtom);
-            const submissionNoteItem = readerActionContext ? null : get(currentNoteItemAtom);
-            // Get current model and build model selection options for the request
-            const model = get(selectedModelAtom);
-            const modelOptions = buildModelSelectionOptions(model);
+    // Reset state
+    set(prepareForNewRunAtom);
+    prewarmMuPDFWorker();
+    set(isWSChatPendingAtom, true);
 
-            // Log model and model selection info
-            logger('Selected model:', model ? {
+    try {
+        const applicationStatePromise = getApplicationStateProvider()(get);
+        // Attach a rejection handler immediately while attachment preparation runs.
+        void applicationStatePromise.catch(() => {});
+        const readerActionContext = get(stagedReaderActionContextAtom);
+        // Routed reader actions carry their own document; destination tabs
+        // must not add unrelated reader or note attachments.
+        const submissionReaderAttachment = readerActionContext ? null : get(currentReaderAttachmentAtom);
+        const submissionNoteItem = readerActionContext ? null : get(currentNoteItemAtom);
+        // Get current model and build model selection options for the request
+        const model = get(selectedModelAtom);
+        const modelOptions = buildModelSelectionOptions(model);
+
+        // Log model and model selection info
+        logger('Selected model:', model ? {
                 id: model.id,
                 name: model.name,
                 provider: model.provider,
@@ -2396,12 +2477,12 @@ const sendWSMessage = async (
                 allow_byok: model.allow_byok,
                 access_mode: model.access_mode,
             } : null);
-            logger('Model selection options:', {
+        logger('Model selection options:', {
                 model_id: modelOptions.model_id || '(not set - using custom model or plan default)',
                 hasApiKey: !!modelOptions.api_key,
             });
 
-            // Custom instructions (if any)
+        // Custom instructions (if any)
         const customInstructions = getPref('customInstructions') || undefined;
 
         // Build attachments from current message items. Final send gate: drop
@@ -2617,28 +2698,28 @@ const sendWSMessage = async (
         // Get current thread ID (null for new thread)
         const threadId = get(currentThreadIdAtom);
 
-            // Set temporary thread name for new threads (mirrors backend thread_name_hint[:35])
-            if (!threadId && message) {
+        // Set temporary thread name for new threads (mirrors backend thread_name_hint[:35])
+        if (!threadId && message) {
                 set(currentThreadNameAtom, message.substring(0, 35));
             }
 
-            assertCredentialGeneration(accountGeneration);
-            // Get user ID for the run
-            const userId = get(userIdAtom);
-            if (!userId) {
+        assertCredentialGeneration(accountGeneration);
+        // Get user ID for the run
+        const userId = get(userIdAtom);
+        if (!userId) {
                 logger('User ID not found', 1);
                 set(isWSChatPendingAtom, false);
                 return;
             }
 
-            // A failed run still in the active slot has to stay in local
-            // history: the server persisted it, and overwriting the slot
-            // without archiving would drop it from the client's view — a
-            // ghost in the middle of the server thread.
-            archiveTerminalActiveRun(get, set);
+        // A failed run still in the active slot has to stay in local
+        // history: the server persisted it, and overwriting the slot
+        // without archiving would drop it from the client's view — a
+        // ghost in the middle of the server thread.
+        archiveTerminalActiveRun(get, set);
 
-            // Create AgentRun shell and request
-            const { run, request } = createAgentRunShell(
+        // Create AgentRun shell and request
+        const { run, request } = createAgentRunShell(
                 userPrompt,
                 threadId,
                 userId,
@@ -2650,19 +2731,38 @@ const sendWSMessage = async (
                 { runIdOverride, permissionsOverride },
             );
 
-            // Set active run - UI now shows user message + spinner
-            set(activeRunAtom, run);
+        // Set active run - UI now shows user message + spinner
+        set(activeRunAtom, run);
 
-            // Reset user message input after creating the run
-            set(clearComposerAtom);
-            set(removePopupMessagesByTypeAtom, ['items_summary']);
-            set(currentMessageItemsAtom, []);
-            set(currentMessageCollectionsAtom, []);
-            set(currentMessageExternalFilesAtom, []);
+        const savedContent = get(currentMessageContentAtom) || message;
+        const savedPills = get(currentMessagePillsAtom);
+        const savedReaderAction = get(readerActionContextAtom);
+        const savedItems = get(currentMessageItemsAtom);
+        const savedCollections = get(currentMessageCollectionsAtom);
+        const savedFiles = get(currentMessageExternalFilesAtom);
+        const restoreComposer = () => {
+            if (!get(currentMessageContentAtom) && !get(currentMessagePillsAtom).length) {
+                set(currentMessageContentAtom, savedContent);
+                set(currentMessagePillsAtom, savedPills);
+                set(readerActionContextAtom, savedReaderAction);
+            }
+            if (!get(currentMessageItemsAtom).length)
+                set(currentMessageItemsAtom, savedItems);
+            if (!get(currentMessageCollectionsAtom).length)
+                set(currentMessageCollectionsAtom, savedCollections);
+            if (!get(currentMessageExternalFilesAtom).length)
+                set(currentMessageExternalFilesAtom, savedFiles);
+        };
+        // Reset user message input after creating the run
+        set(clearComposerAtom);
+        set(removePopupMessagesByTypeAtom, ['items_summary']);
+        set(currentMessageItemsAtom, []);
+        set(currentMessageCollectionsAtom, []);
+        set(currentMessageExternalFilesAtom, []);
 
-            // Execute the WebSocket request
-            await executeWSRequest(run, request, get, set);
-        } catch (error) {
+        // Execute the WebSocket request
+        await executeWSRequest(run, request, get, set, restoreComposer);
+    } catch (error) {
             if (accountGeneration !== getCredentialGeneration()) return;
             // Catch any unexpected errors during message preparation
             logger('sendWSMessageAtom: Unexpected error:', error, 1);
@@ -2675,7 +2775,7 @@ const sendWSMessage = async (
             set(activeRunAtom, null);
             set(isWSChatPendingAtom, false);
         }
-    };
+};
 export const sendWSMessageAtom = atom(null, (get, set, message: string, options?: SendWSMessageOptions) =>
     withThreadWriter(get, set, guardedSet => sendWSMessage(get, guardedSet, message, options)));
 
@@ -2755,8 +2855,8 @@ async function startRegenerateRunOwned(
 
         // Fold a terminal run out of the active slot into thread history
         // before the removed set is computed: a failed run being replaced
-        // contributes its applied actions to the confirm dialog and its ID
-        // to the POSTed removal (it is persisted server-side).
+        // contributes its applied actions to the confirm dialog. Reconciliation
+        // below distinguishes persisted runs from local-only failed requests.
         archiveAndClearTerminalActiveRun(get, set);
 
         // Find the run — a terminal run was archived into threadRuns above,
@@ -2780,14 +2880,15 @@ async function startRegenerateRunOwned(
             return;
         }
 
+        set(retryPendingRunIdAtom, runId);
         if (activeRun) {
             // A live follow-up belongs to the suffix being replaced too.
             // Keep its stopped response in history until truncation succeeds,
             // including when the request fails or the undo dialog is canceled.
-            if (activeRun.id !== targetRun.id) {
+            {
                 threadRuns = appendRunIfMissing(threadRuns, {
                     ...activeRun,
-                    status: 'canceled',
+                    status: "canceled",
                     completed_at: new Date().toISOString(),
                 });
                 set(threadRunsAtom, threadRuns);
@@ -2807,15 +2908,72 @@ async function startRegenerateRunOwned(
             // after the POST would let a switch made during this flush put
             // that dialog in front of the new chat and aim the removal at it.
             // Ahead of the clear below, which abandoning does for itself.
-            if (abandonReplacementIfThreadChanged(get, set, {
-                navSeqBeforeAwait,
-                pendingRetryRunId: runId,
-                logPrefix,
-                popupText: USER_RETRY_ABANDONED_TEXT,
-            })) {
+            if (
+                abandonReplacementIfThreadChanged(get, set, {
+                    navSeqBeforeAwait,
+                    pendingRetryRunId: runId,
+                    logPrefix,
+                    popupText: USER_RETRY_ABANDONED_TEXT,
+                })
+            ) {
                 return;
             }
             set(isWSChatPendingAtom, false);
+        }
+
+        const localHistory = threadRuns;
+        const observedAdmission = get(threadAdmissionAtom);
+        let persistedRunIds: Set<string> | undefined;
+        const intendedRunIds = new Set(threadRuns.map((run) => run.id));
+        intendedRunIds.add(targetRun.id);
+        const settlementThreadId =
+            get(currentThreadIdAtom) || targetRun.thread_id;
+        if (settlementThreadId && Zotero.Beaver?.presence) {
+            set(threadAdmissionAtom, { threadId: settlementThreadId, tailRunId: get(threadAdmissionAtom)?.tailRunId ?? null, activity: { state: 'unknown', run_id: null } });
+            const generation = getCredentialGeneration();
+            const current = () =>
+                navSeqBeforeAwait === get(threadNavigationSeqAtom) &&
+                generation === getCredentialGeneration() &&
+                ownsWriter(currentWriter());
+            const deadline = Date.now() + 130000;
+            let delay = 250;
+            for (;;) {
+                const snapshot = await readAdmission(settlementThreadId);
+                if (!current()) return;
+                set(threadAdmissionAtom, snapshot);
+                if (snapshot.activity.state !== "active") break;
+                if (Date.now() >= deadline)
+                    throw new Error(
+                        "The response is still settling. Retry once it finishes.",
+                    );
+                await Zotero.Promise.delay(delay);
+                if (!current()) return;
+                delay = Math.min(delay * 2, 3000);
+            }
+            if (!(await reconcileThread(get, set, current))) return;
+            threadRuns = get(threadRunsAtom);
+            persistedRunIds = new Set(threadRuns.map(run => run.id));
+            // A failed pre-admission request exists only in this renderer. Keep
+            // that suffix when the authoritative tail and persisted prefix still
+            // match; a remotely truncated or rewritten history is a conflict.
+            const localSuffix = localHistory.slice(threadRuns.length);
+            if (observedAdmission?.threadId === settlementThreadId
+                && observedAdmission.tailRunId === get(threadAdmissionAtom)?.tailRunId
+                && threadRuns.every((run, index) => run.id === localHistory[index]?.id)
+                && localSuffix.every(run => run.status === 'error' || run.status === 'canceled')) {
+                threadRuns = [...threadRuns, ...localSuffix];
+                set(threadRunsAtom, threadRuns);
+            }
+            if (threadRuns.some((run) => !intendedRunIds.has(run.id))) {
+                set(threadConflictAtom, "thread_tail_mismatch");
+                return;
+            }
+            runIndex = threadRuns.findIndex((run) => run.id === targetRun!.id);
+            if (runIndex < 0) {
+                set(threadConflictAtom, "thread_tail_mismatch");
+                return;
+            }
+            targetRun = threadRuns[runIndex];
         }
 
         // If the target is a resume run, walk the resume chain back to the
@@ -2896,7 +3054,7 @@ async function startRegenerateRunOwned(
 
         // Prompt the user to confirm undoing applied actions. The dialog is
         // the consent and must precede the truncate POST: a user who cancels
-        // leaves no trace anywhere. The undo itself executes only after the
+        // preserves history and leaves any canceled response stopped. Undo executes after the
         // backend confirms, so a failed POST changes nothing.
         let confirmResult: UndoConfirmResult = 'skip';
         const hasActionsToUndo = annotationsToDelete.length > 0 || annotationEditsToUndo.length > 0 ||
@@ -2937,13 +3095,16 @@ async function startRegenerateRunOwned(
             // the backend refuses when its survivor differs (rewritten by
             // another client), instead of misreading a stale retry as an
             // idempotent replay.
-            const expectedTailRunId = runIndex > 0 ? threadRuns[runIndex - 1].id : null;
-            const outcome = await truncateThreadOnServer(
+            const survivingRuns = threadRuns.slice(0, runIndex)
+                .filter(run => !persistedRunIds || persistedRunIds.has(run.id));
+            const expectedTailRunId = survivingRuns.at(-1)?.id ?? null;
+            const persistedRemovals = runIdsToRemove.filter(id => !persistedRunIds || persistedRunIds.has(id));
+            const outcome = persistedRemovals.length ? await truncateThreadOnServer(
                 threadId,
-                runIdsToRemove,
+                persistedRemovals,
                 expectedTailRunId,
                 logPrefix,
-            );
+            ) : "ok";
             if (abandonReplacementIfThreadChanged(get, set, {
                 navSeqBeforeAwait,
                 pendingRetryRunId: runId,
@@ -2963,23 +3124,35 @@ async function startRegenerateRunOwned(
                 });
                 return;
             }
-            if (outcome === 'refused') {
+            if (outcome === "refused" || outcome === "busy") {
                 set(retryPendingRunIdAtom, null);
                 set(isWSChatPendingAtom, false);
+                set(
+                    threadConflictAtom,
+                    outcome === "busy" ? "thread_busy" : "thread_tail_mismatch",
+                );
+                if (outcome === "busy")
+                    set(threadAdmissionAtom, {
+                        threadId,
+                        tailRunId: expectedTailRunId,
+                        activity: { state: "unknown", run_id: null },
+                    });
                 set(addPopupMessageAtom, {
-                    type: 'warning',
-                    title: 'Chat changed elsewhere',
-                    text: 'This chat was changed somewhere else (for example on another device), so the retry was not applied. Reloading the chat.',
-                    expire: true,
-                });
-                // Show the thread whole, including whatever was added elsewhere.
-                await set(loadThreadAtom, {
-                    user_id: userId,
-                    threadId,
-                    skipInstanceMismatchConfirm: true,
+                    type: "warning",
+                    title:
+                        outcome === "busy"
+                            ? "Response still settling"
+                            : "Chat changed elsewhere",
+                    text: "The retry was not sent. Your draft and attachments are preserved. Refresh the chat and retry explicitly.",
+                    expire: false,
                 });
                 return;
             }
+            set(threadAdmissionAtom, {
+                threadId,
+                tailRunId: expectedTailRunId,
+                activity: { state: "idle", run_id: null },
+            });
         }
 
         if (confirmResult === 'undo') {
@@ -3082,6 +3255,11 @@ async function startRegenerateRunOwned(
         set(activeRunAtom, prev => (newRunId && prev?.id === newRunId ? null : prev));
         set(retryPendingRunIdAtom, prev => (prev === runId ? null : prev));
         set(isWSChatPendingAtom, false);
+    } finally {
+        if (get(retryPendingRunIdAtom) === runId) {
+            set(retryPendingRunIdAtom, null);
+            set(isWSChatPendingAtom, false);
+        }
     }
 }
 
@@ -3119,12 +3297,12 @@ export const regenerateWithEditedPromptAtom = atom(
 
 /**
  * Resume a failed run from its error point.
- * 
+ *
  * Flow:
  * 1. Find the failed run
  * 2. Create a new run with is_resume=true and empty content
  * 3. Execute via WebSocket
- * 
+ *
  * The backend will continue from where it left off and the UI will hide the error run
  * when displaying the resumed run.
  */
@@ -3690,9 +3868,18 @@ function settleWriter(get: Getter, writer: WriterLease | undefined): void {
     if (id) store.set(viewedHistoryRevisionAtom, Zotero.Beaver.presence.getSnapshot().history[id] ?? 0);
 }
 /** Admit before preparation; nested composer/run phases retain the same lease. */
-export async function withThreadWriter<T>(get: Getter, set: Setter, operation: (set: Setter) => Promise<T>): Promise<T | undefined> {
+export async function withThreadWriter<T>(
+    get: Getter,
+    set: Setter,
+    operation: (set: Setter) => Promise<T>,
+): Promise<T | undefined> {
     const id = get(currentThreadIdAtom);
     const presence = Zotero.Beaver?.presence;
+    if (
+        get(threadConflictAtom) ||
+        (get(serverThreadBlockedAtom) && !ownsWriter(currentWriter()))
+    )
+        return;
     if (presence && id) {
         const snapshot = presence.getSnapshot();
         const owner = snapshot.claims.find(claim => claim.threadId === id);
@@ -3711,15 +3898,52 @@ export async function withThreadWriter<T>(get: Getter, set: Setter, operation: (
         return;
     }
     if (writer) writer.preparing++;
+
     const nav = get(threadNavigationSeqAtom);
     const guardedSet = ((...args: any[]) => {
         assertWriter(writer);
         if (writer && nav !== get(threadNavigationSeqAtom)) throw Object.assign(new Error('Chat changed'), { code: 'thread_operation_canceled' });
         return (set as any)(...args);
     }) as Setter;
-    try { return await operation(guardedSet); }
-    catch (error) {
-        if ((error as { code?: string })?.code !== 'thread_operation_canceled') throw error;
+    try {
+        if (
+            presence &&
+            id &&
+            writer?.preparing === 1 &&
+            !get(activeRunAtom) &&
+            !get(retryPendingRunIdAtom)
+        ) {
+            const generation = getCredentialGeneration();
+            const snapshot = await readAdmission(id);
+            assertCredentialGeneration(generation);
+            assertWriter(writer);
+            if (nav !== get(threadNavigationSeqAtom)) return;
+            const previous = get(threadAdmissionAtom);
+            guardedSet(threadAdmissionAtom, snapshot);
+            if (
+                snapshot.activity.state === "active" ||
+                (previous?.threadId === id &&
+                    previous.tailRunId !== snapshot.tailRunId)
+            ) {
+                if (snapshot.activity.state !== "active")
+                    guardedSet(threadConflictAtom, "thread_tail_mismatch");
+                return;
+            }
+        }
+        return await operation(guardedSet);
+    } catch (error) {
+        if (
+            (error as { code?: string })?.code !== 'thread_operation_canceled'
+        ) {
+            if (ownsWriter(writer) && nav === get(threadNavigationSeqAtom))
+                set(addPopupMessageAtom, {
+                    type: "error",
+                    title: "Chat could not be checked",
+                    text:
+                        error instanceof Error ? error.message : String(error),
+                    expire: false,
+                });
+        }
     } finally {
         if (writer) writer.preparing--;
         settleWriter(get, writer);

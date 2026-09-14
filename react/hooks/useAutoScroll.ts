@@ -60,7 +60,7 @@ interface UseAutoScrollReturn {
  */
 export function useAutoScroll(
     forwardedRef?: ForwardedRef<HTMLDivElement>,
-    options: UseAutoScrollOptions = {}
+    options: UseAutoScrollOptions = {},
 ): UseAutoScrollReturn {
     const {
         threshold = BOTTOM_THRESHOLD,
@@ -68,7 +68,7 @@ export function useAutoScroll(
     } = options;
 
     // Select the correct atoms based on whether we're in the separate window
-    const scrollAtoms = getScrollAtoms(isWindow);
+    const scrollAtoms = getScrollAtoms();
     const scrolledAtom = scrollAtoms.userScrolled;
     const scrollPositionAtom = scrollAtoms.position;
 
@@ -343,4 +343,3 @@ export function useAutoScroll(
         handleScroll
     };
 }
-

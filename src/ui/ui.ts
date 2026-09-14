@@ -57,6 +57,7 @@ export class BeaverUIFactory {
         ztoolkit.log(`registerChatPanel: start for window ${windowHref}`);
         // Remove existing panel if present
         this.removeChatPanel(win);
+        const standalone = win.__beaverRuntime?.kind === "standalone";
         ztoolkit.log("registerChatPanel: previous panel removed");
 
         /**
@@ -102,7 +103,7 @@ export class BeaverUIFactory {
         }
 
         // Add toggle button to toolbar
-        this.addToolbarButton(win);
+        if (!standalone) this.addToolbarButton(win);
         ztoolkit.log("registerChatPanel: toolbar button setup finished");
 
         // Load React bundle
@@ -128,13 +129,12 @@ export class BeaverUIFactory {
                     throw new Error("Beaver renderer API incomplete");
                 }
 
-            
                 // Initialize roots tracking for this window
                 if (!this.windowRoots.has(win)) {
                     this.windowRoots.set(win, new Set());
                 }
                 const roots = this.windowRoots.get(win)!;
-            
+
                 // Create and render global initializer once
                 let globalInitializerRoot = win.document.getElementById("beaver-global-initializer-root");
                 if (!globalInitializerRoot) {
@@ -176,6 +176,14 @@ export class BeaverUIFactory {
                     ztoolkit.log("registerChatPanel: floating popup root already existed");
                 }
 
+                if (standalone) {
+                    const container =
+                        win.document.getElementById("beaver-pane-window");
+                    if (container)
+                        roots.add(
+                            win.BeaverReact.renderWindowSidebar(container),
+                        );
+                }
                 // Render React components for actual sidebars
                 const libraryRootEl = win.document.getElementById("beaver-react-root-library");
                 const readerRootEl = win.document.getElementById("beaver-react-root-reader");
@@ -339,7 +347,7 @@ export class BeaverUIFactory {
 
     /**
      * Remove the chat panel and unmount React components.
-     * 
+     *
      * IMPORTANT: This must always attempt to unmount React components even if
      * win.closed is true, because React cleanup effects need to run to unregister
      * Zotero.Notifier observers. Skipping this causes SIGSEGV during shutdown.
@@ -576,10 +584,10 @@ export class BeaverUIFactory {
             }
         );
     }
-    
+
     /**
      * Unregister all keyboard shortcuts.
-     * 
+     *
      * CRITICAL: This must be called during shutdown to:
      * 1. Clear the interval in KeyboardManager
      * 2. Unregister Zotero.Reader event listeners
@@ -595,12 +603,14 @@ export class BeaverUIFactory {
      * Find an existing Beaver separate window
      */
     static findBeaverWindow(): Window | undefined {
+        const pending = Zotero.Beaver?.runtime?.standaloneWindow;
+        if (pending && !pending.closed) return pending;
         try {
             const wm = Services.wm;
             const enumerator = wm.getEnumerator('beaver:window');
             while (enumerator.hasMoreElements()) {
                 const win = enumerator.getNext() as Window;
-                if (win.name === BEAVER_WINDOW_NAME) {
+                if (!win.closed && win.name === BEAVER_WINDOW_NAME) {
                     return win;
                 }
             }
@@ -619,46 +629,78 @@ export class BeaverUIFactory {
      * this window keeps their size unless it is too small for what is about to
      * be shown.
      */
-    static openBeaverWindow(minSize?: { width?: number; height?: number }, origin?: Window): void {
+    static openBeaverWindow(
+        minSize?: { width?: number; height?: number },
+        origin?: Window,
+    ): Window {
         const existingWindow = this.findBeaverWindow();
         if (existingWindow) {
             this.growWindowTo(existingWindow, minSize);
             existingWindow.focus();
             Zotero.debug("Beaver: Focusing existing separate window");
-            return;
+            return existingWindow;
         }
 
-        const mainWindow = contextMainWindow(origin ?? Zotero.getMainWindow());
-        if (!mainWindow) return;
-        const ownerWindowRef = new WeakRef(mainWindow);
+        const mainWindow = origin ?? Zotero.getMainWindow();
         const features = [
-            'chrome',
-            'resizable',
-            'centerscreen',
-            'dialog=false',
-            minSize?.width ? `width=${minSize.width}` : '',
-            minSize?.height ? `height=${minSize.height}` : '',
+            "chrome",
+            "resizable",
+            "centerscreen",
+            "dialog=false",
+            minSize?.width ? `width=${minSize.width}` : "",
+            minSize?.height ? `height=${minSize.height}` : "",
         ]
             .filter(Boolean)
-            .join(',');
+            .join(",");
 
-        const opened = mainWindow.openDialog(
-            'chrome://beaver/content/beaverWindow.xhtml',
+        const opened = Services.ww.openWindow(
+            (mainWindow ?? null) as any,
+            "chrome://beaver/content/beaverWindow.xhtml",
             BEAVER_WINDOW_NAME,
             features,
-            { ownerWindowRef }
-        );
-        if (opened) opened.__beaverOwnerWindowRef = ownerWindowRef;
+            null as any,
+        ) as unknown as Window;
+        if (Zotero.Beaver?.runtime) Zotero.Beaver.runtime.standaloneWindow = opened;
         // A persisted width smaller than the feature string's is reapplied once
         // the window's attributes load, so grow it again after that.
         if (opened && minSize) {
             opened.addEventListener(
-                'load',
+                "load",
                 () => this.growWindowTo(opened, minSize),
-                { once: true }
+                { once: true },
             );
         }
         Zotero.debug("Beaver: Opened separate window");
+        return opened;
+    }
+
+    /** Send plain data to the independent renderer, pinning it before waiting. */
+    static async commandBeaverWindow(
+        command: string,
+        payload: Record<string, unknown> = {},
+    ): Promise<any> {
+        const win = this.openBeaverWindow();
+        if (!win)
+            throw Object.assign(new Error("Beaver window unavailable"), {
+                code: "window_unavailable",
+            });
+        const deadline = Date.now() + 15000;
+        while (
+            !win.closed &&
+            win.__beaverRuntime?.status !== "ready" &&
+            Date.now() < deadline
+        ) {
+            await Zotero.Promise.delay(25);
+        }
+        if (win.closed || win.__beaverRuntime?.status !== "ready") {
+            throw Object.assign(new Error("Beaver window unavailable"), {
+                code: "window_unavailable",
+            });
+        }
+        return Zotero.Beaver.runtime.dispatchWindowCommand(command, {
+            ...JSON.parse(JSON.stringify(payload)),
+            windowId: win.__beaverRuntime.id,
+        });
     }
 
     /** Grows a window to at least `minSize`, never shrinking it. */
@@ -685,20 +727,9 @@ export class BeaverUIFactory {
         }
     }
 
-    /**
-     * Close the auxiliary windows (separate Beaver window, preferences) that
-     * render with `win`'s React instance.
-     *
-     * Neither window loads its own React bundle: each grabs `BeaverReact` from
-     * a main window at load time and shares that bundle's Jotai store, which it
-     * records as `__beaverOwnerWindowRef`. Once that main window unloads, the
-     * auxiliary window is frozen against a dead bundle and its state is
-     * invisible to the bundle a reopened main window loads — so it must not
-     * outlive its owner. `closeUnowned` additionally closes windows with no
-     * recorded owner, for the last-main-window case where no bundle remains.
-     */
+    /** Close preferences before disposing the renderer that owns them. */
     static closeWindowsRenderedBy(win: Window, closeUnowned = false): void {
-        const auxiliaryWindows = [this.findBeaverWindow(), this.findPreferencesWindow()];
+        const auxiliaryWindows = [this.findPreferencesWindow()];
         for (const auxiliaryWindow of auxiliaryWindows) {
             if (!auxiliaryWindow || auxiliaryWindow.closed) continue;
             const owner = auxiliaryWindow.__beaverOwnerWindowRef?.deref();
@@ -730,7 +761,12 @@ export class BeaverUIFactory {
      * that the Actions tab pre-filter its list to that category (or "uncategorized").
      * `actionId` requests that the Actions tab reveal that action in edit mode.
      */
-    static openPreferencesWindow(tab?: PreferencePageTab, actionsCategoryFilter?: ActionCategoryFilter, actionId?: string, window?: Window): void {
+    static openPreferencesWindow(
+        tab?: PreferencePageTab,
+        actionsCategoryFilter?: ActionCategoryFilter,
+        actionId?: string,
+        window?: Window,
+    ): void {
         const existingWindow = this.findPreferencesWindow();
         if (existingWindow) {
             // Switch tab (and apply the category filter / action-edit request)
@@ -743,7 +779,10 @@ export class BeaverUIFactory {
             return;
         }
 
-        const mainWindow = contextMainWindow(window ?? Zotero.getMainWindow());
+        const mainWindow = window?.__beaverRuntime
+            ? window
+            : (contextMainWindow(window ?? Zotero.getMainWindow()) ??
+              this.findBeaverWindow());
         if (!mainWindow) return;
         const ownerWindowRef = new WeakRef(mainWindow);
         const opened = mainWindow.openDialog(

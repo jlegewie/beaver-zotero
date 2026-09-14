@@ -4,7 +4,8 @@ import { ReaderWidthDispatcher } from './readerWidth';
 export interface WindowRuntime {
     readonly id: string;
     readonly hostWindow: Window;
-    readonly contextWindow: Window;
+    readonly kind: "main" | "standalone";
+    contextWindow: Window | null;
     readonly events: EventTarget;
     status: 'attaching' | 'ready' | 'closing';
 }
@@ -23,6 +24,8 @@ function embedderWindow(win: Window): Window | undefined {
 }
 
 export class BeaverInstance {
+    /** Singleton handle also covers the interval before its renderer attaches. */
+    standaloneWindow?: Window;
     private windows = new Map<Window, WindowRuntime>();
     private nextId = 0;
     private readonly idPrefix = `main-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -32,18 +35,69 @@ export class BeaverInstance {
     private subscriptions = new Map<WindowRuntime, Set<() => void>>();
     private notifications = new Map<string, Set<(detail: any) => void>>();
 
-    attachWindow(win: Window): WindowRuntime {
-        if (this.disposed) throw new Error('Beaver instance disposed');
+    attachWindow(
+        win: Window,
+        kind: WindowRuntime["kind"] = "main",
+    ): WindowRuntime {
+        if (this.disposed) throw new Error("Beaver instance disposed");
         const existing = this.windows.get(win);
         if (existing) return existing;
         const runtime: WindowRuntime = {
-            id: `${this.idPrefix}-${++this.nextId}`, hostWindow: win, contextWindow: win,
-            events: new win.EventTarget(), status: 'attaching',
+            id: `${this.idPrefix}-${++this.nextId}`,
+            hostWindow: win,
+            kind,
+            contextWindow: kind === "main" ? win : this.activeMainWindow(),
+            events: new win.EventTarget(),
+            status: "attaching",
         };
         this.windows.set(win, runtime);
+        if (kind === "standalone") this.standaloneWindow = win;
         win.__beaverRuntime = runtime;
         win.__beaverEventBus = runtime.events;
+        if (kind === "main") {
+            const focus = () => this.refreshContext(win);
+            win.addEventListener("activate", focus);
+            this.addWindowCleanup(runtime, () =>
+                win.removeEventListener("activate", focus),
+            );
+            this.refreshContext();
+        }
         return runtime;
+    }
+
+    private activeMainWindow(): Window | null {
+        const active = Zotero.getMainWindow();
+        if (
+            active &&
+            !active.closed &&
+            this.windows.has(active) &&
+            this.windows.get(active)?.status !== "closing"
+        )
+            return active;
+        return (
+            [...this.windows.values()].find(
+                (r) =>
+                    r.kind === "main" &&
+                    r.status !== "closing" &&
+                    !r.hostWindow.closed,
+            )?.hostWindow ?? null
+        );
+    }
+
+    refreshContext(preferred?: Window): void {
+        const context = preferred ?? this.activeMainWindow();
+        for (const runtime of this.windows.values()) {
+            if (
+                runtime.kind !== "standalone" ||
+                runtime.status === "closing" ||
+                runtime.contextWindow === context
+            )
+                continue;
+            runtime.contextWindow = context;
+            runtime.events.dispatchEvent(
+                new runtime.hostWindow.CustomEvent("contextWindowChanged"),
+            );
+        }
     }
 
     async openChat(): Promise<void> {
@@ -54,9 +108,13 @@ export class BeaverInstance {
 
     getWindow(win: Window): WindowRuntime | undefined { return this.windows.get(win); }
     resolveWindow(id?: string): WindowRuntime | undefined {
-        const runtime = id !== undefined
-            ? [...this.windows.values()].find(value => value.id === id)
-            : this.windows.get(Zotero.getMainWindow());
+        const runtime =
+            id !== undefined
+                ? [...this.windows.values()].find(value => value.id === id)
+                : (this.windows.get(Zotero.getMainWindow()) ??
+                  [...this.windows.values()].find(
+                      (r) => r.kind === "standalone",
+                  ));
         return runtime?.status === 'ready' && !runtime.hostWindow.closed ? runtime : undefined;
     }
     /**
@@ -79,13 +137,22 @@ export class BeaverInstance {
         return undefined;
     }
 
-    getSnapshot(): Array<{ id: string; status: WindowRuntime['status'] }> {
-        return Array.from(this.windows.values(), ({ id, status }) => ({ id, status }));
+    getSnapshot(): Array<{
+        id: string;
+        kind: WindowRuntime["kind"];
+        status: WindowRuntime['status']
+    }> {
+        return Array.from(this.windows.values(), ({ id, kind, status }) => ({
+            id,
+            kind,
+            status,
+        }));
     }
     markClosing(win: Window): boolean {
         const runtime = this.windows.get(win);
         if (!runtime || runtime.status === 'closing') return false;
         runtime.status = 'closing';
+        this.refreshContext();
         Zotero.Beaver?.presence?.detach(runtime.id);
         this.widthListeners.get(runtime)?.();
         this.widthListeners.delete(runtime);
@@ -98,6 +165,7 @@ export class BeaverInstance {
         if (!runtime) return;
         this.markClosing(win);
         this.windows.delete(win);
+        if (this.standaloneWindow === win) this.standaloneWindow = undefined;
         delete win.__beaverRuntime;
         delete win.__beaverJotaiStore;
         win.__beaverEventBus = null;

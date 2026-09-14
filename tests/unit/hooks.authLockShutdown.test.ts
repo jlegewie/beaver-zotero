@@ -28,6 +28,7 @@ const {
 
 vi.mock('../../src/ui/ui', () => ({
     BeaverUIFactory: {
+        closeBeaverWindow: vi.fn(),
         registerChatPanel: mockRegisterChatPanel,
         removeChatPanel: mockRemoveChatPanel,
         registerShortcuts: mockRegisterShortcuts,
@@ -41,7 +42,6 @@ vi.mock('../../src/ui/ui', () => ({
 vi.mock('../../src/beaver-extract', () => ({
     disposeMuPDFWorker: mockDisposeMuPDFWorker,
 }));
-
 
 vi.mock('../../src/services/protocolHandler', () => ({
     registerBeaverProtocolHandler: vi.fn(),
@@ -138,6 +138,8 @@ function makeAuthLock() {
 function makeWindow() {
     const win = {
         EventTarget,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
         closed: false,
         document: {
             getElementById: vi.fn().mockReturnValue(null),

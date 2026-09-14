@@ -1,9 +1,9 @@
 /**
  * Agent Service
- * 
+ *
  * This service provides WebSocket communication for agent runs,
  * enabling bidirectional communication between the Zotero plugin and the backend.
- * 
+ *
  * The Beaver agent is the primary agent that handles chat completions and tool execution.
  */
 
@@ -54,7 +54,6 @@ import {
     ConnectionFailureStage,
 } from './connectionFailure';
 
-
 // =============================================================================
 // Auth helpers
 // =============================================================================
@@ -95,7 +94,6 @@ export async function getWSAuthToken(): Promise<string> {
 
     return data.session.access_token;
 }
-
 
 // =============================================================================
 // Agent Service
@@ -249,7 +247,7 @@ export class AgentService {
      * Get WebSocket URL from HTTP base URL
      */
     private getWebSocketUrl(): string {
-        const wsProtocol = this.baseUrl.startsWith('https') ? 'wss' : 'ws';
+        const wsProtocol = this.baseUrl.startsWith("https") ? "wss" : "ws";
         const httpUrl = new URL(this.baseUrl);
         return `${wsProtocol}://${httpUrl.host}/api/v1/agents/beaver/run`;
     }
@@ -270,7 +268,7 @@ export class AgentService {
 
     /**
      * Connect to the WebSocket endpoint and send an agent run request
-     * 
+     *
      * Protocol flow:
      * 1. Client connects with clean URL (no sensitive data in params)
      * 2. Client sends WSAuthMessage with token only
@@ -278,7 +276,7 @@ export class AgentService {
      * 4. Client sends agent run request (with model selection: model_id/api_key or custom_model)
      * 5. Server validates model and sends "request_ack" event
      * 6. Server streams delta events and sends complete event
-     * 
+     *
      * @param request The agent run request to send (should include model_id/api_key or custom_model)
      * @param callbacks Event callbacks
      * @returns Promise that resolves when connection is established and ready, rejects on error
@@ -292,21 +290,28 @@ export class AgentService {
         zoteroInstance?: ZoteroInstanceWire,
         connectRecovery?: ConnectRecoveryAuthFields,
     ): Promise<void> {
-        const connectTelemetry = connectRecovery ?? connectRecoveryAuthFields(1, null);
+        const connectTelemetry =
+            connectRecovery ?? connectRecoveryAuthFields(1, null);
         // Guard: Don't allow overlapping connect attempts
         if (this.connecting) {
-            logger('AgentService: connect() already in progress, ignoring duplicate call', 1);
+            logger(
+                "AgentService: connect() already in progress, ignoring duplicate call",
+                1,
+            );
             return;
         }
 
         // Log if closing an existing connection
         if (this.ws) {
-            logger(`AgentService: Closing existing connection before new connect (state=${this.ws.readyState})`, 1);
+            logger(
+                `AgentService: Closing existing connection before new connect (state=${this.ws.readyState})`,
+                1,
+            );
         }
 
         // Close existing connection if any. close() clears `connecting`, so
         // this attempt claims the flag only after the old state is torn down.
-        this.close(1000, 'Client closing', { notifyClose: false });
+        this.close(1000, "Client closing", { notifyClose: false });
         this.connecting = true;
 
         // close() increments connectionId. Capture the new value so an
@@ -314,7 +319,7 @@ export class AgentService {
         // before it creates a socket.
         const setupConnectionId = this.connectionId;
         const attempt: ConnectionAttemptState = {
-            stage: 'auth',
+            stage: "auth",
             socketOpened: false,
             readyReceived: false,
             openedAt: null,
@@ -342,8 +347,13 @@ export class AgentService {
                 // Reject before close(): close() resolves the pending
                 // establishConnection promise, so closing first would let the
                 // race settle as a success and mask the timeout.
-                reject(new ConnectTimeoutError(attemptEvidence(attempt), CONNECT_TIMEOUT_MS));
-                this.close(1000, 'Connection attempt timed out');
+                reject(
+                    new ConnectTimeoutError(
+                        attemptEvidence(attempt),
+                        CONNECT_TIMEOUT_MS,
+                    ),
+                );
+                this.close(1000, "Connection attempt timed out");
             }, CONNECT_TIMEOUT_MS);
         });
 
@@ -397,11 +407,16 @@ export class AgentService {
             token = await this.getAuthToken();
         } catch (error) {
             if (error instanceof AgentConnectionError) throw error;
-            const message = error instanceof Error ? error.message : String(error);
-            throw new AgentConnectionError(message || 'Could not check user session', attemptEvidence(attempt, {
-                stage: 'auth',
-                errorName: error instanceof Error ? error.name : 'UnknownError',
-            }));
+            const message =
+                error instanceof Error ? error.message : String(error);
+            throw new AgentConnectionError(
+                message || "Could not check user session",
+                attemptEvidence(attempt, {
+                    stage: "auth",
+                    errorName:
+                        error instanceof Error ? error.name : "UnknownError",
+                }),
+            );
         }
 
         // A close() during the token lookup superseded this attempt (and
@@ -414,10 +429,12 @@ export class AgentService {
         // Auth message includes token, frontend version, and — when the
         // caller supplies them — the client identity, declared features, and
         // optional connect-recovery telemetry after client-side auto-retry.
-        const resolvedConnectTelemetry = connectTelemetry ?? connectRecoveryAuthFields(1, null);
-        const { connect_started_at_ms: connectStartedAtMs, ...wireTelemetry } = resolvedConnectTelemetry;
-        const authMessageBase: Omit<WSAuthMessage, 'connect_latency_ms'> = {
-            type: 'auth',
+        const resolvedConnectTelemetry =
+            connectTelemetry ?? connectRecoveryAuthFields(1, null);
+        const { connect_started_at_ms: connectStartedAtMs, ...wireTelemetry } =
+            resolvedConnectTelemetry;
+        const authMessageBase: Omit<WSAuthMessage, "connect_latency_ms"> = {
+            type: "auth",
             token,
             frontend_version: frontendVersion,
             ...(clientType ? { client_type: clientType } : {}),
@@ -428,7 +445,7 @@ export class AgentService {
 
         // Connect with clean URL (no sensitive data in params)
         const wsUrl = this.getWebSocketUrl();
-        attempt.stage = 'opening';
+        attempt.stage = "opening";
 
         logger(`AgentService: Connecting to ${wsUrl}`, 1);
 
@@ -452,9 +469,28 @@ export class AgentService {
             const wrappedCallbacks: WSCallbacks = {
                 ...callbacks,
                 onReady: (data: WSReadyData) => {
-                    attempt.stage = 'mid_run';
+                    attempt.stage = "mid_run";
                     attempt.readyReceived = true;
-                    logger('AgentService: Server ready, sending agent run request', 1);
+                    if (
+                        request.expected_tail_run_id !== undefined &&
+                        data.thread_admission_version !== 1
+                    ) {
+                        const message =
+                            "This server does not support safe concurrent chats. Update the server before continuing.";
+                        callbacks.onError({
+                            event: "error",
+                            type: "thread_admission_unavailable",
+                            message,
+                            is_retryable: false,
+                        });
+                        finish(new Error(message));
+                        this.close();
+                        return;
+                    }
+                    logger(
+                        "AgentService: Server ready, sending agent run request",
+                        1,
+                    );
                     // Call the original onReady callback first
                     callbacks.onReady(data);
                     // Send the chat request now that server is ready. A socket
@@ -468,11 +504,15 @@ export class AgentService {
                         // would let the failure resolve as a success. The socket
                         // must still be torn down — `ready` already marked the
                         // connection live, so nothing else would reclaim it.
-                        finish(new AgentConnectionError(
-                            'Connection closed before the request could be sent',
-                            attemptEvidence(attempt, { requestNeverSent: true }),
-                        ));
-                        this.close(1000, 'Request could not be sent');
+                        finish(
+                            new AgentConnectionError(
+                                "Connection closed before the request could be sent",
+                                attemptEvidence(attempt, {
+                                    requestNeverSent: true,
+                                }),
+                            ),
+                        );
+                        this.close(1000, "Request could not be sent");
                         return;
                     }
                     // Resolve the connect promise
@@ -483,7 +523,7 @@ export class AgentService {
                     callbacks.onError(event);
                     // If we haven't resolved yet, this is a connection-phase error
                     finish(new Error(event.message));
-                }
+                },
             };
 
             this.callbacks = wrappedCallbacks;
@@ -492,10 +532,19 @@ export class AgentService {
                 wsInstance = new WebSocket(wsUrl);
                 this.ws = wsInstance;
             } catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
-                finish(new AgentConnectionError(message || 'Could not create WebSocket', attemptEvidence(attempt, {
-                    errorName: error instanceof Error ? error.name : 'UnknownError',
-                })));
+                const message =
+                    error instanceof Error ? error.message : String(error);
+                finish(
+                    new AgentConnectionError(
+                        message || "Could not create WebSocket",
+                        attemptEvidence(attempt, {
+                            errorName:
+                                error instanceof Error
+                                    ? error.name
+                                    : "UnknownError",
+                        }),
+                    ),
+                );
                 return;
             }
 
@@ -503,12 +552,15 @@ export class AgentService {
             // is called again before auth completes. The second connect() would call
             // close() which sets this.ws = null, but we need the original instance.
             wsInstance.onopen = () => {
-                attempt.stage = 'authenticating';
+                attempt.stage = "authenticating";
                 attempt.socketOpened = true;
                 attempt.openedAt = Date.now();
-                logger('AgentService: Connection established, sending auth message', 1);
                 logger(
-                    `AgentService: WebSocket negotiated extensions="${wsInstance.extensions || '(none)'}" protocol="${wsInstance.protocol || '(none)'}"`,
+                    "AgentService: Connection established, sending auth message",
+                    1,
+                );
+                logger(
+                    `AgentService: WebSocket negotiated extensions="${wsInstance.extensions || "(none)"}" protocol="${wsInstance.protocol || "(none)"}"`,
                     1,
                 );
                 // Small delay to ensure server has completed accept() before we send
@@ -526,10 +578,13 @@ export class AgentService {
                             ),
                         };
                         wsInstance.send(JSON.stringify(authMessage));
-                        attempt.stage = 'awaiting_ready';
-                        logger('AgentService: Auth message sent', 1);
+                        attempt.stage = "awaiting_ready";
+                        logger("AgentService: Auth message sent", 1);
                     } else {
-                        logger(`AgentService: WebSocket not open for auth (state=${wsInstance.readyState}), connection may have been superseded`, 1);
+                        logger(
+                            `AgentService: WebSocket not open for auth (state=${wsInstance.readyState}), connection may have been superseded`,
+                            1,
+                        );
                     }
                 }, 50); // 50ms delay to allow server to complete accept()
                 callbacks.onOpen?.();
@@ -541,7 +596,8 @@ export class AgentService {
                 // A frame buffered on a socket that close() has already
                 // replaced must not be acked, counted or queued against the
                 // new connection.
-                if (this.connectionId !== connId || this.ws !== wsInstance) return;
+                if (this.connectionId !== connId || this.ws !== wsInstance)
+                    return;
                 const receivedAt = Date.now();
                 attempt.lastMessageAt = receivedAt;
                 const parsed = this.parseMessage(event.data);
@@ -560,16 +616,22 @@ export class AgentService {
                 // shift its own array, not the new connection's.
                 const arrivals = this.queuedMessageArrivals;
                 arrivals.push(receivedAt);
-                this.messageQueue = this.messageQueue.then(() => {
-                    if (this.connectionId !== connId) return;
-                    return this.handleMessage(parsed, receivedAt);
-                }).catch(err => {
-                    logger(`AgentService: Unhandled error in message queue: ${err}`, 1);
-                }).finally(() => {
-                    // Entries stay until their handler settles, so the count
-                    // includes the message currently being handled.
-                    arrivals.shift();
-                });
+                this.messageQueue = this.messageQueue
+                    .then(() => {
+                        if (this.connectionId !== connId) return;
+                        return this.handleMessage(parsed, receivedAt);
+                    })
+                    .catch((err) => {
+                        logger(
+                            `AgentService: Unhandled error in message queue: ${err}`,
+                            1,
+                        );
+                    })
+                    .finally(() => {
+                        // Entries stay until their handler settles, so the count
+                        // includes the message currently being handled.
+                        arrivals.shift();
+                    });
             };
 
             // Note: onerror carries no useful info in browsers. Per the WebSocket
@@ -577,35 +639,51 @@ export class AgentService {
             // onclose to capture the close code (useful for distinguishing proxy
             // blocks, TLS failures, and server-side rejects).
             wsInstance.onerror = () => {
-                logger(`AgentService: WebSocket error event (close will follow)`, 1);
+                logger(
+                    `AgentService: WebSocket error event (close will follow)`,
+                    1,
+                );
             };
 
             wsInstance.onclose = (event) => {
                 if (this.ws !== wsInstance || this.connectionId !== connId) {
-                    logger('AgentService: Ignoring stale close event from superseded connection', 1);
+                    logger(
+                        "AgentService: Ignoring stale close event from superseded connection",
+                        1,
+                    );
                     return;
                 }
-                logger(`AgentService: Connection closed - code=${event.code}, reason=${event.reason}, clean=${event.wasClean}`, 1);
+                logger(
+                    `AgentService: Connection closed - code=${event.code}, reason=${event.reason}, clean=${event.wasClean}`,
+                    1,
+                );
                 // Notify before resetConnectionState() so the callback can
                 // still read connection-scoped state.
                 const evidence = attemptEvidence(attempt, {
-                    stage: attempt.readyReceived ? 'mid_run' : attempt.stage,
+                    stage: attempt.readyReceived ? "mid_run" : attempt.stage,
                     closeCode: event.code,
                     closeReason: event.reason,
                     wasClean: event.wasClean,
                 });
-                callbacks.onClose?.(event.code, event.reason, event.wasClean, evidence);
+                callbacks.onClose?.(
+                    event.code,
+                    event.reason,
+                    event.wasClean,
+                    evidence,
+                );
                 this.resetConnectionState();
                 // If we haven't resolved yet, the connection closed before
                 // ready. Close-code details for the error UI travel via the
                 // onClose callback above, not the rejection.
                 if (!hasResolved) {
-                    finish(new AgentConnectionError(
-                        event.reason
-                            ? `Connection closed: ${event.reason}`
-                            : `Connection closed before ready (code ${event.code})`,
-                        evidence,
-                    ));
+                    finish(
+                        new AgentConnectionError(
+                            event.reason
+                                ? `Connection closed: ${event.reason}`
+                                : `Connection closed before ready (code ${event.code})`,
+                            evidence,
+                        ),
+                    );
                 }
             };
         });
@@ -618,9 +696,11 @@ export class AgentService {
      * carries a user decision can recover locally instead of assuming it went
      * out. Most callers can ignore the result.
      */
-    send(data: AgentRunRequest | Record<string, any> | PreparedJsonMessage): boolean {
+    send(
+        data: AgentRunRequest | Record<string, any> | PreparedJsonMessage,
+    ): boolean {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            logger('AgentService: Cannot send - WebSocket not connected', 1);
+            logger("AgentService: Cannot send - WebSocket not connected", 1);
             return false;
         }
 
@@ -631,9 +711,9 @@ export class AgentService {
         if (isPreparedJsonMessage(data)) {
             const envelope = preparedJsonEnvelope(data);
             if (
-                'request_id' in envelope
-                && 'type' in envelope
-                && !isRequestSignal(envelope.type)
+                "request_id" in envelope &&
+                "type" in envelope &&
+                !isRequestSignal(envelope.type)
             ) {
                 try {
                     data = withPreparedJsonEnvelope(data, (current) => ({
@@ -641,52 +721,83 @@ export class AgentService {
                         timing: { ...current.timing, ...resolveBusyContext() },
                     }));
                 } catch (error) {
-                    logger(`AgentService: Failed to attach busy context: ${error}`, 1);
+                    logger(
+                        `AgentService: Failed to attach busy context: ${error}`,
+                        1,
+                    );
                 }
             }
         } else if (
-            'request_id' in data
-            && 'type' in data
-            && !isRequestSignal((data as any).type)
+            "request_id" in data &&
+            "type" in data &&
+            !isRequestSignal((data as any).type)
         ) {
             try {
                 data = {
                     ...data,
-                    timing: { ...(data as any).timing, ...resolveBusyContext() },
+                    timing: {
+                        ...(data as any).timing,
+                        ...resolveBusyContext(),
+                    },
                 };
             } catch (error) {
-                logger(`AgentService: Failed to attach busy context: ${error}`, 1);
+                logger(
+                    `AgentService: Failed to attach busy context: ${error}`,
+                    1,
+                );
             }
         }
 
         const message = isPreparedJsonMessage(data)
             ? materializePreparedJsonMessage(data)
             : JSON.stringify(data);
-        
+
         // Sanitize sensitive data for logging
         const sanitizedData: Record<string, any> = isPreparedJsonMessage(data)
-            ? { ...preparedJsonEnvelope(data), result: '[stripped document result for log]' }
+            ? {
+                  ...preparedJsonEnvelope(data),
+                  result: "[stripped document result for log]",
+              }
             : { ...data };
-        if ('api_key' in sanitizedData) {
-            sanitizedData.api_key = '[REDACTED]';
+        if ("api_key" in sanitizedData) {
+            sanitizedData.api_key = "[REDACTED]";
         }
-        if ('custom_model' in sanitizedData && typeof sanitizedData.custom_model === 'object') {
+        if (
+            "custom_model" in sanitizedData &&
+            typeof sanitizedData.custom_model === "object"
+        ) {
             sanitizedData.custom_model = {
                 ...sanitizedData.custom_model,
-                api_key: sanitizedData.custom_model.api_key ? '[REDACTED]' : undefined
+                api_key: sanitizedData.custom_model.api_key
+                    ? "[REDACTED]"
+                    : undefined,
             };
         }
         // Strip large payloads from the LOG copy only. The wire payload at
         // line :311 uses the original `data`
-        if ('type' in sanitizedData && sanitizedData.type === 'zotero_attachment_page_images' && 'pages' in sanitizedData) {
-            const n = Array.isArray((sanitizedData as any).pages) ? (sanitizedData as any).pages.length : 0;
+        if (
+            "type" in sanitizedData &&
+            sanitizedData.type === "zotero_attachment_page_images" &&
+            "pages" in sanitizedData
+        ) {
+            const n = Array.isArray((sanitizedData as any).pages)
+                ? (sanitizedData as any).pages.length
+                : 0;
             sanitizedData.pages = `[stripped ${n} page image(s) for log]`;
         }
-        if ('type' in sanitizedData && sanitizedData.type === 'zotero_document' && 'result' in sanitizedData) {
-            sanitizedData.result = '[stripped document result for log]';
+        if (
+            "type" in sanitizedData &&
+            sanitizedData.type === "zotero_document" &&
+            "result" in sanitizedData
+        ) {
+            sanitizedData.result = "[stripped document result for log]";
         }
         // Log the sanitized and stripped data
-        logger(`AgentService: Sending "${sanitizedData.type}"`, sanitizedData, 1);
+        logger(
+            `AgentService: Sending "${sanitizedData.type}"`,
+            sanitizedData,
+            1,
+        );
 
         try {
             this.ws.send(message);
@@ -705,7 +816,8 @@ export class AgentService {
             ...resolveBusyContext(),
             dispatch_lag_ms: Math.max(0, now - receivedAt),
             queue_depth: this.queuedMessageArrivals.length,
-            queue_oldest_ms: oldest === undefined ? 0 : Math.max(0, now - oldest),
+            queue_oldest_ms:
+                oldest === undefined ? 0 : Math.max(0, now - oldest),
         };
     }
 
@@ -719,16 +831,23 @@ export class AgentService {
     private maybeAckRequest(event: WSEvent, receivedAt: number): void {
         if (!this.serverSupportsRequestAcks) return;
         const requestId = (event as any).request_id;
-        if (typeof requestId !== 'string' || !isBackendRequestEvent(event.event)) return;
+        if (
+            typeof requestId !== "string" ||
+            !isBackendRequestEvent(event.event)
+        )
+            return;
         try {
             const ack: WSRequestReceivedAck = {
-                type: 'request_received',
+                type: "request_received",
                 request_id: requestId,
                 busy: this.transportBusyContext(receivedAt),
             };
             this.send(ack);
         } catch (error) {
-            logger(`AgentService: Failed to send request_received ack: ${error}`, 1);
+            logger(
+                `AgentService: Failed to send request_received ack: ${error}`,
+                1,
+            );
         }
     }
 
@@ -742,8 +861,15 @@ export class AgentService {
     private maybeStartKeepalive(event: WSEvent, receivedAt: number): void {
         if (!this.serverSupportsRequestKeepalive) return;
         const requestId = (event as any).request_id;
-        if (typeof requestId !== 'string' || !isBackendRequestEvent(event.event)) return;
-        this.pendingKeepalives.set(requestId, this.startKeepalive(requestId, receivedAt, 'queued'));
+        if (
+            typeof requestId !== "string" ||
+            !isBackendRequestEvent(event.event)
+        )
+            return;
+        this.pendingKeepalives.set(
+            requestId,
+            this.startKeepalive(requestId, receivedAt, "queued"),
+        );
     }
 
     /** Hand a parked keepalive to the dispatcher; a no-op controller when none was started. */
@@ -755,11 +881,17 @@ export class AgentService {
         return keepalive;
     }
 
-    private startKeepalive(requestId: string, receivedAt: number, initialPhase: string): RequestKeepalive {
+    private startKeepalive(
+        requestId: string,
+        receivedAt: number,
+        initialPhase: string,
+    ): RequestKeepalive {
         const connId = this.connectionId;
         let phase = initialPhase;
         const controller: RequestKeepalive = {
-            setPhase: (next: string) => { phase = next; },
+            setPhase: (next: string) => {
+                phase = next;
+            },
             stop: () => {
                 clearInterval(timer);
                 this.activeKeepalives.delete(controller);
@@ -775,7 +907,7 @@ export class AgentService {
             }
             try {
                 const keepalive: WSRequestKeepalive = {
-                    type: 'request_keepalive',
+                    type: "request_keepalive",
                     request_id: requestId,
                     phase,
                     elapsed_ms: Math.max(0, Date.now() - receivedAt),
@@ -783,7 +915,10 @@ export class AgentService {
                 };
                 this.send(keepalive);
             } catch (error) {
-                logger(`AgentService: Failed to send request_keepalive: ${error}`, 1);
+                logger(
+                    `AgentService: Failed to send request_keepalive: ${error}`,
+                    1,
+                );
             }
         };
         const timer = setInterval(tick, REQUEST_KEEPALIVE_INTERVAL_MS);
@@ -803,8 +938,11 @@ export class AgentService {
     private parseMessage(rawData: unknown): WSEvent | null {
         if (!this.callbacks) return null;
         // Guard against invalid data during close handshake
-        if (typeof rawData !== 'string' || !rawData) {
-            logger('AgentService: Received invalid message data (likely during close)', 1);
+        if (typeof rawData !== "string" || !rawData) {
+            logger(
+                "AgentService: Received invalid message data (likely during close)",
+                1,
+            );
             return null;
         }
         try {
@@ -812,9 +950,9 @@ export class AgentService {
         } catch (error) {
             logger(`AgentService: Failed to parse message: ${error}`, 1);
             this.callbacks.onError({
-                event: 'error',
-                type: 'parse_error',
-                message: 'Failed to parse server message',
+                event: "error",
+                type: "parse_error",
+                message: "Failed to parse server message",
             });
             return null;
         }
@@ -826,16 +964,23 @@ export class AgentService {
      * Messages are serialized via messageQueue to preserve processing order;
      * the request ack has already been sent by the time this runs.
      */
-    private async handleMessage(event: WSEvent, receivedAt: number = Date.now()): Promise<void> {
+    private async handleMessage(
+        event: WSEvent,
+        receivedAt: number = Date.now(),
+    ): Promise<void> {
         if (!this.callbacks) return;
 
         try {
             switch (event.event) {
-                case 'ready': {
-                    this.serverSupportsRequestAcks = event.supports_request_acks === true;
-                    this.serverSupportsRequestKeepalive = event.supports_request_keepalive === true;
+                case "ready": {
+                    this.serverSupportsRequestAcks =
+                        event.supports_request_acks === true;
+                    this.serverSupportsRequestKeepalive =
+                        event.supports_request_keepalive === true;
                     // Convert snake_case backend response to camelCase frontend data
                     const readyData: WSReadyData = {
+                        thread_admission_version:
+                            event.thread_admission_version,
                         subscriptionStatus: event.subscription_status,
                         processingMode: event.processing_mode,
                         indexingComplete: event.indexing_complete,
@@ -844,7 +989,7 @@ export class AgentService {
                     break;
                 }
 
-                case 'request_ack': {
+                case "request_ack": {
                     // Request acknowledged with model info
                     const ackData: WSRequestAckData = {
                         runId: event.run_id,
@@ -856,50 +1001,53 @@ export class AgentService {
                     break;
                 }
 
-                case 'part':
+                case "part":
                     await this.callbacks.onPart(event);
                     break;
 
-                case 'tool_return':
+                case "tool_return":
                     await this.callbacks.onToolReturn(event);
                     break;
-                
-                case 'tool_call_progress':
+
+                case "tool_call_progress":
                     this.callbacks.onToolCallProgress(event);
                     break;
 
-                case 'tool_call_args_stream':
+                case "tool_call_args_stream":
                     this.callbacks.onToolCallArgsStream(event);
                     break;
 
-                case 'run_complete':
+                case "run_complete":
                     await this.callbacks.onRunComplete(event);
                     break;
 
-                case 'run_citations':
+                case "run_citations":
                     await this.callbacks.onRunCitations?.(event);
                     break;
 
-                case 'streaming_done':
+                case "streaming_done":
                     this.callbacks.onStreamingDone?.(event);
                     break;
 
-                case 'done':
+                case "done":
                     this.callbacks.onDone();
                     break;
 
-                case 'thread':
-                    this.callbacks.onThread(event.thread_id, event.retry_truncation);
+                case "thread":
+                    this.callbacks.onThread(
+                        event.thread_id,
+                        event.retry_truncation,
+                    );
                     break;
 
-                case 'thread_name':
+                case "thread_name":
                     this.callbacks.onThreadName?.(event);
                     break;
 
-                case 'error': {
+                case "error": {
                     // Call onError callback
                     this.callbacks.onError(event);
-                    // Backend behavior: some errors close connection (auth, internal), 
+                    // Backend behavior: some errors close connection (auth, internal),
                     // others keep it open (LLM errors, rate limits, invalid_request).
                     // Since each connect() is for a single run (for now), close on any error.
                     // Use a small delay to avoid race with server-initiated close.
@@ -914,73 +1062,102 @@ export class AgentService {
                         ) {
                             // Firefox/Zotero only allows code 1000 or 3000-4999 for close()
                             // 1011 causes InvalidAccessError, so we use 1000 (Normal Closure)
-                            this.close(1000, `Client closing after error: ${event.type}`);
+                            this.close(
+                                1000,
+                                `Client closing after error: ${event.type}`,
+                            );
                         }
                     }, 100);
                     break;
                 }
 
-                case 'warning':
+                case "warning":
                     this.callbacks.onWarning(event);
                     break;
 
-                case 'agent_actions':
+                case "agent_actions":
                     await this.callbacks.onAgentActions?.(event);
                     break;
 
-                case 'retry':
+                case "retry":
                     this.callbacks.onRetry?.(event);
                     break;
 
-                case 'missing_zotero_data':
+                case "missing_zotero_data":
                     this.callbacks.onMissingZoteroData?.(event);
                     break;
 
-                case 'deferred_approval_request':
-                    logger("AgentService: Received deferred_approval_request", event, 1);
+                case "deferred_approval_request":
+                    logger(
+                        "AgentService: Received deferred_approval_request",
+                        event,
+                        1,
+                    );
                     // This event is handled by the UI via callback
                     if (this.callbacks?.onDeferredApprovalRequest) {
                         this.callbacks.onDeferredApprovalRequest(event);
                     } else {
                         // No handler - auto-reject to avoid blocking the agent
-                        logger("AgentService: No deferred approval handler, auto-rejecting", 1);
+                        logger(
+                            "AgentService: No deferred approval handler, auto-rejecting",
+                            1,
+                        );
                         this.send({
-                            type: 'deferred_approval_response',
+                            type: "deferred_approval_response",
                             action_id: event.action_id,
                             approved: false,
                         });
                     }
                     break;
 
-                case 'deferred_approval_stale':
-                    logger("AgentService: Received deferred_approval_stale", event, 1);
+                case "deferred_approval_stale":
+                    logger(
+                        "AgentService: Received deferred_approval_stale",
+                        event,
+                        1,
+                    );
                     this.callbacks?.onDeferredApprovalStale?.(event);
                     break;
 
-                case 'credit_confirmation_request':
-                    logger("AgentService: Received credit_confirmation_request", event, 1);
+                case "credit_confirmation_request":
+                    logger(
+                        "AgentService: Received credit_confirmation_request",
+                        event,
+                        1,
+                    );
                     // This event is handled by the UI via callback
                     if (this.callbacks?.onCreditConfirmationRequest) {
                         this.callbacks.onCreditConfirmationRequest(event);
                     } else {
                         // No handler - decline so the run wraps up now instead of
                         // spending credits or waiting out the confirmation timeout.
-                        logger("AgentService: No credit confirmation handler, auto-declining", 1);
+                        logger(
+                            "AgentService: No credit confirmation handler, auto-declining",
+                            1,
+                        );
                         this.send({
-                            type: 'credit_confirmation_response',
+                            type: "credit_confirmation_response",
                             confirmation_id: event.confirmation_id,
                             approved: false,
                         });
                     }
                     break;
 
-                case 'credit_confirmation_stale':
-                    logger("AgentService: Received credit_confirmation_stale", event, 1);
+                case "credit_confirmation_stale":
+                    logger(
+                        "AgentService: Received credit_confirmation_stale",
+                        event,
+                        1,
+                    );
                     this.callbacks?.onCreditConfirmationStale?.(event);
                     break;
 
-                case 'batch_approval_request':
-                    logger("AgentService: Received batch_approval_request", event, 1);
+                case "batch_approval_request":
+                    logger(
+                        "AgentService: Received batch_approval_request",
+                        event,
+                        1,
+                    );
                     // This event is handled by the UI via callback
                     if (this.callbacks?.onBatchApprovalRequest) {
                         this.callbacks.onBatchApprovalRequest(event);
@@ -990,33 +1167,47 @@ export class AgentService {
                         // card: dropping the event would stall the run for the
                         // whole approval timeout, and approving would grant
                         // coverage the user was never shown.
-                        logger("AgentService: No batch approval handler, auto-declining", 1);
+                        logger(
+                            "AgentService: No batch approval handler, auto-declining",
+                            1,
+                        );
                         this.send({
-                            type: 'batch_approval_response',
+                            type: "batch_approval_response",
                             approval_id: event.approval_id,
                             approved: false,
                             // A response is only well-formed with a mode. Echo the
                             // mode the card would have preselected.
-                            mode: event.default_mode ?? 'full_access',
+                            mode: event.default_mode ?? "full_access",
                         });
                     }
                     break;
 
-                case 'batch_approval_stale':
-                    logger("AgentService: Received batch_approval_stale", event, 1);
+                case "batch_approval_stale":
+                    logger(
+                        "AgentService: Received batch_approval_stale",
+                        event,
+                        1,
+                    );
                     this.callbacks?.onBatchApprovalStale?.(event);
                     break;
 
-                case 'ask_user_question_request':
-                    logger("AgentService: Received ask_user_question_request", event, 1);
+                case "ask_user_question_request":
+                    logger(
+                        "AgentService: Received ask_user_question_request",
+                        event,
+                        1,
+                    );
                     // This event is handled by the UI via callback
                     if (this.callbacks?.onAskUserQuestionRequest) {
                         this.callbacks.onAskUserQuestionRequest(event);
                     } else {
                         // No handler - auto-cancel so the agent never hangs
-                        logger("AgentService: No ask_user_question handler, auto-cancelling", 1);
+                        logger(
+                            "AgentService: No ask_user_question handler, auto-cancelling",
+                            1,
+                        );
                         this.send({
-                            type: 'ask_user_question_response',
+                            type: "ask_user_question_response",
                             question_id: event.question_id,
                             answers: [],
                             cancelled: true,
@@ -1032,7 +1223,10 @@ export class AgentService {
                     // backend doesn't time out.
                     const eventName = (event as any).event;
                     const dataEvent = event as any;
-                    const requestId = typeof dataEvent.request_id === 'string' ? dataEvent.request_id : null;
+                    const requestId =
+                        typeof dataEvent.request_id === "string"
+                            ? dataEvent.request_id
+                            : null;
                     // Started on receipt (see onmessage), so time spent in the
                     // message queue or behind other executes is reported as
                     // `queued` rather than as silence.
@@ -1040,8 +1234,12 @@ export class AgentService {
                     const entry = this.getDataProvider()[eventName];
                     if (!entry) {
                         keepalive.stop();
-                        logger(`AgentService: Unknown event type: ${eventName}`, 1);
-                        const errorResponse = unknownDataRequestErrorResponse(event);
+                        logger(
+                            `AgentService: Unknown event type: ${eventName}`,
+                            1,
+                        );
+                        const errorResponse =
+                            unknownDataRequestErrorResponse(event);
                         if (errorResponse) {
                             this.send(errorResponse);
                         }
@@ -1052,19 +1250,29 @@ export class AgentService {
                     const context: AgentDataRequestContext = {
                         assertCurrent: () => {
                             if (this.connectionId !== requestConnectionId) {
-                                throw Object.assign(new Error('Request connection closed'), { code: 'operation_cancelled' });
+                                throw Object.assign(
+                                    new Error("Request connection closed"),
+                                    { code: "operation_cancelled" },
+                                );
                             }
                         },
                         receivedAt,
                         reportPhase: (phase) => keepalive.setPhase(phase),
                     };
                     const runRequest = (): Promise<void> => {
-                        keepalive.setPhase('running');
-                        return entry.handle(dataEvent, context)
-                            .then(res => { keepalive.stop(); this.send(res); })
-                            .catch(err => {
+                        keepalive.setPhase("running");
+                        return entry
+                            .handle(dataEvent, context)
+                            .then((res) => {
                                 keepalive.stop();
-                                logger(`AgentService: ${eventName} failed: ${err}`, 1);
+                                this.send(res);
+                            })
+                            .catch((err) => {
+                                keepalive.stop();
+                                logger(
+                                    `AgentService: ${eventName} failed: ${err}`,
+                                    1,
+                                );
                                 this.send(entry.errorResponse(dataEvent, err));
                             });
                     };
@@ -1074,13 +1282,14 @@ export class AgentService {
                         // are skipped after a close/reconnect (same guard as
                         // messageQueue).
                         const actionConnId = this.connectionId;
-                        this.actionExecutionQueue = this.actionExecutionQueue.then(() => {
-                            if (this.connectionId !== actionConnId) {
-                                keepalive.stop();
-                                return;
-                            }
-                            return runRequest();
-                        });
+                        this.actionExecutionQueue =
+                            this.actionExecutionQueue.then(() => {
+                                if (this.connectionId !== actionConnId) {
+                                    keepalive.stop();
+                                    return;
+                                }
+                                return runRequest();
+                            });
                     } else {
                         runRequest();
                     }
@@ -1092,9 +1301,9 @@ export class AgentService {
             // Only report handling errors if we're still actively listening
             if (this.callbacks) {
                 this.callbacks.onError({
-                    event: 'error',
-                    type: 'event_handling_error',
-                    message: 'Failed to handle server event',
+                    event: "error",
+                    type: "event_handling_error",
+                    message: "Failed to handle server event",
                     details: String(error),
                 });
             }
@@ -1108,7 +1317,7 @@ export class AgentService {
      */
     close(
         code: number = 1000,
-        reason: string = 'Client closing',
+        reason: string = "Client closing",
         options: { notifyClose?: boolean; onlyIfConnectionId?: number } = {},
     ): void {
         const { notifyClose = true, onlyIfConnectionId } = options;
@@ -1116,8 +1325,11 @@ export class AgentService {
         // A caller that captured its connection generation up front (e.g. a
         // deferred close inside cancel()) must not tear down a newer
         // connection that superseded it in the meantime.
-        if (onlyIfConnectionId !== undefined && onlyIfConnectionId !== this.connectionId) {
-            logger('AgentService: Skipping close for superseded connection', 1);
+        if (
+            onlyIfConnectionId !== undefined &&
+            onlyIfConnectionId !== this.connectionId
+        ) {
+            logger("AgentService: Skipping close for superseded connection", 1);
             return;
         }
 
@@ -1128,16 +1340,28 @@ export class AgentService {
         if (wsToClose) {
             // Only attempt to close if not already closing/closed
             // CLOSING = 2, CLOSED = 3
-            if (wsToClose.readyState === WebSocket.OPEN || wsToClose.readyState === WebSocket.CONNECTING) {
-                logger(`AgentService: Closing connection - code=${code}, reason=${reason}`, 1);
+            if (
+                wsToClose.readyState === WebSocket.OPEN ||
+                wsToClose.readyState === WebSocket.CONNECTING
+            ) {
+                logger(
+                    `AgentService: Closing connection - code=${code}, reason=${reason}`,
+                    1,
+                );
                 try {
                     wsToClose.close(code, reason);
                 } catch (error) {
                     // Log but don't throw - the connection may already be closing from server side
-                    logger(`AgentService: Error closing WebSocket (state=${wsToClose.readyState}): ${error}`, 1);
+                    logger(
+                        `AgentService: Error closing WebSocket (state=${wsToClose.readyState}): ${error}`,
+                        1,
+                    );
                 }
             } else {
-                logger(`AgentService: WebSocket already closing/closed (state=${wsToClose.readyState})`, 1);
+                logger(
+                    `AgentService: WebSocket already closing/closed (state=${wsToClose.readyState})`,
+                    1,
+                );
             }
         }
         this.resetConnectionState();
@@ -1161,7 +1385,7 @@ export class AgentService {
      */
     async cancel(waitMs: number = 250): Promise<void> {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            logger('AgentService: Cannot cancel - WebSocket not connected', 1);
+            logger("AgentService: Cannot cancel - WebSocket not connected", 1);
             this.close();
             return;
         }
@@ -1171,14 +1395,16 @@ export class AgentService {
         const connectionIdToCancel = this.connectionId;
 
         // Send cancel message to backend
-        logger('AgentService: Sending cancel message', 1);
-        this.ws.send(JSON.stringify({ type: 'cancel' }));
+        logger("AgentService: Sending cancel message", 1);
+        this.ws.send(JSON.stringify({ type: "cancel" }));
 
         // Wait briefly to allow the message to be flushed
-        await new Promise(resolve => setTimeout(resolve, waitMs));
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
 
         // Close the connection (no-op if a newer connection superseded it)
-        this.close(1000, 'User cancelled', { onlyIfConnectionId: connectionIdToCancel });
+        this.close(1000, "User cancelled", {
+            onlyIfConnectionId: connectionIdToCancel,
+        });
     }
 
     /**
@@ -1191,10 +1417,17 @@ export class AgentService {
      *   client. The caller must recover the card rather than wait for a reply
      *   that cannot come.
      */
-    sendApprovalResponse(actionId: string, approved: boolean, userInstructions?: string | null): boolean {
-        logger(`AgentService: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
+    sendApprovalResponse(
+        actionId: string,
+        approved: boolean,
+        userInstructions?: string | null,
+    ): boolean {
+        logger(
+            `AgentService: Sending approval response for ${actionId}: ${approved}${userInstructions ? " (with instructions)" : ""}`,
+            1,
+        );
         return this.send({
-            type: 'deferred_approval_response',
+            type: "deferred_approval_response",
             action_id: actionId,
             approved,
             user_instructions: userInstructions,
@@ -1216,9 +1449,12 @@ export class AgentService {
         approved: boolean,
         userInstructions?: string | null,
     ): boolean {
-        logger(`AgentService: Sending credit confirmation response for ${confirmationId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
+        logger(
+            `AgentService: Sending credit confirmation response for ${confirmationId}: ${approved}${userInstructions ? " (with instructions)" : ""}`,
+            1,
+        );
         return this.send({
-            type: 'credit_confirmation_response',
+            type: "credit_confirmation_response",
             confirmation_id: confirmationId,
             approved,
             user_instructions: userInstructions,
@@ -1244,9 +1480,12 @@ export class AgentService {
         mode: BatchApprovalMode,
         userInstructions?: string | null,
     ): boolean {
-        logger(`AgentService: Sending batch approval response for ${approvalId}: ${approved} (${mode})${userInstructions ? ' (with instructions)' : ''}`, 1);
+        logger(
+            `AgentService: Sending batch approval response for ${approvalId}: ${approved} (${mode})${userInstructions ? " (with instructions)" : ""}`,
+            1,
+        );
         return this.send({
-            type: 'batch_approval_response',
+            type: "batch_approval_response",
             approval_id: approvalId,
             approved,
             mode,
@@ -1271,23 +1510,33 @@ export class AgentService {
         answers: AskUserQuestionAnswer[],
         cancelled: boolean = false,
     ): boolean {
-        logger(`AgentService: Sending ask_user_question response for ${questionId}: ${cancelled ? 'cancelled' : `${answers.length} answer(s)`}`, 1);
+        logger(
+            `AgentService: Sending ask_user_question response for ${questionId}: ${cancelled ? "cancelled" : `${answers.length} answer(s)`}`,
+            1,
+        );
         return this.send({
-            type: 'ask_user_question_response',
+            type: "ask_user_question_response",
             question_id: questionId,
             answers,
             cancelled,
         });
     }
-
 }
 
 // =============================================================================
 // Agent Run REST API Types
 // =============================================================================
 
+/** Reservation activity is independent of the persisted run's display status. */
+export interface ThreadActivity {
+    state: "active" | "expired" | "idle";
+    run_id: string | null;
+}
+
 /** Response for getting thread runs with optional actions */
 export interface ThreadRunsResponse {
+    tail_run_id?: string | null;
+    activity?: ThreadActivity;
     runs: AgentRun[];
     agent_actions: AgentAction[] | null;
 }
@@ -1326,18 +1575,25 @@ export class AgentRunService extends ApiService {
      */
     async getThreadRuns(
         threadId: string,
-        includeActions: boolean = false
+        includeActions: boolean = false,
     ): Promise<ThreadRunsResponse> {
         let endpoint = `/api/v1/agents/beaver/threads/${threadId}/runs`;
         if (includeActions) {
             endpoint += '?include_actions=true';
         }
-        
-        const response = await this.get<{ runs: AgentRun[]; agent_actions?: Record<string, any>[] | null }>(endpoint);
-        
+
+        const response = await this.get<{
+            runs: AgentRun[];
+            agent_actions?: Record<string, any>[] | null
+            tail_run_id?: string | null;
+            activity?: ThreadActivity;
+        }>(endpoint, { timeoutMs: 15000 });
+
         return {
             runs: response.runs,
-            agent_actions: response.agent_actions?.map(toAgentAction) ?? null
+            tail_run_id: response.tail_run_id,
+            activity: response.activity,
+            agent_actions: response.agent_actions?.map(toAgentAction) ?? null,
         };
     }
 

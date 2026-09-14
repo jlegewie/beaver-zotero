@@ -236,7 +236,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     });
 
     // Select the correct atoms based on whether we're in the separate window
-    const scrollAtoms = getScrollAtoms(isWindow);
+    const scrollAtoms = getScrollAtoms();
     const scrolledAtom = scrollAtoms.userScrolled;
     const scrollPositionAtom = scrollAtoms.position;
 

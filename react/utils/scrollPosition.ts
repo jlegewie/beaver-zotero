@@ -20,13 +20,8 @@
  */
 
 import type { PrimitiveAtom, WritableAtom } from 'jotai';
-import {
-    isAtBottomAtom,
-    userScrolledAtom,
-    windowIsAtBottomAtom,
-    windowUserScrolledAtom,
-} from '../atoms/ui';
-import { currentThreadScrollPositionAtom, windowScrollPositionAtom } from '../atoms/threads';
+import { isAtBottomAtom, userScrolledAtom } from '../atoms/ui';
+import { currentThreadScrollPositionAtom } from '../atoms/threads';
 import { store } from '../store';
 
 /**
@@ -76,18 +71,9 @@ const SIDEBAR_ATOMS: ScrollAtoms = Object.freeze({
     position: currentThreadScrollPositionAtom,
 });
 
-const WINDOW_ATOMS: ScrollAtoms = Object.freeze({
-    isAtBottom: windowIsAtBottomAtom,
-    userScrolled: windowUserScrolledAtom,
-    position: windowScrollPositionAtom,
-});
-
-/**
- * The scroll atoms for a surface. The separate Beaver window scrolls
- * independently of the sidebars, so it keeps its own set.
- */
-export function getScrollAtoms(isWindow: boolean): ScrollAtoms {
-    return isWindow ? WINDOW_ATOMS : SIDEBAR_ATOMS;
+/** Each renderer owns its own scroll state; sidebar surfaces share it. */
+export function getScrollAtoms(): ScrollAtoms {
+    return SIDEBAR_ATOMS;
 }
 
 /**

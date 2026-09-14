@@ -74,9 +74,9 @@ async function requireExpectedWindowCount(): Promise<void> {
     if (process.env.BEAVER_MULTI_WINDOW_TEST === '1') return;
     if (!(await isZoteroAvailable())) return;
 
-    let windows: Array<{ id: string; status: string }>;
+    let windows: Array<{ id: string; status: string; kind?: string }>;
     try {
-        ({ windows } = await post<{ windows: Array<{ id: string; status: string }> }>(
+        ({ windows } = await post<{ windows: Array<{ id: string; status: string; kind?: string }> }>(
             '/beaver/test/window-runtime',
             { command: 'list' },
             { timeout: 5000 },
@@ -84,11 +84,13 @@ async function requireExpectedWindowCount(): Promise<void> {
     } catch {
         return;
     }
-    if (!Array.isArray(windows) || windows.length <= 1) return;
+    if (!Array.isArray(windows)) return;
+    windows = windows.filter(window => window.kind !== "standalone");
+    if (windows.length <= 1) return;
 
     throw new Error(
         `${windows.length} main Zotero windows are open, but the live suites assume one.\n`
-        + `Dev endpoints are owned by the window that registered last, while some still act\n`
+        + `Untargeted test commands resolve the active main window, while older suites act\n`
         + `on Zotero.getMainWindow(), so tab and reader assertions can read the wrong window\n`
         + `and fail as if the code were broken.\n`
         + `  - Close the extra windows and re-run.\n`

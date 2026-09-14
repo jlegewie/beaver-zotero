@@ -43,7 +43,7 @@ let root: Root;
 let host: HTMLDivElement;
 let container: HTMLDivElement;
 let height: number;
-const scrollAtoms = getScrollAtoms(false);
+const scrollAtoms = getScrollAtoms();
 const run = (status: string, id = 'one') => ({ id, status }) as any;
 function resizeContent() {
     // Deliver only to observers whose targets are still in the rendered tree.

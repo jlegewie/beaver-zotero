@@ -54,7 +54,7 @@ export const ScrollDownButton: React.FC<ScrollDownButtonProps> = ({
     style,
     isWindow = false,
 }) => {
-    const isAtBottom = useAtomValue(getScrollAtoms(isWindow).isAtBottom);
+    const isAtBottom = useAtomValue(getScrollAtoms().isAtBottom);
     const hasPopupMessages = useAtomValue(hasPopupMessagesAtom);
     const activeDialog = useAtomValue(activeDialogAtom);
     const isStreaming = useAtomValue(isWSChatPendingAtom);

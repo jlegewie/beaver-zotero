@@ -46,8 +46,12 @@ export async function resolveNavigationWindow(origin?: Window | null): Promise<M
 }
 
 /** Main origins stay local; standalone reader/note commands choose a live chat. */
-export async function resolveChatWindow(origin?: Window | null): Promise<MainWindow> {
+export async function resolveChatWindow(
+    origin?: Window | null,
+): Promise<MainWindow> {
     if (origin?.closed) throw new WindowUnavailableError();
+    const own = origin && Zotero.Beaver?.runtime.resolveWindowFrom(origin);
+    if (own) return own.hostWindow as MainWindow;
     const hasLocalOwner = origin && (isMainWindow(origin) || origin.__beaverRuntime || origin.__beaverOwnerWindowRef);
     const win = await resolveNavigationWindow(hasLocalOwner ? origin : undefined);
     const deadline = Date.now() + 15000;

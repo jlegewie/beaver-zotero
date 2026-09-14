@@ -160,7 +160,7 @@ export function useFindInChat({ container, isWindow }: UseFindInChatOptions): Fi
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const runsCount = useAtomValue(runsCountAtom);
 
-    const scrollAtoms = getScrollAtoms(isWindow);
+    const scrollAtoms = getScrollAtoms();
 
     // The hits, in document order, and the one the reader is on. Kept in refs
     // rather than state: the navigation callbacks read them, and re-creating

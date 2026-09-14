@@ -44,7 +44,7 @@ import { useAutoScroll } from '../../../react/hooks/useAutoScroll';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const atoms = getScrollAtoms(false);
+const atoms = getScrollAtoms();
 
 type Hook = ReturnType<typeof useAutoScroll>;
 

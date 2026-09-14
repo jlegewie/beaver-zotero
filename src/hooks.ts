@@ -459,6 +459,29 @@ async function onStartup() {
     }
 }
 
+function onStandaloneWindowLoad(win: Window): void {
+    if (win.closed || addon.runtime.getWindow(win)) return;
+    addon.runtime.attachWindow(win, "standalone");
+    registerMainWindowFtl(win);
+    BeaverUIFactory.registerChatPanel(win);
+}
+
+function onStandaloneWindowUnload(win: Window): void {
+    const runtime = addon.runtime.getWindow(win);
+    if (!runtime || !addon.runtime.markClosing(win)) return;
+    addon.mutations.cancelOwner(runtime.id);
+    void addon.notePreviews.detachOwner(runtime.id).catch(Zotero.logError);
+    addon.voice?.windowUnloaded(win);
+    closeAgentConnection(win, "Beaver window closed", {
+        rememberInterruptedThread: true,
+    });
+    addon.syncPause.releaseWindow(runtime.id);
+    BeaverUIFactory.closeWindowsRenderedBy(win);
+    BeaverUIFactory.removeChatPanel(win);
+    unregisterMainWindowFtl(win);
+    addon.runtime.detachWindow(win);
+}
+
 async function onMainWindowLoad(win: Window): Promise<void> {
     if (win.closed || addon.runtime.getWindow(win)) return;
     const runtime = addon.runtime.attachWindow(win);
@@ -500,15 +523,15 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 
 /**
  * Cleanup handler for main window unload.
- * 
+ *
  * IMPORTANT: This is where ALL cleanup must happen because:
  * 1. onShutdown() is called AFTER Zotero's internal shutdown begins
  * 2. By the time onShutdown() runs, the crash has already occurred
  * 3. Cleanup must happen during window unload, before Zotero's internal cleanup
- * 
+ *
  * The cleanup order matters to prevent SIGSEGV crashes:
  * 1. Dispose native resources (MuPDF WASM, database)
- * 2. Unregister Zotero.Reader event listeners 
+ * 2. Unregister Zotero.Reader event listeners
  * 3. Restore Zotero.Reader.onChangeSidebarWidth
  * 4. Unmount React components
  * 5. Unload stylesheets
@@ -599,15 +622,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             ztoolkit.log(`resumeSyncAfterRun: ${e}`);
         }
 
-        // The separate Beaver and preferences windows render with THIS window's
-        // React instance and share its Jotai store, so they cannot outlive it.
-        // Close them before React is torn down (their roots then unmount
-        // cleanly). This runs on every main-window unload, not only during
-        // global cleanup: with several main windows the owner can close while
-        // others remain, and on macOS the app keeps running after the last
-        // window closes — in both cases a surviving auxiliary window would be
-        // frozen against a dead bundle, with its state invisible to the bundle
-        // a reopened main window loads.
+        // Preferences borrows this renderer and must unmount before its owner.
         BeaverUIFactory.closeWindowsRenderedBy(win, isLastWindow);
 
         // Dev-only: visualizer highlights are temporary reader annotations
@@ -936,8 +951,9 @@ async function disposePlugin(): Promise<void> {
     addon.data.alive = false;
     cancelAllActiveTasks();
     ztoolkit.log("onShutdown: Running fallback cleanup");
-    
+
     try {
+        BeaverUIFactory.closeBeaverWindow();
         disposeVoice();
         const openWindows = Zotero.getMainWindows?.().filter(w => w && !w.closed) ?? [];
         for (const win of openWindows) addon.runtime.markClosing(win);
@@ -992,7 +1008,7 @@ async function disposePlugin(): Promise<void> {
             unloadKatexStylesheet(w as Window);
         }
         unloadStylesheet();
-        
+
         unregisterQuitObserver();
         cleanupContextMenus();
         cleanupReaderIntegration();
@@ -1030,6 +1046,8 @@ export default {
     onStartup,
     onShutdown,
     onAppShutdown,
+    onStandaloneWindowLoad,
+    onStandaloneWindowUnload,
     onMainWindowLoad,
-    onMainWindowUnload
+    onMainWindowUnload,
 };

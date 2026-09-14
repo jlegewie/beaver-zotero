@@ -1,3 +1,4 @@
+import { BeaverUIFactory } from "../../../../src/ui/ui";
 import { getWindowRuntime } from '../../../runtime/windowRuntime';
 import { getCredentialGeneration } from '@beaver/agent-core/transport/credentials';
 import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
@@ -300,6 +301,16 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
         const items: MenuItem[] = [
             {
+                label: "Open in Beaver window",
+                disabled: !threadId,
+                onClick: () => {
+                    if (threadId)
+                        void BeaverUIFactory.commandBeaverWindow("open-chat", {
+                            threadId,
+                        }).catch(Zotero.logError);
+                },
+            },
+            {
                 // MenuItem carries no shortcut field, so the ⌘F / Ctrl+F chord
                 // that also opens the bar is not shown here.
                 label: 'Find in chat',
@@ -343,7 +354,9 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
                 customContent: pinPending ? (
                     <span className="display-flex items-center gap-2">
                         <Spinner size={14} />
-                        <span>{isPinned ? 'Unpinning chat' : 'Pinning chat'}</span>
+                        <span>
+                            {isPinned ? 'Unpinning chat' : 'Pinning chat'}
+                        </span>
                     </span>
                 ) : undefined,
             },

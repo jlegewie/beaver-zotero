@@ -1,3 +1,8 @@
+import { regenerateFromRunAtom } from './atoms/agentRunAtoms';
+import { threadAdmissionAtom, threadConflictAtom } from './runtime/threadAdmission';
+import { windowSurfaceAtom } from './atoms/windowSurface';
+import { openPreferencesWindow } from './ui/openPreferencesWindow';
+import { attachThreadAdmission } from "./runtime/threadAdmission";
 import { threadEntitiesAtom } from './atoms/threadList';
 import { currentThreadIdAtom, currentThreadNameAtom, activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { sendWSMessageAtom, closeWSConnectionAtom } from './atoms/agentRunAtoms';
@@ -165,17 +170,6 @@ const GlobalContextInitializer = () => {
     // Suppress Zotero auto-sync while mutating agent runs are active.
     useSyncSuppression();
 
-    // Handle Zotero tab selection
-    useZoteroTabSelection();
-
-    // Track Zotero application state (selected items, collection, tags, etc.)
-    useZoteroContext();
-
-    // Track the active reader tab (open attachment, text selection, new
-    // annotations). Global rather than sidebar-mounted so the separate Beaver
-    // window gets reader context while the main-window sidebar is closed.
-    useReaderTabSelection();
-
     // Realtime listener for user profile
     useProfileSync();
 
@@ -215,15 +209,29 @@ const GlobalContextInitializer = () => {
 
     useBackgroundProcessingWelcome();
 
-
     // Command readiness follows the subscription effects above, not createRoot().render().
     React.useEffect(() => {
         const runtime = getWindowRuntime();
-        if (runtime.status === 'attaching') runtime.status = 'ready';
+        if (runtime.status === "attaching") runtime.status = "ready";
     }, []);
 
-    return null; // This component does not render any UI
+    const runtime = getWindowRuntime();
+    const [contextRevision, setContextRevision] = React.useState(0);
+    React.useEffect(() => {
+        const changed = () => setContextRevision((value) => value + 1);
+        runtime.events.addEventListener("contextWindowChanged", changed);
+        return () =>
+            runtime.events.removeEventListener("contextWindowChanged", changed);
+    }, [runtime]);
+    return <ZoteroContextInitializer key={contextRevision} />;
 };
+
+function ZoteroContextInitializer() {
+    useZoteroTabSelection();
+    useZoteroContext();
+    useReaderTabSelection();
+    return null;
+}
 
 // Store root references for proper cleanup
 const rootsMap = new Map<HTMLElement, any>();
@@ -239,11 +247,13 @@ function mountSurface(domElement: HTMLElement, children: React.ReactNode) {
                     <div role="alert" style={{ padding: 20 }}>
                         <strong>Beaver couldn’t start</strong>
                         <p>{getTransportConfigurationError()}</p>
-                        <p>Restart Zotero. If this continues, reinstall Beaver.</p>
+                        <p>
+                            Restart Zotero. If this continues, reinstall Beaver.
+                        </p>
                     </div>
                 ) : children}
             </SurfaceWindowContext.Provider>
-        </Provider>
+        </Provider>,
     );
     return root;
 }
@@ -269,7 +279,7 @@ export function renderAiSidebar(domElement: HTMLElement, location: 'library' | '
 
 /**
  * Renders the WindowSidebar into the separate Beaver window.
- * Uses the shared Jotai store for consistent state.
+ * Uses this renderer’s own store and chat connection.
  */
 export function renderWindowSidebar(domElement: HTMLElement) {
     return mountSurface(domElement, <WindowSidebar />);
@@ -345,7 +355,8 @@ export function initializeRuntime(runtime: WindowRuntime) {
         store.set(addPopupMessageAtom, detail);
     });
     attachThreadProjection(runtime);
-    initializeReactUI(runtime.hostWindow);
+    attachThreadAdmission(runtime);
+    if (runtime.kind === "main") initializeReactUI(runtime.hostWindow);
 }
 
 export function disposeRuntime() {
@@ -358,10 +369,16 @@ export function disposeRuntime() {
 }
 
 /** Development commands execute inside the target renderer's atom graph. */
-export function inspectRuntime(request?: { command?: string; threadId?: string; text?: string; itemId?: number; draft?: string; mutation?: WSAgentActionExecuteRequest; undo?: AgentAction }) {
+export function inspectRuntime(request?: { runId?: string; command?: string; threadId?: string; text?: string; itemId?: number; draft?: string; mutation?: WSAgentActionExecuteRequest; undo?: AgentAction }) {
     if (process.env.NODE_ENV !== 'development') return undefined;
     const runtime = getWindowRuntime();
     switch (request?.command) {
+        case 'admission': return { snapshot: store.get(threadAdmissionAtom), conflict: store.get(threadConflictAtom) };
+        case 'surface': return { surface: store.get(windowSurfaceAtom), contextId: runtime.contextWindow?.__beaverRuntime?.id ?? null };
+        case 'open-preferences': openPreferencesWindow(); return { ok: true };
+        case 'thread-retry':
+            if (!request.runId) return { error: 'run_required' };
+            return store.set(regenerateFromRunAtom, { runId: request.runId }).then(() => ({ ok: true }));
         case 'thread-cache':
             return { entities: [...store.get(threadEntitiesAtom).values()] };
         case 'thread-state':

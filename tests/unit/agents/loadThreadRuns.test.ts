@@ -198,3 +198,21 @@ describe('loadThreadRuns', () => {
         expect(onToolReturn).not.toHaveBeenCalled();
     });
 });
+
+it.each(["active", "expired", "idle"])(
+    "preserves the server tail and %s activity independently of rendered runs",
+    async (state) => {
+        getThreadRunsMock.mockResolvedValue({
+            runs: [],
+            agent_actions: null,
+            tail_run_id: "hidden-tail",
+            activity: { state, run_id: state === "idle" ? null : "reserved" },
+        });
+        const loaded = await loadThreadRuns("thread");
+        expect(loaded.tailRunId).toBe("hidden-tail");
+        expect(loaded.activity).toEqual({
+            state,
+            run_id: state === "idle" ? null : "reserved",
+        });
+    },
+);

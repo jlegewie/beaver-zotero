@@ -43,7 +43,10 @@ type ThreadViewProps = {
  * Uses allRunsAtom which combines completed runs with any active streaming run.
  */
 export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
-    function ThreadView({ className, isWindow = false }: ThreadViewProps, ref: React.ForwardedRef<HTMLDivElement>) {
+    function ThreadView(
+        { className, isWindow = false }: ThreadViewProps,
+        ref: React.ForwardedRef<HTMLDivElement>,
+    ) {
         const surfaceWindow = useSurfaceWindow();
         const runs = useAtomValue(allRunsAtom);
         const hasRuns = runs.length > 0;
@@ -54,12 +57,12 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         const restoredFromAtomRef = useRef(false);
         const currentThreadId = useAtomValue(currentThreadIdAtom);
         const prevThreadIdRef = useRef<string | null>(null);
-        
+
         // Track pending approvals for scroll-to-bottom triggering
         // With parallel tool calls, there can be multiple pending approvals
         const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
         const prevPendingApprovalIdsRef = useRef<Set<string>>(new Set());
-        
+
         // Track visibility state for ResizeObserver
         const wasHiddenRef = useRef(true);
         // Track previous container height for resize detection
@@ -74,15 +77,15 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         const protocolScrollLockUntilRef = useRef(0);
         // How long the layout that follows a finished response is still followed
         const terminalSettleUntilRef = useRef(0);
-        
+
         // Select the correct atoms based on whether we're in the separate window
-        const scrollAtoms = getScrollAtoms(isWindow);
+        const scrollAtoms = getScrollAtoms();
         const scrollPositionAtom = scrollAtoms.position;
         const scrolledAtom = scrollAtoms.userScrolled;
         // Read scroll position imperatively inside restoreScrollPosition rather than subscribing.
         // The atom is updated every ~10px of scroll, so subscribing would cause ThreadView to
         // re-render constantly while the user scrolls, cascading through all message components.
-        
+
         // Watch expansion state to re-evaluate scroll button visibility after expand/collapse
         // Track multiple expansion states: tool calls, sources, and agent actions
         const toolExpansionState = useAtomValue(toolExpandedAtom);
@@ -91,7 +94,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         const prevExpansionStateRef = useRef(toolExpansionState);
         const prevSourcesVisibilityRef = useRef(sourcesVisibilityState);
         const prevAnnotationPanelRef = useRef(annotationPanelState);
-        
+
         // Use the auto-scroll hook with window-aware state
         const { scrollContainerRef, setScrollContainerRef, handleScroll } = useAutoScroll(ref, {
             threshold: BOTTOM_THRESHOLD,
@@ -611,7 +614,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 </div>
             </div>
         );
-    }
+    },
 );
 
 export default ThreadView;

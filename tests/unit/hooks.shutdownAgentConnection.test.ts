@@ -26,6 +26,7 @@ const {
 
 vi.mock('../../src/ui/ui', () => ({
     BeaverUIFactory: {
+        closeBeaverWindow: vi.fn(),
         registerChatPanel: vi.fn(),
         removeChatPanel: mockRemoveChatPanel,
         registerShortcuts: vi.fn(),
@@ -39,7 +40,6 @@ vi.mock('../../src/ui/ui', () => ({
 vi.mock('../../src/beaver-extract', () => ({
     disposeMuPDFWorker: mockDisposeMuPDFWorker,
 }));
-
 
 vi.mock('../../src/services/protocolHandler', () => ({
     registerBeaverProtocolHandler: vi.fn(),
@@ -79,6 +79,8 @@ vi.mock('../../react/constants/versionUpdateMessages', () => ({
 function makeWindow(closeAgentConnection: unknown = vi.fn()) {
     const win = {
         EventTarget,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
         closed: false,
         document: { getElementById: vi.fn().mockReturnValue(null) },
         BeaverReact: { closeAgentConnection },

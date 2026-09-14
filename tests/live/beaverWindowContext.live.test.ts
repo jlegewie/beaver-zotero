@@ -1,7 +1,7 @@
 /**
  * Live tests for which Beaver surface makes reader context available.
  *
- * Reader tracking is shared state, not a sidebar feature. It is mounted once
+ * Reader tracking is local to each renderer and follows its main-window context. It is mounted once
  * globally and gated on "any Beaver surface is open", so the separate Beaver
  * window gets the same reader context the sidebar does — the open attachment,
  * its page and content kind, and the reader's library — and neither surface's
@@ -129,11 +129,10 @@ describe('reader context and Beaver surfaces', () => {
             beaver_ui_visible: true,
         });
         expect(opened.reader_context_settled).toBe(true);
-        // The window must know which bundle renders it, so the plugin can close
-        // it when that main window unloads.
-        expect(opened.owner_is_main_window).toBe(true);
+        // The standalone owns its renderer and reads context from the main window.
+        expect(opened.owner_is_main_window).toBe(false);
 
-        expectFixtureReaderContext(await applicationState());
+        expectFixtureReaderContext(await applicationState(opened.window_id ?? undefined));
     }, TEST_TIMEOUT_MS);
 
     it('tracks the reader when only the sidebar is open', async (ctx) => {
@@ -187,7 +186,7 @@ describe('reader context and Beaver surfaces', () => {
         const opened = await setBeaverWindow(true);
         expect(opened.reader_context_settled).toBe(true);
 
-        expectFixtureReaderContext(await applicationState());
+        expectFixtureReaderContext(await applicationState(opened.window_id ?? undefined));
     }, TEST_TIMEOUT_MS);
 
     it('is idempotent when the window is opened twice', async (ctx) => {
@@ -198,9 +197,9 @@ describe('reader context and Beaver surfaces', () => {
         expect(again.ok).toBe(true);
         expect(again.surfaces.window_open).toBe(true);
         expect(again.reader_context_settled).toBe(true);
-        expect(again.owner_is_main_window).toBe(true);
+        expect(again.owner_is_main_window).toBe(false);
 
-        expectFixtureReaderContext(await applicationState());
+        expectFixtureReaderContext(await applicationState(again.window_id ?? undefined));
     }, TEST_TIMEOUT_MS);
 
     it('is a no-op when a surface is closed while already closed', async (ctx) => {

@@ -24,9 +24,7 @@
  * Wired to their paths in `useHttpEndpoints.ts`.
  */
 
-import { openBeaverWindow } from '../../ui/openBeaverWindow';
-import { borrowedWindowCommandError } from './borrowedWindowCommand';
-import { getContextWindow } from '../../runtime/windowRuntime';
+import { getContextWindow, getHostWindow } from '../../runtime/windowRuntime';
 
 import { BeaverUIFactory } from '../../../src/ui/ui';
 import { eventManager } from '../../events/eventManager';
@@ -137,34 +135,23 @@ async function waitForReaderContext(timeoutMs: number): Promise<boolean> {
  * Open or close the separate Beaver window, then wait for reader context to
  * catch up so callers can assert on `application_state` immediately after.
  */
-export async function handleTestBeaverWindowHttpRequest(request: any): Promise<any> {
-    const ownerError = borrowedWindowCommandError();
-    if (ownerError) return ownerError;
+export async function handleTestBeaverWindowHttpRequest(
+    request: any,
+): Promise<any> {
     const open = request?.open !== false;
 
     if (open) {
-        openBeaverWindow();
-    } else {
-        BeaverUIFactory.closeBeaverWindow();
+        const snapshot = await BeaverUIFactory.commandBeaverWindow('/beaver/test/application-state', {
+            waitForContext: true, timeout_ms: settleTimeout(request),
+        });
+        return { ok: true, reader_context_settled: snapshot.reader_context_settled,
+            owner_is_main_window: false, window_id: snapshot.window_id, surfaces: snapshot.surfaces };
     }
-
+    BeaverUIFactory.closeBeaverWindow();
     const timeoutMs = settleTimeout(request);
-    const windowSettled = await waitFor(() => store.get(isBeaverWindowOpenAtom) === open, timeoutMs);
-    const readerContextSettled = windowSettled && await waitForReaderContext(timeoutMs);
-
-    // The window records the main window whose React bundle renders it; the
-    // plugin closes it when that window unloads.
-    const beaverWindow = BeaverUIFactory.findBeaverWindow();
-    const ownerIsMainWindow = beaverWindow
-        ? beaverWindow.__beaverOwnerWindowRef?.deref() === getContextWindow()
-        : null;
-
-    return {
-        ok: windowSettled,
-        reader_context_settled: readerContextSettled,
-        owner_is_main_window: ownerIsMainWindow,
-        surfaces: getSurfaces(),
-    };
+    const windowSettled = await waitFor(() => !BeaverUIFactory.findBeaverWindow(), timeoutMs);
+    return { ok: windowSettled, reader_context_settled: await waitForReaderContext(timeoutMs),
+        owner_is_main_window: null, window_id: null, surfaces: getSurfaces() };
 }
 
 /**
@@ -250,7 +237,8 @@ export async function handleTestSelectTabHttpRequest(request: any): Promise<any>
     };
 }
 
-export async function handleTestApplicationStateHttpRequest(_request: any): Promise<any> {
+export async function handleTestApplicationStateHttpRequest(request: any): Promise<any> {
+    const settled = request?.waitForContext ? await waitForReaderContext(settleTimeout(request)) : undefined;
     const applicationState = await getApplicationStateProvider()(store.get);
 
     const readerAttachment = store.get(currentReaderAttachmentAtom);
@@ -258,6 +246,8 @@ export async function handleTestApplicationStateHttpRequest(_request: any): Prom
 
     return {
         ok: true,
+        window_id: getHostWindow().__beaverRuntime?.id,
+        reader_context_settled: settled,
         application_state: applicationState,
         surfaces: getSurfaces(),
         context_atoms: {

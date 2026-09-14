@@ -1,3 +1,7 @@
+import {
+    serverThreadBlockedAtom,
+    threadConflictAtom,
+} from "../../runtime/threadAdmission";
 import React, { useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { otherThreadWriterAtom, threadDeletedAtom, threadHistoryStaleAtom } from '../../runtime/threadProjection';
@@ -23,6 +27,8 @@ const ThreadPresenceBar: React.FC = () => {
     const surfaceWindow = useSurfaceWindow();
     const otherWriter = useAtomValue(otherThreadWriterAtom);
     const chatDeleted = useAtomValue(threadDeletedAtom);
+    const serverBlocked = useAtomValue(serverThreadBlockedAtom);
+    const conflict = useAtomValue(threadConflictAtom);
     const historyStale = useAtomValue(threadHistoryStaleAtom);
     const viewerUserId = useAtomValue(userIdAtom);
     const viewerThreadId = useAtomValue(currentThreadIdAtom);
@@ -66,7 +72,9 @@ const ThreadPresenceBar: React.FC = () => {
         content = (
             <>
                 <Icon icon={DeleteIcon} className="font-color-secondary flex-none" size={15} />
-                <span className="font-color-primary text-sm truncate">This chat was deleted</span>
+                <span className="font-color-primary text-sm truncate">
+                    This chat was deleted
+                </span>
                 <div className="flex-1" />
                 <Button variant="outline" onClick={handleNewChat} style={BAR_BUTTON_STYLE}>
                     New chat
@@ -77,22 +85,38 @@ const ThreadPresenceBar: React.FC = () => {
         content = (
             <>
                 <Icon icon={PictureInPictureIcon} className="font-color-secondary flex-none" size={15} />
-                <span className="font-color-primary text-sm truncate">Responding in another window</span>
+                <span className="font-color-primary text-sm truncate">
+                    Responding in another window
+                </span>
                 <div className="flex-1" />
                 <Button variant="outline" rightIcon={ArrowUpRightIcon} onClick={handleGoToWindow} style={BAR_BUTTON_STYLE}>
                     Go to window
                 </Button>
             </>
         );
-    } else if (historyStale) {
+    } else if (serverBlocked) {
+        content = (
+            <span className="font-color-primary text-sm">
+                A response is still running in this chat
+            </span>
+        );
+    } else if (historyStale || conflict) {
         content = (
             <>
-                <Icon icon={SyncIcon} className="font-color-secondary flex-none" size={12} />
-                <span className="font-color-primary text-sm truncate">This chat was updated in another window</span>
+                <Icon
+                    icon={SyncIcon}
+                    className="font-color-secondary flex-none"
+                    size={12}
+                />
+                <span className="font-color-primary text-sm truncate">
+                    This chat was updated in another window
+                </span>
                 <div className="flex-1" />
                 <Button
                     variant="outline"
-                    onClick={(e) => { void handleRefresh(e); }}
+                    onClick={(e) => {
+                        void handleRefresh(e);
+                    }}
                     disabled={!viewerUserId || !viewerThreadId}
                     loading={isRefreshing}
                     style={BAR_BUTTON_STYLE}

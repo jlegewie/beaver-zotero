@@ -190,8 +190,6 @@ export const zoteroServerCredentialsErrorAtom = atom(false);
 // UI behavior and elements
 // Shared scroll state for library and reader sidebars
 export const userScrolledAtom = atom(false);
-// Independent scroll state for separate window
-export const windowUserScrolledAtom = atom(false);
 
 // Whether the thread is scrolled to (or within a threshold of) its bottom.
 //
@@ -206,8 +204,6 @@ export const windowUserScrolledAtom = atom(false);
 // so every writer measures the same way against the same threshold. Starts true:
 // a thread with nothing in it yet is at its bottom.
 export const isAtBottomAtom = atom(true);
-// Independent measured scroll position for the separate window
-export const windowIsAtBottomAtom = atom(true);
 
 // Popup Messages
 export const popupMessagesAtom = atom<PopupMessage[]>([]);

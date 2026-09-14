@@ -5,7 +5,13 @@ vi.mock('../../../react/atoms/models', () => ({ isUsingBeaverCreditsAtom: {} }))
 vi.mock('../../../src/utils/prefs', () => ({ getPref: vi.fn() }));
 
 function makeWindow() {
-    return { EventTarget, CustomEvent, closed: false } as unknown as Window;
+    return {
+        EventTarget,
+        CustomEvent,
+        closed: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+    } as unknown as Window;
 }
 
 /** A frame window the way a reader tab's chrome window appears to the plugin. */
@@ -214,4 +220,35 @@ describe('targeted window commands', () => {
         await expect(instance.dispatchWindowCommand('inspect', { windowId: a.id })).rejects.toMatchObject({ code: 'window_unavailable' });
         await expect(instance.dispatchWindowCommand('inspect', { windowId: 'missing' })).rejects.toMatchObject({ code: 'window_unavailable' });
     });
+});
+
+it("rebinds standalone context across main-window focus and closure without detaching its renderer", () => {
+    const instance = new BeaverInstance();
+    const a = makeWindow(),
+        b = makeWindow(),
+        separate = makeWindow();
+    (Zotero as any).getMainWindow = vi.fn(() => a);
+    const ra = instance.attachWindow(a),
+        rb = instance.attachWindow(b);
+    const standalone = instance.attachWindow(separate, "standalone");
+    ra.status = rb.status = standalone.status = "ready";
+    const changed = vi.fn();
+    standalone.events.addEventListener("contextWindowChanged", changed);
+    expect(standalone.contextWindow).toBe(a);
+    instance.refreshContext(b);
+    expect(standalone.contextWindow).toBe(b);
+    instance.markClosing(b);
+    expect(standalone.contextWindow).toBe(a);
+    instance.markClosing(a);
+    expect(standalone.contextWindow).toBeNull();
+    expect(standalone.status).toBe("ready");
+    expect(instance.resolveWindow(standalone.id)).toBe(standalone);
+    expect(changed).toHaveBeenCalledTimes(3);
+    instance.detachWindow(a);
+    instance.detachWindow(b);
+    vi.mocked(Zotero.getMainWindow).mockReturnValue(null as any);
+    const reopened = makeWindow();
+    instance.attachWindow(reopened);
+    expect(standalone.contextWindow).toBe(reopened);
+    instance.disposeInstance();
 });

@@ -201,6 +201,21 @@ export function useZoteroContext() {
         const mainWindow = getContextWindow();
         const zp = mainWindow?.ZoteroPane;
         if (!zp) {
+            setSelectedItems([]);
+            setSelectedItemCount(0);
+            setSelectedTags([]);
+            setNoteItem(null);
+            setLibraryView({
+                treeRowType: "library",
+                libraryId: 0,
+                libraryName: "",
+                collectionId: null,
+                collectionName: null,
+                searchName: null,
+                selectedRowCount: 0,
+                selectedCollections: [],
+                selectedLibraryIds: [],
+            });
             logger('useZoteroContext: ZoteroPane not available', 2);
             return;
         }

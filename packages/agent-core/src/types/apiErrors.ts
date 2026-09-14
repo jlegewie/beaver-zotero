@@ -96,3 +96,16 @@ export function isSessionRefreshError(error: unknown): error is SessionRefreshEr
 export function isServerError(error: unknown): error is ServerError {
     return !!error && typeof error === 'object' && (error as Error).name === 'ServerError';
 }
+
+/** Admission conflicts require history reconciliation and an explicit new operation. */
+export function isThreadConflict(error: unknown): boolean {
+    if (!error || typeof error !== "object") return false;
+    const value = error as { code?: string; type?: string };
+    return [
+        "thread_busy",
+        "thread_tail_mismatch",
+        "duplicate_run_id",
+        "thread_claim_lost",
+        "thread_not_found",
+    ].includes(value.code ?? value.type ?? "");
+}

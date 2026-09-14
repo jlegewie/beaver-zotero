@@ -8,7 +8,12 @@ let available = false;
 beforeAll(async () => { available = await isZoteroAvailable(); });
 
 async function list() {
-    return (await post<{ windows: { id: string; status: string }[] }>(path, { command: 'list' })).windows;
+    return (
+        await post<{ windows: { id: string; kind: string; status: string }[] }>(
+            path,
+            { command: 'list' },
+        )
+    ).windows;
 }
 
 describe('window runtime diagnostics', () => {
@@ -22,7 +27,9 @@ describe('window runtime diagnostics', () => {
             expect(win.status).toBe('ready');
             const state = await post<RuntimeState>(path, { windowId: win.id });
             expect(state.id).toBe(win.id);
-            expect(state.roots).toBeGreaterThanOrEqual(4);
+            expect(state.roots).toBeGreaterThanOrEqual(
+                win.kind === "standalone" ? 3 : 4,
+            );
         }
         expect(await list()).toEqual(windows);
     });
