@@ -2886,10 +2886,9 @@ async function startRegenerateRunOwned(
             let settledHistory: Awaited<ReturnType<typeof readAdmissionHistory>>;
             for (;;) {
                 const history = await readAdmissionHistory(settlementThreadId, true);
-                const snapshot = { threadId: settlementThreadId, tailRunId: history.tail_run_id, activity: history.activity };
                 if (!current()) return;
-                set(threadAdmissionAtom, snapshot);
-                if (snapshot.activity.state !== 'active') {
+                setAdmission(set, settlementThreadId, history.tail_run_id, history.activity);
+                if (history.activity.state !== 'active') {
                     settledHistory = history;
                     break;
                 }

@@ -33,6 +33,7 @@ const StatusLine: React.FC<{ text: string }> = ({ text }) => {
 };
 import { useAtomValue } from 'jotai';
 import { isSidebarVisibleAtom } from '../../atoms/ui';
+import { tryGetWindowRuntime } from '../../runtime/windowRuntime';
 import { runStatusPopupForceVisibleAtom } from '../../atoms/runStatusPopup';
 import {
     AlertIcon,
@@ -452,7 +453,7 @@ const AnimatedCard: React.FC<{ card: RunStatusPopupCard; children: React.ReactNo
  * waiting on with the controls to make it, or what it finished with.
  *
  * Always mounted, so the completion tracking in the hook sees a run finish
- * whether or not a card is up; it draws nothing while the sidebar is open.
+ * whether or not a card is up; standalone windows already show the chat.
  */
 const RunStatusPopup: React.FC = () => {
     const card = useRunStatusPopupCard();
@@ -465,7 +466,7 @@ const RunStatusPopup: React.FC = () => {
     // for the run it was opened on, so the next run starts collapsed.
     const [batchExpansion, setBatchExpansion] = useState<{ runId: string; expanded: boolean } | null>(null);
 
-    if (!card || (isSidebarVisible && !forceVisible)) return null;
+    if (tryGetWindowRuntime()?.kind === 'standalone' || !card || (isSidebarVisible && !forceVisible)) return null;
 
     // The panel draws nothing without a batch in flight, and the wrapper is
     // hidden with it (see the stylesheet), so a run without a batch does not

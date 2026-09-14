@@ -157,16 +157,16 @@ export function setAdmission(
     });
 }
 
+type AdmissionHistory = ThreadRunsResponse & {
+    tail_run_id: string | null;
+    activity: ThreadActivity;
+};
+
 /** Validate raw capability metadata before normalizing history for presentation. */
 export async function readAdmissionHistory(
     threadId: string,
     includeActions = false,
-): Promise<
-    ThreadRunsResponse & {
-        tail_run_id: string | null;
-        activity: ThreadActivity;
-    }
-> {
+): Promise<AdmissionHistory> {
     const history = await agentRunService.getThreadRuns(
         threadId,
         includeActions,
@@ -176,11 +176,7 @@ export async function readAdmissionHistory(
             "This server does not support safe concurrent chats. Update the server before continuing.",
         );
     }
-    return {
-        ...history,
-        tail_run_id: history.tail_run_id,
-        activity: history.activity,
-    };
+    return history as AdmissionHistory;
 }
 
 export async function readAdmission(

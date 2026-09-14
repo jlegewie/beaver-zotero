@@ -44,7 +44,7 @@ leaves the response stopped.
 ## Validation and compatibility
 
 Verified on macOS with Zotero **10.0.1-beta.1+16a79acf7**, using an isolated profile
-and a server advertising admission v1. The final unit run passed **8,395 tests in
+and a server advertising admission v1. The final unit run passed **8,398 tests in
 531 files**. Live suites passed **20 selected tests across eight files**, with
 additional real chat/lifecycle probes described below. Development build, root and
 package type checks, bundle boundary checks, ESLint, and `git diff --check` passed:
@@ -56,6 +56,9 @@ package type checks, bundle boundary checks, ESLint, and `git diff --check` pass
 - The standalone finished streaming after every main window closed. PDF extraction
   worked after invalidating the document cache with no main window open.
 - Standalone preferences opened with no main window and retained the correct owner.
+- Completed responses showed no status card in the standalone window and retained
+  the card in a main window with its sidebar closed. All nine reader-context
+  transition and library-exclusion live tests passed with explicit window targets.
 - Repeated standalone open/close, reader-context initialization, sidebar context,
   table/chat round trips, and plugin rebuild/restart were exercised.
 - Live suites covered runtime cleanup, context isolation, account/access projection,

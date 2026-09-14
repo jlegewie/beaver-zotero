@@ -96,7 +96,7 @@ afterAll(async () => {
 async function trackReader(
     ctx: any,
     attachment: { library_id: number; zotero_key: string; description: string },
-): Promise<void> {
+): Promise<string> {
     const { has_profile: hasProfile } = await getExclusionState();
     if (!hasProfile) {
         ctx.skip('Beaver profile is not loaded; log in to run the reader-tracking tests');
@@ -108,6 +108,8 @@ async function trackReader(
     const opened = await setBeaverWindow(true);
     expect(opened.surfaces.beaver_ui_visible).toBe(true);
     expect(opened.reader_context_settled).toBe(true);
+    expect(opened.window_id).toBeTruthy();
+    return opened.window_id!;
 }
 
 /**
@@ -117,10 +119,10 @@ async function trackReader(
  * attachment, so it lags a cold open by however long the viewer takes to
  * initialize. Returns null if it never resolves.
  */
-async function waitForReaderPage(timeoutMs = 30000): Promise<number | null> {
+async function waitForReaderPage(windowId: string, timeoutMs = 30000): Promise<number | null> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
-        const page = (await applicationState()).application_state.reader_state?.current_page;
+        const page = (await applicationState(windowId)).application_state.reader_state?.current_page;
         if (typeof page === 'number') return page;
         if (Date.now() >= deadline) return null;
         await new Promise((resolve) => setTimeout(resolve, 500));
@@ -133,8 +135,8 @@ describe('reader tracking follows the selected tab', () => {
     });
 
     it('swaps the attachment when a different reader tab is selected', async (ctx) => {
-        await trackReader(ctx, SMALL_PDF);
-        expect((await applicationState()).context_atoms.reader_attachment).toEqual({
+        const windowId = await trackReader(ctx, SMALL_PDF);
+        expect((await applicationState(windowId)).context_atoms.reader_attachment).toEqual({
             library_id: SMALL_PDF.library_id,
             zotero_key: SMALL_PDF.zotero_key,
         });
@@ -143,7 +145,7 @@ describe('reader tracking follows the selected tab', () => {
         expect(switched.ok).toBe(true);
         expect(switched.reader_context_settled).toBe(true);
 
-        const state = await applicationState();
+        const state = await applicationState(windowId);
         // Nothing from the previous reader may survive the switch: the page and
         // content kind in `reader_state` are read from the OPEN reader, so a
         // stale attachment would be reported alongside the new reader's page.
@@ -159,28 +161,28 @@ describe('reader tracking follows the selected tab', () => {
     }, TEST_TIMEOUT_MS);
 
     it('keeps the attachment when the tracked reader tab is re-selected', async (ctx) => {
-        await trackReader(ctx, SMALL_PDF);
+        const windowId = await trackReader(ctx, SMALL_PDF);
 
         const again = await selectReaderTab(SMALL_PDF);
         expect(again.ok).toBe(true);
         expect(again.reader_context_settled).toBe(true);
 
         // Re-selecting must be a no-op, not a teardown-and-rebuild.
-        expect((await applicationState()).context_atoms.reader_attachment).toEqual({
+        expect((await applicationState(windowId)).context_atoms.reader_attachment).toEqual({
             library_id: SMALL_PDF.library_id,
             zotero_key: SMALL_PDF.zotero_key,
         });
     }, TEST_TIMEOUT_MS);
 
     it('clears reader context when the library tab is selected', async (ctx) => {
-        await trackReader(ctx, SMALL_PDF);
+        const windowId = await trackReader(ctx, SMALL_PDF);
 
         const library = await selectLibraryTab();
         expect(library.ok).toBe(true);
         expect(library.reader_context_settled).toBe(true);
         expect(library.surfaces.is_library_tab).toBe(true);
 
-        const state = await applicationState();
+        const state = await applicationState(windowId);
         expect(state.application_state.current_view).toBe('library');
         expect(state.context_atoms.reader_attachment).toBeNull();
         expect(state.context_atoms.reader_text_selection).toBeNull();
@@ -188,14 +190,14 @@ describe('reader tracking follows the selected tab', () => {
     }, TEST_TIMEOUT_MS);
 
     it('restores reader context when a reader tab is selected again', async (ctx) => {
-        await trackReader(ctx, SMALL_PDF);
+        const windowId = await trackReader(ctx, SMALL_PDF);
         await selectLibraryTab();
 
         const back = await selectReaderTab(SMALL_PDF);
         expect(back.ok).toBe(true);
         expect(back.reader_context_settled).toBe(true);
 
-        const state = await applicationState();
+        const state = await applicationState(windowId);
         expect(state.application_state.current_view).toBe('file_reader');
         expect(state.context_atoms.reader_attachment).toEqual({
             library_id: SMALL_PDF.library_id,
@@ -204,7 +206,7 @@ describe('reader tracking follows the selected tab', () => {
     }, TEST_TIMEOUT_MS);
 
     it('tracks a reader tab that is opened cold while Beaver is already open', async (ctx) => {
-        await trackReader(ctx, SMALL_PDF);
+        const windowId = await trackReader(ctx, SMALL_PDF);
 
         // Closing every reader tab first makes this a cold open: the reader
         // instance does not exist yet when the tab-select notification fires,
@@ -214,7 +216,7 @@ describe('reader tracking follows the selected tab', () => {
         expect(cold.ok).toBe(true);
         expect(cold.reader_context_settled).toBe(true);
 
-        const state = await applicationState();
+        const state = await applicationState(windowId);
         expect(state.context_atoms.reader_attachment).toEqual({
             library_id: NORMAL_PDF.library_id,
             zotero_key: NORMAL_PDF.zotero_key,
@@ -229,11 +231,11 @@ describe('reader tracking follows the selected tab', () => {
         // attachment, so a cold open reports null until the PDF viewer has
         // initialized. Tracking is still correct at that point — the page just
         // catches up shortly after.
-        expect(await waitForReaderPage()).toBeGreaterThan(0);
+        expect(await waitForReaderPage(windowId)).toBeGreaterThan(0);
     }, TEST_TIMEOUT_MS);
 
     it('reports the new library when switching to a reader in another library', async (ctx) => {
-        await trackReader(ctx, SMALL_PDF);
+        const windowId = await trackReader(ctx, SMALL_PDF);
 
         const switched = await selectReaderTab(GROUP_LIB_PDF);
         if (!switched.ok) {
@@ -241,7 +243,7 @@ describe('reader tracking follows the selected tab', () => {
         }
         expect(switched.reader_context_settled).toBe(true);
 
-        const state = await applicationState();
+        const state = await applicationState(windowId);
         expect(state.context_atoms.reader_attachment).toEqual({
             library_id: GROUP_LIB_PDF.library_id,
             zotero_key: GROUP_LIB_PDF.zotero_key,
@@ -272,7 +274,8 @@ describe('reader tracking and excluded libraries', () => {
         const opened = await setBeaverWindow(true);
         expect(opened.reader_context_settled).toBe(true);
 
-        const state = await applicationState();
+        expect(opened.window_id).toBeTruthy();
+        const state = await applicationState(opened.window_id!);
         // The reader is open — the exclusion, not the tab, is what withholds it.
         expect(state.application_state.current_view).toBe('file_reader');
         expect(state.context_atoms.reader_attachment).toBeNull();
@@ -281,8 +284,8 @@ describe('reader tracking and excluded libraries', () => {
     }, TEST_TIMEOUT_MS);
 
     it('drops the tracked attachment when its library is excluded mid-session', async (ctx) => {
-        await trackReader(ctx, SMALL_PDF);
-        expect((await applicationState()).context_atoms.reader_attachment).not.toBeNull();
+        const windowId = await trackReader(ctx, SMALL_PDF);
+        expect((await applicationState(windowId)).context_atoms.reader_attachment).not.toBeNull();
 
         await excludeLibraries([SMALL_PDF.library_id]);
 
@@ -290,21 +293,21 @@ describe('reader tracking and excluded libraries', () => {
         // tear the previous setup down.
         await new Promise((resolve) => setTimeout(resolve, EXCLUSION_SETTLE_MS));
 
-        const state = await applicationState();
+        const state = await applicationState(windowId);
         expect(state.context_atoms.reader_attachment).toBeNull();
         expect(state.application_state.reader_state).toBeUndefined();
     }, TEST_TIMEOUT_MS);
 
     it('resumes tracking when the library is no longer excluded', async (ctx) => {
-        await trackReader(ctx, SMALL_PDF);
+        const windowId = await trackReader(ctx, SMALL_PDF);
         await excludeLibraries([SMALL_PDF.library_id]);
         await new Promise((resolve) => setTimeout(resolve, EXCLUSION_SETTLE_MS));
-        expect((await applicationState()).context_atoms.reader_attachment).toBeNull();
+        expect((await applicationState(windowId)).context_atoms.reader_attachment).toBeNull();
 
         await restoreExclusions(originalExclusions);
         await new Promise((resolve) => setTimeout(resolve, EXCLUSION_SETTLE_MS));
 
-        const state = await applicationState();
+        const state = await applicationState(windowId);
         expect(state.context_atoms.reader_attachment).toEqual({
             library_id: SMALL_PDF.library_id,
             zotero_key: SMALL_PDF.zotero_key,
