@@ -28,30 +28,35 @@ export async function prepareUncachedFiles(): Promise<number> {
     }
     const { documentCache, backgroundExtractor, db } = beaver;
     let queued = 0;
-    await documentCache.runMaintenance(async () => {
-        const candidates = await getUncachedCandidates(await documentCache.getStats());
-        const jobs: BackgroundJobInput[] = [];
-        for (const candidate of candidates) {
-            if (!backgroundProcessingEnabled() || !isBackgroundProcessingLibraryEnabled(candidate.libraryId)) continue;
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(candidate.libraryId, candidate.zoteroKey);
-            if (!item || safeIsInTrash(item) === true) continue;
-            const kind = getReadableContentKind(item);
-            if (kind !== 'pdf' && kind !== 'epub' && kind !== 'snapshot') continue;
-            if (!isBackgroundProcessingLibraryEnabled(candidate.libraryId)) continue;
-            jobs.push({
-                jobType: 'document_extract', libraryId: candidate.libraryId, zoteroKey: candidate.zoteroKey,
-                itemId: item.id, contentKind: kind, payloadKind: 'structured',
-                priority: BACKGROUND_EXTRACT_PRIORITY,
-                payload: { ...buildBackgroundExtractPayload(kind), prepare_cache: true },
-                now: Date.now(),
-            });
-        }
-        if (backgroundProcessingEnabled()) {
-            const allowed = jobs.filter((job) => isBackgroundProcessingLibraryEnabled(job.libraryId));
-            await db.enqueueBackgroundJobs(allowed);
-            if (allowed.length > 0) backgroundExtractor.requestImmediateDrain();
-            queued = allowed.length;
-        }
-    });
-    return queued;
+    const finishDiscovery = await beaver.background?.beginProcessingDiscovery();
+    try {
+        await documentCache.runMaintenance(async () => {
+            const candidates = await getUncachedCandidates(await documentCache.getStats());
+            const jobs: BackgroundJobInput[] = [];
+            for (const candidate of candidates) {
+                if (!backgroundProcessingEnabled() || !isBackgroundProcessingLibraryEnabled(candidate.libraryId)) continue;
+                const item = await Zotero.Items.getByLibraryAndKeyAsync(candidate.libraryId, candidate.zoteroKey);
+                if (!item || safeIsInTrash(item) === true) continue;
+                const kind = getReadableContentKind(item);
+                if (kind !== 'pdf' && kind !== 'epub' && kind !== 'snapshot') continue;
+                if (!isBackgroundProcessingLibraryEnabled(candidate.libraryId)) continue;
+                jobs.push({
+                    jobType: 'document_extract', libraryId: candidate.libraryId, zoteroKey: candidate.zoteroKey,
+                    itemId: item.id, contentKind: kind, payloadKind: 'structured',
+                    priority: BACKGROUND_EXTRACT_PRIORITY,
+                    payload: { ...buildBackgroundExtractPayload(kind), prepare_cache: true },
+                    now: Date.now(),
+                });
+            }
+            if (backgroundProcessingEnabled()) {
+                const allowed = jobs.filter((job) => isBackgroundProcessingLibraryEnabled(job.libraryId));
+                await db.enqueueBackgroundJobs(allowed);
+                if (allowed.length > 0) backgroundExtractor.requestImmediateDrain();
+                queued = allowed.length;
+            }
+        });
+        return queued;
+    } finally {
+        await finishDiscovery?.();
+    }
 }

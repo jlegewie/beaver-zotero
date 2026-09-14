@@ -987,7 +987,7 @@ export class DocumentCache {
     }
 
     /**
-     * Clear native extracted text while retaining OCR payloads and their metadata.
+     * Clear extracted text while retaining OCR payloads and their metadata.
      */
     clearAll(): Promise<{ metadataRows: number; payloadRows: number }> {
         if (this.clearing) return this.clearing;

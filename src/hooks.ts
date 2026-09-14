@@ -336,9 +336,9 @@ async function onStartup() {
         // -------- Initialize background extraction processor --------
         const backgroundExtractor = new BackgroundExtractor();
         addon.backgroundExtractor = backgroundExtractor;
-        backgroundExtractor.start();
         addon.background = new InstanceBackground();
-        addon.background.start(addon.account!);
+        await addon.background.start(addon.account!);
+        backgroundExtractor.start();
         ztoolkit.log("BackgroundExtractor started");
 
         // Whole-library producers are independently pref-gated. They only

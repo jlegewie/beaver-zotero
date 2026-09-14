@@ -62,15 +62,16 @@ it('shows the cache size and clears it after confirmation, then re-reads the siz
         ...stats, cached_document_count: 0, metadata_count: 0, payload_count: 0, payload_total_bytes: 0,
     });
     await render(async (container) => {
-        expect(container.textContent).toContain('2 documents cached · 1.0 MB of 2.0 MB');
+        expect(container.textContent).toContain('2 documents (1.0 MB)');
         await act(async () => clearButton(container).click());
         expect(confirm).toHaveBeenCalledOnce();
         expect(confirm.mock.calls[0][0]).toMatchObject({ button0: 'Clear', defaultButton: 1 });
-        expect((confirm.mock.calls[0][0] as any).text).toContain('2 documents cached');
+        expect((confirm.mock.calls[0][0] as any).text).toContain('Clear extracted text from 2 documents (1.0 MB)');
+        expect((confirm.mock.calls[0][0] as any).text).not.toContain('even above the cache budget');
         expect((confirm.mock.calls[0][0] as any).text).not.toContain('Scanned files');
         expect(clearCache).toHaveBeenCalledWith();
         expect(getStats).toHaveBeenCalledTimes(2);
-        expect(container.textContent).toContain('0 documents cached · 0 MB of 2.0 MB');
+        expect(container.textContent).toContain('0 documents (0 MB)');
         expect(clearButton(container).disabled).toBe(true);
     });
 });
@@ -121,7 +122,7 @@ it('disables Clear when the cache cannot be read and keeps retrying through repe
             expect(clearButton(container).disabled).toBe(true);
             await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
             expect(getStats).toHaveBeenCalledTimes(4);
-            expect(container.textContent).toContain('2 documents cached');
+            expect(container.textContent).toContain('2 documents (1.0 MB)');
             expect(clearButton(container).disabled).toBe(false);
             // Once readable, the size is re-read slowly rather than every few seconds.
             await act(async () => { await vi.advanceTimersByTimeAsync(25_000); });

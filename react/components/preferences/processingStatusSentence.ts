@@ -10,11 +10,7 @@ export interface StatusSentence {
     tone: StatusTone;
     headline: string;
     caption: string;
-    /**
-     * Files with queued or running work, while a lane is busy. The row turns
-     * this into progress through the current run by tracking how it moves
-     * between polls.
-     */
+    /** Distinct attachments with unfinished work, including subsequent stages. */
     outstanding?: number;
     /** Show Start now: queued work can start without waiting for idle. */
     processNow: boolean;
@@ -50,7 +46,7 @@ function blockerCaption(blocker: string): string {
 }
 
 /**
- * Reduce the status snapshot to the one sentence the status row shows.
+ * Reduce the status snapshot to a short headline and an explanatory caption.
  *
  * Four states: working (with a queue depth), waiting (with the reason), settled,
  * and unreadable. Order matters: an unreadable status wins, then running
@@ -87,24 +83,21 @@ export function describeStatus(
     const { total, readable, unreadable, awaitingOcr, oldestPendingAt } = status.ledger;
     const done = readable + unreadable;
     const remaining = Math.max(0, total - done);
-    // Queue depth in files. The ledger counts files with no final outcome yet;
-    // the queue also holds re-reads of settled files (a cache restore, a
-    // changed file), which the ledger does not see, so take the larger.
-    // Running jobs are still queue rows, so they are not added on top. Jobs
-    // are the fallback for a snapshot without the per-file count.
+    // The service's pending set includes every required stage and queued reread.
+    // Older diagnostic snapshots can lack run progress and use queue depth.
     const deferred = status.worker?.deferred ?? 0;
     const queued = status.worker?.queuedFiles ?? (runnable + deferred);
-    const outstanding = Math.max(remaining, queued);
+    const outstanding = status.progress?.pending ?? Math.max(remaining, queued);
     // Stop cancels the drain but never the job already running, so until that
     // job finishes the lane is busy while the gate is shut. Say so, or the
     // click looks ignored for as long as a large PDF takes to read.
     if (inFlight > 0 && !gateOpen && !draining) {
-        const waitingAfter = Math.max(0, outstanding - inFlight);
+        const waitingAfter = Math.max(0, outstanding - (status.worker?.inFlightFiles ?? inFlight));
         return {
             tone: 'busy',
             headline: 'Finishing current file…',
             caption: (waitingAfter > 0 ? `${plural(waitingAfter, 'file')} waiting. ` : '')
-                + 'Processing continues when Zotero is idle.',
+                + 'Processing continues when your computer is idle.',
             outstanding,
             processNow: false,
             stopDrain: false,
@@ -119,21 +112,26 @@ export function describeStatus(
             caption: inFlight === 0
                 ? 'Starting…'
                 : outstanding > 0
-                    ? `${plural(outstanding, 'file')} remaining.`
+                    ? `${plural(outstanding, 'file')} remaining`
                     : 'Reading text from your files.',
             outstanding,
             processNow: false,
             stopDrain: draining,
         };
     }
-    const waiting = outstanding > 0 ? `${plural(outstanding, 'file')} waiting. ` : '';
+    if (status.progress?.discovering) return {
+        tone: 'busy', headline: 'Checking for additional files…',
+        caption: 'Beaver is checking your libraries for files to process.',
+        processNow: false, stopDrain: draining,
+    };
+    const waiting = outstanding > 0 ? `${plural(outstanding, 'file')} waiting` : 'Waiting to start';
     if (runnable > 0) {
         return {
             tone: 'waiting',
-            headline: 'Waiting to start',
-            caption: waiting + (blocker
+            headline: waiting,
+            caption: blocker
                 ? blockerCaption(blocker)
-                : 'Starts after about 30 seconds without activity in Zotero.'),
+                : 'Starts after about 30 seconds without keyboard or mouse activity on your computer.',
             processNow: !draining,
             processNowBlocked: Boolean(blocker),
             stopDrain: draining,
@@ -143,18 +141,18 @@ export function describeStatus(
     if (deferred > 0) {
         return {
             tone: 'waiting',
-            headline: 'Waiting to start',
-            caption: waiting + 'Some files are processing remotely or waiting to retry.',
+            headline: waiting,
+            caption: 'Some files are processing remotely or waiting to retry.',
             processNow: false,
             stopDrain: draining,
         };
     }
     // A reconcile pass may not have queued every unfinished ledger stage yet.
-    if (remaining > 0 || awaitingOcr > 0 || oldestPendingAt !== null) {
+    if (status.progress ? outstanding > 0 : remaining > 0 || awaitingOcr > 0 || oldestPendingAt !== null) {
         return {
             tone: 'waiting',
-            headline: 'Waiting to start',
-            caption: waiting + 'Beaver picks up unfinished files automatically.',
+            headline: waiting,
+            caption: 'Beaver picks up unfinished files automatically.',
             processNow: !draining,
             processNowBlocked: Boolean(blocker),
             stopDrain: draining,
@@ -182,9 +180,7 @@ export function describeStatus(
     return {
         tone: 'idle',
         headline: 'Up to date',
-        caption: status.issues.length > 0
-            ? 'Some files need attention. See the problems below.'
-            : 'Beaver processes new and changed files automatically.',
+        caption: 'Beaver processes new and changed files automatically.',
         processNow: false,
         stopDrain: false,
     };

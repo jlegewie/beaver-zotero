@@ -68,7 +68,12 @@ describe("instance embedding events across background generations", () => {
             libraries: [{ library_id: 1 }, { library_id: 2 }],
         };
         owner = {
-            db: { deleteEmbeddingsBatch: mocks.deleteEmbeddings },
+            db: {
+                deleteEmbeddingsBatch: mocks.deleteEmbeddings,
+                subscribeProcessingChanges: () => () => {},
+                configureProcessingProgress: async () => {},
+                getProcessingProgress: async () => ({ runId: 0, total: 0, pending: 0 }),
+            },
             libraryScopeInitialized: true,
             searchableLibraryIds: [1, 2],
             hasOcrAccess: true,
@@ -76,6 +81,7 @@ describe("instance embedding events across background generations", () => {
             backgroundExtractor: {
                 registerExecutor: vi.fn(),
                 unregisterExecutor: vi.fn(),
+                getLaneStatus: () => ({}),
             },
             account: {
                 subscribe: (fn: typeof reconcile) => {

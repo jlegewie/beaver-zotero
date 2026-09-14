@@ -34,6 +34,8 @@ vi.mock("../../../src/services/backgroundProcessing/statusSnapshot", () => ({
     collectProcessingStatus: mocks.collect,
 }));
 import { InstanceBackground } from "../../../src/services/instanceBackground";
+import { BeaverDB } from '../../../src/services/database';
+import { MockDBConnection } from '../../mocks/mockDBConnection';
 
 describe("InstanceBackground", () => {
     let notify: (snapshot: any) => void;
@@ -45,7 +47,7 @@ describe("InstanceBackground", () => {
             start.mockReturnValue(mocks.stop);
         snapshot = {
             generation: 1,
-            session: {},
+            session: { user: { id: "account-a" } },
             data: { profile: { has_authorized_access: true } },
             libraries: [{ library_id: 1 }],
         };
@@ -150,6 +152,74 @@ describe("InstanceBackground", () => {
         notify(snapshot);
         expect(mocks.embedding.mock.calls[1][1]).toBe(false);
         await service.dispose();
+    });
+
+    it('tracks and settles work without a renderer, then resumes the stored run in a new owner', async () => {
+        vi.useFakeTimers();
+        const conn = new MockDBConnection();
+        const db = new BeaverDB(conn as any);
+        await db.initDatabase('0.99.0');
+        owner.db = db;
+        owner.backgroundExtractor.getLaneStatus = () => ({});
+        owner.runtime = { subscribe: vi.fn(() => vi.fn()), publish: vi.fn() };
+        const service = new InstanceBackground();
+        owner.background = service;
+        try {
+            await service.start(owner.account);
+            await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'FIRST', contentKind: 'pdf' });
+            await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'SECOND', contentKind: 'pdf' });
+            await conn.queryAsync("UPDATE attachment_processing_state SET extract_status = 'done', ocr_status = 'na' WHERE zotero_key = 'FIRST'");
+            await vi.advanceTimersByTimeAsync(100);
+            expect(owner.runtime.publish).toHaveBeenCalledWith('background-processing:changed', {});
+            const before = await service.getProcessingProgress();
+            expect(before).toMatchObject({ total: 2, succeeded: 1, pending: 1 });
+            await service.dispose();
+            const resumed = new InstanceBackground();
+            owner.background = resumed;
+            await resumed.start(owner.account);
+            try {
+                expect(await resumed.getProcessingProgress()).toEqual(before);
+                await db.markAttachmentExtractFailure({ libraryId: 1, zoteroKey: 'SECOND', status: 'failed', error: 'invalid_pdf', attemptedAt: Date.now() });
+                await vi.advanceTimersByTimeAsync(100);
+                const finishInitialCheck = await resumed.beginProcessingDiscovery();
+                await finishInitialCheck();
+                await vi.advanceTimersByTimeAsync(100);
+                // Read the database directly: the owner must have settled it without a UI read.
+                const run = await conn.queryAsync('SELECT finished_at FROM processing_progress_run');
+                expect(run[0].finished_at).not.toBeNull();
+                expect(await resumed.getProcessingProgress()).toMatchObject({ total: 2, succeeded: 1, problems: 1, pending: 0 });
+            } finally { await resumed.dispose(); }
+        } finally {
+            await service.dispose();
+            await conn.closeDatabase();
+            vi.useRealTimers();
+        }
+    });
+
+    it('holds a run through overlapping discovery passes and reports additions without resetting completion', async () => {
+        const conn = new MockDBConnection();
+        const db = new BeaverDB(conn as any);
+        await db.initDatabase('0.99.0');
+        owner.db = db;
+        owner.backgroundExtractor.getLaneStatus = () => ({});
+        const service = new InstanceBackground();
+        owner.background = service;
+        try {
+            await service.start(owner.account);
+            await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'FIRST', contentKind: 'pdf' });
+            const finish = await service.beginProcessingDiscovery();
+            const finishNested = await service.beginProcessingDiscovery();
+            const before = await service.getProcessingProgress();
+            await conn.queryAsync("UPDATE attachment_processing_state SET extract_status = 'done', ocr_status = 'na'");
+            await finish();
+            expect(await service.getProcessingProgress()).toMatchObject({ runId: before!.runId, total: 1, succeeded: 1, discovering: true, finishedAt: null });
+            for (let i = 0; i < 3; i++) await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: `NEW${i}`, contentKind: 'pdf' });
+            await finishNested();
+            expect(await service.getProcessingProgress()).toMatchObject({ runId: before!.runId, total: 4, pending: 3, succeeded: 1, discovered: 3, discovering: false });
+        } finally {
+            await service.dispose();
+            await conn.closeDatabase();
+        }
     });
 
     it("allows only one renderer to claim each notification", () => {

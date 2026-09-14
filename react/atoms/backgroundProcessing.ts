@@ -1,3 +1,4 @@
+import type { ProcessingProgress } from '../../src/services/backgroundProcessing/progress';
 import { atom } from 'jotai';
 import type {
     AttachmentProcessingAggregates,
@@ -10,6 +11,7 @@ import type { ProcessingIssueSummary } from '../../src/services/backgroundProces
 import type { BackgroundWorkerSnapshot } from '../../src/services/backgroundProcessing/statusSnapshot';
 
 export interface BackgroundProcessingStatus {
+    progress: ProcessingProgress | null;
     queue: BackgroundQueueStats;
     ledger: AttachmentProcessingAggregates;
     coverage: IndexStatusResponse | null;
@@ -51,7 +53,8 @@ export const EMPTY_ATTACHMENT_PROCESSING_AGGREGATES: AttachmentProcessingAggrega
     oldestPendingAt: null,
 };
 
-export const backgroundProcessingStatusAtom = atom<BackgroundProcessingStatus>({
+export const EMPTY_BACKGROUND_PROCESSING_STATUS: BackgroundProcessingStatus = {
+    progress: null,
     queue: EMPTY_BACKGROUND_QUEUE_STATS,
     ledger: EMPTY_ATTACHMENT_PROCESSING_AGGREGATES,
     coverage: null,
@@ -64,4 +67,6 @@ export const backgroundProcessingStatusAtom = atom<BackgroundProcessingStatus>({
     documentCache: null,
     error: null,
     updatedAt: null,
-});
+};
+
+export const backgroundProcessingStatusAtom = atom<BackgroundProcessingStatus>(EMPTY_BACKGROUND_PROCESSING_STATUS);

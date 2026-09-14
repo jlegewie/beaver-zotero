@@ -27,11 +27,9 @@ export function formatBytes(bytes: number): string {
 }
 
 function describeCache(cache: DocumentCacheStats): string {
-    const count = typeof cache.cached_document_count === 'number'
-        ? `${plural(cache.cached_document_count, 'document')} cached · `
-        : '';
-    const budget = cache.payload_budget_bytes > 0 ? ` of ${formatBytes(cache.payload_budget_bytes)}` : '';
-    return `${count}${formatBytes(cache.payload_total_bytes)}${budget}. ${formatBytes(cache.protected_ocr_bytes ?? 0)} of OCR text retained, even above the cache budget.`;
+    const size = formatBytes(cache.payload_total_bytes);
+    if (typeof cache.cached_document_count !== 'number') return size;
+    return `${plural(cache.cached_document_count, 'document')} (${size})`;
 }
 
 /**
@@ -86,7 +84,7 @@ const LocalDocumentCacheRow: React.FC<{ hasBorder?: boolean }> = ({ hasBorder = 
         const buttonIndex = Zotero.Prompt.confirm({
             window: surfaceWindow,
             title: 'Clear Local Document Cache?',
-            text: `Clear native extracted text from ${describeCache(cache)}?\n\n${notes}`,
+            text: `Clear extracted text from ${describeCache(cache)}?\n\n${notes}`,
             button0: 'Clear',
             // Cancel at button1 so Escape/dialog-close routes here.
             button1: Zotero.Prompt.BUTTON_TITLE_CANCEL,
@@ -122,7 +120,7 @@ const LocalDocumentCacheRow: React.FC<{ hasBorder?: boolean }> = ({ hasBorder = 
                         {plural(cache.ocr_repreparation_required_count, 'prepared scan')} need re-preparation after an extraction update. Their cached data is retained and will not be served until compatible preparation is available.
                     </span>}
                     {cleared && <span role="status" className="display-flex mt-1">
-                        Native cache cleared. Prepared OCR text is retained. Other files will be read again when needed. To prepare them ahead of time, enable Background Processing, then use Rebuild cache when pending processing has finished and the button appears.
+                        Cache cleared. Prepared OCR text is retained. Other files will be read again when needed. To prepare them ahead of time, enable Background Processing and then use Rebuild cache when pending processing has finished and the button appears.
                     </span>}
                     {error && <span role="alert" className="display-flex font-color-red mt-1">{error}</span>}
                 </>

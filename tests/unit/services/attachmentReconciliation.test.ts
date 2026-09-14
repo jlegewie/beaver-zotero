@@ -104,6 +104,36 @@ describe('attachment change reconciliation', () => {
         await db.enqueueBackgroundJobs(jobs);
     }
 
+    it('counts five unchanged missing files again only when a deep recheck explicitly retries them', async () => {
+        mocks.resolve.mockResolvedValue({ kind: 'error', code: 'file_missing' });
+        const missing = Array.from({ length: 5 }, (_, index) => ({ ...item, id: 20 + index, key: `MISSING${index}` }));
+        for (const attachment of missing) {
+            await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: attachment.key,
+                itemId: attachment.id, contentKind: 'snapshot' });
+            await db.markAttachmentExtractFailure({ libraryId: 1, zoteroKey: attachment.key,
+                status: 'skipped', error: 'file_missing', attemptedAt: 100,
+                extractionSource: (await observeAttachmentSource(attachment, 'snapshot'))?.identity ?? null });
+        }
+        await db.configureProcessingProgress({ accountId: 'account', libraryIds: [1], ...entitlements });
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'NEWFILE1', contentKind: 'snapshot' });
+        expect(await db.getProcessingProgress(false, 0)).toMatchObject({ total: 1, pending: 1 });
+        const check = async (deep: boolean) => {
+            for (const attachment of missing) {
+                const jobs: any[] = [];
+                await (reconciler as any).reconcileAttachment(db, attachment, 'snapshot', deep, jobs,
+                    await db.getAttachmentProcessingState(1, attachment.key));
+                await db.enqueueBackgroundJobs(jobs);
+            }
+        };
+        await check(false);
+        expect(await db.getProcessingProgress(false, 0)).toMatchObject({ total: 1, pending: 1 });
+        // A forced check admits each failure even though it immediately finds
+        // the source still missing. This is why Start now must not force one.
+        await check(true);
+        expect(await db.getProcessingProgress(false, 0)).toMatchObject({ total: 6, pending: 1, problems: 5 });
+        expect(await db.peekBackgroundJobs()).toHaveLength(0);
+    });
+
     it('keeps an empty snapshot listed and does no extraction work on open, page change, or close', async () => {
         await seed();
         const before = await db.getAttachmentProcessingState(1, item.key);

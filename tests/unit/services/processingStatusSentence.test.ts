@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { backgroundProcessingStatusAtom } from '../../../react/atoms/backgroundProcessing';
+import { backgroundProcessingStatusAtom, type BackgroundProcessingStatus } from '../../../react/atoms/backgroundProcessing';
 import { describeStatus } from '../../../react/components/preferences/processingStatusSentence';
 
-function status(deferred: number, total = 1) {
+function status(deferred: number, total = 1): BackgroundProcessingStatus & { worker: NonNullable<BackgroundProcessingStatus['worker']> } {
     return {
         ...backgroundProcessingStatusAtom.init,
         ledger: { ...backgroundProcessingStatusAtom.init.ledger, total, readable: total },
@@ -11,6 +11,28 @@ function status(deferred: number, total = 1) {
 }
 
 describe('processing status sentence', () => {
+    it('uses authoritative pending attachments across ledger/queue overlap and index-stage gaps', () => {
+        const snapshot = status(0, 3);
+        snapshot.progress = { runId: 1, startedAt: 1, finishedAt: null, total: 5, pending: 4,
+            succeeded: 1, problems: 0, removed: 0, discovering: false, discovered: 0 };
+        snapshot.worker.available = 1;
+        snapshot.worker.backlogGateOpen = false;
+        expect(describeStatus(snapshot).headline).toBe('4 files waiting');
+        snapshot.worker.available = 0;
+        expect(describeStatus(snapshot)).toMatchObject({ headline: '4 files waiting', processNow: true });
+        expect(describeStatus(snapshot).headline).toBe('4 files waiting');
+    });
+
+    it('subtracts distinct running attachments instead of overlapping stage jobs', () => {
+        const snapshot = status(0, 4);
+        snapshot.progress = { runId: 1, startedAt: 1, finishedAt: null, total: 4, pending: 4,
+            succeeded: 0, problems: 0, removed: 0, discovering: false, discovered: 0 };
+        snapshot.worker.inFlight = 2;
+        snapshot.worker.inFlightFiles = 1;
+        snapshot.worker.backlogGateOpen = false;
+        expect(describeStatus(snapshot).caption).toContain('3 files waiting');
+    });
+
     it('settles without a red headline or Start now when only unavailable files remain', () => {
         const snapshot = status(0);
         snapshot.ledger.readable = 0;
@@ -49,7 +71,7 @@ describe('processing status sentence', () => {
         expect(describeStatus(snapshot)).toMatchObject({
             tone: 'busy',
             headline: 'Finishing current file…',
-            caption: '5 files waiting. Processing continues when Zotero is idle.',
+            caption: '5 files waiting. Processing continues when your computer is idle.',
             outstanding: 6,
             processNow: false,
             stopDrain: false,
@@ -77,7 +99,7 @@ describe('processing status sentence', () => {
         snapshot.ledger.unreadable = 1;
         snapshot.worker.inFlight = 1;
         expect(describeStatus(snapshot)).toMatchObject({
-            tone: 'busy', headline: 'Processing files…', caption: '3 files remaining.', outstanding: 3,
+            tone: 'busy', headline: 'Processing files…', caption: '3 files remaining', outstanding: 3,
         });
     });
 
@@ -87,7 +109,7 @@ describe('processing status sentence', () => {
         const snapshot = status(1, 0);
         snapshot.worker.inFlight = 1;
         snapshot.worker.available = 4;
-        expect(describeStatus(snapshot)).toMatchObject({ tone: 'busy', caption: '5 files remaining.', outstanding: 5 });
+        expect(describeStatus(snapshot)).toMatchObject({ tone: 'busy', caption: '5 files remaining', outstanding: 5 });
     });
 
     it('exposes no queue depth outside the busy states', () => {
@@ -111,10 +133,10 @@ describe('processing status sentence', () => {
         snapshot.worker.inFlight = 1;
         snapshot.worker.available = 1;
         snapshot.worker.queuedFiles = 1;
-        expect(describeStatus(snapshot).caption).toBe('1 file remaining.');
+        expect(describeStatus(snapshot).caption).toBe('1 file remaining');
         snapshot.worker.inFlight = 0;
         snapshot.worker.backlogGateOpen = false;
-        expect(describeStatus(snapshot).caption).toBe('1 file waiting. Starts after about 30 seconds without activity in Zotero.');
+        expect(describeStatus(snapshot).caption).toBe('Starts after about 30 seconds without keyboard or mouse activity on your computer.');
     });
 
     it('counts every file with queued work, read or not', () => {
@@ -125,10 +147,10 @@ describe('processing status sentence', () => {
         snapshot.worker.inFlight = 1;
         snapshot.worker.available = 7;
         snapshot.worker.queuedFiles = 8;
-        expect(describeStatus(snapshot)).toMatchObject({ tone: 'busy', caption: '8 files remaining.', outstanding: 8 });
+        expect(describeStatus(snapshot)).toMatchObject({ tone: 'busy', caption: '8 files remaining', outstanding: 8 });
         // An index backfill of already-read files counts the same way.
         snapshot.ledger.readable = 10;
-        expect(describeStatus(snapshot)).toMatchObject({ caption: '8 files remaining.', outstanding: 8 });
+        expect(describeStatus(snapshot)).toMatchObject({ caption: '8 files remaining', outstanding: 8 });
     });
 
     it.each(['failed', 'skipped'] as const)('treats a terminal %s extraction as settled, leaving it to the issue list', (outcome) => {
@@ -153,7 +175,7 @@ describe('processing status sentence', () => {
         else snapshot.ledger.readable = 0;
         if (stage === 'ocr') snapshot.ledger.awaitingOcr = 1;
         expect(describeStatus(snapshot)).toMatchObject({
-            tone: 'waiting', headline: 'Waiting to start', processNow: true,
+            tone: 'waiting', headline: stage === 'index' ? 'Waiting to start' : '1 file waiting', processNow: true,
         });
     });
 
@@ -167,13 +189,13 @@ describe('processing status sentence', () => {
         const snapshot = status(3);
         snapshot.worker.drainNow = drainNow;
         expect(describeStatus(snapshot)).toMatchObject({
-            tone: 'waiting', headline: 'Waiting to start', processNow: false, stopDrain: drainNow,
+            tone: 'waiting', headline: '3 files waiting', processNow: false, stopDrain: drainNow,
         });
     });
 
     it('shows delayed retries as waiting even before a ledger row exists', () => {
         expect(describeStatus(status(1, 0))).toMatchObject({
-            tone: 'waiting', headline: 'Waiting to start', processNow: false,
+            tone: 'waiting', headline: '1 file waiting', processNow: false,
         });
     });
 
@@ -192,7 +214,7 @@ describe('processing status sentence', () => {
         const snapshot = status(0);
         snapshot.worker.available = 2;
         snapshot.worker.dispatchBlocker = blocker;
-        expect(describeStatus(snapshot)).toMatchObject({ headline: 'Waiting to start', caption: `2 files waiting. ${caption}` });
+        expect(describeStatus(snapshot)).toMatchObject({ headline: '2 files waiting', caption });
     });
 
     it('explains the idle gate rather than a blocker when nothing blocks dispatch', () => {
@@ -200,34 +222,40 @@ describe('processing status sentence', () => {
         snapshot.worker.available = 2;
         snapshot.worker.backlogGateOpen = false;
         expect(describeStatus(snapshot)).toMatchObject({
-            headline: 'Waiting to start',
-            caption: '2 files waiting. Starts after about 30 seconds without activity in Zotero.',
+            headline: '2 files waiting',
+            caption: 'Starts after about 30 seconds without keyboard or mouse activity on your computer.',
             processNowBlocked: false,
         });
     });
 
-    it('names how many files are waiting in every waiting caption', () => {
+    it('separates waiting counts from idle, sync, retry and unfinished-stage explanations', () => {
         const gated = status(0, 5);
         gated.ledger.readable = 2;
         gated.worker.available = 3;
         gated.worker.backlogGateOpen = false;
-        expect(describeStatus(gated).caption).toBe('3 files waiting. Starts after about 30 seconds without activity in Zotero.');
+        expect(describeStatus(gated).headline).toBe('3 files waiting');
+        expect(describeStatus(gated).caption).toBe('Starts after about 30 seconds without keyboard or mouse activity on your computer.');
         gated.worker.dispatchBlocker = 'sync_in_progress';
-        expect(describeStatus(gated).caption).toBe('3 files waiting. Zotero is syncing.');
+        expect(describeStatus(gated).headline).toBe('3 files waiting');
+        expect(describeStatus(gated).caption).toBe('Zotero is syncing.');
         // Two deferred jobs outnumber the one ledger file still open, so the queue wins.
         const deferred = status(2, 4);
         deferred.ledger.readable = 3;
-        expect(describeStatus(deferred).caption).toBe('2 files waiting. Some files are processing remotely or waiting to retry.');
+        expect(describeStatus(deferred).headline).toBe('2 files waiting');
+        expect(describeStatus(deferred).caption).toBe('Some files are processing remotely or waiting to retry.');
         deferred.worker.deferred = 1;
-        expect(describeStatus(deferred).caption).toBe('1 file waiting. Some files are processing remotely or waiting to retry.');
+        expect(describeStatus(deferred).headline).toBe('1 file waiting');
+        expect(describeStatus(deferred).caption).toBe('Some files are processing remotely or waiting to retry.');
         const unfinished = status(0, 2);
         unfinished.ledger.readable = 0;
-        expect(describeStatus(unfinished).caption).toBe('2 files waiting. Beaver picks up unfinished files automatically.');
+        expect(describeStatus(unfinished).headline).toBe('2 files waiting');
+        expect(describeStatus(unfinished).caption).toBe('Beaver picks up unfinished files automatically.');
         // Re-reads of settled files are queued jobs the ledger does not count.
         const untracked = status(0);
         untracked.worker.available = 279;
         untracked.worker.backlogGateOpen = false;
-        expect(describeStatus(untracked).caption).toBe('279 files waiting. Starts after about 30 seconds without activity in Zotero.');
+        expect(describeStatus(untracked).headline).toBe('279 files waiting');
+        expect(describeStatus(untracked).caption).toBe('Starts after about 30 seconds without keyboard or mouse activity on your computer.');
     });
 
     it('keeps running work ahead of deferred work', () => {
@@ -247,7 +275,7 @@ describe('processing status sentence', () => {
     it('keeps cache rebuilding unavailable while work is deferred or not yet queued', () => {
         const deferred = status(2);
         expect(describeStatus(deferred).processNow).toBe(false);
-        expect(describeStatus(deferred, { canRestoreCache: true })).toMatchObject({ headline: 'Waiting to start', processNow: false });
+        expect(describeStatus(deferred, { canRestoreCache: true })).toMatchObject({ headline: '2 files waiting', processNow: false });
         expect(describeStatus(deferred, { canRestoreCache: true }).rebuildCache).toBeFalsy();
         deferred.worker.drainNow = true;
         expect(describeStatus(deferred, { canRestoreCache: true })).toMatchObject({ processNow: false, stopDrain: true });
@@ -265,7 +293,7 @@ describe('processing status sentence', () => {
         snapshot.worker.available = 2;
         snapshot.worker.backlogGateOpen = false;
         expect(describeStatus(snapshot, { canRestoreCache: true })).toMatchObject({
-            headline: 'Waiting to start', processNow: true,
+            headline: '2 files waiting', processNow: true,
         });
         snapshot.worker.inFlight = 1;
         expect(describeStatus(snapshot, { canRestoreCache: true })).toMatchObject({
