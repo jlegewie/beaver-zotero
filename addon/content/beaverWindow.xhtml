@@ -22,7 +22,38 @@
     xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
     xmlns:html="http://www.w3.org/1999/xhtml"
 >
+    <linkset>
+        <html:link rel="localization" href="browser/menubar.ftl"/>
+        <html:link rel="localization" href="browser/browserSets.ftl"/>
+    </linkset>
+
     <script type="application/javascript" src="chrome://beaver/content/beaverWindow.js"/>
+
+    <commandset>
+        <command id="minimizeWindow"
+                 data-l10n-id="window-minimize-command"
+                 oncommand="window.minimize();"/>
+        <command id="zoomWindow"
+                 data-l10n-id="window-zoom-command"
+                 oncommand="zoomWindow();"/>
+    </commandset>
+    <keyset id="macKeyset">
+        <key id="key_minimizeWindow"
+             command="minimizeWindow"
+             data-l10n-id="window-minimize-shortcut"
+             modifiers="accel"
+             internal="true"/>
+    </keyset>
+    <!-- Zotero's platform keys add Library and its shortcut to this menu. -->
+    <menubar>
+        <menu id="windowMenu" data-l10n-id="menu-window-menu">
+            <menupopup id="windowPopup">
+                <menuitem command="minimizeWindow" key="key_minimizeWindow"/>
+                <menuitem command="zoomWindow"/>
+                <menuseparator id="sep-window-list"/>
+            </menupopup>
+        </menu>
+    </menubar>
 
     <!-- React mount point. `beaver-root` is the scoping root for the shared
          @beaver/agent-ui sheets, which select `.beaver-root .foo`; it belongs on
