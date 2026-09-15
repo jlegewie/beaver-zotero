@@ -84,11 +84,11 @@ describe('DocumentExtractExecutor OCR continuation', () => {
         delete (globalThis as any).Zotero.Beaver;
     });
 
-    async function runExtractJob(priority: number, prepareCache?: boolean, beforeWorker?: () => Promise<void>) {
+    async function runExtractJob(priority: number, prepareCache?: boolean, beforeWorker?: () => Promise<void>, requestContext?: 'interactive' | 'backfill') {
         await db.enqueueBackgroundJob({
             jobType: 'document_extract', libraryId: 1, itemId: 7, zoteroKey: 'SCANNED1',
             contentKind: 'pdf', payloadKind: 'structured', priority,
-            payload: { content_kind: 'pdf', maxPages: 200, timeoutSeconds: 120, prepare_cache: prepareCache }, now: 0,
+            payload: { content_kind: 'pdf', maxPages: 200, timeoutSeconds: 120, prepare_cache: prepareCache, request_context: requestContext }, now: 0,
         });
         const record = await db.claimNextBackgroundJob(Date.now(), 60_000);
         return new DocumentExtractExecutor().execute(record!, {
@@ -102,6 +102,11 @@ describe('DocumentExtractExecutor OCR continuation', () => {
             enqueue: async () => {},
         });
     }
+
+    it('passes persisted interactive intent to the OCR continuation', async () => {
+        await runExtractJob(OCR_PRIORITY_ON_DEMAND, false, undefined, 'interactive');
+        expect(mocks.enqueueOcrJob).toHaveBeenCalledWith(expect.objectContaining({ requestContext: 'interactive' }));
+    });
 
     it('tickets backfill OCR before a background job with a cached no_text_layer verdict retires', async () => {
         const outcome = await runExtractJob(100);

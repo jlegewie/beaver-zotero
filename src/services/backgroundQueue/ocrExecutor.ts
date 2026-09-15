@@ -67,6 +67,7 @@ import type {
 } from './jobExecutor';
 
 interface ResolvedJob {
+    requestContext?: 'interactive' | 'backfill';
     item: Zotero.Item;
     /** Local path or supported remote source for the original scan. */
     source: AttachmentFileSource;
@@ -100,7 +101,7 @@ export class OcrExecutor implements JobExecutor {
      * Resume hints keyed by source item. The file hash keeps each hint scoped to
      * the attachment content that created the backend job.
      */
-    private readonly resumeHints = new Map<string, { jobId: string; fileHash: string }>();
+    private readonly resumeHints = new Map<string, { jobId: string; fileHash: string; requestContext?: 'interactive' | 'backfill' }>();
 
     /**
      * Slot-free background polls keyed by source item. At most one live track
@@ -201,6 +202,7 @@ export class OcrExecutor implements JobExecutor {
         const resolved = await this.resolveJob(record, ctx);
         if ('outcome' in resolved) return resolved.outcome;
         const job = resolved.job;
+        job.requestContext = record.payload?.request_context ?? 'backfill';
         this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
         await ctx.db.ensureAttachmentProcessingState({
             libraryId: job.item.libraryID,
@@ -231,7 +233,7 @@ export class OcrExecutor implements JobExecutor {
         }
         this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
 
-        const ready = await this.resolveReady(job, ctx, record.id);
+        const ready = await this.resolveReady(job, ctx, record.id, record.payload?.request_context ?? 'backfill');
         if ('outcome' in ready) {
             await this.persistFailedOutcome(job, ready.outcome, ctx);
             return ready.outcome;
@@ -252,10 +254,11 @@ export class OcrExecutor implements JobExecutor {
         job: ResolvedJob,
         ctx: JobExecutionContext,
         recordId: number,
+        requestContext: 'interactive' | 'backfill',
     ): Promise<{ getUrl: string } | { outcome: JobOutcome }> {
         const hint = this.resumeHints.get(job.sourceKey);
         this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
-        if (hint?.fileHash === job.fileHash) {
+        if (hint?.fileHash === job.fileHash && !(requestContext === 'interactive' && hint.requestContext !== 'interactive')) {
             logger(`OcrExecutor: ${job.sourceKey} resuming OCR backend job ${hint.jobId}`, 3);
             const resumed = await this.resumeByJobId(hint.jobId, job, ctx, recordId);
             if (!('fallback' in resumed)) {
@@ -276,7 +279,7 @@ export class OcrExecutor implements JobExecutor {
         }
 
         logger(`OcrExecutor: ${job.sourceKey} requesting OCR (pages=${job.pageCount})`, 3);
-        const requestResult = await ocrApiClient.requestOcr(job.fileHash, job.pageCount);
+        const requestResult = await ocrApiClient.requestOcr(job.fileHash, job.pageCount, requestContext);
         this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
         return this.resolveToReadyGetUrl(requestResult, job, ctx, recordId);
     }
@@ -573,7 +576,7 @@ export class OcrExecutor implements JobExecutor {
         job: ResolvedJob,
         recordId: number,
     ): { outcome: JobOutcome } {
-        this.resumeHints.set(job.sourceKey, { jobId, fileHash: job.fileHash });
+        this.resumeHints.set(job.sourceKey, { jobId, fileHash: job.fileHash, requestContext: job.requestContext });
         this.startTracking(jobId, job, recordId);
         logger(`OcrExecutor: ${job.sourceKey} parked queue row while backend job ${jobId} runs`, 3);
         return { outcome: { kind: 'defer', reason: 'ocr_polling' } };

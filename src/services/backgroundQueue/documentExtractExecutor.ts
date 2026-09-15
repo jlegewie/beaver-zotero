@@ -224,6 +224,7 @@ export class DocumentExtractExecutor implements JobExecutor {
                     pageCount: null,
                     priority: record.priority >= 100 ? OCR_PRIORITY_BACKFILL : undefined,
                     prepareCache: record.payload?.prepare_cache === true,
+                    requestContext: record.payload?.request_context ?? 'backfill',
                 });
             } catch (error) {
                 logger(`DocumentExtractExecutor: OCR enqueue failed for ${item.libraryID}-${item.key}: ${error}`, 2);

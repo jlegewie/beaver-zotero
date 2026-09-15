@@ -28,8 +28,12 @@ export class NewItemWatcher {
                     // A late download must not erase the identity needed for deletion cleanup.
                     if (downloaded && this.pending.get(id)?.event === 'delete') continue;
                     this.pending.set(id, {
-                        event: downloaded ? 'modify' : event as AttachmentChange['event'],
+                        event: event === 'delete' ? 'delete'
+                            : this.pending.get(id)?.event === 'add' ? 'add'
+                                : downloaded ? 'modify' : event as AttachmentChange['event'],
                         id,
+                        backfill: this.pending.get(id)?.backfill === true
+                            || Zotero.Sync?.Runner?.syncInProgress === true,
                         extra: extraData?.[id],
                     });
                 }

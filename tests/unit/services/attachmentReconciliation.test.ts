@@ -134,6 +134,96 @@ describe('attachment change reconciliation', () => {
         expect(await db.peekBackgroundJobs()).toHaveLength(0);
     });
 
+    it('preserves a single import through metadata notifications and persists interactive extraction intent', async () => {
+        mocks.kind = 'pdf';
+        observer.notify('add', 'item', [7]);
+        observer.notify('modify', 'item', [7]);
+        await (watcher as any).flush();
+        await (reconciler as any).run(false);
+        expect(await db.peekBackgroundJobs()).toEqual([expect.objectContaining({
+            jobType: 'document_extract', priority: 90,
+            payload: expect.objectContaining({ request_context: 'interactive' }),
+        })]);
+    });
+
+    it.each([
+        [false, false, 'interactive'],
+        [true, false, 'backfill'],
+        [false, true, 'backfill'],
+    ] as const)('merges watcher batches during reconciliation (add sync=%s, modify sync=%s)', async (addSync, modifySync, context) => {
+        mocks.kind = 'pdf';
+        await seed();
+        await connection.queryAsync("INSERT INTO items VALUES (8, 1, 'SECOND00')");
+        vi.mocked(Zotero.Items.getAsync).mockImplementation(async (id: any) =>
+            ({ ...item, id, key: id === 7 ? 'SNAPSHOT' : 'SECOND00' }));
+        let release!: () => void;
+        let entered!: () => void;
+        const startedStat = new Promise<void>((resolve) => { entered = resolve; });
+        const pendingStat = new Promise<void>((resolve) => { release = resolve; });
+        mocks.stat.mockImplementationOnce(async () => {
+            entered();
+            await pendingStat;
+            return { lastModified: 10, size: 20 };
+        });
+        reconciler.notifyAttachments([{ event: 'modify', id: 7 }]);
+        const active = (reconciler as any).run(false);
+        await startedStat;
+        try {
+            (Zotero as any).Sync = { Runner: { syncInProgress: addSync } };
+            observer.notify('add', 'item', [8]);
+            await (watcher as any).flush();
+            (Zotero as any).Sync.Runner.syncInProgress = modifySync;
+            observer.notify('modify', 'item', [8]);
+            await (watcher as any).flush();
+            expect(await db.peekBackgroundJobs()).toEqual([]);
+        } finally {
+            release();
+            await active;
+        }
+        await (reconciler as any).run(false);
+        expect(await db.peekBackgroundJobs()).toEqual([expect.objectContaining({
+            zoteroKey: 'SECOND00', jobType: 'document_extract',
+            payload: expect.objectContaining({ request_context: context }),
+        })]);
+    });
+
+    it('lets deletion supersede an add from an earlier pending batch', async () => {
+        await seed(false);
+        reconciler.notifyAttachments([{ event: 'add', id: 7 }]);
+        reconciler.notifyAttachments([{ event: 'delete', id: 7, extra: { libraryID: 1, key: item.key } }]);
+        await (reconciler as any).run(false);
+        expect(await db.getAttachmentProcessingState(1, item.key)).toBeNull();
+        expect(await db.peekBackgroundJobs()).toEqual([expect.objectContaining({ jobType: 'fulltext_untag' })]);
+    });
+
+    it('keeps a sync-origin single attachment in backfill after sync finishes', async () => {
+        mocks.kind = 'pdf';
+        (Zotero as any).Sync = { Runner: { syncInProgress: true } };
+        observer.notify('add', 'item', [7]);
+        (Zotero as any).Sync.Runner.syncInProgress = false;
+        observer.notify('modify', 'item', [7]);
+        await (watcher as any).flush();
+        await (reconciler as any).run(false);
+        expect((await db.peekBackgroundJobs())[0].payload?.request_context).toBe('backfill');
+    });
+
+    it('groups separately emitted attachment adds as backfill before processing the batch', async () => {
+        mocks.kind = 'pdf';
+        await connection.queryAsync("INSERT INTO items VALUES (8, 1, 'SECOND00')");
+        vi.mocked(Zotero.Items.getAsync).mockImplementation(async (id: any) =>
+            ({ ...item, id, key: id === 7 ? 'SNAPSHOT' : 'SECOND00' }));
+        observer.notify('add', 'item', [7]);
+        observer.notify('add', 'item', [8]);
+        await (watcher as any).flush();
+        await (reconciler as any).run(false);
+        const jobs = await db.peekBackgroundJobs();
+        expect(jobs).toHaveLength(2);
+        for (const job of jobs) {
+            expect(job.priority).toBeGreaterThanOrEqual(100);
+            expect(job.payload?.request_context).toBe('backfill');
+        }
+    });
+
     it('keeps an empty snapshot listed and does no extraction work on open, page change, or close', async () => {
         await seed();
         const before = await db.getAttachmentProcessingState(1, item.key);

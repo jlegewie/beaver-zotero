@@ -39,7 +39,7 @@ export const OCR_STATUS_BATCH_MAX = 50;
 /**
  * Background-queue priorities for OCR tickets (lower number = claimed first;
  * the dispatcher gates `priority >= 100` behind user idleness).
- *  - On-demand (a scan the user just opened) runs promptly and preempts backfill.
+ *  - Explicit preparation and single imports run ahead of waiting backfill.
  *  - Backfill stays above the idle/master-toggle ceiling; it is whole-library
  *    metered work and must never run while background processing is paused.
  */

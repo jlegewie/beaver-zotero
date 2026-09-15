@@ -269,7 +269,7 @@ describe('OcrExecutor', () => {
 
         const outcome = await executor.execute(record, ctx);
 
-        expect(api.requestOcr).toHaveBeenCalledWith('hash123', 5);
+        expect(api.requestOcr).toHaveBeenCalledWith('hash123', 5, 'backfill');
         expect(mockedGet).toHaveBeenCalledWith('https://gcs/get', expect.anything());
         expect(mockedPut).not.toHaveBeenCalled();
         expect(ctx.runOnMuPDFWorker).toHaveBeenCalledOnce();
@@ -526,7 +526,7 @@ describe('OcrExecutor', () => {
         // in-memory download, not the (absent) local file.
         const first = await executor.execute(record, makeCtx());
         expect(first).toEqual({ kind: 'defer', reason: 'ocr_polling' });
-        expect(api.requestOcr).toHaveBeenCalledWith('synced999', 5);
+        expect(api.requestOcr).toHaveBeenCalledWith('synced999', 5, 'backfill');
         expect(mockedLoad).toHaveBeenCalledOnce();
         expect((globalThis as any).IOUtils.read).not.toHaveBeenCalled();
         expect(mockedPut).toHaveBeenCalledWith('https://gcs/put', expect.any(Uint8Array), expect.anything());
@@ -557,7 +557,7 @@ describe('OcrExecutor', () => {
         const outcome = await executor.execute(backfillRecord, makeCtx());
 
         expect(outcome).toEqual({ kind: 'defer', reason: 'ocr_polling' });
-        expect(api.requestOcr).toHaveBeenCalledWith('synced999', 5);
+        expect(api.requestOcr).toHaveBeenCalledWith('synced999', 5, 'backfill');
         expect(mockedLoad).toHaveBeenCalledOnce();
     });
 
@@ -726,6 +726,33 @@ describe('OcrExecutor', () => {
         expect(second).toEqual({ kind: 'complete', reason: 'ocr_ok' });
     });
 
+    it('promotes a parked backfill job through request once, then returns to status polling', async () => {
+        const ex = new OcrExecutor(fakePoller as any);
+        api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'same-job' });
+        fakePoller.poll.mockResolvedValue({ kind: 'timeout' });
+        await ex.execute(record, makeCtx());
+        await ex.drainTracks();
+        const promoted = { ...record, payload: { request_context: 'interactive' } };
+        await ex.execute(promoted, makeCtx());
+        await ex.drainTracks();
+        expect(api.requestOcr).toHaveBeenLastCalledWith('hash123', 5, 'interactive');
+        api.status.mockResolvedValue({ status: 'completed', get_url: 'https://gcs/get' });
+        expect(await ex.execute(promoted, makeCtx())).toEqual({ kind: 'complete', reason: 'ocr_ok' });
+        expect(api.requestOcr).toHaveBeenCalledTimes(2);
+        expect(api.status).toHaveBeenCalledWith('same-job');
+        ex.dispose();
+    });
+
+    it('retains interactive admission after executor restart without persisting signed URLs', async () => {
+        api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
+        const persisted = JSON.parse(JSON.stringify({ ...record, payload: { request_context: 'interactive' } }));
+        const restarted = new OcrExecutor(fakePoller as any);
+        expect(await restarted.execute(persisted, makeCtx())).toEqual({ kind: 'complete', reason: 'ocr_ok' });
+        expect(api.requestOcr).toHaveBeenCalledWith('hash123', 5, 'interactive');
+        expect(mockedPut).not.toHaveBeenCalled();
+        restarted.dispose();
+    });
+
     it('falls back to /ocr/request when the resumed status 404s', async () => {
         const ex = new OcrExecutor(fakePoller as any);
         api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-404' });
@@ -777,7 +804,7 @@ describe('OcrExecutor', () => {
         const second = await ex.execute(record, makeCtx());
 
         expect(api.requestOcr).toHaveBeenCalledTimes(2);
-        expect(api.requestOcr).toHaveBeenLastCalledWith('hashCHANGED', 5);
+        expect(api.requestOcr).toHaveBeenLastCalledWith('hashCHANGED', 5, 'backfill');
         expect(api.status.mock.calls.length).toBe(statusCallsAfterFirst);
         expect(second).toEqual({ kind: 'complete', reason: 'ocr_ok' });
     });
