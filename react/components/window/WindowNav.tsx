@@ -5,6 +5,7 @@ import { userAtom } from '../../atoms/auth';
 import { creditPlanAtom, hasCreditPlanAtom } from '../../atoms/profile';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { useThreadHistory } from '../../hooks/useThreadHistory';
+import { useThreadHistoryScroll } from '../../hooks/useThreadHistoryScroll';
 import { useAccountMenuItems } from '../ui/buttons/UserAccountMenuButton';
 import { formatPlanName } from '../preferences/BillingSection';
 import { highlightMatch } from '../../utils/highlightMatch';
@@ -12,7 +13,6 @@ import ChatLoadFailure from '../ChatLoadFailure';
 import { Icon, MoreHorizontalIcon, PlusSignIcon, SearchIcon, UserIcon, CancelIcon } from '../icons/icons';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
-import Button from '@beaver/agent-ui/primitives/Button';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 
@@ -182,6 +182,7 @@ const WindowNav: React.FC<WindowNavProps> = ({ collapsed }) => {
     const surfaceWindow = useSurfaceWindow();
     const newThread = useSetAtom(newThreadAtom);
     const history = useThreadHistory();
+    const { scrollRef, sentinelRef } = useThreadHistoryScroll(history, !collapsed);
     const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
     const searchInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -274,7 +275,7 @@ const WindowNav: React.FC<WindowNavProps> = ({ collapsed }) => {
             </div>
 
             {/* History */}
-            <div className="beaver-window-nav-scroll scrollbar">
+            <div className="beaver-window-nav-scroll scrollbar" ref={scrollRef}>
                 {history.pinnedThreads.length > 0 && (
                     <section className="beaver-window-nav-group" aria-label="Pinned chats">
                         <div className="beaver-window-nav-group-label">Pinned</div>
@@ -306,19 +307,13 @@ const WindowNav: React.FC<WindowNavProps> = ({ collapsed }) => {
                     <div className="beaver-window-nav-empty"><Spinner size={16} /></div>
                 )}
 
-                {history.view.hasMore && !history.view.error && (
-                    <div className="beaver-window-nav-more">
-                        <Button
-                            variant="ghost-secondary"
-                            onClick={history.loadMore}
-                            disabled={history.isLoading}
-                            loading={history.isLoading}
-                            type="button"
-                        >
-                            Show more
-                        </Button>
-                    </div>
-                )}
+                <div ref={sentinelRef} style={{ minHeight: history.view.hasMore ? 32 : 1 }}>
+                    {history.isLoading && hasRows && (
+                        <div className="display-flex items-center justify-center py-2" role="status" aria-label="Loading more chats">
+                            <Spinner size={16} />
+                        </div>
+                    )}
+                </div>
             </div>
 
             <WindowAccountFooter />
