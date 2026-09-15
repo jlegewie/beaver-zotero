@@ -34,6 +34,8 @@ import {
 export interface AttachmentChange {
     event: 'add' | 'modify' | 'delete';
     id: number;
+    /** Capture sync origin before the notification batch outlives the sync. */
+    backfill?: boolean;
     extra?: { libraryID?: number; key?: string };
 }
 
@@ -151,13 +153,32 @@ export class ReconcilerService {
     /** Notifications are hints, never evidence that file content changed. */
     notifyAttachments(events: AttachmentChange[]): void {
         if (this.stopped) return;
-        for (const event of events) this.pendingAttachments.set(event.id, event);
+        for (const event of events) {
+            const pending = this.pendingAttachments.get(event.id);
+            // Watcher batches can overlap a running pass; retain import intent
+            // until the pending attachment is reconciled.
+            this.pendingAttachments.set(event.id, {
+                ...event,
+                event: event.event === 'modify' && pending?.event === 'add' ? 'add' : event.event,
+                backfill: pending?.backfill === true || event.backfill === true,
+            });
+        }
         this.notify();
     }
 
     private async reconcileNotifiedAttachments(db: QueueDB, generation: number): Promise<void> {
         const events = [...this.pendingAttachments.values()];
         this.pendingAttachments.clear();
+        // One new supported attachment in a 500ms quiet notification batch is
+        // interactive. Multiple attachments (including individually emitted adds)
+        // are backfill. Parent items do not count as attachments.
+        const addedAttachments: number[] = [];
+        for (const event of events) {
+            if (event.event !== 'add') continue;
+            const item = await Zotero.Items.getAsync(event.id);
+            if (item && isBackgroundProcessingLibraryEnabled(item.libraryID)
+                && getReadableContentKind(item)) addedAttachments.push(event.id);
+        }
         for (const event of events) {
             if (this.cancelled(generation)) return;
             try {
@@ -181,7 +202,8 @@ export class ReconcilerService {
                 if (!backgroundProcessingEnabled()) continue;
                 const jobs: BackgroundJobInput[] = [];
                 const row = await db.getAttachmentProcessingState(ref.libraryID, ref.key);
-                await this.reconcileAttachment(db, item, kind, true, jobs, row ?? undefined, false);
+                await this.reconcileAttachment(db, item, kind, true, jobs, row ?? undefined, false,
+                    !event.backfill && addedAttachments.length === 1 && addedAttachments[0] === event.id ? 'interactive' : 'backfill');
                 if (!this.cancelled(generation) && isBackgroundProcessingLibraryEnabled(ref.libraryID)) {
                     await db.enqueueBackgroundJobs(jobs);
                 }
@@ -305,6 +327,7 @@ export class ReconcilerService {
                         itemId: item.id,
                         pageCount: null,
                         priority: OCR_PRIORITY_ON_DEMAND,
+                        requestContext: 'interactive',
                     });
                     retried += 1;
                     continue;
@@ -319,7 +342,7 @@ export class ReconcilerService {
                 // before an executor recorded a verdict); dropping it is what lets
                 // the fresh job be counted as progress rather than as the old failure.
                 await db.deleteBackgroundDeadLetters(ref.libraryId, ref.zoteroKey);
-                await this.reconcileAttachment(db, item, kind, false, jobs, row);
+                await this.reconcileAttachment(db, item, kind, false, jobs, row, false, 'interactive');
                 retried += 1;
             }
             // An explicit retry is scoped to these attachments and works with the
@@ -512,6 +535,7 @@ export class ReconcilerService {
         jobs: BackgroundJobInput[],
         existing?: AttachmentProcessingStateRecord,
         deepCheck = statFile,
+        requestContext: 'interactive' | 'backfill' = 'backfill',
     ): Promise<void> {
         if (!isBackgroundProcessingLibraryEnabled(item.libraryID)) return;
         let row = existing;
@@ -604,8 +628,8 @@ export class ReconcilerService {
                 zoteroKey: item.key,
                 contentKind: kind,
                 payloadKind: 'structured',
-                priority: BACKGROUND_EXTRACT_PRIORITY,
-                payload: buildBackgroundExtractPayload(kind),
+                priority: requestContext === 'interactive' ? OCR_PRIORITY_ON_DEMAND : BACKGROUND_EXTRACT_PRIORITY,
+                payload: { ...buildBackgroundExtractPayload(kind), request_context: requestContext },
                 now: Date.now(),
             });
             return;
@@ -623,7 +647,8 @@ export class ReconcilerService {
                 zoteroKey: item.key,
                 itemId: item.id,
                 pageCount: null,
-                priority: OCR_PRIORITY_BACKFILL,
+                priority: requestContext === 'interactive' ? OCR_PRIORITY_ON_DEMAND : OCR_PRIORITY_BACKFILL,
+                requestContext,
             });
             return;
         }

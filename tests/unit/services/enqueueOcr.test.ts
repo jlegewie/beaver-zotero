@@ -72,7 +72,7 @@ describe('maybeEnqueueOcrJob', () => {
             zoteroKey: 'AAAAAAAA',
             contentKind: 'pdf',
             payloadKind: 'structured',
-            payload: null,
+            payload: expect.objectContaining({ request_context: 'backfill' }),
             priority: OCR_PRIORITY_ON_DEMAND,
         });
         expect(notify).toHaveBeenCalledOnce();
@@ -239,7 +239,7 @@ describe('maybeEnqueueOcrJob', () => {
         await flush();
 
         expect(promote).toHaveBeenCalledWith(
-            'document_ocr', 1, 'AAAAAAAA', 'structured', OCR_PRIORITY_ON_DEMAND, undefined,
+            'document_ocr', 1, 'AAAAAAAA', 'structured', OCR_PRIORITY_ON_DEMAND, expect.objectContaining({ request_context: 'backfill' }),
         );
         expect(hashAccessed).not.toHaveBeenCalled();
         expect(isPermFailed).not.toHaveBeenCalled();
@@ -257,7 +257,7 @@ describe('maybeEnqueueOcrJob', () => {
         await flush();
 
         expect(promote).toHaveBeenCalledWith(
-            'document_ocr', 1, 'AAAAAAAA', 'structured', OCR_PRIORITY_ON_DEMAND, undefined,
+            'document_ocr', 1, 'AAAAAAAA', 'structured', OCR_PRIORITY_ON_DEMAND, expect.objectContaining({ request_context: 'backfill' }),
         );
         expect(hashAccessed).not.toHaveBeenCalled();
         expect(enqueueBackgroundJob).not.toHaveBeenCalled();
@@ -349,7 +349,32 @@ it('does not apply preparation limits to an existing on-demand OCR ticket', asyn
         (Zotero.Beaver as any).db = db;
         await enqueueOcrJob(args());
         await enqueueOcrJob({ ...args(), priority: OCR_PRIORITY_BACKFILL, prepareCache: true });
-        expect((await db.peekBackgroundJobs())[0]).toMatchObject({ priority: OCR_PRIORITY_ON_DEMAND, payload: null });
+        expect((await db.peekBackgroundJobs())[0]).toMatchObject({ priority: OCR_PRIORITY_ON_DEMAND, payload: expect.objectContaining({ request_context: 'backfill' }) });
+    } finally {
+        await connection.closeDatabase();
+    }
+});
+
+
+it.each(['normal', 'same-priority', 'insert-race'])('persists semantic promotion across DB instances without resetting visibility: %s', async (scenario) => {
+    setupBeaver(true);
+    const connection = new MockDBConnection();
+    const db = new BeaverDB(connection);
+    try {
+        await db.initDatabase('0.99.0');
+        (Zotero.Beaver as any).db = db;
+        await enqueueOcrJob({ ...args(), priority: scenario === 'normal' ? OCR_PRIORITY_BACKFILL : OCR_PRIORITY_ON_DEMAND });
+        if (scenario === 'insert-race') {
+            vi.spyOn(db, 'promotePendingBackgroundJob').mockResolvedValueOnce({ exists: false, promoted: false });
+        }
+        await connection.queryAsync("UPDATE background_jobs SET attempt_count = 2, available_at = 9999999999999");
+        await enqueueOcrJob({ ...args(), requestContext: 'interactive' });
+        const reopened = new BeaverDB(connection);
+        const [job] = await reopened.peekBackgroundJobs();
+        expect(job).toMatchObject({ priority: OCR_PRIORITY_ON_DEMAND, attemptCount: 2,
+            availableAt: 9999999999999, payload: { request_context: 'interactive' } });
+        await enqueueOcrJob({ ...args(), priority: OCR_PRIORITY_BACKFILL });
+        expect((await reopened.peekBackgroundJobs())[0].payload?.request_context).toBe('interactive');
     } finally {
         await connection.closeDatabase();
     }

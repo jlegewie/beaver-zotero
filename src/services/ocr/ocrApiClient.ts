@@ -87,10 +87,11 @@ export interface OcrOutcomeReport {
 
 export class OcrApiClient extends ApiService {
     /** Request OCR for a content hash, joining/creating the backend job. */
-    requestOcr(fileHash: string, pageCount: number): Promise<OcrRequestResponse> {
+    requestOcr(fileHash: string, pageCount: number, requestContext: 'interactive' | 'backfill' = 'backfill'): Promise<OcrRequestResponse> {
         return this.post<OcrRequestResponse>(`${OCR_API_PREFIX}/request`, {
             file_hash: fileHash,
             page_count: pageCount,
+            request_context: requestContext,
         });
     }
 

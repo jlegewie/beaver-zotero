@@ -30,12 +30,13 @@ export interface MaybeEnqueueOcrArgs {
     /** Page count from no-text-layer detection. */
     pageCount: number | null;
     /**
-     * Queue priority. Defaults to on-demand (a scan the user just opened), which
-     * runs promptly and preempts a draining backfill. The whole-library backfill
+     * Local queue priority. Explicit preparation can run ahead of waiting backfill.
+     * This does not determine server priority; requestContext carries that intent. The whole-library backfill
      * reconciler passes `OCR_PRIORITY_BACKFILL`, which stays behind the idle
      * and master-toggle gate and yields to on-demand work.
      */
     priority?: number;
+    requestContext?: 'interactive' | 'backfill';
     /** Keep OCR continuations within the explicit preparation storage limit. */
     prepareCache?: boolean;
 }
@@ -86,9 +87,11 @@ export async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
     }
 
     const priority = args.priority ?? OCR_PRIORITY_ON_DEMAND;
-    const payload = args.prepareCache && priority >= 100
-        ? { content_kind: 'pdf' as const, maxPages: null, timeoutSeconds: 120, prepare_cache: true }
-        : null;
+    const payload = {
+        content_kind: 'pdf' as const, maxPages: null, timeoutSeconds: 120,
+        request_context: args.requestContext ?? 'backfill',
+        ...(args.prepareCache && priority >= 100 ? { prepare_cache: true } : {}),
+    };
 
     // Hash-free fast path: if a ticket is already queued for this attachment,
     // the work is already tracked — return before reading + MD5-hashing the

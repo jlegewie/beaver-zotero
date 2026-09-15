@@ -6,6 +6,8 @@ import {
 export interface IndexBackgroundJobMetadata {
   /** Explicit local preparation stops claiming files when the cache fills. */
   prepare_cache?: boolean;
+  /** Semantic OCR admission intent; absent legacy values remain backfill. */
+  request_context?: "interactive" | "backfill";
   index_action?: "upsert" | "untag";
   /** Hash to untag for a delete/replacement operation. */
   doc_hash?: string;

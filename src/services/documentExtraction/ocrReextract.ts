@@ -2,8 +2,8 @@
  * Re-extract OCR'd PDF bytes and cache the result against the original
  * attachment's on-disk identity.
  *
- * The OCR microservice returns a *searchable* PDF (the original page image plus
- * an invisible, positioned text layer). That PDF is consumed transiently: we run
+ * The OCR microservice returns a PDF with positioned text; page images may
+ * be stripped. That PDF is consumed transiently: we run
  * Beaver Extract on its bytes, store the resulting `StructuredDocument` in the
  * document cache, and discard the bytes. Citations and annotations are
  * coordinate-driven, so this verifies that the OCR PDF preserves the original
@@ -118,11 +118,9 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
     const originalPages = originalMeta?.pages ?? null;
 
     const client = getMuPDFWorkerClient(workerName);
-    const maxSourceSizeBytes = sourceIdentity.sourceSizeBytes > 0
-        ? sourceIdentity.sourceSizeBytes
-        : undefined;
 
     let primaryPageCount: number | null = null;
+    const validated: Array<{ mode: DocumentCacheExtractionMode; extracted: BeaverExtractResult }> = [];
 
     for (const mode of OCR_REEXTRACT_MODES) {
         if (abortSignal?.aborted) return { kind: 'aborted' };
@@ -159,13 +157,17 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
             return { kind: 'geometry_mismatch', detail: geometryError };
         }
 
+        validated.push({ mode, extracted });
+        if (primaryPageCount == null) primaryPageCount = extracted.document.pageCount;
+    }
+
+    // Validate both representations before publishing either. A secondary-mode
+    // text or geometry failure must not leave a readable success in the cache.
+    for (const { mode, extracted } of validated) {
         try {
             if (abortSignal?.aborted) return { kind: 'aborted' };
             await cache.putResult({
-                item,
-                filePath,
-                mode,
-                sourceSizeBytes,
+                item, filePath, mode, sourceSizeBytes,
                 contentType: item.attachmentContentType || 'application/pdf',
                 result: extracted,
                 metadata: { ...buildExtractedDocumentCacheMetadata(extracted), extractionSource: 'ocr' },
@@ -175,10 +177,6 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             return { kind: 'error', message: `${mode}_cache_write_failed: ${message}` };
-        }
-
-        if (primaryPageCount == null) {
-            primaryPageCount = extracted.document.pageCount;
         }
     }
 
@@ -209,6 +207,10 @@ function checkGeometryInvariant(
         const original = originalPages[i];
         const ocr = ocrPages[i];
         if (!original || !ocr) continue;
+        if (original.viewBox.some((value, index) =>
+            Math.abs(value - ocr.viewBox[index]) > GEOMETRY_TOLERANCE_PT)) {
+            return `page ${i} viewBox differs from original`;
+        }
         if (original.rotation !== ocr.rotation) {
             return `page ${i} rotation ${ocr.rotation} != original ${original.rotation}`;
         }

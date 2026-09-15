@@ -4603,7 +4603,9 @@ export class BeaverDB {
                     available_at  = CASE WHEN content_kind != ? OR ? < priority
                                          THEN MIN(available_at, ?) ELSE available_at END,
                     content_kind  = ?,
-                    payload_json  = CASE WHEN priority >= 100 AND ? >= 100
+                    payload_json  = CASE WHEN content_kind = ? AND json_extract(?, '$.request_context') = 'interactive'
+                                         THEN json_set(COALESCE(payload_json, ?), '$.request_context', 'interactive')
+                                         WHEN priority >= 100 AND ? >= 100
                                               AND json_extract(?, '$.prepare_cache') = 1 THEN ?
                                          WHEN content_kind != ? OR ? < priority OR ? = 'fulltext_upsert'
                                          THEN ? ELSE payload_json END,
@@ -4619,6 +4621,7 @@ export class BeaverDB {
                     priority,
                     input.now,
                     input.contentKind,
+                    input.contentKind, payloadJson, payloadJson,
                     priority, payloadJson, payloadJson,
                     input.contentKind, priority,
                     input.jobType,
@@ -4677,13 +4680,17 @@ export class BeaverDB {
     ): Promise<{ exists: boolean; promoted: boolean }> {
         // Current priority doubles as the existence check (dedup key is UNIQUE).
         const current: number[] = [];
+        const contexts: unknown[] = [];
         await this.queryAsync(
-            `SELECT priority FROM background_jobs
+            `SELECT priority, json_extract(payload_json, '$.request_context') FROM background_jobs
              WHERE job_type = ? AND library_id = ? AND zotero_key = ? AND payload_kind = ?
                AND dedupe_key = ''
              LIMIT 1`,
             [jobType, libraryId, zoteroKey, payloadKind],
-            { onRow: (row: any) => current.push(row.getResultByIndex(0)) },
+            { onRow: (row: any) => {
+                current.push(row.getResultByIndex(0));
+                contexts.push(row.getResultByIndex(1));
+            } },
         );
         if (current.length === 0) return { exists: false, promoted: false };
         // Fresh detection and its extraction continuation can ticket the same
@@ -4694,7 +4701,18 @@ export class BeaverDB {
                     AND dedupe_key = '' AND priority >= 100`,
             [JSON.stringify(preparationPayload), jobType, libraryId, zoteroKey, payloadKind]);
         }
-        if ((current[0] ?? 0) <= priority) return { exists: true, promoted: false };
+        // Semantic promotion is independent of local scheduling priority. Persist
+        // it without resetting attempts, cooldown or an active visibility lease.
+        const contextPromoted = preparationPayload?.request_context === 'interactive'
+            && contexts[0] !== 'interactive';
+        if (contextPromoted) {
+            await this.queryAsync(`UPDATE background_jobs SET payload_json =
+                json_set(COALESCE(payload_json, ?), '$.request_context', 'interactive')
+                WHERE job_type = ? AND library_id = ? AND zotero_key = ? AND payload_kind = ?
+                    AND dedupe_key = ''`,
+            [JSON.stringify(preparationPayload), jobType, libraryId, zoteroKey, payloadKind]);
+        }
+        if ((current[0] ?? 0) <= priority) return { exists: true, promoted: contextPromoted };
 
         // Lower priority only. The `priority > ?` guard keeps the value
         // monotonically decreasing if the row changed since the read above.

@@ -55,3 +55,15 @@ describe('OcrApiClient.reportOutcome', () => {
         expect(post.mock.calls[0][1]).toEqual(report);
     });
 });
+
+
+describe('OcrApiClient.requestOcr', () => {
+    it.each([undefined, 'backfill', 'interactive'] as const)('sends semantic context %s with the content identity', async (context) => {
+        const client = new OcrApiClient('https://api.test');
+        const post = vi.spyOn(client as any, 'post').mockResolvedValue({ status: 'queued' });
+        await client.requestOcr('original-md5', 2, context);
+        expect(post).toHaveBeenCalledWith('/api/v1/ocr/request', {
+            file_hash: 'original-md5', page_count: 2, request_context: context ?? 'backfill',
+        });
+    });
+});
