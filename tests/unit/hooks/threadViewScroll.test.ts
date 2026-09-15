@@ -43,6 +43,14 @@ let root: Root;
 let host: HTMLDivElement;
 let container: HTMLDivElement;
 let height: number;
+const frames = new Map<number, FrameRequestCallback>();
+let nextFrame = 0;
+
+function flushFrames() {
+    const pending = [...frames.values()];
+    frames.clear();
+    act(() => pending.forEach(callback => callback(0)));
+}
 
 const run = (status: string, id = 'one') => ({ id, status }) as any;
 function resizeContent() {
@@ -54,6 +62,11 @@ function resizeContent() {
     }
 }
 beforeEach(() => {
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => {
+        frames.set(++nextFrame, callback);
+        return nextFrame;
+    });
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => { frames.delete(id); });
     vi.stubGlobal('ResizeObserver', ResizeObserverStub);
     store.set(allRunsAtom, [run('in_progress')]);
     store.set(activeRunAtom, run('in_progress'));
@@ -74,6 +87,8 @@ afterEach(() => {
     act(() => root.unmount());
     host.remove();
     observers.length = 0;
+    frames.clear();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
 });
 it('follows terminal reviews and a follow-up after a run replaces its DOM root', () => {
@@ -103,4 +118,53 @@ it('updates the bottom measurement after a root replacement while the reader sta
     expect(container.scrollTop).toBe(500);
     expect(store.get(scrollAtoms.isAtBottom)).toBe(false);
     expect(store.get(scrollAtoms.userScrolled)).toBe(true);
+});
+
+it('catches up when a follow-up finishes while browser frames are suspended', () => {
+    flushFrames();
+    act(() => {
+        store.set(allRunsAtom, [run('completed')]);
+        store.set(activeRunAtom, null);
+    });
+    flushFrames();
+
+    act(() => {
+        store.set(allRunsAtom, [run('completed'), run('in_progress', 'two')]);
+        store.set(activeRunAtom, run('in_progress', 'two'));
+    });
+    height = 2000;
+    act(() => {
+        store.set(allRunsAtom, [run('completed'), run('completed', 'two')]);
+        store.set(activeRunAtom, null);
+    });
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 5000);
+    resizeContent();
+    flushFrames();
+    expect(container.scrollTop).toBe(1500);
+
+    // An idle expansion after catching up must not pull the reader down.
+    vi.mocked(Date.now).mockReturnValue(Date.now() + 5000);
+    height = 2400;
+    resizeContent();
+    flushFrames();
+    expect(container.scrollTop).toBe(1500);
+});
+
+it('follows terminal layout even when the last streamed resize was long ago', () => {
+    flushFrames();
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 5000);
+    act(() => store.set(activeRunAtom, null));
+    height = 1400;
+    resizeContent();
+    flushFrames();
+    expect(container.scrollTop).toBe(900);
+});
+
+it('respects a reader who scrolls back before a queued terminal frame', () => {
+    flushFrames();
+    act(() => store.set(activeRunAtom, null));
+    store.set(scrollAtoms.userScrolled, true);
+    height = 1800;
+    flushFrames();
+    expect(container.scrollTop).toBe(500);
 });
