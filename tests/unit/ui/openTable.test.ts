@@ -35,6 +35,7 @@ let prefs: Record<string, unknown>;
 beforeEach(() => {
     vi.clearAllMocks();
     prefs = {};
+    (Zotero as any).Beaver = { ...(Zotero as any).Beaver, libraryOperations: { run: vi.fn().mockResolvedValue({ recovered: [] }) } };
     readerOpen = vi.fn().mockResolvedValue(undefined);
     (Zotero as any).Reader = { open: readerOpen };
     (Zotero as any).Prefs = { get: vi.fn((key: string) => prefs[key]) };
@@ -116,4 +117,13 @@ describe('openTable', () => {
             error: expect.stringContaining('reader exploded'),
         });
     });
+});
+
+
+it('repairs locally on Open and surfaces unfinished bookkeeping without hiding the document', async () => {
+    vi.mocked(Zotero.Beaver.libraryOperations.run).mockResolvedValueOnce({ recovered: [{ kind: 'bookkeeping_pending' }] });
+    const result = await openTable(REF);
+    expect(result).toMatchObject({ ok: true, warning: expect.stringContaining('Check / repair table') });
+    expect(Zotero.Beaver.libraryOperations.run).toHaveBeenCalledWith('table_openTable', [REF]);
+    expect(readerOpen).toHaveBeenCalledOnce();
 });

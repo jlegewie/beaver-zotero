@@ -1279,7 +1279,7 @@ describe('retriable creation', () => {
         expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
     });
 
-    it.each(['v1.json', 'history.json'])('retries a failed %s seed without acknowledging incomplete creation', async (failedFile) => {
+    it.each(['v1.json', 'history.json'])('reports committed creation after a failed %s seed and repairs locally', async (failedFile) => {
         const publish = vi.fn();
         (Zotero as any).Beaver = { ...(Zotero as any).Beaver, runtime: { publish } };
         (globalThis as any).IOUtils = {
@@ -1289,12 +1289,11 @@ describe('retriable creation', () => {
                 await realIOUtils.move(from, to);
             },
         };
-        await expect(createTable(options)).rejects.toThrow('disk full');
+        expect(await createTable(options)).toMatchObject({ saved: false });
         expect(item.deleted).toBe(false);
-        expect(publish).not.toHaveBeenCalled();
+        expect(publish).toHaveBeenCalledTimes(1);
         (globalThis as any).IOUtils = realIOUtils;
-        const replay = await createTable(options);
-        expect(replay).toMatchObject({ key: KEY, replayed: true });
+        await openTable(ref);
         expect(existsSync(sidecar('v1.json'))).toBe(true);
         expect((await listVersions(ref))).toMatchObject([{ version: 1, creation: true, actor: 'agent', run_id: 'run' }]);
         expect(publish).toHaveBeenCalledTimes(1);
@@ -1306,13 +1305,13 @@ describe('retriable creation', () => {
         if (step === 'tag') item.addTag.mockImplementationOnce(() => { throw new Error('interrupted'); });
         if (step === 'index') (Zotero.FullText.queueItem as any).mockRejectedValueOnce(new Error('interrupted'));
         if (step === 'save') item.saveTx.mockRejectedValueOnce(new Error('interrupted'));
-        await expect(createTable(options)).rejects.toThrow('interrupted');
+        expect(await createTable(options)).toMatchObject({ saved: false, key: KEY });
         // Unsaved tags disappear on restart; the document must still identify the import.
         const tags = new Set<string>();
         item.hasTag = (tag: string) => tags.has(tag);
         item.addTag.mockImplementation((tag: string) => tags.add(tag));
         item.attachmentSyncState = 1;
-        expect(await createTable(options)).toMatchObject({ key: KEY, replayed: true });
+        expect((await openTable(ref)).recovered).not.toContainEqual({ kind: 'bookkeeping_pending' });
         expect(tags).toEqual(new Set(['beaver-table', '📊']));
         expect(Zotero.FullText.queueItem).toHaveBeenCalled();
         expect(item.attachmentSyncState).toBe(0);
@@ -1323,18 +1322,19 @@ describe('retriable creation', () => {
 
     it.each(['index', 'save'])('keeps a replayed creation retriable when %s fails again', async (step) => {
         item.saveTx.mockRejectedValueOnce(new Error('initial save failed'));
-        await expect(createTable(options)).rejects.toThrow('initial save failed');
+        expect(await createTable(options)).toMatchObject({ saved: false });
         const fail = step === 'index' ? Zotero.FullText.queueItem : item.saveTx;
         (fail as any).mockRejectedValueOnce(new Error('retry failed'));
-        await expect(createTable(options)).rejects.toThrow('retry failed');
+        expect(await createTable(options)).toMatchObject({ saved: false, replayed: true });
         expect(await createTable(options)).toMatchObject({ key: KEY, replayed: true });
         expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
     });
 
     it('refuses an unfinished import instead of creating a duplicate', async () => {
-        (Zotero.File.putContentsAsync as any).mockRejectedValueOnce(new Error('disk full'));
-        await expect(createTable(options)).rejects.toThrow('disk full');
+        vi.spyOn(IOUtils, 'move').mockRejectedValueOnce(new Error('disk full'));
         await expect(createTable(options)).rejects.toMatchObject({ code: 'operation_pending' });
+        await expect(createTable(options)).rejects.toMatchObject({ code: 'operation_pending' });
+        await expect(openTable(ref)).rejects.toMatchObject({ code: 'invalid_spec' });
         expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
     });
 
@@ -1526,7 +1526,7 @@ it('releases renderer-owned commands without withdrawing plugin-owned recovery',
     const second = { closed: false } as Window;
     const releaseFirst = registerTableLocalCommands(first);
     const releaseSecond = registerTableLocalCommands(second);
-    expect(getTableLocalCommands(first).read).toBe(readTable);
+    expect((await getTableLocalCommands(first).read({ libraryID: LIBRARY_ID, key: KEY })).spec).toBeDefined();
     expect(tableLocalCommands().size).toBe(2);
     releaseFirst();
     expect(tableLocalCommands().has(first)).toBe(false);
@@ -1582,4 +1582,53 @@ it('holds the instance queue through an active artifact write after its owner cl
     release();
     await expect(write).resolves.toMatchObject({ ok: true, version: 2 });
     await expect(read).resolves.toMatchObject({ version: 2 });
+});
+
+
+it.each(['index', 'save', 'history'])('repairs a committed %s failure locally and leaves healthy opens clean', async (stage) => {
+    const ref = { libraryID: LIBRARY_ID, key: KEY };
+    await createTable({ spec: demoSpec(), libraryID: LIBRARY_ID });
+    const current = await openTable(ref);
+    const candidate = { ...current.spec, title: 'Committed change' };
+    const fail = new Error('bookkeeping unavailable');
+    if (stage === 'index') vi.mocked(Zotero.FullText.queueItem).mockRejectedValueOnce(fail);
+    if (stage === 'save') item.saveTx.mockRejectedValueOnce(fail);
+    const originalMove = IOUtils.move;
+    if (stage === 'history') {
+        vi.spyOn(IOUtils, 'move').mockImplementation(async (from, to) => {
+            if (String(to).endsWith('history.json')) throw fail;
+            return originalMove(from, to);
+        });
+    }
+    const written = await writeTable(ref, candidate, { actor: 'agent', run_id: 'repair-run' }, current.version);
+    expect(written).toMatchObject({ ok: true });
+    expect(written).toMatchObject({ saved: false });
+    vi.mocked(IOUtils.move).mockRestore?.();
+    item.attachmentSyncState = 1;
+    const repaired = await openTable(ref);
+    expect(repaired.spec.title).toBe('Committed change');
+    expect(repaired.recovered).not.toContainEqual({ kind: 'bookkeeping_pending' });
+    expect(item.attachmentSyncState).toBe(0);
+    item.saveTx.mockClear();
+    vi.mocked(Zotero.FullText.queueItem).mockClear();
+    await openTable(ref);
+    expect(item.saveTx).not.toHaveBeenCalled();
+    expect(Zotero.FullText.queueItem).not.toHaveBeenCalled();
+});
+
+
+it('keeps repair pending across repeated failures, preserves newer content, and respects exclusions', async () => {
+    const ref = { libraryID: LIBRARY_ID, key: KEY };
+    await createTable({ spec: demoSpec(), libraryID: LIBRARY_ID });
+    item.saveTx.mockRejectedValue(new Error('item save unavailable'));
+    expect(await writeTable(ref, demoSpec('First'), { actor: 'user' })).toMatchObject({ saved: false });
+    expect((await openTable(ref)).recovered).toContainEqual({ kind: 'bookkeeping_pending' });
+    expect(await writeTable(ref, demoSpec('Newer'), { actor: 'user' })).toMatchObject({ saved: false });
+    const latest = await readFile(htmlPath, 'utf8');
+    item.saveTx.mockResolvedValue(item.id);
+    const saves = item.saveTx.mock.calls.length;
+    await expect(openTable(ref, () => { throw new Error('access refused'); })).rejects.toThrow('access refused');
+    expect(item.saveTx.mock.calls.length).toBe(saves);
+    expect((await openTable(ref)).recovered).not.toContainEqual({ kind: 'bookkeeping_pending' });
+    expect(await readFile(htmlPath, 'utf8')).toBe(latest);
 });

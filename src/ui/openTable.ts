@@ -32,7 +32,7 @@
 import { closeStaleTableReaders } from '../services/artifacts/view/readerTableView';
 import { resolveTableItem, type TableRef } from '../services/artifacts/tableItemIdentity';
 
-export type OpenTableOutcome = { ok: true } | { error: string };
+export type OpenTableOutcome = { ok: true; warning?: string } | { error: string };
 
 interface ReaderApi {
     open(
@@ -81,6 +81,14 @@ export async function openTable(ref: TableRef): Promise<OpenTableOutcome> {
         if (!path) {
             return { error: `Could not open table ${ref.key} — it has no file on disk.` };
         }
+        let warning: string | undefined;
+        try {
+            const current = await Zotero.Beaver.libraryOperations.run('table_openTable', [ref]);
+            if (current.recovered.some((entry) => entry.kind === 'bookkeeping_pending'))
+                warning = 'Content is committed, but local bookkeeping needs repair. Use Check / repair table to retry.';
+        } catch {
+            warning = 'Local bookkeeping could not be checked. Use Check / repair table to retry.';
+        }
         await closeStaleTableReaders(item.id);
         const openInWindow = openReaderInNewWindow();
         // `allowDuplicate` mirrors `Zotero.FileHandlers.open`, and is not
@@ -90,7 +98,7 @@ export async function openTable(ref: TableRef): Promise<OpenTableOutcome> {
         // reaches the window branch. The table would then appear in a tab
         // while the preference asked for a window.
         await reader.open(item.id, undefined, { openInWindow, allowDuplicate: openInWindow });
-        return { ok: true };
+        return { ok: true, ...(warning ? { warning } : {}) };
     } catch (error) {
         // No trailing period: the thrown message usually carries its own, and
         // `... in library 1..` reads like a typo in the log.

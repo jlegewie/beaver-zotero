@@ -520,14 +520,13 @@ function refOf(item: Zotero.Item): TableRef {
  * caller of a table surface uses, and going through it means a torn-down bundle
  * reports "not up" instead of running a dead realm's closure.
  */
-async function openTable(ref: TableRef): Promise<void> {
+async function openTable(ref: TableRef): Promise<string> {
     const api = getTablesApi();
     if (!api) {
-        logger('tableItemPane: the table surfaces are not registered', 1);
-        return;
+        return 'Table document actions are unavailable.';
     }
     const outcome = await api.openTable(ref);
-    if ('error' in outcome) logger(`tableItemPane: ${outcome.error}`, 1);
+    return 'error' in outcome ? outcome.error : outcome.warning ?? '';
 }
 
 /**
@@ -573,7 +572,7 @@ function renderActions(doc: Document, item: Zotero.Item): HTMLElement {
         // Enabled optimistically; the async half disables it when the item has
         // no file, which is the only way to know.
         button(doc, 'open', 'Open table', actions.open, () =>
-            void openTable(ref)
+            void openTable(ref).then((message) => { status.textContent = message; })
         ),
         button(doc, 'library', 'Show in library', actions.showInLibrary, () =>
             showInLibrary(win, item)

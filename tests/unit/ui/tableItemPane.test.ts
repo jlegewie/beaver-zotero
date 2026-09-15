@@ -70,6 +70,7 @@ it("renders document actions before lazy item data can establish table identity"
         "export-csv",
         "history",
         "restore-version",
+        "repair",
     ]);
     expect(body.textContent).not.toContain("Edit table");
 });
