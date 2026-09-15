@@ -45,6 +45,7 @@ vi.mock('../../../src/utils/zoteroItemUtils', () => ({
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 const libraryScope = vi.hoisted(() => ({ initialized: true, searchableIds: [1] }));
+import { DocumentExtractExecutor } from '../../../src/services/backgroundQueue/documentExtractExecutor';
 import { OcrExecutor } from '../../../src/services/backgroundQueue/ocrExecutor';
 import { ocrApiClient } from '../../../src/services/ocr/ocrApiClient';
 import {
@@ -126,6 +127,7 @@ beforeEach(() => {
         getAttachmentProcessingState: vi.fn(async () => null),
         markAttachmentOcrDone: vi.fn(async () => true),
         markAttachmentOcrFailed: vi.fn(async () => undefined),
+        recordAttachmentReadingOutcome: vi.fn(async () => undefined),
     };
 
     (globalThis as any).Zotero.Items = {
@@ -338,15 +340,46 @@ describe('OcrExecutor', () => {
         expect(outcome).toEqual({ kind: 'complete', reason: 'ocr_disabled' });
     });
 
-    it('completes (not terminal) on a page-cap rejection so a cap raise re-enables it', async () => {
+    it('recovers legacy detection metadata through native extraction before requesting OCR', async () => {
+        const metadata = Zotero.Beaver.documentCache!.getMetadata as ReturnType<typeof vi.fn>;
+        metadata.mockResolvedValueOnce(null);
+        const recovery = vi.spyOn(DocumentExtractExecutor.prototype, 'execute').mockResolvedValueOnce({ kind: 'complete', reason: 'needs_ocr' });
+        dbStub.getAttachmentProcessingState.mockResolvedValue({ ocrStatus: 'needed' });
+        api.requestOcr.mockResolvedValue({ status: 'disabled' });
+        await executor.execute(record, makeCtx());
+        expect(recovery).toHaveBeenCalledWith(expect.objectContaining({ jobType: 'document_extract', payload: expect.objectContaining({ content_kind: 'pdf' }) }), expect.anything());
+        expect(api.requestOcr).toHaveBeenCalledWith('hash123', 5, 'backfill');
+        recovery.mockRestore();
+    });
+
+    it('does not upload when metadata recovery finds valid native text', async () => {
+        (Zotero.Beaver.documentCache!.getMetadata as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
+        const recovery = vi.spyOn(DocumentExtractExecutor.prototype, 'execute').mockResolvedValueOnce({ kind: 'complete', reason: 'ok' });
+        dbStub.getAttachmentProcessingState.mockResolvedValue({ ocrStatus: 'na' });
+        expect(await executor.execute(record, makeCtx())).toEqual({ kind: 'complete', reason: 'ok' });
+        expect(api.requestOcr).not.toHaveBeenCalled();
+        recovery.mockRestore();
+    });
+
+    it('settles failed metadata recovery visibly without requesting cloud work', async () => {
+        (Zotero.Beaver.documentCache!.getMetadata as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+        const recovery = vi.spyOn(DocumentExtractExecutor.prototype, 'execute').mockResolvedValueOnce({ kind: 'complete', reason: 'needs_ocr' });
+        dbStub.getAttachmentProcessingState.mockResolvedValue({ ocrStatus: 'needed' });
+        expect(await executor.execute(record, makeCtx())).toMatchObject({ reason: 'ocr_metadata_unavailable' });
+        expect(dbStub.markAttachmentOcrFailed).toHaveBeenCalledWith(1, 'AAAAAAAA', 'hash123', expect.stringContaining('ocr_metadata_unavailable'));
+        expect(api.requestOcr).not.toHaveBeenCalled();
+        recovery.mockRestore();
+    });
+
+    it('persists a terminal page-cap rejection instead of leaving progress pending', async () => {
         api.requestOcr.mockResolvedValue({ status: 'rejected', reason: 'page_cap', limit: 100, page_count: 250 });
         const ctx = makeCtx();
 
         const outcome = await executor.execute(record, ctx);
 
-        // Page-cap rejections must not be persisted as terminal failures.
-        expect(outcome.kind).toBe('complete');
-        expect((outcome as any).reason).toBe('ocr_page_cap');
+        expect(outcome.kind).toBe('failPermanent');
+        expect((outcome as any).reason).toBe('terminal:ocr_page_cap');
+        expect(dbStub.markAttachmentOcrFailed).toHaveBeenCalledWith(1, 'AAAAAAAA', expect.any(String), expect.stringContaining('OCR limit 100'));
     });
 
     it('records a terminal failure on a permanent backend error', async () => {
@@ -381,6 +414,20 @@ describe('OcrExecutor', () => {
         expect(outcome.kind).toBe('retry');
     });
 
+    it('reports local publication only after the ledger accepts the validated cache', async () => {
+        api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
+        await executor.execute(record, makeCtx());
+        expect(api.reportOutcome).toHaveBeenCalledWith(expect.objectContaining({
+            outcome_code: 'ocr_extracted', source_ref: '1-AAAAAAAA',
+            download_ms: expect.any(Number), publication_ms: expect.any(Number),
+            quality_result: 'text_and_geometry_passed',
+        }));
+        api.reportOutcome.mockClear();
+        dbStub.markAttachmentOcrDone.mockResolvedValue(false);
+        expect(await executor.execute(record, makeCtx())).toMatchObject({ reason: 'stale_completion_ignored' });
+        expect(api.reportOutcome).not.toHaveBeenCalled();
+    });
+
     it('records the OCR_NO_TEXT loop-guard terminal when re-extraction finds no text', async () => {
         api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
         mockedReextract.mockResolvedValue({ kind: 'no_text' } as any);
@@ -394,13 +441,13 @@ describe('OcrExecutor', () => {
             expect(outcome.failure.task).toBe('ocr');
         }
         // Client-detected terminal is reported to the backend for observability.
-        expect(api.reportOutcome).toHaveBeenCalledWith({
+        expect(api.reportOutcome).toHaveBeenCalledWith(expect.objectContaining({
             file_hash: 'hash123',
             outcome_code: 'ocr_no_text',
             engine_version: OCR_ENGINE_VERSION,
             page_count: 5,
             detail: undefined,
-        });
+        }));
     });
 
     it('records a terminal failure on a geometry mismatch', async () => {
@@ -415,13 +462,13 @@ describe('OcrExecutor', () => {
             expect(outcome.failure.terminalCode).toBe('ocr_geometry_mismatch');
         }
         // The geometry detail rides along (truncated) for observability.
-        expect(api.reportOutcome).toHaveBeenCalledWith({
+        expect(api.reportOutcome).toHaveBeenCalledWith(expect.objectContaining({
             file_hash: 'hash123',
             outcome_code: 'ocr_geometry_mismatch',
             engine_version: OCR_ENGINE_VERSION,
             page_count: 5,
             detail: 'page 0 width',
-        });
+        }));
     });
 
     it('still returns the terminal outcome when the outcome report fails (fire-and-forget)', async () => {

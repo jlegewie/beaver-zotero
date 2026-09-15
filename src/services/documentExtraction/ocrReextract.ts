@@ -119,6 +119,19 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
 
     const client = getMuPDFWorkerClient(workerName);
 
+    // Check page preservation before text detection can reject the artifact.
+    try {
+        const pageCount = await client.getPageCount(ocrBytes, abortSignal);
+        if (abortSignal?.aborted) return { kind: 'aborted' };
+        const expected = expectedPageCount ?? originalPages?.length;
+        if (expected != null && pageCount !== expected) {
+            return { kind: 'geometry_mismatch', detail: `page_count ${pageCount} != original ${expected}` };
+        }
+    } catch (error) {
+        if (abortSignal?.aborted) return { kind: 'aborted' };
+        return { kind: 'error', message: `geometry_preflight_failed: ${String(error)}` };
+    }
+
     let primaryPageCount: number | null = null;
     const validated: Array<{ mode: DocumentCacheExtractionMode; extracted: BeaverExtractResult }> = [];
 

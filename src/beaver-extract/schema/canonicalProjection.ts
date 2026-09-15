@@ -113,6 +113,24 @@ export function projectStructuredPage(
         }
     });
 
+    // Glyphs and aggregate boxes may extend beyond the visible source page.
+    // Clip published locators while retaining text and the original page frame.
+    const clip = (rect: [number, number, number, number]): [number, number, number, number] => {
+        if (!rect.every(Number.isFinite) || rect[0] > rect[2] || rect[1] > rect[3]) {
+            throw new Error('Invalid extraction rectangle');
+        }
+        return [Math.max(0, Math.min(page.width, rect[0])),
+            Math.max(0, Math.min(page.height, rect[1])),
+            Math.max(0, Math.min(page.width, rect[2])),
+            Math.max(0, Math.min(page.height, rect[3]))];
+    };
+    for (const item of items) {
+        item.bbox = clip(item.bbox);
+        if ('sentences' in item && item.sentences) {
+            for (const sentence of item.sentences) sentence.bboxes = sentence.bboxes.map(clip);
+        }
+    }
+
     return {
         index: page.index,
         label: page.label,

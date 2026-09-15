@@ -33,7 +33,8 @@ export function preflightCachedPdfMeta(
     const pageCount = cachedMeta.pageCount ?? null;
     if (cachedMeta.errorCode) {
         if (cachedMeta.errorCode === 'no_text_layer') {
-            if (opts.checkOcr) {
+            // A legacy detection without page metadata must be measured again.
+            if (opts.checkOcr && Number.isInteger(pageCount) && pageCount! > 0) {
                 return { code: 'no_text_layer', pageCount };
             }
         } else {

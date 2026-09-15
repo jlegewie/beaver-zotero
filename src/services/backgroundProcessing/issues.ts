@@ -17,6 +17,7 @@ export type ProcessingIssueReason =
     | 'unsupported'
     | 'extract_failed'
     | 'ocr_failed'
+    | 'ocr_page_cap'
     | 'index_failed';
 
 export interface IssueEntitlements {
@@ -109,6 +110,7 @@ export function processingIssuesSql(entitlements: IssueEntitlements): string {
                         ELSE 'no_text' END
                     ELSE 'extract_failed' END
                 WHEN ocr_status = 'failed' THEN CASE
+                    WHEN ${hasCodeSql('ocr_page_cap')} THEN 'ocr_page_cap'
                     WHEN ${anyCodeSql(FILE_UNAVAILABLE_CODES)} THEN 'file_unavailable'
                     ELSE 'ocr_failed' END
                 WHEN ocr_status = 'needed' AND ${entitlements.hasOcrAccess ? 0 : 1} THEN 'scanned'
@@ -141,6 +143,7 @@ export const PROCESSING_ISSUE_REASON_ORDER: ProcessingIssueReason[] = [
     'extract_failed',
     'no_text',
     'ocr_failed',
+    'ocr_page_cap',
     'index_failed',
     'encrypted',
     'too_large',
@@ -154,6 +157,7 @@ export const PROCESSING_ISSUE_REASON_ORDER: ProcessingIssueReason[] = [
  * file is picked up by the reconciler's own signature check instead.
  */
 export const RETRYABLE_PROCESSING_ISSUE_REASONS: readonly ProcessingIssueReason[] = [
+    'ocr_page_cap',
     'file_unavailable',
     'extract_failed',
     'ocr_failed',
@@ -211,6 +215,7 @@ export function classifyProcessingIssue(
     }
 
     if (row.ocrStatus === 'failed') {
+        if (hasCode(row.lastError, 'ocr_page_cap')) return 'ocr_page_cap';
         return hasAnyCode(row.lastError, FILE_UNAVAILABLE_CODES) ? 'file_unavailable' : 'ocr_failed';
     }
     if (row.ocrStatus === 'needed' && !entitlements.hasOcrAccess) return 'scanned';

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ extract: vi.fn(), put: vi.fn() }));
+const mocks = vi.hoisted(() => ({ extract: vi.fn(), getPageCount: vi.fn(), put: vi.fn() }));
 vi.mock('../../../src/beaver-extract', () => ({
-    getMuPDFWorkerClient: () => ({ extract: mocks.extract }),
+    getMuPDFWorkerClient: () => ({ extract: mocks.extract, getPageCount: mocks.getPageCount }),
     ExtractionErrorCode: { NO_TEXT_LAYER: 'NO_TEXT_LAYER' },
 }));
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
@@ -22,6 +22,7 @@ const result = (page = original) => ({ document: { pageCount: 1, pages: [page] }
 beforeEach(() => {
     vi.clearAllMocks();
     mocks.extract.mockResolvedValue(result());
+    mocks.getPageCount.mockResolvedValue(1);
     mocks.put.mockResolvedValue(undefined);
     vi.stubGlobal('Zotero', { Beaver: { documentCache: {
         getSourceIdentitySnapshot: vi.fn(async () => identity),
@@ -58,6 +59,15 @@ describe('OCR artifact validation and publication', () => {
     it('rejects changed page count', async () => {
         mocks.extract.mockResolvedValue({ document: { pageCount: 2, pages: [original, original] } });
         expect(await extractPdfBytesAndCacheAsOriginalAttachment(args)).toMatchObject({ kind: 'geometry_mismatch' });
+        expect(mocks.put).not.toHaveBeenCalled();
+    });
+
+    it('reports lost pages before an unusable text layer can mask the preservation failure', async () => {
+        mocks.getPageCount.mockResolvedValue(63);
+        mocks.extract.mockRejectedValue(new Error('no text'));
+        expect(await extractPdfBytesAndCacheAsOriginalAttachment({ ...args, expectedPageCount: 64 }))
+            .toEqual({ kind: 'geometry_mismatch', detail: 'page_count 63 != original 64' });
+        expect(mocks.extract).not.toHaveBeenCalled();
         expect(mocks.put).not.toHaveBeenCalled();
     });
 
