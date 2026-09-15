@@ -601,7 +601,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         showcase: 'quick-prompt',
         primaryAction: { type: 'quick-prompt', label: 'Try now' },
         inPanel: false,
-        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.25.0-beta.1" target='_blank'>Full changelog</a>`,
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.25.0-beta.3" target='_blank'>Full changelog</a>`,
     },
 ];
 
