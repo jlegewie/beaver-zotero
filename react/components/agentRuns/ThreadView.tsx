@@ -259,6 +259,33 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             prevThreadIdRef.current = currentThreadId;
         }, [restoreScrollPosition, currentThreadId]);
 
+        // A covered window can suspend resize delivery until after the response
+        // has finished. Queue a frame at each generation boundary so that its
+        // final layout is followed even if the resize settle window has expired.
+        useEffect(() => {
+            let frame: number | null = null;
+            let wasGenerating = store.get(activeRunAtom)?.status === 'in_progress';
+            const scheduleFollow = () => {
+                if (frame !== null) return;
+                frame = surfaceWindow.requestAnimationFrame(() => {
+                    frame = null;
+                    if (pendingRunId || isProtocolScrollLocked()) return;
+                    terminalSettleUntilRef.current = Date.now() + TERMINAL_SETTLE_MS;
+                    pinToBottom(scrollContainerRef as React.RefObject<HTMLElement>, scrolledAtom);
+                });
+            };
+            if (wasGenerating) scheduleFollow();
+            const unsubscribe = store.sub(activeRunAtom, () => {
+                const isGenerating = store.get(activeRunAtom)?.status === 'in_progress';
+                if (isGenerating !== wasGenerating) scheduleFollow();
+                wasGenerating = isGenerating;
+            });
+            return () => {
+                unsubscribe();
+                if (frame !== null) surfaceWindow.cancelAnimationFrame(frame);
+            };
+        }, [currentThreadId, pendingRunId, isProtocolScrollLocked, scrollContainerRef, scrolledAtom, surfaceWindow]);
+
         // Deterministic retry path for protocol navigation:
         // attempt again on render-state changes instead of relying on timers.
         useEffect(() => {
