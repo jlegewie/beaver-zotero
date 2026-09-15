@@ -112,6 +112,8 @@ describe('handleAgentActionExecuteRequest deadline', () => {
         const response = await handleAgentActionExecuteRequest(request);
 
         expect(response.success).toBe(true);
+        // Direct calls have no socket receipt, so prepare/queue must not be
+        // billed as wait — even when they take a millisecond.
         expect(response.timing?.queued_ms).toBe(0);
     });
 });

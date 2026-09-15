@@ -158,7 +158,6 @@ export async function handleAgentActionExecuteRequest(
     request: ActionExecuteRequest,
     context?: AgentDataRequestContext,
 ): Promise<WSAgentActionExecuteResponse> {
-    const receivedAt = context?.receivedAt ?? Date.now();
     const generation = request.operation?.accountGeneration ?? Zotero.Beaver.account?.getGeneration();
     const assertCurrent = () => {
         if (generation !== Zotero.Beaver.account?.getGeneration()) throw Object.assign(new Error('Account changed'), { code: 'account_changed' });
@@ -167,7 +166,10 @@ export async function handleAgentActionExecuteRequest(
     };
     try {
         const operation = await prepareOperationRendering(request.action_type, request.action_data, request.operation);
-        return await Zotero.Beaver.libraryOperations.run('executeRequest', [{ ...request, operation }, { ...context, assertCurrent, receivedAt, reportPhase: context?.reportPhase ?? (() => {}) }], {
+        // Leave receivedAt unset when the caller didn't stamp socket receipt.
+        // executeRequest then falls back to its own start, so direct calls
+        // report queued_ms = 0 instead of counting prepare/queue as wait.
+        return await Zotero.Beaver.libraryOperations.run('executeRequest', [{ ...request, operation }, { ...context, assertCurrent, reportPhase: context?.reportPhase ?? (() => {}) }], {
             signal: context?.signal,
             owner: context?.owner,
             assertCurrent,
