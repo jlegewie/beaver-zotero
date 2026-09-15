@@ -3382,6 +3382,22 @@
  * header for the open chat, and the chat in a width-limited column. The chat
  * itself is the same `Sidebar` the panes render. */
 
+/* Scope surfaces at the mount point so menus portaled here share the chat
+ * palette. The navigation column paints its own sidepane background. */
+#beaver-pane-window {
+    --beaver-surface-ground: var(--material-background);
+    --beaver-surface-raised: var(--material-background);
+    --beaver-surface-overlay: var(--material-background);
+}
+
+@supports (background: color-mix(in srgb, red, blue)) {
+    #beaver-pane-window {
+        /* Mix opaque materials so cards do not show content beneath them. */
+        --beaver-surface-raised:
+            color-mix(in srgb, var(--material-mix-quarternary) 40%, var(--material-background));
+    }
+}
+
 #beaver-pane-window .beaver-window-app {
     --beaver-window-nav-width: 264px;
     display: flex;
@@ -3465,7 +3481,7 @@
 }
 
 #beaver-pane-window .beaver-window-main > [role="main"] {
-    background-color: var(--material-background);
+    background-color: var(--beaver-surface-ground);
 }
 
 /* ── Header ── */
