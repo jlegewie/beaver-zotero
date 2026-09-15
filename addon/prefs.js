@@ -22,6 +22,7 @@ pref("addSelectedItemsOnOpen", true);
 pref("addSelectedItemsOnNewThread", true);
 pref("addBeaverProvenanceNote", false);
 pref("focusResponseForScreenReaders", false);
+pref("chatLineSpacing", "standard");
 pref("annotationToolEnabled", true);
 // Author name on annotations Beaver creates. Empty string = no attribution.
 // Only affects new annotations. Reader-created annotations ignore this —

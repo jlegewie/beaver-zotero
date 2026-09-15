@@ -1,4 +1,5 @@
 import { threadReadOnlyAtom } from '../../runtime/threadProjection';
+import { chatLineSpacingAtom } from '../../atoms/preferences';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -133,6 +134,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     const [editedAttachments, setEditedAttachments] = useState<MessageAttachment[]>(EMPTY_ATTACHMENTS);
     const [editedFilters, setEditedFilters] = useState<MessageSearchFilters | null>(null);
     const [needsFade, setNeedsFade] = useState(false);
+    const lineSpacing = useAtomValue(chatLineSpacingAtom);
     // Hold sending while a pick is still being staged (file copy, item load).
     const [isStagingSources, setIsStagingSources] = useState(false);
     // Shown in place of the sent message while a submitted edit commits, so
@@ -273,7 +275,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             const contentHeight = contentRef.current.scrollHeight;
             setNeedsFade(contentHeight > maxContentHeight);
         }
-    }, [displayContent, maxContentHeight, findQuery]);
+    }, [displayContent, maxContentHeight, findQuery, lineSpacing]);
 
     const sentPillIdentity = useMemo(
         () => pillIdentity(promptActionsToDescriptors(userPrompt.actions, allActions)),
@@ -672,7 +674,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                 {/* Message content with max height and fade (both released
                     while a find hit is showing, so the hit can be scrolled to) */}
                 <div
-                    className={`-ml-1 user-select-text user-request-content border-transparent ${needsFade && !releaseHeightClamp ? 'user-request-content-fade' : ''}`}
+                    className={`-ml-1 user-select-text user-request-content chat-prose border-transparent ${needsFade && !releaseHeightClamp ? 'user-request-content-fade' : ''}`}
                     style={{
                         maxHeight: releaseHeightClamp ? undefined : `${maxContentHeight}px`,
                         overflow: 'hidden',

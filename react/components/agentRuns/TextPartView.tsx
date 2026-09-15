@@ -20,7 +20,7 @@ export const TextPartView: React.FC<TextPartViewProps> = React.memo(function Tex
 
     return (
         <MarkdownRenderer
-            className="markdown"
+            className="markdown chat-prose"
             content={part.content.trim()}
             runId={runId}
         />
@@ -28,4 +28,3 @@ export const TextPartView: React.FC<TextPartViewProps> = React.memo(function Tex
 });
 
 export default TextPartView;
-

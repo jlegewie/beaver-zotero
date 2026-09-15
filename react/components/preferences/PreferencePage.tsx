@@ -19,10 +19,12 @@ import AdvancedSection from "./AdvancedSection";
 import PermissionsSection from "./PermissionsSection";
 import LibraryAccessList from "./LibraryAccessList";
 import BackgroundProcessingSection from "./BackgroundProcessingSection";
+import { chatLineSpacingAtom, CHAT_LINE_SPACING, type ChatLineSpacing } from '../../atoms/preferences';
 
 
 const PreferencePage: React.FC = () => {
     const [user] = useAtom(userAtom);
+    const [lineSpacing, setLineSpacing] = useAtom(chatLineSpacingAtom);
     const logout = useSetAtom(logoutAtom);
 
     // --- User profile ---
@@ -468,7 +470,26 @@ const PreferencePage: React.FC = () => {
                         <SectionLabel>Accessibility</SectionLabel>
                         <SettingsGroup>
                             <SettingsRow
+                                title="Chat Line Spacing"
+                                description="Adjust the space between lines in chat messages"
+                                control={
+                                    <select
+                                        id="beaver-chat-line-spacing"
+                                        value={lineSpacing}
+                                        onChange={(event) => setLineSpacing(event.target.value as ChatLineSpacing)}
+                                        className="py-1 px-2 border preference-input text-sm"
+                                        style={{ margin: 0 }}
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
+                                        {Object.entries(CHAT_LINE_SPACING).map(([value, preset]) => (
+                                            <option key={value} value={value}>{preset.label}</option>
+                                        ))}
+                                    </select>
+                                }
+                            />
+                            <SettingsRow
                                 title="Announce Responses for Screen Readers"
+                                hasBorder
                                 description="Move focus to screen-reader text when Beaver starts and finishes generating a response"
                                 onClick={handleFocusResponseForScreenReadersToggle}
                                 tooltip="When enabled, focus moves from the chat input to screen-reader-only status text while Beaver generates, then to a screen-reader-only copy of the completed response."
