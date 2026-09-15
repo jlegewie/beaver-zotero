@@ -17,6 +17,9 @@ import type { ActionExecuteRequest } from './operationContext';
 import { prepareOperationRendering } from './prepareOperationRendering';
 import { DEFAULT_TIMEOUT_SECONDS, TimeoutContext, TimeoutError } from './timeout';
 
+/** Socket receipt is optional: direct/MCP callers never stamped one. */
+type ExecuteContext = Omit<AgentDataRequestContext, 'receivedAt'> & { receivedAt?: number };
+
 
 /**
  * Handle agent_action_execute request from backend.
@@ -40,7 +43,7 @@ import { DEFAULT_TIMEOUT_SECONDS, TimeoutContext, TimeoutError } from './timeout
  */
 export async function executeRequest(
     request: ActionExecuteRequest,
-    context?: AgentDataRequestContext,
+    context?: ExecuteContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const rawTimeout = request.timeout_seconds;
     const timeoutSeconds = (typeof rawTimeout === 'number' && rawTimeout > 0)
@@ -166,10 +169,12 @@ export async function handleAgentActionExecuteRequest(
     };
     try {
         const operation = await prepareOperationRendering(request.action_type, request.action_data, request.operation);
-        // Leave receivedAt unset when the caller didn't stamp socket receipt.
-        // executeRequest then falls back to its own start, so direct calls
-        // report queued_ms = 0 instead of counting prepare/queue as wait.
-        return await Zotero.Beaver.libraryOperations.run('executeRequest', [{ ...request, operation }, { ...context, assertCurrent, reportPhase: context?.reportPhase ?? (() => {}) }], {
+        const executeContext: ExecuteContext = {
+            ...context,
+            assertCurrent,
+            reportPhase: context?.reportPhase ?? (() => {}),
+        };
+        return await Zotero.Beaver.libraryOperations.run('executeRequest', [{ ...request, operation }, executeContext], {
             signal: context?.signal,
             owner: context?.owner,
             assertCurrent,
