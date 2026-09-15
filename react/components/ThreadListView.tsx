@@ -13,6 +13,7 @@ import { formatTimeAgo } from '../utils/formatTimeAgo';
 import { buildThreadItemFilter } from '../utils/threadItemFilter';
 import { highlightMatch } from '../utils/highlightMatch';
 import { useThreadHistory } from '../hooks/useThreadHistory';
+import { useThreadHistoryScroll } from '../hooks/useThreadHistoryScroll';
 import { isThreadInstanceMismatch } from '../../src/services/threads/threadMatches';
 import Button from '@beaver/agent-ui/primitives/Button';
 import { ChipButton } from './agentRuns/requestChips/ChipButton';
@@ -47,6 +48,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
 
     const clearFilter = useCallback(() => setFilter(null), [setFilter]);
     const history = useThreadHistory({ filter, onFilterUnavailable: clearFilter });
+    const { scrollRef, sentinelRef } = useThreadHistoryScroll(history);
     const {
         activeQuery,
         isLoading,
@@ -433,7 +435,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             )}
 
             {/* Thread list */}
-            <div className="flex-1 overflow-y-auto px-1">
+            <div className="flex-1 min-h-0 overflow-y-auto px-1" ref={scrollRef}>
                 {pinnedThreads.length > 0 && (
                     <div>
                         <div className="thread-group-header">Pinned</div>
@@ -488,19 +490,13 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                     </div>
                 )}
 
-                {view.hasMore && !fetchError && (
-                    <div className="display-flex justify-start p-2 ml-2 pb-3">
-                        <Button
-                            variant="outline"
-                            onClick={history.loadMore}
-                            disabled={isLoading}
-                            type="button"
-                            loading={isLoading}
-                        >
-                            Show more
-                        </Button>
-                    </div>
-                )}
+                <div ref={sentinelRef} style={{ minHeight: view.hasMore ? 32 : 1 }}>
+                    {isLoading && hasVisibleRows && (
+                        <div className="display-flex items-center justify-center py-2" role="status" aria-label="Loading more chats">
+                            <Spinner size={16} />
+                        </div>
+                    )}
+                </div>
             </div>
 
             {/* Footer: instance-scoping escape hatch. Outside the scroll area so
