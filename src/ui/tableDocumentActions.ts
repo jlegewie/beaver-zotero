@@ -128,6 +128,12 @@ export function renderTableDocumentActions(
     versions.addEventListener("change", () => {
         restore.disabled = busy || !versions.value;
     });
-    root.append(exportButton, history, versions, restore, status);
+    const repair = action("repair", "Check / repair table", async () => {
+        const current = await commands().read(ref);
+        status.textContent = current.recovered?.some((entry) => entry.kind === 'bookkeeping_pending')
+            ? "Content is committed, but local bookkeeping still needs repair. Try again after resolving storage or sync errors."
+            : "Table bookkeeping is up to date.";
+    });
+    root.append(exportButton, history, versions, restore, repair, status);
     return root;
 }

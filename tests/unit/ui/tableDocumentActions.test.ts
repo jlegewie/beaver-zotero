@@ -191,3 +191,15 @@ it("addresses exclusion errors to the user during version restore", async () => 
     expect(root.textContent).toContain("You can re-enable access");
     expect(root.textContent).not.toContain("Tell the user");
 });
+
+
+it("keeps local repair failures visible and retries without a content mutation", async () => {
+    read.mockResolvedValueOnce({ spec, version: 1, recovered: [{ kind: 'bookkeeping_pending' }] });
+    await click('repair');
+    expect(root.textContent).toContain('local bookkeeping still needs repair');
+    expect(revert).not.toHaveBeenCalled();
+    read.mockResolvedValueOnce({ spec, version: 1, recovered: [] });
+    await click('repair');
+    expect(root.textContent).toContain('bookkeeping is up to date');
+    expect(revert).not.toHaveBeenCalled();
+});

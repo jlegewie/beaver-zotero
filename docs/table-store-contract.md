@@ -81,9 +81,21 @@ queues indexing, marks the item for upload and saves it. It also attempts to res
 missing creation shadow when the current document is still that original state, and
 emits the update event. An intervening edit's recovery evidence is preserved.
 
-Failed operation-backed indexing, item save or history seeding rejects the call while
-keeping the same item available for retry. The caller must retry with the original
-operation ID. Recovery-shadow recording retains its existing best-effort policy.
+Once the stamped document is atomically installed, failed tags, indexing, item save
+or history seeding return confirmed success with `saved: false`. Ordinary local open
+repairs current history/version files and retries indexing/upload/item save under
+the store lock and access checks. It also repairs missing creation tags and an
+absent initial recovery shadow. Incomplete unstamped imports remain `operation_pending`;
+local repair never manufactures their content or imports a replacement.
+
+`beaver/bookkeeping.json` acknowledges the current spec digest only after bookkeeping
+succeeds. Missing/stale acknowledgements trigger repair after restart; healthy opens
+do not save items or queue uploads. This marker contains no replacement spec or
+mutation intent. Repair always uses current committed content, preserving later edits.
+Repeated failures retain `bookkeeping_pending` in open results; the item pane's
+“Check / repair table” action retries locally and shows persistent failure. Export
+and history access also use the local store. No backend replay is needed.
+Recovery-shadow recording retains its best-effort policy.
 
 A completed retry returns the same item, original acknowledgement and current state.
 A changed payload returns `operation_mismatch`. An unfinished import, unavailable

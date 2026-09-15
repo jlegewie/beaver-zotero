@@ -208,6 +208,7 @@ export interface CreateTableItemOptions {
 }
 
 export interface CreatedTableItem {
+    saved?: boolean;
     item: Zotero.Item;
     itemID: number;
     /** The Zotero item key — which is also the table's identity, see below. */
@@ -331,61 +332,74 @@ export async function createTableItem(
     };
     if (collectionID) importOptions.collections = [collectionID];
 
-    const item = await Zotero.Attachments.importFromSnapshotContent(importOptions);
-    if (!item?.key) {
-        throw new TableItemError(
-            'Zotero returned no attachment for the table snapshot.',
-            'import_failed'
+    try {
+        const item = await Zotero.Attachments.importFromSnapshotContent(importOptions);
+        if (!item?.key) {
+            throw new TableItemError(
+                'Zotero returned no attachment for the table snapshot.',
+                'import_failed'
+            );
+        }
+
+        // --- phase 2: the file learns which table it is
+        const stored: TableSpec = {
+            ...named,
+            spec_version: named.spec_version ?? TABLE_SPEC_VERSION,
+            key: item.key,
+            // A fresh item is revision 1 whatever the incoming spec claimed; a spec
+            // copied from an existing table starts its own history here.
+            version: 1,
+        };
+        const second = buildTableDocument(stored, {
+            linksFor,
+            citationScopeFor: zoteroLinkScope,
+            storeState: creation
+                ? {
+                      creation: { ...storeState!.creation, complete: true },
+                      operations: [
+                          {
+                              operation_id: creation.operation_id,
+                              request_sha256: creation.request_sha256,
+                              version: 1,
+                              sha256: await tableSpecHash(stored),
+                          },
+                      ],
+                  }
+                : undefined,
+        });
+
+        const path = await item.getFilePathAsync();
+        if (!path) {
+            throw new TableItemError(
+                `Table ${item.key} has no file on disk.`,
+                'file_missing'
+            );
+        }
+        const tempPath = `${path}.beaver-tmp`;
+        await IOUtils.writeUTF8(tempPath, second.html);
+        await IOUtils.move(tempPath, path);
+
+        // The stamped document is committed; bookkeeping failures cannot undo it.
+        let saved = true;
+        try {
+            item.addTag(TABLE_TAG, 1);
+            item.addTag(TABLE_EMOJI_TAG, 1);
+            await queueTableFullText(item, true);
+            await item.saveTx();
+        } catch (error) {
+            saved = false;
+            logger(`createTableItem: committed content needs local repair: ${String(error)}`, 1);
+        }
+        return { ...describeTableItem(item, stored, second.html, second.cssRuleCount), saved };
+
+    } catch (error) {
+        if (creation) throw new TableItemError(
+            'The import may exist but its document is not confirmed complete. Inspect it before creating another table.',
+            'operation_pending',
         );
+        throw error;
     }
 
-    // --- phase 2: the file learns which table it is
-    const stored: TableSpec = {
-        ...named,
-        spec_version: named.spec_version ?? TABLE_SPEC_VERSION,
-        key: item.key,
-        // A fresh item is revision 1 whatever the incoming spec claimed; a spec
-        // copied from an existing table starts its own history here.
-        version: 1,
-    };
-    const second = buildTableDocument(stored, {
-        linksFor,
-        citationScopeFor: zoteroLinkScope,
-        storeState: creation
-            ? {
-                  creation: { ...storeState!.creation, complete: true },
-                  operations: [
-                      {
-                          operation_id: creation.operation_id,
-                          request_sha256: creation.request_sha256,
-                          version: 1,
-                          sha256: await tableSpecHash(stored),
-                      },
-                  ],
-              }
-            : undefined,
-    });
-
-    const path = await item.getFilePathAsync();
-    if (!path) {
-        throw new TableItemError(
-            `Table ${item.key} has no file on disk.`,
-            'file_missing'
-        );
-    }
-    await Zotero.File.putContentsAsync(path, second.html);
-
-    item.addTag(TABLE_TAG, 1);
-    item.addTag(TABLE_EMOJI_TAG, 1);
-
-    // The index was queued against the first write; the file has changed since.
-    await queueTableFullText(item, !!creation);
-    // Load-bearing, not bookkeeping: Zotero schedules its auto-sync off data
-    // object saves, not off file writes. Without a save a new or changed table
-    // sits unsynced until some unrelated change triggers the next sync.
-    await item.saveTx();
-
-    return describeTableItem(item, stored, second.html, second.cssRuleCount);
 }
 
 /** Describe the stored attachment consistently for imports and replays. */

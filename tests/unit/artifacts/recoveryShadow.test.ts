@@ -814,11 +814,10 @@ it.each(['history', 'save'])('repairs the recovery shadow when creation retries 
         if (to.endsWith('history.json')) throw new Error('interrupted');
         await realIOUtils.move(from, to);
     } };
-    await expect(createTable(options)).rejects.toThrow('interrupted');
-    expect(await lastTableShadow(ref)).toBeNull();
+    expect(await createTable(options)).toMatchObject({ saved: false });
+    if (step === 'history') expect(await lastTableShadow(ref)).toBeNull();
     (globalThis as any).IOUtils = realIOUtils;
-    const replay = await createTable(options);
-    expect(replay.replayed).toBe(true);
+    const replay = await openTable(ref);
     const shadow = await lastTableShadow(ref);
     expect(shadow).toMatchObject({ version: 1, sha256: replay.sha256 });
     expect(existsSync(shadow!.payloadPath!)).toBe(true);

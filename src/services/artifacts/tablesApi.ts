@@ -190,7 +190,7 @@ export const TABLES_API_UNAVAILABLE =
 
 /** Local document commands supplied by a live renderer; dialogs stay with the caller. */
 export interface TableLocalCommands {
-    read(ref: TableRef): Promise<{ spec: TableSpec; version: number }>;
+    read(ref: TableRef): Promise<{ spec: TableSpec; version: number; recovered?: { kind: string }[] }>;
     history(ref: TableRef): Promise<TableVersionEntry[]>;
     revert(ref: TableRef, version: number): Promise<TableWriteResult>;
     restoreShadow: TableShadowRestore;

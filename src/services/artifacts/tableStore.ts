@@ -174,7 +174,8 @@ export type TableRecovery =
     /** Version files above the commit point: writes that never committed. */
     | { kind: 'orphan_removed'; versions: number[] }
     /** Versions the retention cap dropped while the log was being rewritten. */
-    | { kind: 'pruned'; versions: number[] };
+    | { kind: 'pruned'; versions: number[] }
+    | { kind: 'bookkeeping_pending' };
 
 export type TableAccessGuard = (spec: TableSpec) => void;
 
@@ -200,8 +201,7 @@ export interface TableWriteOk {
      *
      * The table on disk is the new one either way — that is what makes this a
      * flag rather than a rejection — and what is behind is bookkeeping the next
-     * {@link openTable} reconciles (the log) or the next write repeats (the
-     * upload mark, see {@link markForUpload}).
+     * {@link openTable} reconciles using the current committed document.
      */
     saved: boolean;
     /** The spec as stored: `key`, `version` and `spec_version` stamped in. */
@@ -1001,19 +1001,22 @@ async function replayTableCreation(item: Zotero.Item, operation_id: string, requ
         if (!read.ok || read.spec.key !== item.key)
             throw new TableItemError('The earlier creation has no matching readable spec.', 'invalid_spec');
         const spec = read.spec;
-        item.addTag(TABLE_TAG, 1);
-        item.addTag(TABLE_EMOJI_TAG, 1);
         const opened = await readCurrentState(item, { html, parsed: read });
         await guardStoredTable(ref, item, opened, accessGuard);
-        const history = await reconcileLog(item, opened);
-        const audited = await auditSidecar(item, spec, opened.htmlVersion, history.versions);
-        if (history.repairs.length || audited.repairs.length)
-            await commitHistory(item, audited.versions);
-        const entry = audited.versions[audited.versions.length - 1];
         const operation = opened.storeState.operations?.find((r) => r.operation_id === operation_id);
-        await queueTableFullText(item, true);
-        markForUpload(item);
-        await item.saveTx();
+        let saved = true;
+        let entry = seal(await versionEntry(spec.version ?? 1, spec, JSON.stringify(spec),
+            state.creation.meta ?? { actor: 'agent' }));
+        try {
+            const history = await reconcileLog(item, opened);
+            const audited = await auditSidecar(item, spec, opened.htmlVersion, history.versions);
+            if (history.repairs.length || audited.repairs.length) await commitHistory(item, audited.versions);
+            entry = audited.versions[audited.versions.length - 1];
+            await repairItemBookkeeping(item, spec);
+        } catch (error) {
+            saved = false;
+            logger(`tableStore: committed creation still needs repair: ${String(error)}`, 1);
+        }
         // Do not overwrite recovery evidence for an intervening edit or
         // sync conflict merely because the original create was retried.
         const sha256 = await tableSpecHash(spec);
@@ -1030,6 +1033,7 @@ async function replayTableCreation(item: Zotero.Item, operation_id: string, requ
             version: spec.version ?? 1,
             entry,
             replayed: true,
+            saved,
             operation,
             sha256,
         };
@@ -1050,7 +1054,9 @@ async function createTableOnce(options: CreateTableOptions): Promise<CreatedTabl
         change: change ?? CREATED_CHANGE,
     };
 
-    let entry: TableVersionEntry;
+    let saved = created.saved !== false;
+    let entry = { ...seal(await versionEntry(created.spec.version ?? 1, created.spec,
+        JSON.stringify(created.spec), meta)), creation: true as const };
     try {
         entry = await withTableLock(ref, async () => {
             const version = created.spec.version ?? 1;
@@ -1078,25 +1084,16 @@ async function createTableOnce(options: CreateTableOptions): Promise<CreatedTabl
             return seeded;
         });
     } catch (error) {
-        // The operation identity lets a retry finish this same committed item.
-        // Keep it available and surface the unfinished seed instead of claiming success.
-        if (options.creationOperation) throw error;
-        // The item is already in the library and already saved, so a failure
-        // here would otherwise leave a table nothing tracks — and a caller that
-        // retries would make a second one. Trashing is reversible, so this is
-        // safe even when the seed failed for a reason that left the file fine:
-        // the user can restore it from the trash.
-        await trashTableItem(created.item).catch((cleanupError) =>
-            logger(
-                `tableStore: could not trash ${created.key} after a failed seed: ${String(cleanupError)}`,
-                1
-            )
-        );
-        throw error;
+        saved = false;
+        logger(`tableStore: committed creation needs history repair: ${String(error)}`, 1);
+    }
+    if (saved) {
+        try { await acknowledgeBookkeeping(created.item, created.spec); }
+        catch { saved = false; }
     }
 
     emitTableUpdated(ref, entry.version, meta);
-    return { ...created, version: entry.version, entry };
+    return { ...created, saved, version: entry.version, entry };
 }
 
 /** JSON object key order is irrelevant to retry identity; array order is significant. */
@@ -1296,9 +1293,10 @@ async function commitWrite(
                 replayEntry = audited.versions[audited.versions.length - 1];
                 if (reconciled.repairs.length || audited.repairs.length)
                     pruned = await commitHistory(item, audited.versions);
-                await queueTableFullText(item);
+                await queueTableFullText(item, true);
                 markForUpload(item);
                 await item.saveTx();
+                await acknowledgeBookkeeping(item, current.spec);
             } catch (error) {
                 saved = false;
                 logger(
@@ -1431,11 +1429,16 @@ async function commitWrite(
     );
 
     try {
-        await queueTableFullText(item);
+        await queueTableFullText(item, true);
         markForUpload(item);
         await item.saveTx();
     } catch (error) {
         bookkeepingFailed('its item save', error);
+    }
+
+    if (saved) {
+        try { await acknowledgeBookkeeping(item, stored); }
+        catch (error) { bookkeepingFailed("recording bookkeeping completion", error); }
     }
 
     return {
@@ -1463,6 +1466,23 @@ async function commitWrite(
  * auto-sync timer to hear. A table that is *already* marked for upload needs
  * neither — its upload is pending regardless.
  */
+async function acknowledgeBookkeeping(item: Zotero.Item, spec: TableSpec): Promise<void> {
+    await ensureSidecarDirectory(item);
+    await writeAtomic(PathUtils.join(requireSidecar(item), 'bookkeeping.json'),
+        JSON.stringify({ sha256: await tableSpecHash(spec) }), tableTempPath(item));
+}
+
+async function repairItemBookkeeping(item: Zotero.Item, spec: TableSpec): Promise<void> {
+    const ref = { libraryID: item.libraryID, key: item.key };
+    requireWritable(ref);
+    item.addTag(TABLE_TAG, 1);
+    item.addTag(TABLE_EMOJI_TAG, 1);
+    await queueTableFullText(item, true);
+    markForUpload(item);
+    await item.saveTx();
+    await acknowledgeBookkeeping(item, spec);
+}
+
 function markForUpload(item: Zotero.Item): void {
     item.attachmentSyncState = Zotero.Sync.Storage.Local.SYNC_STATE_TO_UPLOAD;
 }
@@ -1556,21 +1576,47 @@ export async function openTableUncoordinated(ref: TableRef, accessGuard?: TableA
             );
         }
 
+        if (current.storeState.creation && !current.storeState.creation.complete) {
+            throw new TableItemError('The imported document is not confirmed complete.', 'operation_pending');
+        }
         const recovered = await guardStoredTable(ref, item, current, accessGuard);
         const library = Zotero.Libraries.get(ref.libraryID);
         if (!checkLibraryExcluded(ref.libraryID) && library && library.editable && library.filesEditable !== false) {
-            const reconciled = await reconcileLog(item, current);
-            const audited = await auditSidecar(
-                item,
-                current.spec,
-                current.htmlVersion,
-                reconciled.versions
-            );
-            recovered.push(...reconciled.repairs, ...audited.repairs);
-            if (recovered.length) {
-                const pruned = await commitHistory(item, audited.versions);
-                if (pruned.length) recovered.push({ kind: 'pruned', versions: pruned });
+            try {
+                const reconciled = await reconcileLog(item, current);
+                const audited = await auditSidecar(
+                    item,
+                    current.spec,
+                    current.htmlVersion,
+                    reconciled.versions
+                );
+                recovered.push(...reconciled.repairs, ...audited.repairs);
+                if (recovered.length) {
+                    const pruned = await commitHistory(item, audited.versions);
+                    if (pruned.length) recovered.push({ kind: 'pruned', versions: pruned });
+                }
+                const completion = await readJson<{ sha256: string }>(PathUtils.join(requireSidecar(item), 'bookkeeping.json'));
+                if (recovered.length || completion?.sha256 !== await tableSpecHash(current.spec)) {
+                    await guardStoredTable(ref, item, current, accessGuard);
+                    await repairItemBookkeeping(item, current.spec);
+                    if (current.htmlVersion === 1 && current.storeState.creation?.complete) {
+                        try {
+                            if (!(await lastTableShadow(ref))) await recordTableShadow(ref, 1,
+                                JSON.stringify(current.spec), await tableSpecHash(current.spec));
+                        } catch (error) {
+                            logger(`tableStore: creation shadow repair unavailable: ${String(error)}`, 2);
+                        }
+                    }
+
+                }
+            } catch (error) {
+                if (error instanceof TableItemError && error.code === 'library_excluded') throw error;
+                recovered.push({ kind: 'bookkeeping_pending' });
+                logger(`tableStore: local bookkeeping repair failed: ${String(error)}`, 1);
             }
+        } else {
+            const completion = await readJson<{ sha256: string }>(PathUtils.join(requireSidecar(item), 'bookkeeping.json'));
+            if (completion?.sha256 !== await tableSpecHash(current.spec)) recovered.push({ kind: 'bookkeeping_pending' });
         }
 
         const history = normalizeTableHistory(
@@ -2070,7 +2116,7 @@ function emitTableUpdated(
 /** Registers the store callbacks for one renderer and returns its teardown. */
 export function registerTableLocalCommands(win: Window, owner?: string): () => void {
     const commands = {
-        read: readTable,
+        read: async (ref: TableRef) => Zotero.Beaver.libraryOperations.run('table_openTable', [ref], { owner }),
         history: async (ref: TableRef) => (await Zotero.Beaver.libraryOperations.run('table_openTable', [ref], { owner })).history,
         revert: (ref: TableRef, version: number) => Zotero.Beaver.libraryOperations.run('table_revertTable', [ref, version, { actor: 'user' }], { owner }),
         restoreShadow: (ref: TableRef) => Zotero.Beaver.libraryOperations.run('table_restoreShadowVersion', [ref], { owner }),

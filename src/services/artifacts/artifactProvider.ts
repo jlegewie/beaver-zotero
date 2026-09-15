@@ -254,7 +254,7 @@ export async function handleArtifactRequestUncoordinated(
                 zotero_item: itemIdentity({ libraryID, key: created.key }),
                 operation: created.operation,
                 replayed: created.replayed ?? false,
-                saved: true,
+                saved: created.saved !== false,
             });
         }
         const ref = target(request.key!);
