@@ -65,8 +65,11 @@ import type {
     JobExecutor,
     JobOutcome,
 } from './jobExecutor';
+import { DocumentExtractExecutor } from './documentExtractExecutor';
 
 interface ResolvedJob {
+    downloadMs?: number;
+    publicationStartedAt?: number;
     requestContext?: 'interactive' | 'backfill';
     item: Zotero.Item;
     /** Local path or supported remote source for the original scan. */
@@ -242,7 +245,10 @@ export class OcrExecutor implements JobExecutor {
         if (await shouldStopCachePreparation(record)) {
             return { kind: 'complete', reason: 'cache_budget_reached' };
         }
+        const downloadStartedAt = Date.now();
         const ocrBytes = await this.download(ready.getUrl, job, ctx);
+        job.downloadMs = Date.now() - downloadStartedAt;
+        job.publicationStartedAt = Date.now();
 
         const outcome = await this.reextractAndCache(job, ocrBytes, ctx, ledgerGuard, record);
         await this.persistFailedOutcome(job, outcome, ctx);
@@ -357,7 +363,13 @@ export class OcrExecutor implements JobExecutor {
             }
             this.throwIfLibraryUnavailable(record.libraryId, ctx);
         }
-        if (!item || safeIsInTrash(item) === true) {
+        if (item?.parentID) await Zotero.Items.getAsync(item.parentID);
+        this.throwIfLibraryUnavailable(record.libraryId, ctx);
+        const trashState = item ? safeIsInTrash(item) : null;
+        if (item && trashState === null) {
+            return { outcome: { kind: 'retry', error: 'trash_state_unavailable' } };
+        }
+        if (!item || trashState === true) {
             return { outcome: { kind: 'complete', reason: !item ? 'item_missing' : 'in_trash' } };
         }
         const resolvedItem = item;
@@ -374,6 +386,10 @@ export class OcrExecutor implements JobExecutor {
         });
         this.throwIfLibraryUnavailable(record.libraryId, ctx);
         if (source.kind === 'error') {
+            await ctx.db.recordAttachmentReadingOutcome({
+                libraryId: record.libraryId, zoteroKey: record.zoteroKey,
+                contentKind: 'pdf', errorCode: source.code, attemptedAt: Date.now(),
+            });
             if (source.code === 'file_too_large') {
                 return { outcome: { kind: 'complete', reason: 'file_too_large' } };
             }
@@ -412,11 +428,27 @@ export class OcrExecutor implements JobExecutor {
         // NO_TEXT_LAYER metadata written at detection. For remote the row is keyed
         // by the same synthetic path and stores the original byteLength, so no extra
         // download is needed here to learn the cache key.
-        const meta = await this.resolveSourceMetadata(resolvedItem, filePath);
+        let meta = await this.resolveSourceMetadata(resolvedItem, filePath);
         this.throwIfLibraryUnavailable(record.libraryId, ctx);
+        if (!Number.isInteger(meta?.pageCount) || (meta?.pageCount ?? 0) < 1) {
+            // Recover through normal detection so valid native text stays native.
+            const recovery = await new DocumentExtractExecutor().execute({
+                ...record, jobType: 'document_extract', contentKind: 'pdf', payloadKind: 'structured',
+                payload: { ...record.payload, content_kind: 'pdf', maxPages: null, timeoutSeconds: 120 },
+            }, ctx);
+            this.throwIfLibraryUnavailable(record.libraryId, ctx);
+            if (recovery.kind !== 'complete') return { outcome: recovery };
+            const state = await ctx.db.getAttachmentProcessingState(record.libraryId, record.zoteroKey);
+            this.throwIfLibraryUnavailable(record.libraryId, ctx);
+            if (state?.ocrStatus !== 'needed') return { outcome: recovery };
+            meta = await this.resolveSourceMetadata(resolvedItem, filePath);
+            this.throwIfLibraryUnavailable(record.libraryId, ctx);
+        }
         const pageCount = meta?.pageCount ?? null;
-        if (pageCount == null || pageCount < 1) {
-            return { outcome: { kind: 'complete', reason: 'no_page_count' } };
+        if (!Number.isInteger(pageCount) || pageCount == null || pageCount < 1) {
+            await ctx.db.markAttachmentOcrFailed(record.libraryId, record.zoteroKey, fileHash,
+                'ocr_metadata_unavailable: Detection could not recover a page count');
+            return { outcome: { kind: 'complete', reason: 'ocr_metadata_unavailable' } };
         }
         const sourceSizeBytes = isRemoteOnly ? (meta?.sourceSizeBytes ?? 0) : 0;
 
@@ -514,10 +546,9 @@ export class OcrExecutor implements JobExecutor {
                 logger(`OcrExecutor: ${job.sourceKey} OCR disabled by backend entitlement gate`, 3);
                 return { outcome: { kind: 'complete', reason: 'ocr_disabled' } };
             case 'rejected':
-                // Page-cap rejections depend on the current entitlement limits,
-                // so they are not recorded as terminal OCR failures.
                 logger(`OcrExecutor: ${job.sourceKey} rejected (${request.reason}; ${request.page_count}/${request.limit})`, 2);
-                return { outcome: { kind: 'complete', reason: `ocr_${request.reason ?? 'rejected'}` } };
+                return { outcome: this.terminal(job, `ocr_${request.reason ?? 'rejected'}`,
+                    `ocr_${request.reason ?? 'rejected'}: ${request.page_count} pages exceeds OCR limit ${request.limit}`) };
             case 'failed':
                 return { outcome: this.failureOutcome(job, request.error) };
             case 'ready':
@@ -719,6 +750,8 @@ export class OcrExecutor implements JobExecutor {
                         expectedOcrEngineVersion: ledgerGuard?.ocrEngineVersion ?? null,
                         expectedExtractStatus: ledgerGuard?.extractStatus ?? null,
                     });
+                    if (!applied) return { kind: 'complete', reason: 'stale_completion_ignored' };
+                    this.reportTerminalOutcome(job, 'ocr_extracted');
                     if (
                         applied
                         && previous?.structuredDocumentHash !== structuredDocumentHash
@@ -810,11 +843,15 @@ export class OcrExecutor implements JobExecutor {
         );
     }
 
-    /** Fire-and-forget telemetry for a client-detected terminal outcome. */
+    /** Best-effort telemetry after local validation and ledger publication. */
     private reportTerminalOutcome(job: ResolvedJob, outcomeCode: string, detail?: string): void {
         void ocrApiClient
             .reportOutcome({
                 file_hash: job.fileHash,
+                source_ref: job.sourceKey,
+                download_ms: job.downloadMs,
+                publication_ms: job.publicationStartedAt == null ? undefined : Date.now() - job.publicationStartedAt,
+                quality_result: outcomeCode === 'ocr_extracted' ? 'text_and_geometry_passed' : outcomeCode,
                 outcome_code: outcomeCode,
                 engine_version: OCR_ENGINE_VERSION,
                 page_count: job.pageCount,

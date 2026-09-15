@@ -88,6 +88,13 @@ describe("annotationGeometry", () => {
       ).toEqual([[51.5, 666.4, 130.5, 677]]);
     });
 
+    it("clips cached citation boxes to the original CropBox and drops fully outside boxes", () => {
+      expect(sourceBboxesToZoteroRects([
+        { ...sourceBox, l: -5, t: -10, r: 450, b: 630 },
+        { ...sourceBox, l: 500, r: 550 },
+      ], geometry({ viewBox: [10, 20, 410, 620] }))).toEqual([[10, 20, 410, 620]]);
+    });
+
     it("adds the viewBox offset after converting to PDF user space", () => {
       expect(
         sourceBboxesToZoteroRects(

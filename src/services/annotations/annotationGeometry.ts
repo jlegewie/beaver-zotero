@@ -71,7 +71,13 @@ export function sourceBboxesToZoteroRects(
         .map((box) => box.coord_origin === CoordOrigin.BOTTOMLEFT
             ? legacyBottomLeftBoxToZoteroRect(box, geometry)
             : sourceBboxToZoteroRect({ l: box.l, t: box.t, r: box.r, b: box.b }, geometry))
-        .filter(isUsableRect);
+        .filter(isUsableRect)
+        // Cached locators also need bounds checks before reaching the reader.
+        .map(([l, b, r, t]) => [
+            Math.max(geometry.viewBox[0], l), Math.max(geometry.viewBox[1], b),
+            Math.min(geometry.viewBox[2], r), Math.min(geometry.viewBox[3], t),
+        ])
+        .filter(([l, b, r, t]) => l < r && b < t);
 }
 
 /**

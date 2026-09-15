@@ -91,6 +91,7 @@ export class ReconcilerService {
     private pendingWake = false;
     private pendingForce = false;
     private scheduledForce = false;
+    private admissionScopes = new Map<number, string>();
     private generation = 0;
     private timer: ReturnType<typeof setTimeout> | null = null;
     private prefObservers: symbol[] = [];
@@ -192,8 +193,9 @@ export class ReconcilerService {
                 }
                 if (!ref?.libraryID || !ref.key || !isBackgroundProcessingLibraryEnabled(ref.libraryID)) continue;
                 const item = event.event === 'delete' ? null : await Zotero.Items.getAsync(event.id);
+                if (item && item.parentID) await Zotero.Items.getAsync(item.parentID);
                 if (!isBackgroundProcessingLibraryEnabled(ref.libraryID)) continue;
-                const kind = item && safeIsInTrash(item) !== true ? getReadableContentKind(item) : null;
+                const kind = item && safeIsInTrash(item) === false ? getReadableContentKind(item) : null;
                 if (kind === 'text') continue;
                 if (!item || (kind !== 'pdf' && kind !== 'epub' && kind !== 'snapshot')) {
                     await this.removeAttachment(db, ref.libraryID, ref.key);
@@ -273,7 +275,8 @@ export class ReconcilerService {
             for (const ref of refs) {
                 if (!isBackgroundProcessingLibraryEnabled(ref.libraryId)) continue;
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.libraryId, ref.zoteroKey);
-                if (!item || safeIsInTrash(item) === true || !isBackgroundProcessingLibraryEnabled(ref.libraryId)) continue;
+                if (item && item.parentID) await Zotero.Items.getAsync(item.parentID);
+                if (!item || safeIsInTrash(item) !== false || !isBackgroundProcessingLibraryEnabled(ref.libraryId)) continue;
                 const kind = getReadableContentKind(item);
                 if (kind === 'text') {
                     const attemptedAt = Date.now();
@@ -419,6 +422,9 @@ export class ReconcilerService {
             const libraries = Zotero.Libraries.getAll().filter((library) =>
                 (library.libraryType === 'user' || library.libraryType === 'group')
                 && isBackgroundProcessingLibraryEnabled(library.libraryID));
+            for (const id of this.admissionScopes.keys()) {
+                if (!libraries.some((library) => library.libraryID === id)) this.admissionScopes.delete(id);
+            }
             for (const library of libraries) {
                 if (this.cancelled(generation)) return;
                 await this.reconcileLibrary(db, library.libraryID, force, generation);
@@ -465,18 +471,24 @@ export class ReconcilerService {
         const safetyDiffDue = !!previous
             && Date.now() - previous.lastScanTimestamp >= FULL_DIFF_SAFETY_INTERVAL_MS;
         const fullDiffDue = force || !previous || safetyDiffDue;
+        const admissionScope = JSON.stringify([
+            Zotero.Beaver?.account?.getGeneration(),
+            Zotero.Beaver?.hasOcrAccess,
+            Zotero.Beaver?.hasSearchIndexAccess,
+        ]);
+        const admissionChanged = this.admissionScopes.get(libraryId) !== admissionScope;
         const cursorChanged = !previous
             || previous.maxClientDateModified !== cursor.maxClientDateModified
             || previous.attachmentCount !== cursor.attachmentCount
             || previous.ledgerRowCount !== (await db.getAttachmentProcessingAggregates(libraryId)).total;
-        if (!cursorChanged && !fullDiffDue) return;
+        if (!cursorChanged && !fullDiffDue && !admissionChanged) return;
 
         // Weekly file stats are deliberately idle-only. A forced diagnostic pass
         // may run the safety diff immediately. Do not
         // advance the weekly timestamp when an active user prevented the stat
         // sweep, or external byte changes could be postponed indefinitely.
         const idleForStats = force || getSystemIdleTimeMs() >= IDLE_THRESHOLD_MS;
-        if (!cursorChanged && safetyDiffDue && !idleForStats) return;
+        if (!cursorChanged && safetyDiffDue && !idleForStats && !admissionChanged) return;
         const statFiles = force || (safetyDiffDue && idleForStats);
         const items = await this.listProcessableAttachments(libraryId);
         const ledgerRows = await db.getAttachmentProcessingStatesByLibrary(libraryId);
@@ -525,6 +537,7 @@ export class ReconcilerService {
                 : Date.now(),
         };
         await db.upsertProcessingIndexState(state);
+        this.admissionScopes.set(libraryId, admissionScope);
     }
 
     private async reconcileAttachment(
@@ -720,7 +733,8 @@ export class ReconcilerService {
              FROM items I
              LEFT JOIN itemAttachments IA USING (itemID)
              WHERE I.libraryID = ?
-               AND I.itemID NOT IN (SELECT itemID FROM deletedItems)`,
+               AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
+               AND NOT EXISTS (SELECT 1 FROM deletedItems D WHERE D.itemID = IA.parentItemID)`,
             [Zotero.Attachments.LINK_MODE_LINKED_URL, libraryId],
             {
                 onRow: (row: any) => rows.push({
@@ -740,6 +754,7 @@ export class ReconcilerService {
              JOIN itemAttachments IA USING (itemID)
              WHERE I.libraryID = ?
                AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
+               AND NOT EXISTS (SELECT 1 FROM deletedItems D WHERE D.itemID = IA.parentItemID)
                AND IA.linkMode != ?
                AND LOWER(COALESCE(IA.contentType, '')) IN (
                     'application/pdf', 'application/epub+zip',

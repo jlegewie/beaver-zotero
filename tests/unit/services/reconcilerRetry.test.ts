@@ -149,6 +149,46 @@ describe('ReconcilerService.retryAttachments', () => {
         expect(invalidate).toHaveBeenCalledWith(1, 'CHILDPDF');
     });
 
+    it('excludes trashed parents from enumeration and cursor counts even when item trash checks cannot load parents', async () => {
+        await connection.queryAsync('CREATE TABLE items (itemID INTEGER PRIMARY KEY, libraryID INTEGER, key TEXT, clientDateModified TEXT)');
+        await connection.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, linkMode INTEGER, contentType TEXT)');
+        await connection.queryAsync('CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY)');
+        await connection.queryAsync("INSERT INTO items VALUES (10,1,'PARENT01','2026'), (11,1,'CHILD001','2026'), (12,1,'LIVE0001','2026')");
+        await connection.queryAsync("INSERT INTO itemAttachments VALUES (11,10,0,'application/pdf'), (12,NULL,0,'application/pdf')");
+        await connection.queryAsync('INSERT INTO deletedItems VALUES (10)');
+        const getAsync = vi.fn(async (ids: number[]) => ids.map(id => ({ id, isInTrash() { throw new Error('parent unloaded'); } })));
+        vi.stubGlobal('Zotero', { ...Zotero, DB: { queryAsync: connection.queryAsync.bind(connection) },
+            Attachments: { LINK_MODE_LINKED_URL: 3 }, Items: { getAsync } });
+        expect(await (reconciler as any).readLibraryCursor(1)).toMatchObject({ attachmentCount: 1 });
+        expect(await (reconciler as any).listProcessableAttachments(1)).toHaveLength(1);
+        expect(getAsync).toHaveBeenCalledWith([12]);
+    });
+
+    it('revisits unchanged libraries once when OCR access changes without replaying native successes', async () => {
+        const scan = items.get('1-MISSING1')!;
+        const native = items.get('1-INDEXED1')!;
+        for (const item of [scan, native]) {
+            await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: item.key, itemId: item.id, contentKind: 'pdf' });
+        }
+        await connection.queryAsync("UPDATE attachment_processing_state SET extract_status='done', extract_schema_version=?, ocr_status='na'", [expectedExtractionSchemaVersion('pdf')]);
+        await connection.queryAsync("UPDATE attachment_processing_state SET ocr_status='needed' WHERE zotero_key='MISSING1'");
+        vi.spyOn(reconciler as any, 'reconcileReadingState').mockResolvedValue(undefined);
+        vi.spyOn(reconciler as any, 'readLibraryCursor').mockResolvedValue({ maxClientDateModified: 'same', attachmentCount: 2 });
+        vi.spyOn(reconciler as any, 'listProcessableAttachments').mockResolvedValue([scan, native]);
+        Zotero.Beaver.hasOcrAccess = false;
+        reconciler.start();
+        const run = () => (reconciler as any).reconcileLibrary(db, 1, false, (reconciler as any).generation);
+        await run();
+        expect(mocks.maybeEnqueueOcrJob).not.toHaveBeenCalled();
+        Zotero.Beaver.hasOcrAccess = true;
+        await run();
+        await run();
+        expect(mocks.maybeEnqueueOcrJob).toHaveBeenCalledTimes(1);
+        expect(mocks.maybeEnqueueOcrJob).toHaveBeenCalledWith(expect.objectContaining({ zoteroKey: scan.key }));
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+        expect(invalidate).not.toHaveBeenCalled();
+    });
+
     it('retains both records when persisting deletion cleanup fails while paused', async () => {
         mocks.backgroundEnabled = false;
         await failedExtraction('INDEXED1', 'file_missing');

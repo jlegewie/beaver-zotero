@@ -564,6 +564,16 @@ describe('BeaverDB background processing state', () => {
         }
     });
 
+    it('shows OCR page-cap failures separately from native size limits and pending scans', async () => {
+        const entitlements = { hasOcrAccess: true, hasSearchIndexAccess: false };
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'OVERLIMIT', contentKind: 'pdf' });
+        await connection.queryAsync("UPDATE attachment_processing_state SET extract_status='done', ocr_status='needed', file_hash='original'");
+        await db.recordAttachmentReadingOutcome({ libraryId: 1, zoteroKey: 'OVERLIMIT', contentKind: 'pdf', errorCode: 'ocr_required', attemptedAt: 1 });
+        await db.markAttachmentOcrFailed(1, 'OVERLIMIT', 'original', 'ocr_page_cap: 899 pages exceeds OCR limit 500');
+        expect(await db.getProcessingIssueCounts(entitlements)).toEqual([{ reason: 'ocr_page_cap', count: 1 }]);
+        expect(await db.getProcessingIssueRefs(entitlements, 'ocr_page_cap')).toEqual([{ libraryId: 1, zoteroKey: 'OVERLIMIT' }]);
+    });
+
     it('SQL grouping matches issue classification, with stable non-overlapping pages', async () => {
         const errors = ['file_missing', 'download_failed: 404', 'ocr load: read_failed', 'encrypted',
             'file_too_large: 120MB', 'too_many_pages', 'unsupported_type', 'wrapped: unsupported_type',

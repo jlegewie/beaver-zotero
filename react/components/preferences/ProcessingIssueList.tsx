@@ -64,6 +64,11 @@ function reasonCopy(reason: ProcessingIssueReason, hasOcrAccess: boolean): Reaso
                 title: 'OCR failed',
                 description: 'Text recognition did not succeed for these scans.',
             };
+        case 'ocr_page_cap':
+            return {
+                title: 'Exceeds the OCR page limit',
+                description: 'These scans exceed the 500-page OCR limit and will not be retried automatically. Retry after the limit or source changes.',
+            };
         case 'index_failed':
             return {
                 title: 'Not added to the search index',

@@ -89,6 +89,20 @@ describe("canonical extraction schema helpers", () => {
         expect(resolveCitation(doc, "s1")?.bboxes).toEqual([[0, 10, 80, 20]]);
     });
 
+    it("clips overflow locators without changing page geometry or text", () => {
+        const page = projectStructuredPage({
+            index: 0, width: 612, height: 792, viewBox: [10, 20, 622, 812], rotation: 0,
+            items: [{ id: 'p0:i0', kind: 'text', pageIndex: 0, index: 0,
+                bbox: { l: -5, t: 10, r: 731, b: 810, origin: 'top-left' },
+                columnIndex: 0, text: 'A sentence.', lines: [] }],
+            sentences: [{ parentId: 'p0:i0', index: 0, text: 'A sentence.',
+                bboxes: [{ l: 20, t: 10, r: 731, b: 30, origin: 'top-left' }] }],
+        });
+        expect(page.viewBox).toEqual([10, 20, 622, 812]);
+        expect(page.items[0]).toMatchObject({ text: 'A sentence.', bbox: [0, 10, 612, 792],
+            sentences: [{ text: 'A sentence.', bboxes: [[20, 10, 612, 30]] }] });
+    });
+
     it("projects internal text, section headers, and margin items", () => {
         const page = projectStructuredPage({
             index: 0,

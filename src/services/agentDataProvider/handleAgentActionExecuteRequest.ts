@@ -40,7 +40,7 @@ import { DEFAULT_TIMEOUT_SECONDS, TimeoutContext, TimeoutError } from './timeout
  */
 export async function executeRequest(
     request: ActionExecuteRequest,
-    context?: AgentDataRequestContext,
+    context?: Omit<AgentDataRequestContext, 'receivedAt'> & { receivedAt?: number },
 ): Promise<WSAgentActionExecuteResponse> {
     const rawTimeout = request.timeout_seconds;
     const timeoutSeconds = (typeof rawTimeout === 'number' && rawTimeout > 0)

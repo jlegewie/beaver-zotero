@@ -315,7 +315,12 @@ export class DocumentExtractExecutor implements JobExecutor {
         const postLookup = this.checkScope(record);
         if (postLookup) return postLookup;
 
-        if (!item || safeIsInTrash(item) === true) {
+        if (item?.parentID) await Zotero.Items.getAsync(item.parentID);
+        const trashState = item ? safeIsInTrash(item) : null;
+        if (item && trashState === null) {
+            return { kind: 'retry', error: 'trash_state_unavailable' };
+        }
+        if (!item || trashState === true) {
             return { kind: 'complete', reason: item ? 'in_trash' : 'item_missing' };
         }
         const liveKind = liveAttachmentContentKind(item);
@@ -385,7 +390,12 @@ export class DocumentExtractExecutor implements JobExecutor {
         } catch (error) {
             logger(`DocumentExtractExecutor: item lookup failed: ${error}`, 1);
         }
-        if (!item || safeIsInTrash(item) === true) {
+        if (item?.parentID) await Zotero.Items.getAsync(item.parentID);
+        const trashState = item ? safeIsInTrash(item) : null;
+        if (item && trashState === null) {
+            return { outcome: { kind: 'retry', error: 'trash_state_unavailable' } };
+        }
+        if (!item || trashState === true) {
             return {
                 outcome: {
                     kind: 'complete',

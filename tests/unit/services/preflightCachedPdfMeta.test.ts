@@ -51,6 +51,12 @@ describe('preflightCachedPdfMeta', () => {
         expect(result).toBeNull();
     });
 
+    it.each([null, 0, -1, NaN])('recovers incomplete scan detection with page count %s', (pageCount) => {
+        expect(preflightCachedPdfMeta(makeMeta({ errorCode: 'no_text_layer', pageCount }), {
+            checkOcr: true, applyPageCountCap: true, maxPageCount: 1000,
+        })).toBeNull();
+    });
+
     it('returns encrypted for encrypted metadata', () => {
         const result = preflightCachedPdfMeta(
             makeMeta({ errorCode: 'encrypted', pageCount: 5 }),

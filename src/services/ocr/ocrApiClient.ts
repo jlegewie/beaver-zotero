@@ -77,6 +77,10 @@ export interface OcrStatusBatchResponse {
 /** A client-detected terminal OCR outcome (no_text / geometry_mismatch) */
 export interface OcrOutcomeReport {
     file_hash: string;
+    source_ref?: string;
+    download_ms?: number;
+    publication_ms?: number;
+    quality_result?: string;
     /** OCR_TERMINAL_NO_TEXT | OCR_TERMINAL_GEOMETRY */
     outcome_code: string;
     engine_version: string;
