@@ -1278,8 +1278,17 @@
     border: 1px solid var(--fill-quinary);
     background-color: var(--fill-senary);
     outline: none;
-    /* border-bottom-color: transparent !important; */
+}
+
+/* Neutralize the focus background Zotero's Windows theme paints on inputs.
+ * Selects are exempt: their dropdown arrow is that background image. */
+[id^="beaver-pane-"] .preference-input:not(select):focus {
     background-image: none !important;
+}
+
+/* Keep the option text clear of the arrow Zotero paints at the inline end. */
+[id^="beaver-pane-"] select.preference-input {
+    padding-inline-end: 26px;
 }
 
 [id^="beaver-pane-"] .preference-input:hover {
@@ -1656,11 +1665,20 @@
 }
 
 
-/* [id^="beaver-pane-"] .markdown {
-    margin-top: 0px !important;
-    width: 100%;
+/* Conversation prose has an explicit baseline independent of the host UI font.
+ * Only message bodies opt in; previews, exports and controls retain their layout. */
+[id^="beaver-pane-"] .chat-prose {
+    line-height: var(--beaver-chat-line-height, 1.5);
+}
+
+[id^="beaver-pane-"] .markdown.chat-prose :is(p, ul, ol, li, blockquote) {
+    line-height: inherit;
+}
+
+/* Tables retain a stable density when surrounding prose spacing changes. */
+[id^="beaver-pane-"] .markdown.chat-prose table {
     line-height: 1.5;
-} */
+}
 
 [id^="beaver-pane-"] .markdown p {
     margin-block-start: 0px !important;

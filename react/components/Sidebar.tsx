@@ -46,6 +46,7 @@ import { getFirstRunSelectionVariant } from '../utils/firstRunSelection';
 import { FindQueryProvider } from '@beaver/agent-ui/chat/findContext';
 import { FindInChatControlsProvider, useFindInChat } from '../hooks/useFindInChat';
 import FindBar from './ui/FindBar';
+import { chatLineSpacingAtom, CHAT_LINE_SPACING } from '../atoms/preferences';
 
 interface SidebarProps {
     location: 'library' | 'reader';
@@ -111,6 +112,7 @@ const SidebarShell = ({
     isWindow,
     onFind,
 }: SidebarShellProps) => {
+    const lineSpacing = useAtomValue(chatLineSpacingAtom);
     const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
         if (event.defaultPrevented) {
             return;
@@ -162,6 +164,7 @@ const SidebarShell = ({
         <div
             id={id}
             className={className}
+            style={{ '--beaver-chat-line-height': CHAT_LINE_SPACING[lineSpacing].lineHeight } as React.CSSProperties}
             role={isWindow ? "main" : "region"}
             aria-label="Beaver"
             onKeyDown={handleKeyDown}
