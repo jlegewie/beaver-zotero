@@ -44,6 +44,8 @@ export interface BackgroundWorkerSnapshot {
     queuedFiles?: number;
     /** Jobs currently running across the file-processing lanes. */
     inFlight: number;
+    /** OCR attachments waiting for a remote result, outside local lane occupancy. */
+    remoteWaiting?: number;
     /** Distinct running attachments, since multiple stages can overlap. */
     inFlightFiles?: number;
     /** A one-off "process now" is bypassing the idle gate until the queue drains. */
@@ -120,6 +122,7 @@ export async function collectProcessingStatus(
             0,
         ),
         inFlightFiles: extractor?.getInFlightFileCount?.(activeTypes),
+        remoteWaiting: hasOcrAccess ? (lanes.document_ocr?.remoteWaiting ?? 0) : 0,
         drainNow: extractor?.isImmediateDrainRequested?.() ?? false,
         backlogGateOpen: extractor?.isBacklogGateOpen?.() ?? false,
     };
