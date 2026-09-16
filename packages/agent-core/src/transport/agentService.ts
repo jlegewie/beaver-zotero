@@ -1261,10 +1261,12 @@ export class AgentService {
         approved: boolean,
         mode: BatchApprovalMode,
         userInstructions?: string | null,
+        table?: import('../protocol/artifactProtocol').TableApprovalIdentity,
     ): boolean {
         logger(`AgentService: Sending batch approval response for ${approvalId}: ${approved} (${mode})${userInstructions ? ' (with instructions)' : ''}`, 1);
         return this.send({
             type: 'batch_approval_response',
+            ...(table ? { table } : {}),
             approval_id: approvalId,
             approved,
             mode,
