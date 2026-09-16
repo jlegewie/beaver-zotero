@@ -2697,7 +2697,7 @@ export class BeaverDB {
         fileMtimeMs: number;
         fileSizeBytes: number;
     }): Promise<boolean> {
-        await this.queryAsync(
+        return await this.executeChangedRow(
             `UPDATE attachment_processing_state SET extraction_source = ?
              WHERE library_id = ? AND zotero_key = ? AND extraction_source IS NULL
                AND extract_status = 'done' AND content_kind = ?
@@ -2705,7 +2705,6 @@ export class BeaverDB {
             [input.source, input.libraryId, input.zoteroKey, input.contentKind,
                 input.fileMtimeMs, input.fileSizeBytes],
         );
-        return await this.lastStatementChangedRow();
     }
 
     public async resetAttachmentOcr(
@@ -2764,7 +2763,7 @@ export class BeaverDB {
     }): Promise<boolean> {
         const hashChanged = input.previousDocumentHash !== input.structuredDocumentHash;
         const refreshDownstream = hashChanged || input.ocrStatus === 'needed';
-        await this.queryAsync(
+        return await this.executeChangedRow(
             `UPDATE attachment_processing_state SET
                 file_mtime_ms = ?, file_size_bytes = ?, file_hash = ?,
                 structured_document_hash = ?, extract_status = 'done',
@@ -2797,7 +2796,6 @@ export class BeaverDB {
                 input.expectedExtractStatus,
             ],
         );
-        return await this.lastStatementChangedRow();
     }
 
     public async markAttachmentExtractFailure(input: {
@@ -2808,13 +2806,13 @@ export class BeaverDB {
         attemptedAt: number;
         extractionSource?: string | null;
     }): Promise<void> {
-        await this.queryAsync(
+        const changed = await this.executeChangedRow(
             `UPDATE attachment_processing_state SET
                 extract_status = ?, last_error = ?, extraction_source = ?, updated_at = datetime('now')
              WHERE library_id = ? AND zotero_key = ? AND extract_status IS NULL`,
             [input.status, input.error, input.extractionSource ?? null, input.libraryId, input.zoteroKey],
         );
-        if (await this.lastStatementChangedRow()) {
+        if (changed) {
             const row = await this.getAttachmentProcessingState(input.libraryId, input.zoteroKey);
             if (row) await this.recordAttachmentReadingOutcome({
                 libraryId: input.libraryId, zoteroKey: input.zoteroKey,
@@ -2834,7 +2832,7 @@ export class BeaverDB {
         expectedOcrEngineVersion: string | null;
         expectedExtractStatus: AttachmentExtractStatus;
     }): Promise<boolean> {
-        await this.queryAsync(
+        return await this.executeChangedRow(
             `UPDATE attachment_processing_state SET
                 ocr_status = 'done', ocr_engine_version = ?,
                 structured_document_hash = ?,
@@ -2857,7 +2855,6 @@ export class BeaverDB {
                 input.expectedExtractStatus,
             ],
         );
-        return await this.lastStatementChangedRow();
     }
 
     /** OCR may originate from the on-demand detector before a backlog row exists. */
@@ -2900,7 +2897,7 @@ export class BeaverDB {
         const guardStatus = input.expectedUpsertStatus !== undefined;
         const guardVersion = input.expectedUpsertIndexVersion !== undefined;
         const guardExtract = input.expectedExtractStatus !== undefined;
-        await this.queryAsync(
+        return await this.executeChangedRow(
             `UPDATE attachment_processing_state SET
                 upsert_status = 'done', upsert_index_version = ?,
                 last_error = NULL, updated_at = datetime('now')
@@ -2922,7 +2919,6 @@ export class BeaverDB {
                 input.expectedExtractStatus ?? null,
             ],
         );
-        return await this.lastStatementChangedRow();
     }
 
     public async markAttachmentUpsertFailed(
@@ -3253,12 +3249,13 @@ export class BeaverDB {
         );
     }
 
-    private async lastStatementChangedRow(): Promise<boolean> {
-        const changes: number[] = [];
-        await this.queryAsync(`SELECT changes()`, [], {
-            onRow: (row: any) => changes.push(row.getResultByIndex(0)),
+    /** Capture the mutation's own result before listeners or other writes can run. */
+    private async executeChangedRow(sql: string, params: readonly unknown[] = []): Promise<boolean> {
+        let changed = false;
+        await this.queryAsync(`${sql} RETURNING 1`, params, {
+            onRow: () => { changed = true; },
         });
-        return (changes[0] ?? 0) === 1;
+        return changed;
     }
 
     private async selectAttachmentProcessingStates(
@@ -4737,8 +4734,8 @@ export class BeaverDB {
      * extractor to gate library-scale work (priority >= 100) behind user
      * idleness while still letting hot-path retries (priority < 100) run.
      *
-     * Returns `null` when no row is visible, or when an optimistic-claim
-     * race lost (currently impossible with one consumer; cheap insurance).
+     * Selection, visibility update and returned ownership form one SQL statement.
+     * Returns `null` when no eligible row is visible.
      */
     public async claimNextBackgroundJob(
         now: number,
@@ -4746,7 +4743,7 @@ export class BeaverDB {
         maxPriority?: number,
         jobTypes?: BackgroundJobType[],
     ): Promise<BackgroundJobRecord | null> {
-        const params: unknown[] = [now];
+        const params: unknown[] = [now + visibilityTimeoutMs, now];
         let priorityClause = '';
         if (maxPriority !== undefined) {
             priorityClause = ' AND priority < ?';
@@ -4757,35 +4754,18 @@ export class BeaverDB {
             jobTypesClause = ` AND job_type IN (${jobTypes.map(() => '?').join(',')})`;
             params.push(...jobTypes);
         }
-        const candidates = await this.selectBackgroundJobs(
-            `SELECT ${BACKGROUND_JOB_COLUMNS}
-             FROM background_jobs
-             WHERE available_at <= ?${priorityClause}${jobTypesClause}
-             ORDER BY priority ASC, available_at ASC
-             LIMIT 1`,
+        const claimed = await this.selectBackgroundJobs(
+            `UPDATE background_jobs SET available_at = ?
+             WHERE id = (
+                 SELECT id FROM background_jobs
+                 WHERE available_at <= ?${priorityClause}${jobTypesClause}
+                 ORDER BY priority ASC, available_at ASC, id ASC
+                 LIMIT 1
+             )
+             RETURNING ${BACKGROUND_JOB_COLUMNS}`,
             params,
         );
-        if (candidates.length === 0) return null;
-        const candidate = candidates[0];
-
-        const newAvailableAt = now + visibilityTimeoutMs;
-        const changesRows: number[] = [];
-        await this.conn.executeTransaction(async () => {
-            await this.queryAsync(
-                `UPDATE background_jobs
-                 SET available_at = ?
-                 WHERE id = ? AND available_at <= ?`,
-                [newAvailableAt, candidate.id, now],
-            );
-            await this.queryAsync(`SELECT changes()`, [], {
-                onRow: (row: any) => {
-                    changesRows.push(row.getResultByIndex(0));
-                },
-            });
-        });
-
-        if ((changesRows[0] ?? 0) !== 1) return null;
-        return { ...candidate, availableAt: newAvailableAt };
+        return claimed[0] ?? null;
     }
 
     /** Read up to `limit` jobs (default 100) without claiming. */
@@ -4811,12 +4791,10 @@ export class BeaverDB {
     public async completeBackgroundPreparationJob(id: number, now: number): Promise<boolean> {
         let retired = true;
         await this.conn.executeTransaction(async () => {
-            await this.queryAsync(`DELETE FROM background_jobs WHERE id = ? AND priority >= 100`, [id]);
-            if (await this.lastStatementChangedRow()) return;
+            if (await this.executeChangedRow(`DELETE FROM background_jobs WHERE id = ? AND priority >= 100`, [id])) return;
             // A foreground request may have promoted the claimed ticket while
             // its executor was waiting. Make that work immediately claimable.
-            await this.queryAsync(`UPDATE background_jobs SET available_at = ? WHERE id = ? AND priority < 100`, [now, id]);
-            retired = !(await this.lastStatementChangedRow());
+            retired = !(await this.executeChangedRow(`UPDATE background_jobs SET available_at = ? WHERE id = ? AND priority < 100`, [now, id]));
         });
         return retired;
     }

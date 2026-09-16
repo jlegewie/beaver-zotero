@@ -29,6 +29,8 @@ export type JobOutcome =
     | { kind: 'defer'; reason: string };
 
 export interface JobExecutor {
+    /** Remote work being tracked without occupying a local lane slot. */
+    getRemoteWaitingCount?(): number;
     readonly jobType: BackgroundJobType;
     execute(
         record: BackgroundJobRecord,
