@@ -76,6 +76,7 @@ export function describeStatus(
         };
     }
     const inFlight = status.worker?.inFlight ?? 0;
+    const remoteWaiting = status.worker?.remoteWaiting ?? 0;
     const blocker = status.worker?.dispatchBlocker;
     const gateOpen = !blocker && (status.worker?.backlogGateOpen ?? false);
     const runnable = status.worker?.available ?? 0;
@@ -103,6 +104,12 @@ export function describeStatus(
             stopDrain: false,
         };
     }
+    if (inFlight === 0 && remoteWaiting > 0) return {
+        tone: 'waiting', headline: 'Waiting for OCR…',
+        caption: `${plural(remoteWaiting, 'file')} processing remotely.`,
+        outstanding, processNow: runnable > 0 && !gateOpen && !draining,
+        processNowBlocked: Boolean(blocker), stopDrain: draining,
+    };
     if (inFlight > 0 || (runnable > 0 && gateOpen)) {
         return {
             tone: 'busy',

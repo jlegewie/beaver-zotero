@@ -100,6 +100,7 @@ export function processingIssuesSql(entitlements: IssueEntitlements): string {
         SELECT library_id, zotero_key, extract_status, ocr_status, upsert_status, last_error,
             COALESCE(attempted_at, CAST(strftime('%s', updated_at) AS INTEGER) * 1000) AS timestamp, read_succeeded,
             CASE
+                WHEN ${hasCodeSql('low_confidence')} THEN 'no_text'
                 WHEN extract_status IN ('failed', 'skipped') THEN CASE
                     WHEN ${anyCodeSql(FILE_UNAVAILABLE_CODES)} THEN 'file_unavailable'
                     WHEN ${hasCodeSql('encrypted')} THEN 'encrypted'
@@ -201,6 +202,7 @@ export function classifyProcessingIssue(
     entitlements: IssueEntitlements,
 ): ProcessingIssueReason | null {
     // Extraction retries can leave downstream statuses from the previous attempt.
+    if (hasCode(row.lastError, 'low_confidence')) return 'no_text';
     const extractTerminal = row.extractStatus === 'failed' || row.extractStatus === 'skipped';
     if (extractTerminal) {
         const error = row.lastError;

@@ -72,7 +72,7 @@ export interface ProcessOnceResult {
 }
 
 export type BackgroundLaneStatus = Partial<
-    Record<BackgroundJobType, { inFlight: number; capacity: number }>
+    Record<BackgroundJobType, { inFlight: number; capacity: number; remoteWaiting?: number }>
 >;
 
 type LaneEntry = {
@@ -185,6 +185,7 @@ export class BackgroundExtractor {
             status[jobType] = {
                 inFlight: this.laneInFlight.get(jobType)?.size ?? 0,
                 capacity: registration.maxInFlight,
+                remoteWaiting: registration.executor.getRemoteWaitingCount?.() ?? 0,
             };
         }
         return status;

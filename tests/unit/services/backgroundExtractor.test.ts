@@ -1377,7 +1377,7 @@ describe('BackgroundExtractor', () => {
         proc.registerExecutor(second, { maxInFlight: 1 });
 
         proc.unregisterExecutor('document_ocr', first);
-        expect(proc.getLaneStatus().document_ocr).toEqual({ inFlight: 0, capacity: 1 });
+        expect(proc.getLaneStatus().document_ocr).toEqual({ inFlight: 0, capacity: 1, remoteWaiting: 0 });
 
         proc.unregisterExecutor('document_ocr', second);
         expect(proc.getLaneStatus().document_ocr).toBeUndefined();

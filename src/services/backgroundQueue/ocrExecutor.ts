@@ -130,6 +130,10 @@ export class OcrExecutor implements JobExecutor {
         this.tracks.clear();
     }
 
+    getRemoteWaitingCount(): number {
+        return this.tracks.size;
+    }
+
     /** Await all in-flight background tracks to settle before shutdown completes. */
     async drainTracks(): Promise<void> {
         await Promise.allSettled([...this.tracks.values()].map((t) => t.promise));
