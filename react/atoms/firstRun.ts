@@ -24,7 +24,7 @@ import { isWebSearchAllowedAtom, isWebSearchEnabledAtom } from './ui';
 import { beaverDefaultModelAtom, updateSelectedModelAtom } from './models';
 import { ChargingPermissions } from '@beaver/agent-core/protocol/agentProtocol';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
+import { UNRESOLVED_LIBRARY_ID, resolveObjectId } from '../../src/utils/libraryIdentity';
 
 export const firstRunSuggestionsAtom = atom<LibrarySuggestionsResponse | null>(null);
 export const firstRunSuggestionsLoadingAtom = atom<boolean>(false);
@@ -257,6 +257,14 @@ async function hydrateAttachments(
     if (!attachments) return { items, collections };
 
     for (const a of attachments) {
+        if (a.type === 'table') {
+            const ref = resolveObjectId(a.reference.key);
+            if (ref && ref.library_id !== UNRESOLVED_LIBRARY_ID) {
+                const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key);
+                if (item) items.push(item);
+            }
+            continue;
+        }
         if (a.type === 'external_file') {
             // External files are not Zotero objects; nothing to hydrate.
             continue;

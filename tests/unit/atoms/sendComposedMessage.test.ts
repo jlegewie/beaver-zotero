@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'jotai';
 
 // =============================================================================
@@ -83,9 +83,9 @@ vi.mock('../../../react/utils/actionVisibility', () => ({
 }));
 
 // converters pulls in src serializers → supabase-backed services; actions.ts
-// only needs `toMessageAttachment` from it.
+// only needs `toValidatedMessageAttachment` from it.
 vi.mock('../../../react/types/attachments/converters', () => ({
-    toMessageAttachment: vi.fn(() => null),
+    toValidatedMessageAttachment: vi.fn(async () => null),
 }));
 
 vi.mock('../../../react/types/actionStorage', () => ({
@@ -124,6 +124,7 @@ import {
     pendingPillInsertsAtom,
 } from '../../../react/atoms/messageComposition';
 import { resolvePromptVariables, resolveTargetContext } from '../../../react/utils/promptVariables';
+import { toValidatedMessageAttachment } from '../../../react/types/attachments/converters';
 import type { Action } from '@beaver/agent-core/types/actions';
 
 const sendWSMessageMock = (await import('../../../react/atoms/agentRunAtoms') as any).__sendWSMessageMock as ReturnType<typeof vi.fn>;
@@ -179,6 +180,7 @@ function nextTargets(context: Partial<{
 beforeEach(() => {
     vi.clearAllMocks();
 });
+afterEach(() => vi.unstubAllGlobals());
 
 describe('resolveActionForStagingAtom', () => {
     it('returns a pill for the action', () => {
@@ -387,6 +389,34 @@ describe('sendComposedMessageAtom', () => {
 });
 
 describe('buildEditedPromptActionsAtom', () => {
+    it('reports unavailable table targets and leaves the edit intact for retry', async () => {
+        const item = {
+            libraryID: 1, key: 'ABCDEFGH', parentItem: null,
+            isRegularItem: () => false, isAttachment: () => true, isNote: () => false,
+        };
+        const targets = { text: 'x', items: [item], collections: [], emptyItemVariables: [] };
+        vi.mocked(resolvePromptVariables).mockResolvedValueOnce(targets as any).mockResolvedValueOnce(targets as any);
+        vi.mocked(toValidatedMessageAttachment).mockRejectedValueOnce(new Error('Table unavailable (file_missing).'));
+        vi.stubGlobal('Zotero', { ...Zotero, Items: { loadDataTypes: vi.fn().mockResolvedValue(undefined) } });
+        const store = makeStore();
+        const payload = {
+            pills: [{ commandName: 'summarize', actionId: 'custom-1', targetType: 'items' as const }],
+            existingAttachments: [],
+        };
+        const original = structuredClone(payload);
+        expect(await store.set(buildEditedPromptActionsAtom, payload)).toBeNull();
+        expect(addPopupMessageMock).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'error', title: 'Unable to submit edit',
+            text: expect.stringContaining('Table unavailable (file_missing).'),
+        }));
+        expect(payload).toEqual(original);
+        expect(sendWSMessageMock).not.toHaveBeenCalled();
+
+        const attachment = { type: 'table' as const, reference: { kind: 'table' as const, key: 'u-ABCDEFGH', title: 'Restored table' } };
+        vi.mocked(toValidatedMessageAttachment).mockResolvedValueOnce(attachment);
+        expect(await store.set(buildEditedPromptActionsAtom, payload)).toMatchObject({ addedAttachments: [attachment] });
+    });
+
     const collectionAction: Action = {
         id: 'custom-1',
         title: 'Summarize',

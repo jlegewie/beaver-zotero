@@ -24,6 +24,7 @@ export function useBatchApprovalSubmit(approvalId: string | null): (decision: Ba
             approved: decision.approved,
             mode: decision.mode,
             userInstructions: decision.user_instructions,
+            table: decision.table,
         });
     }, [sendResponse, approvalId]);
 }
