@@ -140,6 +140,15 @@ export async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
 
     // Loop guard: skip scans this engine has already marked terminal.
     if (await db.isDocumentProcessingPermanentlyFailed(fileHash, 'ocr', OCR_ENGINE_VERSION)) {
+        const failure = await db.getDocumentProcessingFailure(fileHash, 'ocr', OCR_ENGINE_VERSION);
+        if (!inScope()) return;
+        // Recreated attachment ledgers must reflect the retained content failure.
+        await db.markAttachmentOcrFailed(
+            args.libraryId,
+            args.zoteroKey,
+            fileHash,
+            failure?.lastError ?? failure?.terminalCode ?? 'OCR previously failed permanently',
+        );
         logger(`maybeEnqueueOcrJob: ${args.libraryId}-${args.zoteroKey} skipped, terminal OCR failure already recorded`, 3);
         return;
     }

@@ -235,6 +235,19 @@ export class OcrExecutor implements JobExecutor {
                 OCR_ENGINE_VERSION,
             )
         ) {
+            const failure = await ctx.db.getDocumentProcessingFailure(
+                job.fileHash,
+                'ocr',
+                OCR_ENGINE_VERSION,
+            );
+            this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
+            // The content failure can outlive an attachment's processing ledger.
+            await ctx.db.markAttachmentOcrFailed(
+                job.item.libraryID,
+                job.item.key,
+                job.fileHash,
+                failure?.lastError ?? failure?.terminalCode ?? 'OCR previously failed permanently',
+            );
             logger(`OcrExecutor: ${job.sourceKey} skipped, terminal OCR failure already recorded`, 3);
             return { kind: 'complete', reason: 'ocr_perm_failed' };
         }
@@ -711,6 +724,7 @@ export class OcrExecutor implements JobExecutor {
                 filePath: job.filePath,
                 ocrBytes,
                 expectedPageCount: job.pageCount,
+                expectedFileHash: job.fileHash,
                 isRemoteOnly: job.source.isRemoteOnly,
                 sourceSizeBytes: job.sourceSizeBytes,
                 workerName: 'background',
@@ -744,6 +758,12 @@ export class OcrExecutor implements JobExecutor {
                         'pdf',
                         document as any,
                     );
+                    const currentHash = job.source.isRemoteOnly
+                        ? job.item.attachmentSyncedHash : await job.item.attachmentHash;
+                    this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
+                    if (currentHash !== job.fileHash) {
+                        return { kind: 'retry', error: 'ocr_source_changed', reason: 'source_changed' };
+                    }
                     const applied = await ctx.db.markAttachmentOcrDone({
                         libraryId: job.item.libraryID,
                         zoteroKey: job.item.key,
@@ -793,6 +813,8 @@ export class OcrExecutor implements JobExecutor {
                 return this.terminal(job, OCR_TERMINAL_GEOMETRY, `OCR geometry mismatch: ${result.detail}`);
             case 'aborted':
                 return { kind: 'release', reason: 'aborted' };
+            case 'source_changed':
+                return { kind: 'retry', error: 'ocr_source_changed', reason: 'source_changed' };
             case 'unavailable':
                 logger(`OcrExecutor: ${job.sourceKey} OCR re-extract unavailable (${result.reason})`, 2);
                 return { kind: 'complete', reason: `ocr_${result.reason}` };

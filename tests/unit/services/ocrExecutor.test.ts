@@ -118,6 +118,7 @@ beforeEach(() => {
 
     dbStub = {
         isDocumentProcessingPermanentlyFailed: vi.fn(async () => false),
+        getDocumentProcessingFailure: vi.fn(async () => null),
         clearDocumentProcessingFailure: vi.fn(async () => undefined),
         // Used by the slot-free track to wake a parked row for the finish phase.
         releaseBackgroundJob: vi.fn(async () => undefined),
@@ -414,6 +415,30 @@ describe('OcrExecutor', () => {
         expect(outcome.kind).toBe('retry');
     });
 
+    it('retries a changed source without publishing success for its old artifact', async () => {
+        api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
+        mockedReextract.mockResolvedValue({ kind: 'source_changed' });
+        expect(await executor.execute(record, makeCtx()))
+            .toMatchObject({ kind: 'retry', reason: 'source_changed' });
+        expect(mockedReextract).toHaveBeenCalledWith(expect.objectContaining({ expectedFileHash: 'hash123' }));
+        expect(dbStub.markAttachmentOcrDone).not.toHaveBeenCalled();
+        expect(api.reportOutcome).not.toHaveBeenCalled();
+    });
+
+    it('rechecks source content after extraction and before marking local publication', async () => {
+        api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
+        const item = await Zotero.Items.getByLibraryAndKeyAsync(1, 'AAAAAAAA');
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(item);
+        mockedReextract.mockImplementationOnce(async () => {
+            Object.defineProperty(item, 'attachmentHash', { value: 'replacement-hash' });
+            return { kind: 'ok', pageCount: 5 };
+        });
+        expect(await executor.execute(record, makeCtx()))
+            .toMatchObject({ kind: 'retry', reason: 'source_changed' });
+        expect(dbStub.markAttachmentOcrDone).not.toHaveBeenCalled();
+        expect(api.reportOutcome).not.toHaveBeenCalled();
+    });
+
     it('reports local publication only after the ledger accepts the validated cache', async () => {
         api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
         await executor.execute(record, makeCtx());
@@ -497,11 +522,20 @@ describe('OcrExecutor', () => {
 
     it('short-circuits a terminal scan via the loop guard', async () => {
         dbStub.isDocumentProcessingPermanentlyFailed.mockResolvedValue(true);
+        dbStub.getDocumentProcessingFailure.mockResolvedValue({
+            terminalCode: 'ocr_page_cap',
+            lastError: 'ocr_page_cap: 501 pages exceeds OCR limit 500',
+            failureCount: 1,
+        });
         const ctx = makeCtx();
 
         const outcome = await executor.execute(record, ctx);
 
         expect(api.requestOcr).not.toHaveBeenCalled();
+        expect(dbStub.markAttachmentOcrFailed).toHaveBeenCalledWith(
+            1, 'AAAAAAAA', 'hash123', 'ocr_page_cap: 501 pages exceeds OCR limit 500',
+        );
+        expect(dbStub.clearDocumentProcessingFailure).not.toHaveBeenCalled();
         expect(outcome).toEqual({ kind: 'complete', reason: 'ocr_perm_failed' });
     });
 
