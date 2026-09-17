@@ -58,11 +58,20 @@ export const validateOTPCode = (code: string): boolean => {
 }
 
 /**
+ * Read an error's message without `instanceof Error`. Auth errors are created in
+ * the plugin realm, whose `Error` differs from the renderer window's.
+ */
+export const getErrorMessage = (error: unknown): string | undefined => {
+  const message = (error as { message?: unknown } | null)?.message
+  return typeof message === 'string' && message ? message : undefined
+}
+
+/**
  * Check if an error indicates a service outage (e.g. Supabase returning HTML instead of JSON)
  */
 export const isServiceUnavailableError = (error: unknown): boolean => {
-  if (!(error instanceof Error)) return false
-  const msg = error.message.toLowerCase()
+  const msg = getErrorMessage(error)?.toLowerCase()
+  if (!msg) return false
   return (
     msg.includes('json.parse') ||
     msg.includes('unexpected character') ||
@@ -80,12 +89,12 @@ export const SERVICE_UNAVAILABLE_MESSAGE =
 /**
  * Get user-friendly error message for OTP errors
  */
-export const getOTPErrorMessage = (error: Error): string => {
+export const getOTPErrorMessage = (error: unknown): string => {
   if (isServiceUnavailableError(error)) {
     return SERVICE_UNAVAILABLE_MESSAGE
   }
 
-  const message = error.message.toLowerCase()
+  const message = getErrorMessage(error)?.toLowerCase() ?? ''
 
   if (message.includes('invalid')) {
     return 'Invalid code'

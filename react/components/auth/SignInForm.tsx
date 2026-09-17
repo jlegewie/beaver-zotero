@@ -16,7 +16,7 @@ import {
   setAuthMethodAtom,
 } from '../../atoms/auth'
 import { OTPVerification } from '@beaver/agent-ui/auth/OTPVerification'
-import { sendOTP, verifyOTP, getOTPErrorMessage, isServiceUnavailableError, SERVICE_UNAVAILABLE_MESSAGE } from '@beaver/agent-core/transport/otp'
+import { sendOTP, verifyOTP, getErrorMessage, getOTPErrorMessage, isServiceUnavailableError, SERVICE_UNAVAILABLE_MESSAGE } from '@beaver/agent-core/transport/otp'
 import { getPref, setPref } from '../../../src/utils/prefs'
 import { logger } from '@beaver/agent-core/platform/logger'
 import { performAccountSwitchAtom } from '../../atoms/accountSwitch'
@@ -140,7 +140,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
     } catch (error) {
       const msg = isServiceUnavailableError(error)
         ? SERVICE_UNAVAILABLE_MESSAGE
-        : error instanceof Error ? error.message : 'Failed to send verification code'
+        : getErrorMessage(error) ?? 'Failed to send verification code'
       setError(msg)
     } finally {
       setIsLoading(false)
@@ -166,7 +166,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
       setIsWaitingForProfile(true);
       // isLoading will be set to false when profile loads or timeout occurs
     } catch (error) {
-      const errorMessage = error instanceof Error ? getOTPErrorMessage(error) : 'Verification failed'
+      const errorMessage = getOTPErrorMessage(error)
       logger(`SignInForm: OTP verification failed: ${errorMessage}`, 2);
       setError(errorMessage)
       setErrorMsg(errorMessage)
@@ -209,7 +209,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
     } catch (error: unknown) {
       const errorMessage = isServiceUnavailableError(error)
         ? SERVICE_UNAVAILABLE_MESSAGE
-        : error instanceof Error ? error.message : 'An error occurred during login'
+        : getErrorMessage(error) ?? 'An error occurred during login'
       logger(`SignInForm: password sign-in failed: ${errorMessage}`, 2);
       setError(errorMessage)
       setErrorMsg(errorMessage)
