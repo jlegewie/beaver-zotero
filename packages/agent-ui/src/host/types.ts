@@ -169,6 +169,12 @@ export interface ResolvedItemDisplay {
      */
     displayName?: string;
     /**
+     * Attachments only: the broad content kind ("pdf", "epub", "snapshot", …),
+     * so the row's icon matches the one a stamped record would give it.
+     * Absent for other items and when the client cannot say.
+     */
+    contentKind?: string;
+    /**
      * The item's title, for lists that need more than the display name to
      * tell items apart. For attachments this is the parent item's title.
      * Absent when it can't be resolved.

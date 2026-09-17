@@ -23,8 +23,17 @@ import type { ResolvedItemDisplay } from '../host/types';
 /** Rows an item list shows before it offers the rest. */
 export const MAX_ITEM_ROWS = 10;
 
+/**
+ * Rows each "Show more" adds. A page rather than the rest: a row the
+ * population record does not describe resolves through the host, and a
+ * group at the batch cap opened all at once would be a thousand concurrent
+ * lookups and a thousand DOM rows on the main thread.
+ */
+export const ITEM_ROWS_STEP = 50;
+
 /** Layout wording. Everything that describes a batch is composed backend-side. */
 const showAllLabel = (count: number): string => `Show all ${count.toLocaleString()}`;
+const showMoreLabel = (count: number): string => `Show ${count.toLocaleString()} more`;
 
 /**
  * The host's display data for an item, resolved once per mount.
@@ -98,7 +107,7 @@ function resolvedRowModel(
         : display?.title && display.title !== display.displayName
           ? display.title
           : undefined;
-    const iconName = display?.itemType ? itemTypeToIconName(display.itemType, undefined) : null;
+    const iconName = display?.itemType ? itemTypeToIconName(display.itemType, display.contentKind) : null;
     return { name, title, iconName };
 }
 
@@ -196,9 +205,13 @@ export const BatchItemList: React.FC<{
     /** How the batch's items look, when the thread carries that record. */
     population?: BatchPopulationLookup;
 }> = ({ group, maxRows = MAX_ITEM_ROWS, action, population }) => {
-    const [showAll, setShowAll] = useState(false);
+    const [limit, setLimit] = useState(maxRows);
     const ids = group.item_ids;
-    const shown = showAll ? ids : ids.slice(0, maxRows);
+    const shown = ids.slice(0, limit);
+    const remaining = ids.length - shown.length;
+    // The rest in one go when it fits a page; a page at a time otherwise.
+    const nextPage = Math.min(remaining, ITEM_ROWS_STEP);
+    const showMore = () => setLimit((current) => current + nextPage);
 
     return (
         <div className="batch-item-list display-flex flex-col min-w-0">
@@ -214,16 +227,16 @@ export const BatchItemList: React.FC<{
                             tabIndex={0}
                             onClick={(e) => {
                                 e.stopPropagation();
-                                setShowAll(true);
+                                showMore();
                             }}
                             onKeyDown={(e) => {
                                 if (e.key !== 'Enter' && e.key !== ' ') return;
                                 e.preventDefault();
                                 e.stopPropagation();
-                                setShowAll(true);
+                                showMore();
                             }}
                         >
-                            {showAllLabel(ids.length)}
+                            {remaining <= ITEM_ROWS_STEP ? showAllLabel(ids.length) : showMoreLabel(nextPage)}
                         </span>
                     )}
                     {action && (

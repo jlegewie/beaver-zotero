@@ -239,6 +239,33 @@ describe('the batch receipt under a terminal run', () => {
         expect(alone.props.children.props.populationsByBatch.size).toBe(0);
     });
 
+    it('keeps the records for an answer whose run the thread does not hold yet', () => {
+        // A run that failed or was stopped stays in the active slot until the
+        // next send, so it is not in the thread; the records written before
+        // it are still what its receipt needs.
+        const started: ModelMessage = {
+            kind: 'request',
+            run_id: 'r1',
+            instructions: '',
+            parts: [
+                {
+                    part_kind: 'tool-return',
+                    tool_name: 'batch_start',
+                    tool_call_id: 'call-start',
+                    content: {},
+                    metadata: { batch_population: { batch_id: 'filing', items: [{ id: 'u-A', n: 'Smith 2004' }] } },
+                },
+            ],
+        } as unknown as ModelMessage;
+        const earlier = run([started], 'completed', 'r1');
+        const failed = run([request(stamp(entry({ batch_id: 'filing', progress_title: 'Filed items', status: 'failed_out' })))], 'error', 'r2');
+
+        hookState.slots = [];
+        hookState.index = 0;
+        const receipt = BatchRunReceipt({ runs: [failed], historyRuns: [earlier] }) as React.ReactElement<any>;
+        expect(receipt.props.children.props.populationsByBatch.get('filing')?.get('u-A')?.n).toBe('Smith 2004');
+    });
+
     it('recovers the outcome record of a batch a later answer only restated', () => {
         // The record is written once, where the batch ended. An answer that
         // updates the finished batch's goal states it again without the

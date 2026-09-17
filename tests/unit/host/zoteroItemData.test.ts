@@ -102,7 +102,10 @@ describe('zoteroItemData.resolveItemDisplay', () => {
         });
 
         expect(getAsync).toHaveBeenCalledWith(23);
+        // The parent is resolved once for every field the row draws.
+        expect(getAsync).toHaveBeenCalledTimes(1);
         expect(loadDataTypes).toHaveBeenCalledWith([parent], ['itemData', 'creators']);
         expect(display?.displayName).toBe('Jones 2022');
+        expect(display?.creator).toBe('Jones');
     });
 });

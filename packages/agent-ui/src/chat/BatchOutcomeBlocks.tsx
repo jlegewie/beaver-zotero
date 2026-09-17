@@ -11,6 +11,7 @@ import type {
 import {
     batchItemGroupFor,
     batchItemGroupsOfKind,
+    batchItemIdentityKey,
     batchOutcomeTarget,
     batchPopulationItemFor,
 } from '@beaver/agent-core/run-state/batchProgress';
@@ -713,7 +714,9 @@ export const BatchOutcomeBlockView: React.FC<{
             const distinct = new Set<string>();
             let unattributed = 0;
             for (const entry of joined) {
-                if (entry.group) entry.group.item_ids.forEach((id) => distinct.add(id));
+                // By identity, not spelling: two records can name one item
+                // `u-KEY` and `1-KEY`, and counting both overstates the items.
+                if (entry.group) entry.group.item_ids.forEach((id) => distinct.add(batchItemIdentityKey(id) ?? id));
                 else unattributed += entry.row.count;
             }
             headCount = countAcrossItems(total, distinct.size + unattributed);

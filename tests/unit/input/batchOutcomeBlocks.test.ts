@@ -481,6 +481,18 @@ describe('a block with an item record', () => {
         expect(text(BatchOutcomeBlockView({ block, items }))).not.toContain('across');
     });
 
+    it('counts an item once however the records spelled its id', () => {
+        const block: BatchOutcomeBlock = {
+            heading: 'Findings',
+            kind: 'finding',
+            rows: [{ label: 'a', count: 1 }, { label: 'b', count: 1 }],
+            total: 2,
+        };
+        // One item, two findings, two spellings of its id.
+        const items = record([finding('a', ['u-A']), finding('b', ['1-A'])]);
+        expect(text(BatchOutcomeBlockView({ block, items, surface: 'receipt' }))).toContain('2 across 1 items');
+    });
+
     it('moves the place a row names into its item list once it can open', () => {
         // Two click targets on one row would be indistinguishable: with items
         // behind it the row toggles, and the collection is a named action.
@@ -598,6 +610,28 @@ it('shows why no action was needed', () => {
     });
     expect(rendered).toContain('Outside the requested date range');
     expect(rendered).toContain('2');
+});
+
+describe('an item list with more rows than it shows', () => {
+    const finding = (label: string, ids: string[]) => ({ kind: 'finding' as const, label, item_ids: ids });
+    const itemRows = (node: React.ReactNode) =>
+        elements(node).filter((el) => typeof el.props.className === 'string' && /(^| )batch-item-row( |$)/.test(el.props.className));
+    const ids = (count: number) => Array.from({ length: count }, (_, i) => `u-K${String(i).padStart(6, '0')}`);
+
+    it('offers the rest a page at a time, never all of a large group at once', () => {
+        // Every row the record does not describe is a host lookup; a group at
+        // the batch cap opened whole would be a thousand of them at once.
+        const rendered = BatchItemList({ group: finding('x', ids(120)) });
+        expect(itemRows(rendered)).toHaveLength(10);
+        expect(text(rendered)).toContain('Show 50 more');
+        expect(text(rendered)).not.toContain('Show all');
+    });
+
+    it('offers the rest in one go when it fits a page', () => {
+        const rendered = BatchItemList({ group: finding('x', ids(40)) });
+        expect(itemRows(rendered)).toHaveLength(10);
+        expect(text(rendered)).toContain('Show all 40');
+    });
 });
 
 describe('rows drawn from the population record', () => {

@@ -30,17 +30,28 @@ export interface BatchRunReceiptProps {
 }
 
 /**
- * The thread through this answer's last run, oldest first, or the answer's
- * own runs when the thread was not given or does not hold that run.
+ * The thread through this answer's last run, oldest first, plus any run of
+ * the answer the thread does not hold yet — a run that failed or was stopped
+ * stays in the active slot until the next send, and its answer is the one
+ * whose receipt most needs the records written before it. Without a thread,
+ * the answer's own runs.
  */
 function historyThrough(
     historyRuns: readonly AgentRun[] | undefined,
     runs: readonly AgentRun[],
 ): readonly AgentRun[] {
-    const last = runs[runs.length - 1];
-    if (!historyRuns || !last) return runs;
-    const end = historyRuns.findIndex((run) => run.id === last.id);
-    return end === -1 ? runs : historyRuns.slice(0, end + 1);
+    if (!historyRuns) return runs;
+    const known = new Set(historyRuns.map((run) => run.id));
+    const missing = runs.filter((run) => !known.has(run.id));
+    let end = historyRuns.length;
+    for (let index = runs.length - 1; index >= 0; index--) {
+        const position = historyRuns.findIndex((run) => run.id === runs[index].id);
+        if (position !== -1) {
+            end = position + 1;
+            break;
+        }
+    }
+    return missing.length ? [...historyRuns.slice(0, end), ...missing] : historyRuns.slice(0, end);
 }
 
 /** Whether `BatchRunReceipt` draws anything for these runs. */
