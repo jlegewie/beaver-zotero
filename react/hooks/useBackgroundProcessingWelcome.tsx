@@ -2,10 +2,11 @@ import React, { useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
     accountGenerationAtom,
+    cloudBetaAtom,
     cloudConsentAtom,
+    cloudProductNameAtom,
     hasOcrAccessAtom,
     hasSearchIndexAccessAtom,
-    indexingPlanLabelAtom,
 } from '../atoms/profile';
 import { addFloatingPopupMessageAtom, removeFloatingPopupMessageAtom } from '../atoms/floatingPopup';
 import BackgroundProcessingWelcomeContent from '../components/ui/popup/BackgroundProcessingWelcomeContent';
@@ -15,7 +16,8 @@ const POPUP_ID = 'background-processing-welcome';
 export function useBackgroundProcessingWelcome(): void {
     const hasOcr = useAtomValue(hasOcrAccessAtom);
     const hasSearch = useAtomValue(hasSearchIndexAccessAtom);
-    const label = useAtomValue(indexingPlanLabelAtom);
+    const productName = useAtomValue(cloudProductNameAtom);
+    const beta = useAtomValue(cloudBetaAtom);
     const addPopup = useSetAtom(addFloatingPopupMessageAtom);
     const removePopup = useSetAtom(removeFloatingPopupMessageAtom);
     const consent = useAtomValue(cloudConsentAtom);
@@ -27,27 +29,20 @@ export function useBackgroundProcessingWelcome(): void {
             return;
         }
         if (!Zotero.Beaver.background?.claimNotification('cloud-preparation-consent')) return;
-        const reminder = false;
-        const title = reminder
-            ? 'Keep document search up to date'
-            : label === 'pro'
-                ? 'Welcome to Beaver Pro'
-                : label === 'search'
-                    ? 'Welcome to Beaver Search'
-                    : 'Background processing is now available';
         addPopup({
             id: POPUP_ID,
-            type: 'info',
-            title,
+            type: 'cloud_consent',
+            title: `Welcome to ${productName}`,
             expire: false,
             cancelable: false,
             customContent: (
                 <BackgroundProcessingWelcomeContent
                     messageId={POPUP_ID}
-                    reminder={reminder}
+                    productName={productName}
+                    beta={beta}
                     generation={generation}
                 />
             ),
         });
-    }, [addPopup, removePopup, hasOcr, hasSearch, label, consent, generation]);
+    }, [addPopup, removePopup, hasOcr, hasSearch, productName, beta, consent, generation]);
 }

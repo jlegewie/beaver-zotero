@@ -6,7 +6,7 @@ import { expect, it, vi } from 'vitest';
 vi.mock('../../../react/atoms/profile', async () => {
     const { atom } = await import('jotai');
     return { accountGenerationAtom: atom(1), cloudConsentAtom: atom('pending'),
-        hasOcrAccessAtom: atom(true), hasSearchIndexAccessAtom: atom(false), indexingPlanLabelAtom: atom('pro') };
+        hasOcrAccessAtom: atom(true), hasSearchIndexAccessAtom: atom(false), cloudProductNameAtom: atom('Beaver Pro'), cloudBetaAtom: atom(false) };
 });
 vi.mock('../../../react/components/ui/popup/BackgroundProcessingWelcomeContent', () => ({ default: () => null }));
 import { cloudConsentAtom } from '../../../react/atoms/profile';

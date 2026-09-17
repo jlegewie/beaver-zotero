@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { accountGenerationAtom, cloudConsentAtom, hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../../atoms/profile';
+import { cloudConsentAtom, hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../../atoms/profile';
 import {
     backgroundProcessingStatusAtom,
     type BackgroundProcessingStatus,
@@ -202,7 +202,6 @@ const MetadataIndexProblemRow: React.FC<{ indexState: EmbeddingIndexState }> = (
 
 export default function BackgroundProcessingSection(): React.ReactElement | null {
     const consent = useAtomValue(cloudConsentAtom);
-    const generation = useAtomValue(accountGenerationAtom);
     const hasOcrAccess = useAtomValue(hasOcrAccessAtom);
     const hasSearchAccess = useAtomValue(hasSearchIndexAccessAtom);
     const cloudRequired = hasOcrAccess || hasSearchAccess;
@@ -319,9 +318,7 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                     announceDescription={hasSearchAccess}
                     description={<>{locked
                         ? 'Background processing is required for cloud preparation. Files process after 30 seconds without keyboard or mouse activity on your computer. Use Start now to process immediately, or Stop to return to idle processing.'
-                        : cloudRequired
-                            ? 'Cloud setup is incomplete. Local preparation can continue, but OCR uploads and search preparation require your confirmation.'
-                            : 'Process files ahead of time while your computer is idle for faster responses.'}
+                        : 'Process files ahead of time while your computer is idle for faster responses.'}
                         {hasSearchAccess && <span className="display-flex mt-1">{searchIndexStatusLine(status)}</span>}
                     </>}
                     onClick={() => updateEnabled(!enabled)}
@@ -334,13 +331,6 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                         onClick={(event) => event.stopPropagation()}
                     />}
                 />
-                {cloudRequired && !locked && (
-                    <div className="text-base font-color-secondary border-top-quinary" style={{ padding: '10px 12px' }}>
-                        Cloud preparation uploads scanned PDFs for OCR and extracted text for search when available, from included libraries on this computer. Remote downloads follow your remote-file permission. Acceptance covers both features and keeps background processing enabled while either is active.
-                        <Button variant="outline" onClick={() => Zotero.Beaver?.account?.setCloudConsent(true, generation)}>Accept and finish setup</Button>
-                        {consent === 'pending' && <Button variant="ghost" onClick={() => Zotero.Beaver?.account?.setCloudConsent(false, generation)}>Not now</Button>}
-                    </div>
-                )}
                 {(enabled || (status.worker?.inFlight ?? 0) > 0) && (
                     <ProcessingStatusRow
                         status={status}

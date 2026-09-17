@@ -104,7 +104,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
     return (
         <div
             ref={containerRef}
-            className={`source-preview border-popup shadow-md mx-0 w-full ${message.type === 'version_update' ? 'beaver-popup-message--unbounded' : ''}`}
+            className={`source-preview border-popup shadow-md mx-0 w-full ${message.type === 'version_update' || message.type === 'cloud_consent' ? 'beaver-popup-message--unbounded' : ''}`}
             style={{
                 background: backgroundColor,
                 backdropFilter: 'blur(6px)',
@@ -115,12 +115,12 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
         >
             <div
                 className= {`
-                    ${message.type === 'version_update' && isFloating ? 'p-4' : 'p-3'}
+                    ${(message.type === 'version_update' || message.type === 'cloud_consent') && isFloating ? 'p-4' : 'p-3'}
                     display-flex flex-col items-start gap-2
                 `}
             >
-                {/* Floating version_update/welcome_onboarding/reader_tip render their own headers; a feature tip always does */}
-                {!(isFloating && (message.type === 'version_update' || message.type === 'welcome_onboarding' || message.type === 'reader_tip' || message.type === 'note_tip')) && message.type !== 'feature_tip' && (
+                {/* Floating version_update/welcome_onboarding/reader_tip/cloud_consent render their own headers; a feature tip always does */}
+                {!(isFloating && (message.type === 'version_update' || message.type === 'welcome_onboarding' || message.type === 'reader_tip' || message.type === 'note_tip' || message.type === 'cloud_consent')) && message.type !== 'feature_tip' && (
                     <PopupMessageHeader
                         icon={message.icon || getDefaultIcon()}
                         rightIcon={message.rightIcon}
@@ -144,7 +144,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
                 )}
 
                 {/* Content for info, warning, error */}
-                {['info', 'warning', 'error', 'items_summary'].includes(message.type) && (
+                {['info', 'warning', 'error', 'items_summary', 'cloud_consent'].includes(message.type) && (
                     message.customContent ? (
                         <div className="w-full">
                             {message.customContent}
