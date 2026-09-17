@@ -54,6 +54,8 @@ function historyThrough(
     return missing.length ? [...historyRuns.slice(0, end), ...missing] : historyRuns.slice(0, end);
 }
 
+const NO_RUNS: readonly AgentRun[] = [];
+
 /** Whether `BatchRunReceipt` draws anything for these runs. */
 export function hasBatchReceipt(runs: readonly AgentRun[]): boolean {
     return !runs.some(isRunActive) && selectChainBatchOutcomes(runs).length > 0;
@@ -68,14 +70,25 @@ export function hasBatchReceipt(runs: readonly AgentRun[]): boolean {
  * changes and offers the apply and undo for them.
  */
 export const BatchRunReceipt: React.FC<BatchRunReceiptProps> = ({ runs, historyRuns }) => {
+    const active = runs.some(isRunActive);
     // A finished run's messages no longer change, so this is computed once.
     const outcomes = useMemo(() => selectChainBatchOutcomes(runs), [runs]);
     // The item records ride on the same carrier, wherever in the thread up to
-    // here they were written; older threads have none.
+    // here they were written; older threads have none. The thread array is
+    // replaced on every append, so the walk is keyed on what it would read —
+    // which runs, in which state, with how many messages — and not on the
+    // array: a long thread with many receipts must not re-read all of its
+    // messages per receipt on every new run. Nothing is read while the answer
+    // is live, since the receipt draws nothing then.
     const recordRuns = useMemo(() => historyThrough(historyRuns, runs), [historyRuns, runs]);
-    const itemsByBatch = useMemo(() => selectChainBatchItems(recordRuns), [recordRuns]);
-    const populationsByBatch = useMemo(() => selectChainBatchPopulations(recordRuns), [recordRuns]);
-    if (runs.some(isRunActive) || outcomes.length === 0) return null;
+    const recordKey = active
+        ? ''
+        : recordRuns.map((run) => `${run.id}:${run.status}:${run.model_messages?.length ?? 0}`).join('|');
+    // Keyed on the runs' identity and shape rather than the array on purpose.
+    const recordSource = useMemo(() => (recordKey ? recordRuns : NO_RUNS), [recordKey]);
+    const itemsByBatch = useMemo(() => selectChainBatchItems(recordSource), [recordSource]);
+    const populationsByBatch = useMemo(() => selectChainBatchPopulations(recordSource), [recordSource]);
+    if (active || outcomes.length === 0) return null;
     return (
         <div className="px-4">
             <BatchDoneRows batches={outcomes} itemsByBatch={itemsByBatch} populationsByBatch={populationsByBatch} />

@@ -64,6 +64,31 @@ describe('zoteroItemData.resolveItemDisplay', () => {
         });
     });
 
+    it('skips the attachment search when the caller does not want the flag', async () => {
+        // A list row names the item; resolving whether it has a readable
+        // attachment would cost a child-item load and a search per row.
+        const getBestAttachment = vi.fn().mockResolvedValue({ id: 10 });
+        resolveLibraryRef.mockReturnValue(7);
+        getByLibraryAndKeyAsync.mockResolvedValue({
+            isNote: () => false,
+            isAttachment: () => false,
+            isRegularItem: () => true,
+            getBestAttachment,
+            firstCreator: 'Smith',
+            getField: (field: string) => field === 'date' ? '2024' : '',
+            itemType: 'journalArticle',
+        });
+
+        const display = await zoteroItemData.resolveItemDisplay(
+            { library_id: 7, zotero_key: 'ABCD1234' },
+            { attachment: false },
+        );
+
+        expect(getBestAttachment).not.toHaveBeenCalled();
+        expect(loadDataTypes).not.toHaveBeenCalledWith(expect.anything(), ['itemData', 'childItems']);
+        expect(display).toMatchObject({ displayName: 'Smith 2024', hasReadableAttachment: false });
+    });
+
     it('does not read Zotero data when the library is unavailable on this device', async () => {
         resolveLibraryRef.mockReturnValue(null);
 

@@ -52,7 +52,9 @@ export function useItemDisplay(ref: ZoteroItemReference | null): ResolvedItemDis
             return undefined;
         }
         itemData
-            .resolveItemDisplay(ref)
+            // A row names the item; whether it has a readable attachment is
+            // not drawn, and resolving it costs a child-item load per row.
+            .resolveItemDisplay(ref, { attachment: false })
             .then((resolved) => {
                 if (!cancelled) setDisplay(resolved);
             })

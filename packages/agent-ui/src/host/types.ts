@@ -218,8 +218,17 @@ export interface ItemDataHost {
      * Resolve display metadata (icon type + attachment availability + display
      * name) for a library item in a source/result list. Async because it may
      * load the item; returns null when the item can't be resolved.
+     *
+     * `options.attachment` (default true) asks for `hasReadableAttachment`,
+     * which costs a child-item load and a best-attachment search per item. A
+     * list that only names items passes false so a page of rows does not
+     * pay for a flag it never draws. A host that ignores the option answers
+     * as before.
      */
-    resolveItemDisplay(ref: ZoteroItemReference): Promise<ResolvedItemDisplay | null>;
+    resolveItemDisplay(
+        ref: ZoteroItemReference,
+        options?: { attachment?: boolean },
+    ): Promise<ResolvedItemDisplay | null>;
     /**
      * Resolve a library's display name for a tool-call header label. Accepts the
      * raw `library` arg (numeric id or name). Returns null when unavailable.

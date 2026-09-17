@@ -686,10 +686,16 @@ export const BatchOutcomeBlockView: React.FC<{
     // dropped joins the ones the backend never sent.
     const restored = joined.length - sentRows.length;
     const dropped = filtered.length - rows.length;
-    const overflow = Math.max(0, (block.overflow ?? 0) - restored) + dropped;
+    // What the backend never sent cannot be filtered, so under a filter it
+    // is not counted as "more" matches; only rows this surface dropped are.
+    const unsent = Math.max(0, (block.overflow ?? 0) - restored);
+    const overflow = (filter ? 0 : unsent) + dropped;
     const rowSum = joined.reduce((sum, entry) => sum + entry.row.count, 0);
-    // The backend's sum spans rows it never sent; older records omit it.
-    const total = block.total || rowSum;
+    // The backend's sum spans rows it never sent. An older record omits it,
+    // and then the rows on hand sum to the total only when none is missing:
+    // heading a capped block with the sum of what it lists would state a
+    // total that is not one.
+    const total = block.total || (unsent === 0 ? rowSum : undefined);
 
     // Destination rows count MEMBERSHIPS, not items — one item takes several
     // tags — so when the sum runs past the item count, say so rather than leave
@@ -697,7 +703,7 @@ export const BatchOutcomeBlockView: React.FC<{
     // says it in the section head; the live bar keeps it as a footnote.
     const receipt = surface === 'receipt';
     const membershipNote =
-        block.kind === 'destination' && total > resolved && resolved > 0
+        block.kind === 'destination' && total !== undefined && total > resolved && resolved > 0
             ? `${total.toLocaleString()} across ${resolved.toLocaleString()} items`
             : null;
     const footnote: string[] = [];
@@ -719,9 +725,9 @@ export const BatchOutcomeBlockView: React.FC<{
                 if (entry.group) entry.group.item_ids.forEach((id) => distinct.add(batchItemIdentityKey(id) ?? id));
                 else unattributed += entry.row.count;
             }
-            headCount = countAcrossItems(total, distinct.size + unattributed);
+            headCount = total === undefined ? undefined : countAcrossItems(total, distinct.size + unattributed);
         } else {
-            headCount = total.toLocaleString();
+            headCount = total?.toLocaleString();
         }
     }
 

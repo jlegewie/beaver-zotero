@@ -166,6 +166,30 @@ describe('one outcome block', () => {
     });
 });
 
+describe('the head count of a block without a total', () => {
+    it('is the sum of the rows when every row is on hand', () => {
+        const rendered = text(
+            BatchOutcomeBlockView({
+                block: { heading: 'Failed', kind: 'failure', rows: [{ label: 'timed out', count: 3 }, { label: 'gone', count: 2 }] },
+                surface: 'receipt',
+            }),
+        );
+        expect(rendered).toContain('5');
+    });
+
+    it('is left out when rows the backend never sent would make the sum a lie', () => {
+        // An older record caps its rows without saying what they add up to;
+        // heading it "5" over "+ 40 more" would state a total that is not one.
+        const rendered = BatchOutcomeBlockView({
+            block: { heading: 'Failed', kind: 'failure', rows: [{ label: 'timed out', count: 3 }, { label: 'gone', count: 2 }], overflow: 40 },
+            surface: 'receipt',
+        });
+        const heading = elements(rendered).find((el) => el.props.count !== undefined || el.props.kind === 'failure');
+        expect(heading?.props.count).toBeUndefined();
+        expect(text(rendered)).toContain('+ 40 more');
+    });
+});
+
 describe('the progress track', () => {
     it('captions the bar with the backend breakdown', () => {
         expect(
@@ -479,6 +503,18 @@ describe('a block with an item record', () => {
         const items = record([finding('a', ['u-A', 'u-B']), finding('b', ['u-A', 'u-C'])]);
         expect(text(BatchOutcomeBlockView({ block, items, surface: 'receipt' }))).toContain('4 across 3 items');
         expect(text(BatchOutcomeBlockView({ block, items }))).not.toContain('across');
+    });
+
+    it('says nothing about further matches under a filter, since the unsent rows cannot be searched', () => {
+        const block: BatchOutcomeBlock = {
+            heading: 'Findings',
+            kind: 'finding',
+            rows: [{ label: 'shared', count: 2 }, { label: 'alone', count: 1 }],
+            overflow: 200,
+        };
+        const items = record([finding('shared', ['u-A', 'u-B']), finding('alone', ['u-C'])]);
+        expect(text(BatchOutcomeBlockView({ block, items }))).toContain('+ 200 more');
+        expect(text(BatchOutcomeBlockView({ block, items, filter: 'alone' }))).not.toContain('more');
     });
 
     it('counts an item once however the records spelled its id', () => {

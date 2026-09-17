@@ -129,14 +129,19 @@ export const zoteroItemData: ItemDataHost = {
         }
     },
 
-    async resolveItemDisplay(ref: ZoteroItemReference): Promise<ResolvedItemDisplay | null> {
+    async resolveItemDisplay(
+        ref: ZoteroItemReference,
+        options?: { attachment?: boolean },
+    ): Promise<ResolvedItemDisplay | null> {
         const libraryId = resolveLibraryRef(ref);
         if (!libraryId) return null;
         try {
             const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, ref.zotero_key);
             if (!item || typeof item === 'boolean') return null;
             let hasReadableAttachment = false;
-            if (item.isRegularItem()) {
+            if (options?.attachment === false) {
+                // Not asked for: skip the child-item load and the search.
+            } else if (item.isRegularItem()) {
                 // getBestAttachment() may inspect the parent item's URL via
                 // getField(), so itemData must be loaded as well as childItems.
                 await Zotero.Items.loadDataTypes([item], ['itemData', 'childItems']);
