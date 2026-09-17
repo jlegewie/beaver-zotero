@@ -152,10 +152,16 @@ export const PROCESSING_ISSUE_REASON_ORDER: ProcessingIssueReason[] = [
 ];
 
 /**
- * Reasons a user can retry from the issues list. The rest describe the bytes
- * themselves (encrypted, too large, unsupported, no text) or an entitlement
- * (scans without OCR access), so re-running them fails identically; a replaced
- * file is picked up by the reconciler's own signature check instead.
+ * Reasons a user can retry from the issues list.
+ *
+ * Verdicts about the bytes themselves (encrypted, too large, no text) are
+ * included because the user's fix, replacing the file or raising the size
+ * limit, changes nothing the reconciler watches: a file overwritten in place
+ * sends no Zotero notification, and the size preference is not observed, so
+ * without a retry the row waits for the weekly source sweep. Retrying unchanged
+ * bytes is cheap (a stat, a preflight) and fails identically. Excluded are
+ * `scanned`, whose remedy is an entitlement, and `unsupported`, which no file
+ * change can fix.
  */
 export const RETRYABLE_PROCESSING_ISSUE_REASONS: readonly ProcessingIssueReason[] = [
     'ocr_page_cap',
@@ -163,6 +169,9 @@ export const RETRYABLE_PROCESSING_ISSUE_REASONS: readonly ProcessingIssueReason[
     'extract_failed',
     'ocr_failed',
     'index_failed',
+    'encrypted',
+    'too_large',
+    'no_text',
 ];
 
 export function isRetryableProcessingIssue(reason: ProcessingIssueReason): boolean {

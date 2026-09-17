@@ -61,7 +61,13 @@ it('offers Retry all only for retryable reasons and routes it to the group', asy
         await act(async () => retry.click());
         expect(onRetry).toHaveBeenCalledWith('file_unavailable', null);
     });
-    await render({ group: { reason: 'encrypted', count: 1 }, onRetry }, (container) => {
+    await render({ group: { reason: 'encrypted', count: 1 }, onRetry }, async (container) => {
+        const retry = Array.from(container.querySelectorAll('button')).find((node) => node.textContent?.trim() === 'Retry all')!;
+        expect(retry).toBeDefined();
+        await act(async () => retry.click());
+        expect(onRetry).toHaveBeenCalledWith('encrypted', null);
+    });
+    await render({ group: { reason: 'unsupported', count: 1 }, onRetry }, (container) => {
         expect(buttonLabels(container)).not.toContain('Retry all');
     });
 });

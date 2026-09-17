@@ -37,7 +37,7 @@ function reasonCopy(reason: ProcessingIssueReason, hasOcrAccess: boolean): Reaso
         case 'no_text':
             return {
                 title: 'No readable text',
-                description: 'The file did not yield any readable text.',
+                description: 'The file did not yield any readable text. Retry after replacing the file.',
             };
         case 'file_unavailable':
             return {
@@ -47,12 +47,12 @@ function reasonCopy(reason: ProcessingIssueReason, hasOcrAccess: boolean): Reaso
         case 'encrypted':
             return {
                 title: 'Password protected',
-                description: 'Encrypted files cannot be read. Beaver re-reads a file if it is replaced.',
+                description: 'Encrypted files cannot be read. Retry after replacing the file with an unprotected copy.',
             };
         case 'too_large':
             return {
                 title: 'Too large to process',
-                description: `These files exceed the ${effectiveMaxPageCount().toLocaleString()}-page or ${effectiveMaxFileSizeMB().toLocaleString()} MB limit.`,
+                description: `These files exceed the ${effectiveMaxPageCount().toLocaleString()}-page or ${effectiveMaxFileSizeMB().toLocaleString()} MB limit. Retry after replacing the file or changing the limit.`,
             };
         case 'unsupported':
             return {

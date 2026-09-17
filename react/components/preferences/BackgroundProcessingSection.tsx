@@ -17,7 +17,7 @@ import type { AttachmentRef, ProcessingIssueReason } from '../../../src/services
 import Spinner from '@beaver/agent-ui/icons/Spinner';
 import Button from '@beaver/agent-ui/primitives/Button';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import { SettingsGroup, SettingsRow, SectionLabel } from './components/SettingsElements';
+import { ExternalLink, SettingsGroup, SettingsRow, SectionLabel } from './components/SettingsElements';
 import ProcessingIssueGroupRow from './ProcessingIssueList';
 import { ProgressBar } from '../status/ProgressBar';
 import { describeStatus, plural, type StatusTone } from './processingStatusSentence';
@@ -361,6 +361,13 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                 ))}
                 <MetadataIndexProblemRow indexState={indexState} />
             </SettingsGroup>
+            <div className="text-sm font-color-secondary mt-2" style={{ paddingLeft: '4px' }}>
+                Problems with a specific file? Send it to{' '}
+                <ExternalLink href="mailto:contact@beaverapp.ai?subject=Beaver%20file%20problem" className="text-sm">
+                    contact@beaverapp.ai
+                </ExternalLink>
+                {' '}and we will take a look.
+            </div>
         </>
     );
 }
