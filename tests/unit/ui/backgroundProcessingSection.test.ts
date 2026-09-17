@@ -21,6 +21,7 @@ vi.mock('../../../react/atoms/profile', async () => {
         accountGenerationAtom: atom(1),
         hasOcrAccessAtom: atom(false),
         hasSearchIndexAccessAtom: atom(() => access.search),
+        cloudProductNameAtom: atom('Beaver Search'),
         localZoteroLibrariesAtom: atom([]),
         searchableLibraryIdsAtom: atom([]),
     };
@@ -583,26 +584,16 @@ it('reports a metadata index error without failed items, and disables Rebuild wh
     });
 });
 
-it.each(['pending', 'declined', 'accepted'] as const)('shows cloud consent state %s and locks accepted preparation', async consent => {
+it.each(['pending', 'declined', 'accepted'] as const)('locks accepted cloud preparation and leaves consent %s to the Search & Files banner', async consent => {
     access.search = true;
     const store = createStore();
     store.set(cloudConsentAtom, consent);
-    const previous = Zotero.Beaver;
-    const setCloudConsent = vi.fn();
-    (Zotero as any).Beaver = { account: { setCloudConsent } };
-    try {
-        await withView(store, async container => {
-            const toggle = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
-            expect(toggle.disabled).toBe(consent === 'accepted');
-            if (consent === 'accepted') {
-                expect(container.textContent).toContain('required for cloud preparation');
-                expect(container.textContent).not.toContain('Accept and finish setup');
-            } else {
-                expect(container.textContent).toContain('Cloud setup is incomplete');
-                const accept = Array.from(container.querySelectorAll('button')).find(b => b.textContent === 'Accept and finish setup')!;
-                await act(async () => accept.click());
-                expect(setCloudConsent).toHaveBeenCalledWith(true, 1);
-            }
-        });
-    } finally { Zotero.Beaver = previous; }
+    await withView(store, async container => {
+        const toggle = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+        expect(toggle.disabled).toBe(consent === 'accepted');
+        expect(container.textContent).not.toContain('Accept and turn on');
+        expect(container.textContent).toContain(consent === 'accepted'
+            ? 'required for cloud preparation'
+            : 'Process files ahead of time');
+    });
 });

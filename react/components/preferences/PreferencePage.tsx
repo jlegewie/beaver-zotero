@@ -19,6 +19,7 @@ import AdvancedSection from "./AdvancedSection";
 import PermissionsSection from "./PermissionsSection";
 import LibraryAccessList from "./LibraryAccessList";
 import BackgroundProcessingSection from "./BackgroundProcessingSection";
+import CloudFeaturesBanner from "./CloudFeaturesBanner";
 import { chatLineSpacingAtom, CHAT_LINE_SPACING, type ChatLineSpacing } from '../../atoms/preferences';
 
 
@@ -550,6 +551,7 @@ const PreferencePage: React.FC = () => {
                 {/* ===== SEARCH & FILES TAB ===== */}
                 {effectiveActiveTab === 'sync' && (
                     <>
+                        <CloudFeaturesBanner />
                         <SectionLabel>Libraries</SectionLabel>
                         <LibraryAccessList />
 

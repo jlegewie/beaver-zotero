@@ -529,8 +529,13 @@ export class BackgroundExtractor {
 
         if (launched === 0) {
             // Remote OCR frees its lane slot while its queue row is parked.
-            // Keep the bypass through that wait and any subsequent stages.
-            if (this.drainNowRequested && this.totalInFlight() === 0) {
+            // Keep the bypass through that wait and any subsequent stages, and
+            // through a discovery scan that has not enqueued its work yet: a
+            // "Start now" issued right after enabling cloud features must not
+            // be dropped by an empty pass that runs before the reconciler fills
+            // the queue.
+            if (this.drainNowRequested && this.totalInFlight() === 0
+                && Zotero.Beaver?.background?.isDiscovering() !== true) {
                 const queue = await db.getBackgroundQueueStats(Date.now(), [...this.executors.keys()]);
                 if (queue.pending === 0) this.drainNowRequested = false;
             }
