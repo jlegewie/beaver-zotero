@@ -60,6 +60,7 @@ describe('zoteroItemData.resolveItemDisplay', () => {
             itemType: 'journalArticle',
             hasReadableAttachment: true,
             displayName: 'Smith 2024',
+            creator: 'Smith',
         });
     });
 

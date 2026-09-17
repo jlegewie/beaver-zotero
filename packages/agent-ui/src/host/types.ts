@@ -168,6 +168,23 @@ export interface ResolvedItemDisplay {
      * can't be resolved.
      */
     displayName?: string;
+    /**
+     * The item's title, for lists that need more than the display name to
+     * tell items apart. For attachments this is the parent item's title.
+     * Absent when it can't be resolved.
+     */
+    title?: string;
+    /**
+     * The first creator's name, when the item has one. Absent for an item
+     * without creators (a web page, a report), whose display name is then a
+     * placeholder — a list may prefer to lead with the title instead.
+     */
+    creator?: string;
+    /**
+     * The item type in the client's words ("Report", "Web Page"), for a row
+     * that has no creator to show. Absent when the client cannot say.
+     */
+    itemTypeLabel?: string;
 }
 
 /**

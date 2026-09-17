@@ -1705,6 +1705,59 @@ export interface WSResolvePopulationResponse {
 }
 
 /** Request from backend for get_metadata */
+/**
+ * Request from backend for item_display.
+ *
+ * The display fields of specific items, in one round trip: a name, a second
+ * line and a type per item, nothing else. The lean counterpart of
+ * `get_metadata`, for a list that has to be drawn without the library at hand.
+ * Issued once when a batch job's population is minted, so the receipt in the
+ * transcript can name the items a row stands for.
+ */
+export interface WSItemDisplayRequest extends WSBaseEvent {
+    event: 'item_display_request';
+    request_id: string;
+    /**
+     * Item ids in either grammar (`u-KEY` / `g<groupID>-KEY`, or the legacy
+     * `<libraryID>-KEY`). Bounded by the caller: a batch population is at
+     * most 1,000 items.
+     */
+    item_ids: string[];
+}
+
+/** One item as a list draws it, computed by the client that owns the library. */
+export interface ItemDisplayRow {
+    /** The item's id as this client spells it, portable where it can be. */
+    item_id: string;
+    /** Zotero item type, for the row's icon. */
+    item_type?: string | null;
+    /**
+     * The row's headline: "Author Year" for a regular item, the title for a
+     * note or standalone attachment — the same label every other surface
+     * gives the item.
+     */
+    display_name: string;
+    /** The quieter second line: title and context, or the parent for a child item. */
+    subtitle?: string | null;
+    /** Attachments only: the broad content kind, for the icon. */
+    content_kind?: string | null;
+}
+
+/**
+ * Response to an item_display request.
+ *
+ * Rows come back for the ids this client could resolve, in any order. An id
+ * that is missing, in a library this device does not have, or excluded from
+ * Beaver has no row and is not an error.
+ */
+export interface WSItemDisplayResponse {
+    type: 'item_display';
+    request_id: string;
+    items: ItemDisplayRow[];
+    error?: string | null;
+    error_code?: string | null;
+}
+
 export interface WSGetMetadataRequest extends WSBaseEvent {
     event: 'get_metadata_request';
     request_id: string;
@@ -2516,6 +2569,7 @@ export type WSEvent =
     | WSZoteroSearchRequest
     | WSListItemsRequest
     | WSResolvePopulationRequest
+    | WSItemDisplayRequest
     | WSListCollectionsRequest
     | WSListTagsRequest
     | WSGetMetadataRequest
@@ -2710,6 +2764,13 @@ export const CLIENT_FEATURES = {
      * resolves a population WIDER than the one the batch described.
      */
     POPULATION_ANY_CONDITIONS: 'population_any_conditions',
+    /**
+     * This client answers `item_display_request`: the display fields of a
+     * batch population, asked once when the batch starts so the receipt can
+     * name the items each row stands for. A client without a handler drops
+     * the unknown event, so the backend must not send it.
+     */
+    BATCH_ITEM_DISPLAY: 'batch_item_display',
     /**
      * `create_item` actions carry `pdf_candidates`: a ranked list of places the
      * PDF might be downloaded from.

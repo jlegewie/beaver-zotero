@@ -203,6 +203,75 @@ describe('the batch receipt under a terminal run', () => {
         expect(text).toContain('Tagged items');
     });
 
+    it('names items from the record written where the batch started, even in an earlier answer', () => {
+        // The population record rides on `batch_start`; a batch that ends
+        // after an ordinary follow-up message ends under a later chain than
+        // the one it started in. The names are looked up across the thread,
+        // while the batches drawn stay those this answer finished.
+        const started: ModelMessage = {
+            kind: 'request',
+            run_id: 'r1',
+            instructions: '',
+            parts: [
+                {
+                    part_kind: 'tool-return',
+                    tool_name: 'batch_start',
+                    tool_call_id: 'call-start',
+                    content: {},
+                    metadata: { batch_population: { batch_id: 'filing', items: [{ id: 'u-A', n: 'Smith 2004' }] } },
+                },
+            ],
+        } as unknown as ModelMessage;
+        const earlier = run([started], 'completed', 'r1');
+        const ending = run([request(stamp(entry({ batch_id: 'filing', progress_title: 'Filed items' })))], 'completed', 'r2');
+
+        hookState.slots = [];
+        hookState.index = 0;
+        const receipt = BatchRunReceipt({ runs: [ending], historyRuns: [earlier, ending] }) as React.ReactElement<any>;
+        const rows = receipt.props.children;
+        expect(rows.props.batches.map((b: BatchProgressEntry) => b.batch_id)).toEqual(['filing']);
+        expect(rows.props.populationsByBatch.get('filing')?.get('u-A')?.n).toBe('Smith 2004');
+
+        // Without the thread, only the answer's own runs are searched.
+        hookState.slots = [];
+        hookState.index = 0;
+        const alone = BatchRunReceipt({ runs: [ending] }) as React.ReactElement<any>;
+        expect(alone.props.children.props.populationsByBatch.size).toBe(0);
+    });
+
+    it('recovers the outcome record of a batch a later answer only restated', () => {
+        // The record is written once, where the batch ended. An answer that
+        // updates the finished batch's goal states it again without the
+        // record, so the receipt reaches back for it — but not forward: a
+        // record written after this answer describes a newer state.
+        const recordFor = (label: string): ModelMessage =>
+            ({
+                kind: 'request',
+                run_id: 'r',
+                instructions: '',
+                parts: [
+                    {
+                        part_kind: 'tool-return',
+                        tool_name: 'batch_resolve',
+                        tool_call_id: 'call-items',
+                        content: {},
+                        metadata: {
+                            batch_items: { batches: [{ batch_id: 'filing', groups: [{ kind: 'finding', label, item_ids: ['u-A'] }] }] },
+                        },
+                    },
+                ],
+            }) as unknown as ModelMessage;
+        const ended = run([recordFor('recorded when it ended')], 'completed', 'r1');
+        const restated = run([request(stamp(entry({ batch_id: 'filing', progress_title: 'Filed items' })))], 'completed', 'r2');
+        const later = run([recordFor('recorded after this answer')], 'completed', 'r3');
+
+        hookState.slots = [];
+        hookState.index = 0;
+        const receipt = BatchRunReceipt({ runs: [restated], historyRuns: [ended, restated, later] }) as React.ReactElement<any>;
+        const items = receipt.props.children.props.itemsByBatch;
+        expect(items.get('filing')?.groups[0].label).toBe('recorded when it ended');
+    });
+
     it('says what each batch was for, so two of one operation are told apart', () => {
         // Titles come from the operation, not the batch: two `edit_metadata`
         // batches are both "Edited items", and only the goal distinguishes them.
@@ -226,5 +295,42 @@ describe('the batch receipt under a terminal run', () => {
         ]);
         expect(text).toContain('Find DOIs for items missing them');
         expect(text).toContain('Add abstracts where they are missing');
+    });
+});
+
+describe('the item records the thread carries', () => {
+    it('hands each finished batch its record', () => {
+        hookState.slots = [];
+        hookState.index = 0;
+        const message = {
+            kind: 'request',
+            run_id: 'r1',
+            instructions: '',
+            parts: [
+                {
+                    part_kind: 'tool-return',
+                    tool_name: 'batch_resolve',
+                    tool_call_id: 'call-0',
+                    content: {},
+                    metadata: {
+                        batch_progress: stamp(entry({ progress_title: 'Reviewed items' })),
+                        batch_items: {
+                            batches: [{ batch_id: 'b1', groups: [{ kind: 'finding', label: 'no PDF', item_ids: ['u-A'] }] }],
+                        },
+                    },
+                },
+            ],
+        } as unknown as ModelMessage;
+        const tree = BatchRunReceipt({ runs: [run([message])] }) as React.ReactElement<any>;
+        const rows = React.Children.toArray(tree.props.children)[0] as React.ReactElement<any>;
+        expect(rows.props.itemsByBatch.get('b1')?.groups).toEqual([{ kind: 'finding', label: 'no PDF', item_ids: ['u-A'] }]);
+    });
+
+    it('hands nothing for a thread written before records existed', () => {
+        hookState.slots = [];
+        hookState.index = 0;
+        const tree = BatchRunReceipt({ runs: [run([request(stamp(entry()))])] }) as React.ReactElement<any>;
+        const rows = React.Children.toArray(tree.props.children)[0] as React.ReactElement<any>;
+        expect(rows.props.itemsByBatch.size).toBe(0);
     });
 });

@@ -37,6 +37,43 @@ async function resolveDisplayName(item: Zotero.Item): Promise<string | undefined
 }
 
 /**
+ * The item's title, for lists that need more than "Author Year" to tell items
+ * apart. An attachment shows its parent's title, like its display name.
+ */
+async function resolveTitle(item: Zotero.Item): Promise<string | undefined> {
+    let target = item;
+    if (item.isAttachment() && item.parentItemID) {
+        target = await Zotero.Items.getAsync(item.parentItemID) || item;
+    }
+    // `resolveDisplayName` has already loaded the target's item data.
+    try {
+        const title = target.getDisplayTitle?.() || target.getField?.('title');
+        return title || undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * The first creator, when there is one, and the localized item type. Both
+ * read off the parent for an attachment, matching the display name. Runs
+ * after `resolveDisplayName` has loaded the creators, so this is synchronous.
+ */
+async function resolveCreatorAndType(item: Zotero.Item): Promise<{ creator?: string; itemTypeLabel?: string }> {
+    try {
+        let target = item;
+        if (item.isAttachment() && item.parentItemID) {
+            target = await Zotero.Items.getAsync(item.parentItemID) || item;
+        }
+        const creator = target.isNote() ? undefined : target.firstCreator || undefined;
+        const itemTypeLabel = Zotero.ItemTypes?.getLocalizedString?.(target.itemType) || undefined;
+        return { creator, itemTypeLabel };
+    } catch {
+        return {};
+    }
+}
+
+/**
  * Resolve the page-label map (0-based page index -> printed label) for a Zotero
  * item, preferring its best PDF attachment. Returns null when no labels have
  * been preloaded for the attachment.
@@ -99,7 +136,9 @@ export const zoteroItemData: ItemDataHost = {
                 hasReadableAttachment = true;
             }
             const displayName = await resolveDisplayName(item);
-            return { itemType: item.itemType, hasReadableAttachment, displayName };
+            const title = await resolveTitle(item);
+            const { creator, itemTypeLabel } = await resolveCreatorAndType(item);
+            return { itemType: item.itemType, hasReadableAttachment, displayName, title, creator, itemTypeLabel };
         } catch (e) {
             logger(`zoteroItemData: item display resolution failed: ${e}`);
             return null;

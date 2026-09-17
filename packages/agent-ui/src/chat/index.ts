@@ -46,6 +46,15 @@ export { default as BatchRunReceipt, hasBatchReceipt } from './BatchRunReceipt';
 export type { BatchRunReceiptProps } from './BatchRunReceipt';
 
 export {
+    BatchItemFilter,
+    BatchItemFindingRow,
+    BatchItemList,
+    BatchItemRow,
+    MAX_ITEM_ROWS,
+    useItemDisplay,
+} from './BatchItemRows';
+
+export {
     BatchBlockFootnote,
     BatchBlockHeading,
     BatchFailureChip,

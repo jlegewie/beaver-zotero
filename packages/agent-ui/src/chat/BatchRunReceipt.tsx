@@ -1,16 +1,46 @@
 import React, { useMemo } from 'react';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { isRunActive } from '@beaver/agent-core/agents/types';
-import { selectChainBatchOutcomes } from '@beaver/agent-core/run-state/batchProgress';
+import {
+    selectChainBatchItems,
+    selectChainBatchOutcomes,
+    selectChainBatchPopulations,
+} from '@beaver/agent-core/run-state/batchProgress';
 import BatchDoneRows from './BatchDoneRows';
 
 export interface BatchRunReceiptProps {
+    /**
+     * Every run of the thread, oldest first, when the caller has them. Both
+     * item records are written once and can sit in an earlier answer than the
+     * one this receipt is under: the population record where the batch
+     * STARTED, and the outcome record where it ENDED, which a later answer
+     * that only restated the batch (a goal update) does not carry again. So
+     * the records are looked up through the thread up to this answer's last
+     * run — never past it, since a record written after this answer describes
+     * a newer state than the counts drawn here. Which batches the receipt
+     * draws stays decided by `runs` alone. Falls back to `runs` when absent.
+     */
+    historyRuns?: readonly AgentRun[];
     /**
      * The runs that make up one answer, oldest first. An ordinary run is a
      * chain of one; a response continued after an interruption is several, and
      * the receipt reports on all of them. Draws nothing until they are terminal.
      */
     runs: readonly AgentRun[];
+}
+
+/**
+ * The thread through this answer's last run, oldest first, or the answer's
+ * own runs when the thread was not given or does not hold that run.
+ */
+function historyThrough(
+    historyRuns: readonly AgentRun[] | undefined,
+    runs: readonly AgentRun[],
+): readonly AgentRun[] {
+    const last = runs[runs.length - 1];
+    if (!historyRuns || !last) return runs;
+    const end = historyRuns.findIndex((run) => run.id === last.id);
+    return end === -1 ? runs : historyRuns.slice(0, end + 1);
 }
 
 /** Whether `BatchRunReceipt` draws anything for these runs. */
@@ -26,13 +56,18 @@ export function hasBatchReceipt(runs: readonly AgentRun[]): boolean {
  * reports how each batch as a whole came out, that one lists the individual
  * changes and offers the apply and undo for them.
  */
-export const BatchRunReceipt: React.FC<BatchRunReceiptProps> = ({ runs }) => {
+export const BatchRunReceipt: React.FC<BatchRunReceiptProps> = ({ runs, historyRuns }) => {
     // A finished run's messages no longer change, so this is computed once.
     const outcomes = useMemo(() => selectChainBatchOutcomes(runs), [runs]);
+    // The item records ride on the same carrier, wherever in the thread up to
+    // here they were written; older threads have none.
+    const recordRuns = useMemo(() => historyThrough(historyRuns, runs), [historyRuns, runs]);
+    const itemsByBatch = useMemo(() => selectChainBatchItems(recordRuns), [recordRuns]);
+    const populationsByBatch = useMemo(() => selectChainBatchPopulations(recordRuns), [recordRuns]);
     if (runs.some(isRunActive) || outcomes.length === 0) return null;
     return (
         <div className="px-4">
-            <BatchDoneRows batches={outcomes} />
+            <BatchDoneRows batches={outcomes} itemsByBatch={itemsByBatch} populationsByBatch={populationsByBatch} />
         </div>
     );
 };
