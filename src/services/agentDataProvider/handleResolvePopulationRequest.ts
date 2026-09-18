@@ -83,9 +83,14 @@ async function itemIdsWithAttachments(itemIds: number[]): Promise<Set<number>> {
 }
 
 /**
- * The non-trashed attachments of the given items, as item ids.
+ * The non-trashed file attachments of the given items, as item ids.
  * The population of an attachment scope: the filters describe bibliographic
  * items, and these are the attachments hanging off the ones that matched.
+ *
+ * Linked-URL attachments are left out. They carry no file, so extraction and
+ * reading refuse them, and a library where each item has a web link (e.g. one
+ * added by a sync tool) would otherwise spend a large share of every tranche on
+ * rows that can only come back blocked.
  */
 async function attachmentIdsForItems(itemIds: number[]): Promise<number[]> {
     const attachmentIds: number[] = [];
@@ -96,8 +101,9 @@ async function attachmentIdsForItems(itemIds: number[]): Promise<number[]> {
         await Zotero.DB.queryAsync(
             'SELECT ia.itemID FROM itemAttachments ia '
                 + 'LEFT JOIN deletedItems di ON di.itemID = ia.itemID '
-                + `WHERE ia.parentItemID IN (${placeholders}) AND di.itemID IS NULL`,
-            chunk,
+                + `WHERE ia.parentItemID IN (${placeholders}) AND di.itemID IS NULL `
+                + 'AND ia.linkMode != ?',
+            [...chunk, Zotero.Attachments.LINK_MODE_LINKED_URL],
             {
                 onRow: (row: any) => {
                     attachmentIds.push(row.getResultByIndex(0));
@@ -107,6 +113,31 @@ async function attachmentIdsForItems(itemIds: number[]): Promise<number[]> {
     }
 
     return attachmentIds;
+}
+
+/**
+ * The given attachment ids minus linked-URL attachments, in input order.
+ * Standalone attachments reach the population through the search rather than
+ * through `attachmentIdsForItems`, so they need the same exclusion.
+ */
+async function withoutLinkedUrlAttachments(attachmentIds: number[]): Promise<number[]> {
+    const linkedUrl = new Set<number>();
+
+    for (let i = 0; i < attachmentIds.length; i += SQL_CHUNK_SIZE) {
+        const chunk = attachmentIds.slice(i, i + SQL_CHUNK_SIZE);
+        const placeholders = chunk.map(() => '?').join(', ');
+        await Zotero.DB.queryAsync(
+            `SELECT itemID FROM itemAttachments WHERE itemID IN (${placeholders}) AND linkMode = ?`,
+            [...chunk, Zotero.Attachments.LINK_MODE_LINKED_URL],
+            {
+                onRow: (row: any) => {
+                    linkedUrl.add(row.getResultByIndex(0));
+                },
+            },
+        );
+    }
+
+    return attachmentIds.filter(id => !linkedUrl.has(id));
 }
 
 /** Non-bibliographic types excluded unless standalone attachments are requested. */
@@ -758,6 +789,9 @@ export async function handleResolvePopulationRequest(
         const standaloneSet = new Set(standaloneIds);
         const parentIds = itemIds.filter(id => !standaloneSet.has(id));
         const matchedItemCount = parentIds.length;
+        if (standaloneIds.length > 0) {
+            standaloneIds = await withoutLinkedUrlAttachments(standaloneIds);
+        }
         const matchedIds = itemCategory === 'attachment'
             ? [...await attachmentIdsForItems(parentIds), ...standaloneIds]
             : itemIds;
