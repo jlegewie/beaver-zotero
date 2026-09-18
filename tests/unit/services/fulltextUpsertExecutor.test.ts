@@ -7,6 +7,11 @@ import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { BACKGROUND_EXTRACT_PRIORITY, BACKGROUND_UPSERT_PRIORITY } from '../../../src/services/backgroundProcessing/constants';
 import { OCR_PRIORITY_ON_DEMAND } from '../../../src/services/ocr/constants';
 
+async function countCleanupIntents(connection: MockDBConnection, accountId: string): Promise<number> {
+    const rows = await connection.queryAsync('SELECT COUNT(*) AS n FROM index_cleanup_outbox WHERE account_id = ?', [accountId]);
+    return rows[0].n;
+}
+
 vi.mock('../../../src/services/searchIndex/searchIndexApiClient', () => ({
     searchIndexApiClient: {},
 }));
@@ -35,7 +40,7 @@ vi.mock('../../../src/services/backgroundProcessing/utils', async (importOrigina
     };
 });
 
-function response(status: 'completed' | 'tagged' = 'tagged', indexVersion = 2) {
+function response(status: 'completed' | 'tagged' = 'tagged', indexVersion = 3) {
     return {
         status,
         namespace_ready: true,
@@ -54,6 +59,7 @@ describe('FulltextUpsertExecutor', () => {
     let connection: MockDBConnection;
     let db: BeaverDB;
     let api: {
+        requirements: ReturnType<typeof vi.fn>;
         upsertHash: ReturnType<typeof vi.fn>;
         upsertPayload: ReturnType<typeof vi.fn>;
         untag: ReturnType<typeof vi.fn>;
@@ -88,6 +94,7 @@ describe('FulltextUpsertExecutor', () => {
             ocrStatus: 'na',
         });
         api = {
+            requirements: vi.fn().mockResolvedValue({ index_version: 3, extract_schema_versions: { pdf: ['4'], epub: ['2'], snapshot: ['1'] } }),
             upsertHash: vi.fn().mockResolvedValue(response('tagged')),
             upsertPayload: vi.fn().mockResolvedValue(response('completed')),
             untag: vi.fn().mockResolvedValue({ results: [] }),
@@ -129,6 +136,8 @@ describe('FulltextUpsertExecutor', () => {
             db,
             data: { env: 'production' },
             hasSearchIndexAccess: true,
+            libraryScopeInitialized: true,
+            searchableLibraryIds: [1],
             documentCache: { getResult: vi.fn(async () => payload) },
         };
         (globalThis as any).Zotero.Items = {
@@ -145,13 +154,327 @@ describe('FulltextUpsertExecutor', () => {
         await connection.closeDatabase();
     });
 
+    it('cleans up without paid access using the frozen remote identity', async () => {
+        (Zotero.Beaver as any).hasSearchIndexAccess = false;
+        Zotero.Beaver.libraryScopeInitialized = true;
+        (Zotero.Beaver as any).account = { getGeneration: () => 1, getSnapshot: () => ({ session: { user: { id: 'account-a' } } }) };
+        record.jobType = 'fulltext_untag';
+        record.payload = { ...record.payload!, doc_hash: 'a'.repeat(64), index_account_id: 'account-a', index_scope_ref: 'g123', index_local_id: 'OLDDEVICE' };
+        api.untag.mockResolvedValue({ results: [{ outcome: 'untagged' }] });
+        expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx)).toEqual({ kind: 'complete', reason: 'index_untagged' });
+        expect(api.untag).toHaveBeenCalledWith('OLDDEVICE', [{ scope_ref: 'g123', zotero_key: record.zoteroKey, doc_hash: 'a'.repeat(64) }]);
+    });
+
+    it.each([false, true])('transfers unchanged content to another account after an ambiguous upload: %s', async (ambiguous) => {
+        let accountId = 'account-a';
+        Zotero.Beaver.account = { getGeneration: () => 1,
+            getSnapshot: () => ({ session: { user: { id: accountId } } }) } as any;
+        if (ambiguous) api.upsertHash.mockRejectedValueOnce(new Error('response lost after commit'));
+        const executor = new FulltextUpsertExecutor(api as any);
+        expect(await executor.execute(record, ctx)).toMatchObject({ kind: ambiguous ? 'retry' : 'complete' });
+        const originalIdentity = (await db.getAttachmentProcessingState(1, record.zoteroKey))!.upsertRemoteIdentity;
+
+        accountId = 'account-b';
+        expect(await executor.execute(record, ctx)).toMatchObject({ kind: 'complete', reason: 'index_tagged' });
+        expect(api.upsertHash).toHaveBeenCalledTimes(2);
+        expect(await db.getAttachmentProcessingState(1, record.zoteroKey)).toMatchObject({
+            upsertStatus: 'done', upsertRemoteIdentity: { index_account_id: 'account-b' },
+        });
+        expect(await db.markAttachmentUpsertDone({ libraryId: 1, zoteroKey: record.zoteroKey,
+            structuredDocumentHash: 'a'.repeat(64), upsertIndexVersion: '3', remoteIdentity: originalIdentity })).toBe(false);
+        expect(await countCleanupIntents(connection, 'account-a')).toBe(1);
+        const cleanup = (await db.peekBackgroundJobs()).find((job) => job.jobType === 'fulltext_untag')!;
+        expect(cleanup.payload).toMatchObject({ ...originalIdentity, doc_hash: 'a'.repeat(64) });
+        expect(await executor.execute(cleanup, ctx)).toMatchObject({ kind: 'complete', reason: 'cleanup_account_unavailable' });
+        expect(api.untag).not.toHaveBeenCalled();
+        accountId = 'account-a';
+        api.untag.mockResolvedValue({ results: [{ outcome: 'untagged' }] });
+        expect(await executor.execute(cleanup, ctx)).toMatchObject({ kind: 'complete' });
+        expect(api.untag).toHaveBeenCalledTimes(1);
+        expect(await countCleanupIntents(connection, 'account-a')).toBe(0);
+    });
+
+    it.each([undefined, 'exclusion', 'replacement', 'stale_completion'] as const)('defers %s cleanup while A reacquires ownership after A → B → A', async (reason) => {
+        let accountId = 'account-a';
+        Zotero.Beaver.account = { getGeneration: () => 1,
+            getSnapshot: () => ({ session: { user: { id: accountId } } }) } as any;
+        const executor = new FulltextUpsertExecutor(api as any);
+        await executor.execute(record, ctx);
+        accountId = 'account-b';
+        await executor.execute(record, ctx);
+        const cleanup = (await db.peekBackgroundJobs()).find((job) => job.payload?.index_account_id === 'account-a')!;
+        cleanup.payload = { ...cleanup.payload!, index_cleanup_reason: reason };
+        accountId = 'account-a';
+        let remoteMembership = false;
+        let committed!: () => void;
+        const commit = new Promise<void>((resolve) => { committed = resolve; });
+        let respond!: () => void;
+        const responseGate = new Promise<void>((resolve) => { respond = resolve; });
+        api.upsertHash.mockImplementationOnce(async () => {
+            remoteMembership = true;
+            committed();
+            await responseGate;
+            return response('tagged');
+        });
+        api.untag.mockImplementation(async () => {
+            remoteMembership = false;
+            return { results: [{ outcome: 'untagged' }] };
+        });
+        const upload = executor.execute(record, ctx);
+        await commit;
+        try {
+            expect(await db.getAttachmentProcessingState(1, record.zoteroKey)).toMatchObject({
+                upsertStatus: null, upsertRemoteIdentity: { index_account_id: 'account-a' },
+            });
+            expect(await executor.execute(cleanup, ctx)).toEqual({ kind: 'defer', reason: 'index_acquisition_pending' });
+            expect(api.untag).not.toHaveBeenCalled();
+            expect(await countCleanupIntents(connection, 'account-a')).toBe(1);
+        } finally {
+            respond();
+            await upload;
+        }
+        expect(await db.getAttachmentProcessingState(1, record.zoteroKey)).toMatchObject({ upsertStatus: 'done' });
+        expect(await executor.execute(cleanup, ctx)).toEqual({ kind: 'complete', reason: 'cleanup_superseded' });
+        expect(api.untag).not.toHaveBeenCalled();
+        expect(remoteMembership).toBe(true);
+        expect(await countCleanupIntents(connection, 'account-a')).toBe(0);
+    });
+
+    it('does not dispatch with a different account after awaiting ownership transfer', async () => {
+        let accountId = 'account-a';
+        Zotero.Beaver.account = { getGeneration: () => 1,
+            getSnapshot: () => ({ session: { user: { id: accountId } } }) } as any;
+        const acquire = db.recordAttachmentIndexIdentity.bind(db);
+        vi.spyOn(db, 'recordAttachmentIndexIdentity').mockImplementation(async (...args) => {
+            const result = await acquire(...args);
+            accountId = 'account-b';
+            return result;
+        });
+        expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx)).toEqual({ kind: 'release', reason: 'access_changed' });
+        expect(api.upsertHash).not.toHaveBeenCalled();
+        expect(api.upsertPayload).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        [400, 'bad_request', true], [413, 'http_413', true],
+        [422, 'invalid_payload', true], [403, 'not_entitled', true],
+        [401, 'unauthorized', false], [429, 'rate_limited', false], [503, 'unavailable', false],
+    ] as const)('retires only terminal untag failures: %s %s', async (status, code, terminal) => {
+        Zotero.Beaver.account = { getGeneration: () => 1, revokeSearchIndexAccess: vi.fn(),
+            getSnapshot: () => ({ session: { user: { id: 'owner' } } }) } as any;
+        const queued = await db.enqueueBackgroundJob({ ...record, jobType: 'fulltext_untag', now: Date.now(),
+            payload: { ...record.payload!, doc_hash: 'b'.repeat(64), index_account_id: 'owner',
+                index_scope_ref: 'lLOCAL123', index_local_id: 'LOCAL123' } });
+        const job = (await db.peekBackgroundJobs()).find((entry) => entry.id === queued.id)!;
+        api.untag.mockRejectedValue(new ApiError(status, 'request failed', 'request failed', code));
+        const outcome = await new FulltextUpsertExecutor(api as any).execute(job, ctx);
+        expect(outcome).toMatchObject(terminal ? { kind: 'complete', reason: `terminal:${code}` } : { kind: 'retry' });
+        expect(await countCleanupIntents(connection, 'owner')).toBe(terminal ? 0 : 1);
+        await db.completeBackgroundJob(job.id);
+        expect(await db.restoreIndexCleanup('owner')).toBe(terminal ? 0 : 1);
+        db = new BeaverDB(connection);
+        await db.initDatabase('0.99.0');
+        expect(await countCleanupIntents(connection, 'owner')).toBe(terminal ? 0 : 1);
+    });
+
+    it('retains cleanup if a terminal response arrives after account revocation', async () => {
+        let generation = 1;
+        Zotero.Beaver.account = { getGeneration: () => generation,
+            getSnapshot: () => ({ session: { user: { id: 'owner' } } }) } as any;
+        const queued = await db.enqueueBackgroundJob({ ...record, jobType: 'fulltext_untag', now: Date.now(),
+            payload: { ...record.payload!, doc_hash: 'b'.repeat(64), index_account_id: 'owner',
+                index_scope_ref: 'lLOCAL123', index_local_id: 'LOCAL123' } });
+        const job = (await db.peekBackgroundJobs()).find((entry) => entry.id === queued.id)!;
+        api.untag.mockImplementation(async () => {
+            generation++;
+            throw new ApiError(400, 'bad request', 'bad request', 'invalid_payload');
+        });
+        expect(await new FulltextUpsertExecutor(api as any).execute(job, ctx)).toEqual({ kind: 'release', reason: 'access_changed' });
+        expect(await countCleanupIntents(connection, 'owner')).toBe(1);
+    });
+
+    it('retires a v0.25 unowned cleanup without guessing an account', async () => {
+        Zotero.Beaver.account = { getGeneration: () => 1, getSnapshot: () => ({ session: { user: { id: 'owner' } } }) } as any;
+        await db.markAttachmentUpsertDone({ libraryId: 1, zoteroKey: record.zoteroKey,
+            structuredDocumentHash: 'a'.repeat(64), upsertIndexVersion: '2' });
+        const queued = await db.enqueueBackgroundJob({ ...record, jobType: 'fulltext_untag', now: Date.now(),
+            payload: { ...record.payload!, doc_hash: 'a'.repeat(64) } });
+        const legacy = (await db.peekBackgroundJobs()).find((job) => job.id === queued.id)!;
+        expect(await new FulltextUpsertExecutor(api as any).execute(legacy, ctx)).toEqual({ kind: 'complete', reason: 'legacy_unowned' });
+        await db.completeBackgroundJob(legacy.id);
+        expect(api.untag).not.toHaveBeenCalled();
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+        expect(await db.restoreIndexCleanup('owner')).toBe(0);
+    });
+
+    it('restores another account’s completed queue ticket only when its owner returns', async () => {
+        let accountId = 'account-b';
+        Zotero.Beaver.account = { getGeneration: () => 1, getSnapshot: () => ({ session: { user: { id: accountId } } }) } as any;
+        const queued = await db.enqueueBackgroundJob({ ...record, jobType: 'fulltext_untag', now: Date.now(),
+            payload: { ...record.payload!, doc_hash: 'a'.repeat(64), index_account_id: 'account-a',
+                index_scope_ref: 'lLOCAL123', index_local_id: 'LOCAL123' } });
+        const job = (await db.peekBackgroundJobs()).find((entry) => entry.id === queued.id)!;
+        const executor = new FulltextUpsertExecutor(api as any);
+        expect(await executor.execute(job, ctx)).toEqual({ kind: 'complete', reason: 'cleanup_account_unavailable' });
+        await db.completeBackgroundJob(job.id);
+        expect(await db.restoreIndexCleanup('account-b')).toBe(0);
+        expect(await countCleanupIntents(connection, 'account-a')).toBe(1);
+        accountId = 'account-a';
+        expect(await db.restoreIndexCleanup('account-a')).toBe(1);
+        api.untag.mockResolvedValue({ results: [{ outcome: 'untagged' }] });
+        expect(await executor.execute((await db.peekBackgroundJobs())[0], ctx)).toEqual({ kind: 'complete', reason: 'index_untagged' });
+        expect(await countCleanupIntents(connection, 'account-a')).toBe(0);
+    });
+
+    it('retains cleanup for an account that is not signed in', async () => {
+        record.jobType = 'fulltext_untag';
+        record.payload = { ...record.payload!, doc_hash: 'a'.repeat(64), index_account_id: 'another-account' };
+        expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx)).toEqual({ kind: 'complete', reason: 'cleanup_account_unavailable' });
+        expect(api.untag).not.toHaveBeenCalled();
+    });
+
+    it.each(['exclusion', 'replacement', 'stale_completion'] as const)('defers %s cleanup until scope resolves, then cancels superseded work', async (reason) => {
+        const identity = { index_account_id: 'owner', index_scope_ref: 'g123', index_local_id: 'DEVICE' };
+        Zotero.Beaver.account = { getGeneration: () => 1,
+            getSnapshot: () => ({ session: { user: { id: 'owner' } } }) } as any;
+        record.jobType = 'fulltext_untag';
+        record.payload = { ...record.payload!, ...identity, doc_hash: 'a'.repeat(64),
+            index_action: 'untag', index_cleanup_reason: reason };
+        await db.enqueueBackgroundJob({ ...record, now: Date.now() });
+        await db.markAttachmentUpsertDone({ libraryId: 1, zoteroKey: record.zoteroKey,
+            structuredDocumentHash: 'a'.repeat(64), upsertIndexVersion: '3', remoteIdentity: identity });
+        const acknowledge = vi.spyOn(db, 'acknowledgeIndexCleanup');
+        Zotero.Beaver.libraryScopeInitialized = false;
+        const executor = new FulltextUpsertExecutor(api as any);
+        expect(await executor.execute(record, ctx)).toEqual({ kind: 'release', reason: 'access_changed' });
+        expect(api.untag).not.toHaveBeenCalled();
+        expect(acknowledge).not.toHaveBeenCalled();
+        expect(await countCleanupIntents(connection, 'owner')).toBe(1);
+
+        Zotero.Beaver.libraryScopeInitialized = true;
+        expect(await executor.execute(record, ctx)).toEqual({ kind: 'complete', reason: 'cleanup_superseded' });
+        expect(api.untag).not.toHaveBeenCalled();
+        expect(await countCleanupIntents(connection, 'owner')).toBe(0);
+    });
+
+    it.each(['replacement', 'stale_completion'] as const)('defers %s cleanup if scope becomes unknown during the ledger read', async (reason) => {
+        Zotero.Beaver.account = { getGeneration: () => 1,
+            getSnapshot: () => ({ session: { user: { id: 'owner' } } }) } as any;
+        record.jobType = 'fulltext_untag';
+        record.payload = { ...record.payload!, index_account_id: 'owner', index_scope_ref: 'g123',
+            index_local_id: 'DEVICE', doc_hash: 'a'.repeat(64), index_cleanup_reason: reason };
+        await db.enqueueBackgroundJob({ ...record, now: Date.now() });
+        vi.spyOn(db, 'getAttachmentProcessingState').mockImplementationOnce(async () => {
+            Zotero.Beaver.libraryScopeInitialized = false;
+            return null;
+        });
+        expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx))
+            .toEqual({ kind: 'release', reason: 'access_changed' });
+        expect(api.untag).not.toHaveBeenCalled();
+        expect(await countCleanupIntents(connection, 'owner')).toBe(1);
+    });
+
+    describe.each(['replacement', 'stale_completion'] as const)('%s cleanup fencing', (reason) => {
+        it.each(['account', 'generation', 'abort'] as const)('retains cleanup when %s changes during the ledger read', async (change) => {
+            let userId = 'account-a';
+            let generation = 1;
+            const abort = new AbortController();
+            ctx.externalAbortSignal = abort.signal;
+            Zotero.Beaver.account = {
+                getGeneration: () => generation,
+                getSnapshot: () => ({ session: { user: { id: userId } } }),
+            } as any;
+            record.jobType = 'fulltext_untag';
+            record.payload = { ...record.payload!, index_action: 'untag',
+                index_cleanup_reason: reason, doc_hash: 'a'.repeat(64),
+                index_account_id: userId, index_scope_ref: 'g123', index_local_id: 'OLDDEVICE' };
+            await db.enqueueBackgroundJob({ ...record, now: Date.now() });
+            const acknowledge = vi.spyOn(db, 'acknowledgeIndexCleanup');
+            let resolveRead!: (value: null) => void;
+            vi.spyOn(db, 'getAttachmentProcessingState').mockImplementationOnce(() =>
+                new Promise((resolve) => { resolveRead = resolve; }));
+            const executing = new FulltextUpsertExecutor(api as any).execute(record, ctx);
+
+            if (change === 'account') userId = 'account-b';
+            if (change === 'generation') generation++;
+            if (change === 'abort') abort.abort();
+            resolveRead(null);
+
+            expect(await executing).toEqual({ kind: 'release', reason: 'access_changed' });
+            expect(api.untag).not.toHaveBeenCalled();
+            expect(acknowledge).not.toHaveBeenCalled();
+            expect(await countCleanupIntents(connection, 'account-a')).toBe(1);
+        });
+    });
+
+    describe.each([undefined, 'exclusion', 'replacement', 'stale_completion'] as const)('%s remote identity', (reason) => {
+        it.each(['same', 'scope', 'device'] as const)('only cancels cleanup for the same complete identity: %s', async (difference) => {
+            const identity = { index_account_id: 'owner', index_scope_ref: 'g123', index_local_id: 'OLDDEVICE' };
+            Zotero.Beaver.account = { getGeneration: () => 1,
+                getSnapshot: () => ({ session: { user: { id: 'owner' } } }) } as any;
+            await db.markAttachmentUpsertDone({ libraryId: 1, zoteroKey: record.zoteroKey,
+                structuredDocumentHash: 'a'.repeat(64), upsertIndexVersion: '3',
+                remoteIdentity: { ...identity,
+                    index_scope_ref: difference === 'scope' ? 'g456' : identity.index_scope_ref,
+                    index_local_id: difference === 'device' ? 'NEWDEVICE' : identity.index_local_id },
+            });
+            record.jobType = 'fulltext_untag';
+            record.payload = { ...record.payload!, ...identity, doc_hash: 'a'.repeat(64),
+                index_action: 'untag', index_cleanup_reason: reason };
+            await db.enqueueBackgroundJob({ ...record, now: Date.now() });
+            api.untag.mockResolvedValue({ results: [{ outcome: 'busy' }] });
+
+            const result = await new FulltextUpsertExecutor(api as any).execute(record, ctx);
+            if (difference === 'same') {
+                expect(result).toEqual({ kind: 'complete', reason: 'cleanup_superseded' });
+                expect(api.untag).not.toHaveBeenCalled();
+                expect(await countCleanupIntents(connection, 'owner')).toBe(0);
+            } else {
+                expect(result).toMatchObject({ kind: 'retry', error: 'index_untag_busy' });
+                expect(api.untag).toHaveBeenCalledWith('OLDDEVICE', [{ scope_ref: 'g123',
+                    zotero_key: record.zoteroKey, doc_hash: 'a'.repeat(64) }]);
+                expect(await countCleanupIntents(connection, 'owner')).toBe(1);
+            }
+        });
+    });
+
+    it('does not acknowledge superseded cleanup after the account changes during its ledger read', async () => {
+        let generation = 1;
+        Zotero.Beaver.account = {
+            getGeneration: () => generation,
+            getSnapshot: () => ({ session: { user: { id: 'account-a' } } }),
+        } as any;
+        record.jobType = 'fulltext_untag';
+        record.payload = { ...record.payload!, index_cleanup_reason: 'replacement',
+            doc_hash: 'a'.repeat(64), index_account_id: 'account-a' };
+        const acknowledge = vi.spyOn(db, 'acknowledgeIndexCleanup');
+        const current = (await db.getAttachmentProcessingState(1, 'ABCDEFGH'))!;
+        vi.spyOn(db, 'getAttachmentProcessingState').mockImplementationOnce(async () => {
+            generation++;
+            return { ...current, upsertStatus: 'done', upsertRemoteIdentity: {
+                index_account_id: 'account-a', index_scope_ref: 'g123', index_local_id: 'OLDDEVICE',
+            } };
+        });
+        expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx))
+            .toEqual({ kind: 'release', reason: 'access_changed' });
+        expect(api.untag).not.toHaveBeenCalled();
+        expect(acknowledge).not.toHaveBeenCalled();
+    });
+
+    it('uses backend requirements when a later index generation is accepted', async () => {
+        api.requirements.mockResolvedValue({ index_version: 4, extract_schema_versions: { pdf: ['4'] } });
+        api.upsertHash.mockResolvedValue(response('tagged', 4));
+        expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx)).toMatchObject({ reason: 'index_tagged' });
+        expect(await db.getAttachmentProcessingState(1, 'ABCDEFGH')).toMatchObject({ upsertIndexVersion: '4' });
+    });
+
     it('uses the hash-only tagged path and stamps stored versions', async () => {
         const outcome = await new FulltextUpsertExecutor(api as any).execute(record, ctx);
         expect(outcome).toEqual({ kind: 'complete', reason: 'index_tagged' });
         expect(api.upsertPayload).not.toHaveBeenCalled();
         expect(await db.getAttachmentProcessingState(1, 'ABCDEFGH')).toMatchObject({
             upsertStatus: 'done',
-            upsertIndexVersion: '2',
+            upsertIndexVersion: '3',
         });
     });
 
@@ -162,7 +485,7 @@ describe('FulltextUpsertExecutor', () => {
         expect(api.upsertPayload).toHaveBeenCalledTimes(1);
         expect(await db.getAttachmentProcessingState(1, 'ABCDEFGH')).toMatchObject({
             upsertStatus: 'done',
-            upsertIndexVersion: '2',
+            upsertIndexVersion: '3',
         });
     });
 
@@ -242,20 +565,9 @@ describe('FulltextUpsertExecutor', () => {
             .toEqual({ kind: 'complete', reason: 'ledger_not_ready' });
     });
 
-    it('pairs a replacement upsert with an idempotent old-hash untag', async () => {
-        record.payload = { ...record.payload!, previous_doc_hash: 'b'.repeat(64) } as any;
-        const outcome = await new FulltextUpsertExecutor(api as any).execute(record, ctx);
-        expect(outcome.kind).toBe('complete');
-        expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({
-            jobType: 'fulltext_untag',
-            zoteroKey: 'ABCDEFGH',
-            payload: expect.objectContaining({ doc_hash: 'b'.repeat(64) }),
-        }));
-        expect((await db.getAttachmentProcessingState(1, 'ABCDEFGH'))?.upsertStatus)
-            .toBe('done');
-    });
-
     it('executes a dedicated untag job without requiring an accessible local library', async () => {
+        Zotero.Beaver.account = { getGeneration: () => 1, getSnapshot: () => ({ session: { user: { id: 'owner' } } }) } as any;
+        record.payload = { ...record.payload!, index_account_id: 'owner', index_scope_ref: 'lLOCAL123', index_local_id: 'LOCAL123' };
         record.jobType = 'fulltext_untag';
         record.payload = {
             ...record.payload!,
@@ -281,6 +593,45 @@ describe('FulltextUpsertExecutor', () => {
             zotero_key: 'ABCDEFGH',
             doc_hash: 'b'.repeat(64),
         }]);
+    });
+
+    it.each(['deleted', 'replaced', 'restored', 'acquiring'] as const)('re-inclusion checks the exact exclusion reference: %s', async (state) => {
+        const identity = { index_account_id: 'owner', index_scope_ref: 'lLOCAL123', index_local_id: 'LOCAL123' };
+        Zotero.Beaver.account = { getGeneration: () => 1, getSnapshot: () => ({ session: { user: { id: 'owner' } } }) } as any;
+        record.jobType = 'fulltext_untag';
+        record.payload = { ...record.payload!, ...identity, index_action: 'untag',
+            index_cleanup_reason: 'exclusion', doc_hash: 'a'.repeat(64) };
+        await db.enqueueBackgroundJob({ ...record, now: Date.now() });
+        // Exclusion purges the ledger; re-inclusion may discover nothing, a
+        // replacement, or the exact content whose removal was queued.
+        await db.deleteAttachmentProcessingStatesByLibrary(1);
+        if (state !== 'deleted') {
+            const hash = (state === 'replaced' ? 'b' : 'a').repeat(64);
+            await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: record.zoteroKey, contentKind: 'pdf' });
+            await db.markAttachmentExtracted({ libraryId: 1, zoteroKey: record.zoteroKey,
+                expectedFileMtimeMs: null, expectedFileSizeBytes: null, previousDocumentHash: null,
+                expectedExtractStatus: null, fileMtimeMs: 1, fileSizeBytes: 2,
+                fileHash: 'file-md5', structuredDocumentHash: hash, extractSchemaVersion: '4', ocrStatus: 'na' });
+            await db.recordAttachmentIndexIdentity(1, record.zoteroKey, hash, identity);
+            if (state !== 'acquiring') await db.markAttachmentUpsertDone({
+                libraryId: 1, zoteroKey: record.zoteroKey, structuredDocumentHash: hash,
+                upsertIndexVersion: '3', remoteIdentity: identity,
+            });
+        }
+        api.untag.mockResolvedValue({ results: [{ outcome: 'untagged' }] });
+        const outcome = await new FulltextUpsertExecutor(api as any, 'fulltext_untag').execute(record, ctx);
+        if (state === 'deleted' || state === 'replaced') {
+            expect(outcome).toEqual({ kind: 'complete', reason: 'index_untagged' });
+            expect(api.untag).toHaveBeenCalledWith(identity.index_local_id, [{
+                scope_ref: identity.index_scope_ref, zotero_key: record.zoteroKey, doc_hash: 'a'.repeat(64),
+            }]);
+        } else {
+            expect(outcome).toEqual(state === 'restored'
+                ? { kind: 'complete', reason: 'cleanup_superseded' }
+                : { kind: 'defer', reason: 'index_acquisition_pending' });
+            expect(api.untag).not.toHaveBeenCalled();
+        }
+        expect(await countCleanupIntents(connection, 'owner')).toBe(state === 'acquiring' ? 1 : 0);
     });
 
     it('marks payload_too_large terminal and never retries it', async () => {

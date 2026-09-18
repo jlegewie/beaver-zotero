@@ -122,7 +122,7 @@ describe('ReconcilerService.retryAttachments', () => {
         await db.recordAttachmentReadingOutcome({ libraryId: 1, zoteroKey: 'DELETED1',
             contentKind: 'pdf', errorCode: null, attemptedAt: 200 });
         await connection.queryAsync(`UPDATE attachment_processing_state
-            SET upsert_status = 'done', structured_document_hash = ? WHERE zotero_key = 'CHILDPDF'`, ['a'.repeat(64)]);
+            SET upsert_status = 'done', upsert_remote_identity='{"index_account_id":"account-a","index_scope_ref":"lLOCAL123","index_local_id":"LOCAL123"}', structured_document_hash = ? WHERE zotero_key = 'CHILDPDF'`, ['a'.repeat(64)]);
         vi.stubGlobal('Zotero', { ...Zotero,
             DB: { queryAsync: connection.queryAsync.bind(connection) },
             Libraries: { getAll: () => [{ libraryID: 1, libraryType: 'user' }, { libraryID: 9, libraryType: 'group' }] },
@@ -193,7 +193,7 @@ describe('ReconcilerService.retryAttachments', () => {
         mocks.backgroundEnabled = false;
         await failedExtraction('INDEXED1', 'file_missing');
         await connection.queryAsync(`UPDATE attachment_processing_state
-            SET upsert_status = 'done', structured_document_hash = ?`, ['a'.repeat(64)]);
+            SET upsert_status = 'done', upsert_remote_identity='{"index_account_id":"account-a","index_scope_ref":"lLOCAL123","index_local_id":"LOCAL123"}', structured_document_hash = ?`, ['a'.repeat(64)]);
         vi.stubGlobal('Zotero', { ...Zotero, DB: { queryAsync: vi.fn(async () => undefined) } });
         vi.spyOn(db, 'enqueueBackgroundJob').mockRejectedValueOnce(new Error('disk full'));
 

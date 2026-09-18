@@ -8,11 +8,15 @@ export interface IndexBackgroundJobMetadata {
   prepare_cache?: boolean;
   /** Semantic OCR admission intent; absent legacy values remain backfill. */
   request_context?: "interactive" | "backfill";
+  /** Frozen remote identity for cleanup, independent of later account/library changes. */
+  index_account_id?: string;
+  /** Diagnostic label only; all removals check whether membership is still wanted. */
+  index_cleanup_reason?: "replacement" | "stale_completion" | "exclusion";
+  index_scope_ref?: string;
+  index_local_id?: string;
   index_action?: "upsert" | "untag";
   /** Hash to untag for a delete/replacement operation. */
   doc_hash?: string;
-  /** Prior attachment hash removed after a replacement upsert succeeds. */
-  previous_doc_hash?: string;
 }
 
 export interface PdfBackgroundJobPayload extends IndexBackgroundJobMetadata {

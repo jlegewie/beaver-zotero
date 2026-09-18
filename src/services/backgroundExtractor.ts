@@ -86,6 +86,7 @@ type LaneEntry = {
 type ExecutorRegistration = {
     executor: JobExecutor;
     maxInFlight: number;
+    survivesLibraryExclusion: boolean;
 };
 
 export class BackgroundExtractor {
@@ -205,7 +206,7 @@ export class BackgroundExtractor {
     /** Register a queue executor and activate its lane. */
     registerExecutor(
         executor: JobExecutor,
-        options: { maxInFlight: number },
+        options: { maxInFlight: number; survivesLibraryExclusion?: boolean },
     ): void {
         const maxInFlight = Math.max(1, Math.floor(options.maxInFlight));
         // Releasing a replaced executor stops any background work it owns (e.g.
@@ -215,7 +216,7 @@ export class BackgroundExtractor {
         if (previous && previous.executor !== executor) {
             this.disposeExecutor(previous.executor);
         }
-        this.executors.set(executor.jobType, { executor, maxInFlight });
+        this.executors.set(executor.jobType, { executor, maxInFlight, survivesLibraryExclusion: options.survivesLibraryExclusion ?? false });
         if (!this.laneInFlight.has(executor.jobType)) {
             this.laneInFlight.set(executor.jobType, new Map());
         }
@@ -418,6 +419,7 @@ export class BackgroundExtractor {
     abortJobsWithoutAccess(): void {
         for (const [jobType, lane] of this.laneInFlight) {
             for (const [id, entry] of lane) {
+                if (isLibraryScopeKnown() && this.executors.get(jobType)?.survivesLibraryExclusion) continue;
                 const deniedEntitlement = (jobType === 'document_ocr' && Zotero.Beaver?.hasOcrAccess === false)
                     || (jobType === 'fulltext_upsert' && Zotero.Beaver?.hasSearchIndexAccess === false);
                 if (!deniedEntitlement && entry.libraryId === UNRESOLVED_LIBRARY_ID) continue;
@@ -554,17 +556,13 @@ export class BackgroundExtractor {
     }): Promise<number> {
         let launched = 0;
         const waits: Promise<void>[] = [];
-        // Set when a claim observes an unknown scope: stops further claims but
-        // still falls through to the wait below, so jobs launched earlier in
-        // this pass keep their settle-before-return contract.
-        let scopeUnknown = false;
         for (const [jobType, registration] of this.executors) {
-            if (scopeUnknown) break;
             if (jobType === 'document_ocr' && Zotero.Beaver?.hasOcrAccess !== true) continue;
             if (jobType === 'fulltext_upsert' && Zotero.Beaver?.hasSearchIndexAccess !== true) continue;
             const freeSlots = this.laneCapacityFree(jobType);
             for (let slot = 0; slot < freeSlots; slot += 1) {
                 if (this.stopRequested) return launched;
+                if (!isLibraryScopeKnown()) break;
                 const record = await options.db.claimNextBackgroundJob(
                     Date.now(),
                     VISIBILITY_TIMEOUT_MS,
@@ -587,7 +585,6 @@ export class BackgroundExtractor {
                     if (!this.shouldSkipDbWrites()) {
                         await options.db.releaseBackgroundJob(record.id, Date.now());
                     }
-                    scopeUnknown = true;
                     break;
                 }
 
@@ -892,6 +889,7 @@ export class BackgroundExtractor {
      * (`UNRESOLVED_LIBRARY_ID`) are left to the executor's own handling.
      */
     private isOutOfScope(record: BackgroundJobRecord): boolean {
+        if (this.executors.get(record.jobType)?.survivesLibraryExclusion) return false;
         return record.libraryId !== UNRESOLVED_LIBRARY_ID
             && !isLibraryInScope(record.libraryId);
     }

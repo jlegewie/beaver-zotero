@@ -11,6 +11,7 @@ import {
 import {
     handleTestProcessingLedgerHttpRequest,
     handleTestProcessingReconcileNowHttpRequest,
+    handleTestIndexReconcileHttpRequest,
     handleTestProcessingResetHttpRequest,
     handleTestProcessingStatusHttpRequest,
 } from './handlers/testProcessingHandlers';
@@ -1054,6 +1055,7 @@ export function registerEndpoints(): (() => void) | undefined {
         // Whole-library processing (dev-only): drives ReconcilerService and
         // exposes the ledger the prefs section aggregates.
         endpoints['/beaver/test/processing-reconcile-now'] = createEndpoint(handleTestProcessingReconcileNowHttpRequest);
+        endpoints['/beaver/test/index-reconcile'] = createEndpoint(handleTestIndexReconcileHttpRequest);
 
         endpoints['/beaver/test/processing-status'] = createEndpoint(handleTestProcessingStatusHttpRequest);
 
@@ -1194,5 +1196,4 @@ export function registerEndpoints(): (() => void) | undefined {
     logger(`LocalEndpoints: Registered ${releases.length} HTTP endpoints`, 3);
     return () => { for (const release of releases) release(); };
 }
-
 

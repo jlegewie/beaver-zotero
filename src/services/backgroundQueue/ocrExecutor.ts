@@ -792,8 +792,6 @@ export class OcrExecutor implements JobExecutor {
                             priority: BACKGROUND_UPSERT_PRIORITY,
                             payload: buildIndexJobPayload('pdf', {
                                 docHash: structuredDocumentHash,
-                                previousDocumentHash:
-                                    previous?.structuredDocumentHash ?? undefined,
                             }),
                             now: Date.now(),
                         });

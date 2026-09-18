@@ -1,8 +1,8 @@
+import { captureAccountGuard } from '../accountGuard';
 import { searchIndexApiClient } from '../searchIndex/searchIndexApiClient';
 import { getIndexScopeRef, getZoteroUserIdentifier } from '../../utils/zoteroUtils';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { BACKGROUND_UNTAG_PRIORITY } from './constants';
-import { buildIndexJobPayload } from './utils';
+import { buildUntagJobInput, indexCleanupIdentity } from './utils';
 
 /**
  * Enforce Beaver's library-exclusion boundary on derived local state and cloud
@@ -12,95 +12,72 @@ import { buildIndexJobPayload } from './utils';
  */
 export async function purgeExcludedLibraries(
     libraryIds: number[],
-    hasSearchAccess: boolean,
     isCancelled: () => boolean,
 ): Promise<Set<number>> {
     const completed = new Set<number>();
     const db = Zotero.Beaver?.db;
-    if (!db) return completed;
+    const accountId = Zotero.Beaver?.account?.getSnapshot().session?.user.id;
+    if (!db || !accountId) return completed;
+    const accountIsCurrent = captureAccountGuard(accountId);
+    const cancelled = () => isCancelled() || !accountIsCurrent();
     const { localUserKey } = getZoteroUserIdentifier();
 
     for (const libraryId of libraryIds) {
         const isStillExcluded = () =>
             !(Zotero.Beaver?.searchableLibraryIds ?? []).includes(libraryId);
-        if (isCancelled()) return completed;
+        if (cancelled()) return completed;
         if (!isStillExcluded()) continue;
         const rows = await db.getAttachmentProcessingStatesByLibrary(libraryId);
         const ledgerWasEmpty = rows.length === 0;
-        const refs = new Map<string, {
-            zoteroKey: string;
-            docHash: string;
-            contentKind: 'pdf' | 'epub' | 'snapshot';
-            itemId: number | null;
-        }>();
-        for (const row of rows) {
-            if (!row.structuredDocumentHash || row.upsertStatus !== 'done') continue;
-            refs.set(`${row.zoteroKey}:${row.structuredDocumentHash}`, {
-                zoteroKey: row.zoteroKey,
-                docHash: row.structuredDocumentHash,
-                contentKind: row.contentKind,
-                itemId: row.itemId,
-            });
-        }
+        const jobs = rows.filter((row) => row.structuredDocumentHash && row.upsertRemoteIdentity)
+            .map((row) => buildUntagJobInput(row, Date.now(), { reason: 'exclusion' }));
 
         // Cancel all local work before adding the only allowed post-exclusion
         // intent: a remote membership removal that reads no library content.
-        if (isCancelled() || !isStillExcluded()) continue;
+        if (cancelled() || !isStillExcluded()) continue;
         await db.deleteBackgroundJobsByLibrary(libraryId);
 
-        let remoteListingComplete = !hasSearchAccess;
+        let remoteListingComplete = false;
         let remoteRefCount = 0;
-        if (hasSearchAccess) {
-            const scopeRef = getIndexScopeRef(libraryId);
-            if (scopeRef) {
-                try {
-                    const remoteRefs = await searchIndexApiClient.listAllRefs({
-                        scopeRef,
-                        zoteroLocalId: localUserKey,
-                        isCancelled,
-                    });
-                    remoteRefCount = remoteRefs.length;
-                    for (const ref of remoteRefs) {
-                        const key = `${ref.zotero_key}:${ref.doc_hash}`;
-                        if (!refs.has(key)) {
-                            refs.set(key, {
-                                zoteroKey: ref.zotero_key,
-                                docHash: ref.doc_hash,
-                                contentKind: 'pdf',
-                                itemId: null,
-                            });
-                        }
-                    }
-                    remoteListingComplete = !isCancelled();
-                } catch (error) {
-                    // Ledger-known refs below are still durably queued. A later
-                    // scope refresh/app start retries discovery of any others.
-                    logger(`Excluded-library remote listing failed for ${libraryId}: ${error}`, 2);
+        const scopeRef = getIndexScopeRef(libraryId);
+        if (scopeRef) {
+            try {
+                const remoteRefs = await searchIndexApiClient.listAllRefs({
+                    scopeRef,
+                    zoteroLocalId: localUserKey,
+                    isCancelled: cancelled,
+                });
+                remoteRefCount = remoteRefs.length;
+                for (const ref of remoteRefs) {
+                    jobs.push(buildUntagJobInput({
+                        libraryId, itemId: null, zoteroKey: ref.zotero_key, contentKind: 'pdf',
+                        structuredDocumentHash: ref.doc_hash,
+                        upsertRemoteIdentity: { index_account_id: accountId,
+                            index_scope_ref: scopeRef, index_local_id: localUserKey },
+                    }, Date.now(), { reason: 'exclusion' }));
                 }
-            } else {
-                remoteListingComplete = true;
+                remoteListingComplete = !cancelled();
+            } catch (error) {
+                // Ledger-known refs below are still durably queued. A later
+                // scope refresh/app start retries discovery of any others.
+                logger(`Excluded-library remote listing failed for ${libraryId}: ${error}`, 2);
             }
+        } else {
+            remoteListingComplete = true;
         }
 
-        if (isCancelled() || !isStillExcluded()) continue;
-        if (hasSearchAccess && refs.size > 0 && !isCancelled()) {
-            await db.enqueueBackgroundJobs([...refs.values()].map((ref) => ({
-                jobType: 'fulltext_untag' as const,
-                libraryId,
-                itemId: ref.itemId,
-                zoteroKey: ref.zoteroKey,
-                contentKind: ref.contentKind,
-                payloadKind: 'structured' as const,
-                priority: BACKGROUND_UNTAG_PRIORITY,
-                payload: buildIndexJobPayload(ref.contentKind, {
-                    indexAction: 'untag',
-                    docHash: ref.docHash,
-                }),
-                now: Date.now(),
-            })));
-        }
+        if (cancelled() || !isStillExcluded()) continue;
+        // Prefer the ledger's content kind when listing returns the same membership.
+        const identities = new Set<string>();
+        const uniqueJobs = jobs.filter((job) => {
+            const identity = indexCleanupIdentity(job);
+            if (identities.has(identity)) return false;
+            identities.add(identity);
+            return true;
+        });
+        if (uniqueJobs.length > 0) await db.enqueueBackgroundJobs(uniqueJobs);
 
-        if (isCancelled() || !isStillExcluded()) continue;
+        if (cancelled() || !isStillExcluded()) continue;
         await Zotero.Beaver?.documentCache?.invalidateByLibrary(libraryId);
         await db.deleteAttachmentProcessingStatesByLibrary(libraryId);
         await db.deleteProcessingIndexState(libraryId);

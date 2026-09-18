@@ -85,8 +85,8 @@ describe('attachment change reconciliation', () => {
             await db.markAttachmentExtractFailure({ libraryId: 1, zoteroKey: item.key, status: 'failed', error: 'no_text_layer', attemptedAt: 100, extractionSource });
         } else {
             await connection.queryAsync(`UPDATE attachment_processing_state SET extract_status='done',
-                extract_schema_version=?, ocr_status='na', upsert_status='done', upsert_index_version='2',
-                structured_document_hash='indexed', file_mtime_ms=10, file_size_bytes=20, extraction_source=?`,
+                extract_schema_version=?, ocr_status='na', upsert_status='done', upsert_index_version='3',
+                upsert_remote_identity='{"index_account_id":"account-a","index_scope_ref":"lLOCAL123","index_local_id":"LOCAL123"}', structured_document_hash='indexed', file_mtime_ms=10, file_size_bytes=20, extraction_source=?`,
                 [expectedExtractionSchemaVersion(mocks.kind as any), extractionSource]);
         }
     }
@@ -455,6 +455,14 @@ describe('attachment change reconciliation', () => {
         await notify();
         expect(await db.peekBackgroundJobs()).toEqual([]);
         expect(mocks.invalidate).not.toHaveBeenCalled();
+    });
+
+    it('does not invent remote ownership for content that was never uploaded', async () => {
+        await seed(false);
+        await connection.queryAsync("UPDATE attachment_processing_state SET upsert_status = NULL, upsert_remote_identity = NULL");
+        await notify('delete');
+        expect(await db.getAttachmentProcessingState(1, item.key)).toBeNull();
+        expect(await db.peekBackgroundJobs()).toEqual([]);
     });
 
     it('durably schedules index cleanup before removing deleted attachments', async () => {
