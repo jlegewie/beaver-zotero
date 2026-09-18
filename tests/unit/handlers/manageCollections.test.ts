@@ -245,6 +245,9 @@ describe('validateManageCollectionsAction', () => {
         } as any);
         expect(resp.valid).toBe(false);
         expect(resp.error_code).toBe('invalid_library_id');
+        expect(resp.error).toContain('list_collections');
+        expect(resp.error).not.toContain('embeds library');
+        expect(resp.error).not.toContain('library_id=');
         // The resolver must not be invoked when the consistency check fails.
         expect((getCollectionByIdOrName as any)).not.toHaveBeenCalled();
     });
@@ -333,6 +336,8 @@ describe('validateManageCollectionsAction', () => {
         } as any);
         expect(resp.valid).toBe(false);
         expect(resp.error_code).toBe('invalid_parent');
+        expect(resp.error).toContain('unavailable');
+        expect(resp.error).toContain('list_libraries');
         // The malformed-whole-string lookup must never have been attempted.
         expect(Zot.Collections.getByLibraryAndKeyAsync).not.toHaveBeenCalledWith(1, 'g5-PARENTKEY');
     });
@@ -569,5 +574,45 @@ describe('executeManageCollectionsAction', () => {
         } as any, ctx);
         expect(resp.success).toBe(false);
         expect(resp.error_code).toBe('collection_not_found');
+    });
+});
+
+
+describe('trashed collection write guards', () => {
+    it('rejects a trashed move parent before approval', async () => {
+        Zot.Collections.getByLibraryAndKeyAsync.mockResolvedValue({ id: 99, key: 'PARENT01', deleted: true });
+        const response = await validateManageCollectionsAction({
+            request_id: 'trash-parent', action_data: {
+                action: 'move', collection_key: mockCollection.key, new_parent_key: 'PARENT01',
+            },
+        } as any);
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe('parent_not_found');
+    });
+
+    it('rejects a parent trashed after validation without moving the collection', async () => {
+        Zot.Collections.getByLibraryAndKeyAsync.mockImplementation(async (_id: number, key: string) =>
+            key === mockCollection.key ? mockCollection : { id: 99, key, deleted: true });
+        const response = await executeManageCollectionsAction({
+            request_id: 'trash-parent', action_data: {
+                action: 'move', library_id: 1, collection_key: mockCollection.key, new_parent_key: 'PARENT01',
+            },
+        } as any, { signal: new AbortController().signal, startTime: Date.now(), timeoutSeconds: 60 });
+        expect(response.success).toBe(false);
+        expect(response.error_code).toBe('parent_not_found');
+        expect(mockCollection.parentKey).toBeNull();
+        expect(mockCollection.saveTx).not.toHaveBeenCalled();
+    });
+
+    it.each(['rename', 'move', 'delete'])('rejects %s when the source was trashed after validation', async (action) => {
+        mockCollection.deleted = true;
+        const response = await executeManageCollectionsAction({
+            request_id: 'trash-source', action_data: {
+                action, library_id: 1, collection_key: mockCollection.key, new_name: 'Updated',
+            },
+        } as any, { signal: new AbortController().signal, startTime: Date.now(), timeoutSeconds: 60 });
+        expect(response.success).toBe(false);
+        expect(response.error_code).toBe('collection_not_found');
+        expect(mockCollection.saveTx).not.toHaveBeenCalled();
     });
 });

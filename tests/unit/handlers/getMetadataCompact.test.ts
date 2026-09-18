@@ -148,6 +148,19 @@ describe('metadata identity and field quality', () => {
         }]);
     });
 
+    it('omits trashed and missing memberships from full metadata', async () => {
+        mocks.resolveItemReference.mockResolvedValue({ status: 'found', item: regularItem('AAAAAAAA', {
+            toJSON: () => ({ collections: ['LIVE0001', 'TRASH001', 'MISSING1'] }),
+        }) });
+        (globalThis as any).Zotero.Collections = { getByLibraryAndKey: (_id: number, key: string) =>
+            key === 'MISSING1' ? null : { libraryID: 1, key, name: key, deleted: key === 'TRASH001' },
+        };
+        const result = await handleGetMetadataRequest(request());
+        expect(result.items[0].collections).toEqual([{
+            collection_key: 'LIVE0001', name: 'LIVE0001', collection_id: 'u-LIVE0001', library_ref: 'u',
+        }]);
+    });
+
     it('reports unavailable collection mapping rather than inventing an ID or claiming the item is missing', async () => {
         vi.mocked(libraryRefForLibraryID).mockReturnValue(null);
         mocks.resolveItemReference.mockResolvedValue({ status: 'found', item: regularItem('AAAAAAAA', {

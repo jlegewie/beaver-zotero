@@ -274,7 +274,7 @@ export async function validateOrganizeItemsAction(
                 for (const lib of Zotero.Libraries.getAll()) {
                     if (!searchableLibraryIds.includes(lib.libraryID)) continue;
                     const found = await Zotero.Collections.getByLibraryAndKeyAsync(lib.libraryID, collKey);
-                    if (found) return lib.libraryID;
+                    if (found && !found.deleted) return lib.libraryID;
                 }
                 return null;
             };
@@ -292,7 +292,7 @@ export async function validateOrganizeItemsAction(
                 for (const collKey of keys) {
                     if (seenInvalid.has(collKey)) continue;
                     const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
-                    if (!collection) {
+                    if (!collection || collection.deleted) {
                         seenInvalid.add(collKey);
                         invalidColls.push({
                             key: collKey,
@@ -520,12 +520,12 @@ export async function executeOrganizeItemsAction(
                 for (const collKey of collections?.add ?? []) {
                     checkAborted(ctx, 'organize_items:collection_resolve');
                     const collection = await Zotero.Collections.getByLibraryAndKeyAsync(collectionLibraryId!, collKey);
-                    if (collection) addCollections.set(collKey, collection);
+                    if (collection && !collection.deleted) addCollections.set(collKey, collection);
                 }
                 for (const collKey of collections?.remove ?? []) {
                     checkAborted(ctx, 'organize_items:collection_resolve');
                     const collection = await Zotero.Collections.getByLibraryAndKeyAsync(collectionLibraryId!, collKey);
-                    if (collection) removeCollections.set(collKey, collection);
+                    if (collection && !collection.deleted) removeCollections.set(collKey, collection);
                 }
             });
         }
