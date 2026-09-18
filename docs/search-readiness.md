@@ -35,7 +35,8 @@ boundaries and uses cheap cancellation checks for individual attachments.
 
 Account, entitlement, included-library or portable scope identity changes immediately
 discard the current and last-confirmed observations and the readiness latch. A newly
-included library must satisfy initial readiness. Exclusion/deletion removes files from
+included library must satisfy initial readiness. An enabled scope change requests a new
+pass after one second, or immediately after an active pass settles. Exclusion/deletion removes files from
 the next complete denominator. Accepted index/schema changes reset initial readiness.
 
 Item and file notifications invalidate discovery synchronously and request a new pass
@@ -47,7 +48,8 @@ there can be a short fail-closed discovery interval, but ordinary preparation qu
 changes do not toggle readiness. Large imports lower coverage and can revoke the latch.
 
 Source identities are checked again after remote verification, so extraction or file
-replacement during a pass cannot publish membership for the prior identity. Account
+replacement during a pass cannot publish membership for the prior identity. A changed
+source census queues a follow-up pass as soon as the current pass settles. Account
 and scope fences discard late results. Positive evidence of lost membership revokes
 the prior result even if a later verification batch fails.
 

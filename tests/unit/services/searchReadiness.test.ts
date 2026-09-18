@@ -206,6 +206,98 @@ describe('instance search verification', () => {
         expect(searchReadinessSentence(service.getStatus())).not.toContain('0 of 0');
     });
 
+    it('rechecks a changed library scope within one second while idle', async () => {
+        vi.useFakeTimers();
+        census.mockImplementation(async (ids) => ids.length ? library(1) : []);
+        service.start();
+        try {
+            await vi.advanceTimersByTimeAsync(0);
+            expect(service.getStatus().current.ready).toBe(true);
+            Zotero.Beaver.searchableLibraryIds = [];
+            service.reconcile();
+            expect(service.getStatus().lastConfirmed).toBeNull();
+            await vi.advanceTimersByTimeAsync(1_000);
+            expect(service.getStatus().current).toMatchObject({ discovery_complete: true, ready: false, libraries: [] });
+            Zotero.Beaver.searchableLibraryIds = [1];
+            service.reconcile();
+            await vi.advanceTimersByTimeAsync(1_000);
+            expect(service.getStatus().current.ready).toBe(true);
+            expect(verify).toHaveBeenCalledTimes(2);
+            await vi.advanceTimersByTimeAsync(60_000);
+            expect(verify).toHaveBeenCalledTimes(3);
+        } finally {
+            await service.dispose();
+            vi.useRealTimers();
+        }
+    });
+
+    it('rechecks promptly when search access returns and cancels a scheduled scope retry on disposal', async () => {
+        vi.useFakeTimers();
+        census.mockResolvedValue(library(1));
+        Zotero.Beaver.hasSearchIndexAccess = false;
+        service.start();
+        try {
+            await vi.advanceTimersByTimeAsync(60_000);
+            expect(verify).not.toHaveBeenCalled();
+            Zotero.Beaver.hasSearchIndexAccess = true;
+            service.reconcile();
+            await vi.advanceTimersByTimeAsync(1_000);
+            expect(service.getStatus().current.ready).toBe(true);
+            Zotero.Beaver.searchableLibraryIds = [];
+            service.reconcile();
+            await service.dispose();
+            await vi.advanceTimersByTimeAsync(60_000);
+            expect(verify).toHaveBeenCalledTimes(1);
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            await service.dispose();
+            vi.useRealTimers();
+        }
+    });
+
+    it.each(['library', 'account'])('rechecks a %s change discovered during verification as soon as the old pass settles', async (change) => {
+        vi.useFakeTimers();
+        let finishVerification!: (value: { refs: [] }) => void;
+        census.mockImplementation(async (ids) => ids.length ? library(1) : []);
+        verify.mockReturnValueOnce(new Promise((resolve) => { finishVerification = resolve; }));
+        service.start();
+        try {
+            await vi.advanceTimersByTimeAsync(0);
+            const pending = service.refresh();
+            if (change === 'library') Zotero.Beaver.searchableLibraryIds = [];
+            else generation++;
+            // No external reconciliation: the pass must notice the changed scope itself.
+            finishVerification({ refs: [] });
+            await pending;
+            expect(service.getStatus().current.discovery_complete).toBe(true);
+            expect(service.getStatus().current.libraries).toHaveLength(change === 'library' ? 0 : 1);
+            expect(verify).toHaveBeenCalledTimes(change === 'library' ? 1 : 2);
+            expect(vi.getTimerCount()).toBe(1);
+        } finally {
+            finishVerification({ refs: [] });
+            await service.dispose();
+            vi.useRealTimers();
+        }
+    });
+
+    it('rechecks extraction changes without notifications until the census settles', async () => {
+        vi.useFakeTimers();
+        census.mockResolvedValueOnce(library(1)).mockResolvedValueOnce(library(2))
+            .mockResolvedValueOnce(library(2)).mockResolvedValueOnce(library(3))
+            .mockResolvedValue(library(3));
+        service.start();
+        try {
+            await vi.advanceTimersByTimeAsync(0);
+            expect(service.getStatus().current).toMatchObject({ ready: true, libraries: [{ supported: 3, confirmed: 3 }] });
+            expect(verify).toHaveBeenCalledTimes(3);
+            expect(census).toHaveBeenCalledTimes(6);
+            expect(vi.getTimerCount()).toBe(1);
+        } finally {
+            await service.dispose();
+            vi.useRealTimers();
+        }
+    });
+
     it.each([100, 1_500])('refreshes immediately after an invalidated pass settles %i ms after notification', async (delay) => {
         vi.useFakeTimers();
         let finishVerification!: (value: { refs: [] }) => void;

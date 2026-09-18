@@ -19,6 +19,7 @@ export class InstanceSearchReadiness {
     private epoch = 0;
     private dirty = true;
     private stopped = false;
+    private started = false;
     private observation = unknownSearchReadiness();
     private lastConfirmed: SearchReadiness | null = null;
     private retainedReady = false;
@@ -65,21 +66,28 @@ export class InstanceSearchReadiness {
             this.lastConfirmed = null;
             this.retainedReady = false;
             this.error = null;
+            if (scope.enabled) this.requestRefresh();
         }
         return scope;
     }
 
     start(): void {
         this.stopped = false;
+        this.started = true;
         this.observer = Zotero.Notifier.registerObserver({ notify: (event: string, type: string) => {
             if ((type === 'item' && ['add', 'modify', 'delete', 'trash'].includes(event)) || type === 'file') {
                 this.epoch++;
                 this.dirty = true;
-                if (this.pending) this.refreshRequested = true;
-                else this.schedule(1_000);
+                this.requestRefresh();
             }
         } } as any, ['item', 'file'], 'beaver-search-readiness');
         this.schedule(0);
+    }
+
+    private requestRefresh(): void {
+        if (!this.started || this.stopped) return;
+        if (this.pending) this.refreshRequested = true;
+        else this.schedule(1_000);
     }
 
     private schedule(delay: number): void {
@@ -87,10 +95,7 @@ export class InstanceSearchReadiness {
         if (this.timer !== undefined) clearTimeout(this.timer);
         this.timer = setTimeout(() => {
             this.timer = undefined;
-            void this.refresh().finally(() => {
-                // A notification after settlement may already have requested an earlier pass.
-                if (this.timer === undefined) this.schedule(60_000);
-            });
+            void this.refresh();
         }, delay);
     }
 
@@ -104,13 +109,21 @@ export class InstanceSearchReadiness {
 
     refresh(): Promise<void> {
         const scope = this.reconcile();
-        if (this.stopped || !scope.enabled) return Promise.resolve();
+        if (this.stopped) return Promise.resolve();
+        if (!scope.enabled) {
+            if (this.started && this.timer === undefined) this.schedule(60_000);
+            return Promise.resolve();
+        }
         if (this.pending) return this.pending;
+        if (this.timer !== undefined) clearTimeout(this.timer);
+        this.timer = undefined;
         this.refreshRequested = false;
         this.pending = this.collect(scope).finally(() => {
             this.pending = undefined;
             if (this.refreshRequested && !this.stopped && this.scope().enabled) return this.refresh();
             Zotero.Beaver?.runtime?.publish('background-processing:changed', {});
+            // Preserve an earlier retry requested by a subscriber during publication.
+            if (this.started && this.timer === undefined) this.schedule(60_000);
         });
         return this.pending;
     }
@@ -120,7 +133,7 @@ export class InstanceSearchReadiness {
         const current = () => !this.stopped && epoch === this.epoch
             && Zotero.Beaver?.account?.getGeneration() === scope.generation;
         const scopeCurrent = () => {
-            if (!current()) return false;
+            if (this.stopped || epoch !== this.epoch) return false;
             this.reconcile();
             return current();
         };
@@ -187,6 +200,7 @@ export class InstanceSearchReadiness {
             if (!scopeCurrent()) return;
             if (JSON.stringify(after) !== censusKey) {
                 this.dirty = true;
+                this.requestRefresh();
                 return;
             }
             const observation: SearchReadiness = { ...unknownSearchReadiness(),
