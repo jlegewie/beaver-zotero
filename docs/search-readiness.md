@@ -29,6 +29,9 @@ The plugin owns one readiness service for all windows. It refreshes independentl
 preparation, ordinarily every minute, and coalesces concurrent requests. Exact refs
 are verified in sequential batches of at most 50. Backend requirements use the existing
 five-minute account-generation-scoped cache. No document text is uploaded by readiness.
+Settings windows read the shared status and subscribe to its updates; they do not
+start additional remote verification loops. Discovery checks account/scope at batch
+boundaries and uses cheap cancellation checks for individual attachments.
 
 Account, entitlement, included-library or portable scope identity changes immediately
 discard the current and last-confirmed observations and the readiness latch. A newly

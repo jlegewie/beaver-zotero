@@ -2976,10 +2976,6 @@ export interface ChargingPermissions {
     pause_long_running_agent?: boolean;
 }
 
-/**
- * Agent run request sent by the client after receiving the 'ready' event.
- * Model selection is included in this request (moved from auth message).
- */
 /** Client observation of search coverage; never grants search entitlement. */
 export interface SearchReadiness {
     policy_version: 1;
@@ -2993,6 +2989,10 @@ export interface SearchReadiness {
     libraries: Array<{ scope_ref: string; supported: number; confirmed: number }>;
 }
 
+/**
+ * Agent run request sent by the client after receiving the 'ready' event.
+ * Model selection is included in this request (moved from auth message).
+ */
 export interface AgentRunRequest {
     /** Request type discriminator */
     type: 'chat';

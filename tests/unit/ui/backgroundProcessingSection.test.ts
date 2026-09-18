@@ -348,8 +348,6 @@ it('lists server indexing problems with reading problems and shows search covera
         ledger: { ...store.get(backgroundProcessingStatusAtom).ledger, total: 2, readable: 2 },
         issues: [{ reason: 'index_failed', count: 2 }],
         worker: { available: 0, deferred: 0, inFlight: 0, dispatchBlocker: null, drainNow: false, backlogGateOpen: false },
-        coverage: { namespace_exists: true, approx_row_count: 1000, documents: [] },
-        coverageUpdatedAt: Date.now(),
     });
     await withView(store, (container) => {
         expect(container.textContent).not.toContain('Full-text Search');

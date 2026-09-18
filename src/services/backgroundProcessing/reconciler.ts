@@ -9,6 +9,7 @@ import { getReadableContentKind } from '../documentExtraction/attachmentResoluti
 import { recordReadingOutcome } from '../documentExtraction/readingOutcome';
 import { loadAttachmentData, resolveAttachmentFileSource } from '../documentExtraction/attachmentSource';
 import { observeAttachmentSource } from '../documentExtraction/sourceObservation';
+import { queryLibraryAttachmentIds } from '../documentExtraction/attachmentInventory';
 import { OCR_ENGINE_VERSION, OCR_PRIORITY_BACKFILL, OCR_PRIORITY_ON_DEMAND } from '../ocr/constants';
 import type { AttachmentRef } from './issues';
 import { enqueueOcrJob, maybeEnqueueOcrJob } from '../ocr/enqueueOcr';
@@ -749,23 +750,9 @@ export class ReconcilerService {
     }
 
     private async listProcessableAttachments(libraryId: number): Promise<Zotero.Item[]> {
-        const ids: number[] = [];
-        await Zotero.DB.queryAsync(
-            `SELECT I.itemID
-             FROM items I
-             JOIN itemAttachments IA USING (itemID)
-             WHERE I.libraryID = ?
-               AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
-               AND NOT EXISTS (SELECT 1 FROM deletedItems D WHERE D.itemID = IA.parentItemID)
-               AND IA.linkMode != ?
-               AND LOWER(COALESCE(IA.contentType, '')) IN (
-                    'application/pdf', 'application/epub+zip',
-                    'text/html', 'application/xhtml+xml'
-               )
-             ORDER BY I.itemID`,
-            [libraryId, Zotero.Attachments.LINK_MODE_LINKED_URL],
-            { onRow: (row: any) => ids.push(row.getResultByIndex(0)) },
-        );
+        const ids = await queryLibraryAttachmentIds(libraryId, {
+            contentTypes: ['application/pdf', 'application/epub+zip', 'text/html', 'application/xhtml+xml'],
+        });
         if (ids.length === 0) return [];
         const items = (await Zotero.Items.getAsync(ids)).filter(
             (item): item is Zotero.Item => !!item && safeIsInTrash(item) !== true,

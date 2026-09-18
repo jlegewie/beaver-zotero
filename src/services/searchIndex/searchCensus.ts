@@ -2,6 +2,7 @@ import type { AttachmentProcessingStateRecord } from '../database';
 import { getReadableContentKind } from '../documentExtraction/attachmentResolution';
 import { observeAttachmentSource } from '../documentExtraction/sourceObservation';
 import { getIndexScopeRef } from '../../utils/zoteroInstanceIdentity';
+import { queryLibraryAttachmentIds } from '../documentExtraction/attachmentInventory';
 
 export interface SearchCensusAttachment {
     libraryId: number;
@@ -35,31 +36,24 @@ function currentIdentity(
 export async function discoverSearchCensus(
     libraryIds: number[],
     isCurrent: () => boolean,
+    isScopeCurrent: () => boolean = isCurrent,
 ): Promise<SearchCensusLibrary[]> {
     const check = () => { if (!isCurrent()) throw new Error('Search discovery scope changed'); };
+    const checkScope = () => { if (!isScopeCurrent()) throw new Error('Search discovery scope changed'); };
     const db = Zotero.Beaver?.db;
     if (!db) throw new Error('Search discovery database unavailable');
     const libraries: SearchCensusLibrary[] = [];
     for (const libraryId of [...new Set(libraryIds)].sort((a, b) => a - b)) {
-        check();
+        checkScope();
         const scopeRef = getIndexScopeRef(libraryId);
         if (!scopeRef) throw new Error('Search discovery library identity unavailable');
-        const ids: number[] = [];
-        await Zotero.DB.queryAsync(
-            `SELECT I.itemID FROM items I JOIN itemAttachments A USING (itemID)
-             WHERE I.libraryID = ? AND A.linkMode != ?
-               AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
-               AND NOT EXISTS (SELECT 1 FROM deletedItems D WHERE D.itemID = A.parentItemID)
-             ORDER BY I.itemID`,
-            [libraryId, Zotero.Attachments.LINK_MODE_LINKED_URL],
-            { onRow: (row: any) => ids.push(row.getResultByIndex(0)) },
-        );
-        check();
+        const ids = await queryLibraryAttachmentIds(libraryId);
+        checkScope();
         const ledger = new Map((await db.getAttachmentProcessingStatesByLibrary(libraryId))
             .map((row) => [row.zoteroKey, row]));
         const attachments: SearchCensusAttachment[] = [];
         for (let offset = 0; offset < ids.length; offset += 100) {
-            check();
+            checkScope();
             const items = await Zotero.Items.getAsync(ids.slice(offset, offset + 100));
             if (items.length !== Math.min(100, ids.length - offset) || items.some((item) => !item)) {
                 throw new Error('Search discovery changed during enumeration');
@@ -79,6 +73,6 @@ export async function discoverSearchCensus(
         }
         libraries.push({ libraryId, scopeRef, attachments });
     }
-    check();
+    checkScope();
     return libraries;
 }

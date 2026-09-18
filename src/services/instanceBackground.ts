@@ -1,7 +1,5 @@
 import type { ProcessingProgress } from "./backgroundProcessing/progress";
 import { InstanceSearchReadiness } from "./searchIndex/instanceSearchReadiness";
-import { searchIndexApiClient } from "./searchIndex/searchIndexApiClient";
-import { getZoteroUserIdentifier } from "../utils/zoteroUtils";
 import {
     collectProcessingStatus,
     type ProcessingStatusOptions,
@@ -202,26 +200,6 @@ export class InstanceBackground {
                 this.statusChanged();
             }
         };
-    }
-
-    /** Remote coverage has its own request lifetime and never blocks local progress. */
-    async collectCoverage() {
-        const owner = Zotero.Beaver;
-        const generation = owner.account?.getGeneration();
-        if (!owner.hasSearchIndexAccess) return undefined;
-        const revision = owner.account?.getSnapshot().revision;
-        let coverage;
-        try {
-            coverage = await searchIndexApiClient.status(
-                getZoteroUserIdentifier().localUserKey,
-            );
-        } catch {
-            coverage = null;
-        }
-        return owner.account?.getGeneration() === generation &&
-            owner.account?.getSnapshot().revision === revision
-            ? coverage
-            : undefined;
     }
 
     claimVersionNotifications(): string[] {

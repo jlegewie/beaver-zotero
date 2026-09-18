@@ -126,6 +126,41 @@ describe('instance search verification', () => {
         expect(service.getStatus().lastConfirmed).toBeNull();
         expect(service.getStatus().current.ready).toBe(false);
     });
+    it('rejects duplicate verification identities rather than counting them twice', async () => {
+        verify.mockImplementation(async (_device, refs) => ({ refs: [...refs, refs[0]] }));
+        await service.refresh();
+        expect(service.getStatus().lastConfirmed).toBeNull();
+        expect(service.getStatus().error).toBeTruthy();
+    });
+    it('matches unordered verification results by exact identity', async () => {
+        verify.mockImplementation(async (_device, refs) => ({ refs: refs.map((ref: any) => ({ ...ref,
+            state: 'current', index_version: 3, extract_schema_version: '4' })).reverse() }));
+        await service.refresh();
+        expect(service.getStatus().current.ready).toBe(true);
+    });
+    it('does not rebuild the scope snapshot for each attachment freshness check', async () => {
+        const snapshot = vi.spyOn(Zotero.Beaver.account, 'getSnapshot');
+        census.mockImplementation(async (_ids, isCurrent) => {
+            for (let i = 0; i < 10_000; i++) expect(isCurrent()).toBe(true);
+            return library(1);
+        });
+        try {
+            await service.refresh();
+            expect(snapshot.mock.calls.length).toBeLessThan(20);
+            expect(service.getStatus().current.ready).toBe(true);
+        } finally {
+            snapshot.mockRestore();
+        }
+    });
+    it('checks changed scope after a remote batch even before account reconciliation arrives', async () => {
+        verify.mockImplementation(async () => {
+            Zotero.Beaver.searchableLibraryIds = [];
+            return { refs: [] };
+        });
+        await service.refresh();
+        expect(service.getStatus().lastConfirmed).toBeNull();
+        expect(verify).toHaveBeenCalledTimes(1);
+    });
     it('clears scope and hysteresis on account and library changes', async () => {
         await service.refresh();
         generation++;

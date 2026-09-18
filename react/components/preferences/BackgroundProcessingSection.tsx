@@ -192,7 +192,6 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
     );
     const working = (status.worker?.inFlight ?? 0) > 0 || status.worker?.drainNow === true;
     const refresh = useBackgroundProcessingStatus({
-        includeCoverage: hasSearchAccess,
         includeFailures: true,
         // Poll faster while files are being processed so the bar keeps up.
         pollIntervalMs: working ? 4_000 : 15_000,

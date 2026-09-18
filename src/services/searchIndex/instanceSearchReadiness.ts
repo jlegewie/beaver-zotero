@@ -31,9 +31,11 @@ export class InstanceSearchReadiness {
     private scope() {
         const owner = Zotero.Beaver;
         const account = owner?.account;
+        const snapshot = account?.getSnapshot();
+        const generation = account?.getGeneration();
         const ids = [...(owner?.searchableLibraryIds ?? [])].sort((a, b) => a - b);
         let enabled = !!owner?.libraryScopeInitialized && !!owner.hasSearchIndexAccess
-            && !!account?.getSnapshot().session;
+            && !!snapshot?.session;
         let device: string | null = null;
         let refs: Array<[number, string | null]> = [];
         try {
@@ -45,13 +47,13 @@ export class InstanceSearchReadiness {
         } catch {
             enabled = false;
         }
-        return { ids, enabled, device, key: JSON.stringify([
-            account?.getGeneration(), account?.getSnapshot().session?.user.id,
+        return { ids, enabled, device, generation, key: JSON.stringify([
+            generation, snapshot?.session?.user.id,
             enabled, device, refs,
         ]) };
     }
 
-    reconcile(): void {
+    reconcile() {
         const scope = this.scope();
         if (scope.key !== this.scopeKey) {
             this.scopeKey = scope.key;
@@ -64,6 +66,7 @@ export class InstanceSearchReadiness {
             this.retainedReady = false;
             this.error = null;
         }
+        return scope;
     }
 
     start(): void {
@@ -92,21 +95,19 @@ export class InstanceSearchReadiness {
     }
 
     getStatus(): SearchReadinessStatus {
-        this.reconcile();
+        const scope = this.reconcile();
         let current = evaluateSearchReadiness(this.observation, this.retainedReady);
-        if (this.stopped || !this.scope().enabled) current = { ...unknownSearchReadiness(), reason: 'unavailable' };
+        if (this.stopped || !scope.enabled) current = { ...unknownSearchReadiness(), reason: 'unavailable' };
         else if (this.dirty) current = { ...current, ready: false, discovery_complete: false, reason: 'discovering' };
         return { current, lastConfirmed: this.lastConfirmed, error: this.error, refreshing: !!this.pending };
     }
 
     refresh(): Promise<void> {
-        this.reconcile();
-        if (this.stopped || !this.scope().enabled) return Promise.resolve();
+        const scope = this.reconcile();
+        if (this.stopped || !scope.enabled) return Promise.resolve();
         if (this.pending) return this.pending;
         this.refreshRequested = false;
-        this.pending = this.collect().catch(() => {
-            this.error = 'Could not verify current search coverage.';
-        }).finally(() => {
+        this.pending = this.collect(scope).finally(() => {
             this.pending = undefined;
             if (this.refreshRequested && !this.stopped && this.scope().enabled) return this.refresh();
             Zotero.Beaver?.runtime?.publish('background-processing:changed', {});
@@ -114,20 +115,25 @@ export class InstanceSearchReadiness {
         return this.pending;
     }
 
-    private async collect(): Promise<void> {
-        const scope = this.scope();
+    private async collect(scope: ReturnType<InstanceSearchReadiness['scope']>): Promise<void> {
         const epoch = this.epoch;
-        const current = () => !this.stopped && epoch === this.epoch && this.scope().key === scope.key;
+        const current = () => !this.stopped && epoch === this.epoch
+            && Zotero.Beaver?.account?.getGeneration() === scope.generation;
+        const scopeCurrent = () => {
+            if (!current()) return false;
+            this.reconcile();
+            return current();
+        };
         try {
-            const census = await discoverSearchCensus(scope.ids, current);
-            if (!current()) return;
+            const census = await discoverSearchCensus(scope.ids, current, scopeCurrent);
+            if (!scopeCurrent()) return;
             const censusKey = JSON.stringify(census);
             if (censusKey !== this.censusKey) this.dirty = true;
             if (evaluateSearchReadiness(this.observation, this.retainedReady).reason === 'stale') {
                 this.retainedReady = false;
             }
             const requirements = await searchIndexApiClient.requirements();
-            if (!current()) return;
+            if (!scopeCurrent()) return;
             const versionChanged = this.observation.index_version !== requirements.index_version
                 || JSON.stringify(this.observation.extract_schema_versions) !== JSON.stringify(requirements.extract_schema_versions);
             if (versionChanged) {
@@ -144,18 +150,22 @@ export class InstanceSearchReadiness {
                 const candidates = library.attachments.filter((attachment) => attachment.identity
                     && requirements.extract_schema_versions[attachment.contentKind]?.includes(attachment.identity.schemaVersion));
                 for (let offset = 0; offset < candidates.length; offset += 50) {
-                    if (!current()) return;
+                    if (!scopeCurrent()) return;
                     const batch = candidates.slice(offset, offset + 50);
                     const response = await searchIndexApiClient.verify(scope.device!, batch.map((attachment) => ({
                         scope_ref: library.scopeRef, zotero_key: attachment.zoteroKey, doc_hash: attachment.identity!.docHash,
                     })));
-                    if (!current()) return;
-                    for (const attachment of batch) {
-                        const matches = response.refs.filter((ref) => ref.scope_ref === library.scopeRef
-                            && ref.zotero_key === attachment.zoteroKey && ref.doc_hash === attachment.identity!.docHash);
-                        if (matches.length !== 1) throw new Error('Incomplete search verification');
-                        const ref = matches[0];
+                    if (!scopeCurrent()) return;
+                    const refs = new Map<string, (typeof response.refs)[number]>();
+                    for (const ref of response.refs) {
                         const identity = JSON.stringify([ref.scope_ref, ref.zotero_key, ref.doc_hash]);
+                        if (refs.has(identity)) throw new Error('Duplicate search verification');
+                        refs.set(identity, ref);
+                    }
+                    for (const attachment of batch) {
+                        const identity = JSON.stringify([library.scopeRef, attachment.zoteroKey, attachment.identity!.docHash]);
+                        const ref = refs.get(identity);
+                        if (!ref) throw new Error('Incomplete search verification');
                         if ((ref.state === 'current' || ref.state === 'empty')
                             && ref.index_version === requirements.index_version
                             && ref.extract_schema_version === attachment.identity!.schemaVersion) {
@@ -170,16 +180,16 @@ export class InstanceSearchReadiness {
                 }
                 libraries.push({ scope_ref: library.scopeRef, supported: library.attachments.length, confirmed });
             }
-            if (!current()) return;
+            if (!scopeCurrent()) return;
             // Extraction can replace a ledger hash without a Zotero item notification.
             // Never publish membership for identities that changed during verification.
-            const after = await discoverSearchCensus(scope.ids, current);
-            if (!current()) return;
+            const after = await discoverSearchCensus(scope.ids, current, scopeCurrent);
+            if (!scopeCurrent()) return;
             if (JSON.stringify(after) !== censusKey) {
                 this.dirty = true;
                 return;
             }
-            const observation: SearchReadiness = { policy_version: 1, ready: false, reason: 'unknown',
+            const observation: SearchReadiness = { ...unknownSearchReadiness(),
                 discovery_complete: true, verified_at: verifiedAt, index_version: requirements.index_version,
                 extract_schema_versions: requirements.extract_schema_versions, zotero_local_id: scope.device, libraries };
             this.observation = evaluateSearchReadiness(observation, this.retainedReady);
@@ -190,7 +200,7 @@ export class InstanceSearchReadiness {
             this.dirty = false;
             this.error = null;
         } catch (error) {
-            if (current()) this.error = 'Could not verify current search coverage.';
+            if (scopeCurrent()) this.error = 'Could not verify current search coverage.';
         }
     }
 

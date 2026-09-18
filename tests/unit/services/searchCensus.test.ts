@@ -57,4 +57,19 @@ describe('complete search attachment census', () => {
         await expect(discoverSearchCensus([1, 2], () => current)).rejects.toThrow('scope changed');
         expect(Zotero.DB.queryAsync).toHaveBeenCalledTimes(1);
     });
+    it('checks full scope at batch boundaries while retaining cheap per-item cancellation', async () => {
+        items = Array.from({ length: 201 }, (_, id) => ({ id, key: `key${id}`, libraryID: 1, kind: 'pdf' }));
+        const scopeCurrent = vi.fn(() => true);
+        const current = vi.fn(() => true);
+        expect((await discoverSearchCensus([1], current, scopeCurrent))[0].attachments).toHaveLength(201);
+        expect(scopeCurrent.mock.calls.length).toBeLessThan(10);
+        expect(current.mock.calls.length).toBeGreaterThanOrEqual(201);
+    });
+    it('rejects a changed scope before loading the next batch without a notification', async () => {
+        items = Array.from({ length: 201 }, (_, id) => ({ id, key: `key${id}`, libraryID: 1, kind: 'pdf' }));
+        let scopeCurrent = true;
+        observe.mockImplementation(async () => { scopeCurrent = false; return null; });
+        await expect(discoverSearchCensus([1], () => true, () => scopeCurrent)).rejects.toThrow('scope changed');
+        expect(Zotero.Items.getAsync).toHaveBeenCalledTimes(1);
+    });
 });

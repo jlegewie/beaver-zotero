@@ -10,7 +10,6 @@ import { tryGetWindowRuntime } from "../runtime/windowRuntime";
 
 export function useBackgroundProcessingStatus(
     options: {
-        includeCoverage?: boolean;
         includeFailures?: boolean;
         pollIntervalMs?: number;
     } = {},
@@ -67,13 +66,6 @@ export function useBackgroundProcessingStatus(
                         worker,
                         documentCache,
                         searchReadiness: Zotero.Beaver.background?.searchReadiness?.getStatus(),
-                        coverage: hasSearchAccess ? previous.coverage : null,
-                        coverageUpdatedAt: hasSearchAccess
-                            ? previous.coverageUpdatedAt
-                            : null,
-                        coverageError: hasSearchAccess
-                            ? previous.coverageError
-                            : null,
                         failures: failures ?? previous.failures,
                         issues: issues ?? previous.issues,
                         issuesUpdatedAt:
@@ -102,6 +94,7 @@ export function useBackgroundProcessingStatus(
     }, [
         accountGeneration,
         hasOcrAccess,
+        // Restart the polling effect to refresh status immediately when search access changes.
         hasSearchAccess,
         options.includeFailures,
         setStatus,
@@ -136,32 +129,6 @@ export function useBackgroundProcessingStatus(
             if (timer !== undefined) clearTimeout(timer);
         };
     }, [options.pollIntervalMs, refresh]);
-
-    useEffect(() => {
-        if (!options.includeCoverage || !hasSearchAccess) return;
-        let cancelled = false;
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        const poll = async () => {
-            const readiness = Zotero.Beaver?.background?.searchReadiness;
-            if (!readiness) return;
-            await readiness.refresh();
-            if (cancelled) return;
-            setStatus((previous) => ({ ...previous,
-                searchReadiness: readiness.getStatus(),
-            }));
-            timer = setTimeout(() => void poll(), 60_000);
-        };
-        void poll();
-        return () => {
-            cancelled = true;
-            if (timer !== undefined) clearTimeout(timer);
-        };
-    }, [
-        accountGeneration,
-        options.includeCoverage,
-        hasSearchAccess,
-        setStatus,
-    ]);
 
     return refresh;
 }
