@@ -1550,9 +1550,6 @@ export function createWSCallbacks(
         onRequestAck: (data: WSRequestAckData) => {
             logger('WS onRequestAck:', data, 1);
             set(wsRequestAckDataAtom, data);
-            const id = store.get(currentThreadIdAtom);
-            if (id)
-                setAdmission(set, id, data.runId, "idle");
         },
 
         onPart: async (event: WSPartEvent) => {
@@ -1684,6 +1681,9 @@ export function createWSCallbacks(
                 highTokenUsage: event.high_token_usage,
             }, 1);
             set(activeRunAtom, (prev) => prev ? updateRunComplete(prev, event) : prev);
+            const run = store.get(activeRunAtom);
+            if (run?.id === event.run_id && run.thread_id)
+                setAdmission(set, run.thread_id, event.run_id, "idle");
             // Streaming-done is deliberately left set: this frame now arrives
             // as soon as the run is durable, with the citation lookup still
             // running, and that state is what tells the user their sources are
@@ -1763,6 +1763,14 @@ export function createWSCallbacks(
             logger('WS onThread:', { threadId: newThreadId }, 1);
             set(currentThreadIdAtom, newThreadId);
             set(activeRunAtom, (prev) => prev ? { ...prev, thread_id: newThreadId } : prev);
+            const run = store.get(activeRunAtom);
+            const admission = store.get(threadAdmissionAtom);
+            if (run) {
+                // The thread is claimed, but its run may not have been inserted yet.
+                setAdmission(set, newThreadId,
+                    admission?.threadId === newThreadId ? admission.tailRunId : null,
+                    "idle", run.id);
+            }
         },
 
         onThreadName: (event: WSThreadNameEvent) => {
@@ -2256,8 +2264,13 @@ async function executeWSRequest(
     restoreComposer?: () => void,
 ): Promise<void> {
     assertWriter(currentWriter());
+    const admission = get(threadAdmissionAtom);
+    if (request.thread_id && admission?.threadId !== request.thread_id) {
+        restoreComposer?.();
+        throw new Error("Refresh the chat before sending again.");
+    }
     request.expected_tail_run_id = request.thread_id
-        ? (get(threadAdmissionAtom)?.tailRunId ?? null)
+        ? (admission?.tailRunId ?? null)
         : null;
     // Every send/retry/resume lands here; stop if the client is already gone.
     if (clientShutDown) {
@@ -3831,7 +3844,8 @@ export async function withThreadWriter<T>(get: Getter, set: Setter, operation: (
             presence &&
             id &&
             writer?.preparing === 1 &&
-            !get(activeRunAtom) &&
+            (!get(activeRunAtom) || (!isRunActive(get(activeRunAtom)) &&
+                !!get(threadAdmissionAtom)?.unconfirmedRunId)) &&
             !get(retryPendingRunIdAtom)
         ) {
             const generation = getCredentialGeneration();
@@ -3844,7 +3858,8 @@ export async function withThreadWriter<T>(get: Getter, set: Setter, operation: (
             if (
                 snapshot.activity.state === "active" ||
                 (previous?.threadId === id &&
-                    previous.tailRunId !== snapshot.tailRunId)
+                    previous.tailRunId !== snapshot.tailRunId &&
+                    previous.unconfirmedRunId !== snapshot.tailRunId)
             ) {
                 if (snapshot.activity.state !== "active")
                     guardedSet(threadConflictAtom, "thread_tail_mismatch");

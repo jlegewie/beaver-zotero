@@ -202,7 +202,9 @@ describe('retry via synchronous truncation', () => {
         runtimeState.value = undefined;
         delete (Zotero as any).Beaver?.presence;
         store.set(viewedHistoryRevisionAtom, 0);
-        store.set(threadAdmissionAtom, null);
+        store.set(threadAdmissionAtom, {
+            threadId: "thread-1", tailRunId: null, activity: { state: "idle", run_id: null },
+        });
         store.set(threadConflictAtom, null);
         vi.clearAllMocks();
         connectMock.mockResolvedValue(undefined);
@@ -318,6 +320,7 @@ describe('retry via synchronous truncation', () => {
             store.set(activeRunAtom, null);
             store.set(threadRunsAtom, []);
             store.set(currentMessageContentAtom, "draft A");
+            historyMock.mockResolvedValueOnce({ runs: [], tail_run_id: null, activity: { state: "idle", run_id: null } });
             await store.set(sendWSMessageAtom, "draft A");
             await store.set(closeWSConnectionAtom);
             store.set(threadNavigationSeqAtom, 1);
