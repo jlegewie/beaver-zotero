@@ -59,6 +59,8 @@ export interface FileHashReference {
  * with `collectionToReference()` in `react/utils/zoteroReferences.ts`.
  */
 export interface CollectionReference extends ZoteroItemReference {
+    collection_id?: string;
+    parent_collection_id?: string;
     name: string;
     parent_key: string | null;
 }
@@ -69,7 +71,7 @@ export interface CollectionReference extends ZoteroItemReference {
  * combine the library ID with the key.
  */
 export function collectionReferenceKey(ref: CollectionReference): string {
-    return `${ref.library_id}-${ref.zotero_key}`;
+    return ref.collection_id ?? `${ref.library_ref ?? ref.library_id}-${ref.zotero_key}`;
 }
 
 /**
@@ -90,6 +92,8 @@ export interface ZoteroCreator {
 }
 
 export interface CollectionSummary {
+    collection_id?: string;
+    parent_collection_id?: string;
     library_id: number;
     zotero_key: string;
     /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
@@ -98,6 +102,8 @@ export interface CollectionSummary {
 }
 
 export interface ZoteroCollection extends ZoteroItemReference {
+    collection_id?: string;
+    parent_collection_id?: string;
     name: string;
     zotero_version: number;
     date_modified: string;

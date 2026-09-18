@@ -1,3 +1,4 @@
+import { resolveObjectIdReference } from '../../identity/libraryRef';
 /**
  * MessageAttachment represents an attachment in a message.
  * Mirrors the pydantic models SourceAttachment, AnnotationAttachment, NoteAttachment
@@ -72,6 +73,8 @@ export interface NoteAttachment extends BaseMessageAttachment {
 
 // "collection" type attachment (explicit collection reference)
 export interface CollectionAttachment extends BaseMessageAttachment {
+    collection_id?: string;
+    parent_collection_id?: string;
     type: "collection";
     name: string;
     parent_key: string | null;
@@ -231,7 +234,7 @@ export function messageAttachmentKey(attachment: MessageAttachment): string {
     if (isExternalFileAttachment(attachment)) {
         return `ext-${attachment.ext_key}`;
     }
-    return zoteroReferenceKey(attachment);
+    return attachment.type === 'collection' && attachment.collection_id ? attachment.collection_id : zoteroReferenceKey(attachment);
 }
 
 /** Portable and legacy aliases used to look up an existing attachment. */
@@ -239,7 +242,7 @@ export function messageAttachmentLookupKeys(attachment: MessageAttachment): stri
     if (isExternalFileAttachment(attachment)) {
         return [`ext-${attachment.ext_key}`];
     }
-    return zoteroReferenceLookupKeys(attachment);
+    return zoteroReferenceLookupKeys(attachment.type === 'collection' ? normalizeCollectionAttachment(attachment) : attachment);
 }
 
 /**
@@ -326,4 +329,10 @@ export function messageAttachmentsHaveSameIdentity(
 
 export function toMessageAttachment(attachment: SourceAttachment): MessageAttachment {
     return attachment;
+}
+
+/** Hydrate structured collection identity while retaining old attachment fields. */
+export function normalizeCollectionAttachment(attachment: CollectionAttachment): CollectionAttachment {
+    const ref = resolveObjectIdReference(attachment.collection_id ?? attachment.zotero_key ?? '');
+    return ref ? { ...attachment, ...ref } : attachment;
 }

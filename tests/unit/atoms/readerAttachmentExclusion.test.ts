@@ -309,7 +309,7 @@ describe('selected collection attachments', () => {
         });
         store.set(updateMessageCollectionsFromZoteroSelectionAtom);
         expect(store.get(currentMessageCollectionsAtom)).toEqual([{
-            library_id: 1, library_ref: 'u', zotero_key: 'COLL0001', name: 'Selected', parent_key: 'PARENT01',
+            collection_id: 'u-COLL0001', parent_collection_id: 'u-PARENT01', library_id: 1, library_ref: 'u', zotero_key: 'COLL0001', name: 'Selected', parent_key: 'PARENT01',
         }]);
     });
     it('does not fail when the active pane is unavailable', () => {

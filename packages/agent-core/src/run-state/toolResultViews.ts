@@ -105,12 +105,13 @@ export interface AnnotationRowView {
 export type ItemListRow = ItemRowView | AnnotationRowView;
 
 export interface CollectionRowView {
+    collection_id?: string;
     /** Used by the reveal click. */
-    library_id: number;
+    library_id?: number;
     /** Device-portable library identity ("u" | "g<groupID>"). */
     library_ref?: string;
     /** Collection key (NOT an item key); the frontend maps it to a CollectionReference. */
-    collection_key: string;
+    collection_key?: string;
     name: string;
 }
 

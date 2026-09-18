@@ -1,3 +1,5 @@
+import { formatCollectionId } from '../collections/collectionIdentity';
+import { assertCollectionLibraryWritable, recheckCollection, recheckCollectionMemberships } from '../collections/collectionMutations';
 /**
  * Utilities for executing and undoing organize_items agent actions.
  * These functions are used by AgentActionView for post-run action handling.
@@ -17,11 +19,31 @@ import { parseItemReference, resolveItemReference } from '../../utils/libraryIde
 export async function executeOrganizeItemsAction(
     action: AgentAction
 ): Promise<OrganizeItemsResultData> {
-    const { item_ids, tags, collections } = action.proposed_data as {
+    const { item_ids, tags, collections: requestedCollections } = action.proposed_data as {
         item_ids: string[];
         tags?: TagChanges | null;
         collections?: CollectionChanges | null;
     };
+    const collections = requestedCollections ? { ...requestedCollections } : requestedCollections;
+
+    const hasCollections = !!(collections?.add?.length || collections?.remove?.length);
+    const libraries = new Set<number>();
+    for (const id of new Set(item_ids)) {
+        const parsed = parseItemReference(id);
+        if (!parsed) continue;
+        const resolved = await resolveItemReference(parsed);
+        if (resolved.status !== 'found') continue;
+        assertCollectionLibraryWritable(resolved.item.libraryID);
+        libraries.add(resolved.item.libraryID);
+    }
+    if (hasCollections && libraries.size > 1) throw new Error('Collection changes require one library.');
+    for (const libraryID of libraries) {
+        for (const op of ['add', 'remove'] as const) {
+            const resolved = recheckCollectionMemberships(collections?.[op] ?? [], libraryID);
+            if (collections?.[op]) collections[op] = resolved.map(entry => entry.key);
+        }
+    }
+    const currentState: Record<string, { tags: string[]; collections: string[] }> = {};
 
     let itemsModified = 0;
     const failedItems: Record<string, string> = {};
@@ -32,7 +54,7 @@ export async function executeOrganizeItemsAction(
     const actualCollectionsRemoved = new Set<string>();
 
     // Process each item
-    for (const itemId of item_ids) {
+    for (const itemId of new Set(item_ids)) {
         try {
             // Accept both portable "<library_ref>-<key>" and legacy numeric ids.
             const parsed = parseItemReference(itemId);
@@ -46,6 +68,7 @@ export async function executeOrganizeItemsAction(
                 continue;
             }
             const item = resolved.item;
+            assertCollectionLibraryWritable(item.libraryID);
 
             let modified = false;
 
@@ -61,6 +84,8 @@ export async function executeOrganizeItemsAction(
                     return collection ? collection.key : null;
                 }).filter(Boolean) as string[])
                 : new Set<string>();
+
+            currentState[itemId] = { tags: [...existingTags], collections: [...existingCollections] };
 
             // Add tags (only if not already present)
             if (tags?.add && tags.add.length > 0) {
@@ -87,7 +112,7 @@ export async function executeOrganizeItemsAction(
             if (isTopLevel && collections?.add && collections.add.length > 0) {
                 for (const collKey of collections.add) {
                     if (!existingCollections.has(collKey)) {
-                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(item.libraryID, collKey);
+                        const collection = recheckCollection(collKey, item.libraryID).collection;
                         if (collection) {
                             item.addToCollection(collection.id);
                             actualCollectionsAdded.add(collKey);
@@ -101,7 +126,7 @@ export async function executeOrganizeItemsAction(
             if (isTopLevel && collections?.remove && collections.remove.length > 0) {
                 for (const collKey of collections.remove) {
                     if (existingCollections.has(collKey)) {
-                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(item.libraryID, collKey);
+                        const collection = recheckCollection(collKey, item.libraryID).collection;
                         if (collection) {
                             item.removeFromCollection(collection.id);
                             actualCollectionsRemoved.add(collKey);
@@ -131,9 +156,12 @@ export async function executeOrganizeItemsAction(
 
     return {
         items_modified: itemsModified,
+        current_state: currentState,
         // Store actual changes (not requested changes) for safe undo
         tags_added: actualTagsAdded.size > 0 ? [...actualTagsAdded] : undefined,
         tags_removed: actualTagsRemoved.size > 0 ? [...actualTagsRemoved] : undefined,
+        collection_ids_added: [...libraries][0] != null ? [...actualCollectionsAdded].map(key => formatCollectionId([...libraries][0], key)) : undefined,
+        collection_ids_removed: [...libraries][0] != null ? [...actualCollectionsRemoved].map(key => formatCollectionId([...libraries][0], key)) : undefined,
         collections_added: actualCollectionsAdded.size > 0 ? [...actualCollectionsAdded] : undefined,
         collections_removed: actualCollectionsRemoved.size > 0 ? [...actualCollectionsRemoved] : undefined,
         failed_items: hasFailures ? failedItems : undefined,
@@ -158,8 +186,9 @@ export async function undoOrganizeItemsAction(
     // If we have current_state, use it for precise undo
     // Otherwise, reverse the changes that were applied
     const resultData = action.result_data as OrganizeItemsResultData | undefined;
+    const failures: string[] = [];
 
-    for (const itemId of item_ids) {
+    for (const itemId of new Set(item_ids)) {
         try {
             // Accept both portable "<library_ref>-<key>" and legacy numeric ids.
             const parsed = parseItemReference(itemId);
@@ -173,13 +202,18 @@ export async function undoOrganizeItemsAction(
                 continue;
             }
             const item = resolved.item;
+            assertCollectionLibraryWritable(item.libraryID);
 
             let modified = false;
 
-            if (current_state && current_state[itemId]) {
+            if (resultData?.current_state?.[itemId] ?? current_state?.[itemId]) {
                 // Precise undo using saved state
-                const originalState = current_state[itemId];
+                const originalState = (resultData?.current_state?.[itemId] ?? current_state?.[itemId])!;
                 
+                // Resolve every membership before mutating the cached item.
+                const addedCollections = (collections?.add ?? []).map(ref => recheckCollection(ref, item.libraryID));
+                const removedCollections = (collections?.remove ?? []).map(ref => recheckCollection(ref, item.libraryID));
+
                 // Restore tags: remove added tags, add back removed tags
                 if (tags?.add) {
                     for (const tagName of tags.add) {
@@ -201,33 +235,23 @@ export async function undoOrganizeItemsAction(
                 }
 
                 // Restore collections
-                if (collections?.add) {
-                    for (const collKey of collections.add) {
-                        // Only remove if it wasn't in the original state
-                        if (!originalState.collections.includes(collKey)) {
-                            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(item.libraryID, collKey);
-                            if (collection) {
-                                item.removeFromCollection(collection.id);
-                                modified = true;
-                            }
-                        }
+                for (const { key, collection } of addedCollections) {
+                    if (!originalState.collections.includes(key)) {
+                        item.removeFromCollection(collection.id);
+                        modified = true;
                     }
                 }
-                if (collections?.remove) {
-                    for (const collKey of collections.remove) {
-                        // Only add back if it was in the original state
-                        if (originalState.collections.includes(collKey)) {
-                            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(item.libraryID, collKey);
-                            if (collection) {
-                                item.addToCollection(collection.id);
-                                modified = true;
-                            }
-                        }
+                for (const { key, collection } of removedCollections) {
+                    if (originalState.collections.includes(key)) {
+                        item.addToCollection(collection.id);
+                        modified = true;
                     }
                 }
             } else if (resultData) {
                 // Fallback: reverse using result_data which contains actual changes made
                 // This is safe because result_data now tracks actual changes, not requested changes
+                const addedCollections = (resultData.collections_added ?? []).map(ref => recheckCollection(ref, item.libraryID));
+                const removedCollections = (resultData.collections_removed ?? []).map(ref => recheckCollection(ref, item.libraryID));
                 if (resultData.tags_added) {
                     for (const tagName of resultData.tags_added) {
                         item.removeTag(tagName);
@@ -240,23 +264,13 @@ export async function undoOrganizeItemsAction(
                         modified = true;
                     }
                 }
-                if (resultData.collections_added) {
-                    for (const collKey of resultData.collections_added) {
-                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(item.libraryID, collKey);
-                        if (collection) {
-                            item.removeFromCollection(collection.id);
-                            modified = true;
-                        }
-                    }
+                for (const { collection } of addedCollections) {
+                    item.removeFromCollection(collection.id);
+                    modified = true;
                 }
-                if (resultData.collections_removed) {
-                    for (const collKey of resultData.collections_removed) {
-                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(item.libraryID, collKey);
-                        if (collection) {
-                            item.addToCollection(collection.id);
-                            modified = true;
-                        }
-                    }
+                for (const { collection } of removedCollections) {
+                    item.addToCollection(collection.id);
+                    modified = true;
                 }
             } else {
                 logger(`undoOrganizeItemsAction: No current_state or result_data for ${itemId}, skipping`, 1);
@@ -267,9 +281,11 @@ export async function undoOrganizeItemsAction(
                 await item.saveTx();
             }
         } catch (error) {
+            failures.push(String(error));
             logger(`undoOrganizeItemsAction: Failed to undo ${itemId}: ${error}`, 1);
         }
     }
 
     logger(`undoOrganizeItemsAction: Restored ${item_ids.length} items`, 1);
+    if (failures.length) throw new Error(failures.join('; '));
 }

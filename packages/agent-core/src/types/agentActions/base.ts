@@ -142,6 +142,7 @@ export interface CreateCollectionProposedData {
     /** Name of the collection to create */
     name: string;
     /** Parent collection key (optional, for subcollections) */
+    parent_collection_id?: string | null;
     parent_key?: string | null;
     /** Item IDs to add to the collection after creation (optional) */
     item_ids?: string[];
@@ -156,6 +157,7 @@ export interface CreateCollectionResultData {
     /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
     library_ref?: string;
     /** Zotero key of the created collection */
+    collection_id?: string;
     collection_key: string;
     /** Number of items added to the collection (if any were requested) */
     items_added?: number;
@@ -206,6 +208,9 @@ export interface OrganizeItemsProposedData {
  * Result data after applying an organize items action
  */
 export interface OrganizeItemsResultData {
+    collection_ids_added?: string[];
+    collection_ids_removed?: string[];
+    current_state?: Record<string, { tags: string[]; collections: string[] }>;
     /** Number of items that were successfully modified */
     items_modified: number;
     /** Tags that were added */
@@ -292,9 +297,11 @@ export interface ManageCollectionsProposedData {
     /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
     library_ref?: string;
     action: 'rename' | 'move' | 'delete';
+    collection_id?: string;
     collection_key: string;
     new_name?: string | null;
     /** Target parent key for move; null means top-level */
+    new_parent_collection_id?: string | null;
     new_parent_key?: string | null;
 }
 
@@ -310,14 +317,17 @@ export interface ManageCollectionsResultData {
     /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
     library_ref?: string;
     action: 'rename' | 'move' | 'delete';
+    collection_id?: string;
     collection_key: string;
     new_name?: string | null;
+    new_parent_collection_id?: string | null;
     new_parent_key?: string | null;
     /** Items in the collection at apply time (delete only, for preview display) */
     items_affected?: number | null;
     /** Collection name immediately before the execute op (undo + rejected-preview fallback) */
     old_name?: string | null;
     /** Parent key immediately before the execute op (undo) */
+    old_parent_collection_id?: string | null;
     old_parent_key?: string | null;
 }
 

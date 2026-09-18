@@ -2707,6 +2707,8 @@ export const CLIENT_FEATURES = {
     EXTERNAL_FILES: 'external_files',
     ASK_USER_QUESTION: 'ask_user_question',
     PORTABLE_IDS: 'portable_ids',
+    /** Scoped collection resolution, stable mutation targets, and portable result readers. */
+    COLLECTION_IDS: 'collection_ids',
     LIST_ITEMS_INCLUDE_CHILDREN: 'list_items_include_children',
     CREATE_NOTE_TAGS_COLLECTIONS: 'create_note_tags_collections',
     /** Batch multi-edit note editing (edit_note_batch action type). */
@@ -2849,6 +2851,8 @@ export interface CurrentLibrary {
 
 /** Current collection context for application state */
 export interface CurrentCollection {
+    collection_id?: string;
+    parent_collection_id?: string;
     /** Collection key */
     collection_key: string;
     /** Collection name */

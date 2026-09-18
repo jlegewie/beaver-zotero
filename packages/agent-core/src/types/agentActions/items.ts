@@ -39,6 +39,7 @@ export interface CreateItemProposedData {
     text_path?: string;  // Path to extracted text file
 
     // Zotero organization
+    collection_ids?: string[];
     collection_keys?: string[];  // Collection keys to add item to
     suggested_tags?: string[];  // Tags suggested for the item
 }
@@ -60,6 +61,8 @@ export interface CreateItemProposedData {
 export type AttachmentStatus = 'none' | 'pending' | 'available' | 'failed';
 
 export interface CreateItemResultData {
+    collection_ids?: string[];
+    collection_keys?: string[];
     // From ZoteroItemReference
     library_id: number;
     zotero_key: string;  // The Zotero key assigned to the new item

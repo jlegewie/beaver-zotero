@@ -1,3 +1,4 @@
+import { normalizeCollectionAttachment, messageAttachmentKey } from '@beaver/agent-core/types/attachments/apiTypes';
 import React from 'react';
 import type { BeaverAgentPrompt } from '@beaver/agent-core/agents/types';
 import {
@@ -222,10 +223,10 @@ export function RequestChips({
                         );
                     }
                     case 'collection': {
-                        const collection = att as CollectionAttachment;
+                        const collection = normalizeCollectionAttachment(att as CollectionAttachment);
                         return (
                             <CollectionChip
-                                key={`collection-${collection.library_id}-${collection.zotero_key}`}
+                                key={`collection-${messageAttachmentKey(collection)}`}
                                 name={collection.name}
                                 collectionRef={{
                                     library_id: collection.library_id,

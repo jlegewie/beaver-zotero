@@ -1,3 +1,4 @@
+import { resolveCollection } from '../../../src/services/collections/collectionIdentity';
 import React from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { CSSIcon, LibraryIcon } from '../icons/icons';
@@ -5,7 +6,6 @@ import { currentMessageCollectionsAtom } from '../../atoms/messageComposition';
 import { CollectionReference, collectionReferenceKey } from '@beaver/agent-core/types/zotero';
 import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { selectCollection } from '../../utils/selectItem';
-import { UNRESOLVED_LIBRARY_ID } from '../../../src/utils/libraryIdentity';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
 import { ChipWithPopup, type ChipPopupContent } from '@beaver/agent-ui/chat/ChipPopup';
 import { ChipButton } from '../agentRuns/requestChips/ChipButton';
@@ -38,8 +38,7 @@ export const MessageCollectionButton: React.FC<MessageCollectionButtonProps> = (
         try {
             // A portable library ref that couldn't be resolved on this device
             // carries library_id 0, which throws synchronously if looked up.
-            if (collection.library_id === UNRESOLVED_LIBRARY_ID) return;
-            const col = Zotero.Collections.getByLibraryAndKey(collection.library_id, collection.zotero_key);
+            const col = resolveCollection(collection.collection_id ?? `${collection.library_ref ?? collection.library_id}-${collection.zotero_key}`, { access: 'local' }).collection;
             if (col) selectCollection(col);
         } catch { /* ignore */ }
     };

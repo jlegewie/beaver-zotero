@@ -1,3 +1,4 @@
+import { recheckCollectionMemberships } from '../../collections/collectionMutations';
 import { collectionLibrariesMismatchError, resolveCollectionList } from '../../collections/collectionIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
@@ -72,6 +73,7 @@ interface CreateNoteResultData {
     parent_key?: string;
     collection_key?: string;
     /** All collection keys the note was added to (create_note_tags_collections). */
+    collection_ids?: string[];
     collection_keys?: string[];
     /** Tags applied to the created note (create_note_tags_collections). */
     tags?: string[];
@@ -481,6 +483,7 @@ async function validateCreateNoteAction(
         parent_key: parentKey,
         collection_key: resolvedCollectionKey,
         collection_keys: resolvedCollectionKeys,
+        collection_ids: recheckCollectionMemberships(resolvedCollectionKeys, resolvedLibraryId).map(entry => entry.collectionId),
         related_item_key: relatedItemKey,
         warning: combinedWarning,
     };
@@ -528,6 +531,7 @@ async function executeCreateNoteAction(
         library_ref?: string | null;  // resolved by validation
         parent_key?: string | null;  // resolved by validation
         collection_key?: string | null;  // resolved by validation
+        collection_ids?: string[] | null;
         collection_keys?: string[] | null;  // resolved by validation (create_note_tags_collections)
         tags?: string[] | null;  // create_note_tags_collections
         related_item_key?: string | null;  // set by validation when falling back to standalone
@@ -638,19 +642,15 @@ async function executeCreateNoteAction(
         // Child notes (with parentKey) cannot be in collections — Zotero's
         // fki_collectionItems_itemID_parentItemID trigger aborts saveTx if we try.
         // Validation should already have dropped the keys in that case; guard anyway.
-        const collectionKeysToApply = (collectionKeys && collectionKeys.length > 0)
+        const collectionKeysToApply = actionData.collection_ids ?? ((collectionKeys && collectionKeys.length > 0)
             ? collectionKeys
-            : (collectionKey ? [collectionKey] : []);
+            : (collectionKey ? [collectionKey] : []));
         const appliedCollectionKeys: string[] = [];
+        const memberships = recheckCollectionMemberships(parentKey ? [] : collectionKeysToApply, targetLibraryId);
         if (collectionKeysToApply.length > 0 && !parentKey) {
-            for (const key of collectionKeysToApply) {
-                try {
-                    zoteroNote.addToCollection(key);
-                    appliedCollectionKeys.push(key);
-                } catch (collectionError: any) {
-                    logger(`executeCreateNoteAction: Failed to stage collection assignment for ${key}: ${collectionError.message}`, 1);
-                    // Don't fail the whole operation for a collection assignment failure
-                }
+            for (const entry of memberships) {
+                zoteroNote.addToCollection(entry.collection.id);
+                appliedCollectionKeys.push(entry.key);
             }
         } else if (collectionKeysToApply.length > 0 && parentKey) {
             logger(`executeCreateNoteAction: Skipping addToCollection(${collectionKeysToApply.join(', ')}) because note has parent_key ${parentKey} (child notes cannot be in collections directly)`, 1);
@@ -740,7 +740,7 @@ async function executeCreateNoteAction(
             library_ref: libraryRefForLibraryID(zoteroNote.libraryID) ?? undefined,
             ...(zoteroNote.parentKey ? { parent_key: zoteroNote.parentKey } : {}),
             ...(appliedCollectionKeys.length > 0 ? { collection_key: appliedCollectionKeys[0] } : {}),
-            ...(appliedCollectionKeys.length > 0 ? { collection_keys: appliedCollectionKeys } : {}),
+            ...(appliedCollectionKeys.length > 0 ? { collection_keys: appliedCollectionKeys, collection_ids: memberships.map(entry => entry.collectionId) } : {}),
             ...(appliedTags.length > 0 ? { tags: appliedTags } : {}),
             ...(noteContent ? { note_content: noteContent } : {}),
             ...(warning ? { warning } : {}),
@@ -777,7 +777,7 @@ async function executeCreateNoteAction(
             request_id: request.request_id,
             success: false,
             error: errorMsg,
-            error_code: 'create_failed',
+            error_code: error?.code ?? 'create_failed',
             timing: buildTiming(),
         };
     }

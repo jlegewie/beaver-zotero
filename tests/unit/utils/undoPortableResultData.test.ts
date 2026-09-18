@@ -30,8 +30,11 @@ const eraseTx = vi.fn();
 beforeEach(() => {
     vi.clearAllMocks();
     eraseTx.mockResolvedValue(undefined);
+    installMutationInstance();
     const zotero = (globalThis as any).Zotero;
-    zotero.Libraries = { ...zotero.Libraries, userLibraryID: 1 };
+    zotero.Beaver.libraryScopeInitialized = true;
+    zotero.Beaver.searchableLibraryIds = [1, 5];
+    zotero.Libraries = { ...zotero.Libraries, userLibraryID: 1, get: (libraryID: number) => ({ libraryID, editable: true }) };
     zotero.Groups = {
         ...zotero.Groups,
         getLibraryIDFromGroupID: vi.fn((groupID: number) => (groupID === 50 ? 5 : false)),
@@ -40,7 +43,7 @@ beforeEach(() => {
     zotero.Items = {
         ...zotero.Items,
         getByLibraryAndKeyAsync: vi.fn(async (libraryID: number, key: string) =>
-            libraryID === 5 && key === 'AAAAAAA1' ? { eraseTx } : null),
+            libraryID === 5 && key === 'AAAAAAA1' ? { eraseTx, libraryID } : null),
     };
 });
 
@@ -101,5 +104,3 @@ describe('undoCreateNoteAction with portable-only result data', () => {
         expect(eraseTx).not.toHaveBeenCalled();
     });
 });
-
-beforeEach(installMutationInstance);
