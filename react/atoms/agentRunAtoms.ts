@@ -2915,16 +2915,27 @@ async function startRegenerateRunOwned(
             }
             if (!(await reconcileThread(get, set, current, settledHistory))) return;
             threadRuns = get(threadRunsAtom);
-            persistedRunIds = new Set(threadRuns.map(run => run.id));
-            // A failed pre-admission request exists only in this renderer. Keep
-            // that suffix when the authoritative tail and persisted prefix still
-            // match; a remotely truncated or rewritten history is a conflict.
-            const localSuffix = localHistory.slice(threadRuns.length);
+            const persisted = new Set(threadRuns.map(run => run.id));
+            persistedRunIds = persisted;
+            // A request that failed before the backend inserted its run exists
+            // only in this renderer, and a follow-up sent after it is saved
+            // behind it, so such runs are kept wherever they sit. Every other
+            // local run must appear in the authoritative history in the same
+            // order, and the tail this renderer last observed must still
+            // stand; a remotely truncated or rewritten history is a conflict.
+            // A failed or stopped run the backend did persist is in both lists
+            // and needs no rescue.
+            const isLocalOnlyFailure = (run: AgentRun) =>
+                !persisted.has(run.id) && (run.status === 'error' || run.status === 'canceled');
+            const localPersisted = localHistory.filter(run => !isLocalOnlyFailure(run));
             if (observedAdmission?.threadId === settlementThreadId
                 && observedAdmission.tailRunId === get(threadAdmissionAtom)?.tailRunId
-                && threadRuns.every((run, index) => run.id === localHistory[index]?.id)
-                && localSuffix.every(run => run.status === 'error' || run.status === 'canceled')) {
-                threadRuns = [...threadRuns, ...localSuffix];
+                && localPersisted.length === threadRuns.length
+                && localPersisted.every((run, index) => run.id === threadRuns[index].id)) {
+                const authoritative = threadRuns;
+                let next = 0;
+                threadRuns = localHistory.map(run =>
+                    isLocalOnlyFailure(run) ? run : authoritative[next++]);
                 set(threadRunsAtom, threadRuns);
             }
             if (threadRuns.some((run) => !intendedRunIds.has(run.id))) {

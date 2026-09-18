@@ -316,6 +316,51 @@ describe('retry via synchronous truncation', () => {
             expect(truncateMock).not.toHaveBeenCalled();
             expect(connectMock).not.toHaveBeenCalled();
         });
+        /** A first request that failed before its row was written, then a saved follow-up. */
+        function unpersistedFailureBeforeFollowUp() {
+            store.set(threadRunsAtom, [makeRun("local", { status: "error" }), makeRun("a")]);
+            store.set(activeRunAtom, null);
+            store.set(threadAdmissionAtom, { threadId: "thread-1", tailRunId: "a", activity: { state: "idle", run_id: null } });
+            historyMock.mockResolvedValue({ tail_run_id: "a", activity: { state: "idle", run_id: null } });
+            loadThreadRunsMock.mockResolvedValue({ runs: [makeRun("a")], citations: [], agentActions: [], tailRunId: "a", activity: { state: "idle", run_id: null } });
+        }
+        it("retries an unsaved failed request that a saved follow-up sits behind", async () => {
+            unpersistedFailureBeforeFollowUp();
+            await store.set(regenerateFromRunAtom, { runId: "local" });
+            expect(store.get(threadConflictAtom)).toBeNull();
+            expect(truncateMock).toHaveBeenCalledWith("thread-1", ["a"], null);
+            expect(sentRequest().user_prompt.content).toBe("prompt for local");
+            expect(sentRequest().expected_tail_run_id).toBeNull();
+        });
+        it("keeps an unsaved failed request ahead of the saved follow-up it retries", async () => {
+            unpersistedFailureBeforeFollowUp();
+            await store.set(regenerateFromRunAtom, { runId: "a" });
+            expect(store.get(threadConflictAtom)).toBeNull();
+            expect(truncateMock).toHaveBeenCalledWith("thread-1", ["a"], null);
+            expect(sentRequest().expected_tail_run_id).toBeNull();
+            expect(threadRunIds()).toEqual(["local"]);
+        });
+        it("truncates a saved failed run instead of treating it as local-only", async () => {
+            const savedFailure = makeRun("b", { status: "error" });
+            store.set(threadRunsAtom, [makeRun("a"), savedFailure]);
+            store.set(activeRunAtom, null);
+            store.set(threadAdmissionAtom, { threadId: "thread-1", tailRunId: "b", activity: { state: "idle", run_id: null } });
+            historyMock.mockResolvedValue({ tail_run_id: "b", activity: { state: "idle", run_id: null } });
+            loadThreadRunsMock.mockResolvedValue({ runs: [makeRun("a"), savedFailure], citations: [], agentActions: [], tailRunId: "b", activity: { state: "idle", run_id: null } });
+            await store.set(regenerateFromRunAtom, { runId: "b" });
+            expect(store.get(threadConflictAtom)).toBeNull();
+            expect(truncateMock).toHaveBeenCalledWith("thread-1", ["b"], "a");
+            expect(sentRequest().expected_tail_run_id).toBe("a");
+        });
+        it("reports a conflict when the saved follow-up behind an unsaved failure was removed elsewhere", async () => {
+            unpersistedFailureBeforeFollowUp();
+            historyMock.mockResolvedValue({ tail_run_id: null, activity: { state: "idle", run_id: null } });
+            loadThreadRunsMock.mockResolvedValue({ runs: [], citations: [], agentActions: [], tailRunId: null, activity: { state: "idle", run_id: null } });
+            await store.set(regenerateFromRunAtom, { runId: "local" });
+            expect(store.get(threadConflictAtom)).toBe("thread_tail_mismatch");
+            expect(truncateMock).not.toHaveBeenCalled();
+            expect(connectMock).not.toHaveBeenCalled();
+        });
         it("does not restore a canceled send's draft during another chat's retry conflict", async () => {
             store.set(activeRunAtom, null);
             store.set(threadRunsAtom, []);
