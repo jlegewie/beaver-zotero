@@ -258,6 +258,7 @@ async function handleMetadataSearchHttpRequest(request: any) {
 
     return {
         items: response.items,
+        unresolved_collections: response.unresolved_collections,
         error: response.error ?? null,
         error_code: response.error_code ?? null,
     };
@@ -282,6 +283,7 @@ async function handleTopicSearchHttpRequest(request: any) {
 
     return {
         items: response.items,
+        unresolved_collections: response.unresolved_collections,
         error: response.error ?? null,
         error_code: response.error_code ?? null,
     };
@@ -305,6 +307,7 @@ async function handleQuickSearchHttpRequest(request: any) {
 
     return {
         items: response.items,
+        unresolved_collections: response.unresolved_collections,
         detail: response.detail,
         total_count: response.total_count,
         // Without this a caller reads a truncated total as the complete match
@@ -496,6 +499,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         // to as well or a localhost run loses the WHERE half of the card.
         library_name: response.library_name,
         collection_names: response.collection_names,
+        collection_ids: response.collection_ids,
         // The join mode actually applied to `conditions`. Its absence is how the
         // caller detects a provider that predates the field, so it has to be
         // forwarded here too.

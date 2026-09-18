@@ -47,6 +47,7 @@ export async function handleItemSearchByMetadataRequest(
 ): Promise<WSItemSearchByMetadataResponse> {
     // Start timing
     const startTime = Date.now();
+    const unresolvedCollections: string[] = [];
     let searchEndTime = 0;
     let serializationEndTime = 0;
     
@@ -66,6 +67,7 @@ export async function handleItemSearchByMetadataRequest(
         logger('handleItemSearchByMetadataRequest: No query parameters or filters provided', 1);
         return {
             type: 'item_search_by_metadata',
+            ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
             request_id: request.request_id,
             items: [],
             timing: {
@@ -92,6 +94,7 @@ export async function handleItemSearchByMetadataRequest(
             logger(`handleItemSearchByMetadataRequest: ${filterError.message}`, 1);
             return {
                 type: 'item_search_by_metadata',
+                ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
                 request_id: request.request_id,
                 items: [],
                 error: filterError.message,
@@ -115,6 +118,7 @@ export async function handleItemSearchByMetadataRequest(
     const hasCollectionsFilter = collectionsFilter.length > 0;
     if (hasCollectionsFilter) {
         const resolution = resolveCollectionsFilter(collectionsFilter, libraryIds);
+        unresolvedCollections.push(...resolution.unresolved);
 
         // A collections_filter that resolves to nothing must narrow the search to
         // no results, never widen it to the whole library — and it is reported as
@@ -125,6 +129,7 @@ export async function handleItemSearchByMetadataRequest(
             logger(`handleItemSearchByMetadataRequest: ${filterError.message}`, 1);
             return {
                 type: 'item_search_by_metadata',
+                ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
                 request_id: request.request_id,
                 items: [],
                 error: filterError.message,
@@ -163,6 +168,7 @@ export async function handleItemSearchByMetadataRequest(
             logger(`handleItemSearchByMetadataRequest: ${filterError.message}`, 1);
             return {
                 type: 'item_search_by_metadata',
+                ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
                 request_id: request.request_id,
                 items: [],
                 error: filterError.message,
@@ -182,6 +188,7 @@ export async function handleItemSearchByMetadataRequest(
             logger('handleItemSearchByMetadataRequest: tags_filter resolved to no tags', 1);
             return {
                 type: 'item_search_by_metadata',
+                ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
                 request_id: request.request_id,
                 items: [],
                 timing: {
@@ -277,6 +284,7 @@ export async function handleItemSearchByMetadataRequest(
     if (failedLibraries > 0 && failedLibraries === searchedLibraries) {
         return {
             type: 'item_search_by_metadata',
+            ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
             request_id: request.request_id,
             items: [],
             error: 'Searching the Zotero library failed. Please try again.',
@@ -337,6 +345,7 @@ export async function handleItemSearchByMetadataRequest(
 
     const response: WSItemSearchByMetadataResponse = {
         type: 'item_search_by_metadata',
+        ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
         request_id: request.request_id,
         items: resultItems,
         timing,

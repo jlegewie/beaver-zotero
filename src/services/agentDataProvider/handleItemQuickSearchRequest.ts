@@ -94,10 +94,12 @@ export async function handleItemQuickSearchRequest(
     request: WSItemQuickSearchRequest
 ): Promise<WSItemQuickSearchResponse> {
     const startTime = Date.now();
+    const unresolvedCollections: string[] = [];
     const detail: QuickSearchDetail = request.detail === 'full' ? 'full' : 'compact';
 
     const fail = (message: string, errorCode: WSItemQuickSearchResponse['error_code']): WSItemQuickSearchResponse => ({
         type: 'item_quick_search',
+        ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
         request_id: request.request_id,
         items: [],
         detail,
@@ -109,6 +111,7 @@ export async function handleItemQuickSearchRequest(
 
     const empty = (): WSItemQuickSearchResponse => ({
         type: 'item_quick_search',
+        ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
         request_id: request.request_id,
         items: [],
         detail,
@@ -151,6 +154,7 @@ export async function handleItemQuickSearchRequest(
     const collectionKeysByLibrary = new Map<number, Set<string>>();
     if (hasCollectionsFilter) {
         const resolution = resolveCollectionsFilter(collectionsFilter, libraryIds);
+        unresolvedCollections.push(...resolution.unresolved);
 
         const filterError = collectionsFilterError(resolution);
         if (filterError) {
@@ -344,6 +348,7 @@ export async function handleItemQuickSearchRequest(
 
     return {
         type: 'item_quick_search',
+        ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
         request_id: request.request_id,
         items,
         detail,

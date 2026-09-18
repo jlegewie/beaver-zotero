@@ -5,13 +5,13 @@ vi.mock('@beaver/agent-core/platform/logger', () => ({
 }));
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
-    validateLibraryAccess: vi.fn(),
+    validateCollectionLibraryAccess: vi.fn(),
     resolveStoredTagName: vi.fn(),
 }));
 
 import type { WSResolvePopulationRequest } from '@beaver/agent-core/protocol/agentProtocol';
 import { handleResolvePopulationRequest } from '../../../src/services/agentDataProvider/handleResolvePopulationRequest';
-import { resolveStoredTagName, validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';
+import { resolveStoredTagName, validateCollectionLibraryAccess } from '../../../src/services/agentDataProvider/utils';
 
 /** One row of the fake `items` table the handler reads key/dateAdded from. */
 interface ItemRow {
@@ -170,7 +170,7 @@ describe('handleResolvePopulationRequest', () => {
         searches = [];
         libraryTags = ['to-read', 'reviewed'];
 
-        vi.mocked(validateLibraryAccess).mockReturnValue({
+        vi.mocked(validateCollectionLibraryAccess).mockReturnValue({
             valid: true,
             library: { libraryID: LIBRARY_ID, name: 'My Library' },
         } as any);
@@ -184,6 +184,7 @@ describe('handleResolvePopulationRequest', () => {
 
         // modelObjectId() derives the portable "u-" prefix from this.
         (globalThis as any).Zotero.Libraries.userLibraryID = LIBRARY_ID;
+        (globalThis as any).Zotero.Beaver = { libraryScopeInitialized: true, searchableLibraryIds: [LIBRARY_ID] };
 
         (globalThis as any).Zotero.Search = class MockSearch {
             libraryID = 0;
@@ -208,7 +209,8 @@ describe('handleResolvePopulationRequest', () => {
 
         (globalThis as any).Zotero.Collections = {
             getByLibraryAndKey: vi.fn((libraryID: number, key: string) =>
-                collections.get(`${libraryID}/${key}`) ?? false),
+                (collections.has(`${libraryID}/${key}`) ? { ...collections.get(`${libraryID}/${key}`), libraryID, key } : false)),
+            getByLibrary: vi.fn(() => []),
         };
 
         (globalThis as any).Zotero.Tags = {
@@ -280,6 +282,15 @@ describe('handleResolvePopulationRequest', () => {
     });
 
     describe('native predicates', () => {
+        it('accepts portable scope while retaining ordered display names and native search keys', async () => {
+            collections.set(`${LIBRARY_ID}/ABCD2345`, { id: 77, name: 'Methods' });
+            const result = await handleResolvePopulationRequest(makeRequest({ collection_keys: ['u-ABCD2345', 'ABCD2345'], max_items: 0 }));
+            expect(result.error).toBeUndefined();
+            expect(result.collection_names).toEqual(['Methods', 'Methods']);
+            expect(result.collection_ids).toEqual(['u-ABCD2345', 'u-ABCD2345']);
+            expect(orGroupValues('collection')).toEqual(['ABCD2345']);
+        });
+
         it('resolves unfiled through the native unfiled condition', async () => {
             searchResultIds = [1];
             seedItem(1);
@@ -342,6 +353,7 @@ describe('handleResolvePopulationRequest', () => {
         });
 
         it('recurses a collection condition given through the condition grammar', async () => {
+            collections.set(`${LIBRARY_ID}/ABCD2345`, { id: 77, name: 'Methods' });
             searchResultIds = [1];
             seedItem(1);
 
@@ -1259,7 +1271,7 @@ describe('handleResolvePopulationRequest', () => {
 
         it('emits group ids as g<groupID>-<key>, not library_id-key', async () => {
             const groupLibraryID = 3;
-            vi.mocked(validateLibraryAccess).mockReturnValue({
+            vi.mocked(validateCollectionLibraryAccess).mockReturnValue({
                 valid: true,
                 library: { libraryID: groupLibraryID, name: 'Some Group' },
             } as any);
@@ -1507,7 +1519,7 @@ describe('handleResolvePopulationRequest', () => {
 
     describe('library access', () => {
         it('returns the library error with available libraries and runs no search when the library is excluded', async () => {
-            vi.mocked(validateLibraryAccess).mockReturnValue({
+            vi.mocked(validateCollectionLibraryAccess).mockReturnValue({
                 valid: false,
                 error: 'Library "Private" is excluded from Beaver',
                 error_code: 'library_not_searchable',
@@ -1527,7 +1539,7 @@ describe('handleResolvePopulationRequest', () => {
         });
 
         it('returns the not-found error with available libraries for an unknown library', async () => {
-            vi.mocked(validateLibraryAccess).mockReturnValue({
+            vi.mocked(validateCollectionLibraryAccess).mockReturnValue({
                 valid: false,
                 error: 'Library not found: "Nope"',
                 error_code: 'library_not_found',
@@ -2085,7 +2097,7 @@ describe('handleResolvePopulationRequest', () => {
 
         it('excludes a portable group id only from its matching group library', async () => {
             const groupLibraryID = 3;
-            vi.mocked(validateLibraryAccess).mockReturnValue({
+            vi.mocked(validateCollectionLibraryAccess).mockReturnValue({
                 valid: true,
                 library: { libraryID: groupLibraryID, name: 'Some Group' },
             } as any);

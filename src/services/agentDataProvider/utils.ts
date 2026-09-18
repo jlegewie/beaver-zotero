@@ -1,3 +1,4 @@
+import { CollectionResolutionError, collectionLibrariesMismatchError, resolveCollection, resolveCollectionList, type CollectionScope } from '../collections/collectionIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     AttachmentInfo,
@@ -12,7 +13,6 @@ import {
     libraryRefForLibraryID,
     modelObjectId,
     modelObjectIdFromReference,
-    parseItemReference,
     parseLibraryRef,
     resolveLibraryRef,
     UNRESOLVED_LIBRARY_ID,
@@ -531,144 +531,35 @@ export interface CollectionLookupResult {
     libraryID: number;
 }
 
-/**
- * Get collection by ID, key, or name.
- *
- * Supports:
- * - Number: Looks up by collection ID
- * - String: Checks for a key (8 alphanumeric chars), then a compound "<library_ref>-<key>"
- *   or "<libraryID>-<key>" format (e.g. "u-ABCD1234", "g123-ABCD1234", "1-ABCD1234"), then
- *   numeric ID (digits only), then searches by name
- * - null/undefined: Returns null
- *
- * The compound format is resolved only in the embedded library, ignoring the
- * libraryId parameter.
- *
- * When libraryId is provided, does a full lookup (key + name) in that library first.
- * Cross-library fallback only applies when the input looks like a Zotero key (8 alphanumeric
- * chars). Name-based lookups stay scoped to the requested
- * library to avoid returning a same-named collection from the wrong library.
- *
- * @param collectionIdOrName - Collection ID, key, or name
- * @param libraryId - Optional library ID to search first (falls back to other libraries)
- * @returns Collection and its library ID, or null if not found
- */
+/** Compatibility adapter. A supplied library is a constraint, never a hint. */
 export function getCollectionByIdOrName(
-    collectionIdOrName: number | string | null | undefined,
-    libraryId?: number
+    input: number | string | null | undefined,
+    libraryId?: number,
+    options: CollectionScope = {},
 ): CollectionLookupResult | null {
-    if (collectionIdOrName == null) {
-        return null;
+    if (input == null) return null;
+    try {
+        const resolved = resolveCollection(input, { ...options, libraryID: libraryId });
+        return { collection: resolved.collection, libraryID: resolved.libraryID };
+    } catch (error) {
+        if (error instanceof CollectionResolutionError && error.code === 'collection_not_found') return null;
+        throw error;
     }
-    
-    // If it's a number, look up by ID
-    if (typeof collectionIdOrName === 'number') {
-        const collection = Zotero.Collections.get(collectionIdOrName);
-        return collection ? { collection, libraryID: collection.libraryID } : null;
-    }
-
-    // Try a compound "<library_ref>-<key>" or "<libraryID>-<key>" format
-    // (e.g. "u-ABCD1234", "g123-ABCD1234", "1-ABCD1234")
-    const compoundParsed = parseItemReference(collectionIdOrName);
-    if (compoundParsed) {
-        const compoundLibId = compoundParsed.library_ref
-            ? resolveLibraryRef(compoundParsed)
-            : compoundParsed.library_id!;
-        if (compoundLibId != null && Zotero.Utilities.isValidObjectKey(compoundParsed.zotero_key)) {
-            const collection = Zotero.Collections.getByLibraryAndKey(compoundLibId, compoundParsed.zotero_key);
-            if (collection) return { collection, libraryID: collection.libraryID };
-        }
-    }
-
-    const isKeyLike = Zotero.Utilities.isValidObjectKey(collectionIdOrName);
-    const hasLibraryId = libraryId !== undefined && Number.isFinite(libraryId);
-
-    // If libraryId provided, do full lookup (key + name) there first
-    if (hasLibraryId) {
-        const found = findCollectionInLibrary(collectionIdOrName, libraryId, isKeyLike);
-        if (found) return found;
-    }
-
-    // Try numeric collection ID
-    if (/^\d+$/.test(collectionIdOrName)) {
-        const parsedId = parseInt(collectionIdOrName, 10);
-        const collection = Zotero.Collections.get(parsedId);
-        if (collection) return { collection, libraryID: collection.libraryID };
-    }
-    
-    // Cross-library fallback: only for key-like inputs.
-    // Name-based lookups stay scoped to the requested library since names like
-    // "Inbox" are commonly duplicated across libraries.
-    if (!isKeyLike && hasLibraryId) {
-        return null;
-    }
-
-    const searchableIds = getSearchableLibraryIds();
-    const otherLibraryIds = Zotero.Libraries.getAll()
-        .map((lib: any) => lib.libraryID as number)
-        .filter((id: number) => !hasLibraryId || id !== libraryId);
-    const sortedLibraryIds = [
-        ...otherLibraryIds.filter(id => searchableIds.includes(id)),
-        ...otherLibraryIds.filter(id => !searchableIds.includes(id)),
-    ];
-
-    const matches: CollectionLookupResult[] = [];
-    for (const libId of sortedLibraryIds) {
-        if (!isKeyLike && !searchableIds.includes(libId)) continue;
-        const found = findCollectionInLibrary(collectionIdOrName, libId, isKeyLike);
-        if (found) {
-            if (isKeyLike && found.collection.key === collectionIdOrName) return found;
-            if (searchableIds.includes(libId)) matches.push(found);
-        }
-    }
-    if (matches.length > 1) throw ambiguousCollectionError(collectionIdOrName, matches.map(match => match.collection));
-    return matches[0] ?? null;
 }
 
-/**
- * Try to find a collection in a single library by key, then by name.
- */
-function findCollectionInLibrary(
-    input: string,
-    libraryId: number,
-    isKeyLike: boolean
-): CollectionLookupResult | null {
-    if (isKeyLike) {
-        const collection = Zotero.Collections.getByLibraryAndKey(libraryId, input);
-        if (collection) return { collection, libraryID: collection.libraryID };
+/** Infer a single read library from collections only when no library was requested. */
+export function validateCollectionLibraryAccess(
+    libraryInput: number | string | null | undefined,
+    references: (string | number)[],
+): ReturnType<typeof validateLibraryAccess> {
+    if (libraryInput != null || references.length === 0) return validateLibraryAccess(libraryInput);
+    const resolution = resolveCollectionList(references);
+    if (resolution.failures.length) throw resolution.failures[0].error;
+    const libraryIds = new Set(resolution.collections.map(entry => entry.libraryID));
+    if (libraryIds.size !== 1) {
+        throw collectionLibrariesMismatchError(resolution.collections, 'search');
     }
-    
-    const collections = Zotero.Collections.getByLibrary(libraryId, true);
-    const inputLower = input.toLowerCase();
-    const byName = collections.filter(
-        (c: Zotero.Collection) => c.name.toLowerCase() === inputLower
-    );
-    if (byName.length > 1 && isLibrarySearchable(libraryId)) throw ambiguousCollectionError(input, byName);
-    if (byName[0]) return { collection: byName[0], libraryID: byName[0].libraryID };
-    
-    return null;
-}
-
-class CollectionAmbiguityError extends Error {
-    readonly code = 'ambiguous_collection';
-}
-
-/** Describe ambiguous names using only libraries the caller may access. */
-function ambiguousCollectionError(input: string, collections: Zotero.Collection[]): Error {
-    const candidates = collections.filter(c => isLibrarySearchable(c.libraryID)).map(collection => {
-        const path = [collection.name];
-        const seen = new Set<number>([collection.id]);
-        let parentId = collection.parentID;
-        while (parentId && !seen.has(parentId)) {
-            seen.add(parentId);
-            const parent = Zotero.Collections.get(parentId);
-            if (!parent) break;
-            path.unshift(parent.name);
-            parentId = parent.parentID;
-        }
-        return `${modelObjectId(collection.libraryID, collection.key)} (${path.join(' / ')})`;
-    });
-    return new CollectionAmbiguityError(`Ambiguous collection name "${input}". Use a collection ID: ${candidates.join('; ')}.`);
+    return validateLibraryAccess(resolution.collections[0].libraryID);
 }
 
 /** A collection a `collections_filter` entry matched outside the searched libraries. */
@@ -694,23 +585,21 @@ export interface CollectionsFilterResolution {
     /** Filter entries that matched only outside the searched libraries. */
     outOfScope: OutOfScopeCollection[];
     ambiguity?: string;
+    failure?: CollectionResolutionError;
 }
 
 /** A `collections_filter` that left the search with no usable collection. */
 export interface CollectionsFilterError {
     message: string;
-    error_code: 'collection_not_found' | 'library_not_searchable' | 'ambiguous_collection';
+    error_code: CollectionResolutionError['code'];
 }
 
 /**
  * Resolve a `collections_filter` against the libraries a search will cover.
  *
- * Names must identify a single collection across the searched libraries.
- * Matches outside those libraries are
- * reported separately rather than dropped: numeric IDs and key-like entries
- * resolve through a cross-library fallback that can land in a library the
- * request is not scoped to, or that the user excluded from Beaver, and the
- * caller has to tell that apart from a bad reference.
+ * Keys and names must identify a single collection across the searched libraries.
+ * Qualified references remain exact. Partial discovery retains unresolved inputs;
+ * ambiguity always fails the request.
  *
  * `libraryIds` must already be the searchable libraries the search will cover;
  * an empty list resolves nothing at all.
@@ -719,59 +608,14 @@ export function resolveCollectionsFilter(
     collectionsFilter: (string | number)[],
     libraryIds: number[]
 ): CollectionsFilterResolution {
-    const collections = new Map<number, Zotero.Collection>();
-    const unresolved: string[] = [];
-    const outOfScope: OutOfScopeCollection[] = [];
-
-    // Nothing to search in: resolve nothing rather than looking the filter up
-    // library-less, which would enumerate every library the user excluded from
-    // Beaver. The searchable set is also empty while the profile is still
-    // loading, so a lookup here could report an allowed collection as excluded.
-    if (libraryIds.length === 0) {
-        return { collections: [], unresolved, outOfScope };
-    }
-
-    for (const filter of collectionsFilter) {
-        const matches: Zotero.Collection[] = [];
-        if (typeof filter === 'number') {
-            const collection = Zotero.Collections.get(filter);
-            if (collection) matches.push(collection);
-        } else {
-            for (const libraryId of libraryIds) {
-                try {
-                    const match = getCollectionByIdOrName(filter, libraryId);
-                    if (match) matches.push(match.collection);
-                } catch (error) {
-                    if (!(error instanceof CollectionAmbiguityError)) throw error;
-                    return { collections: [], unresolved, outOfScope, ambiguity: error.message };
-                }
-            }
-        }
-
-        const inScope = Array.from(new Map(matches
-            .filter(collection => libraryIds.includes(collection.libraryID))
-            .map(collection => [collection.id, collection])).values());
-        if (inScope.length > 1 && typeof filter === 'string' && !/^\d+$/.test(filter)
-            && !parseItemReference(filter) && inScope.some(collection => collection.key !== filter)) {
-            return { collections: [], unresolved, outOfScope, ambiguity: ambiguousCollectionError(filter, inScope).message };
-        }
-        if (inScope.length > 0) {
-            for (const collection of inScope) collections.set(collection.id, collection);
-        } else if (matches.length > 0) {
-            const [collection] = matches;
-            outOfScope.push({
-                input: String(filter),
-                // Keep an excluded library's collection name out of the resolution
-                // entirely, so no caller can surface it by accident.
-                name: isLibrarySearchable(collection.libraryID) ? collection.name : null,
-                libraryId: collection.libraryID,
-            });
-        } else {
-            unresolved.push(String(filter));
-        }
-    }
-
-    return { collections: Array.from(collections.values()), unresolved, outOfScope };
+    const resolution = resolveCollectionList(collectionsFilter, { libraryIds });
+    return {
+        collections: resolution.collections.map(entry => entry.collection),
+        unresolved: resolution.failures.filter(entry => entry.error.code !== 'ambiguous_collection').map(entry => String(entry.input)),
+        outOfScope: [],
+        ambiguity: resolution.failures.find(entry => entry.error.code === 'ambiguous_collection')?.error.message,
+        failure: resolution.failures[0]?.error,
+    };
 }
 
 /**
@@ -788,6 +632,7 @@ export function collectionsFilterError(
 ): CollectionsFilterError | null {
     if (resolution.ambiguity) return { message: resolution.ambiguity, error_code: 'ambiguous_collection' };
     if (resolution.collections.length > 0) return null;
+    if (resolution.failure) return { message: resolution.failure.message, error_code: resolution.failure.code };
 
     if (resolution.unresolved.length > 0) {
         const label = resolution.unresolved.length === 1 ? 'Collection not found' : 'Collections not found';

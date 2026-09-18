@@ -1,3 +1,4 @@
+import { collectionNotFoundError } from '../collections/collectionIdentity';
 import type { OperationContext } from '../agentDataProvider/operationContext';
 /**
  * Utility functions for create_note agent actions.
@@ -93,7 +94,9 @@ export async function executeCreateNoteAction(action: AgentAction, runId: string
     // resolve raw keys-or-names from the proposed data (covers pending actions
     // persisted before validation normalized them).
     let collectionKeysToApply: string[] = [];
-    if (proposed.collection_keys && proposed.collection_keys.length > 0) {
+    if (parentKey) {
+        collectionKeysToApply = [];
+    } else if (proposed.collection_keys && proposed.collection_keys.length > 0) {
         collectionKeysToApply = [...proposed.collection_keys];
     } else {
         const rawCollections = (proposed.collections && proposed.collections.length > 0)
@@ -104,7 +107,7 @@ export async function executeCreateNoteAction(action: AgentAction, runId: string
             if (match && !collectionKeysToApply.includes(match.collection.key)) {
                 collectionKeysToApply.push(match.collection.key);
             } else if (!match) {
-                logger(`executeCreateNoteAction: Collection "${entry}" not found, skipping`, 1);
+                throw collectionNotFoundError(entry);
             }
         }
         if (collectionKeysToApply.length === 0 && proposed.collection_key) {

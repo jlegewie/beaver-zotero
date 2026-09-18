@@ -178,7 +178,7 @@ export const zoteroItemData: ItemDataHost = {
 
     async resolveCollectionName(keyOrName: string | number, libraryId?: number): Promise<string | null> {
         try {
-            const result = getCollectionByIdOrName(keyOrName, libraryId);
+            const result = getCollectionByIdOrName(keyOrName, libraryId, { access: 'local' });
             return result?.collection.name ?? null;
         } catch (e) {
             logger(`zoteroItemData: collection name resolution failed: ${e}`);
