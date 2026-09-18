@@ -277,6 +277,83 @@ describe('retry via synchronous truncation', () => {
                 makeRun("live", { status: "in_progress" }),
             );
         });
+        it("retries a local failure while a persisted successor is running", async () => {
+            store.set(threadRunsAtom, [makeRun("a"), makeRun("local", { status: "error" })]);
+            store.set(activeRunAtom, makeRun("live", { status: "in_progress" }));
+            store.set(threadAdmissionAtom, { threadId: "thread-1", tailRunId: "a", unconfirmedRunId: "live", activity: { state: "idle", run_id: null } });
+            historyMock.mockResolvedValue({ runs: [makeRun("a"), makeRun("live", { status: "canceled" })], tail_run_id: "live", activity: { state: "idle", run_id: null } });
+            loadThreadRunsMock.mockResolvedValue({ runs: [makeRun("a"), makeRun("live", { status: "canceled" })], citations: [], agentActions: [], tailRunId: "live", activity: { state: "idle", run_id: null } });
+            await store.set(regenerateFromRunAtom, { runId: "local" });
+            expect(cancelMock).toHaveBeenCalled();
+            expect(store.get(threadConflictAtom)).toBeNull();
+            expect(truncateMock).toHaveBeenCalledWith("thread-1", ["live"], "a");
+            expect(sentRequest().user_prompt.content).toBe("prompt for local");
+        });
+        it("auto-retry uses the saved predecessor across a local-only failure", async () => {
+            store.set(threadRunsAtom, [makeRun("a"), makeRun("local", { status: "error" })]);
+            store.set(activeRunAtom, makeRun("live", { status: "error" }));
+            store.set(threadAdmissionAtom, { threadId: "thread-1", tailRunId: "live", activity: { state: "idle", run_id: null } });
+            historyMock.mockResolvedValue({ runs: [makeRun("a"), makeRun("live", { status: "error" })], tail_run_id: "live", activity: { state: "idle", run_id: null } });
+            await store.set(autoRetryErroredRunAtom, "live");
+            expect(truncateMock).toHaveBeenCalledWith("thread-1", ["live"], "a");
+            expect(sentRequest().expected_tail_run_id).toBe("a");
+            expect(threadRunIds()).toEqual(["a", "local"]);
+        });
+        it.each(["idle", "expired"] as const)("auto-retries an unsaved suffix with %s admission without truncating", async (state) => {
+            store.set(threadRunsAtom, [makeRun("a")]);
+            store.set(activeRunAtom, makeRun("local", { status: "error" }));
+            store.set(threadAdmissionAtom, { threadId: "thread-1", tailRunId: "a", activity: { state: "idle", run_id: null } });
+            historyMock.mockResolvedValue({ runs: [makeRun("a")], tail_run_id: "a", activity: { state, run_id: null } });
+            await store.set(autoRetryErroredRunAtom, "local");
+            expect(truncateMock).not.toHaveBeenCalled();
+            expect(sentRequest().expected_tail_run_id).toBe("a");
+            expect(threadRunIds()).toEqual(["a"]);
+        });
+        it.each(["busy", "unseen", "removed", "offline"])("preserves local history when auto-retry history is %s", async (state) => {
+            store.set(threadRunsAtom, [makeRun("a"), makeRun("local", { status: "error" })]);
+            store.set(activeRunAtom, makeRun("live", { status: "error" }));
+            store.set(threadAdmissionAtom, { threadId: "thread-1", tailRunId: "live", activity: { state: "idle", run_id: null } });
+            store.set(currentMessageContentAtom, "unsent draft");
+            historyMock.mockImplementation(async () => {
+                if (state === "offline") throw new Error("offline");
+                return {
+                    runs: state === "removed" ? [makeRun("a")] : [makeRun("a"), makeRun("live", { status: "error" }), ...(state === "unseen" ? [makeRun("other")] : [])],
+                    tail_run_id: state === "removed" ? "a" : state === "unseen" ? "other" : "live",
+                    activity: { state: state === "busy" ? "active" : "idle", run_id: null },
+                };
+            });
+            await store.set(autoRetryErroredRunAtom, "live");
+            expect(truncateMock).not.toHaveBeenCalled();
+            expect(connectMock).not.toHaveBeenCalled();
+            expect(threadRunIds()).toEqual(["a", "local", "live"]);
+            expect(store.get(currentMessageContentAtom)).toBe("unsent draft");
+            expect(store.get(retryPendingRunIdAtom)).toBeNull();
+        });
+        it("abandons automatic retry when a new chat opens during the history read", async () => {
+            store.set(threadRunsAtom, [makeRun("a")]);
+            store.set(activeRunAtom, makeRun("live", { status: "error" }));
+            store.set(threadAdmissionAtom, { threadId: "thread-1", tailRunId: "live", activity: { state: "idle", run_id: null } });
+            historyMock.mockImplementation(async () => {
+                await store.set(newThreadAtom, { skipAutoPopulate: true, skipActiveRunConfirm: true });
+                return { runs: [makeRun("a"), makeRun("live")], tail_run_id: "live", activity: { state: "idle", run_id: null } };
+            });
+            await store.set(autoRetryErroredRunAtom, "live");
+            expect(truncateMock).not.toHaveBeenCalled();
+            expect(connectMock).not.toHaveBeenCalled();
+            expect(store.get(currentThreadIdAtom)).toBeNull();
+            expect(store.get(retryPendingRunIdAtom)).toBeNull();
+        });
+        it("does not rescue a removed saved failure when a claimed successor becomes durable", async () => {
+            store.set(threadRunsAtom, [makeRun("a", { status: "error" })]);
+            store.set(activeRunAtom, makeRun("live", { status: "in_progress" }));
+            store.set(threadAdmissionAtom, { threadId: "thread-1", tailRunId: "a", unconfirmedRunId: "live", activity: { state: "idle", run_id: null } });
+            historyMock.mockResolvedValue({ runs: [makeRun("live")], tail_run_id: "live", activity: { state: "idle", run_id: null } });
+            loadThreadRunsMock.mockResolvedValue({ runs: [makeRun("live")], citations: [], agentActions: [], tailRunId: "live", activity: { state: "idle", run_id: null } });
+            await store.set(regenerateFromRunAtom, { runId: "a" });
+            expect(store.get(threadConflictAtom)).toBe("thread_tail_mismatch");
+            expect(truncateMock).not.toHaveBeenCalled();
+            expect(connectMock).not.toHaveBeenCalled();
+        });
         function unpersistedFollowUp() {
             store.set(threadRunsAtom, [makeRun("a")]);
             store.set(activeRunAtom, makeRun("local", { status: "error" }));
@@ -311,6 +388,51 @@ describe('retry via synchronous truncation', () => {
         it("does not reinterpret a remotely removed accepted run as a local failure", async () => {
             unpersistedFollowUp();
             store.set(threadAdmissionAtom, { threadId: "thread-1", tailRunId: "local", activity: { state: "idle", run_id: null } });
+            await store.set(regenerateFromRunAtom, { runId: "local" });
+            expect(store.get(threadConflictAtom)).toBe("thread_tail_mismatch");
+            expect(truncateMock).not.toHaveBeenCalled();
+            expect(connectMock).not.toHaveBeenCalled();
+        });
+        /** A first request that failed before its row was written, then a saved follow-up. */
+        function unpersistedFailureBeforeFollowUp() {
+            store.set(threadRunsAtom, [makeRun("local", { status: "error" }), makeRun("a")]);
+            store.set(activeRunAtom, null);
+            store.set(threadAdmissionAtom, { threadId: "thread-1", tailRunId: "a", activity: { state: "idle", run_id: null } });
+            historyMock.mockResolvedValue({ tail_run_id: "a", activity: { state: "idle", run_id: null } });
+            loadThreadRunsMock.mockResolvedValue({ runs: [makeRun("a")], citations: [], agentActions: [], tailRunId: "a", activity: { state: "idle", run_id: null } });
+        }
+        it("retries an unsaved failed request that a saved follow-up sits behind", async () => {
+            unpersistedFailureBeforeFollowUp();
+            await store.set(regenerateFromRunAtom, { runId: "local" });
+            expect(store.get(threadConflictAtom)).toBeNull();
+            expect(truncateMock).toHaveBeenCalledWith("thread-1", ["a"], null);
+            expect(sentRequest().user_prompt.content).toBe("prompt for local");
+            expect(sentRequest().expected_tail_run_id).toBeNull();
+        });
+        it("keeps an unsaved failed request ahead of the saved follow-up it retries", async () => {
+            unpersistedFailureBeforeFollowUp();
+            await store.set(regenerateFromRunAtom, { runId: "a" });
+            expect(store.get(threadConflictAtom)).toBeNull();
+            expect(truncateMock).toHaveBeenCalledWith("thread-1", ["a"], null);
+            expect(sentRequest().expected_tail_run_id).toBeNull();
+            expect(threadRunIds()).toEqual(["local"]);
+        });
+        it("truncates a saved failed run instead of treating it as local-only", async () => {
+            const savedFailure = makeRun("b", { status: "error" });
+            store.set(threadRunsAtom, [makeRun("a"), savedFailure]);
+            store.set(activeRunAtom, null);
+            store.set(threadAdmissionAtom, { threadId: "thread-1", tailRunId: "b", activity: { state: "idle", run_id: null } });
+            historyMock.mockResolvedValue({ tail_run_id: "b", activity: { state: "idle", run_id: null } });
+            loadThreadRunsMock.mockResolvedValue({ runs: [makeRun("a"), savedFailure], citations: [], agentActions: [], tailRunId: "b", activity: { state: "idle", run_id: null } });
+            await store.set(regenerateFromRunAtom, { runId: "b" });
+            expect(store.get(threadConflictAtom)).toBeNull();
+            expect(truncateMock).toHaveBeenCalledWith("thread-1", ["b"], "a");
+            expect(sentRequest().expected_tail_run_id).toBe("a");
+        });
+        it("reports a conflict when the saved follow-up behind an unsaved failure was removed elsewhere", async () => {
+            unpersistedFailureBeforeFollowUp();
+            historyMock.mockResolvedValue({ tail_run_id: null, activity: { state: "idle", run_id: null } });
+            loadThreadRunsMock.mockResolvedValue({ runs: [], citations: [], agentActions: [], tailRunId: null, activity: { state: "idle", run_id: null } });
             await store.set(regenerateFromRunAtom, { runId: "local" });
             expect(store.get(threadConflictAtom)).toBe("thread_tail_mismatch");
             expect(truncateMock).not.toHaveBeenCalled();
