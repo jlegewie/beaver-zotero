@@ -17,7 +17,7 @@ import {
 } from '@beaver/agent-core/run-state/batchProgress';
 import { ArrowDownIcon, Icon } from '../icons';
 import { getHost } from '../host';
-import { BatchItemFilter, BatchItemFindingRow, BatchItemList } from './BatchItemRows';
+import { BatchItemFilter, BatchItemFindingRow, BatchItemList, ITEM_ROWS_STEP } from './BatchItemRows';
 import type { BatchItemListAction } from './BatchItemRows';
 
 /**
@@ -139,6 +139,7 @@ function moreLabel(overflow: number): string {
 
 /** Layout wording for a list the surface itself capped. */
 const showAllLabel = (count: number): string => `Show all ${count.toLocaleString()}`;
+const showMoreLabel = (count: number): string => `Show ${count.toLocaleString()} more`;
 
 /** "N across M items" when memberships outnumber items, else just "N". */
 function countAcrossItems(total: number, items: number): string {
@@ -165,8 +166,11 @@ interface TrackLegendEntry {
     color: string;
 }
 
-/** Swatch for the part of the track nothing has been credited to yet. */
-const REMAINING_SWATCH = 'var(--fill-quarternary)';
+/**
+ * Swatch for the part of the track nothing has been credited to yet: the
+ * track draws no segment there, so this is its background colour.
+ */
+const REMAINING_SWATCH = 'var(--fill-quinary)';
 
 /**
  * The breakdown as a legend, or `null` when it cannot be drawn as one.
@@ -517,8 +521,14 @@ const BatchOutcomeRowList: React.FC<{
     surface?: BatchSurface;
     population?: BatchPopulationLookup;
 }> = ({ entries, block, top, showMeter, maxRows, itemFirst, operation, libraryRef, surface, population }) => {
-    const [showAll, setShowAll] = useState(false);
-    const shown = showAll || maxRows === undefined ? entries : entries.slice(0, maxRows);
+    // Paged like an item list, and for the same reason: an item-first row
+    // resolves its item through the host, so "the rest" of a large block is
+    // hundreds of lookups if it arrives at once.
+    const [limit, setLimit] = useState(maxRows ?? Infinity);
+    const shown = entries.slice(0, limit);
+    const remaining = entries.length - shown.length;
+    const nextPage = Math.min(remaining, ITEM_ROWS_STEP);
+    const showMore = () => setLimit((current) => current + nextPage);
     // Bind so a host object with state still gets its `this`.
     const navigation = getHost().navigation;
     const reveal = navigation?.revealBatchOutcome?.bind(navigation);
@@ -552,16 +562,16 @@ const BatchOutcomeRowList: React.FC<{
                     tabIndex={0}
                     onClick={(e) => {
                         e.stopPropagation();
-                        setShowAll(true);
+                        showMore();
                     }}
                     onKeyDown={(e) => {
                         if (e.key !== 'Enter' && e.key !== ' ') return;
                         e.preventDefault();
                         e.stopPropagation();
-                        setShowAll(true);
+                        showMore();
                     }}
                 >
-                    {showAllLabel(entries.length)}
+                    {remaining <= ITEM_ROWS_STEP ? showAllLabel(entries.length) : showMoreLabel(nextPage)}
                 </span>
             )}
         </>

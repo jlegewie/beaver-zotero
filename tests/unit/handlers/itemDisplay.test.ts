@@ -65,7 +65,12 @@ function regularItem(key: string, libraryID = 1, overrides: Record<string, any> 
 
 /** The items this device holds, keyed `<libraryID>-<key>`. */
 let library: Record<string, any>;
-const getByLibraryAndKeyAsync = vi.fn(async (libraryID: number, key: string) => library[`${libraryID}-${key}`] ?? false);
+/** Zotero's in-memory key map: a stable numeric id per held item, no database. */
+const getIDFromLibraryAndKey = vi.fn((libraryID: number, key: string) => {
+    const index = Object.keys(library).indexOf(`${libraryID}-${key}`);
+    return index === -1 ? false : index + 1;
+});
+const getAsync = vi.fn(async (ids: number[]) => ids.map((id) => library[Object.keys(library)[id - 1]]));
 
 function request(itemIds: string[]) {
     return { event: 'item_display_request', request_id: 'r1', item_ids: itemIds } as any;
@@ -83,7 +88,7 @@ beforeEach(() => {
     });
     mocks.checkLibraryExcluded.mockReturnValue(null);
     const zotero = (globalThis as any).Zotero;
-    zotero.Items = { ...(zotero.Items ?? {}), getByLibraryAndKeyAsync };
+    zotero.Items = { ...(zotero.Items ?? {}), getIDFromLibraryAndKey, getAsync };
 });
 
 describe('handleItemDisplayRequest', () => {
@@ -113,6 +118,8 @@ describe('handleItemDisplayRequest', () => {
 
         const res = await handleItemDisplayRequest(request(['u-AAAAAAAA', '1-BBBBBBBB', 'g5-CCCCCCCC']));
 
+        // One fetch and one field load for the whole list, not one per item.
+        expect(getAsync).toHaveBeenCalledTimes(1);
         expect(mocks.loadQuickSearchHitData).toHaveBeenCalledTimes(1);
         expect(mocks.loadQuickSearchHitData.mock.calls[0][0]).toHaveLength(3);
         expect(res.items.map((row) => row.item_id)).toEqual(['u-AAAAAAAA', 'u-BBBBBBBB', 'g5-CCCCCCCC']);
@@ -138,7 +145,8 @@ describe('handleItemDisplayRequest', () => {
         const res = await handleItemDisplayRequest(request(['g5-CCCCCCCC']));
 
         expect(res.items).toEqual([]);
-        expect(getByLibraryAndKeyAsync).not.toHaveBeenCalled();
+        expect(getIDFromLibraryAndKey).not.toHaveBeenCalled();
+        expect(getAsync).not.toHaveBeenCalled();
     });
 
     it('describes an item once however many ways the request spells it', async () => {
@@ -147,7 +155,7 @@ describe('handleItemDisplayRequest', () => {
         const res = await handleItemDisplayRequest(request(['u-AAAAAAAA', '1-AAAAAAAA', 'u-AAAAAAAA']));
 
         expect(res.items).toHaveLength(1);
-        expect(getByLibraryAndKeyAsync).toHaveBeenCalledTimes(1);
+        expect(getAsync).toHaveBeenCalledWith([1]);
     });
 
     it('gives an attachment its content kind, for the icon', async () => {

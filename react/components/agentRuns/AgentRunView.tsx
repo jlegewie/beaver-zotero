@@ -16,6 +16,7 @@ import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
 import { autoReplacementPendingRunIdsAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { getHost } from '@beaver/agent-ui/host';
 import BatchRunReceipt, { hasBatchReceipt } from '@beaver/agent-ui/chat/BatchRunReceipt';
+import { FindQueryProvider } from '@beaver/agent-ui/chat/findContext';
 
 /**
  * The receipt with the thread behind it. Its own component so the thread
@@ -28,7 +29,6 @@ const BatchReceiptForChain: React.FC<{ runs: readonly AgentRun[] }> = ({ runs })
     const threadRuns = useAtomValue(threadRunsAtom);
     return <BatchRunReceipt runs={runs} historyRuns={threadRuns} />;
 };
-import { FindQueryProvider } from '@beaver/agent-ui/chat/findContext';
 
 interface AgentRunViewProps {
     run: AgentRun;

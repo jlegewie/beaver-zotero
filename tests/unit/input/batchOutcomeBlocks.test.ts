@@ -648,6 +648,26 @@ it('shows why no action was needed', () => {
     expect(rendered).toContain('2');
 });
 
+describe('a block with more item-first rows than it shows', () => {
+    const finding = (label: string, ids: string[]) => ({ kind: 'finding' as const, label, item_ids: ids });
+
+    it('offers the rest a page at a time, since each row resolves its item', () => {
+        const count = 120;
+        const block: BatchOutcomeBlock = {
+            heading: 'Findings',
+            kind: 'finding',
+            rows: Array.from({ length: count }, (_, i) => ({ label: `finding ${i}`, count: 1 })),
+        };
+        const items: BatchItemsRecord = {
+            batch_id: 'b1',
+            groups: Array.from({ length: count }, (_, i) => finding(`finding ${i}`, [`u-K${i}`])),
+        };
+        const rendered = BatchOutcomeBlockView({ block, items });
+        expect(findingRows(rendered)).toHaveLength(10);
+        expect(text(rendered)).toContain('Show 50 more');
+    });
+});
+
 describe('an item list with more rows than it shows', () => {
     const finding = (label: string, ids: string[]) => ({ kind: 'finding' as const, label, item_ids: ids });
     const itemRows = (node: React.ReactNode) =>

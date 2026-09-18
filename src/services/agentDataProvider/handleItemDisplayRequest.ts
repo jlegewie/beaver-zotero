@@ -64,10 +64,13 @@ export async function handleItemDisplayRequest(
     logger(`handleItemDisplayRequest: Describing ${requested.length} item(s)`, 1);
 
     try {
-        // Resolve first, then load once: `loadDataTypes` takes the whole set
-        // and issues one query per data type and library.
-        const items: Zotero.Item[] = [];
-        const seen = new Set<string>();
+        // Keys to ids from the in-memory key map, which Zotero fills for every
+        // library at startup, so this loop touches no database; then the items
+        // in one fetch and their fields in one load, each a query per data
+        // type and library rather than a round trip per item. This runs on
+        // the batch start's critical path.
+        const itemIDs: number[] = [];
+        const seen = new Set<number>();
         for (const itemId of requested.slice(0, MAX_ITEM_DISPLAY_IDS)) {
             if (typeof itemId !== 'string') continue;
             const ref = parseItemReference(itemId);
@@ -76,12 +79,12 @@ export async function handleItemDisplayRequest(
             // A library this device does not have, or one the user excluded
             // from Beaver: no row, and no lookup that could leak its contents.
             if (!libraryID || checkLibraryExcluded(libraryID)) continue;
-            const key = `${libraryID}-${ref.zotero_key}`;
-            if (seen.has(key)) continue;
-            seen.add(key);
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, ref.zotero_key);
-            if (item) items.push(item);
+            const id = Zotero.Items.getIDFromLibraryAndKey(libraryID, ref.zotero_key);
+            if (!id || seen.has(id)) continue;
+            seen.add(id);
+            itemIDs.push(id);
         }
+        const items: Zotero.Item[] = itemIDs.length ? await Zotero.Items.getAsync(itemIDs) : [];
 
         await loadQuickSearchHitData(items);
 

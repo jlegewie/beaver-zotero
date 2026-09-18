@@ -99,7 +99,9 @@ function resolvedRowModel(
     display: ResolvedItemDisplay | null | undefined,
     fallback: string,
 ): Pick<ItemRowModel, 'name' | 'title' | 'iconName'> {
-    const leadsWithTitle = !!display && !display.creator && !!display.title;
+    // A note has no creator either, but its display name already IS its
+    // title, and its icon says what it is: it keeps the plain shape below.
+    const leadsWithTitle = !!display && display.itemType !== 'note' && !display.creator && !!display.title;
     const name = leadsWithTitle
         ? display.title!
         : display?.displayName || (display === undefined ? '…' : fallback);
