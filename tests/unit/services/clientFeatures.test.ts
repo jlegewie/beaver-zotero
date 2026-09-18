@@ -74,6 +74,10 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // resolve_population request field: a build that predates it drops the ORed
 // condition group and resolves a WIDER population than the batch described, so
 // the backend refuses the field up front rather than infer support.
+// batch_item_display is declaration-only because it gates an inbound
+// item_display_request a client only answers if it has the handler: a build
+// that predates it drops the event, and every batch start would wait out the
+// request timeout for nothing.
 // continuation_new_run is declaration-only because it gates an offer shape the
 // client must render and act on: a build that predates it ignores `mode` and
 // `prompt`, so a 'new_run' card would either resume the wrong way or show a
@@ -102,6 +106,7 @@ const DECLARATION_ONLY_FEATURES = [
     'batch_jobs',
     'citation_graph',
     'population_any_conditions',
+    'batch_item_display',
     'item_links',
     'continuation_new_run',
 ];

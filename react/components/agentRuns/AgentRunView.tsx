@@ -11,12 +11,24 @@ import { RunErrorDisplay } from './RunErrorDisplay';
 import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
 import { threadWarningsAtom } from '../../atoms/warnings';
-import { resumeChainAtom, runToolResultsAtom, resumedRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
+import { resumeChainAtom, runToolResultsAtom, resumedRunIdsAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
 import { autoReplacementPendingRunIdsAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { getHost } from '@beaver/agent-ui/host';
 import BatchRunReceipt, { hasBatchReceipt } from '@beaver/agent-ui/chat/BatchRunReceipt';
 import { FindQueryProvider } from '@beaver/agent-ui/chat/findContext';
+
+/**
+ * The receipt with the thread behind it. Its own component so the thread
+ * subscription is paid only by the few runs that draw a receipt: the records
+ * a receipt names items from are written where each batch started, which can
+ * be an earlier answer than the one the batch ended under, but reading the
+ * thread from every run card would re-render all of them per streamed frame.
+ */
+const BatchReceiptForChain: React.FC<{ runs: readonly AgentRun[] }> = ({ runs }) => {
+    const threadRuns = useAtomValue(threadRunsAtom);
+    return <BatchRunReceipt runs={runs} historyRuns={threadRuns} />;
+};
 
 interface AgentRunViewProps {
     run: AgentRun;
@@ -173,7 +185,7 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
             {/* What this answer's batch jobs ended up doing. Above the changes
                 card, so the two read as outcome then detail: how each batch came
                 out, then the individual changes it made. */}
-            {showBatchReceipt && <BatchRunReceipt runs={chainRuns} />}
+            {showBatchReceipt && <BatchReceiptForChain runs={chainRuns} />}
 
             {/* Agent actions (e.g., create item from citations) — client-specific
                 UI injected by the host; absent for clients without it. The whole

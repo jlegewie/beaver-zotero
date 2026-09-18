@@ -266,6 +266,168 @@
     text-decoration: underline;
 }
 
+/* The colour a legend entry or a section head shares with its track segment. */
+.beaver-root .batch-swatch {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+}
+.beaver-root .batch-track-legend {
+    column-gap: 0.85rem;
+    row-gap: 0.15rem;
+    margin-top: 2px;
+}
+.beaver-root .batch-block-heading-count {
+    letter-spacing: 0;
+    text-transform: none;
+    font-variant-numeric: tabular-nums;
+}
+/* The head aligns its parts on the baseline, which puts an empty dot's bottom
+   edge on it and the dot too high; centre it on the caps instead. */
+.beaver-root .batch-block-heading .batch-swatch {
+    align-self: center;
+}
+
+/* The receipt's framing. Scoped so the live bar above the composer, which
+   draws the same body, keeps its own. Chrome and section heads step down to
+   caps in secondary grey; the batch title and the rows are what stand out. */
+.beaver-root .batch-outcome-receipt {
+    row-gap: 0.9rem;
+}
+.beaver-root .batch-outcome-receipt .batch-outcome-goal {
+    font-size: 0.875rem;
+    line-height: 1.45;
+}
+.beaver-root .batch-outcome-receipt .batch-block-heading {
+    font-size: 0.85rem;
+    color: var(--fill-primary);
+}
+.beaver-root .batch-outcome-receipt .batch-block-heading-count {
+    color: var(--fill-secondary);
+}
+
+/* A tally label wraps rather than truncates: a finding is a sentence the user
+   has to read. The 100-character backend cap bounds it to a few lines. */
+.beaver-root .batch-tally-label {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.beaver-root .batch-tally-toggle {
+    cursor: pointer;
+    border-radius: 4px;
+    margin: 0 -4px;
+    padding: 1px 4px;
+}
+.beaver-root .batch-tally-toggle:hover,
+.beaver-root .batch-tally-toggle:focus-visible {
+    background-color: var(--fill-quinary);
+    outline: none;
+}
+.beaver-root .batch-tally-meter,
+.beaver-root .batch-tally-chevron {
+    /* Align with the first line of a label that may wrap. */
+    margin-top: 0.45em;
+}
+.beaver-root .batch-tally-chevron {
+    margin-top: 0.15em;
+}
+
+/* The items behind a row: indented under it, ruled off from the label. */
+.beaver-root .batch-item-list {
+    gap: 0.15rem;
+    margin: 0.15rem 0 0.35rem 0.35rem;
+    padding: 0.1rem 0 0.15rem 0.6rem;
+    border-left: 2px solid var(--fill-quinary);
+}
+.beaver-root .batch-item-list-actions {
+    padding-top: 0.2rem;
+}
+.beaver-root .batch-item-row {
+    padding: 2px 4px;
+    margin: 0 -4px;
+    border-radius: 3px;
+}
+/* Name takes its content width; the title fills what is left and truncates.
+   The name only shrinks when it itself is wider than the row — a title-led
+   name (a creatorless item, a standalone attachment) still cannot push the
+   reveal glyph out. */
+.beaver-root .batch-item-row-name {
+    font-weight: 500;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.beaver-root .batch-item-row-title {
+    flex: 1 1 0%;
+    min-width: 0;
+}
+.beaver-root .batch-item-row-icon {
+    display: inline-flex;
+    align-items: center;
+}
+.beaver-root .batch-item-row-link {
+    cursor: pointer;
+}
+.beaver-root .batch-item-row-link:hover,
+.beaver-root .batch-item-row-link:focus-visible {
+    background-color: var(--fill-quinary);
+    outline: none;
+}
+.beaver-root .batch-item-row-reveal {
+    opacity: 0;
+}
+.beaver-root .batch-item-row-link:hover .batch-item-row-reveal,
+.beaver-root .batch-item-row-link:focus-visible .batch-item-row-reveal {
+    opacity: 1;
+}
+
+/* A one-item finding: the item leads, the finding follows in full. The whole
+   block is the target — the finding is about the item, so it opens it too. */
+.beaver-root .batch-item-finding {
+    padding: 3px 4px;
+    margin: 0 -4px;
+    border-radius: 4px;
+}
+.beaver-root .batch-item-finding-link {
+    cursor: pointer;
+}
+.beaver-root .batch-item-finding-link:hover,
+.beaver-root .batch-item-finding-link:focus-visible {
+    background-color: var(--fill-quinary);
+    outline: none;
+}
+.beaver-root .batch-item-finding-link:hover .batch-item-row-reveal,
+.beaver-root .batch-item-finding-link:focus-visible .batch-item-row-reveal {
+    opacity: 1;
+}
+.beaver-root .batch-item-finding + .batch-item-finding {
+    border-top: 1px solid var(--fill-senary);
+}
+/* Indented to the name, past the type icon, so the finding reads as the
+   item's line continued rather than a new row. */
+.beaver-root .batch-item-finding-text {
+    padding-left: 21px;
+    line-height: 1.4;
+}
+
+/* Filter box above a long record. */
+.beaver-root .batch-item-filter {
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 6px;
+    padding: 0.15rem 0.5rem;
+    background-color: var(--beaver-surface-overlay);
+}
+.beaver-root .batch-item-filter-input {
+    border: 0;
+    outline: 0;
+    background: transparent;
+    font: inherit;
+    color: var(--fill-primary);
+}
+
 /* Batch progress: the track before anything has been credited.
    A determinate track sitting at zero reads as a batch that has stalled, which
    is exactly wrong at the moment one has just been approved and the model is

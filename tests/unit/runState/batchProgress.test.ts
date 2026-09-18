@@ -1,7 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import {
+    batchItemGroupFor,
+    batchItemIdentityKey,
+    batchItemReference,
     batchOutcomeTarget,
+    batchPopulationItemFor,
+    readBatchPopulationRecord,
+    selectChainBatchPopulations,
     isBatchProgressStamp,
+    readBatchItemsStamp,
+    selectChainBatchItems,
     readBatchProgressStamp,
     selectBatchProgress,
     selectBatchPanelGroups,
@@ -828,5 +836,163 @@ describe('batchOutcomeTarget', () => {
         const row = { label: 'Publisher', count: 8 };
         expect(batchOutcomeTarget('edit_metadata', block('destination', [row]), row)).toBeNull();
         expect(batchOutcomeTarget('brand_new_operation', block('destination', [row]), row)).toBeNull();
+    });
+});
+
+describe('the item record', () => {
+    const finding = (label: string, ids: string[]) => ({ kind: 'finding' as const, label, item_ids: ids });
+
+    /** A request carrying one tool return with item records on its metadata. */
+    function itemsRequest(...records: unknown[]): ModelMessage {
+        return {
+            kind: 'request',
+            run_id: 'r1',
+            instructions: '',
+            parts: [
+                {
+                    part_kind: 'tool-return',
+                    tool_name: 'batch_resolve',
+                    tool_call_id: 'call-items',
+                    content: {},
+                    metadata: { batch_items: { batches: records } },
+                },
+            ],
+        } as unknown as ModelMessage;
+    }
+
+    function itemsRun(messages: ModelMessage[], id = 'r1'): AgentRun {
+        return { id, status: 'completed', model_messages: messages } as unknown as AgentRun;
+    }
+
+    it('reads a record and drops what it cannot read, group by group', () => {
+        const stamp = readBatchItemsStamp({
+            batches: [
+                { batch_id: 'b1', groups: [finding('a', ['u-A']), { kind: 'mystery', label: 'x', item_ids: [] }, 'junk'] },
+                { groups: [] },
+                null,
+            ],
+        });
+        expect(stamp).toEqual({ batches: [{ batch_id: 'b1', groups: [finding('a', ['u-A'])] }] });
+        expect(readBatchItemsStamp(null)).toBeNull();
+        expect(readBatchItemsStamp({ batches: 'no' })).toBeNull();
+    });
+
+    it('is empty for a thread written before records existed', () => {
+        const runs = [itemsRun([request(stamp(entry({ status: 'completed' })))])];
+        expect(selectChainBatchItems(runs).size).toBe(0);
+    });
+
+    it('keeps the newest record per batch, across runs, and every batch that has one', () => {
+        const older = itemsRun(
+            [itemsRequest({ batch_id: 'b1', groups: [finding('old', ['u-A'])] }, { batch_id: 'b2', groups: [] })],
+            'r1',
+        );
+        const newer = itemsRun([itemsRequest({ batch_id: 'b1', groups: [finding('new', ['u-B'])] })], 'r2');
+        const items = selectChainBatchItems([older, newer]);
+        expect(items.get('b1')?.groups).toEqual([finding('new', ['u-B'])]);
+        expect(items.get('b2')?.groups).toEqual([]);
+    });
+
+    it('joins a row to its group by reference when it has one, else by label', () => {
+        const record = {
+            batch_id: 'b1',
+            groups: [
+                { kind: 'destination' as const, label: 'Ecology', reference: 'AAAA0001', item_ids: ['u-A'] },
+                { kind: 'destination' as const, label: 'Ecology', reference: 'AAAA0002', item_ids: ['u-B'] },
+                { kind: 'finding' as const, label: 'Ecology', item_ids: ['u-C'] },
+            ],
+        };
+        const destination = { kind: 'destination' as const };
+        expect(batchItemGroupFor(record, destination, { label: 'Ecology', reference: 'AAAA0002' })?.item_ids).toEqual(['u-B']);
+        expect(batchItemGroupFor(record, { kind: 'finding' }, { label: 'Ecology' })?.item_ids).toEqual(['u-C']);
+        // A name alone does not pick between two keyed destinations.
+        expect(batchItemGroupFor(record, destination, { label: 'Ecology' })).toBeNull();
+        expect(batchItemGroupFor(undefined, destination, { label: 'Ecology' })).toBeNull();
+    });
+
+    it('turns a recorded id into a reference the host can resolve', () => {
+        expect(batchItemReference('u-ABCD1234')).toEqual({ zotero_key: 'ABCD1234', library_id: 0, library_ref: 'u' });
+        expect(batchItemReference('g900-ABCD1234')).toEqual({ zotero_key: 'ABCD1234', library_id: 0, library_ref: 'g900' });
+        expect(batchItemReference('1-ABCD1234')).toEqual({ zotero_key: 'ABCD1234', library_id: 1 });
+        expect(batchItemReference('garbage')).toBeNull();
+    });
+});
+
+describe('the population record', () => {
+    const item = (id: string, n: string, rest: Record<string, string> = {}) => ({ id, n, ...rest });
+
+    /** A request carrying one `batch_start` return with a population record on its metadata. */
+    function populationRequest(record: unknown): ModelMessage {
+        return {
+            kind: 'request',
+            run_id: 'r1',
+            instructions: '',
+            parts: [
+                {
+                    part_kind: 'tool-return',
+                    tool_name: 'batch_start',
+                    tool_call_id: 'call-start',
+                    content: {},
+                    metadata: { batch_population: record },
+                },
+            ],
+        } as unknown as ModelMessage;
+    }
+
+    function populationRun(messages: ModelMessage[], id = 'r1'): AgentRun {
+        return { id, status: 'completed', model_messages: messages } as unknown as AgentRun;
+    }
+
+    it('reads a record and drops what it cannot read, item by item', () => {
+        expect(
+            readBatchPopulationRecord({
+                batch_id: 'b1',
+                items: [item('u-A', 'Smith 2004', { s: 'A title' }), { id: 'u-B' }, { n: 'nameless' }, 'junk', null],
+            }),
+        ).toEqual({ batch_id: 'b1', items: [item('u-A', 'Smith 2004', { s: 'A title' })] });
+        expect(readBatchPopulationRecord({ items: [] })).toBeNull();
+        expect(readBatchPopulationRecord({ batch_id: 'b1', items: 'no' })).toBeNull();
+        expect(readBatchPopulationRecord(null)).toBeNull();
+    });
+
+    it('names one identity for the personal library in both grammars, and none for a malformed id', () => {
+        expect(batchItemIdentityKey('u-AAAAAAAA')).toBe('u-AAAAAAAA');
+        expect(batchItemIdentityKey('1-AAAAAAAA')).toBe('u-AAAAAAAA');
+        expect(batchItemIdentityKey('g42-AAAAAAAA')).toBe('g42-AAAAAAAA');
+        // A bare rowid for a group names a library only on the install that wrote it.
+        expect(batchItemIdentityKey('7-AAAAAAAA')).toBe('7-AAAAAAAA');
+        expect(batchItemIdentityKey('nonsense')).toBeNull();
+    });
+
+    it('is empty for a thread written before records existed', () => {
+        const runs = [populationRun([request(stamp(entry({ status: 'completed' })))])];
+        expect(selectChainBatchPopulations(runs).size).toBe(0);
+    });
+
+    it('keeps the newest record per batch, across runs', () => {
+        const older = populationRun(
+            [populationRequest({ batch_id: 'b1', items: [item('u-A', 'old name')] })],
+            'r1',
+        );
+        const newer = populationRun(
+            [
+                populationRequest({ batch_id: 'b1', items: [item('u-A', 'new name')] }),
+                populationRequest({ batch_id: 'b2', items: [item('u-B', 'other batch')] }),
+            ],
+            'r2',
+        );
+        const populations = selectChainBatchPopulations([older, newer]);
+        expect(populations.get('b1')?.get('u-A')?.n).toBe('new name');
+        expect(populations.get('b2')?.get('u-B')?.n).toBe('other batch');
+    });
+
+    it('finds an item whichever grammar the group and the record spelled it in', () => {
+        const [population] = selectChainBatchPopulations([
+            populationRun([populationRequest({ batch_id: 'b1', items: [item('1-A', 'Smith 2004')] })]),
+        ]).values();
+        expect(batchPopulationItemFor(population, 'u-A')?.n).toBe('Smith 2004');
+        expect(batchPopulationItemFor(population, '1-A')?.n).toBe('Smith 2004');
+        expect(batchPopulationItemFor(population, 'u-B')).toBeNull();
+        expect(batchPopulationItemFor(undefined, 'u-A')).toBeNull();
     });
 });

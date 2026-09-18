@@ -53,6 +53,7 @@ import type {
     // Notes
     WSReadNoteRequest,
     WSResolvePopulationRequest,
+    WSItemDisplayRequest,
     WSZoteroAttachmentPageImagesRequest,
     WSZoteroAttachmentSearchRequest,
     WSZoteroDataRequest,
@@ -80,6 +81,7 @@ import {
     // Notes
     handleReadNoteRequest,
     handleResolvePopulationRequest,
+    handleItemDisplayRequest,
     handleZoteroAttachmentPageImagesRequest,
     handleZoteroAttachmentSearchRequest,
     handleZoteroDataRequest,
@@ -512,6 +514,27 @@ async function handleResolvePopulationHttpRequest(request: any) {
     };
 }
 
+/**
+ * Item display lookup over HTTP. The backend's localhost frontend posts here,
+ * so the accepted body and the returned shape must stay identical to the
+ * `item_display` wire request/response.
+ */
+async function handleItemDisplayHttpRequest(request: any) {
+    const wsRequest: WSItemDisplayRequest = {
+        event: 'item_display_request',
+        request_id: generateRequestId(),
+        item_ids: Array.isArray(request.item_ids) ? request.item_ids : [],
+    };
+
+    const response = await handleItemDisplayRequest(wsRequest);
+
+    return {
+        items: response.items,
+        error: response.error,
+        error_code: response.error_code,
+    };
+}
+
 async function handleLibraryMetadataHttpRequest(request: any) {
     const wsRequest: WSGetMetadataRequest = {
         event: 'get_metadata_request',
@@ -782,6 +805,9 @@ export function registerEndpoints(): (() => void) | undefined {
     
     endpoints['/beaver/library/resolve-population'] =
         createEndpoint(handleResolvePopulationHttpRequest);
+
+    endpoints['/beaver/library/item-display'] =
+        createEndpoint(handleItemDisplayHttpRequest);
 
     endpoints['/beaver/library/metadata'] =
         createEndpoint(handleLibraryMetadataHttpRequest);

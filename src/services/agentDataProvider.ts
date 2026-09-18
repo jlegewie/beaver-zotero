@@ -22,6 +22,7 @@ export { handleItemQuickSearchRequest } from './agentDataProvider/handleItemQuic
 export { handleZoteroSearchRequest } from './agentDataProvider/handleZoteroSearchRequest';
 export { handleListItemsRequest } from './agentDataProvider/handleListItemsRequest';
 export { handleResolvePopulationRequest } from './agentDataProvider/handleResolvePopulationRequest';
+export { handleItemDisplayRequest } from './agentDataProvider/handleItemDisplayRequest';
 export { handleGetMetadataRequest } from './agentDataProvider/handleGetMetadataRequest';
 export { handleGetAnnotationsRequest } from './agentDataProvider/handleGetAnnotationsRequest';
 export { handleFindAnnotationsRequest } from './agentDataProvider/handleFindAnnotationsRequest';

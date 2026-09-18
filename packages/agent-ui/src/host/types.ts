@@ -159,8 +159,11 @@ export interface NavigationHost {
 export interface ResolvedItemDisplay {
     /** Zotero item type, for icon rendering. */
     itemType?: string;
-    /** Whether the item has a readable attachment (enables an "open" action). */
-    hasReadableAttachment: boolean;
+    /**
+     * Whether the item has a readable attachment (enables an "open" action).
+     * Absent when the caller asked `resolveItemDisplay` not to find out.
+     */
+    hasReadableAttachment?: boolean;
     /**
      * Bibliographic display name for the referenced item, used by tool-call
      * header labels (e.g. "Smith 2005"; a note's title for note references).
@@ -168,6 +171,29 @@ export interface ResolvedItemDisplay {
      * can't be resolved.
      */
     displayName?: string;
+    /**
+     * Attachments only: the broad content kind ("pdf", "epub", "snapshot", …),
+     * so the row's icon matches the one a stamped record would give it.
+     * Absent for other items and when the client cannot say.
+     */
+    contentKind?: string;
+    /**
+     * The item's title, for lists that need more than the display name to
+     * tell items apart. For attachments this is the parent item's title.
+     * Absent when it can't be resolved.
+     */
+    title?: string;
+    /**
+     * The first creator's name, when the item has one. Absent for an item
+     * without creators (a web page, a report), whose display name is then a
+     * placeholder — a list may prefer to lead with the title instead.
+     */
+    creator?: string;
+    /**
+     * The item type in the client's words ("Report", "Web Page"), for a row
+     * that has no creator to show. Absent when the client cannot say.
+     */
+    itemTypeLabel?: string;
 }
 
 /**
@@ -195,8 +221,17 @@ export interface ItemDataHost {
      * Resolve display metadata (icon type + attachment availability + display
      * name) for a library item in a source/result list. Async because it may
      * load the item; returns null when the item can't be resolved.
+     *
+     * `options.attachment` (default true) asks for `hasReadableAttachment`,
+     * which costs a child-item load and a best-attachment search per item. A
+     * list that only names items passes false so a page of rows does not
+     * pay for a flag it never draws. A host that ignores the option answers
+     * as before.
      */
-    resolveItemDisplay(ref: ZoteroItemReference): Promise<ResolvedItemDisplay | null>;
+    resolveItemDisplay(
+        ref: ZoteroItemReference,
+        options?: { attachment?: boolean },
+    ): Promise<ResolvedItemDisplay | null>;
     /**
      * Resolve a library's display name for a tool-call header label. Accepts the
      * raw `library` arg (numeric id or name). Returns null when unavailable.

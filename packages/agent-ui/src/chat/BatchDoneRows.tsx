@@ -1,5 +1,9 @@
 import React, { useCallback, useState } from 'react';
-import type { BatchProgressEntry } from '@beaver/agent-core/run-state/batchProgress';
+import type {
+    BatchItemsByBatch,
+    BatchPopulationsByBatch,
+    BatchProgressEntry,
+} from '@beaver/agent-core/run-state/batchProgress';
 import { ArrowDownIcon, CancelCircleIcon, Icon, LayersIcon, TickIcon } from '../icons';
 import { BatchOutcomeBody } from './BatchOutcomeBlocks';
 
@@ -37,7 +41,11 @@ const BatchDoneRow: React.FC<{
     ruleAbove: boolean;
     /** Whether to spend a second line on the goal. */
     showGoal: boolean;
-}> = ({ batch, ruleAbove, showGoal }) => {
+    /** The batch's item record, when the thread carries one. */
+    itemsByBatch?: BatchItemsByBatch;
+    /** How the batch's items look, when the thread carries that record. */
+    populationsByBatch?: BatchPopulationsByBatch;
+}> = ({ batch, ruleAbove, showGoal, itemsByBatch, populationsByBatch }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const toggle = useCallback(() => setIsExpanded((open) => !open), []);
     const onKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -93,12 +101,14 @@ const BatchDoneRow: React.FC<{
                     {lead}
                 </span>
                 {/* Present even when empty: it is also the spacer that pushes the
-                    failure count and the chevron to the end of the row. */}
+                    failure count and the chevron to the end of the row. Empty
+                    while the row is open — the legend under the track states
+                    the same counts, and one statement is enough. */}
                 <span
                     className="font-color-secondary opacity-70 text-sm truncate flex-1 min-w-0"
-                    title={trail || undefined}
+                    title={!isExpanded && trail ? trail : undefined}
                 >
-                    {trail}
+                    {isExpanded ? '' : trail}
                 </span>
                 {failed > 0 && (
                     <span className="font-color-orange text-sm flex-none">
@@ -124,7 +134,16 @@ const BatchDoneRow: React.FC<{
                 )}
             </div>
 
-            {isExpanded && <BatchOutcomeBody batch={batch} bounded={false} revealTargets />}
+            {isExpanded && (
+                <BatchOutcomeBody
+                    batch={batch}
+                    bounded={false}
+                    revealTargets
+                    items={itemsByBatch?.get(batch.batch_id)}
+                    population={populationsByBatch?.get(batch.batch_id)}
+                    surface="receipt"
+                />
+            )}
         </div>
     );
 };
@@ -132,6 +151,18 @@ const BatchDoneRow: React.FC<{
 export interface BatchDoneRowsProps {
     /** Ended batches, already ordered by `selectRunBatchOutcomes`. */
     batches: readonly BatchProgressEntry[];
+    /**
+     * Item records by batch id, from `selectChainBatchItems`. Optional: a
+     * thread written before records existed has none, and the rows then
+     * draw their counts alone.
+     */
+    itemsByBatch?: BatchItemsByBatch;
+    /**
+     * Population records by batch id, from `selectChainBatchPopulations`.
+     * Optional for the same reason: without one, item rows resolve through
+     * the host or fall back to ids.
+     */
+    populationsByBatch?: BatchPopulationsByBatch;
 }
 
 /**
@@ -139,7 +170,7 @@ export interface BatchDoneRowsProps {
  *
  * The live panel does not keep these. Unbounded: the transcript already scrolls.
  */
-export const BatchDoneRows: React.FC<BatchDoneRowsProps> = ({ batches }) => {
+export const BatchDoneRows: React.FC<BatchDoneRowsProps> = ({ batches, itemsByBatch, populationsByBatch }) => {
     if (batches.length === 0) return null;
 
     // Two batches of one operation share a label ("Edited items" twice), and
@@ -153,13 +184,17 @@ export const BatchDoneRows: React.FC<BatchDoneRowsProps> = ({ batches }) => {
             role="group"
             aria-label="Completed batch jobs"
         >
-            {/* Match the approval card header. */}
+            {/* Chrome, set below the rows it frames: the approval card's caps
+                voice, a step lighter, so the batch titles are what stand out. */}
             <div className="display-flex flex-row items-center gap-2 px-3 py-15 min-w-0 border-bottom-quinary">
                 <Icon
                     icon={LayersIcon}
                     className="font-color-secondary scale-10 flex-none"
                 />
-                <div className="font-color-primary font-medium truncate">
+                <div
+                    className="text-xs font-semibold uppercase font-color-secondary truncate"
+                    style={{ letterSpacing: '0.06em' }}
+                >
                     {headingLabel(batches.length)}
                 </div>
             </div>
@@ -169,6 +204,8 @@ export const BatchDoneRows: React.FC<BatchDoneRowsProps> = ({ batches }) => {
                     batch={batch}
                     ruleAbove={index > 0}
                     showGoal={ambiguousLabels.has(leadLabel(batch))}
+                    itemsByBatch={itemsByBatch}
+                    populationsByBatch={populationsByBatch}
                 />
             ))}
         </div>
