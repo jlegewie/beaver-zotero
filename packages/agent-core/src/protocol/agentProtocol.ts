@@ -1645,7 +1645,8 @@ export interface WSResolvePopulationResponse {
      * filters matched nothing" from "the filters matched, but none of the
      * matches has an attachment" — two cases that call for opposite
      * corrections. It says nothing about whether an attachment's file is
-     * present on disk: an attachment record is counted either way.
+     * present on disk: an attachment record is counted either way. Linked-URL
+     * attachments are never part of an attachment population.
      *
      * Set on every successful resolution; absent from a failure and from a
      * provider that predates the field.

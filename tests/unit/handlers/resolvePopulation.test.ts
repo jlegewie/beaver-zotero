@@ -32,6 +32,7 @@ type MockSearchInstance = {
 };
 
 const LIBRARY_ID = 1;
+const LINKED_URL = 3;
 
 /** Predicate for `groupResults`: matches the OR-group carrying a condition on `field`. */
 const hasCondition = (field: string) => (conditions: string[][]) =>
@@ -42,6 +43,8 @@ describe('handleResolvePopulationRequest', () => {
     const itemRows = new Map<number, ItemRow>();
     /** Fake `itemAttachments`: parent itemID -> non-trashed attachment itemIDs. */
     const attachmentsByParent = new Map<number, number[]>();
+    /** Attachment itemIDs whose linkMode is LINK_MODE_LINKED_URL. */
+    const linkedUrlAttachments = new Set<number>();
     /** What the native search resolves to. */
     let searchResultIds: number[] = [];
     /**
@@ -159,6 +162,7 @@ describe('handleResolvePopulationRequest', () => {
         vi.clearAllMocks();
         itemRows.clear();
         attachmentsByParent.clear();
+        linkedUrlAttachments.clear();
         collections.clear();
         searchResultIds = [];
         scopeSearchResultIds = null;
@@ -217,7 +221,9 @@ describe('handleResolvePopulationRequest', () => {
             loadDataTypes: vi.fn(async () => undefined),
         };
 
-        // Stands in for the three SQL statements the handler issues: the
+        (globalThis as any).Zotero.Attachments = { LINK_MODE_LINKED_URL: LINKED_URL };
+
+        // Stands in for the SQL statements the handler issues: the
         // has_attachments predicate, the attachment-population derivation, and
         // the id/order read. Each is answered from the fixtures above.
         (globalThis as any).Zotero.DB = {
@@ -232,10 +238,20 @@ describe('handleResolvePopulationRequest', () => {
                     return;
                 }
                 if (/SELECT ia\.itemID FROM itemAttachments/.test(sql)) {
-                    for (const parentID of params) {
+                    // The trailing parameter is the excluded link mode.
+                    const parentIDs = params.slice(0, -1);
+                    expect(params[params.length - 1]).toBe(LINKED_URL);
+                    for (const parentID of parentIDs) {
                         for (const attachmentID of attachmentsByParent.get(parentID) ?? []) {
-                            emit([attachmentID]);
+                            if (!linkedUrlAttachments.has(attachmentID)) emit([attachmentID]);
                         }
+                    }
+                    return;
+                }
+                if (/SELECT itemID FROM itemAttachments WHERE itemID IN .* AND linkMode = \?/.test(sql)) {
+                    expect(params[params.length - 1]).toBe(LINKED_URL);
+                    for (const itemID of params.slice(0, -1)) {
+                        if (linkedUrlAttachments.has(itemID)) emit([itemID]);
                     }
                     return;
                 }
@@ -1058,7 +1074,25 @@ describe('handleResolvePopulationRequest', () => {
             expect(response.total_count).toBe(2);
             // Derived from itemAttachments, not from an `itemType is attachment` search.
             expect(callsMatching(/SELECT ia\.itemID FROM itemAttachments/)).toHaveLength(1);
-            expect(callsMatching(/SELECT ia\.itemID FROM itemAttachments/)[0][1]).toEqual([1, 2]);
+            expect(callsMatching(/SELECT ia\.itemID FROM itemAttachments/)[0][1]).toEqual([1, 2, LINKED_URL]);
+        });
+
+        it('leaves linked-URL attachments out of an attachment population', async () => {
+            searchResultIds = [1, 2];
+            seedItem(1, { attachments: [101, 102] });
+            seedItem(2, { attachments: [201] });
+            linkedUrlAttachments.add(102);
+            linkedUrlAttachments.add(201);
+
+            const response = await handleResolvePopulationRequest(makeRequest({ item_category: 'attachment' }));
+
+            expect(response.error).toBeUndefined();
+            expect(response.item_ids).toEqual(['u-ATT101']);
+            expect(response.total_count).toBe(1);
+            // Both items still matched; one just has nothing readable.
+            expect(response.matched_item_count).toBe(2);
+            const [sql] = callsMatching(/SELECT ia\.itemID FROM itemAttachments/)[0];
+            expect(sql).toContain('ia.linkMode != ?');
         });
 
         it('excludes trashed attachments from an attachment population', async () => {
@@ -2138,6 +2172,22 @@ describe('handleResolvePopulationRequest', () => {
         expect(addedConditions()).not.toContainEqual(['itemType', 'isNot', 'attachment']);
         expect(addedConditions()).toContainEqual(['noChildren', 'true', '']);
         expect(mainSearch()?.search).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaves standalone linked-URL attachments out of the population', async () => {
+        seedItem(1, { attachments: [11] });
+        seedItem(2, { itemType: 'attachment', key: 'ABCD2345' });
+        seedItem(3, { itemType: 'attachment', key: 'EFGH6789' });
+        linkedUrlAttachments.add(3);
+        searchResultIds = [1, 2, 3];
+        const response = await handleResolvePopulationRequest(makeRequest({
+            item_category: 'attachment', include_standalone_attachments: true,
+        }));
+        expect(response.error).toBeUndefined();
+        expect(response.total_count).toBe(2);
+        expect(response.matched_item_count).toBe(1);
+        expect(response.item_ids).toContain('u-ABCD2345');
+        expect(response.item_ids).not.toContain('u-EFGH6789');
     });
 
     it('resolves a large standalone tranche with exclusions without paginated searches', async () => {
