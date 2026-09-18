@@ -90,9 +90,11 @@ import {
     isWSChatPendingAtom,
     isWSReadyAtom,
     sendWSMessageAtom,
+    resumeFromRunAtom,
     wsErrorAtom,
 } from "../../../react/atoms/agentRunAtoms";
 import { popupMessagesAtom } from "../../../react/atoms/ui";
+import { selectedModelAtom } from "../../../react/atoms/models";
 import { sessionAtom } from "../../../react/atoms/auth";
 
 import { ThreadPresence } from "../../../src/services/threads/threadPresence";
@@ -106,6 +108,8 @@ import {
 import {
     currentMessageContentAtom,
     currentMessageItemsAtom,
+    currentMessageCollectionsAtom,
+    currentMessageExternalFilesAtom,
 } from "../../../react/atoms/messageComposition";
 import { threadPresenceAtom, threadHistoryStaleAtom, threadReadOnlyAtom, otherThreadWriterAtom, viewedHistoryRevisionAtom } from "../../../react/runtime/threadProjection";
 import {
@@ -121,6 +125,9 @@ beforeEach(() => {
     store.set(threadConflictAtom, null);
     releaseWriter();
     vi.clearAllMocks();
+    vi.mocked(agentRunService.getThreadRuns).mockReset().mockResolvedValue({
+        runs: [], tail_run_id: null, activity: { state: "idle", run_id: null },
+    });
     clearClientShutDownLatch();
     presence = new ThreadPresence();
     presence.reset(getCredentialGeneration());
@@ -139,6 +146,8 @@ beforeEach(() => {
     store.set(sessionAtom, { user: { id: "user-1" } } as any);
     store.set(currentMessageContentAtom, "my draft");
     store.set(currentMessageItemsAtom, []);
+    store.set(currentMessageCollectionsAtom, []);
+    store.set(currentMessageExternalFilesAtom, []);
     resolveClientIdentityMock.mockReturnValue({
         frontendVersion: "test",
         clientType: "zotero-plugin",
@@ -146,6 +155,175 @@ beforeEach(() => {
     });
 });
 describe("writer admission at the real send entry point", () => {
+    it("resumes a failed first run with the persisted server tail", async () => {
+        store.set(currentThreadIdAtom, null);
+        store.set(selectedModelAtom, { name: "test-model", provider: "test" } as any);
+        let callbacks: any;
+        connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
+        await store.set(sendWSMessageAtom, "hello");
+        const firstRun = store.get(activeRunAtom)!;
+        callbacks.onRequestAck({ runId: firstRun.id });
+        callbacks.onThread("new-thread");
+        callbacks.onError({ event: "error", type: "llm_rate_limit", message: "Rate limited",
+            run_id: firstRun.id, is_resumable: true });
+        vi.mocked(agentRunService.getThreadRuns).mockResolvedValueOnce({
+            runs: [], tail_run_id: firstRun.id, activity: { state: "idle", run_id: null },
+        });
+
+        await store.set(resumeFromRunAtom, firstRun.id);
+
+        expect(connectMock).toHaveBeenCalledTimes(2);
+        expect(connectMock.mock.calls[1][0]).toMatchObject({
+            thread_id: "new-thread", expected_tail_run_id: firstRun.id,
+            user_prompt: { is_resume: true, resumes_run_id: firstRun.id },
+        });
+    });
+    it.each(["durable", "unconfirmed", "not-saved"])("sends a follow-up after a %s first-run failure", async (state) => {
+        store.set(currentThreadIdAtom, null);
+        let callbacks: any;
+        connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
+        await store.set(sendWSMessageAtom, "hello");
+        const firstRun = store.get(activeRunAtom)!;
+        callbacks.onRequestAck({ runId: firstRun.id });
+        callbacks.onThread("new-thread");
+        if (state === "durable") await callbacks.onRunComplete({ run_id: firstRun.id, high_token_usage: true });
+        callbacks.onError({ event: "error", type: "llm_rate_limit", message: "Rate limited",
+            run_id: firstRun.id, is_resumable: true });
+        const tail = state === "not-saved" ? null : firstRun.id;
+        vi.mocked(agentRunService.getThreadRuns).mockResolvedValueOnce({
+            runs: [], tail_run_id: tail, activity: { state: "idle", run_id: null },
+        });
+
+        await store.set(sendWSMessageAtom, "Please try again");
+
+        expect(connectMock).toHaveBeenCalledTimes(2);
+        expect(connectMock.mock.calls[1][0].expected_tail_run_id).toBe(tail);
+        if (state === "durable") expect(agentRunService.getThreadRuns).not.toHaveBeenCalled();
+    });
+    it("resumes a confirmed failure without reading history again", async () => {
+        store.set(currentThreadIdAtom, null);
+        store.set(selectedModelAtom, { name: "test-model", provider: "test" } as any);
+        let callbacks: any;
+        connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
+        await store.set(sendWSMessageAtom, "hello");
+        const firstRun = store.get(activeRunAtom)!;
+        callbacks.onRequestAck({ runId: firstRun.id });
+        callbacks.onThread("new-thread");
+        await callbacks.onRunComplete({ run_id: firstRun.id, high_token_usage: true });
+        callbacks.onError({ event: "error", type: "llm_rate_limit", message: "Rate limited",
+            run_id: firstRun.id, is_resumable: true });
+
+        await store.set(resumeFromRunAtom, firstRun.id);
+
+        expect(connectMock).toHaveBeenCalledTimes(2);
+        expect(connectMock.mock.calls[1][0].expected_tail_run_id).toBe(firstRun.id);
+        expect(agentRunService.getThreadRuns).not.toHaveBeenCalled();
+    });
+    it("retains the server tail when a claimed follow-up was never saved", async () => {
+        store.set(threadAdmissionAtom, { threadId: "t", tailRunId: "saved", activity: { state: "idle", run_id: null } });
+        vi.mocked(agentRunService.getThreadRuns).mockResolvedValue({
+            runs: [], tail_run_id: "saved", activity: { state: "idle", run_id: null },
+        });
+        let callbacks: any;
+        connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
+        await store.set(sendWSMessageAtom, "hello");
+        const run = store.get(activeRunAtom)!;
+        callbacks.onRequestAck({ runId: run.id });
+        callbacks.onThread("t");
+        callbacks.onError({ event: "error", type: "setup_error", message: "Setup failed", run_id: run.id });
+
+        await store.set(sendWSMessageAtom, "Try again");
+
+        expect(connectMock).toHaveBeenCalledTimes(2);
+        expect(connectMock.mock.calls[1][0].expected_tail_run_id).toBe("saved");
+    });
+    it.each(["foreign", "missing"])("preserves the draft when the tail snapshot is %s", async (snapshot) => {
+        let callbacks: any;
+        connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
+        await store.set(sendWSMessageAtom, "hello");
+        const run = store.get(activeRunAtom)!;
+        callbacks.onError({ event: "error", type: "setup_error", message: "Setup failed", run_id: run.id });
+        store.set(threadAdmissionAtom, snapshot === "missing" ? null : {
+            threadId: "other", tailRunId: "foreign", activity: { state: "idle", run_id: null },
+        });
+        store.set(currentMessageContentAtom, "my long draft");
+        const collections = [{ library_id: 1, zotero_key: "COLLECT1", name: "Sources" }];
+        const files = [{ extKey: "file", filename: "source.pdf", storedPath: "/source.pdf" }] as any;
+        store.set(currentMessageCollectionsAtom, collections);
+        store.set(currentMessageExternalFilesAtom, files);
+
+        await store.set(sendWSMessageAtom, "my long draft");
+
+        expect(connectMock).toHaveBeenCalledTimes(1);
+        expect(store.get(wsErrorAtom)?.message).toContain("Refresh the chat");
+        expect(store.get(currentMessageContentAtom)).toBe("my long draft");
+        expect(store.get(currentMessageCollectionsAtom)).toEqual(collections);
+        expect(store.get(currentMessageExternalFilesAtom)).toEqual(files);
+    });
+    it("records run completion against the run's thread instead of the visible thread", async () => {
+        let callbacks: any;
+        connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
+        await store.set(sendWSMessageAtom, "hello");
+        const run = store.get(activeRunAtom)!;
+        store.set(currentThreadIdAtom, "different-view");
+
+        await callbacks.onRunComplete({ run_id: run.id });
+
+        expect(store.get(threadAdmissionAtom)).toMatchObject({ threadId: run.thread_id, tailRunId: run.id });
+    });
+    it("does not record an unrelated completion as the active run's tail", async () => {
+        let callbacks: any;
+        connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
+        await store.set(sendWSMessageAtom, "hello");
+        const admission = store.get(threadAdmissionAtom);
+
+        await callbacks.onRunComplete({ run_id: "unrelated" });
+
+        expect(store.get(threadAdmissionAtom)).toBe(admission);
+    });
+    it("does not advance the saved tail on an acknowledgment rejected by admission", async () => {
+        store.set(threadAdmissionAtom, { threadId: "t", tailRunId: "saved", activity: { state: "idle", run_id: null } });
+        vi.mocked(agentRunService.getThreadRuns).mockResolvedValueOnce({
+            runs: [], tail_run_id: "saved", activity: { state: "idle", run_id: null },
+        });
+        let callbacks: any;
+        connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
+        await store.set(sendWSMessageAtom, "hello");
+        const run = store.get(activeRunAtom)!;
+        callbacks.onRequestAck({ runId: run.id });
+        callbacks.onError({ event: "error", type: "thread_busy", message: "Busy", run_id: run.id });
+        expect(store.get(threadAdmissionAtom)?.tailRunId).toBe("saved");
+    });
+    it.each(["changed", "busy", "offline"])("preserves the failed run when resume admission is %s", async (state) => {
+        store.set(currentThreadIdAtom, null);
+        store.set(selectedModelAtom, { name: "test-model", provider: "test" } as any);
+        let callbacks: any;
+        connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
+        await store.set(sendWSMessageAtom, "hello");
+        const firstRun = store.get(activeRunAtom)!;
+        callbacks.onRequestAck({ runId: firstRun.id });
+        callbacks.onThread("new-thread");
+        callbacks.onError({ event: "error", type: "llm_rate_limit", message: "Rate limited",
+            run_id: firstRun.id, is_resumable: true });
+        const failedRun = store.get(activeRunAtom);
+        store.set(currentMessageContentAtom, "unsent draft");
+        if (state === "offline") {
+            vi.mocked(agentRunService.getThreadRuns).mockRejectedValueOnce(new Error("Offline"));
+        } else {
+            vi.mocked(agentRunService.getThreadRuns).mockResolvedValueOnce({
+                runs: [], tail_run_id: state === "changed" ? "successor" : firstRun.id,
+                activity: state === "busy" ? { state: "active", run_id: "other" } : { state: "idle", run_id: null },
+            });
+        }
+
+        await store.set(resumeFromRunAtom, firstRun.id);
+
+        expect(connectMock).toHaveBeenCalledTimes(1);
+        expect(store.get(activeRunAtom)).toBe(failedRun);
+        expect(store.get(currentMessageContentAtom)).toBe("unsent draft");
+        expect(presence.getSnapshot().claims).toHaveLength(0);
+        if (state === "changed") expect(store.get(threadConflictAtom)).toBe("thread_tail_mismatch");
+    });
     it("keeps unseen server history behind the send admission check after opening the menu", async () => {
         const admission = { threadId: "t", tailRunId: "displayed", activity: { state: "idle" as const, run_id: null } };
         store.set(threadAdmissionAtom, admission);
