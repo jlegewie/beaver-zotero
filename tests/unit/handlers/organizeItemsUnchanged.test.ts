@@ -110,6 +110,38 @@ describe('executeOrganizeItemsAction unchanged_items', () => {
         };
     });
 
+    it.each([1, 7])('applies tag-only edits in library %s without collection preflight or collection results', async libraryID => {
+        const item = makeItem('AAAAAAAA', [], []);
+        item.libraryID = libraryID;
+        items.AAAAAAAA = item;
+        Zotero.Beaver.searchableLibraryIds = [1, 7];
+        vi.mocked(Zotero.Libraries.get).mockReturnValue({ libraryID, editable: true } as any);
+
+        const response = await executeOrganizeItemsAction(buildRequest({
+            item_ids: [`${libraryID}-AAAAAAAA`], tags: { add: ['reviewed'] },
+        }), timeoutCtx());
+
+        expect(response.success).toBe(true);
+        expect(item.state.tags).toEqual(['reviewed']);
+        expect(Zotero.Items.getByLibraryAndKeyAsync).toHaveBeenCalledTimes(1);
+        expect(Zotero.Collections.getByLibraryAndKey).not.toHaveBeenCalled();
+        expect(response.result_data).toMatchObject({ tags_added: ['reviewed'], items_modified: 1 });
+        expect(response.result_data?.collection_ids_added).toBeUndefined();
+        expect(response.result_data?.collection_ids_removed).toBeUndefined();
+        expect(response.result_data?.collections_added).toBeUndefined();
+        expect(response.result_data?.collections_removed).toBeUndefined();
+    });
+
+    it('omits portable result fields for collection operations that made no changes', async () => {
+        items.AAAAAAAA = makeItem('AAAAAAAA', [], [COLLECTION_ID]);
+        const response = await executeOrganizeItemsAction(buildRequest({
+            item_ids: ['1-AAAAAAAA'], collections: { add: [COLLECTION_KEY] },
+        }), timeoutCtx());
+        expect(response.success).toBe(true);
+        expect(response.result_data?.collection_ids_added).toBeUndefined();
+        expect(response.result_data?.collection_ids_removed).toBeUndefined();
+    });
+
     afterEach(() => {
         (globalThis as any).Zotero = previousZotero;
     });
@@ -195,18 +227,14 @@ describe('executeOrganizeItemsAction unchanged_items', () => {
         // nothing, so the item is NOT in the requested state.
         items.AAAAAAAA = makeItem('AAAAAAAA', [], [COLLECTION_ID]);
 
-        const response = await executeOrganizeItemsAction(
+        await expect(executeOrganizeItemsAction(
             buildRequest({
                 item_ids: ['1-AAAAAAAA'],
                 collections: { add: [COLLECTION_KEY, 'DELETED12'] },
             }),
             timeoutCtx()
-        );
+        )).rejects.toMatchObject({ code: 'collection_not_found' });
 
-        expect(response.success).toBe(false);
-        expect(response.error_code).toBe('collection_not_found');
-        expect(response.error).toContain('DELETED12');
-        expect(response.result_data).toBeUndefined();
         expect(items.AAAAAAAA.save).not.toHaveBeenCalled();
     });
 
@@ -215,15 +243,13 @@ describe('executeOrganizeItemsAction unchanged_items', () => {
         // requested state holds and the item belongs in unchanged_items.
         items.AAAAAAAA = makeItem('AAAAAAAA', [], []);
 
-        const response = await executeOrganizeItemsAction(
+        await expect(executeOrganizeItemsAction(
             buildRequest({
                 item_ids: ['1-AAAAAAAA'],
                 collections: { remove: ['DELETED12'] },
             }),
             timeoutCtx()
-        );
+        )).rejects.toMatchObject({ code: 'collection_not_found' });
 
-        expect(response.success).toBe(false);
-        expect(response.error_code).toBe('collection_not_found');
     });
 });

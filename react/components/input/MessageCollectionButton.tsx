@@ -38,7 +38,7 @@ export const MessageCollectionButton: React.FC<MessageCollectionButtonProps> = (
         try {
             // A portable library ref that couldn't be resolved on this device
             // carries library_id 0, which throws synchronously if looked up.
-            const col = resolveCollection(collection.collection_id ?? `${collection.library_ref ?? collection.library_id}-${collection.zotero_key}`, { access: 'local' }).collection;
+            const col = resolveCollection(collectionReferenceKey(collection), { access: 'local' }).collection;
             if (col) selectCollection(col);
         } catch { /* ignore */ }
     };

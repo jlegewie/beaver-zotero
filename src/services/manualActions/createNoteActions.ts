@@ -1,5 +1,4 @@
-import { assertCollectionLibraryWritable } from '../collections/collectionMutations';
-import { recheckCollectionMemberships } from '../collections/collectionMutations';
+import { assertLibraryWritable, recheckCollectionMemberships } from '../collections/collectionMutations';
 import { collectionNotFoundError } from '../collections/collectionIdentity';
 import type { OperationContext } from '../agentDataProvider/operationContext';
 /**
@@ -257,7 +256,7 @@ export async function undoCreateNoteAction(action: AgentAction): Promise<void> {
         return;
     }
 
-    assertCollectionLibraryWritable(resolved.item.libraryID);
+    assertLibraryWritable(resolved.item.libraryID);
     await resolved.item.eraseTx();
     logger(`undoCreateNoteAction: Deleted note ${resultData.library_id}-${resultData.zotero_key}`, 1);
 }

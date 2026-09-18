@@ -1,3 +1,4 @@
+import { readCollectionActionData } from '@beaver/agent-core/identity/collectionActionData';
 import { describe, expect, it } from 'vitest';
 import { extractListCollectionsData } from '@beaver/agent-core/run-state/toolResultTypes';
 import { toAgentAction } from '@beaver/agent-core/agents/agentActionTypes';
@@ -63,4 +64,21 @@ it('reconciles legacy batch keys only with an explicitly known library', () => {
     expect(batchItemGroupFor(record, block, row)).toBeNull();
     expect(batchItemGroupFor(record, block, row, 'g12345')?.item_ids).toEqual(['g12345-ITEMKEY1']);
     expect(batchItemGroupFor(record, block, row, 'u')).toBeNull();
+});
+
+it('uses explicit null portable parents over stale native parents in proposals and undo snapshots', () => {
+    const data = { collection_id: 'g12345-SAMEKEY1', new_parent_collection_id: null, new_parent_key: 'STALEKEY' };
+    expect(readCollectionActionData(data)).toMatchObject({ collection_key: 'g12345-SAMEKEY1', new_parent_key: null });
+    const decoded = toAgentAction({ action_type: 'manage_collections', proposed_data: { ...data, action: 'move' },
+        result_data: { old_parent_collection_id: null, old_parent_key: 'STALEKEY' } });
+    expect(decoded.proposed_data.new_parent_key).toBeNull();
+    expect(decoded.result_data?.old_parent_key).toBeNull();
+    expect(readCollectionActionData(decoded.proposed_data)).toEqual(decoded.proposed_data);
+});
+
+it('retains a native collection key when the portable collection ID is null', () => {
+    const decoded = readCollectionActionData({ collection_id: null, collection_key: 'SAMEKEY1',
+        new_parent_collection_id: null, new_parent_key: 'PARENT12' });
+    expect(decoded.collection_key).toBe('SAMEKEY1');
+    expect(decoded.new_parent_key).toBeNull();
 });

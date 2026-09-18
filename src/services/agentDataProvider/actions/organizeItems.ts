@@ -1,6 +1,5 @@
-import { formatCollectionId } from '../../collections/collectionIdentity';
-import { assertCollectionLibraryWritable, resolveCollectionMemberships, recheckCollection } from '../../collections/collectionMutations';
-import { CollectionResolutionError } from '../../collections/collectionIdentity';
+import { formatCollectionId, CollectionResolutionError } from '../../collections/collectionIdentity';
+import { resolveOrganizeLibrary, resolveCollectionMemberships, recheckCollection } from '../../collections/collectionMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { WSAgentActionExecuteResponse, WSAgentActionValidateResponse } from '@beaver/agent-core/protocol/agentProtocol';
 import { modelObjectId, parseItemReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
@@ -347,7 +346,7 @@ export async function validateOrganizeItemsAction(
  * This is an all-or-nothing operation: if any item fails to save, the entire
  * transaction rolls back. Items that don't exist are skipped (not an error).
  */
-async function executeOrganizeItems(
+export async function executeOrganizeItemsAction(
     request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
@@ -428,22 +427,8 @@ async function executeOrganizeItems(
     // Library the collection keys were resolved against; null when no requested
     // item exists on this device (every item is skipped below, so there is
     // nothing to resolve keys for).
-    let collectionLibraryId: number | null = null;
+    const collectionLibraryId = hasCollectionChanges ? await resolveOrganizeLibrary(item_ids, true) : null;
     if (hasCollectionChanges && item_ids.length > 0) {
-        // Resolve every surviving item before writes so an unvalidated or replayed
-        // request cannot partially apply collection changes across libraries.
-        for (const itemId of item_ids) {
-            const parsed = parseItemReference(itemId);
-            if (!parsed) continue;
-            const resolved = await resolveItemReference(parsed);
-            if (resolved.status === 'found') {
-                assertCollectionLibraryWritable(resolved.item.libraryID);
-                if (collectionLibraryId != null && collectionLibraryId !== resolved.item.libraryID) {
-                    throw new CollectionResolutionError('library_collection_mismatch', 'Collection changes require all items to be in the same library.');
-                }
-                collectionLibraryId = resolved.item.libraryID;
-            }
-        }
         if (collectionLibraryId != null) {
             await ta.track('collection_resolve_ms', async () => {
                 for (const collKey of collections?.add ?? []) {
@@ -627,8 +612,8 @@ async function executeOrganizeItems(
             // Store actual changes (not requested changes) for safe undo
             tags_added: actualTagsAdded.size > 0 ? [...actualTagsAdded] : undefined,
             tags_removed: actualTagsRemoved.size > 0 ? [...actualTagsRemoved] : undefined,
-            collection_ids_added: collectionLibraryId != null ? [...actualCollectionsAdded].map(key => formatCollectionId(collectionLibraryId!, key)) : undefined,
-            collection_ids_removed: collectionLibraryId != null ? [...actualCollectionsRemoved].map(key => formatCollectionId(collectionLibraryId!, key)) : undefined,
+            collection_ids_added: actualCollectionsAdded.size > 0 && collectionLibraryId != null ? [...actualCollectionsAdded].map(key => formatCollectionId(collectionLibraryId!, key)) : undefined,
+            collection_ids_removed: actualCollectionsRemoved.size > 0 && collectionLibraryId != null ? [...actualCollectionsRemoved].map(key => formatCollectionId(collectionLibraryId!, key)) : undefined,
             collections_added: actualCollectionsAdded.size > 0 ? [...actualCollectionsAdded] : undefined,
             collections_removed: actualCollectionsRemoved.size > 0 ? [...actualCollectionsRemoved] : undefined,
             skipped_items: skippedItems.length > 0 ? skippedItems : undefined,
@@ -641,13 +626,4 @@ async function executeOrganizeItems(
             items_unchanged: unchangedItems.length,
         }),
     };
-}
-
-export async function executeOrganizeItemsAction(request: ActionExecuteRequest, ctx: TimeoutContext): Promise<WSAgentActionExecuteResponse> {
-    try { return await executeOrganizeItems(request, ctx); }
-    catch (error) {
-        if (!(error instanceof CollectionResolutionError)) throw error;
-        return { type: 'agent_action_execute_response', request_id: request.request_id,
-            success: false, error: error.message, error_code: error.code };
-    }
 }

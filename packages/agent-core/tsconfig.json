@@ -48,6 +48,7 @@
     "./src/extract/document/shared/documentExtractResult.ts",
     "./src/extract/document/snapshot/schema.ts",
     "./src/identity/libraryRef.ts",
+    "./src/identity/collectionActionData.ts",
     "./src/extract/types.ts",
     "./src/extract/schema.ts",
     "./src/agents/types.ts",

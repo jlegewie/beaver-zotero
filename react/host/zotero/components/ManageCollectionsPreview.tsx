@@ -1,3 +1,4 @@
+import { readCollectionActionData } from '@beaver/agent-core/identity/collectionActionData';
 import { resolveCollection } from '../../../../src/services/collections/collectionIdentity';
 import React, { useEffect, useState } from 'react';
 import { CSSIcon, Icon, ArrowRightIcon } from '../../../components/icons/icons';
@@ -105,15 +106,16 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
     resultData,
     errorMessage,
 }) => {
+    const data = readCollectionActionData(actionData);
     const action: 'rename' | 'move' | 'delete' = actionData.action ?? 'rename';
     const newName = actionData.new_name ?? undefined;
-    const newParentKey = actionData.new_parent_collection_id ?? actionData.new_parent_key ?? null;
-    const identity = resolveObjectId(resultData?.collection_id ?? actionData.collection_id ?? '');
+    const newParentKey = data.new_parent_key ?? null;
+    const identity = resolveObjectId(resultData?.collection_id ?? data.collection_id ?? '');
     const libraryId = resolveLibraryRef(identity ?? {
         library_ref: resultData?.library_ref ?? actionData.library_ref,
         library_id: resultData?.library_id ?? currentValue?.library_id ?? actionData.library_id,
     });
-    const collectionKey = actionData.collection_id ?? actionData.collection_key;
+    const collectionKey = data.collection_key;
 
     const isApplied = status === 'applied';
     const isRejectedOrUndone = status === 'rejected' || status === 'undone';

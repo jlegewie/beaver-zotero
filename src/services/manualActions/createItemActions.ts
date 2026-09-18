@@ -1,4 +1,4 @@
-import { assertCollectionLibraryWritable } from '../collections/collectionMutations';
+import { assertLibraryWritable } from '../collections/collectionMutations';
 /**
  * Create Item Action Utilities
  * 
@@ -95,7 +95,7 @@ export async function undoCreateItemAction(action: AgentAction): Promise<void> {
     }
 
     // Erase the item
-    assertCollectionLibraryWritable(resolved.item.libraryID);
+    assertLibraryWritable(resolved.item.libraryID);
     await resolved.item.eraseTx();
 
     logger(`undoCreateItemAction: Successfully deleted item ${resultData.library_id}-${resultData.zotero_key}`, 1);

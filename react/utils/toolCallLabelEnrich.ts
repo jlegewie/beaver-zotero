@@ -52,7 +52,7 @@ export async function resolveToolCallLabelEnrich(
             : refParsed
                 ? resolveLibraryRef({ library_ref: libParam }) ?? undefined
                 : (typeof libParam === 'string' ? parseInt(libParam, 10) : undefined);
-        const collParam = ((args.collection_id ?? args.collection_key) ?? args.collection ?? (args.parent_collection_id ?? args.parent_collection)) as string | undefined;
+        const collParam = (args.collection_id ?? args.collection_key ?? args.collection ?? args.parent_collection_id ?? args.parent_collection) as string | undefined;
         if (collParam && itemData.resolveCollectionName) {
             const name = await itemData.resolveCollectionName(collParam, Number.isNaN(libId as number) ? undefined : libId);
             if (name) next.collectionName = name;

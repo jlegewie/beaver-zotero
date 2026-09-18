@@ -1,4 +1,3 @@
-import { serializeCollectionIdentity } from '../../src/services/collections/collectionIdentity';
 /**
  * Application-state builder.
  *
@@ -8,7 +7,7 @@ import { serializeCollectionIdentity } from '../../src/services/collections/coll
  * a different host can supply its own document state via
  * `setApplicationStateProvider` without changing the run-start path.
  */
-
+import { serializeCollectionReadIdentity } from '../../src/services/collections/collectionIdentity';
 import { getContextWindow } from '../runtime/windowRuntime';
 
 import { Getter } from 'jotai';
@@ -217,10 +216,8 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                 const counts = countsFor(itemCounts, collection.id);
                 return {
                     collection_key: collection.key,
-                    ...serializeCollectionIdentity(collection),
-
+                    ...serializeCollectionReadIdentity(collection),
                     library_id: collection.libraryID,
-                    library_ref: libraryRefForLibraryID(collection.libraryID) ?? undefined,
                     parent_key: collection.parentKey || null,
                     item_count: counts.itemCount,
                     standalone_attachment_count: counts.standaloneAttachmentCount,

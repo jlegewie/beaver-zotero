@@ -1,5 +1,7 @@
+import { assertLibraryWritable } from '../../../src/services/collections/collectionMutations';
+import { collectionToReference } from '../../../react/utils/zoteroReferences';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resolveCollection, resolveCollectionList, serializeCollectionIdentity, collectionLibrariesMismatchError } from '../../../src/services/collections/collectionIdentity';
+import { resolveCollection, resolveCollectionList, serializeCollectionIdentity, serializeCollectionReadIdentity, CollectionResolutionError, collectionLibrariesMismatchError } from '../../../src/services/collections/collectionIdentity';
 
 const personal = { id: 10, key: 'ABCD2345', libraryID: 1, name: 'Research' };
 const group = { id: 20, key: 'ABCD2345', libraryID: 7, name: 'Research' };
@@ -154,4 +156,19 @@ describe('model-facing recovery guidance', () => {
             expect(message).toContain(operation === 'search' ? 'separate requests' : 'A single note');
         }
     });
+});
+
+it('keeps read references usable without inventing portable identity for an unmapped library', () => {
+    zotero.Groups.getGroupIDFromLibraryID = () => false;
+    const value = { ...group, parentKey: 'PARENT23' } as any;
+    expect(serializeCollectionReadIdentity(value)).toEqual({ name: 'Research' });
+    expect(collectionToReference(value)).toMatchObject({ library_id: 7, zotero_key: 'ABCD2345', name: 'Research' });
+    expect(collectionToReference(value)).not.toHaveProperty('collection_id');
+    expect(() => serializeCollectionIdentity(value)).toThrow(expect.objectContaining({ code: 'library_unavailable' }));
+});
+
+it('reports a read-only library as a typed collection resolution failure', () => {
+    zotero.Libraries.get = () => ({ editable: false });
+    expect(() => assertLibraryWritable(7)).toThrow(CollectionResolutionError);
+    expect(() => assertLibraryWritable(7)).toThrow(expect.objectContaining({ code: 'library_not_editable' }));
 });

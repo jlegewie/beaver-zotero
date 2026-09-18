@@ -1,4 +1,4 @@
-import { serializeCollectionIdentity } from '../services/collections/collectionIdentity';
+import { serializeCollectionReadIdentity } from '../services/collections/collectionIdentity';
 import type { ContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { AnnotationResultItem, NoteResultItem } from '@beaver/agent-core/protocol/agentProtocol';
@@ -58,7 +58,7 @@ export function getCollectionSummariesFromItem(item: Zotero.Item): CollectionSum
             return {
                 library_id: item.libraryID,
                 zotero_key: collection.key,
-                ...serializeCollectionIdentity(collection),
+                ...serializeCollectionReadIdentity(collection),
             } as CollectionSummary;
         })
         .filter((s): s is CollectionSummary => s !== null);
@@ -134,7 +134,7 @@ async function getCollectionsFromItem(item: Zotero.Item): Promise<ZoteroCollecti
             return {
                 library_id: item.libraryID,
                 zotero_key: collection.key,
-                ...serializeCollectionIdentity(col),
+                ...serializeCollectionReadIdentity(col),
                 zotero_version: collection.version,
                 date_modified: await getCollectionClientDateModifiedAsISOString(collection_id),
                 parent_collection: collection.parentCollection || null,
@@ -266,7 +266,7 @@ export async function serializeCollection(
     return {
         library_id: collection.libraryID,
         zotero_key: collection.key,
-        ...serializeCollectionIdentity(collection),
+        ...serializeCollectionReadIdentity(collection),
         zotero_version: collection.version,
         date_modified: finalDateModified,
         parent_collection: collectionJSON.parentCollection || null,

@@ -1,5 +1,3 @@
-import { serializeCollectionIdentity, formatCollectionId } from '../collections/collectionIdentity';
-import { assertCollectionLibraryWritable, recheckCollection, recheckCollectionParent } from '../collections/collectionMutations';
 /**
  * Utilities for executing and undoing manage_collections agent actions
  * from the UI (post-run apply / undo).
@@ -26,7 +24,9 @@ import { assertCollectionLibraryWritable, recheckCollection, recheckCollectionPa
  *     too (no `includeTrashed` filter on primary lookup) — check the
  *     `deleted` property to detect trash state.
  */
-
+import { readCollectionActionData } from '@beaver/agent-core/identity/collectionActionData';
+import { formatCollectionId } from '../collections/collectionIdentity';
+import { assertLibraryWritable, recheckCollection, recheckCollectionParent } from '../collections/collectionMutations';
 import { AgentAction, ManageCollectionsAgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { ManageCollectionsProposedData, ManageCollectionsResultData } from '@beaver/agent-core/types/agentActions/base';
@@ -37,8 +37,7 @@ export async function executeManageCollectionsAction(
     action: AgentAction
 ): Promise<ManageCollectionsResultData> {
     const raw = action.proposed_data;
-    const data = { ...raw, collection_key: raw.collection_id ?? raw.collection_key,
-        new_parent_key: raw.new_parent_collection_id !== undefined ? raw.new_parent_collection_id : raw.new_parent_key } as ManageCollectionsProposedData;
+    const data = readCollectionActionData(raw) as ManageCollectionsProposedData;
     const { action: op, collection_key, new_name, new_parent_key, library_id, library_ref } = data;
     // A destructive write must carry an explicit target. Reject a
     // stale/malformed action (e.g. library_id: 0 with no library_ref) instead
@@ -55,7 +54,8 @@ export async function executeManageCollectionsAction(
     if (!resolution.ok) throw new Error(resolution.message);
     const resolvedLibraryID = resolution.libraryID;
 
-    const collection = recheckCollection(collection_key, resolvedLibraryID).collection;
+    const lookup = recheckCollection(collection_key, resolvedLibraryID);
+    const collection = lookup.collection;
     if (!collection) {
         throw new Error(`Collection not found: ${collection_key}`);
     }
@@ -107,7 +107,7 @@ export async function executeManageCollectionsAction(
         library_ref: libraryRefForLibraryID(resolvedLibraryID) ?? undefined,
         action: op,
         collection_key: collection.key,
-        collection_id: serializeCollectionIdentity(collection).collection_id,
+        collection_id: lookup.collectionId,
         new_name: new_name ?? null,
         new_parent_key: new_parent_key ? collection.parentKey || null : null,
         new_parent_collection_id: new_parent_key && collection.parentKey ? formatCollectionId(resolvedLibraryID, collection.parentKey) : null,
@@ -133,8 +133,7 @@ export async function undoManageCollectionsAction(
     action: AgentAction,
 ): Promise<void> {
     const raw = action.proposed_data;
-    const data = { ...raw, collection_key: raw.collection_id ?? raw.collection_key,
-        new_parent_key: raw.new_parent_collection_id !== undefined ? raw.new_parent_collection_id : raw.new_parent_key } as ManageCollectionsProposedData;
+    const data = readCollectionActionData(raw) as ManageCollectionsProposedData;
     const { library_id, action: op, collection_key } = data;
     if ((!library_id || typeof library_id !== 'number') && !data.library_ref) {
         logger(`undoManageCollectionsAction: missing target library (${collection_key}); skipping`, 1);
@@ -146,10 +145,10 @@ export async function undoManageCollectionsAction(
         return;
     }
     const resolvedLibraryID = resolution.libraryID;
-    assertCollectionLibraryWritable(resolvedLibraryID);
-    const result = (action.result_data ?? {}) as Partial<ManageCollectionsResultData>;
+    assertLibraryWritable(resolvedLibraryID);
+    const result = readCollectionActionData(action.result_data ?? {}) as Partial<ManageCollectionsResultData>;
     const old_name = result.old_name ?? null;
-    const old_parent_key = result.old_parent_collection_id ?? result.old_parent_key ?? null;
+    const old_parent_key = result.old_parent_key ?? null;
 
     if (op === 'rename') {
         const collection = recheckCollection(collection_key, resolvedLibraryID, true).collection;

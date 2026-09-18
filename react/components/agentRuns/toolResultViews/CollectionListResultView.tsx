@@ -1,3 +1,4 @@
+import { collectionReferenceKey } from '@beaver/agent-core/types/zotero';
 import { normalizeBackendCollection } from '@beaver/agent-core/run-state/toolResultTypes';
 import React, { useState } from 'react';
 import { CollectionListView } from '@beaver/agent-core/run-state/toolResultViews';
@@ -28,8 +29,9 @@ export const CollectionListResultView: React.FC<{ view: CollectionListView }> = 
 
     return (
         <div className="display-flex flex-col">
-            {collections.map((collection) => {
-                const compositeKey = collection.collection_id ?? `${collection.library_ref ?? collection.library_id}-${collection.collection_key}`;
+            {collections.map((collection, index) => {
+                const ref = normalizeBackendCollection(collection, collection.library_id, collection.library_ref);
+                const compositeKey = ref ? collectionReferenceKey(ref) : `unresolved-${index}`;
                 const isHovered = hoveredKey === compositeKey;
 
                 return (

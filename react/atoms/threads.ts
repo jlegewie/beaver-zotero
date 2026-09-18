@@ -1,4 +1,3 @@
-import { normalizeCollectionAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import {
     setAdmission,
     readAdmission,
@@ -555,10 +554,7 @@ export const loadThreadAtom = atom(
                 // From user attachments in runs (external files have no Zotero
                 // reference to preload)
                 for (const run of processedRuns) {
-                    const attachments = (run.user_prompt.attachments || []).map(att =>
-                        att.type === 'collection' ? normalizeCollectionAttachment(att) : att);
-                    run.user_prompt.attachments = attachments;
-                    attachments
+                    (run.user_prompt.attachments || [])
                         .filter(att => att.type !== 'external_file')
                         .filter(att => !!att.zotero_key)
                         .forEach(att => allItemReferences.set(zoteroReferenceKey(att), {

@@ -591,7 +591,7 @@ export interface CollectionsFilterResolution {
 /** A `collections_filter` that left the search with no usable collection. */
 export interface CollectionsFilterError {
     message: string;
-    error_code: CollectionResolutionError['code'];
+    error_code: Exclude<CollectionResolutionError['code'], 'library_not_editable'> | 'internal_error';
 }
 
 /**
@@ -632,7 +632,12 @@ export function collectionsFilterError(
 ): CollectionsFilterError | null {
     if (resolution.ambiguity) return { message: resolution.ambiguity, error_code: 'ambiguous_collection' };
     if (resolution.collections.length > 0) return null;
-    if (resolution.failure) return { message: resolution.failure.message, error_code: resolution.failure.code };
+    if (resolution.failure) {
+        // Search resolution cannot produce write-access errors. Keep unexpected
+        // write failures out of the search protocol if one ever reaches this boundary.
+        const code = resolution.failure.code;
+        return { message: resolution.failure.message, error_code: code === 'library_not_editable' ? 'internal_error' : code };
+    }
 
     if (resolution.unresolved.length > 0) {
         const label = resolution.unresolved.length === 1 ? 'Collection not found' : 'Collections not found';

@@ -1,4 +1,4 @@
-import { resolveObjectIdReference } from '../identity/libraryRef';
+import { readCollectionActionData } from '../identity/collectionActionData';
 import { ZoteroItemReference } from '../types/zotero';
 import { hasLibraryIdentity } from '../identity/libraryRef';
 import {
@@ -756,8 +756,8 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
     }
 
     if (['create_collection', 'manage_collections'].includes(actionType)) {
-        proposedData = normalizeCollectionActionData(proposedData);
-        if (resultData) resultData = normalizeCollectionActionData(resultData);
+        proposedData = readCollectionActionData(proposedData);
+        if (resultData) resultData = readCollectionActionData(resultData);
     }
 
     return {
@@ -774,23 +774,4 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
         created_at: raw.created_at ?? raw.createdAt,
         updated_at: raw.updated_at ?? raw.updatedAt,
     };
-}
-
-/** Decode only structured collection fields; preserve qualification for write-time checks. */
-function normalizeCollectionActionData(data: Record<string, any>): Record<string, any> {
-    const result = { ...data };
-    for (const [portable, native] of [
-        ['collection_id', 'collection_key'],
-        ['parent_collection_id', 'parent_key'],
-        ['new_parent_collection_id', 'new_parent_key'],
-        ['old_parent_collection_id', 'old_parent_key'],
-    ]) {
-        if (typeof data[portable] === 'string') result[native] = data[portable];
-    }
-    const target = resolveObjectIdReference(typeof data.collection_id === 'string' ? data.collection_id : data.collection_key ?? '');
-    if (target && !data.library_ref && !data.library_id) {
-        result.library_ref = target.library_ref;
-        result.library_id = target.library_id;
-    }
-    return result;
 }

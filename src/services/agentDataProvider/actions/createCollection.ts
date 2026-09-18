@@ -1,5 +1,6 @@
-import { resolveCollection, serializeCollectionIdentity } from '../../collections/collectionIdentity';
-import { assertCollectionLibraryWritable, recheckCollection } from '../../collections/collectionMutations';
+import { readCollectionActionData } from '@beaver/agent-core/identity/collectionActionData';
+import { resolveCollection, formatCollectionId } from '../../collections/collectionIdentity';
+import { assertLibraryWritable, recheckCollection } from '../../collections/collectionMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSAgentActionExecuteResponse,
@@ -25,11 +26,7 @@ import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference
 async function validateCreateCollectionAction(
     request: ActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
-    const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = {
-        ...request.action_data,
-        parent_key: request.action_data.parent_collection_id !== undefined
-            ? request.action_data.parent_collection_id : request.action_data.parent_key,
-    } as {
+    const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = readCollectionActionData(request.action_data) as {
         library_id?: number | null;
         library_ref?: string | null;
         library_name?: string | null;
@@ -194,11 +191,7 @@ async function executeCreateCollectionAction(
     request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
-    const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = {
-        ...request.action_data,
-        parent_key: request.action_data.parent_collection_id !== undefined
-            ? request.action_data.parent_collection_id : request.action_data.parent_key,
-    } as {
+    const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = readCollectionActionData(request.action_data) as {
         library_id?: number | null;
         library_ref?: string | null;
         library_name?: string | null;
@@ -231,7 +224,7 @@ async function executeCreateCollectionAction(
         };
     }
 
-    assertCollectionLibraryWritable(library_id);
+    assertLibraryWritable(library_id);
 
     // Build collection params
     const collectionParams: { name: string; libraryID: number; parentID?: number } = {
@@ -318,7 +311,7 @@ async function executeCreateCollectionAction(
                 library_id,
                 library_ref: libraryRefForLibraryID(library_id) ?? undefined,
                 collection_key: collection.key,
-                collection_id: serializeCollectionIdentity(collection).collection_id,
+                collection_id: formatCollectionId(collection.libraryID, collection.key),
                 items_added: itemsAdded,
                 skipped_item_ids: skippedItemIds,
             },

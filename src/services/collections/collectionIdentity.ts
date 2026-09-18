@@ -1,7 +1,7 @@
 import { libraryRefForLibraryID, parseItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
 
 export type CollectionResolutionCode = 'collection_not_found' | 'ambiguous_collection'
-    | 'library_unavailable' | 'library_collection_mismatch' | 'library_not_searchable';
+    | 'library_unavailable' | 'library_collection_mismatch' | 'library_not_searchable' | 'library_not_editable';
 
 export class CollectionResolutionError extends Error {
     constructor(readonly code: CollectionResolutionCode, message: string) {
@@ -60,10 +60,25 @@ export function serializeCollectionIdentity(collection: Zotero.Collection): {
     const ref = libraryRefForLibraryID(collection.libraryID);
     if (!ref) throw new CollectionResolutionError('library_unavailable', `Cannot produce a portable ID for collection key "${collection.key}": its library identity is unavailable on this computer. Call list_libraries to check available library references. If the intended library is still unavailable, ask the user to make it available in Zotero, then retry; do not assume the personal library.`);
     return {
-        collection_id: formatCollectionId(collection.libraryID, collection.key),
+        collection_id: `${ref}-${collection.key}`,
         library_ref: ref,
         name: collection.name,
-        ...(collection.parentKey ? { parent_collection_id: formatCollectionId(collection.libraryID, collection.parentKey) } : {}),
+        ...(collection.parentKey ? { parent_collection_id: `${ref}-${collection.parentKey}` } : {}),
+    };
+}
+
+/** Read paths retain native identity when a portable library mapping is unavailable. */
+export function serializeCollectionReadIdentity(collection: Zotero.Collection): {
+    collection_id?: string; library_ref?: string; name: string; parent_collection_id?: string;
+} {
+    const ref = libraryRefForLibraryID(collection.libraryID);
+    return {
+        name: collection.name,
+        ...(ref ? {
+            library_ref: ref,
+            collection_id: `${ref}-${collection.key}`,
+            ...(collection.parentKey ? { parent_collection_id: `${ref}-${collection.parentKey}` } : {}),
+        } : {}),
     };
 }
 

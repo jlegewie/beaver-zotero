@@ -1,10 +1,10 @@
-import { serializeCollectionIdentity } from '../collections/collectionIdentity';
-import { assertCollectionLibraryWritable, recheckCollection } from '../collections/collectionMutations';
 /**
  * Utilities for executing and undoing create_collection agent actions.
  * These functions are used by AgentActionView for post-run action handling.
  */
-
+import { readCollectionActionData } from '@beaver/agent-core/identity/collectionActionData';
+import { formatCollectionId } from '../collections/collectionIdentity';
+import { assertLibraryWritable, recheckCollection } from '../collections/collectionMutations';
 import { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { CreateCollectionResultData } from '@beaver/agent-core/types/agentActions/base';
@@ -24,11 +24,7 @@ import {
 export async function executeCreateCollectionAction(
     action: AgentAction
 ): Promise<CreateCollectionResultData> {
-    const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = {
-        ...action.proposed_data,
-        parent_key: action.proposed_data.parent_collection_id !== undefined
-            ? action.proposed_data.parent_collection_id : action.proposed_data.parent_key,
-    } as {
+    const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = readCollectionActionData(action.proposed_data) as {
         library_id?: number | null;
         library_ref?: string | null;
         library_name?: string | null;
@@ -41,7 +37,7 @@ export async function executeCreateCollectionAction(
     if (!targetLibrary.ok) throw new Error(targetLibrary.message);
     const library_id = targetLibrary.libraryID;
 
-    assertCollectionLibraryWritable(library_id);
+    assertLibraryWritable(library_id);
 
     // Build collection params
     const collectionParams: { name: string; libraryID: number; parentID?: number } = {
@@ -110,7 +106,7 @@ export async function executeCreateCollectionAction(
         library_id,
         library_ref: libraryRefForLibraryID(library_id) ?? undefined,
         collection_key: collection.key,
-        collection_id: serializeCollectionIdentity(collection).collection_id,
+        collection_id: formatCollectionId(collection.libraryID, collection.key),
         items_added: itemsAdded,
         skipped_item_ids: skippedItemIds,
     };
@@ -144,7 +140,7 @@ export async function undoCreateCollectionAction(
         return;
     }
 
-    assertCollectionLibraryWritable(libraryID);
+    assertLibraryWritable(libraryID);
     const collection = recheckCollection(typeof resultData.collection_id === 'string' ? resultData.collection_id : resultData.collection_key, libraryID, true).collection;
 
     if (!collection) {

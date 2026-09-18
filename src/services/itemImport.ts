@@ -1,4 +1,4 @@
-import { resolveCollection } from './collections/collectionIdentity';
+import { resolveCollection, type ResolvedCollection } from './collections/collectionIdentity';
 import { recheckCollectionMemberships } from './collections/collectionMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { CreateItemProposedAction, CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
@@ -15,6 +15,10 @@ import { fetchPdfAttachment } from './pdfAttachmentFetch';
 const SAVE_ATTACHMENTS_WITH_TRANSLATORS = false;
 const BEAVER_PROVENANCE_MARKER = 'Added by Beaver';
 
+
+function trackWith<T>(timing: TimingAccumulator | undefined, name: string, fn: () => Promise<T>): Promise<T> {
+    return timing ? timing.track(name, fn) : fn();
+}
 
 /** Options for importing items */
 export interface ImportItemOptions {
@@ -307,12 +311,17 @@ export function stampBeaverProvenanceExtra(
  * @param options - Import options including target library and collection
  */
 export async function createZoteroItem(reference: ExternalReference, options?: ImportItemOptions): Promise<Zotero.Item> {
-    const timing = options?.timing;
-    const track = <T>(name: string, fn: () => Promise<T>): Promise<T> =>
-        timing ? timing.track(name, fn) : fn();
+    const target = await trackWith(options?.timing, 'resolve_target_ms', () => resolveImportTarget(options));
+    return importZoteroItem(reference, options, target);
+}
 
-    // Resolve target library and collection
-    const { libraryId, collectionId } = await track('resolve_target_ms', () => resolveImportTarget(options));
+/** Import into a target already validated by the public entry point. */
+async function importZoteroItem(
+    reference: ExternalReference,
+    options: ImportItemOptions | undefined,
+    { libraryId, collectionId }: Awaited<ReturnType<typeof resolveImportTarget>>,
+): Promise<Zotero.Item> {
+    const timing = options?.timing;
 
     let item: Zotero.Item | null = null;
 
@@ -321,7 +330,7 @@ export async function createZoteroItem(reference: ExternalReference, options?: I
     // to avoid duplicate items if the translation completes after timeout
     if (reference.identifiers) {
         try {
-            item = await track('identifier_translation_ms', () =>
+            item = await trackWith(timing, 'identifier_translation_ms', () =>
                 tryImportFromIdentifiers(reference.identifiers, libraryId)
             );
             if (item) {
@@ -337,7 +346,7 @@ export async function createZoteroItem(reference: ExternalReference, options?: I
     // sites routinely take 15–30s+ and blow the WebSocket executor budget.
     if (!item && reference.url && !options?.skipUrlTranslation) {
         try {
-            item = await track('url_translation_ms', () => importFromUrl(reference.url!, libraryId));
+            item = await trackWith(timing, 'url_translation_ms', () => importFromUrl(reference.url!, libraryId));
             if (item) {
                 logger("createZoteroItem: Successfully imported item via URL", 2);
             }
@@ -349,47 +358,58 @@ export async function createZoteroItem(reference: ExternalReference, options?: I
     // 3. Fallback: Create item manually from available metadata
     if (!item) {
         logger("createZoteroItem: Falling back to manual item creation", 2);
-        item = await track('manual_creation_ms', () => createItemManually(reference, libraryId));
+        item = await trackWith(timing, 'manual_creation_ms', () => createItemManually(reference, libraryId));
     }
 
     try {
-        // 4. Add to collection if specified
-        if (collectionId) {
-            const collection = resolveCollection(collectionId, { libraryID: libraryId }).collection;
-            if (collection) {
-                await track('add_to_collection_ms', () =>
-                    Zotero.DB.executeTransaction(async () => {
-                        await collection.addItem(item!.id);
-                    })
-                );
-                logger(`createZoteroItem: Added item to collection ${collection.name}`, 2);
-            }
-        }
-
-        // 5. Schedule background PDF fetch (unless caller handles it separately)
-        if (!options?.skipBackgroundPdfFetch) {
-            // Check if item already has a PDF (may have been added by translation)
-            const existingAttachments = await item.getAttachments();
-            const existingPdfAttachments = await filterPdfAttachments(existingAttachments);
-
-            if (existingPdfAttachments.length === 0 && !isPdfFetchInProgress(libraryId, item.key)) {
-                schedulePdfFetchTask(libraryId, item.key, {
-                    openAccessUrl: reference.open_access_url,
-                    fallbackUrl: reference.url,
-                    fileAvailable: reference.is_open_access,
-                    actionId: options?.actionId,
-                    runId: options?.runId,
-                    threadId: options?.threadId,
-                    onAttachmentResolved: options?.onAttachmentResolved,
-                });
-            }
-        }
-
-        return item;
+        return await finishZoteroItemImport(item, reference, options, collectionId);
     } catch (error) {
         await cleanupFailedImport(item);
         throw error;
     }
+}
+
+/** Attach context membership and schedule optional PDF discovery for a new item. */
+async function finishZoteroItemImport(
+    item: Zotero.Item,
+    reference: ExternalReference,
+    options: ImportItemOptions | undefined,
+    collectionId: number | null,
+): Promise<Zotero.Item> {
+    const libraryId = item.libraryID;
+    const timing = options?.timing;
+
+    // 4. Add to collection if specified
+    if (collectionId) {
+        const collection = resolveCollection(collectionId, { libraryID: libraryId }).collection;
+        await trackWith(timing, 'add_to_collection_ms', () =>
+            Zotero.DB.executeTransaction(async () => {
+                await collection.addItem(item.id);
+            })
+        );
+        logger(`createZoteroItem: Added item to collection ${collection.name}`, 2);
+    }
+
+    // 5. Schedule background PDF fetch (unless caller handles it separately)
+    if (!options?.skipBackgroundPdfFetch) {
+        // Check if item already has a PDF (may have been added by translation)
+        const existingAttachments = await item.getAttachments();
+        const existingPdfAttachments = await filterPdfAttachments(existingAttachments);
+
+        if (existingPdfAttachments.length === 0 && !isPdfFetchInProgress(libraryId, item.key)) {
+            schedulePdfFetchTask(libraryId, item.key, {
+                openAccessUrl: reference.open_access_url,
+                fallbackUrl: reference.url,
+                fileAvailable: reference.is_open_access,
+                actionId: options?.actionId,
+                runId: options?.runId,
+                threadId: options?.threadId,
+                onAttachmentResolved: options?.onAttachmentResolved,
+            });
+        }
+    }
+
+    return item;
 }
 
 /**
@@ -410,150 +430,161 @@ export async function applyCreateItemData(
 ): Promise<CreateItemResultData> {
     const itemData = proposedData.item;
     const timing = options?.timing;
-    const track = <T>(name: string, fn: () => Promise<T>): Promise<T> =>
-        timing ? timing.track(name, fn) : fn();
 
-    const target = await resolveImportTarget(options);
+    const target = await trackWith(timing, 'resolve_target_ms', () => resolveImportTarget(options));
     const memberships = recheckCollectionMemberships(proposedData.collection_ids ?? proposedData.collection_keys ?? [], target.libraryId);
 
     // Create or Import the item (handles library/collection resolution internally)
     // Skip background PDF fetch here - we'll schedule it below with more context
-    const item = await track('create_zotero_item_ms', () =>
-        createZoteroItem(itemData, {
+    const item = await trackWith(timing, 'create_zotero_item_ms', () =>
+        importZoteroItem(itemData, {
             ...options,
             skipBackgroundPdfFetch: true,
-        })
+        }, target)
     );
-    const libraryId = item.libraryID;
-    const itemKey = item.key;
     
     try {
-        // Track if we need to save (consolidate all modifications)
-        let needsSave = false;
-    
-        // Post-processing (Things that apply regardless of how item was created)
-    
-        // 1. Add Extra fields (Identifiers that aren't standard fields, Beaver provenance)
-        const extraLines: string[] = [];
-        const identifiers = itemData.identifiers;
-    
-        if (identifiers) {
-            const currentExtra = item.getField('extra') as string || '';
-            if (identifiers.arXivID && !currentExtra.includes(identifiers.arXivID)) {
-                extraLines.push(`arXiv: ${identifiers.arXivID}`);
-            }
-            if (identifiers.pmid && !currentExtra.includes(identifiers.pmid)) {
-                extraLines.push(`PMID: ${identifiers.pmid}`);
-            }
-            if (identifiers.pmcid && !currentExtra.includes(identifiers.pmcid)) {
-                extraLines.push(`PMCID: ${identifiers.pmcid}`);
-            }
-        }
-
-        if (extraLines.length > 0) {
-            const currentExtra = item.getField('extra') as string;
-            item.setField('extra', currentExtra ? `${currentExtra}\n${extraLines.join('\n')}` : extraLines.join('\n'));
-            needsSave = true;
-        }
-
-        needsSave = stampBeaverProvenanceExtra(item, { reason: proposedData.reason }) || needsSave;
-
-        // 2. Collections (from proposed data, in addition to context collection)
-        if (memberships.length > 0) {
-            const collectionIds = recheckCollectionMemberships(memberships.map(entry => entry.collectionId), libraryId)
-                .map(entry => entry.collection.id);
-            if (collectionIds.length > 0) {
-                // Append to existing collections if any (from translation or context)
-                const currentCollections = item.getCollections();
-                const newCollections = [...new Set([...currentCollections, ...collectionIds])];
-                item.setCollections(newCollections);
-                needsSave = true;
-            }
-        }
-
-        // 3. Tags
-        if (proposedData.suggested_tags && proposedData.suggested_tags.length > 0) {
-            for (const tag of proposedData.suggested_tags) {
-                item.addTag(tag);
-            }
-            needsSave = true;
-        }
-
-        // Single consolidated save for all modifications
-        if (needsSave) {
-            await track('post_save_ms', () => item.saveTx());
-            logger(`applyCreateItemData: Saved item with extra fields, collections, and tags`, 2);
-        }
-
-        if (getPref('addBeaverProvenanceNote') === true) {
-            await createProvenanceNote(
-                {
-                    library_id: libraryId,
-                    zotero_key: itemKey,
-                    library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
-                },
-                {
-                    reason: proposedData.reason,
-                    threadId: options?.threadId,
-                    runId: options?.runId,
-                },
-            );
-        }
-
-        // Check for existing PDF attachments (may have been added by translation)
-        const pdfCheckStart = Date.now();
-        const existingAttachments = item.getAttachments();
-        const existingPdfAttachments = await filterPdfAttachments(existingAttachments);
-        timing?.record('pdf_check_ms', Date.now() - pdfCheckStart);
-
-        // Schedule PDF fetching as background task (non-blocking)
-        // Only if no PDF exists and we have potential sources
-        let didScheduleBgFetch = false;
-        let fetchAlreadyInProgress = false;
-        if (existingPdfAttachments.length === 0) {
-            if (isPdfFetchInProgress(libraryId, itemKey)) {
-                fetchAlreadyInProgress = true;
-            } else {
-                const pdfUrl = itemData.open_access_url || proposedData.downloaded_url;
-                schedulePdfFetchTask(libraryId, itemKey, {
-                    pdfCandidates: proposedData.pdf_candidates,
-                    openAccessUrl: pdfUrl,
-                    fallbackUrl: itemData.url,
-                    fileAvailable: proposedData.file_available,
-                    actionId: options?.actionId,
-                    runId: options?.runId,
-                    threadId: options?.threadId,
-                    onAttachmentResolved: options?.onAttachmentResolved,
-                });
-                didScheduleBgFetch = true;
-            }
-        }
-
-        // Compute initial attachment_status
-        let attachmentStatus: CreateItemResultData['attachment_status'];
-        let attachmentKey: string | undefined;
-        if (existingPdfAttachments.length > 0) {
-            attachmentStatus = 'available';
-            attachmentKey = `${libraryId}-${existingPdfAttachments[0].key}`;
-        } else if (didScheduleBgFetch || fetchAlreadyInProgress) {
-            attachmentStatus = 'pending';
-        } else {
-            attachmentStatus = 'none';
-        }
-
-        return {
-            library_id: libraryId,
-            zotero_key: itemKey,
-            library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
-            collection_ids: memberships.map(entry => entry.collectionId),
-            collection_keys: memberships.map(entry => entry.key),
-            attachment_status: attachmentStatus,
-            attachment_key: attachmentKey,
-        };
+        return await finishCreateItemData(item, proposedData, options, memberships);
     } catch (error) {
         await cleanupFailedImport(item);
         throw error;
     }
+}
+
+/** Apply requested metadata and memberships to an item just created by this import. */
+async function finishCreateItemData(
+    item: Zotero.Item,
+    proposedData: CreateItemProposedData,
+    options: ImportItemOptions | undefined,
+    memberships: ResolvedCollection[],
+): Promise<CreateItemResultData> {
+    const itemData = proposedData.item;
+    const libraryId = item.libraryID;
+    const itemKey = item.key;
+    const timing = options?.timing;
+
+    // Track if we need to save (consolidate all modifications)
+    let needsSave = false;
+
+    // Post-processing (Things that apply regardless of how item was created)
+
+    // 1. Add Extra fields (Identifiers that aren't standard fields, Beaver provenance)
+    const extraLines: string[] = [];
+    const identifiers = itemData.identifiers;
+
+    if (identifiers) {
+        const currentExtra = item.getField('extra') as string || '';
+        if (identifiers.arXivID && !currentExtra.includes(identifiers.arXivID)) {
+            extraLines.push(`arXiv: ${identifiers.arXivID}`);
+        }
+        if (identifiers.pmid && !currentExtra.includes(identifiers.pmid)) {
+            extraLines.push(`PMID: ${identifiers.pmid}`);
+        }
+        if (identifiers.pmcid && !currentExtra.includes(identifiers.pmcid)) {
+            extraLines.push(`PMCID: ${identifiers.pmcid}`);
+        }
+    }
+
+    if (extraLines.length > 0) {
+        const currentExtra = item.getField('extra') as string;
+        item.setField('extra', currentExtra ? `${currentExtra}\n${extraLines.join('\n')}` : extraLines.join('\n'));
+        needsSave = true;
+    }
+
+    needsSave = stampBeaverProvenanceExtra(item, { reason: proposedData.reason }) || needsSave;
+
+    // 2. Collections (from proposed data, in addition to context collection)
+    if (memberships.length > 0) {
+        const collectionIds = recheckCollectionMemberships(memberships.map(entry => entry.collectionId), libraryId)
+            .map(entry => entry.collection.id);
+        if (collectionIds.length > 0) {
+            // Append to existing collections if any (from translation or context)
+            const currentCollections = item.getCollections();
+            const newCollections = [...new Set([...currentCollections, ...collectionIds])];
+            item.setCollections(newCollections);
+            needsSave = true;
+        }
+    }
+
+    // 3. Tags
+    if (proposedData.suggested_tags && proposedData.suggested_tags.length > 0) {
+        for (const tag of proposedData.suggested_tags) {
+            item.addTag(tag);
+        }
+        needsSave = true;
+    }
+
+    // Single consolidated save for all modifications
+    if (needsSave) {
+        await trackWith(timing, 'post_save_ms', () => item.saveTx());
+        logger(`applyCreateItemData: Saved item with extra fields, collections, and tags`, 2);
+    }
+
+    if (getPref('addBeaverProvenanceNote') === true) {
+        await createProvenanceNote(
+            {
+                library_id: libraryId,
+                zotero_key: itemKey,
+                library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
+            },
+            {
+                reason: proposedData.reason,
+                threadId: options?.threadId,
+                runId: options?.runId,
+            },
+        );
+    }
+
+    // Check for existing PDF attachments (may have been added by translation)
+    const pdfCheckStart = Date.now();
+    const existingAttachments = item.getAttachments();
+    const existingPdfAttachments = await filterPdfAttachments(existingAttachments);
+    timing?.record('pdf_check_ms', Date.now() - pdfCheckStart);
+
+    // Schedule PDF fetching as background task (non-blocking)
+    // Only if no PDF exists and we have potential sources
+    let didScheduleBgFetch = false;
+    let fetchAlreadyInProgress = false;
+    if (existingPdfAttachments.length === 0) {
+        if (isPdfFetchInProgress(libraryId, itemKey)) {
+            fetchAlreadyInProgress = true;
+        } else {
+            const pdfUrl = itemData.open_access_url || proposedData.downloaded_url;
+            schedulePdfFetchTask(libraryId, itemKey, {
+                pdfCandidates: proposedData.pdf_candidates,
+                openAccessUrl: pdfUrl,
+                fallbackUrl: itemData.url,
+                fileAvailable: proposedData.file_available,
+                actionId: options?.actionId,
+                runId: options?.runId,
+                threadId: options?.threadId,
+                onAttachmentResolved: options?.onAttachmentResolved,
+            });
+            didScheduleBgFetch = true;
+        }
+    }
+
+    // Compute initial attachment_status
+    let attachmentStatus: CreateItemResultData['attachment_status'];
+    let attachmentKey: string | undefined;
+    if (existingPdfAttachments.length > 0) {
+        attachmentStatus = 'available';
+        attachmentKey = `${libraryId}-${existingPdfAttachments[0].key}`;
+    } else if (didScheduleBgFetch || fetchAlreadyInProgress) {
+        attachmentStatus = 'pending';
+    } else {
+        attachmentStatus = 'none';
+    }
+
+    return {
+        library_id: libraryId,
+        zotero_key: itemKey,
+        library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
+        collection_ids: memberships.map(entry => entry.collectionId),
+        collection_keys: memberships.map(entry => entry.key),
+        attachment_status: attachmentStatus,
+        attachment_key: attachmentKey,
+    };
 }
 
 /** Remove an item owned by an import that failed after persistence. */

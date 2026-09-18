@@ -116,14 +116,12 @@ describe('validateManageCollectionsAction', () => {
     });
 
     it('rejects when collection not found in any searchable library', async () => {
-        const resp = await validateManageCollectionsAction({
+        await expect(validateManageCollectionsAction({
             event: 'agent_action_validate',
             request_id: 'r2',
             action_type: 'manage_collections',
             action_data: { action: 'delete', collection_key: 'ZZZZ9999' },
-        } as any);
-        expect(resp.valid).toBe(false);
-        expect(resp.error_code).toBe('collection_not_found');
+        } as any)).rejects.toMatchObject({ code: 'collection_not_found' });
     });
 
     it('reports not_a_collection when the key belongs to a library item', async () => {
@@ -183,7 +181,7 @@ describe('validateManageCollectionsAction', () => {
     });
 
     it('rejects move into own descendant (cycle)', async () => {
-        const descendant = { id: 99, key: 'WXYZ5678' };
+        const descendant = { id: 99, key: 'WXYZ5678', libraryID: 1 };
         // Return the collection for its own key; return a different descendant for the parent key
         Zot.Collections.getByLibraryAndKey.mockImplementation( (_lib: number, key: string) => {
             if (key === mockCollection.key) return mockCollection;
@@ -233,7 +231,7 @@ describe('validateManageCollectionsAction', () => {
     });
 
     it('rejects when compound collection_key library disagrees with separate library_id', async () => {
-        const resp = await validateManageCollectionsAction({
+        await expect(validateManageCollectionsAction({
             event: 'agent_action_validate',
             request_id: 'r7b2',
             action_type: 'manage_collections',
@@ -244,9 +242,7 @@ describe('validateManageCollectionsAction', () => {
                 new_name: 'Updated',
                 library_id: 1,
             },
-        } as any);
-        expect(resp.valid).toBe(false);
-        expect(resp.error_code).toMatch(/invalid_library_id|library_collection_mismatch|library_not_searchable/);
+        } as any)).rejects.toMatchObject({ code: 'library_collection_mismatch' });
         // The resolver must not be invoked when the consistency check fails.
         expect((getCollectionByIdOrName as any)).not.toHaveBeenCalled();
     });
@@ -282,7 +278,7 @@ describe('validateManageCollectionsAction', () => {
     });
 
     it('rejects when portable collection_key library disagrees with separate library_id', async () => {
-        const resp = await validateManageCollectionsAction({
+        await expect(validateManageCollectionsAction({
             event: 'agent_action_validate',
             request_id: 'r7f2',
             action_type: 'manage_collections',
@@ -293,9 +289,7 @@ describe('validateManageCollectionsAction', () => {
                 new_name: 'Updated',
                 library_id: 2,
             },
-        } as any);
-        expect(resp.valid).toBe(false);
-        expect(resp.error_code).toMatch(/invalid_library_id|library_collection_mismatch|library_not_searchable/);
+        } as any)).rejects.toMatchObject({ code: 'library_not_searchable' });
     });
 
     it('accepts portable new_parent_key from the same library and normalizes to plain key', async () => {
@@ -323,7 +317,7 @@ describe('validateManageCollectionsAction', () => {
         // No Zotero.Groups mock is installed in this suite, so "g5" can't be
         // resolved locally — this must be rejected as a cross-library/
         // unavailable reference, not misread as a literal collection key.
-        const resp = await validateManageCollectionsAction({
+        await expect(validateManageCollectionsAction({
             event: 'agent_action_validate',
             request_id: 'r7h',
             action_type: 'manage_collections',
@@ -332,15 +326,13 @@ describe('validateManageCollectionsAction', () => {
                 collection_key: mockCollection.key,
                 new_parent_key: 'g5-PARENTKEY',
             },
-        } as any);
-        expect(resp.valid).toBe(false);
-        expect(resp.error_code).toMatch(/invalid_parent|library_collection_mismatch|library_unavailable/);
+        } as any)).rejects.toMatchObject({ code: 'library_unavailable' });
         // The malformed-whole-string lookup must never have been attempted.
         expect(Zot.Collections.getByLibraryAndKey).not.toHaveBeenCalledWith(1, 'g5-PARENTKEY');
     });
 
     it('rejects compound new_parent_key from a different library', async () => {
-        const resp = await validateManageCollectionsAction({
+        await expect(validateManageCollectionsAction({
             event: 'agent_action_validate',
             request_id: 'r7c',
             action_type: 'manage_collections',
@@ -350,9 +342,7 @@ describe('validateManageCollectionsAction', () => {
                 // mockCollection is in library 1; passing a compound pointing to lib 2 must fail
                 new_parent_key: `2-${mockCollection.key}`,
             },
-        } as any);
-        expect(resp.valid).toBe(false);
-        expect(resp.error_code).toMatch(/invalid_parent|library_collection_mismatch|library_unavailable/);
+        } as any)).rejects.toMatchObject({ code: 'library_collection_mismatch' });
     });
 
     it('accepts compound new_parent_key from the same library and normalizes to plain key', async () => {

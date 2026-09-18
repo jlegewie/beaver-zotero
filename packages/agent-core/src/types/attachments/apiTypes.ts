@@ -242,7 +242,7 @@ export function messageAttachmentLookupKeys(attachment: MessageAttachment): stri
     if (isExternalFileAttachment(attachment)) {
         return [`ext-${attachment.ext_key}`];
     }
-    return zoteroReferenceLookupKeys(attachment.type === 'collection' ? normalizeCollectionAttachment(attachment) : attachment);
+    return zoteroReferenceLookupKeys(attachment);
 }
 
 /**

@@ -1,3 +1,4 @@
+import { readCollectionActionData } from '@beaver/agent-core/identity/collectionActionData';
 import { CollectionResolutionError, resolveCollection, serializeCollectionIdentity, formatCollectionId } from '../../collections/collectionIdentity';
 import { recheckCollection, recheckCollectionParent } from '../../collections/collectionMutations';
 import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
@@ -93,15 +94,10 @@ async function classifyNonCollectionKey(
 }
 
 
-async function validateManageCollections(
+export async function validateManageCollectionsAction(
     request: ActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
-    const { action, collection_key: rawCollectionKey, new_name: rawNewName, new_parent_key: rawNewParentKey, library_id: rawLibraryId, library_ref } = {
-        ...request.action_data,
-        collection_key: request.action_data.collection_id ?? request.action_data.collection_key,
-        new_parent_key: request.action_data.new_parent_collection_id !== undefined
-            ? request.action_data.new_parent_collection_id : request.action_data.new_parent_key,
-    } as {
+    const { action, collection_key: rawCollectionKey, new_name: rawNewName, new_parent_key: rawNewParentKey, library_id: rawLibraryId, library_ref } = readCollectionActionData(request.action_data) as {
         action: 'rename' | 'move' | 'delete';
         collection_key: string;
         new_name?: string | null;
@@ -318,7 +314,7 @@ async function validateManageCollections(
             library_name: library.name,
             action,
             collection_key: collection.key,
-            collection_id: serializeCollectionIdentity(collection).collection_id,
+            collection_id: lookup.collectionId,
             collection_name: oldName,
             old_name: oldName,
             old_parent_key: oldParentKey,
@@ -332,7 +328,7 @@ async function validateManageCollections(
             library_id: libraryID,
             library_ref: libraryRefForLibraryID(libraryID) ?? undefined,
             collection_key: collection.key,
-            collection_id: serializeCollectionIdentity(collection).collection_id,
+            collection_id: lookup.collectionId,
             ...(action === 'move' ? { new_parent_key: newParentKey, new_parent_collection_id: newParentKey ? formatCollectionId(libraryID, newParentKey) : null } : {}),
         },
         preference,
@@ -344,12 +340,7 @@ export async function executeManageCollectionsAction(
     request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
-    const { action, collection_key, new_name, new_parent_key, library_id, library_ref } = {
-        ...request.action_data,
-        collection_key: request.action_data.collection_id ?? request.action_data.collection_key,
-        new_parent_key: request.action_data.new_parent_collection_id !== undefined
-            ? request.action_data.new_parent_collection_id : request.action_data.new_parent_key,
-    } as {
+    const { action, collection_key, new_name, new_parent_key, library_id, library_ref } = readCollectionActionData(request.action_data) as {
         action: 'rename' | 'move' | 'delete';
         collection_key: string;
         new_name?: string | null;
@@ -395,7 +386,8 @@ export async function executeManageCollectionsAction(
     }
 
     try {
-        const collection = recheckCollection(collection_key, resolvedLibraryId).collection;
+        const lookup = recheckCollection(collection_key, resolvedLibraryId);
+        const collection = lookup.collection;
         if (!collection) {
             return {
                 type: 'agent_action_execute_response',
@@ -484,7 +476,7 @@ export async function executeManageCollectionsAction(
                 library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
                 action,
                 collection_key: collection.key,
-                collection_id: serializeCollectionIdentity(collection).collection_id,
+                collection_id: lookup.collectionId,
                 new_name: new_name ?? null,
                 new_parent_key: new_parent_key ? collection.parentKey || null : null,
                 new_parent_collection_id: new_parent_key && collection.parentKey ? formatCollectionId(resolvedLibraryId, collection.parentKey) : null,
@@ -506,14 +498,5 @@ export async function executeManageCollectionsAction(
             error: String(error),
             error_code: (error as { code?: string }).code ?? 'execution_failed',
         };
-    }
-}
-
-export async function validateManageCollectionsAction(request: ActionValidateRequest): Promise<WSAgentActionValidateResponse> {
-    try { return await validateManageCollections(request); }
-    catch (error) {
-        if (!(error instanceof CollectionResolutionError)) throw error;
-        return { type: 'agent_action_validate_response', request_id: request.request_id,
-            valid: false, preference: 'always_ask', error: error.message, error_code: error.code };
     }
 }

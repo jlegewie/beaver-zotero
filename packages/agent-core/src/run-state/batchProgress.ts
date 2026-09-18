@@ -12,7 +12,7 @@
 
 import { isRunActive } from '../agents/types';
 import type { AgentRun, ModelMessage } from '../agents/types';
-import { parseItemReference, UNRESOLVED_LIBRARY_ID } from '../identity/libraryRef';
+import { isZoteroKey, parseItemReference, UNRESOLVED_LIBRARY_ID } from '../identity/libraryRef';
 import type { ZoteroItemReference } from '../types/zotero';
 
 /** How far a batch got, and how it ended. */
@@ -619,7 +619,7 @@ export function batchItemGroupFor(
     if (!record) return null;
     const identity = (value?: string) => {
         const ref = value?.trim();
-        return ref && collectionLibraryRef && /^[A-Z0-9]{8}$/.test(ref)
+        return ref && collectionLibraryRef && isZoteroKey(ref)
             ? `${collectionLibraryRef}-${ref}` : ref;
     };
     const reference = identity(row.reference);

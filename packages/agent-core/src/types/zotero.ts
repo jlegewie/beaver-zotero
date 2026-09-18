@@ -70,7 +70,9 @@ export interface CollectionReference extends ZoteroItemReference {
  * only unique within a library, so React list keys and dedup comparisons must
  * combine the library ID with the key.
  */
-export function collectionReferenceKey(ref: CollectionReference): string {
+export type CollectionReferenceIdentity = Pick<CollectionReference, 'collection_id' | 'library_ref' | 'library_id'> & { zotero_key: string };
+
+export function collectionReferenceKey(ref: CollectionReferenceIdentity): string {
     return ref.collection_id ?? `${ref.library_ref ?? ref.library_id}-${ref.zotero_key}`;
 }
 

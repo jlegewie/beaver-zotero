@@ -251,3 +251,68 @@ it.each([[1, 'u'], [7, 'g12345']] as const)('restores tags and collections after
     expect(row.memberships).toEqual([removed.id]);
     expect(row.saveTx).toHaveBeenCalledTimes(2);
 });
+
+it('uses null portable parent fields for manual move and undo despite stale native parents', async () => {
+    const parent = collection(7, 'PARENT12', 'Parent');
+    const target = collections[1];
+    target.parentKey = parent.key;
+    const data = { library_ref: 'g12345', collection_id: 'g12345-SAMEKEY1', action: 'move',
+        new_parent_collection_id: null, new_parent_key: parent.key };
+    await manualManage.executeManageCollectionsAction(action('manage_collections', data));
+    expect(target.parentKey).toBe(false);
+    target.parentKey = parent.key;
+    await manualManage.undoManageCollectionsAction(action('manage_collections', data, {
+        old_parent_collection_id: null, old_parent_key: parent.key,
+    }));
+    expect(target.parentKey).toBe(false);
+});
+
+it('applies and undoes manual tag-only edits in an unmapped library without collection preflight', async () => {
+    groupLibrary = 99;
+    const row = item(7, 'ITEMKEY1');
+    const tags = new Set(['original']);
+    Object.assign(row, {
+        getTags: () => [...tags].map(tag => ({ tag })),
+        addTag: (tag: string) => tags.add(tag),
+        removeTag: (tag: string) => tags.delete(tag),
+    });
+    const lookup = vi.spyOn(Zotero.Items, 'getByLibraryAndKeyAsync');
+    const collectionLookup = vi.spyOn(Zotero.Collections, 'getByLibraryAndKey');
+    const data = { item_ids: ['7-ITEMKEY1'], tags: { add: ['added'], remove: ['original'] } };
+    const result = await manualOrganize.executeOrganizeItemsAction(action('organize_items', data));
+    expect(tags).toEqual(new Set(['added']));
+    expect(lookup).toHaveBeenCalledTimes(1);
+    expect(collectionLookup).not.toHaveBeenCalled();
+    expect(result.collection_ids_added).toBeUndefined();
+    expect(result.collection_ids_removed).toBeUndefined();
+
+    await manualOrganize.undoOrganizeItemsAction(action('organize_items', data, result));
+    expect(tags).toEqual(new Set(['original']));
+    expect(lookup).toHaveBeenCalledTimes(2);
+    expect(row.saveTx).toHaveBeenCalledTimes(2);
+});
+
+it.each(['excluded', 'read-only'])('keeps manual tag-only apply and undo blocked for an %s library', async restriction => {
+    groupLibrary = 99;
+    const row = item(7, 'ITEMKEY1');
+    Object.assign(row, { addTag: vi.fn(), removeTag: vi.fn() });
+    if (restriction === 'excluded') Zotero.Beaver.searchableLibraryIds = [1];
+    else libraries[1].editable = false;
+    const data = { item_ids: ['7-ITEMKEY1'], tags: { add: ['added'] } };
+    await expect(manualOrganize.executeOrganizeItemsAction(action('organize_items', data))).rejects.toThrow();
+    await expect(manualOrganize.undoOrganizeItemsAction(action('organize_items', data, { tags_added: ['added'] })))
+        .rejects.toThrow();
+    expect((row as any).addTag).not.toHaveBeenCalled();
+    expect((row as any).removeTag).not.toHaveBeenCalled();
+    expect(row.saveTx).not.toHaveBeenCalled();
+});
+
+it('still requires portable identity for manual collection changes in an unmapped library', async () => {
+    groupLibrary = 99;
+    const row = item(7, 'ITEMKEY1');
+    const data = { item_ids: ['7-ITEMKEY1'], collections: { add: ['SAMEKEY1'] } };
+    await expect(manualOrganize.executeOrganizeItemsAction(action('organize_items', data)))
+        .rejects.toMatchObject({ code: 'library_unavailable' });
+    expect(row.memberships).toEqual([]);
+    expect(row.saveTx).not.toHaveBeenCalled();
+});
