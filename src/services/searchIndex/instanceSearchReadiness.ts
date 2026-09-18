@@ -214,7 +214,7 @@ export class InstanceSearchReadiness {
             this.dirty = false;
             this.error = null;
         } catch (error) {
-            if (scopeCurrent()) this.error = 'Could not verify current search coverage.';
+            if (scopeCurrent()) this.error = 'Could not reach the search index to verify your files.';
         }
     }
 

@@ -354,7 +354,8 @@ it('lists server indexing problems with reading problems and shows search covera
         expect(container.textContent).toContain('Keep Full-Text Search Up to Date');
         expect(container.querySelector('[role="status"]')?.textContent).toBe('Up to date');
         expect(container.textContent).toContain('2 files could not be read or indexed. See Problems below.');
-        expect(container.textContent).toContain('Checking search coverage…');
+        expect(container.textContent).toContain('Full-Text Search');
+        expect(container.textContent).toContain('Reading full-text search status.');
         expect(container.textContent).not.toContain('Full-text search index available');
         expect(container.textContent).not.toContain('Updates paused.');
         expect(container.textContent).toContain('2 attachments could not be read or indexed');
@@ -362,9 +363,9 @@ it('lists server indexing problems with reading problems and shows search covera
     });
 });
 it.each([
-    [{ searchReadiness: { current: { ...unknownSearchReadiness(), reason: 'empty' }, lastConfirmed: null, error: null, refreshing: false } }, 'No supported attachments'],
-    [{ searchReadiness: { current: unknownSearchReadiness(), lastConfirmed: null, error: 'Could not verify current search coverage.', refreshing: false } }, 'Could not verify current search coverage.'],
-    [{ searchReadiness: undefined }, 'Checking search coverage…'],
+    [{ searchReadiness: { current: { ...unknownSearchReadiness(), reason: 'empty' }, lastConfirmed: null, error: null, refreshing: false } }, 'The included libraries have no PDF, EPUB, or web snapshot files to search.'],
+    [{ searchReadiness: { current: unknownSearchReadiness(), lastConfirmed: null, error: 'Could not reach the search index to verify your files.', refreshing: false } }, 'Could not reach the search index to verify your files.'],
+    [{ searchReadiness: undefined }, 'Reading full-text search status.'],
 ])('keeps the search index status %j visible while processing is paused', async (coverageState, line) => {
     prefs.backgroundProcessingEnabled = false;
     const store = createStore();

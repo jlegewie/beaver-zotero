@@ -86,8 +86,9 @@ as well as accepted index/schema versions and per-library counts. Missing, unkno
 malformed, stale or unsupported signals require the existing attachment-search fallback.
 The signal contains no attachment keys, file paths, document text or account IDs.
 
-Current servers ignore this additional request field and retain their existing tools.
-This implementation does not enable cloud search in conversations. Settings explicitly
-separate preparation activity, verified coverage, conversation availability, problems
-and local cache storage. Protected OCR bytes survive cache clearing; local cache size
-does not measure cloud coverage.
+Servers that do not yet consume the field retain their existing tools. The Full-Text
+Search settings section shows verified coverage only; `unknown` and `stale` read as a
+check in progress because a recheck follows within a minute. Settings keep preparation
+activity, verified coverage, problems and local cache storage apart.
+Protected OCR bytes survive cache clearing; local cache size does not measure cloud
+coverage.

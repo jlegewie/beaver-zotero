@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SearchReadiness } from '@beaver/agent-core/protocol/agentProtocol';
 import { evaluateSearchReadiness, unknownSearchReadiness, SEARCH_READINESS_MAX_AGE_MS } from '../../../src/services/searchIndex/searchReadinessPolicy';
-import { searchReadinessSentence } from '../../../react/components/preferences/searchReadinessSentence';
+import { describeSearchReadiness } from '../../../react/components/preferences/searchReadinessSentence';
 
 const { census, requirements, verify } = vi.hoisted(() => ({ census: vi.fn(), requirements: vi.fn(), verify: vi.fn() }));
 vi.mock('../../../src/services/searchIndex/searchCensus', () => ({ discoverSearchCensus: census }));
@@ -118,7 +118,7 @@ describe('instance search verification', () => {
         await service.refresh();
         expect(service.getStatus().lastConfirmed).toEqual(before);
         expect(service.getStatus().error).toBeTruthy();
-        expect(searchReadinessSentence(service.getStatus())).toContain('Last confirmed: 100 of 100');
+        expect(describeSearchReadiness(service.getStatus()).caption).toContain('Last successful check: 100 of 100 files indexed (100%)');
     });
     it('treats incomplete responses as unknown instead of zero', async () => {
         verify.mockResolvedValue({ refs: [] });
@@ -203,7 +203,7 @@ describe('instance search verification', () => {
         requirements.mockRejectedValue(new Error('offline'));
         await service.refresh();
         expect(service.getStatus().lastConfirmed).toBeNull();
-        expect(searchReadinessSentence(service.getStatus())).not.toContain('0 of 0');
+        expect(describeSearchReadiness(service.getStatus()).caption).not.toContain('0 of 0');
     });
 
     it('rechecks a changed library scope within one second while idle', async () => {
@@ -382,5 +382,52 @@ describe('instance search verification', () => {
             register.mockRestore();
             vi.useRealTimers();
         }
+    });
+});
+
+describe('full-text search status wording', () => {
+    const libraries = [
+        { library_id: 1, group_id: null, name: 'My Library', is_group: false, type: 'user', type_id: 1 },
+        { library_id: 2, group_id: 77, name: 'Female Legislator', is_group: true, type: 'group', type_id: 77 },
+    ] as any[];
+    const status = (current: SearchReadiness, lastConfirmed: SearchReadiness | null = null, error: string | null = null) =>
+        ({ current, lastConfirmed, error, refreshing: false });
+    const now = new Date('2026-09-18T15:54:27');
+
+    it('reports ready coverage with a relative check time', () => {
+        const sentence = describeSearchReadiness(status(
+            { ...observation(415, 434), ready: true, reason: 'ready', verified_at: '2026-09-18T15:54:27' }), [], now);
+        expect(sentence.headline).toBe('Ready');
+        expect(sentence.tone).toBe('idle');
+        expect(sentence.caption).toMatch(/^415 of 434 files indexed \(95%\)\. Last checked today at /);
+    });
+    it('names the libraries that hold full-text search back', () => {
+        const current: SearchReadiness = { ...observation(), reason: 'coverage', libraries: [
+            { scope_ref: 'labc', supported: 400, confirmed: 398 },
+            { scope_ref: 'g77', supported: 28, confirmed: 12 },
+        ] };
+        const sentence = describeSearchReadiness(status(current), libraries, now);
+        expect(sentence.headline).toBe('Not ready yet');
+        expect(sentence.caption).toContain('410 of 428 files indexed (95%)');
+        expect(sentence.caption).toBe('410 of 428 files indexed (95%). Full-text search turns on once at least 95% of the files in each library are indexed.');
+        expect(sentence.libraries).toEqual(['Female Legislator: 12 of 28 files indexed (42%)']);
+    });
+    it('keeps the last successful check visible after a failed one', () => {
+        const confirmed = { ...observation(100, 100), ready: true, reason: 'ready' as const, verified_at: '2026-09-17T09:05:00' };
+        const sentence = describeSearchReadiness(status(unknownSearchReadiness(), confirmed, 'Could not reach the search index to verify your files.'), [], now);
+        expect(sentence.tone).toBe('error');
+        expect(sentence.headline).toBe('Could not check');
+        expect(sentence.caption).toContain('Beaver will try again automatically.');
+        expect(sentence.caption).toMatch(/Last successful check: 100 of 100 files indexed \(100%\), yesterday at /);
+    });
+    it('explains empty and unavailable states in plain words', () => {
+        expect(describeSearchReadiness(status({ ...unknownSearchReadiness(), reason: 'empty' })).headline).toBe('Nothing to search yet');
+        expect(describeSearchReadiness(status({ ...unknownSearchReadiness(), reason: 'unavailable' })).headline).toBe('Not available');
+        expect(describeSearchReadiness(undefined).headline).toBe('Checking…');
+    });
+    it.each(['discovering', 'unknown', 'stale'] as const)('shows the fail-closed reason %s as a check in progress', (reason) => {
+        const sentence = describeSearchReadiness(status({ ...unknownSearchReadiness(), reason }));
+        expect(sentence.headline).toBe('Checking…');
+        expect(sentence.tone).toBe('busy');
     });
 });

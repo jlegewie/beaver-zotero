@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { cloudConsentAtom, hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../../atoms/profile';
+import { cloudConsentAtom, hasOcrAccessAtom, hasSearchIndexAccessAtom, localZoteroLibrariesAtom } from '../../atoms/profile';
 import {
     backgroundProcessingStatusAtom,
     type BackgroundProcessingStatus,
@@ -24,13 +24,57 @@ import { describeStatus, plural, type StatusTone } from './processingStatusSente
 import PlayIcon from '@beaver/agent-ui/icons/PlayIcon';
 import StopIcon from '@beaver/agent-ui/icons/StopIcon';
 import { prepareUncachedFiles } from '../../../src/services/backgroundProcessing/cachePreparation';
-import { searchReadinessSentence } from './searchReadinessSentence';
+import { describeSearchReadiness } from './searchReadinessSentence';
+import type { SearchReadinessStatus } from '../../../src/services/searchIndex/instanceSearchReadiness';
 
 const TONE_COLOR: Record<StatusTone, string> = {
     idle: 'var(--accent-green)',
     busy: 'var(--accent-blue)',
     waiting: 'var(--tag-yellow)',
     error: 'var(--tag-red)',
+};
+
+/** Colored dot, or a spinner while work is in progress, aligned with a one-line headline. */
+const ToneIndicator: React.FC<{ tone: StatusTone }> = ({ tone }) => (
+    <div
+        className="display-flex items-center justify-center flex-shrink-0"
+        style={{ width: '14px', height: '1.25em' }}
+    >
+        {tone === 'busy'
+            ? <Spinner size={14} className="font-color-accent-blue" />
+            : <span
+                aria-hidden="true"
+                style={{ width: '10px', height: '10px', borderRadius: '50%', background: TONE_COLOR[tone] }}
+            />
+        }
+    </div>
+);
+
+/**
+ * Whether chats search the full text of the included libraries: the verified
+ * share of indexed files per library, and which libraries hold it back.
+ */
+const SearchReadinessRow: React.FC<{ status: SearchReadinessStatus | undefined }> = ({ status }) => {
+    const libraries = useAtomValue(localZoteroLibrariesAtom);
+    const sentence = describeSearchReadiness(status, libraries);
+    return (
+        <div className="display-flex flex-col gap-1" style={{ padding: '8px 12px 12px' }}>
+            <div className="display-flex flex-row items-start gap-2" style={{ minHeight: '24px' }}>
+                <ToneIndicator tone={sentence.tone} />
+                <div className={`text-base font-medium flex-1 min-w-0 ${sentence.tone === 'error' ? 'font-color-red' : 'font-color-primary'}`}>
+                    {sentence.headline}
+                </div>
+            </div>
+            <div className="text-base font-color-secondary" style={{ paddingLeft: '22px', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
+                {sentence.caption}
+            </div>
+            {sentence.libraries.length > 0 && (
+                <ul className="text-sm font-color-secondary" style={{ margin: 0, paddingLeft: '22px', listStyle: 'none' }}>
+                    {sentence.libraries.map((line) => <li key={line}>{line}</li>)}
+                </ul>
+            )}
+        </div>
+    );
 };
 
 /** Activity and its explanation, followed by progress and cumulative file problems. */
@@ -54,18 +98,7 @@ const ProcessingStatusRow: React.FC<{
         <div className="display-flex flex-col gap-1 border-top-quinary" style={{ padding: '8px 12px 12px' }}>
             <div className="display-flex flex-row items-center gap-3" style={{ minHeight: '24px' }}>
                 <div className="display-flex flex-row items-start gap-2 flex-1 min-w-0">
-                    <div
-                        className="display-flex items-center justify-center flex-shrink-0"
-                        style={{ width: '14px', height: '1.25em' }}
-                    >
-                        {sentence.tone === 'busy'
-                            ? <Spinner size={14} className="font-color-accent-blue" />
-                            : <span
-                                aria-hidden="true"
-                                style={{ width: '10px', height: '10px', borderRadius: '50%', background: TONE_COLOR[sentence.tone] }}
-                            />
-                        }
-                    </div>
+                    <ToneIndicator tone={sentence.tone} />
                     <div
                         role="status"
                         className={`text-base font-medium flex-1 min-w-0 ${sentence.tone === 'error' ? 'font-color-red' : 'font-color-primary'}`}
@@ -289,6 +322,13 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
 
     return (
         <>
+            {hasSearchAccess && <>
+                <SectionLabel>Full-Text Search</SectionLabel>
+                <SettingsGroup>
+                    <SearchReadinessRow status={status.searchReadiness} />
+                </SettingsGroup>
+            </>}
+
             <SectionLabel>Background Processing</SectionLabel>
             <SettingsGroup>
                 <SettingsRow
@@ -319,17 +359,6 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                 )}
                 {actionError && <div role="alert" className="font-color-red text-base border-top-quinary" style={{ padding: '8px 12px' }}>{actionError}</div>}
             </SettingsGroup>
-
-            {hasSearchAccess && <>
-                <SectionLabel>Search Coverage</SectionLabel>
-                <SettingsGroup>
-                    <SettingsRow title="Cloud Search Preparation" description={<>
-                        {searchReadinessSentence(status.searchReadiness)}
-                        <span className="display-flex mt-1">Requires 95% of supported files in each included library initially; stays prepared at 90%. Unavailable and failed files count toward coverage.</span>
-                        <span className="display-flex mt-1">Cloud search is not yet enabled in conversations. Attachment search remains available.</span>
-                    </>} />
-                </SettingsGroup>
-            </>}
 
             <SectionLabel>Problems</SectionLabel>
             <SettingsGroup>

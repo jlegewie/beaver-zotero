@@ -48,10 +48,10 @@ it.each([1, 2])('projects readiness in %i windows without starting remote refres
         const wake = subscribe.mock.calls[0][2] as () => void;
         await act(async () => wake());
         expect(store.get(backgroundProcessingStatusAtom).searchReadiness).toEqual(remote);
-        readinessStatus = { ...remote, error: 'Could not verify current search coverage.' };
+        readinessStatus = { ...remote, error: 'Could not reach the search index to verify your files.' };
         await act(async () => vi.advanceTimersByTimeAsync(60_000));
         expect(store.get(backgroundProcessingStatusAtom)).toMatchObject({
-            searchReadiness: { ...remote, error: 'Could not verify current search coverage.' }, error: null,
+            searchReadiness: { ...remote, error: 'Could not reach the search index to verify your files.' }, error: null,
         });
         expect(refresh).not.toHaveBeenCalled();
     } finally {
