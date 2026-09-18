@@ -593,7 +593,7 @@ it.each(['pending', 'declined', 'accepted'] as const)('locks accepted cloud prep
         expect(toggle.disabled).toBe(consent === 'accepted');
         expect(container.textContent).not.toContain('Accept and turn on');
         expect(container.textContent).toContain(consent === 'accepted'
-            ? 'required for cloud preparation'
+            ? 'required for full-text search and OCR'
             : 'Process files ahead of time');
     });
 });

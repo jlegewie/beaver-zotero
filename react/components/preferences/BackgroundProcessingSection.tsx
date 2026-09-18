@@ -317,7 +317,7 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                     title={hasSearchAccess ? 'Keep Full-Text Search Up to Date' : 'Process Files in the Background'}
                     announceDescription={hasSearchAccess}
                     description={<>{locked
-                        ? 'Background processing is required for cloud preparation. Files process after 30 seconds without keyboard or mouse activity on your computer. Use Start now to process immediately, or Stop to return to idle processing.'
+                        ? 'Background processing is required for full-text search and OCR. Files process after 30 seconds without keyboard or mouse activity on your computer. Use Start now to process immediately, or Stop to return to idle processing.'
                         : 'Process files ahead of time while your computer is idle for faster responses.'}
                         {hasSearchAccess && <span className="display-flex mt-1">{searchIndexStatusLine(status)}</span>}
                     </>}
