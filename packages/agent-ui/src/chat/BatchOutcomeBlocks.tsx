@@ -137,6 +137,9 @@ function moreLabel(overflow: number): string {
     return `+ ${overflow.toLocaleString()} more`;
 }
 
+/** Layout wording for a filter box no row matches. */
+const NO_MATCH_LABEL = 'No rows match';
+
 /** Layout wording for a list the surface itself capped. */
 const showAllLabel = (count: number): string => `Show all ${count.toLocaleString()}`;
 const showMoreLabel = (count: number): string => `Show ${count.toLocaleString()} more`;
@@ -682,8 +685,10 @@ export const BatchOutcomeBlockView: React.FC<{
         block.kind === 'finding'
         && !!items
         && joined.every((entry) => entry.row.count === 1 && entry.group?.item_ids.length === 1);
-    // Scale against every row in the block so a cap does not rescale the bars.
-    const top = topCount(filtered.map((entry) => entry.row));
+    // Scale against every row in the block, so neither a cap nor the filter
+    // box rescales the bars: a 3-of-500 row stays a sliver when it is the
+    // only match.
+    const top = topCount(joined.map((entry) => entry.row));
     const showMeter = !itemFirst && top >= 2;
 
     // A surface cap hides rows into the backend's overflow count; uncapped,
@@ -776,9 +781,17 @@ const BatchFilteredBlocks: React.FC<{
     population?: BatchPopulationLookup;
 }> = ({ batch, items, rows, maxRows, revealTargets, surface, population }) => {
     const [filter, setFilter] = useState('');
+    // Every block draws nothing for a filter it has no row for, which would
+    // leave the box over blank space with no word about why.
+    const nothingMatches =
+        !!filter.trim()
+        && !(batch.blocks ?? []).some((block) =>
+            joinRows(block, items).some((entry) => matchesFilter(entry, filter, population)),
+        );
     return (
         <>
             <BatchItemFilter count={rows} value={filter} onChange={setFilter} />
+            {nothingMatches && <div className="text-sm font-color-tertiary">{NO_MATCH_LABEL}</div>}
             {(batch.blocks ?? []).map((block, index) => (
                 <BatchOutcomeBlockView
                     key={`${block.kind}-${index}`}

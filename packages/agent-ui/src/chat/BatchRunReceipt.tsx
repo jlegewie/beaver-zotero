@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { isRunActive } from '@beaver/agent-core/agents/types';
 import {
@@ -56,6 +56,20 @@ function historyThrough(
 
 const NO_RUNS: readonly AgentRun[] = [];
 
+/**
+ * The previous array when it holds the very same run objects in the same
+ * order, else the new one — so a memo keyed on it re-runs on a changed run,
+ * not on a rebuilt list of unchanged ones.
+ */
+function useSameRuns(runs: readonly AgentRun[]): readonly AgentRun[] {
+    const previous = useRef(runs);
+    const same =
+        previous.current.length === runs.length
+        && previous.current.every((run, index) => run === runs[index]);
+    if (!same) previous.current = runs;
+    return previous.current;
+}
+
 /** Whether `BatchRunReceipt` draws anything for these runs. */
 export function hasBatchReceipt(runs: readonly AgentRun[]): boolean {
     return !runs.some(isRunActive) && selectChainBatchOutcomes(runs).length > 0;
@@ -75,17 +89,14 @@ export const BatchRunReceipt: React.FC<BatchRunReceiptProps> = ({ runs, historyR
     const outcomes = useMemo(() => selectChainBatchOutcomes(runs), [runs]);
     // The item records ride on the same carrier, wherever in the thread up to
     // here they were written; older threads have none. The thread array is
-    // replaced on every append, so the walk is keyed on what it would read —
-    // which runs, in which state, with how many messages — and not on the
-    // array: a long thread with many receipts must not re-read all of its
-    // messages per receipt on every new run. Nothing is read while the answer
-    // is live, since the receipt draws nothing then.
+    // replaced on every append while the runs already in it keep their
+    // objects, so the walk is keyed on the run objects, not the array: a long
+    // thread with many receipts must not re-read all of its messages per
+    // receipt on every new run, and a run replaced by a reload — the same id,
+    // its records now filled in — is a new object and is read again. Nothing
+    // is read while the answer is live, since the receipt draws nothing then.
     const recordRuns = useMemo(() => historyThrough(historyRuns, runs), [historyRuns, runs]);
-    const recordKey = active
-        ? ''
-        : recordRuns.map((run) => `${run.id}:${run.status}:${run.model_messages?.length ?? 0}`).join('|');
-    // Keyed on the runs' identity and shape rather than the array on purpose.
-    const recordSource = useMemo(() => (recordKey ? recordRuns : NO_RUNS), [recordKey]);
+    const recordSource = useSameRuns(active ? NO_RUNS : recordRuns);
     const itemsByBatch = useMemo(() => selectChainBatchItems(recordSource), [recordSource]);
     const populationsByBatch = useMemo(() => selectChainBatchPopulations(recordSource), [recordSource]);
     if (active || outcomes.length === 0) return null;

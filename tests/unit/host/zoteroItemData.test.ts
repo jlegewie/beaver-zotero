@@ -86,7 +86,8 @@ describe('zoteroItemData.resolveItemDisplay', () => {
 
         expect(getBestAttachment).not.toHaveBeenCalled();
         expect(loadDataTypes).not.toHaveBeenCalledWith(expect.anything(), ['itemData', 'childItems']);
-        expect(display).toMatchObject({ displayName: 'Smith 2024', hasReadableAttachment: false });
+        expect(display?.displayName).toBe('Smith 2024');
+        expect(display?.hasReadableAttachment).toBeUndefined();
     });
 
     it('does not read Zotero data when the library is unavailable on this device', async () => {

@@ -159,8 +159,11 @@ export interface NavigationHost {
 export interface ResolvedItemDisplay {
     /** Zotero item type, for icon rendering. */
     itemType?: string;
-    /** Whether the item has a readable attachment (enables an "open" action). */
-    hasReadableAttachment: boolean;
+    /**
+     * Whether the item has a readable attachment (enables an "open" action).
+     * Absent when the caller asked `resolveItemDisplay` not to find out.
+     */
+    hasReadableAttachment?: boolean;
     /**
      * Bibliographic display name for the referenced item, used by tool-call
      * header labels (e.g. "Smith 2005"; a note's title for note references).

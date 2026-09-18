@@ -138,9 +138,11 @@ export const zoteroItemData: ItemDataHost = {
         try {
             const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, ref.zotero_key);
             if (!item || typeof item === 'boolean') return null;
-            let hasReadableAttachment = false;
+            let hasReadableAttachment: boolean | undefined = false;
             if (options?.attachment === false) {
-                // Not asked for: skip the child-item load and the search.
+                // Not asked for: skip the child-item load and the search, and
+                // say nothing rather than "none".
+                hasReadableAttachment = undefined;
             } else if (item.isRegularItem()) {
                 // getBestAttachment() may inspect the parent item's URL via
                 // getField(), so itemData must be loaded as well as childItems.

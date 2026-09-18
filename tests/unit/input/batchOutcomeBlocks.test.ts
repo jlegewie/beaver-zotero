@@ -517,6 +517,18 @@ describe('a block with an item record', () => {
         expect(text(BatchOutcomeBlockView({ block, items, filter: 'alone' }))).not.toContain('more');
     });
 
+    it('keeps the bars scaled to the whole block while the filter narrows the rows', () => {
+        const block: BatchOutcomeBlock = {
+            heading: 'Findings',
+            kind: 'finding',
+            rows: [{ label: 'common', count: 500 }, { label: 'rare', count: 3 }],
+        };
+        const items = record([finding('common', ['u-A', 'u-B']), finding('rare', ['u-C', 'u-D'])]);
+        const [rare] = tallyRows(BatchOutcomeBlockView({ block, items, filter: 'rare' }));
+        expect(rare.props.name).toBe('rare');
+        expect(rare.props.top).toBe(500);
+    });
+
     it('counts an item once however the records spelled its id', () => {
         const block: BatchOutcomeBlock = {
             heading: 'Findings',
