@@ -409,25 +409,18 @@ export async function autoCreateNoteAgentActions(
         if (!isLibrarySearchable(targetLibraryId)) continue;
         if (!isLibraryEditable(targetLibraryId)) continue;
 
-        // Resolve collection if specified
+        // Keep an unresolved collection assignment pending for the approval flow.
         let collectionKey: string | undefined;
         if (proposed.collection) {
-            const collectionResult = getCollectionByIdOrName(proposed.collection, targetLibraryId);
-            if (collectionResult) {
-                collectionKey = collectionResult.collection.key;
-                // If collection is in a different library than targetLibraryId
-                // (e.g. library was not specified but collection was found elsewhere),
-                // update targetLibraryId to match — but never into an excluded or
-                // read-only library; such a collection is unusable here.
-                if (!proposed.library_ref && !proposed.library_id && !proposed.zotero_key && !proposed.library) {
-                    if (isLibrarySearchable(collectionResult.libraryID) && isLibraryEditable(collectionResult.libraryID)) {
-                        targetLibraryId = collectionResult.libraryID;
-                    } else {
-                        collectionKey = undefined;
-                    }
-                }
-            } else {
-                logger(`autoCreateNoteAgentActions: Collection "${proposed.collection}" not found, creating note without collection`, 1);
+            try {
+                const hasExplicitLibrary = proposed.library_ref || proposed.library_id || proposed.zotero_key || proposed.library;
+                const result = getCollectionByIdOrName(proposed.collection, hasExplicitLibrary ? targetLibraryId : undefined);
+                if (!result || !isLibrarySearchable(result.libraryID) || !isLibraryEditable(result.libraryID)) continue;
+                collectionKey = result.collection.key;
+                targetLibraryId = result.libraryID;
+            } catch (error) {
+                logger(`autoCreateNoteAgentActions: Collection resolution failed: ${error}`, 1);
+                continue;
             }
         }
 

@@ -7,6 +7,8 @@
  * The Beaver agent is the primary agent that handles chat completions and tool execution.
  */
 
+import { CollectionResolutionError } from '../collections/collectionIdentity';
+
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     // Library management tools
@@ -20,7 +22,7 @@ import {
 import { ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
-import { validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem, degradedAttachmentRow, isReadableItemField, readItemField } from './utils';
+import { validateCollectionLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem, degradedAttachmentRow, isReadableItemField, readItemField } from './utils';
 import { addSearchCondition, findVacuousNegation, vacuousNegationMessage } from './searchConditions';
 
 
@@ -109,7 +111,10 @@ export async function handleZoteroSearchRequest(
 
     try {
         // Validate library (checks both existence and searchability)
-        const validation = validateLibraryAccess(request.library_id);
+        const collectionReferences = request.conditions
+            .filter(condition => COLLECTION_CONDITION_FIELDS.has(condition.field))
+            .map(condition => condition.value ?? '');
+        const validation = validateCollectionLibraryAccess(request.library_id, collectionReferences);
         if (!validation.valid) {
             return {
                 type: 'zotero_search',
@@ -518,8 +523,8 @@ export async function handleZoteroSearchRequest(
             request_id: request.request_id,
             items: [],
             total_count: 0,
-            error: String(error),
-            error_code: 'search_failed',
+            error: error instanceof Error ? error.message : String(error),
+            error_code: error instanceof CollectionResolutionError ? error.code : 'search_failed',
         };
     }
 }

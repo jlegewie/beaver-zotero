@@ -268,13 +268,13 @@ describe('executeCreateNoteAction', () => {
         });
     });
 
-    it('resolves raw collection names, dedupes them, and skips ones that do not exist', async () => {
+    it('resolves raw collection names and deduplicates them', async () => {
         const result = await executeCreateNoteAction({
             proposed_data: {
                 title: 'Title',
                 content: 'Body',
                 // "Reading List" and RLKEY resolve to the same key -> deduped.
-                collections: ['Reading List', 'RLKEY', 'NOSUCH', 'Inbox'],
+                collections: ['Reading List', 'RLKEY', 'Inbox'],
             },
         } as any, 'run-1');
 
@@ -283,6 +283,13 @@ describe('executeCreateNoteAction', () => {
         expect(result).toMatchObject({
             collection_keys: ['RLKEY', 'INBOXKEY'],
         });
+    });
+
+    it('rejects unresolved explicit memberships before creating a note', async () => {
+        await expect(executeCreateNoteAction({ proposed_data: {
+            title: 'Title', content: 'Body', collections: ['Reading List', 'NOSUCH'],
+        } } as any, 'run-1')).rejects.toThrow(/Collection not found/);
+        expect(noteInstances).toHaveLength(0);
     });
 
     it('falls back to the legacy singular collection_key when no plural keys are present', async () => {

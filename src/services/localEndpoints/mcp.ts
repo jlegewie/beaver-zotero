@@ -814,6 +814,7 @@ async function handleSearchByTopic(args: any): Promise<any> {
         has_more: hasMore,
         next_offset: hasMore ? offset + limit : null,
         results: items.map((item) => formatSearchResultItem(item, true)),
+        ...(response.unresolved_collections ? { unresolved_collections: response.unresolved_collections } : {}),
     };
 }
 
@@ -856,6 +857,7 @@ async function handleSearchByMetadata(args: any): Promise<any> {
         has_more: hasMore,
         next_offset: hasMore ? offset + limit : null,
         results: items.map((item) => formatSearchResultItem(item, false)),
+        ...(response.unresolved_collections ? { unresolved_collections: response.unresolved_collections } : {}),
     };
 }
 

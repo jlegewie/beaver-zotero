@@ -7,6 +7,8 @@
  * silently drops changes which items a batch operates on.
  */
 
+import { CollectionResolutionError, resolveCollection } from '../collections/collectionIdentity';
+
 import { logger } from '@beaver/agent-core/platform/logger';
 import { ZoteroSearchCondition } from '@beaver/agent-core/protocol/agentProtocol';
 
@@ -109,9 +111,9 @@ function acceptsOperator(condition: string, operator: string): boolean {
  * Add one wire condition to `search`, handling the operator mapping and the
  * empty-value quirk.
  *
- * A condition Zotero rejects is dropped and recorded in `warnings` instead of
- * failing the whole request. Dropping a condition WIDENS the result set, so
- * callers must surface `warnings` to the backend unchanged.
+ * Invalid collection conditions throw so no caller can broaden their scope.
+ * Other rejected conditions are recorded in `warnings`; callers must surface
+ * these unchanged because dropping a condition can widen the result set.
  *
  * @param logLabel Handler name used as the log-line prefix.
  * @returns true when the condition was added, false when it was dropped.
@@ -174,33 +176,13 @@ export function addSearchCondition(
         }
     }
 
-    // A collection Zotero cannot resolve is NOT a condition that matches
-    // nothing: it compiles to `itemID IN (0)`, and under `isNot` that negates
-    // to every non-annotation item. So an unknown key silently turns a
-    // narrowing condition into one that matches the whole library — and inside
-    // a `joinMode any` group, one such disjunct makes the entire group match
-    // everything. Refuse it here, where the key can still be named.
-    if (condition.field === 'collection' && value !== '' && operatorAccepted && libraryID !== undefined) {
-        try {
-            // Zotero parses a legacy '<libraryID>_<key>' value server-side, so
-            // only the key half identifies the collection.
-            const key = /^\d+_/.test(value) ? value.slice(value.indexOf('_') + 1) : value;
-            if (!Zotero.Collections.getByLibraryAndKey(libraryID, key)) {
-                logger(`${logLabel}: Unknown collection key '${value}'`, 1);
-                warnings.push(
-                    `Dropped condition field='collection' value='${value}': this library has no `
-                        + 'collection with that key. Use list_collections to get the key. Zotero '
-                        + 'treats an unknown collection as one that matches nothing, which under '
-                        + "'isNot' would select the whole library."
-                );
-                return false;
-            }
-        } catch (err) {
-            // Collection data is loaded lazily. Let the condition through
-            // unvalidated rather than block a search on a cold cache.
-            const msg = err instanceof Error ? err.message : String(err);
-            logger(`${logLabel}: Skipped collection validation for '${value}': ${msg}`, 1);
+    // An invalid membership predicate must never be dropped, especially under OR or isNot.
+    if (condition.field === 'collection' || condition.field === 'collectionID') {
+        if (!operatorAccepted || !['is', 'isNot'].includes(originalOperator) || !value || libraryID === undefined) {
+            throw new CollectionResolutionError('collection_not_found', `Invalid collection condition: field="${condition.field}", operator="${originalOperator}", value="${condition.value ?? ''}". Use is or isNot with a nonempty collection ID from list_collections and the matching library. Keep the intended inclusion/exclusion and join mode when retrying.`);
         }
+        const resolved = resolveCollection(value, { libraryID });
+        value = condition.field === 'collectionID' ? String(resolved.collection.id) : resolved.key;
     }
 
     try {
@@ -208,6 +190,9 @@ export function addSearchCondition(
         return true;
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+        if (condition.field === 'collection' || condition.field === 'collectionID') {
+            throw new Error(`Could not apply collection condition field="${condition.field}", operator="${originalOperator}", value="${condition.value ?? ''}": ${msg}. Call list_collections in the intended library to verify the reference, then retry using is or isNot. Do not remove the condition or change the join mode to bypass this failure.`);
+        }
         logger(`${logLabel}: Invalid condition ${condition.field} ${originalOperator}: ${msg}`, 1);
         warnings.push(
             `Dropped condition field='${condition.field}' operator='${originalOperator}' value='${String(condition.value ?? '')}': ${msg}`

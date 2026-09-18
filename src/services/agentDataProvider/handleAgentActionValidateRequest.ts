@@ -1,3 +1,4 @@
+import { CollectionResolutionError } from '../collections/collectionIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSAgentActionValidateResponse
@@ -93,8 +94,8 @@ export async function handleAgentActionValidateRequest(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: String(error),
-            error_code: 'validation_failed',
+            error: error instanceof Error ? error.message : String(error),
+            error_code: error instanceof CollectionResolutionError ? error.code : 'validation_failed',
             preference: 'always_ask',
         };
     }

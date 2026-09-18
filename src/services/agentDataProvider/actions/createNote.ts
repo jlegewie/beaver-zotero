@@ -1,3 +1,4 @@
+import { collectionLibrariesMismatchError, resolveCollectionList } from '../../collections/collectionIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     NoteResultItem,
@@ -272,7 +273,7 @@ async function validateCreateNoteAction(
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
                 valid: false,
-                error: 'Resolved parent library does not match the requested library_ref',
+                error: `Parent reference "${rawParentItemId}" conflicts with requested library_ref "${libraryRef}". A child note must use its parent's library. Select the parent's library, or choose a parent from the intended library using item search.`,
                 error_code: 'library_collection_mismatch',
                 preference: 'always_ask',
                 timing: buildTiming(),
@@ -302,7 +303,7 @@ async function validateCreateNoteAction(
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
                 valid: false,
-                error: 'Resolved parent library does not match the requested library_id',
+                error: `Parent reference "${rawParentItemId}" conflicts with requested library_id "${rawLibraryId}". A child note must use its parent's library. Select the parent's library, or choose a parent from the intended library using item search.`,
                 error_code: 'library_collection_mismatch',
                 preference: 'always_ask',
                 timing: buildTiming(),
@@ -341,18 +342,14 @@ async function validateCreateNoteAction(
     // collection's library
     if (collectionDerivedLibraryId != null && resolvedLibraryId != null && resolvedLibraryId !== collectionDerivedLibraryId) {
         ta.record('library_resolution_ms', Date.now() - tLib);
-        const collectionLibrary = Zotero.Libraries.get(collectionDerivedLibraryId);
-        const explicitLibrary = Zotero.Libraries.get(resolvedLibraryId);
-        const collectionLibraryName = collectionLibrary ? collectionLibrary.name : String(collectionDerivedLibraryId);
-        const explicitLibraryName = explicitLibrary ? explicitLibrary.name : String(resolvedLibraryId);
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
             error:
-                `parent_id "${rawParentItemId}" is a collection in library "${collectionLibraryName}", ` +
-                `but library "${explicitLibraryName}" was also requested. ` +
-                `Use the 'collection' parameter for collections, and ensure 'library' matches.`,
+                `parent_id "${rawParentItemId}" identifies a collection that conflicts with the requested library. ` +
+                `Pass it in 'collections' instead of 'parent_item_id' and select its intended library, ` +
+                `or call list_collections in the requested library and choose a returned ID.`,
             error_code: 'library_collection_mismatch',
             preference: 'always_ask',
             timing: buildTiming(),
@@ -360,6 +357,27 @@ async function validateCreateNoteAction(
     }
     if (resolvedLibraryId == null && collectionDerivedLibraryId != null) {
         resolvedLibraryId = collectionDerivedLibraryId;
+    }
+
+    // Explicit libraries and parent-derived libraries constrain memberships. Without
+    // either, resolve across the allowed scope before choosing a default library.
+    const resolvedCollectionKeys: string[] = [];
+    if (collectionsInput.length > 0 && !parentKey) {
+        const tColl = Date.now();
+        const resolution = resolveCollectionList(collectionsInput, {
+            libraryID: resolvedLibraryId ?? undefined,
+        });
+        if (resolution.failures.length) throw resolution.failures[0].error;
+        const libraryIds = new Set(resolution.collections.map(entry => entry.libraryID));
+        if (libraryIds.size !== 1) {
+            throw collectionLibrariesMismatchError(resolution.collections, 'note');
+        }
+        resolvedLibraryId = resolution.collections[0].libraryID;
+        resolvedCollectionKeys.push(...resolution.collections.map(entry => entry.key));
+        ta.record('collection_resolution_ms', Date.now() - tColl);
+    } else if (collectionsInput.length > 0 && parentKey) {
+        // Child notes inherit membership from their parent and cannot be filed directly.
+        logger('validateCreateNoteAction: Ignoring collection assignments for a child note', 1);
     }
 
     // Default to user's library
@@ -412,28 +430,6 @@ async function validateCreateNoteAction(
     }
     ta.record('library_resolution_ms', Date.now() - tLib);
 
-    // Resolve collections if specified.
-    // Child notes cannot belong to collections directly (Zotero's
-    // fki_collectionItems_itemID_parentItemID trigger aborts the insert),
-    // so silently drop the collections when a parent is set — the note
-    // inherits collection membership from the parent.
-    const resolvedCollectionKeys: string[] = [];
-    if (collectionsInput.length > 0 && !parentKey) {
-        const tColl = Date.now();
-        for (const entry of collectionsInput) {
-            const collectionResult = getCollectionByIdOrName(entry, resolvedLibraryId);
-            if (collectionResult) {
-                if (!resolvedCollectionKeys.includes(collectionResult.collection.key)) {
-                    resolvedCollectionKeys.push(collectionResult.collection.key);
-                }
-            } else {
-                logger(`validateCreateNoteAction: Collection "${entry}" not found, will skip collection assignment`, 1);
-            }
-        }
-        ta.record('collection_resolution_ms', Date.now() - tColl);
-    } else if (collectionsInput.length > 0 && parentKey) {
-        logger(`validateCreateNoteAction: Ignoring collections "${collectionsInput.join(', ')}" because note has parent_key ${parentKey}`, 1);
-    }
     let resolvedCollectionKey: string | null = resolvedCollectionKeys[0] ?? null;
 
     // Standalone fallback: if parent resolution dropped to a standalone related
