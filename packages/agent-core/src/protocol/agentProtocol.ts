@@ -2980,9 +2980,24 @@ export interface ChargingPermissions {
  * Agent run request sent by the client after receiving the 'ready' event.
  * Model selection is included in this request (moved from auth message).
  */
+/** Client observation of search coverage; never grants search entitlement. */
+export interface SearchReadiness {
+    policy_version: 1;
+    ready: boolean;
+    reason: 'unknown' | 'discovering' | 'empty' | 'coverage' | 'ready' | 'stale' | 'unavailable';
+    discovery_complete: boolean;
+    verified_at: string | null;
+    index_version: number | null;
+    extract_schema_versions: Record<'pdf' | 'epub' | 'snapshot', string[]> | null;
+    zotero_local_id: string | null;
+    libraries: Array<{ scope_ref: string; supported: number; confirmed: number }>;
+}
+
 export interface AgentRunRequest {
     /** Request type discriminator */
     type: 'chat';
+    /** Missing/unknown observations require the local attachment-search fallback. */
+    search_readiness?: SearchReadiness;
     /** Client-generated run ID for this agent run */
     run_id: string;
     /** Thread ID (new UUID for new thread, existing UUID for continuation) */

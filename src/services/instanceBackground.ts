@@ -1,4 +1,5 @@
 import type { ProcessingProgress } from "./backgroundProcessing/progress";
+import { InstanceSearchReadiness } from "./searchIndex/instanceSearchReadiness";
 import { searchIndexApiClient } from "./searchIndex/searchIndexApiClient";
 import { getZoteroUserIdentifier } from "../utils/zoteroUtils";
 import {
@@ -23,6 +24,7 @@ import { logger } from "@beaver/agent-core/platform/logger";
 
 /** Owns background lane registrations, scope reconciliation and UI projections. */
 export class InstanceBackground {
+    readonly searchReadiness = new InstanceSearchReadiness();
     private unsubscribe?: () => void;
     private cleanups: (() => void | Promise<void>)[] = [];
     private key = "";
@@ -275,6 +277,7 @@ export class InstanceBackground {
     start(account: InstanceAccount): Promise<void> {
         if (this.unsubscribe) return this.progressReady;
         this.disposed = false;
+        this.searchReadiness.start();
         this.awaitingInitialDiscovery = true;
         this.progressUnsubscribe = Zotero.Beaver.db?.subscribeProcessingChanges(
             this.statusChanged,
@@ -339,6 +342,7 @@ export class InstanceBackground {
         this.pendingReindex = false;
     }
     private reconcile(snapshot: AccountSnapshot): void {
+        this.searchReadiness.reconcile();
         void this.configureProgress().then(this.statusChanged, (error) =>
             logger(`Processing progress: ${error}`, 2),
         );
@@ -414,6 +418,7 @@ export class InstanceBackground {
         this.clearGeneration();
         this.pendingReindex = false;
         await Promise.allSettled([
+            this.searchReadiness.dispose(),
             this.tail,
             this.progressReady,
             ...this.progressReads,

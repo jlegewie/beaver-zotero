@@ -66,6 +66,7 @@ export function useBackgroundProcessingStatus(
                         ledger,
                         worker,
                         documentCache,
+                        searchReadiness: Zotero.Beaver.background?.searchReadiness?.getStatus(),
                         coverage: hasSearchAccess ? previous.coverage : null,
                         coverageUpdatedAt: hasSearchAccess
                             ? previous.coverageUpdatedAt
@@ -141,20 +142,13 @@ export function useBackgroundProcessingStatus(
         let cancelled = false;
         let timer: ReturnType<typeof setTimeout> | undefined;
         const poll = async () => {
-            const coverage = await Zotero.Beaver?.background?.collectCoverage();
+            const readiness = Zotero.Beaver?.background?.searchReadiness;
+            if (!readiness) return;
+            await readiness.refresh();
             if (cancelled) return;
-            if (coverage !== undefined)
-                setStatus((previous) => ({
-                    ...previous,
-                    coverage: coverage ?? previous.coverage,
-                    coverageUpdatedAt: coverage
-                        ? Date.now()
-                        : previous.coverageUpdatedAt,
-                    coverageError:
-                        coverage === null
-                            ? "Could not check search coverage."
-                            : null,
-                }));
+            setStatus((previous) => ({ ...previous,
+                searchReadiness: readiness.getStatus(),
+            }));
             timer = setTimeout(() => void poll(), 60_000);
         };
         void poll();

@@ -52,6 +52,8 @@ vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 import { store } from '../../../react/store';
 import { sendWSMessageAtom } from '../../../react/atoms/agentRunAtoms';
 import { sessionAtom } from '../../../react/atoms/auth';
+import { isWSChatPendingAtom, isWSReadyAtom } from '../../../react/atoms/agentRunAtoms';
+import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 
 describe('sendWSMessageAtom connect() identity', () => {
     beforeEach(() => {
@@ -59,6 +61,9 @@ describe('sendWSMessageAtom connect() identity', () => {
         connectMock.mockResolvedValue(undefined);
         resolveClientIdentityMock.mockReturnValue(FIXTURE_IDENTITY);
         store.set(sessionAtom, { user: { id: 'user-1' } } as any);
+        store.set(isWSChatPendingAtom, false);
+        store.set(isWSReadyAtom, false);
+        store.set(activeRunAtom, null);
     });
 
     it('forwards the identity resolved by the client-identity seam, unchanged', async () => {
@@ -67,11 +72,25 @@ describe('sendWSMessageAtom connect() identity', () => {
         expect(resolveClientIdentityMock).toHaveBeenCalledTimes(1);
         expect(connectMock).toHaveBeenCalledTimes(1);
         const [, , frontendVersion, clientType, clientFeatures, zoteroInstance] = connectMock.mock.calls[0];
+        expect(connectMock.mock.calls[0][0].search_readiness).toMatchObject({
+            policy_version: 1, ready: false, discovery_complete: false,
+        });
         expect(frontendVersion).toBe(FIXTURE_IDENTITY.frontendVersion);
         expect(clientType).toBe(FIXTURE_IDENTITY.clientType);
         expect(clientFeatures).toBe(FIXTURE_IDENTITY.clientFeatures);
         // Same reference as resolveClientIdentity() returned — no defensive
         // copy needed since the seam already builds a fresh object per call.
         expect(zoteroInstance).toBe(FIXTURE_IDENTITY.zoteroInstance);
+    });
+
+    it('updates readiness at the ready handshake rather than keeping an earlier observation', async () => {
+        const getStatus = vi.fn(() => ({ current: { policy_version: 1, ready: true, reason: 'ready' } }));
+        Zotero.Beaver = { background: { searchReadiness: { getStatus } } } as any;
+        await store.set(sendWSMessageAtom, 'hello');
+        const [request, callbacks] = connectMock.mock.calls[0];
+        expect(request.search_readiness.ready).toBe(true);
+        getStatus.mockReturnValue({ current: { policy_version: 1, ready: false, reason: 'discovering' } });
+        callbacks.onReady({ subscriptionStatus: 'active', processingMode: 'local', indexingComplete: false });
+        expect(request.search_readiness).toMatchObject({ ready: false, reason: 'discovering' });
     });
 });

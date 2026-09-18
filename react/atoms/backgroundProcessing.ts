@@ -1,5 +1,6 @@
 import type { ProcessingProgress } from '../../src/services/backgroundProcessing/progress';
 import { atom } from 'jotai';
+import type { SearchReadinessStatus } from '../../src/services/searchIndex/instanceSearchReadiness';
 import type {
     AttachmentProcessingAggregates,
     BackgroundQueueStats,
@@ -11,6 +12,7 @@ import type { ProcessingIssueSummary } from '../../src/services/backgroundProces
 import type { BackgroundWorkerSnapshot } from '../../src/services/backgroundProcessing/statusSnapshot';
 
 export interface BackgroundProcessingStatus {
+    searchReadiness?: SearchReadinessStatus;
     progress: ProcessingProgress | null;
     queue: BackgroundQueueStats;
     ledger: AttachmentProcessingAggregates;

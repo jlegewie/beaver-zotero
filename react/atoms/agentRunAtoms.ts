@@ -2256,6 +2256,12 @@ async function executeWSRequest(
     restoreComposer?: () => void,
 ): Promise<void> {
     assertWriter(currentWriter());
+    const updateSearchReadiness = () => { request.search_readiness = Zotero.Beaver?.background?.searchReadiness?.getStatus().current ?? {
+        policy_version: 1, ready: false, reason: 'unknown', discovery_complete: false,
+        verified_at: null, index_version: null, extract_schema_versions: null,
+        zotero_local_id: null, libraries: [],
+    }; };
+    updateSearchReadiness();
     request.expected_tail_run_id = request.thread_id
         ? (get(threadAdmissionAtom)?.tailRunId ?? null)
         : null;
@@ -2289,10 +2295,14 @@ async function executeWSRequest(
     };
 
     connectLoopsInFlight++;
+    const callbacks = createWSCallbacks(set, () => attemptsMade, restoreComposer);
     const result = await connectWithRetry({
         service: agentService,
         request,
-        callbacks: createWSCallbacks(set, () => attemptsMade, restoreComposer),
+        callbacks: { ...callbacks, onReady: (data) => {
+            updateSearchReadiness();
+            callbacks.onReady(data);
+        } },
         logLabel: `run ${run.id}`,
         // Every attempt starts from a clean ready state.
         onAttempt: () => set(isWSReadyAtom, false),

@@ -116,6 +116,9 @@ const LocalDocumentCacheRow: React.FC<{ hasBorder?: boolean }> = ({ hasBorder = 
                     <span className="display-flex mt-1">
                         {cache === undefined ? 'Checking local storage…' : cache === null ? 'Cache status unavailable' : describeCache(cache)}
                     </span>
+                    {cache && typeof cache.protected_ocr_bytes === 'number' && <span className="display-flex mt-1">
+                        {formatBytes(cache.protected_ocr_bytes)} of protected OCR text is retained when clearing this cache. Local cache size does not measure cloud search coverage.
+                    </span>}
                     {!!cache?.ocr_repreparation_required_count && <span role="status" className="display-flex mt-1">
                         {plural(cache.ocr_repreparation_required_count, 'prepared scan')} need re-preparation after an extraction update. Their cached data is retained and will not be served until compatible preparation is available.
                     </span>}

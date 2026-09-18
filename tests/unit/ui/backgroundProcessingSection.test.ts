@@ -1,3 +1,4 @@
+import { unknownSearchReadiness } from '../../../src/services/searchIndex/searchReadinessPolicy';
 // @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -339,7 +340,7 @@ it('keeps known problems visible with background processing off, without status,
         expect(container.querySelector('[data-retry="group"]')).not.toBeNull();
     });
 });
-it('lists server indexing problems with reading problems and keeps the search status on the toggle row', async () => {
+it('lists server indexing problems with reading problems and shows search coverage separately from preparation', async () => {
     const store = createStore();
     access.search = true;
     store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
@@ -355,20 +356,17 @@ it('lists server indexing problems with reading problems and keeps the search st
         expect(container.textContent).toContain('Keep Full-Text Search Up to Date');
         expect(container.querySelector('[role="status"]')?.textContent).toBe('Up to date');
         expect(container.textContent).toContain('2 files could not be read or indexed. See Problems below.');
-        expect(container.textContent).toContain('Full-text search index available. Last checked');
+        expect(container.textContent).toContain('Checking search coverage…');
+        expect(container.textContent).not.toContain('Full-text search index available');
         expect(container.textContent).not.toContain('Updates paused.');
         expect(container.textContent).toContain('2 attachments could not be read or indexed');
         expect(container.querySelector('[data-issue-reason="index_failed"]')).not.toBeNull();
     });
 });
 it.each([
-    [{ coverage: { namespace_exists: false, approx_row_count: 0, documents: [] }, coverageError: null }, 'Full-text search index not built yet.'],
-    [{ coverage: null, coverageError: 'Could not check search coverage.' }, 'The full-text search index could not be checked.'],
-    [{ coverage: null, coverageError: null }, 'Checking the full-text search index…'],
-    [
-        { coverage: { namespace_exists: true, approx_row_count: 10, documents: [] }, coverageError: 'Could not check search coverage.', coverageUpdatedAt: 0 },
-        'The full-text search index could not be checked. Last known status: Full-text search index available.',
-    ],
+    [{ searchReadiness: { current: { ...unknownSearchReadiness(), reason: 'empty' }, lastConfirmed: null, error: null, refreshing: false } }, 'No supported attachments'],
+    [{ searchReadiness: { current: unknownSearchReadiness(), lastConfirmed: null, error: 'Could not verify current search coverage.', refreshing: false } }, 'Could not verify current search coverage.'],
+    [{ searchReadiness: undefined }, 'Checking search coverage…'],
 ])('keeps the search index status %j visible while processing is paused', async (coverageState, line) => {
     prefs.backgroundProcessingEnabled = false;
     const store = createStore();
@@ -377,7 +375,8 @@ it.each([
     await withView(store, (container) => {
         expect(container.querySelector('[role="status"]')).toBeNull();
         expect(container.textContent).toContain(line);
-        const paused = Array.from(container.querySelectorAll('span')).find((node) => node.textContent?.startsWith(line));
+        const paused = Array.from(container.querySelectorAll('div')).find((node) => node.textContent?.startsWith(line));
+        expect(paused).toBeDefined();
         expect(paused?.closest('[aria-hidden="true"]')).toBeNull();
         expect(container.textContent).toContain('No problems found in the files Beaver has processed so far.');
     });

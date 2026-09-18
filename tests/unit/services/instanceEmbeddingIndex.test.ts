@@ -39,6 +39,13 @@ vi.mock(
     }),
 );
 import { InstanceBackground } from "../../../src/services/instanceBackground";
+vi.mock('../../../src/services/searchIndex/instanceSearchReadiness', () => ({
+    InstanceSearchReadiness: class {
+        start() {}
+        reconcile() {}
+        async dispose() {}
+    },
+}));
 
 describe("instance embedding events across background generations", () => {
     let service: InstanceBackground;
@@ -63,7 +70,7 @@ describe("instance embedding events across background generations", () => {
         mocks.deleteEmbeddings.mockResolvedValue(undefined);
         snapshot = {
             generation: 1,
-            session: {},
+            session: { user: { id: 'user1' } },
             data: { profile: { has_authorized_access: true } },
             libraries: [{ library_id: 1 }, { library_id: 2 }],
         };
@@ -90,6 +97,7 @@ describe("instance embedding events across background generations", () => {
                     return () => {};
                 },
                 getSnapshot: () => snapshot,
+                getGeneration: () => snapshot.generation,
             },
         };
         (Zotero as any).Beaver = owner;

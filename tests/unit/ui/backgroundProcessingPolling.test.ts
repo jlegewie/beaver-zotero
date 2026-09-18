@@ -22,12 +22,13 @@ function GeneralStatusConsumer() {
     useBackgroundProcessingStatus({ includeFailures: false, pollIntervalMs: 60_000 });
     return null;
 }
-beforeEach(() => { vi.clearAllMocks(); collect.mockReset(); coverage.mockReset(); });
+let readinessStatus: any = undefined;
+beforeEach(() => { readinessStatus = undefined; vi.clearAllMocks(); collect.mockReset(); coverage.mockReset(); });
 it('updates local progress while coverage is slow and preserves coverage after its own failure', async () => {
     vi.useFakeTimers();
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     const previous = Zotero.Beaver;
-    (Zotero as any).Beaver = { db: {}, background: { collectStatus: collect, collectCoverage: coverage }, runtime: { subscribeWindow: subscribe } };
+    (Zotero as any).Beaver = { db: {}, background: { collectStatus: collect, searchReadiness: { refresh: coverage, getStatus: () => readinessStatus } }, runtime: { subscribeWindow: subscribe } };
     const store = createStore();
     const snapshot = { ...store.get(backgroundProcessingStatusAtom), documentCache: null };
     collect.mockResolvedValue(snapshot);
@@ -42,13 +43,13 @@ it('updates local progress while coverage is slow and preserves coverage after i
         expect(collect).toHaveBeenCalledTimes(6);
         expect(coverage).toHaveBeenCalledTimes(1);
         expect(collect).toHaveBeenLastCalledWith({ includeCoverage: false, includeFailures: true });
-        const remote = { namespace_exists: true, approx_row_count: 100, documents: [] };
-        await act(async () => resolve(remote));
-        const confirmedAt = store.get(backgroundProcessingStatusAtom).coverageUpdatedAt;
+        const remote = { current: { ready: true }, lastConfirmed: { verified_at: '2026-09-18T00:00:00Z' }, error: null };
+        readinessStatus = remote;
+        await act(async () => resolve(undefined));
+        readinessStatus = { ...remote, error: 'Could not verify current search coverage.' };
         await act(async () => vi.advanceTimersByTimeAsync(60_000));
         expect(store.get(backgroundProcessingStatusAtom)).toMatchObject({
-            coverage: remote, coverageUpdatedAt: confirmedAt,
-            coverageError: 'Could not check search coverage.', error: null,
+            searchReadiness: { ...remote, error: 'Could not verify current search coverage.' }, error: null,
         });
     } finally {
         act(() => root.unmount());
@@ -60,7 +61,7 @@ it('updates local progress while coverage is slow and preserves coverage after i
 it('does not invalidate issue pages when a general status poll omits issues', async () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     const previous = Zotero.Beaver;
-    (Zotero as any).Beaver = { db: {}, background: { collectStatus: collect, collectCoverage: coverage }, runtime: { subscribeWindow: subscribe } };
+    (Zotero as any).Beaver = { db: {}, background: { collectStatus: collect, searchReadiness: { refresh: coverage, getStatus: () => readinessStatus } }, runtime: { subscribeWindow: subscribe } };
     const store = createStore();
     const initial = store.get(backgroundProcessingStatusAtom);
     store.set(backgroundProcessingStatusAtom, {
@@ -92,14 +93,14 @@ it('does not invalidate issue pages when a general status poll omits issues', as
 it('ignores the stale-account status sentinel without displaying an error', async () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     const previous = Zotero.Beaver;
-    (Zotero as any).Beaver = { db: {}, background: { collectStatus: collect, collectCoverage: coverage }, runtime: { subscribeWindow: subscribe } };
+    (Zotero as any).Beaver = { db: {}, background: { collectStatus: collect, searchReadiness: { refresh: coverage, getStatus: () => readinessStatus } }, runtime: { subscribeWindow: subscribe } };
     const store = createStore();
     const initial = store.get(backgroundProcessingStatusAtom);
     collect.mockResolvedValue(null);
     const root = createRoot(document.createElement('div'));
     try {
         await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(Consumer))));
-        expect(store.get(backgroundProcessingStatusAtom)).toBe(initial);
+        expect(store.get(backgroundProcessingStatusAtom)).toEqual(initial);
     } finally {
         act(() => root.unmount());
         Zotero.Beaver = previous;
@@ -110,7 +111,7 @@ it('ignores the stale-account status sentinel without displaying an error', asyn
 it('coalesces activity during a slow local read and ignores results after unmount', async () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     const previous = Zotero.Beaver;
-    (Zotero as any).Beaver = { db: {}, background: { collectStatus: collect, collectCoverage: coverage }, runtime: { subscribeWindow: subscribe } };
+    (Zotero as any).Beaver = { db: {}, background: { collectStatus: collect, searchReadiness: { refresh: coverage, getStatus: () => readinessStatus } }, runtime: { subscribeWindow: subscribe } };
     const store = createStore();
     const snapshot = { ...store.get(backgroundProcessingStatusAtom) };
     let resolve!: (value: any) => void;

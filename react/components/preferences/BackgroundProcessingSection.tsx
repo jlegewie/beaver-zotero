@@ -24,6 +24,7 @@ import { describeStatus, plural, type StatusTone } from './processingStatusSente
 import PlayIcon from '@beaver/agent-ui/icons/PlayIcon';
 import StopIcon from '@beaver/agent-ui/icons/StopIcon';
 import { prepareUncachedFiles } from '../../../src/services/backgroundProcessing/cachePreparation';
+import { searchReadinessSentence } from './searchReadinessSentence';
 
 const TONE_COLOR: Record<StatusTone, string> = {
     idle: 'var(--accent-green)',
@@ -138,28 +139,6 @@ const ProcessingStatusRow: React.FC<{
         </div>
     );
 };
-
-/**
- * The server search-index check, for accounts with full-text search. Shown
- * with the toggle so it stays visible while processing is paused. The status
- * poll keeps the last successful check when a later one fails, so a failure
- * is named ahead of that stale result rather than hidden behind it.
- */
-function searchIndexStatusLine(status: BackgroundProcessingStatus): string {
-    const known = status.coverage
-        ? (status.coverage.namespace_exists
-            ? 'Full-text search index available.'
-            : 'Full-text search index not built yet.')
-        : null;
-    const checked = known && status.coverageUpdatedAt
-        ? ` Last checked ${new Date(status.coverageUpdatedAt).toLocaleString()}.`
-        : '';
-    if (status.coverageError) {
-        return 'The full-text search index could not be checked.'
-            + (known ? ` Last known status: ${known}${checked}` : '');
-    }
-    return known ? known + checked : 'Checking the full-text search index…';
-}
 
 /** True while the local metadata search index has something to fix. */
 function hasMetadataIndexProblem(indexState: EmbeddingIndexState): boolean {
@@ -319,7 +298,6 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                     description={<>{locked
                         ? 'Background processing is required for full-text search and OCR. Files process after 30 seconds without keyboard or mouse activity on your computer. Use Start now to process immediately, or Stop to return to idle processing.'
                         : 'Process files ahead of time while your computer is idle for faster responses.'}
-                        {hasSearchAccess && <span className="display-flex mt-1">{searchIndexStatusLine(status)}</span>}
                     </>}
                     onClick={() => updateEnabled(!enabled)}
                     control={<input
@@ -342,6 +320,17 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                 )}
                 {actionError && <div role="alert" className="font-color-red text-base border-top-quinary" style={{ padding: '8px 12px' }}>{actionError}</div>}
             </SettingsGroup>
+
+            {hasSearchAccess && <>
+                <SectionLabel>Search Coverage</SectionLabel>
+                <SettingsGroup>
+                    <SettingsRow title="Cloud Search Preparation" description={<>
+                        {searchReadinessSentence(status.searchReadiness)}
+                        <span className="display-flex mt-1">Requires 95% of supported files in each included library initially; stays prepared at 90%. Unavailable and failed files count toward coverage.</span>
+                        <span className="display-flex mt-1">Cloud search is not yet enabled in conversations. Attachment search remains available.</span>
+                    </>} />
+                </SettingsGroup>
+            </>}
 
             <SectionLabel>Problems</SectionLabel>
             <SettingsGroup>
