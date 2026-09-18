@@ -9,7 +9,8 @@ vi.mock('../../../src/utils/searchTools', () => ({
 // The shared library-filter resolution is exercised by its own tests; here it
 // only needs to be the same seam every other search op goes through.
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
-    getCollectionByIdOrName: vi.fn(),
+    resolveCollectionsFilter: vi.fn(),
+    collectionsFilterError: vi.fn(() => null),
     getSearchableLibraryIds: vi.fn(() => searchableLibs),
     isLibraryAccessReady: vi.fn(() => true),
     resolveLibrariesFilter: vi.fn(),
@@ -23,7 +24,8 @@ vi.mock('../../../src/utils/agentItemSupport', () => ({
 import { handleResolveSearchFiltersRequest } from '../../../src/services/agentDataProvider/handleResolveSearchFiltersRequest';
 import { resolveItemsByFilters } from '../../../src/utils/searchTools';
 import {
-    getCollectionByIdOrName,
+    resolveCollectionsFilter,
+    collectionsFilterError,
     isLibraryAccessReady,
     librariesFilterError,
     resolveLibrariesFilter,
@@ -72,7 +74,8 @@ beforeEach(() => {
         loadDataTypes: vi.fn(async () => undefined),
     };
 
-    (getCollectionByIdOrName as any).mockReturnValue({ libraryID: 1, collection: { key: 'COLLKEY' } });
+    (resolveCollectionsFilter as any).mockReturnValue({ collections: [{ libraryID: 1, key: 'COLLKEY' }], unresolved: [], outOfScope: [] });
+    (collectionsFilterError as any).mockReturnValue(null);
     (resolveLibrariesFilter as any).mockReturnValue({ libraryIds: [1], unresolved: [], excluded: [] });
     (librariesFilterError as any).mockReturnValue(null);
     (isLibraryAccessReady as any).mockReturnValue(true);
@@ -192,7 +195,8 @@ describe('handleResolveSearchFiltersRequest', () => {
 
     it('skips a library where requested collections resolve to no keys', async () => {
         searchableLibs = [1];
-        (getCollectionByIdOrName as any).mockReturnValue(null);
+        (resolveCollectionsFilter as any).mockReturnValue({ collections: [], unresolved: ['Missing'], outOfScope: [] });
+        (collectionsFilterError as any).mockReturnValue({ message: 'Collection not found', error_code: 'collection_not_found' });
         (resolveItemsByFilters as any).mockResolvedValue({ itemIDs: [10], matchedTags: [], matchedAuthors: [] });
 
         const res = await handleResolveSearchFiltersRequest({

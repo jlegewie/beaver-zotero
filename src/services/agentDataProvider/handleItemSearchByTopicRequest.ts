@@ -50,6 +50,7 @@ export async function handleItemSearchByTopicRequest(
 ): Promise<WSItemSearchByTopicResponse> {
     // Start timing
     const startTime = Date.now();
+    const unresolvedCollections: string[] = [];
     let searchEndTime = 0;
     let serializationEndTime = 0;
     
@@ -59,6 +60,7 @@ export async function handleItemSearchByTopicRequest(
         logger('handleItemSearchByTopicRequest: Database not available', 1);
         return {
             type: 'item_search_by_topic',
+            ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
             request_id: request.request_id,
             items: [],
             timing: {
@@ -77,6 +79,7 @@ export async function handleItemSearchByTopicRequest(
         logger('handleItemSearchByTopicRequest: no searchable libraries available', 1);
         return {
             type: 'item_search_by_topic',
+            ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
             request_id: request.request_id,
             items: [],
             timing: {
@@ -103,6 +106,7 @@ export async function handleItemSearchByTopicRequest(
             logger(`handleItemSearchByTopicRequest: ${filterError.message}`, 1);
             return {
                 type: 'item_search_by_topic',
+                ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
                 request_id: request.request_id,
                 items: [],
                 error: filterError.message,
@@ -125,6 +129,7 @@ export async function handleItemSearchByTopicRequest(
     let collectionItemIds: number[] | undefined;
     if (request.collections_filter && request.collections_filter.length > 0) {
         const resolution = resolveCollectionsFilter(request.collections_filter, libraryIds);
+        unresolvedCollections.push(...resolution.unresolved);
 
         // A collections_filter that resolves to nothing must narrow the search to
         // no results, never widen it to the whole library — and it is reported as
@@ -135,6 +140,7 @@ export async function handleItemSearchByTopicRequest(
             logger(`handleItemSearchByTopicRequest: ${filterError.message}`, 1);
             return {
                 type: 'item_search_by_topic',
+                ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
                 request_id: request.request_id,
                 items: [],
                 error: filterError.message,
@@ -154,6 +160,7 @@ export async function handleItemSearchByTopicRequest(
             logger(`handleItemSearchByTopicRequest: collections_filter resolved to ${resolution.collections.length} collections holding no items`, 1);
             return {
                 type: 'item_search_by_topic',
+                ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
                 request_id: request.request_id,
                 items: [],
                 timing: {
@@ -178,6 +185,7 @@ export async function handleItemSearchByTopicRequest(
             logger(`handleItemSearchByTopicRequest: ${filterError.message}`, 1);
             return {
                 type: 'item_search_by_topic',
+                ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
                 request_id: request.request_id,
                 items: [],
                 error: filterError.message,
@@ -197,6 +205,7 @@ export async function handleItemSearchByTopicRequest(
             logger('handleItemSearchByTopicRequest: tags_filter resolved to no tags', 1);
             return {
                 type: 'item_search_by_topic',
+                ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
                 request_id: request.request_id,
                 items: [],
                 timing: {
@@ -235,6 +244,7 @@ export async function handleItemSearchByTopicRequest(
         logger(`handleItemSearchByTopicRequest: Semantic search failed: ${error}`, 1);
         return {
             type: 'item_search_by_topic',
+            ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
             request_id: request.request_id,
             items: [],
         };
@@ -254,6 +264,7 @@ export async function handleItemSearchByTopicRequest(
         };
         return {
             type: 'item_search_by_topic',
+            ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
             request_id: request.request_id,
             items: [],
             timing,
@@ -268,6 +279,7 @@ export async function handleItemSearchByTopicRequest(
     if (validItems.length === 0) {
         return {
             type: 'item_search_by_topic',
+            ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
             request_id: request.request_id,
             items: [],
             timing: {
@@ -402,6 +414,7 @@ export async function handleItemSearchByTopicRequest(
 
     const response: WSItemSearchByTopicResponse = {
         type: 'item_search_by_topic',
+        ...(unresolvedCollections.length ? { unresolved_collections: unresolvedCollections } : {}),
         request_id: request.request_id,
         items: resultItems,
         timing,

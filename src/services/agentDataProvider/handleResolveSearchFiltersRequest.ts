@@ -20,7 +20,8 @@ import { agentItemFilter } from '../../utils/agentItemSupport';
 import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 import { resolveItemsByFilters } from '../../utils/searchTools';
 import {
-    getCollectionByIdOrName,
+    resolveCollectionsFilter,
+    collectionsFilterError,
     getSearchableLibraryIds,
     isLibraryAccessReady,
     librariesFilterError,
@@ -117,14 +118,14 @@ export async function handleResolveSearchFiltersRequest(
     const resolvedCollectionInputs = new Set<string | number>();
     if (hasCollections) {
         for (const libId of libraryIds) collectionKeysByLibrary.set(libId, []);
-        for (const coll of request.collections!) {
-            for (const libId of libraryIds) {
-                const result = getCollectionByIdOrName(coll as number | string, libId);
-                if (result && result.libraryID === libId) {
-                    collectionKeysByLibrary.get(libId)!.push(result.collection.key);
-                    resolvedCollectionInputs.add(coll);
-                }
-            }
+        const resolution = resolveCollectionsFilter(request.collections!, libraryIds);
+        const error = collectionsFilterError(resolution);
+        if (error) return buildResponse(request, [], { collections: request.collections! }, startTime, 0, error);
+        for (const collection of resolution.collections) {
+            collectionKeysByLibrary.get(collection.libraryID)!.push(collection.key);
+        }
+        for (const input of request.collections!) {
+            if (!resolution.unresolved.includes(String(input))) resolvedCollectionInputs.add(input);
         }
     }
 

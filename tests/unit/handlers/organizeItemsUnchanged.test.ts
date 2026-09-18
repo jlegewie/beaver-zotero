@@ -188,6 +188,18 @@ describe('executeOrganizeItemsAction unchanged_items', () => {
         expect(items.AAAAAAAA.save).toHaveBeenCalledTimes(1);
     });
 
+    it('rejects a trashed add target before applying any item changes', async () => {
+        items.AAAAAAAA = makeItem('AAAAAAAA', [], []);
+        vi.mocked(Zotero.Collections.getByLibraryAndKeyAsync).mockResolvedValue({ id: COLLECTION_ID, deleted: true } as any);
+        const response = await executeOrganizeItemsAction(buildRequest({
+            item_ids: ['1-AAAAAAAA'], tags: { add: ['new'] }, collections: { add: [COLLECTION_KEY] },
+        }), timeoutCtx());
+        expect(response.success).toBe(false);
+        expect(response.error_code).toBe('collection_not_found');
+        expect(items.AAAAAAAA.save).not.toHaveBeenCalled();
+        expect(items.AAAAAAAA.state.tags).toEqual([]);
+    });
+
     it('fails the batch when an add-target collection was deleted since validation', async () => {
         // Filed in the surviving collection already; the second key resolves to
         // nothing, so the item is NOT in the requested state.

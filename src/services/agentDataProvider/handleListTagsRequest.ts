@@ -7,13 +7,15 @@
  * The Beaver agent is the primary agent that handles chat completions and tool execution.
  */
 
+import { collectionNotFoundError, CollectionResolutionError } from '../collections/collectionIdentity';
+
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSListTagsRequest,
     WSListTagsResponse,
     TagInfo,
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, excludedLibraryMessage } from './utils';
+import { getCollectionByIdOrName, validateLibraryAccess } from './utils';
 import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 
 
@@ -63,7 +65,13 @@ export async function handleListTagsRequest(
     
     try {
         // Validate library (checks both existence and searchability)
-        const validation = validateLibraryAccess(request.library_id);
+        let validation = validateLibraryAccess(request.library_id);
+        const collectionLookup = request.collection_key && (request.library_id == null || validation.valid)
+            ? getCollectionByIdOrName(request.collection_key, request.library_id != null ? validation.library!.libraryID : undefined)
+            : null;
+        if (request.library_id == null && collectionLookup) {
+            validation = validateLibraryAccess(collectionLookup.libraryID);
+        }
         if (!validation.valid) {
             return {
                 type: 'list_tags',
@@ -75,12 +83,12 @@ export async function handleListTagsRequest(
                 available_libraries: validation.available_libraries,
             };
         }
-        let library = validation.library!;
+        const library = validation.library!;
         let resolvedCollection: Zotero.Collection | null = null;
         
         // Resolve collection if specified, potentially updating library scope
         if (request.collection_key) {
-            const result = getCollectionByIdOrName(request.collection_key, library.libraryID);
+            const result = collectionLookup;
             
             if (!result) {
                 return {
@@ -90,30 +98,11 @@ export async function handleListTagsRequest(
                     total_count: 0,
                     library_id: library.libraryID,
                     library_name: library.name,
-                    error: `Collection not found: ${request.collection_key}`,
+                    error: collectionNotFoundError(request.collection_key).message,
                     error_code: 'collection_not_found',
                 };
             }
-            
-            // Update library scope if collection was found in a different library
-            if (result.libraryID !== library.libraryID) {
-                const resolvedLib = Zotero.Libraries.get(result.libraryID);
-                if (!resolvedLib || !isLibrarySearchable(result.libraryID)) {
-                    return {
-                        type: 'list_tags',
-                        request_id: request.request_id,
-                        tags: [],
-                        total_count: 0,
-                        // Do not echo the collection's name: it is content from a
-                        // library the user excluded from Beaver.
-                        error: excludedLibraryMessage(result.libraryID),
-                        error_code: 'library_not_searchable',
-                        available_libraries: getSearchableLibraries(),
-                    };
-                }
-                library = resolvedLib;
-            }
-            
+
             resolvedCollection = result.collection;
         }
         
@@ -307,8 +296,8 @@ export async function handleListTagsRequest(
             request_id: request.request_id,
             tags: [],
             total_count: 0,
-            error: String(error),
-            error_code: 'list_failed',
+            error: error instanceof Error ? error.message : String(error),
+            error_code: error instanceof CollectionResolutionError ? error.code : 'list_failed',
         };
     }
 }

@@ -185,7 +185,9 @@ describe('resolveCollectionsFilter', () => {
                 getByLibrary: (libraryId: number) =>
                     COLLECTIONS.filter(c => (c as any).libraryID === libraryId),
             },
+            Groups: { getGroupIDFromLibraryID: (id: number) => id === 100 ? 12345 : false },
             Libraries: {
+                userLibraryID: 1,
                 getAll: () => [{ libraryID: 1 }, { libraryID: 100 }, { libraryID: 42 }],
                 get: (libraryId: number) =>
                     LIBRARY_NAMES.has(libraryId) ? { name: LIBRARY_NAMES.get(libraryId) } : false,
@@ -245,21 +247,17 @@ describe('resolveCollectionsFilter', () => {
         expect(resolution.outOfScope).toEqual([]);
     });
 
-    it('separates a key that resolves outside the searched libraries from a missing one', () => {
-        // Key-like entries resolve through a cross-library fallback that can
-        // land in a library the request is not scoped to.
+    it('does not look for a bare key outside the searched libraries', () => {
         const resolution = resolveCollectionsFilter(['CCCCCCCC'], [1]);
-
         expect(resolution.collections).toEqual([]);
-        expect(resolution.unresolved).toEqual([]);
-        // Library 42 is excluded, so its collection name is not carried out.
-        expect(resolution.outOfScope).toEqual([{ input: 'CCCCCCCC', name: null, libraryId: 42 }]);
+        expect(resolution.unresolved).toEqual(['CCCCCCCC']);
+        expect(resolution.outOfScope).toEqual([]);
     });
 
-    it('reports a numeric ID from an unsearched library as out of scope', () => {
+    it('rejects a numeric ID outside the searched libraries without disclosing its name', () => {
         const resolution = resolveCollectionsFilter([12], [1]);
-
-        expect(resolution.outOfScope).toEqual([{ input: '12', name: 'Papers', libraryId: 100 }]);
+        expect(collectionsFilterError(resolution)).toMatchObject({ error_code: 'library_not_searchable' });
+        expect(JSON.stringify(resolution)).not.toContain('Papers');
     });
 
     it('keeps the collections it resolved when only some entries fail', () => {
@@ -281,7 +279,7 @@ describe('resolveCollectionsFilter', () => {
         // profile still loading): reading collections out of those libraries to
         // classify the filter would be an unauthorized read, and would report an
         // allowed collection as excluded while loading.
-        expect(resolution).toEqual({ collections: [], unresolved: [], outOfScope: [] });
+        expect(resolution).toMatchObject({ collections: [], unresolved: ['Papers', 'CCCCCCCC'], outOfScope: [] });
         expect(getByLibrary).not.toHaveBeenCalled();
         expect(getByLibraryAndKey).not.toHaveBeenCalled();
     });
@@ -294,7 +292,9 @@ describe('collectionsFilterError', () => {
         previousZotero = (globalThis as any).Zotero;
         (globalThis as any).Zotero = {
             Beaver: { searchableLibraryIds: [1, 100], libraryScopeInitialized: true },
+            Groups: { getGroupIDFromLibraryID: (id: number) => id === 100 ? 12345 : false },
             Libraries: {
+                userLibraryID: 1,
                 get: (libraryId: number) =>
                     LIBRARY_NAMES.has(libraryId) ? { name: LIBRARY_NAMES.get(libraryId) } : false,
             },

@@ -286,6 +286,12 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
     // =====================================================================
 
     describe('search_by_topic', () => {
+        it('preserves partial collection diagnostics in the MCP result', async () => {
+            mockHandleItemSearchByTopicRequest.mockResolvedValue({ items: [], unresolved_collections: ['Missing'] });
+            const result = await callTool(endpoint, 'search_by_topic', { topic_query: 'test' });
+            expect(JSON.parse(result.content[0].text).unresolved_collections).toEqual(['Missing']);
+        });
+
         it('passes topic_query to handler', async () => {
             mockHandleItemSearchByTopicRequest.mockResolvedValue({
                 type: 'item_search_by_topic',
@@ -657,6 +663,12 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
     // =====================================================================
 
     describe('search_by_metadata', () => {
+        it('preserves partial collection diagnostics in the MCP result', async () => {
+            mockHandleItemSearchByMetadataRequest.mockResolvedValue({ items: [], unresolved_collections: ['Missing'] });
+            const result = await callTool(endpoint, 'search_by_metadata', { title_query: 'test' });
+            expect(JSON.parse(result.content[0].text).unresolved_collections).toEqual(['Missing']);
+        });
+
         it('passes author_query to handler', async () => {
             mockHandleItemSearchByMetadataRequest.mockResolvedValue({
                 type: 'item_search_by_metadata',

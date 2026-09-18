@@ -636,10 +636,14 @@ export type ItemSearchErrorCode =
     | 'library_not_found'      // libraries_filter matched no library on this device
     | 'library_not_searchable' // a filter matched only in a library excluded from Beaver
     | 'tag_not_found'          // tags_filter matched no tag in the searched libraries
-    | 'timeout'; // Operation timed out
+    | 'timeout'               // Operation timed out
+    | 'library_unavailable'
+    | 'library_collection_mismatch';
 
 /** Response to item metadata search request */
 export interface WSItemSearchByMetadataResponse {
+    /** Collection filters omitted from a partially successful discovery search. */
+    unresolved_collections?: string[];
     type: 'item_search_by_metadata';
     request_id: string;
     items: ItemSearchFrontendResultItem[];
@@ -682,6 +686,8 @@ export interface WSItemSearchByTopicRequest extends WSBaseEvent {
 
 /** Response to item topic search request */
 export interface WSItemSearchByTopicResponse {
+    /** Collection filters omitted from a partially successful discovery search. */
+    unresolved_collections?: string[];
     type: 'item_search_by_topic';
     request_id: string;
     items: ItemSearchFrontendResultItem[];
@@ -844,6 +850,8 @@ export interface WSItemQuickSearchRequest extends WSBaseEvent {
 
 /** Response to a quick search request */
 export interface WSItemQuickSearchResponse {
+    /** Collection filters omitted from a partially successful discovery search. */
+    unresolved_collections?: string[];
     type: 'item_quick_search';
     request_id: string;
     /**
@@ -1530,11 +1538,11 @@ export interface WSListItemsResponse {
 export interface WSResolvePopulationRequest extends WSBaseEvent {
     event: 'resolve_population_request';
     request_id: string;
-    /** Library id or name. Null/absent = the user's default library. */
+    /** Library id or name. When absent, infer from collection references or use the user's default library. */
     library_id?: number | string | null;
     /**
-     * Bare collection keys (never library-qualified); the backend
-     * down-converts. ORed: an item matches when it is in ANY of them.
+     * Collection references, including legacy bare keys scoped to the library.
+     * Qualified IDs must agree with an explicitly requested library. ORed: an item matches when it is in ANY of them.
      */
     collection_keys?: string[] | null;
     /** Include items from subcollections of every scoped collection. */
@@ -1667,6 +1675,8 @@ export interface WSResolvePopulationResponse {
      */
     library_name?: string | null;
     collection_names?: string[] | null;
+    /** Portable identities aligned with collection_names; legacy keys remain accepted. */
+    collection_ids?: string[];
     /**
      * The join mode actually applied to the request's `conditions`. Set on
      * every successful resolution, and absent from a failure.
@@ -1875,6 +1885,9 @@ export interface CollectionInfo {
     library_id?: number;
     /** Device-portable library identity ("u" | "g<groupID>"). */
     library_ref?: string;
+    /** Additive portable identity; collection_key remains the native key. */
+    collection_id?: string;
+    parent_collection_id?: string;
     collection_key: string;
     name: string;
     parent_key?: string | null;

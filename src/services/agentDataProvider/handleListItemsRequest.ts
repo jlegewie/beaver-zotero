@@ -7,6 +7,8 @@
  * The Beaver agent is the primary agent that handles chat completions and tool execution.
  */
 
+import { collectionNotFoundError, CollectionResolutionError } from '../collections/collectionIdentity';
+
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSListItemsRequest,
@@ -18,7 +20,7 @@ import {
 import { ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
-import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, excludedLibraryMessage, extractYear, formatCreatorsString, getAttachmentInfoForItem, degradedAttachmentRow, resolveStoredTagName } from './utils';
+import { getCollectionByIdOrName, validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem, degradedAttachmentRow, resolveStoredTagName } from './utils';
 
 function isAnnotationItem(item: Zotero.Item): boolean {
     return String(item.itemType) === 'annotation' || (item as { isAnnotation?: () => boolean }).isAnnotation?.() === true;
@@ -35,7 +37,13 @@ export async function handleListItemsRequest(
     
     try {
         // Validate library (checks both existence and searchability)
-        const validation = validateLibraryAccess(request.library_id);
+        let validation = validateLibraryAccess(request.library_id);
+        const resolvedCollection = request.collection_key && (request.library_id == null || validation.valid)
+            ? getCollectionByIdOrName(request.collection_key, request.library_id != null ? validation.library!.libraryID : undefined)
+            : null;
+        if (request.library_id == null && resolvedCollection) {
+            validation = validateLibraryAccess(resolvedCollection.libraryID);
+        }
         if (!validation.valid) {
             return {
                 type: 'list_items',
@@ -47,13 +55,13 @@ export async function handleListItemsRequest(
                 available_libraries: validation.available_libraries,
             };
         }
-        let library = validation.library!;
+        const library = validation.library!;
         let collectionName: string | null = null;
         let resolvedCollectionId: number | null = null;
         
         // Resolve collection if specified (supports both key and name)
         if (request.collection_key) {
-            const result = getCollectionByIdOrName(request.collection_key, library.libraryID);
+            const result = resolvedCollection;
             
             if (!result) {
                 return {
@@ -61,30 +69,11 @@ export async function handleListItemsRequest(
                     request_id: request.request_id,
                     items: [],
                     total_count: 0,
-                    error: `Collection not found: ${request.collection_key}`,
+                    error: collectionNotFoundError(request.collection_key).message,
                     error_code: 'collection_not_found',
                 };
             }
-            
-            // Update library scope if collection was found in a different library
-            if (result.libraryID !== library.libraryID) {
-                const resolvedLib = Zotero.Libraries.get(result.libraryID);
-                if (!resolvedLib || !isLibrarySearchable(result.libraryID)) {
-                    return {
-                        type: 'list_items',
-                        request_id: request.request_id,
-                        items: [],
-                        total_count: 0,
-                        // Do not echo the collection's name: it is content from a
-                        // library the user excluded from Beaver.
-                        error: excludedLibraryMessage(result.libraryID),
-                        error_code: 'library_not_searchable',
-                        available_libraries: getSearchableLibraries(),
-                    };
-                }
-                library = resolvedLib;
-            }
-            
+
             collectionName = result.collection.name;
             resolvedCollectionId = result.collection.id;
         }
@@ -426,8 +415,8 @@ export async function handleListItemsRequest(
             request_id: request.request_id,
             items: [],
             total_count: 0,
-            error: String(error),
-            error_code: 'list_failed',
+            error: error instanceof Error ? error.message : String(error),
+            error_code: error instanceof CollectionResolutionError ? error.code : 'list_failed',
         };
     }
 }

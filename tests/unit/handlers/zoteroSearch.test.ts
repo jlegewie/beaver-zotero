@@ -25,7 +25,7 @@ vi.mock('../../../react/atoms/profile', () => ({
 }));
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
-    validateLibraryAccess: vi.fn(),
+    validateCollectionLibraryAccess: vi.fn(),
     extractYear: vi.fn(() => null),
     formatCreatorsString: vi.fn(() => ''),
     getAttachmentInfoForItem: vi.fn(),
@@ -53,7 +53,7 @@ vi.mock('../../../src/utils/zoteroSerializers', async (importOriginal) => {
 
 import type { WSZoteroSearchResponse } from '@beaver/agent-core/protocol/agentProtocol';
 import { handleZoteroSearchRequest } from '../../../src/services/agentDataProvider/handleZoteroSearchRequest';
-import { getAttachmentInfoForItem, isReadableItemField, validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';
+import { getAttachmentInfoForItem, isReadableItemField, validateCollectionLibraryAccess } from '../../../src/services/agentDataProvider/utils';
 
 type MockItem = {
     id: number;
@@ -136,7 +136,7 @@ describe('handleZoteroSearchRequest', () => {
         itemsById.clear();
         searchResultIds = [1, 2, 3, 4];
 
-        vi.mocked(validateLibraryAccess).mockReturnValue({
+        vi.mocked(validateCollectionLibraryAccess).mockReturnValue({
             valid: true,
             library: { libraryID: 1, name: 'My Library' },
         } as any);
@@ -552,6 +552,15 @@ describe('handleZoteroSearchRequest', () => {
     // inside that collection. When child items are wanted, the condition becomes a
     // scope applied with includeChildren instead.
     describe('collection scope', () => {
+        beforeEach(() => {
+            (globalThis as any).Zotero.Beaver = { libraryScopeInitialized: true, searchableLibraryIds: [1] };
+            (globalThis as any).Zotero.Libraries.userLibraryID = 1;
+            (globalThis as any).Zotero.Collections = {
+                getByLibraryAndKey: (libraryID: number, key: string) => key === 'ABCD2345'
+                    ? { id: 77, libraryID, key, name: 'Methods' } : false,
+                getByLibrary: () => [],
+            };
+        });
         const collectionCondition = { field: 'collection', operator: 'is', value: 'ABCD2345' };
 
         function searchRequest(overrides: Record<string, any> = {}) {
@@ -635,6 +644,18 @@ describe('handleZoteroSearchRequest', () => {
 
         // 'isNot' excludes a collection; that is a filter on the item itself, and
         // expanding it into a scope would invert its meaning.
+        it.each(['all', 'any'])('rejects an unresolved negative collection under %s without executing', async join_mode => {
+            const response = await handleZoteroSearchRequest(searchRequest({ join_mode,
+                conditions: [
+                    { field: 'title', operator: 'contains', value: 'science' },
+                    { field: 'collection', operator: 'isNot', value: 'u-MISS2345' },
+                ],
+            }));
+            expect(response.error_code).toBe('collection_not_found');
+            expect(mainSearch()!.search).not.toHaveBeenCalled();
+            expect(response.items).toEqual([]);
+        });
+
         it('does not scope a negated collection condition', async () => {
             searchResultIds = [];
 
@@ -663,7 +684,8 @@ describe('handleZoteroSearchRequest', () => {
 
             const response = await handleZoteroSearchRequest(searchRequest());
 
-            expect(response.warnings?.join(' ')).toContain('collection');
+            expect(response.error).toBeDefined();
+            expect(mainSearch()!.search).not.toHaveBeenCalled();
             expect(mainSearch()!.setScope).not.toHaveBeenCalled();
         });
     });
@@ -816,7 +838,7 @@ describe('handleZoteroSearchRequest', () => {
 
             // A read changes nothing, so it answers rather than refusing.
             expect(response.error).toBeUndefined();
-            expect(itemIds(response)).toEqual(['1-FIRST']);
+            expect(itemIds(response)).toEqual(['u-FIRST']);
             expect(response.warnings).toHaveLength(1);
             expect(response.warnings![0]).toContain("field='abstractNote'");
             expect(response.warnings![0]).toContain('flow and team cohesion');
