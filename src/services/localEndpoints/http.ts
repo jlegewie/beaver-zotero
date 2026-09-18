@@ -11,6 +11,7 @@ import {
 import {
     handleTestProcessingLedgerHttpRequest,
     handleTestProcessingReconcileNowHttpRequest,
+    handleTestIndexReconcileHttpRequest,
     handleTestProcessingResetHttpRequest,
     handleTestProcessingStatusHttpRequest,
 } from './handlers/testProcessingHandlers';
@@ -53,6 +54,7 @@ import type {
     // Notes
     WSReadNoteRequest,
     WSResolvePopulationRequest,
+    WSItemDisplayRequest,
     WSZoteroAttachmentPageImagesRequest,
     WSZoteroAttachmentSearchRequest,
     WSZoteroDataRequest,
@@ -80,6 +82,7 @@ import {
     // Notes
     handleReadNoteRequest,
     handleResolvePopulationRequest,
+    handleItemDisplayRequest,
     handleZoteroAttachmentPageImagesRequest,
     handleZoteroAttachmentSearchRequest,
     handleZoteroDataRequest,
@@ -256,6 +259,7 @@ async function handleMetadataSearchHttpRequest(request: any) {
 
     return {
         items: response.items,
+        unresolved_collections: response.unresolved_collections,
         error: response.error ?? null,
         error_code: response.error_code ?? null,
     };
@@ -280,6 +284,7 @@ async function handleTopicSearchHttpRequest(request: any) {
 
     return {
         items: response.items,
+        unresolved_collections: response.unresolved_collections,
         error: response.error ?? null,
         error_code: response.error_code ?? null,
     };
@@ -303,6 +308,7 @@ async function handleQuickSearchHttpRequest(request: any) {
 
     return {
         items: response.items,
+        unresolved_collections: response.unresolved_collections,
         detail: response.detail,
         total_count: response.total_count,
         // Without this a caller reads a truncated total as the complete match
@@ -494,6 +500,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         // to as well or a localhost run loses the WHERE half of the card.
         library_name: response.library_name,
         collection_names: response.collection_names,
+        collection_ids: response.collection_ids,
         // The join mode actually applied to `conditions`. Its absence is how the
         // caller detects a provider that predates the field, so it has to be
         // forwarded here too.
@@ -509,6 +516,27 @@ async function handleResolvePopulationHttpRequest(request: any) {
         error: response.error,
         error_code: response.error_code,
         available_libraries: response.available_libraries,
+    };
+}
+
+/**
+ * Item display lookup over HTTP. The backend's localhost frontend posts here,
+ * so the accepted body and the returned shape must stay identical to the
+ * `item_display` wire request/response.
+ */
+async function handleItemDisplayHttpRequest(request: any) {
+    const wsRequest: WSItemDisplayRequest = {
+        event: 'item_display_request',
+        request_id: generateRequestId(),
+        item_ids: Array.isArray(request.item_ids) ? request.item_ids : [],
+    };
+
+    const response = await handleItemDisplayRequest(wsRequest);
+
+    return {
+        items: response.items,
+        error: response.error,
+        error_code: response.error_code,
     };
 }
 
@@ -783,6 +811,9 @@ export function registerEndpoints(): (() => void) | undefined {
     endpoints['/beaver/library/resolve-population'] =
         createEndpoint(handleResolvePopulationHttpRequest);
 
+    endpoints['/beaver/library/item-display'] =
+        createEndpoint(handleItemDisplayHttpRequest);
+
     endpoints['/beaver/library/metadata'] =
         createEndpoint(handleLibraryMetadataHttpRequest);
 
@@ -1028,6 +1059,7 @@ export function registerEndpoints(): (() => void) | undefined {
         // Whole-library processing (dev-only): drives ReconcilerService and
         // exposes the ledger the prefs section aggregates.
         endpoints['/beaver/test/processing-reconcile-now'] = createEndpoint(handleTestProcessingReconcileNowHttpRequest);
+        endpoints['/beaver/test/index-reconcile'] = createEndpoint(handleTestIndexReconcileHttpRequest);
 
         endpoints['/beaver/test/processing-status'] = createEndpoint(handleTestProcessingStatusHttpRequest);
 
@@ -1168,5 +1200,4 @@ export function registerEndpoints(): (() => void) | undefined {
     logger(`LocalEndpoints: Registered ${releases.length} HTTP endpoints`, 3);
     return () => { for (const release of releases) release(); };
 }
-
 

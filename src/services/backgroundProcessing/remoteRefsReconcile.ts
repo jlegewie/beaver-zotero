@@ -1,15 +1,16 @@
 import type { BackgroundJobInput } from '../database';
-import { searchIndexApiClient } from '../searchIndex/searchIndexApiClient';
+import { searchIndexApiClient, type IndexVerifyResponse } from '../searchIndex/searchIndexApiClient';
 import { getIndexScopeRef, getZoteroUserIdentifier } from '../../utils/zoteroUtils';
 import {
     BACKGROUND_UPSERT_PRIORITY,
-    EXPECTED_SEARCH_INDEX_VERSION,
 } from './constants';
 import {
     backgroundProcessingEnabled,
     buildIndexJobPayload,
     isBackgroundProcessingLibraryEnabled,
 } from './utils';
+
+const INDEX_VERIFY_BATCH_SIZE = 50;
 
 /**
  * Align the local ledger with the cloud index's tag coverage: confirm rows the
@@ -26,51 +27,50 @@ export async function reconcileRemoteRefs(
         || !backgroundProcessingEnabled()
     ) return;
     const { localUserKey } = getZoteroUserIdentifier();
+    const accountId = Zotero.Beaver?.account?.getSnapshot().session?.user.id;
     for (const libraryId of libraryIds) {
         if (isCancelled()) return;
         if (!isBackgroundProcessingLibraryEnabled(libraryId)) continue;
         const scopeRef = getIndexScopeRef(libraryId);
         if (!scopeRef) continue;
 
-        const remote = await searchIndexApiClient.listAllRefs({
-            scopeRef,
-            zoteroLocalId: localUserKey,
-            isCancelled,
-        });
+        const requirements = await searchIndexApiClient.requirements();
         if (isCancelled()) return;
-
         const local = await db.getAttachmentProcessingStatesByLibrary(libraryId);
-        if (isCancelled()) return;
-        const localPairs = new Map(
-            local
-                .filter((row) => !!row.structuredDocumentHash)
-                .map((row) => [
-                    `${row.zoteroKey}:${row.structuredDocumentHash}`,
-                    row,
-                ]),
-        );
-        const remotePairs = new Set(
-            remote.map((ref) => `${ref.zotero_key}:${ref.doc_hash}`),
-        );
-
+        const candidates = local.filter((row) => row.structuredDocumentHash && row.extractStatus === 'done');
+        const verified = new Map<string, IndexVerifyResponse['refs'][number]>();
+        for (let offset = 0; offset < candidates.length; offset += INDEX_VERIFY_BATCH_SIZE) {
+            if (isCancelled() || !isBackgroundProcessingLibraryEnabled(libraryId)) return;
+            const result = await searchIndexApiClient.verify(localUserKey, candidates.slice(offset, offset + INDEX_VERIFY_BATCH_SIZE).map((row) => ({
+                scope_ref: scopeRef, zotero_key: row.zoteroKey, doc_hash: row.structuredDocumentHash!,
+            })));
+            for (const ref of result.refs) verified.set(`${ref.zotero_key}:${ref.doc_hash}`, ref);
+        }
+        if (isCancelled() || !isBackgroundProcessingLibraryEnabled(libraryId)) return;
         const jobs: BackgroundJobInput[] = [];
-        for (const [pair, row] of localPairs) {
+        for (const row of candidates) {
             if (isCancelled()) return;
-            if (remotePairs.has(pair)) {
-                const knownVersion = row.upsertIndexVersion == null
-                    ? null
-                    : Number(row.upsertIndexVersion);
-                if (knownVersion != null && knownVersion >= EXPECTED_SEARCH_INDEX_VERSION) {
-                    await db.markAttachmentUpsertDone({
-                        libraryId,
-                        zoteroKey: row.zoteroKey,
-                        structuredDocumentHash: row.structuredDocumentHash!,
-                        upsertIndexVersion: row.upsertIndexVersion!,
-                    });
-                    continue;
-                }
+            const ref = verified.get(`${row.zoteroKey}:${row.structuredDocumentHash}`);
+            if (!ref) continue; // An incomplete response is unknown, not missing.
+            const identity = row.upsertRemoteIdentity;
+            const ownershipChanged = identity && (identity.index_account_id !== accountId
+                || identity.index_scope_ref !== scopeRef || identity.index_local_id !== localUserKey);
+            // The upsert lane preserves the former owner's cleanup before acquiring ownership.
+            if (!ownershipChanged && (ref.state === 'current' || ref.state === 'empty')
+                && ref.index_version === requirements.index_version
+                && ref.extract_schema_version === row.extractSchemaVersion
+                && requirements.extract_schema_versions[row.contentKind]?.includes(ref.extract_schema_version!)) {
+                await db.markAttachmentUpsertDone({
+                    libraryId, zoteroKey: row.zoteroKey,
+                    structuredDocumentHash: row.structuredDocumentHash!,
+                    upsertIndexVersion: String(ref.index_version),
+                    remoteIdentity: accountId ? { index_account_id: accountId, index_scope_ref: scopeRef, index_local_id: localUserKey } : undefined,
+                    expectedUpsertStatus: row.upsertStatus,
+                    expectedUpsertIndexVersion: row.upsertIndexVersion,
+                    expectedExtractStatus: row.extractStatus,
+                });
+                continue;
             }
-            if (row.extractStatus !== 'done') continue;
             jobs.push({
                 jobType: 'fulltext_upsert',
                 libraryId,

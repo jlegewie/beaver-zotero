@@ -105,17 +105,6 @@ describe('resetLocalProcessingState', () => {
         expect(await db.getAttachmentProcessingState(99, 'ORPHAN01')).toBeNull();
     });
 
-    it('preserves the old hash cleanup carried by an unfinished upsert', async () => {
-        await db.enqueueBackgroundJob({ jobType: 'fulltext_upsert', libraryId: 1, zoteroKey: 'ABCDEFGH',
-            contentKind: 'pdf', payloadKind: 'structured', priority: 100, now: 1,
-            payload: { content_kind: 'pdf', scope_ref: 'local', doc_hash: 'b'.repeat(64), previous_doc_hash: 'a'.repeat(64) } });
-        await resetLocalProcessingState();
-        const jobs = await connection.queryAsync('SELECT job_type, payload_json FROM background_jobs');
-        expect(jobs).toHaveLength(1);
-        expect(jobs[0].job_type).toBe('fulltext_untag');
-        expect(JSON.parse(jobs[0].payload_json)).toMatchObject({ doc_hash: 'a'.repeat(64) });
-    });
-
     it('resumes services after a failed cache deletion without resetting progress', async () => {
         const resume = vi.fn();
         const suspend = vi.fn(async () => resume);

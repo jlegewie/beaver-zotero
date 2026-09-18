@@ -9,7 +9,9 @@ import Button from "@beaver/agent-ui/primitives/Button";
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { parseTextWithLinksAndNewlines } from '../../../utils/parseTextWithLinksAndNewlines';
 import FeatureTourContent from './FeatureTourContent';
-import { FeatureStep } from '../../../constants/versionUpdateMessages';
+import { FeatureStep, VersionAlsoNew, VersionShortcutId } from '../../../constants/versionUpdateMessages';
+import PictureInPictureIcon from '@beaver/agent-ui/icons/PictureInPictureIcon';
+import { beaverWindowShortcutKeys, quickPromptShortcutKeys } from '../../../utils/quickPromptShortcut';
 import { eventManager } from '../../../events/eventManager';
 import { getVersionShowcase } from '../../../constants/versionShowcases';
 
@@ -18,6 +20,43 @@ interface VersionUpdateMessageContentProps {
     onDismiss?: () => void;
     isFloating?: boolean;
 }
+
+const SHORTCUT_KEYS: Record<VersionShortcutId, () => string[]> = {
+    'quick-prompt': quickPromptShortcutKeys,
+    'beaver-window': beaverWindowShortcutKeys,
+};
+
+/** One more feature under the showcase: a row, not a checklist item. */
+const AlsoNewRow: React.FC<{ item: VersionAlsoNew }> = ({ item }) => {
+    const keys = item.shortcut ? SHORTCUT_KEYS[item.shortcut]() : [];
+    return (
+        <div className="display-flex flex-col gap-2">
+            <span className="text-sm font-medium font-color-tertiary" style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Also in this release
+            </span>
+            <div className="display-flex flex-row gap-3 items-start">
+                <Icon icon={PictureInPictureIcon} size={18} className="flex-shrink-0 mt-015 font-color-secondary" />
+                <div className="display-flex flex-col gap-1 flex-1 min-w-0">
+                    <div className="display-flex flex-row items-center justify-between gap-2">
+                        <span className="font-color-primary text-base font-semibold">{item.title}</span>
+                        {keys.length > 0 && (
+                            <span className="beaver-showcase__chord beaver-showcase__chord--small flex-shrink-0">
+                                {keys.map((key) => (
+                                    <span key={key} className="beaver-showcase__key">{key}</span>
+                                ))}
+                            </span>
+                        )}
+                    </div>
+                    {item.description && (
+                        <span className="font-color-secondary text-md">
+                            {parseTextWithLinksAndNewlines(item.description)}
+                        </span>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
 
 /**
  * Legacy list-based content for older version messages
@@ -99,9 +138,10 @@ const FloatingVersionCard: React.FC<{
     learnMoreUrl?: string;
     learnMoreLabel?: string;
     Showcase?: React.ComponentType;
+    alsoNew?: VersionAlsoNew;
     primaryAction?: PopupMessage['primaryAction'];
     onDismiss: () => void;
-}> = ({ version, title, text, subtitle, features, footer, learnMoreUrl, learnMoreLabel, Showcase, primaryAction, onDismiss }) => {
+}> = ({ version, title, text, subtitle, features, footer, learnMoreUrl, learnMoreLabel, Showcase, alsoNew, primaryAction, onDismiss }) => {
     const gate = useAtomValue(chatAccessGateAtom);
     const openQuickPrompt = useSetAtom(openQuickPromptAtom);
     const action = primaryAction ?? { type: 'open-beaver', label: 'Open Beaver' };
@@ -175,6 +215,8 @@ const FloatingVersionCard: React.FC<{
 
             {/* The feature itself, where the note has one to show */}
             {Showcase && <Showcase />}
+
+            {alsoNew && <AlsoNewRow item={alsoNew} />}
 
             {/* Feature list */}
             {features.length > 0 && (
@@ -260,6 +302,7 @@ const VersionUpdateMessageContent: React.FC<VersionUpdateMessageContentProps> = 
                 learnMoreUrl={learnMoreUrl}
                 learnMoreLabel={learnMoreLabel}
                 Showcase={Showcase}
+                alsoNew={message.alsoNew}
                 primaryAction={message.primaryAction}
                 onDismiss={onDismiss || (() => {})}
             />

@@ -689,6 +689,20 @@
     transition: transform 90ms ease, box-shadow 90ms ease, background-color 90ms ease;
 }
 
+/* Keycaps beside a line of text, rather than the showcase's centerpiece. */
+.beaver-showcase__chord--small {
+    gap: 3px;
+}
+
+.beaver-showcase__chord--small .beaver-showcase__key {
+    min-width: 19px;
+    height: 19px;
+    padding: 0 5px;
+    border-radius: 5px;
+    box-shadow: 0 1px 0 var(--fill-quarternary);
+    font-size: 12px;
+}
+
 .beaver-showcase__chord--pressed .beaver-showcase__key {
     transform: translateY(2px);
     box-shadow: 0 0 0 var(--fill-quarternary);
@@ -1698,14 +1712,13 @@
     mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 2.5em), transparent 100%);
 }
 
+/* Inline math must stay a plain inline box. An inline-block with non-visible
+ * overflow takes its baseline from its bottom edge, which lifts the formula
+ * above the text line, and sub/superscripts that extend a pixel past the box
+ * would show a scrollbar. Long formulas wrap at KaTeX's own break points. */
 [id^="beaver-pane-"] .markdown .katex {
-    /* Styles for inline math */
-    display: inline-block;
     margin: 0 0.1em;
     font-size: 1.1em !important;
-    max-width: 100%;
-    overflow-x: auto;
-    overflow-y: hidden;
 }
 
 [id^="beaver-pane-"] .markdown .katex-display {
@@ -1717,21 +1730,7 @@
 }
 
 [id^="beaver-pane-"] .markdown .katex-display > .katex {
-    /* Restore katex.css defaults inside display math — the .markdown .katex rule
-       above would otherwise override these to inline-block with overflow */
-    display: block;
     margin: 0;
-    max-width: none;
-    overflow: visible;
-}
-
-[id^="beaver-pane-"] .markdown .katex-display > .katex {
-    /* Restore katex.css defaults inside display math — the .markdown .katex rule
-       above would otherwise override these to inline-block with overflow */
-    display: block;
-    margin: 0;
-    max-width: none;
-    overflow: visible;
 }
 
 [id^="beaver-pane-"] .markdown a {

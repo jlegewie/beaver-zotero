@@ -1,11 +1,11 @@
 import { FileStatusSummary } from "./fileStatus";
-import { FeatureStep, VersionShowcaseId, VersionUpdateAction } from "../constants/versionUpdateMessages";
+import { FeatureStep, VersionAlsoNew, VersionShowcaseId, VersionUpdateAction } from "../constants/versionUpdateMessages";
 import { ButtonVariant } from "@beaver/agent-ui/primitives/Button";
 import type { FeatureTipId } from "../constants/featureTips";
 
 export const POPUP_MESSAGE_DURATION = 4000; // 4 seconds
 
-export type PopupMessageType = 'info' | 'warning' | 'error' | 'plan_change' | 'indexing_complete' | 'version_update' | 'items_summary' | 'welcome_onboarding' | 'reader_tip' | 'note_tip' | 'citation_tip' | 'feature_tip';
+export type PopupMessageType = 'info' | 'warning' | 'error' | 'plan_change' | 'indexing_complete' | 'version_update' | 'items_summary' | 'welcome_onboarding' | 'reader_tip' | 'note_tip' | 'citation_tip' | 'feature_tip' | 'cloud_consent';
 
 export interface PopupMessageFeature {
     title: string;
@@ -55,5 +55,7 @@ export interface PopupMessage {
     subtitle?: string;
     /** The visual a version update message carries — see `react/constants/versionShowcases.ts`. */
     showcase?: VersionShowcaseId;
+    /** A second feature under the showcase — see `VersionAlsoNew`. */
+    alsoNew?: VersionAlsoNew;
     primaryAction?: VersionUpdateAction;
 }

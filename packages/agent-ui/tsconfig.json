@@ -206,6 +206,7 @@
     "./src/chat/BatchDoneRows.tsx",
     "./src/chat/BatchRunReceipt.tsx",
     "./src/chat/BatchOutcomeBlocks.tsx",
+    "./src/chat/BatchItemRows.tsx",
     "./src/chat/BatchProgressBar.tsx",
     "./src/chat/CreditConfirmationCard.tsx",
     "./src/chat/composerTakeover.ts",

@@ -6,7 +6,31 @@ import type { CitationRef } from '@beaver/agent-core/citations/citationGrammar';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveLibraryRef } from '../../../src/utils/libraryIdentity';
+import { getContentKind } from '../../../src/services/documentExtraction/attachmentResolution';
 import type { ItemDataHost, ResolvedItemDisplay } from '@beaver/agent-ui/host/types';
+
+/**
+ * The item a row describes: the item itself, or the parent of an attachment,
+ * whose identity the attachment borrows. Resolved once, with the fields and
+ * creators every display helper below reads already loaded (Zotero lazy-loads
+ * both), so the helpers are synchronous and never disagree about which item
+ * they describe.
+ */
+async function displayTarget(item: Zotero.Item): Promise<Zotero.Item> {
+    if (item.isNote()) {
+        // A note's title lives in itemData: getNoteTitle() reads _noteTitle, which
+        // is populated by the itemData load (the 'note' data type only loads the
+        // full note body and would leave getNoteTitle() throwing UnloadedDataException).
+        await item.loadDataType('itemData').catch(() => {});
+        return item;
+    }
+    let target = item;
+    if (item.isAttachment() && item.parentItemID) {
+        target = await Zotero.Items.getAsync(item.parentItemID) || item;
+    }
+    await Zotero.Items.loadDataTypes([target], ['itemData', 'creators']).catch(() => {});
+    return target;
+}
 
 /**
  * Bibliographic display name for a tool-call header label.
@@ -14,27 +38,49 @@ import type { ItemDataHost, ResolvedItemDisplay } from '@beaver/agent-ui/host/ty
  * - Notes → the note's own title.
  * - Attachments → the parent item's "Author Year" identity.
  * - Regular items → their own "Author Year" identity.
- *
- * Loads the data types it reads (Zotero lazy-loads field/creator data), so it is
- * reliable even for items not preloaded by the live-run path.
  */
-async function resolveDisplayName(item: Zotero.Item): Promise<string | undefined> {
-    if (item.isNote()) {
-        // A note's title lives in itemData: getNoteTitle() reads _noteTitle, which
-        // is populated by the itemData load (the 'note' data type only loads the
-        // full note body and would leave getNoteTitle() throwing UnloadedDataException).
-        await item.loadDataType('itemData').catch(() => {});
-        const title = item.getNoteTitle?.();
+function displayNameOf(target: Zotero.Item): string | undefined {
+    if (target.isNote()) {
+        const title = target.getNoteTitle?.();
         return title || undefined;
     }
-    let target = item;
-    if (item.isAttachment() && item.parentItemID) {
-        target = await Zotero.Items.getAsync(item.parentItemID) || item;
-    }
-    await Zotero.Items.loadDataTypes([target], ['itemData', 'creators']).catch(() => {});
     const firstCreator = target.firstCreator || 'Unknown';
     const year = target.getField('date')?.match(/\d{4}/)?.[0] || '';
     return `${firstCreator}${year ? ` ${year}` : ''}`;
+}
+
+/**
+ * The item's title, for lists that need more than "Author Year" to tell items
+ * apart. An attachment shows its parent's title, like its display name.
+ */
+function titleOf(target: Zotero.Item): string | undefined {
+    try {
+        const title = target.getDisplayTitle?.() || target.getField?.('title');
+        return title || undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/** The first creator, when there is one, and the localized item type. */
+function creatorAndTypeOf(target: Zotero.Item): { creator?: string; itemTypeLabel?: string } {
+    try {
+        const creator = target.isNote() ? undefined : target.firstCreator || undefined;
+        const itemTypeLabel = Zotero.ItemTypes?.getLocalizedString?.(target.itemType) || undefined;
+        return { creator, itemTypeLabel };
+    } catch {
+        return {};
+    }
+}
+
+/** An attachment's broad content kind, for its icon; nothing for other items. */
+function contentKindOf(item: Zotero.Item): string | undefined {
+    if (!item.isAttachment()) return undefined;
+    try {
+        return getContentKind(item);
+    } catch {
+        return undefined;
+    }
 }
 
 /**
@@ -86,14 +132,21 @@ export const zoteroItemData: ItemDataHost = {
         }
     },
 
-    async resolveItemDisplay(ref: ZoteroItemReference): Promise<ResolvedItemDisplay | null> {
+    async resolveItemDisplay(
+        ref: ZoteroItemReference,
+        options?: { attachment?: boolean },
+    ): Promise<ResolvedItemDisplay | null> {
         const libraryId = resolveLibraryRef(ref);
         if (!libraryId) return null;
         try {
             const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, ref.zotero_key);
             if (!item || typeof item === 'boolean') return null;
-            let hasReadableAttachment = false;
-            if (item.isRegularItem()) {
+            let hasReadableAttachment: boolean | undefined = false;
+            if (options?.attachment === false) {
+                // Not asked for: skip the child-item load and the search, and
+                // say nothing rather than "none".
+                hasReadableAttachment = undefined;
+            } else if (item.isRegularItem()) {
                 // getBestAttachment() may inspect the parent item's URL via
                 // getField(), so itemData must be loaded as well as childItems.
                 await Zotero.Items.loadDataTypes([item], ['itemData', 'childItems']);
@@ -101,8 +154,15 @@ export const zoteroItemData: ItemDataHost = {
             } else if (item.isAttachment()) {
                 hasReadableAttachment = true;
             }
-            const displayName = await resolveDisplayName(item);
-            return { itemType: item.itemType, hasReadableAttachment, displayName };
+            const target = await displayTarget(item);
+            return {
+                itemType: item.itemType,
+                contentKind: contentKindOf(item),
+                hasReadableAttachment,
+                displayName: displayNameOf(target),
+                title: titleOf(target),
+                ...creatorAndTypeOf(target),
+            };
         } catch (e) {
             logger(`zoteroItemData: item display resolution failed: ${e}`);
             return null;
@@ -121,7 +181,7 @@ export const zoteroItemData: ItemDataHost = {
 
     async resolveCollectionName(keyOrName: string | number, libraryId?: number): Promise<string | null> {
         try {
-            const result = getCollectionByIdOrName(keyOrName, libraryId);
+            const result = getCollectionByIdOrName(keyOrName, libraryId, { access: 'local' });
             return result?.collection.name ?? null;
         } catch (e) {
             logger(`zoteroItemData: collection name resolution failed: ${e}`);

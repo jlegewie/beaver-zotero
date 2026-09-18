@@ -29,6 +29,8 @@ function setupBeaver(hasOcrAccess: boolean) {
         searchableLibraryIds: [1],
         db: {
             isDocumentProcessingPermanentlyFailed: isPermFailed,
+            getDocumentProcessingFailure: vi.fn(async () => ({ lastError: 'OCR produced no usable text layer' })),
+            markAttachmentOcrFailed: vi.fn(async () => undefined),
             promotePendingBackgroundJob: promote,
             enqueueBackgroundJob,
         },
@@ -213,6 +215,23 @@ describe('maybeEnqueueOcrJob', () => {
         await flush();
 
         expect(isPermFailed).toHaveBeenCalledOnce();
+        expect(Zotero.Beaver.db.markAttachmentOcrFailed).toHaveBeenCalledWith(
+            1, 'AAAAAAAA', 'hash123', 'OCR produced no usable text layer',
+        );
+        expect(enqueueBackgroundJob).not.toHaveBeenCalled();
+    });
+
+    it('does not restore a terminal ledger after scope is revoked during failure lookup', async () => {
+        setupBeaver(true);
+        isPermFailed.mockResolvedValue(true);
+        vi.mocked(Zotero.Beaver.db.getDocumentProcessingFailure).mockImplementation(async () => {
+            Zotero.Beaver.searchableLibraryIds = [];
+            return null;
+        });
+
+        await enqueueOcrJob(args());
+
+        expect(Zotero.Beaver.db.markAttachmentOcrFailed).not.toHaveBeenCalled();
         expect(enqueueBackgroundJob).not.toHaveBeenCalled();
     });
 

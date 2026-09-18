@@ -53,6 +53,8 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     getCreatorTypeInfo: mocks.getCreatorTypeInfo,
 }));
 
+import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
+
 import { handleGetMetadataRequest } from '../../../src/services/agentDataProvider/handleGetMetadataRequest';
 
 function regularItem(key: string, overrides: Record<string, any> = {}) {
@@ -115,6 +117,7 @@ function request(overrides: Record<string, any> = {}) {
 
 beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(libraryRefForLibraryID).mockReturnValue('u');
     mocks.resolveObjectId.mockReturnValue({ library_id: 1, zotero_key: 'AAAAAAAA' });
     mocks.resolveItemReference.mockResolvedValue({ status: 'found', item: regularItem('AAAAAAAA') });
     mocks.checkLibraryExcluded.mockReturnValue(null);
@@ -129,6 +132,34 @@ beforeEach(() => {
 });
 
 describe('metadata identity and field quality', () => {
+    it('adds qualified memberships without changing legacy key and name fields', async () => {
+        vi.mocked(libraryRefForLibraryID).mockReturnValue('g12345');
+        mocks.resolveObjectId.mockReturnValue({ library_id: 7, zotero_key: 'AAAAAAAA' });
+        mocks.resolveItemReference.mockResolvedValue({ status: 'found', item: regularItem('AAAAAAAA', {
+            libraryID: 7, toJSON: () => ({ itemType: 'journalArticle', collections: ['ABCD2345'] }),
+        }) });
+        (globalThis as any).Zotero.Collections = { getByLibraryAndKey: vi.fn((id, key) => ({
+            libraryID: id, key, name: 'Methods', parentKey: 'PARENT23',
+        })) };
+        const result = await handleGetMetadataRequest(request());
+        expect(result.items[0].collections).toEqual([{
+            collection_key: 'ABCD2345', name: 'Methods', collection_id: 'g12345-ABCD2345',
+            library_ref: 'g12345', parent_collection_id: 'g12345-PARENT23',
+        }]);
+    });
+
+    it('reports unavailable collection mapping rather than inventing an ID or claiming the item is missing', async () => {
+        vi.mocked(libraryRefForLibraryID).mockReturnValue(null);
+        mocks.resolveItemReference.mockResolvedValue({ status: 'found', item: regularItem('AAAAAAAA', {
+            toJSON: () => ({ collections: ['ABCD2345'] }),
+        }) });
+        (globalThis as any).Zotero.Collections = { getByLibraryAndKey: () => ({ libraryID: 7, key: 'ABCD2345', name: 'Methods' }) };
+        const result = await handleGetMetadataRequest(request());
+        expect(result.error_code).toBe('library_unavailable');
+        expect(result.not_found).toEqual([]);
+        expect(result.items).toEqual([]);
+    });
+
     it('normalizes a legacy ID and removes escaped control-only URLs', async () => {
         const item = regularItem('AAAAAAAA', { toJSON: () => ({ itemType: 'journalArticle', title: 'Source', url: String.raw`\u0000\u0000` }) });
         mocks.resolveItemReference.mockResolvedValue({ status: 'found', item });

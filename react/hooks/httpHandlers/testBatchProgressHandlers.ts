@@ -28,6 +28,8 @@ import {
     selectRunBatchOutcomes,
 } from '@beaver/agent-core/run-state/batchProgress';
 import type {
+    BatchItemsRecord,
+    BatchPopulationRecord,
     BatchProgressEntry,
     BatchProgressStamp,
 } from '@beaver/agent-core/run-state/batchProgress';
@@ -41,7 +43,12 @@ const PREVIEW_TOOL_CALL_ID = 'batch-progress-preview-call';
 type PreviewRunStatus = 'in_progress' | 'completed';
 
 /** A run carrying exactly one tool return, with the stamp on its metadata. */
-function previewRun(stamp: BatchProgressStamp, status: PreviewRunStatus): AgentRun {
+function previewRun(
+    stamp: BatchProgressStamp,
+    status: PreviewRunStatus,
+    items: BatchItemsRecord[] = [],
+    population: BatchPopulationRecord | null = null,
+): AgentRun {
     const message: ModelMessage = {
         kind: 'request',
         run_id: PREVIEW_RUN_ID,
@@ -52,7 +59,11 @@ function previewRun(stamp: BatchProgressStamp, status: PreviewRunStatus): AgentR
                 tool_name: 'organize_items',
                 tool_call_id: PREVIEW_TOOL_CALL_ID,
                 content: { status: 'applied' },
-                metadata: { batch_progress: stamp },
+                metadata: {
+                    batch_progress: stamp,
+                    ...(items.length ? { batch_items: { batches: items } } : {}),
+                    ...(population ? { batch_population: population } : {}),
+                },
             },
         ],
     } as ModelMessage;
@@ -76,12 +87,21 @@ function withoutPreview(runs: AgentRun[]): AgentRun[] {
 /**
  * Stage a synthetic progress stamp.
  *
- * Body: `{ batches: BatchProgressEntry[], runStatus? }` — the stamp exactly as
- * the backend would send it, so a caller can reproduce any state the ledger can
- * reach. `runStatus` defaults to `in_progress`, the state the panel draws in.
+ * Body: `{ batches: BatchProgressEntry[], runStatus?, items?, population? }` —
+ * the stamp exactly as the backend would send it, so a caller can reproduce any
+ * state the ledger can reach. `runStatus` defaults to `in_progress`, the state
+ * the panel draws in. `items` is the item record the backend writes when a
+ * batch ends (`BatchItemsRecord[]`), stamped on the same tool return.
+ * `population` is the display record `batch_start` writes when a population is
+ * minted (`BatchPopulationRecord`), stamped here too so the receipt names items.
  */
 export async function handleBatchProgressPreview(
-    body: { batches?: BatchProgressEntry[]; runStatus?: PreviewRunStatus },
+    body: {
+        batches?: BatchProgressEntry[];
+        runStatus?: PreviewRunStatus;
+        items?: BatchItemsRecord[];
+        population?: BatchPopulationRecord;
+    },
 ): Promise<{
     ok: boolean;
     batches: number;
@@ -95,8 +115,10 @@ export async function handleBatchProgressPreview(
     const stamp: BatchProgressStamp = { batches };
     const runStatus: PreviewRunStatus = body?.runStatus === 'completed' ? 'completed' : 'in_progress';
 
+    const items = Array.isArray(body?.items) ? body.items : [];
+    const population = body?.population && typeof body.population === 'object' ? body.population : null;
     const runs = withoutPreview(store.get(threadRunsAtom) as AgentRun[]);
-    const staged = previewRun(stamp, runStatus);
+    const staged = previewRun(stamp, runStatus, items, population);
     store.set(threadRunsAtom, [...runs, staged]);
 
     // Report what each surface draws, not what it was handed.

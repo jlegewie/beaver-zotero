@@ -186,8 +186,12 @@ describe('the completed batch rows', () => {
         hookState.index = 0;
         const text = renderedText(BatchDoneRows({ batches }) as React.ReactNode).join(' ');
         expect(text).toContain('File the Methods collection by topic');
-        // The full breakdown labels the track; the header keeps failures separate.
-        expect(text.split('151 filed · 26 left as-is · 7 failed')).toHaveLength(2);
+        // Open, the breakdown is the legend under the track and nowhere else:
+        // the row's own summary line gives way to it. The header keeps its
+        // failure chip, so failures are stated twice and everything else once.
+        expect(text).not.toContain('151 filed · 26 left as-is · 7 failed');
+        expect(text.match(/151 filed/g)).toHaveLength(1);
+        expect(text.match(/26 left as-is/g)).toHaveLength(1);
         expect(text.match(/7 failed/g)).toHaveLength(2);
         expect(text).toContain('Where items went');
         expect(text).toContain('Ecology');
@@ -282,7 +286,9 @@ describe('the completed batch rows', () => {
         hookState.index = 0;
         const text = renderedText(BatchDoneRows({ batches }) as React.ReactNode).join(' ');
         expect(text).toContain('Highlight methods and findings');
-        expect(text.split('14 annotated · 15 no change')).toHaveLength(3);
+        // Once, as the legend: the collapsed line's copy is gone while open.
+        expect(text.match(/14 annotated/g)).toHaveLength(1);
+        expect(text.match(/15 no change/g)).toHaveLength(1);
     });
 
     it('lets an opened row grow instead of scrolling inside itself', () => {

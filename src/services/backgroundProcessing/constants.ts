@@ -8,4 +8,4 @@ export const INDEX_RECONCILE_INTERVAL_MS = 24 * 60 * 60_000;
 export const ATTACHMENT_SCAN_BATCH_SIZE = 250;
 
 /** Frontend's minimum accepted backend chunk/index generation. */
-export const EXPECTED_SEARCH_INDEX_VERSION = 2;
+export const EXPECTED_SEARCH_INDEX_VERSION = 3;

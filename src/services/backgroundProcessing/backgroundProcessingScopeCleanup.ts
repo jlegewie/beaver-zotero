@@ -10,7 +10,6 @@ const EXCLUDED_LIBRARY_CLEANUP_RETRY_MS = 15 * 60_000;
 export function startBackgroundProcessingScopeCleanup(
     libraries: { library_id: number }[],
     searchableLibraryIds: number[],
-    hasSearchAccess: boolean,
 ): () => Promise<void> {
     let cancelled = false;
     const searchable = new Set(searchableLibraryIds);
@@ -36,7 +35,6 @@ export function startBackgroundProcessingScopeCleanup(
         running = true;
         pending = purgeExcludedLibraries(
             pendingIds,
-            hasSearchAccess,
             () => cancelled,
         )
             .then((finished) => {

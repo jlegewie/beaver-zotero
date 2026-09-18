@@ -9,6 +9,21 @@ import type { FeatureTipId } from './featureTips';
  */
 export type VersionShowcaseId = 'quick-prompt';
 
+/** A chord a release note can draw as keycaps; the label comes from `react/utils/quickPromptShortcut.ts`. */
+export type VersionShortcutId = 'quick-prompt' | 'beaver-window';
+
+/**
+ * A second feature a release note mentions beneath its showcase: one compact
+ * row rather than a checklist, so the showcase stays the headline.
+ */
+export interface VersionAlsoNew {
+    title: string;
+    /** One line; supports the same placeholders as the other copy fields. */
+    description?: string;
+    /** Drawn as keycaps beside the title. */
+    shortcut?: VersionShortcutId;
+}
+
 /** Declarative actions keep release configuration safe for the plugin bundle. */
 export type VersionUpdateAction =
     | { type: 'open-beaver'; label: string }
@@ -45,8 +60,9 @@ export interface FeatureStep {
 
 /**
  * The copy fields (`text`, `subtitle`, descriptions) may use
- * `{{quickPromptShortcut}}` for the quick prompt chord on the user's machine;
- * it is filled when the note is built (`react/utils/versionUpdatePopup.ts`).
+ * `{{quickPromptShortcut}}` and `{{beaverWindowShortcut}}` for those chords on
+ * the user's machine; they are filled when the note is built
+ * (`react/utils/versionUpdatePopup.ts`).
  */
 export interface VersionUpdateMessageConfig {
     version: string;
@@ -63,6 +79,8 @@ export interface VersionUpdateMessageConfig {
     steps?: FeatureStep[];
     /** A visual under the intro text — the feature itself, not a description of it. */
     showcase?: VersionShowcaseId;
+    /** A second feature, shown as one row under the showcase on the floating card. */
+    alsoNew?: VersionAlsoNew;
     learnMoreUrl?: string;
     learnMoreLabel?: string;
     footer?: string;
@@ -594,14 +612,19 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.24.0" target='_blank'>Full changelog</a>`,
     },
     {
-        version: "0.25.0-beta.1",
+        version: "0.25.0",
         deferFeatureTips: { 'run-status-popup': 7 * 24 * 60 * 60 * 1000 },
-        title: "Introducing Quick Prompt",
-        text: "Press {{quickPromptShortcut}} to open a composer in the corner. Beaver works while you stay in Zotero: the card shows progress, asks for approvals, and reports the result.",
+        title: "Ask Beaver without opening the sidebar",
+        text: "Press {{quickPromptShortcut}} to type a request wherever you are in Zotero. A small card shows progress, asks for approvals, and reports the result.",
         showcase: 'quick-prompt',
+        alsoNew: {
+            title: "Redesigned Beaver window",
+            description: "A full chat window with your history at hand, and room for a second chat.",
+            shortcut: 'beaver-window',
+        },
         primaryAction: { type: 'quick-prompt', label: 'Try now' },
         inPanel: false,
-        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.25.0-beta.2" target='_blank'>Full changelog</a>`,
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.25.0" target='_blank'>Full changelog</a>`,
     },
 ];
 

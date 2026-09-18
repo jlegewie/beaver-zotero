@@ -85,6 +85,28 @@ describe('filtering by a tag the caller knows the library for', () => {
     });
 });
 
+describe('finding the tag again once it is applied', () => {
+    it('narrows the tag list to the tag through the selector search box', async () => {
+        // A selected tag in a list of hundreds is hard to find and switch off;
+        // searched for, it is the only tag shown.
+        const searched: string[] = [];
+        tagLibraries = { methods: [1] };
+        stubZotero();
+        pane.tagSelector.handleSearch = (text: string) => searched.push(text);
+
+        expect(await selectTagFilter('methods', 1)).toBe('filtered');
+        expect(searched).toEqual(['methods']);
+        expect(appliedTags).toEqual(['methods']);
+    });
+
+    it('still applies the filter on a selector with no search box', async () => {
+        tagLibraries = { methods: [1] };
+
+        expect(await selectTagFilter('methods', 1)).toBe('filtered');
+        expect(appliedTags).toEqual(['methods']);
+    });
+});
+
 describe('filtering by a tag with no library to go on', () => {
     it('uses the one library holding it', async () => {
         tagLibraries = { methods: [5] };

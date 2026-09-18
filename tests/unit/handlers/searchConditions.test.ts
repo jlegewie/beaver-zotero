@@ -105,84 +105,55 @@ describe('addSearchCondition: itemType value validation', () => {
 });
 
 describe('addSearchCondition: collection value validation', () => {
-    const LIBRARY_ID = 1;
     let warnings: string[];
     let addCondition: ReturnType<typeof vi.fn>;
-
-    /** Run one condition through the shared translator, naming the library. */
-    const add = (condition: ZoteroSearchCondition) =>
-        addSearchCondition({ addCondition } as any, condition, warnings, LOG_LABEL, LIBRARY_ID);
-
-    const addedConditions = () => addCondition.mock.calls.map(call => call.slice(0, 3));
+    const add = (value: string, operator = 'is', libraryID: number | undefined = 1) =>
+        addSearchCondition({ addCondition } as any, { field: 'collection', operator, value } as any, warnings, LOG_LABEL, libraryID);
 
     beforeEach(() => {
-        vi.clearAllMocks();
         warnings = [];
         addCondition = vi.fn();
+        (globalThis as any).Zotero.Beaver = { libraryScopeInitialized: true, searchableLibraryIds: [1] };
+        (globalThis as any).Zotero.Libraries.userLibraryID = 1;
         (globalThis as any).Zotero.Collections = {
-            getByLibraryAndKey: vi.fn((libraryID: number, key: string) =>
-                libraryID === LIBRARY_ID && key === 'ABCD2345'
-                    ? { id: 77, name: 'Methods' }
-                    : false),
+            getByLibraryAndKey: vi.fn((libraryID: number, key: string) => key === 'ABCD2345'
+                ? { id: 77, name: 'Methods', libraryID, key } : false),
+            getByLibrary: () => [],
         };
     });
 
-    it('adds a condition naming a collection the library has', () => {
-        expect(add({ field: 'collection', operator: 'is', value: 'ABCD2345' } as any)).toBe(true);
-        expect(addedConditions()).toEqual([['collection', 'is', 'ABCD2345']]);
+    it.each(['ABCD2345', 'u-ABCD2345', '1-ABCD2345', '1_ABCD2345'])('normalizes %s to a native scoped key', value => {
+        expect(add(value)).toBe(true);
+        expect(addCondition).toHaveBeenCalledWith('collection', 'is', 'ABCD2345');
         expect(warnings).toEqual([]);
     });
 
-    it('drops a key the library does not have, naming it', () => {
-        expect(add({ field: 'collection', operator: 'is', value: 'ZZZZ9999' } as any)).toBe(false);
-        expect(addedConditions()).toEqual([]);
-        expect(warnings).toHaveLength(1);
-        expect(warnings[0]).toContain("value='ZZZZ9999'");
-        expect(warnings[0]).toContain('list_collections');
+    it.each(['is', 'isNot'])('fails an unresolved %s predicate instead of dropping it', operator => {
+        expect(() => add('ZZZZ9999', operator)).toThrow(/Collection not found/);
+        expect(addCondition).not.toHaveBeenCalled();
     });
 
-    it('drops an unknown key under isNot, which would otherwise select everything', () => {
-        // Zotero compiles an unresolvable collection to a set matching nothing,
-        // and negating that matches every non-annotation item — so this is the
-        // case that must never reach the search.
-        expect(add({ field: 'collection', operator: 'isNot', value: 'ZZZZ9999' } as any)).toBe(false);
-        expect(addedConditions()).toEqual([]);
-        expect(warnings[0]).toContain('whole library');
+    it('retains a negative operator while normalizing the identity', () => {
+        expect(add('u-ABCD2345', 'isNot')).toBe(true);
+        expect(addCondition).toHaveBeenCalledWith('collection', 'isNot', 'ABCD2345');
     });
 
-    it('reads the key out of the legacy library-prefixed form', () => {
-        expect(add({ field: 'collection', operator: 'is', value: '1_ABCD2345' } as any)).toBe(true);
-        expect(warnings).toEqual([]);
+    it('explains a native predicate rejection without losing the original reference', () => {
+        addCondition.mockImplementation(() => { throw new Error('Unsupported condition'); });
+        expect(() => add('u-ABCD2345', 'isNot')).toThrow(/operator="isNot".*u-ABCD2345.*Unsupported condition.*list_collections.*Do not remove/);
     });
 
-    it('skips the check when no library was named', () => {
-        // Omitted entirely, not passed as undefined: a default parameter would
-        // fill the latter in and the case would not be exercised.
-        const added = addSearchCondition(
-            { addCondition } as any,
-            { field: 'collection', operator: 'is', value: 'ZZZZ9999' } as any,
-            warnings,
-            LOG_LABEL,
-        );
-        expect(added).toBe(true);
-        expect(warnings).toEqual([]);
+    it('checks the library embedded in a legacy native condition', () => {
+        expect(() => add('2_ABCD2345')).toThrow(/different library/);
     });
 
-    it('leaves a refused operator to be reported as an operator problem', () => {
-        // Reporting the value first would send the caller to fix the wrong half
-        // and cost a second round trip.
-        addCondition.mockImplementation(() => { throw new Error('Invalid operator'); });
-        expect(add({ field: 'collection', operator: 'contains', value: 'ZZZZ9999' } as any)).toBe(false);
-        expect(warnings[0]).toContain("operator='contains'");
-        expect(warnings[0]).not.toContain('list_collections');
-    });
-
-    it('lets the condition through when collection data is not loaded', () => {
-        (globalThis as any).Zotero.Collections.getByLibraryAndKey = vi.fn(() => {
-            throw new Error('Collection data not yet loaded');
-        });
-        expect(add({ field: 'collection', operator: 'is', value: 'ABCD2345' } as any)).toBe(true);
-        expect(warnings).toEqual([]);
+    it('refuses a missing library, invalid operator, or cold collection cache', () => {
+        expect(() => addSearchCondition({ addCondition } as any,
+            { field: 'collection', operator: 'is', value: 'ABCD2345' } as any, warnings, LOG_LABEL)).toThrow();
+        expect(() => add('ABCD2345', 'contains')).toThrow();
+        (globalThis as any).Zotero.Collections.getByLibraryAndKey.mockImplementation(() => { throw new Error('Cold cache'); });
+        expect(() => add('ABCD2345')).toThrow('Cold cache');
+        expect(addCondition).not.toHaveBeenCalled();
     });
 });
 

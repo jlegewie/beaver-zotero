@@ -39,7 +39,6 @@ export function buildIndexJobPayload(
     options: {
         indexAction?: 'upsert' | 'untag';
         docHash?: string;
-        previousDocumentHash?: string;
     } = {},
 ): BackgroundJobPayload {
     const base = buildBackgroundExtractPayload(kind);
@@ -47,16 +46,14 @@ export function buildIndexJobPayload(
         ...base,
         index_action: options.indexAction ?? 'upsert',
         ...(options.docHash ? { doc_hash: options.docHash } : {}),
-        ...(options.previousDocumentHash
-            ? { previous_doc_hash: options.previousDocumentHash }
-            : {}),
     } as BackgroundJobPayload;
 }
 
 /** Untag job for a ledger row whose indexed content is being dropped. */
 export function buildUntagJobInput(
-    row: AttachmentProcessingStateRecord,
+    row: Pick<AttachmentProcessingStateRecord, 'libraryId' | 'itemId' | 'zoteroKey' | 'contentKind' | 'structuredDocumentHash' | 'upsertRemoteIdentity'>,
     now: number,
+    options: { hash?: string; reason?: BackgroundJobPayload['index_cleanup_reason'] } = {},
 ): BackgroundJobInput {
     return {
         jobType: 'fulltext_untag',
@@ -66,11 +63,17 @@ export function buildUntagJobInput(
         contentKind: row.contentKind,
         payloadKind: 'structured',
         priority: BACKGROUND_UNTAG_PRIORITY,
-        payload: buildIndexJobPayload(row.contentKind, {
+        payload: { ...buildIndexJobPayload(row.contentKind, {
             indexAction: 'untag',
-            docHash: row.structuredDocumentHash!,
-        }),
+            docHash: options.hash ?? row.structuredDocumentHash!,
+        }), ...row.upsertRemoteIdentity, ...(options.reason ? { index_cleanup_reason: options.reason } : {}) },
         now,
     };
 }
 
+
+/** Complete remote membership identity, shared by scheduling and durable cleanup. */
+export function indexCleanupIdentity(job: Pick<BackgroundJobInput, 'payload' | 'zoteroKey'>): string {
+    return JSON.stringify([job.payload?.index_account_id, job.payload?.index_scope_ref,
+        job.payload?.index_local_id, job.zoteroKey, job.payload?.doc_hash]);
+}

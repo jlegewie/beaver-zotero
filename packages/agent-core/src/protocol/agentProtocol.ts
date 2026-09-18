@@ -636,10 +636,14 @@ export type ItemSearchErrorCode =
     | 'library_not_found'      // libraries_filter matched no library on this device
     | 'library_not_searchable' // a filter matched only in a library excluded from Beaver
     | 'tag_not_found'          // tags_filter matched no tag in the searched libraries
-    | 'timeout'; // Operation timed out
+    | 'timeout'               // Operation timed out
+    | 'library_unavailable'
+    | 'library_collection_mismatch';
 
 /** Response to item metadata search request */
 export interface WSItemSearchByMetadataResponse {
+    /** Collection filters omitted from a partially successful discovery search. */
+    unresolved_collections?: string[];
     type: 'item_search_by_metadata';
     request_id: string;
     items: ItemSearchFrontendResultItem[];
@@ -682,6 +686,8 @@ export interface WSItemSearchByTopicRequest extends WSBaseEvent {
 
 /** Response to item topic search request */
 export interface WSItemSearchByTopicResponse {
+    /** Collection filters omitted from a partially successful discovery search. */
+    unresolved_collections?: string[];
     type: 'item_search_by_topic';
     request_id: string;
     items: ItemSearchFrontendResultItem[];
@@ -844,6 +850,8 @@ export interface WSItemQuickSearchRequest extends WSBaseEvent {
 
 /** Response to a quick search request */
 export interface WSItemQuickSearchResponse {
+    /** Collection filters omitted from a partially successful discovery search. */
+    unresolved_collections?: string[];
     type: 'item_quick_search';
     request_id: string;
     /**
@@ -1530,11 +1538,11 @@ export interface WSListItemsResponse {
 export interface WSResolvePopulationRequest extends WSBaseEvent {
     event: 'resolve_population_request';
     request_id: string;
-    /** Library id or name. Null/absent = the user's default library. */
+    /** Library id or name. When absent, infer from collection references or use the user's default library. */
     library_id?: number | string | null;
     /**
-     * Bare collection keys (never library-qualified); the backend
-     * down-converts. ORed: an item matches when it is in ANY of them.
+     * Collection references, including legacy bare keys scoped to the library.
+     * Qualified IDs must agree with an explicitly requested library. ORed: an item matches when it is in ANY of them.
      */
     collection_keys?: string[] | null;
     /** Include items from subcollections of every scoped collection. */
@@ -1645,7 +1653,8 @@ export interface WSResolvePopulationResponse {
      * filters matched nothing" from "the filters matched, but none of the
      * matches has an attachment" — two cases that call for opposite
      * corrections. It says nothing about whether an attachment's file is
-     * present on disk: an attachment record is counted either way.
+     * present on disk: an attachment record is counted either way. Linked-URL
+     * attachments are never part of an attachment population.
      *
      * Set on every successful resolution; absent from a failure and from a
      * provider that predates the field.
@@ -1666,6 +1675,8 @@ export interface WSResolvePopulationResponse {
      */
     library_name?: string | null;
     collection_names?: string[] | null;
+    /** Portable identities aligned with collection_names; legacy keys remain accepted. */
+    collection_ids?: string[];
     /**
      * The join mode actually applied to the request's `conditions`. Set on
      * every successful resolution, and absent from a failure.
@@ -1705,6 +1716,59 @@ export interface WSResolvePopulationResponse {
 }
 
 /** Request from backend for get_metadata */
+/**
+ * Request from backend for item_display.
+ *
+ * The display fields of specific items, in one round trip: a name, a second
+ * line and a type per item, nothing else. The lean counterpart of
+ * `get_metadata`, for a list that has to be drawn without the library at hand.
+ * Issued once when a batch job's population is minted, so the receipt in the
+ * transcript can name the items a row stands for.
+ */
+export interface WSItemDisplayRequest extends WSBaseEvent {
+    event: 'item_display_request';
+    request_id: string;
+    /**
+     * Item ids in either grammar (`u-KEY` / `g<groupID>-KEY`, or the legacy
+     * `<libraryID>-KEY`). Bounded by the caller: a batch population is at
+     * most 1,000 items.
+     */
+    item_ids: string[];
+}
+
+/** One item as a list draws it, computed by the client that owns the library. */
+export interface ItemDisplayRow {
+    /** The item's id as this client spells it, portable where it can be. */
+    item_id: string;
+    /** Zotero item type, for the row's icon. */
+    item_type?: string | null;
+    /**
+     * The row's headline: "Author Year" for a regular item, the title for a
+     * note or standalone attachment — the same label every other surface
+     * gives the item.
+     */
+    display_name: string;
+    /** The quieter second line: title and context, or the parent for a child item. */
+    subtitle?: string | null;
+    /** Attachments only: the broad content kind, for the icon. */
+    content_kind?: string | null;
+}
+
+/**
+ * Response to an item_display request.
+ *
+ * Rows come back for the ids this client could resolve, in any order. An id
+ * that is missing, in a library this device does not have, or excluded from
+ * Beaver has no row and is not an error.
+ */
+export interface WSItemDisplayResponse {
+    type: 'item_display';
+    request_id: string;
+    items: ItemDisplayRow[];
+    error?: string | null;
+    error_code?: string | null;
+}
+
 export interface WSGetMetadataRequest extends WSBaseEvent {
     event: 'get_metadata_request';
     request_id: string;
@@ -1821,6 +1885,9 @@ export interface CollectionInfo {
     library_id?: number;
     /** Device-portable library identity ("u" | "g<groupID>"). */
     library_ref?: string;
+    /** Additive portable identity; collection_key remains the native key. */
+    collection_id?: string;
+    parent_collection_id?: string;
     collection_key: string;
     name: string;
     parent_key?: string | null;
@@ -2518,6 +2585,7 @@ export type WSEvent =
     | WSZoteroSearchRequest
     | WSListItemsRequest
     | WSResolvePopulationRequest
+    | WSItemDisplayRequest
     | WSListCollectionsRequest
     | WSListTagsRequest
     | WSGetMetadataRequest
@@ -2712,6 +2780,13 @@ export const CLIENT_FEATURES = {
      * resolves a population WIDER than the one the batch described.
      */
     POPULATION_ANY_CONDITIONS: 'population_any_conditions',
+    /**
+     * This client answers `item_display_request`: the display fields of a
+     * batch population, asked once when the batch starts so the receipt can
+     * name the items each row stands for. A client without a handler drops
+     * the unknown event, so the backend must not send it.
+     */
+    BATCH_ITEM_DISPLAY: 'batch_item_display',
     /**
      * `create_item` actions carry `pdf_candidates`: a ranked list of places the
      * PDF might be downloaded from.

@@ -76,6 +76,7 @@ describe('getCollectionByIdOrName', () => {
         vi.clearAllMocks();
         previousZotero = (globalThis as any).Zotero;
         (globalThis as any).Zotero = {
+            Beaver: { searchableLibraryIds: [1, 100], libraryScopeInitialized: true },
             Libraries: {
                 getAll: vi.fn(() => [{ libraryID: 1 }, { libraryID: 100 }]),
                 userLibraryID: 1,
@@ -123,13 +124,8 @@ describe('getCollectionByIdOrName', () => {
         expect(result).toEqual({ collection: groupCollection, libraryID: 100 });
     });
 
-    it('falls through to a not-found result for an unresolvable portable group ref', () => {
-        // Group 99999 isn't registered locally, so resolveLibraryRef returns
-        // null and the compound branch can't do a getByLibraryAndKey lookup.
-        // isValidObjectKey still passes, so this only fails the compound path,
-        // and the bare-key fallback below also can't find a match.
-        const result = getCollectionByIdOrName(`g99999-${groupCollection.key}`);
-        expect(result).toBeNull();
+    it('reports an unavailable portable group without falling through', () => {
+        expect(() => getCollectionByIdOrName(`g99999-${groupCollection.key}`)).toThrow(/unavailable/);
     });
 
     it('preserves fallback semantics: a hyphenated name that is not a compound id falls through to name lookup', () => {

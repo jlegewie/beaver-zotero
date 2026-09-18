@@ -48,6 +48,8 @@ export type OcrReextractResult =
     | { kind: 'unavailable'; reason: string }
     /** Caller aborted (window closing / lease expiry). */
     | { kind: 'aborted' }
+    /** The returned artifact belongs to an earlier source revision. */
+    | { kind: 'source_changed' }
     /** Transient extraction failure; caller may retry. */
     | { kind: 'error'; message: string };
 
@@ -63,6 +65,8 @@ export interface ExtractOcrBytesArgs {
     ocrBytes: Uint8Array;
     /** Page count from the original no-text-layer detection; enforced 1:1. */
     expectedPageCount: number | null;
+    /** Content hash used to request this artifact, before cloud processing. */
+    expectedFileHash: string;
     /**
      * Whether the original is a remote-only source. Remote entries are keyed by
      * size (not on-disk mtime), so the cache identity uses `sourceSizeBytes`.
@@ -111,6 +115,20 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
         logger(`extractPdfBytesAndCacheAsOriginalAttachment: source identity snapshot failed: ${error}`, 1);
         return { kind: 'unavailable', reason: 'source_identity_unavailable' };
     }
+
+    // The snapshot above protects changes during extraction, but may already
+    // describe a replacement file. Bind it to the hash that requested the OCR
+    // artifact before allowing any old text to be stamped with that identity.
+    const sourceStillMatches = async (): Promise<boolean> => {
+        try {
+            const hash = args.isRemoteOnly ? item.attachmentSyncedHash : await item.attachmentHash;
+            return hash === args.expectedFileHash;
+        } catch {
+            return false;
+        }
+    };
+    if (!await sourceStillMatches()) return { kind: 'source_changed' };
+    if (abortSignal?.aborted) return { kind: 'aborted' };
 
     // Use original page geometry when available; otherwise enforce page count.
     const originalMeta = await cache.getMetadata(docRef, filePath).catch(() => null);
@@ -176,6 +194,7 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
 
     // Validate both representations before publishing either. A secondary-mode
     // text or geometry failure must not leave a readable success in the cache.
+    if (!await sourceStillMatches()) return { kind: 'source_changed' };
     for (const { mode, extracted } of validated) {
         try {
             if (abortSignal?.aborted) return { kind: 'aborted' };
@@ -193,6 +212,7 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
         }
     }
 
+    if (!await sourceStillMatches()) return { kind: 'source_changed' };
     return { kind: 'ok', pageCount: primaryPageCount ?? expectedPageCount ?? 0 };
 }
 

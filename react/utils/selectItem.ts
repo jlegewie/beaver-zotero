@@ -285,8 +285,19 @@ export async function selectTagFilter(
             await zoteroPane.toggleTagSelector();
         }
         if (zoteroPane.tagSelector) {
-            zoteroPane.tagSelector.clearTagSelection();
-            zoteroPane.tagSelector.handleTagSelected(tagName);
+            const selector = zoteroPane.tagSelector as typeof zoteroPane.tagSelector & {
+                handleSearch?: (searchString: string) => void;
+            };
+            selector.clearTagSelection();
+            // Narrow the tag list to the tag as well. Selecting alone leaves it
+            // highlighted somewhere in a list that can run to hundreds, and a
+            // user who wants the filter off first has to find it. With the
+            // selector's own search box set to its name, the highlighted tag
+            // is the whole list, one click from off, and the box's clear
+            // button brings the rest back. A selector without a search box is
+            // simply not narrowed.
+            selector.handleSearch?.(tagName);
+            selector.handleTagSelected(tagName);
             return 'filtered';
         }
         if (zoteroPane.itemsView) {

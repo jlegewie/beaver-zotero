@@ -11,6 +11,32 @@ function status(deferred: number, total = 1): BackgroundProcessingStatus & { wor
 }
 
 describe('processing status sentence', () => {
+    it('reports remote OCR while local occupancy is zero, even with runnable work', () => {
+        const snapshot = status(3);
+        snapshot.worker.available = 2;
+        snapshot.worker.remoteWaiting = 3;
+        expect(describeStatus(snapshot)).toMatchObject({ headline: 'Waiting for OCR…',
+            caption: '3 files processing remotely.', processNow: false });
+        snapshot.worker.inFlight = 1;
+        expect(describeStatus(snapshot).headline).toBe('Processing files…');
+        snapshot.worker.inFlight = 0;
+        snapshot.worker.remoteWaiting = 0;
+        expect(describeStatus(snapshot).caption).toBe('Starting…');
+    });
+    it('keeps queued local work actionable during remote OCR', () => {
+        const snapshot = status(3);
+        snapshot.worker.remoteWaiting = 3;
+        snapshot.worker.available = 2;
+        snapshot.worker.backlogGateOpen = false;
+        expect(describeStatus(snapshot)).toMatchObject({ processNow: true, processNowBlocked: false });
+        snapshot.worker.dispatchBlocker = 'sync';
+        expect(describeStatus(snapshot)).toMatchObject({ processNow: true, processNowBlocked: true });
+        snapshot.worker.drainNow = true;
+        expect(describeStatus(snapshot)).toMatchObject({ processNow: false, stopDrain: true });
+        snapshot.worker.drainNow = false;
+        snapshot.worker.available = 0;
+        expect(describeStatus(snapshot).processNow).toBe(false);
+    });
     it('uses authoritative pending attachments across ledger/queue overlap and index-stage gaps', () => {
         const snapshot = status(0, 3);
         snapshot.progress = { runId: 1, startedAt: 1, finishedAt: null, total: 5, pending: 4,

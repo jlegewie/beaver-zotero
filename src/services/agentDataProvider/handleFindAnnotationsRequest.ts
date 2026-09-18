@@ -2,6 +2,8 @@
  * Handle find_annotations requests from the backend.
  */
 
+import { collectionNotFoundError, CollectionResolutionError } from '../collections/collectionIdentity';
+
 import {
     ANNOTATION_TYPE_DB_IDS,
     ZOTERO_ANNOTATION_PALETTE_COLORS,
@@ -22,7 +24,6 @@ import {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import {
     checkLibraryExcluded,
-    excludedLibraryMessage,
     getCollectionByIdOrName,
     getSearchableLibraries,
     isLibrarySearchable,
@@ -587,7 +588,13 @@ export async function handleFindAnnotationsRequest(
     logger('handleFindAnnotationsRequest: Finding annotations', 1);
 
     try {
-        const validation = validateLibraryAccess(request.library_id);
+        let validation = validateLibraryAccess(request.library_id);
+        const resolvedCollection = request.collection && (request.library_id == null || validation.valid)
+            ? getCollectionByIdOrName(request.collection, request.library_id != null ? validation.library!.libraryID : undefined)
+            : null;
+        if (request.library_id == null && resolvedCollection) {
+            validation = validateLibraryAccess(resolvedCollection.libraryID);
+        }
         if (!validation.valid) {
             return invalidResponse(
                 request,
@@ -603,24 +610,11 @@ export async function handleFindAnnotationsRequest(
         let attachmentScopeItem: Zotero.Item | null = null;
         const collectionInput = cleanString(request.collection);
         if (collectionInput) {
-            const result = getCollectionByIdOrName(collectionInput, library.libraryID);
+            const result = resolvedCollection;
             if (!result) {
-                return invalidResponse(request, `Collection not found: ${collectionInput}`, 'collection_not_found');
+                return invalidResponse(request, collectionNotFoundError(collectionInput).message, 'collection_not_found');
             }
-            if (result.libraryID !== library.libraryID) {
-                const resolvedLib = Zotero.Libraries.get(result.libraryID);
-                if (!resolvedLib || !isLibrarySearchable(result.libraryID)) {
-                    // Do not echo the collection's name: it is content from a
-                    // library the user excluded from Beaver.
-                    return invalidResponse(
-                        request,
-                        excludedLibraryMessage(result.libraryID),
-                        'library_not_searchable',
-                        getSearchableLibraries(),
-                    );
-                }
-                library = resolvedLib;
-            }
+
             collection = result.collection;
         }
 
@@ -780,7 +774,7 @@ export async function handleFindAnnotationsRequest(
         return invalidResponse(
             request,
             error instanceof Error ? error.message : String(error),
-            'internal_error',
+            error instanceof CollectionResolutionError ? error.code : 'internal_error',
         );
     }
 }

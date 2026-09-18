@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { accountGenerationAtom, cloudConsentAtom, hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../../atoms/profile';
+import { cloudConsentAtom, hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../../atoms/profile';
 import {
     backgroundProcessingStatusAtom,
     type BackgroundProcessingStatus,
@@ -17,7 +17,7 @@ import type { AttachmentRef, ProcessingIssueReason } from '../../../src/services
 import Spinner from '@beaver/agent-ui/icons/Spinner';
 import Button from '@beaver/agent-ui/primitives/Button';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import { SettingsGroup, SettingsRow, SectionLabel } from './components/SettingsElements';
+import { ExternalLink, SettingsGroup, SettingsRow, SectionLabel } from './components/SettingsElements';
 import ProcessingIssueGroupRow from './ProcessingIssueList';
 import { ProgressBar } from '../status/ProgressBar';
 import { describeStatus, plural, type StatusTone } from './processingStatusSentence';
@@ -202,7 +202,6 @@ const MetadataIndexProblemRow: React.FC<{ indexState: EmbeddingIndexState }> = (
 
 export default function BackgroundProcessingSection(): React.ReactElement | null {
     const consent = useAtomValue(cloudConsentAtom);
-    const generation = useAtomValue(accountGenerationAtom);
     const hasOcrAccess = useAtomValue(hasOcrAccessAtom);
     const hasSearchAccess = useAtomValue(hasSearchIndexAccessAtom);
     const cloudRequired = hasOcrAccess || hasSearchAccess;
@@ -318,10 +317,8 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                     title={hasSearchAccess ? 'Keep Full-Text Search Up to Date' : 'Process Files in the Background'}
                     announceDescription={hasSearchAccess}
                     description={<>{locked
-                        ? 'Background processing is required for cloud preparation. Files process after 30 seconds without keyboard or mouse activity on your computer. Use Start now to process immediately, or Stop to return to idle processing.'
-                        : cloudRequired
-                            ? 'Cloud setup is incomplete. Local preparation can continue, but OCR uploads and search preparation require your confirmation.'
-                            : 'Process files ahead of time while your computer is idle for faster responses.'}
+                        ? 'Background processing is required for full-text search and OCR. Files process after 30 seconds without keyboard or mouse activity on your computer. Use Start now to process immediately, or Stop to return to idle processing.'
+                        : 'Process files ahead of time while your computer is idle for faster responses.'}
                         {hasSearchAccess && <span className="display-flex mt-1">{searchIndexStatusLine(status)}</span>}
                     </>}
                     onClick={() => updateEnabled(!enabled)}
@@ -334,13 +331,6 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                         onClick={(event) => event.stopPropagation()}
                     />}
                 />
-                {cloudRequired && !locked && (
-                    <div className="text-base font-color-secondary border-top-quinary" style={{ padding: '10px 12px' }}>
-                        Cloud preparation uploads scanned PDFs for OCR and extracted text for search when available, from included libraries on this computer. Remote downloads follow your remote-file permission. Acceptance covers both features and keeps background processing enabled while either is active.
-                        <Button variant="outline" onClick={() => Zotero.Beaver?.account?.setCloudConsent(true, generation)}>Accept and finish setup</Button>
-                        {consent === 'pending' && <Button variant="ghost" onClick={() => Zotero.Beaver?.account?.setCloudConsent(false, generation)}>Not now</Button>}
-                    </div>
-                )}
                 {(enabled || (status.worker?.inFlight ?? 0) > 0) && (
                     <ProcessingStatusRow
                         status={status}
@@ -371,6 +361,13 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                 ))}
                 <MetadataIndexProblemRow indexState={indexState} />
             </SettingsGroup>
+            <div className="text-sm font-color-secondary mt-2" style={{ paddingLeft: '4px' }}>
+                Problems with a specific file? Send it to{' '}
+                <ExternalLink href="mailto:contact@beaverapp.ai?subject=Beaver%20file%20problem" className="text-sm">
+                    contact@beaverapp.ai
+                </ExternalLink>
+                {' '}and we will take a look.
+            </div>
         </>
     );
 }

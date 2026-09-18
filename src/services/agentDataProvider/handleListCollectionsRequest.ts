@@ -7,6 +7,8 @@
  * The Beaver agent is the primary agent that handles chat completions and tool execution.
  */
 
+import { collectionNotFoundError, CollectionResolutionError, serializeCollectionIdentity } from '../collections/collectionIdentity';
+
 import { logger } from '@beaver/agent-core/platform/logger';
 import { getCollectionItemCounts } from './collectionCounts';
 import {
@@ -14,7 +16,7 @@ import {
     WSListCollectionsResponse,
     CollectionInfo,
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, excludedLibraryMessage } from './utils';
+import { getCollectionByIdOrName, validateLibraryAccess } from './utils';
 import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 
 
@@ -41,7 +43,13 @@ export async function handleListCollectionsRequest(
     
     try {
         // Validate library (checks both existence and searchability)
-        const validation = validateLibraryAccess(request.library_id);
+        let validation = validateLibraryAccess(request.library_id);
+        const resolvedCollection = request.parent_collection_key && (request.library_id == null || validation.valid)
+            ? getCollectionByIdOrName(request.parent_collection_key, request.library_id != null ? validation.library!.libraryID : undefined)
+            : null;
+        if (request.library_id == null && resolvedCollection) {
+            validation = validateLibraryAccess(resolvedCollection.libraryID);
+        }
         if (!validation.valid) {
             return {
                 type: 'list_collections',
@@ -53,12 +61,12 @@ export async function handleListCollectionsRequest(
                 available_libraries: validation.available_libraries,
             };
         }
-        let library = validation.library!;
+        const library = validation.library!;
         
-        // Resolve parent collection if specified, potentially updating library scope
+        // Use the resolved parent to constrain the listing
         let parentCollectionId: number | null = null;
         if (request.parent_collection_key) {
-            const result = getCollectionByIdOrName(request.parent_collection_key, library.libraryID);
+            const result = resolvedCollection;
             
             if (!result) {
                 return {
@@ -67,30 +75,11 @@ export async function handleListCollectionsRequest(
                     collections: [],
                     total_count: 0,
                     library_name: library.name,
-                    error: `Parent collection not found: ${request.parent_collection_key}`,
+                    error: collectionNotFoundError(request.parent_collection_key).message,
                     error_code: 'collection_not_found',
                 };
             }
-            
-            // Update library scope if collection was found in a different library
-            if (result.libraryID !== library.libraryID) {
-                const resolvedLib = Zotero.Libraries.get(result.libraryID);
-                if (!resolvedLib || !isLibrarySearchable(result.libraryID)) {
-                    return {
-                        type: 'list_collections',
-                        request_id: request.request_id,
-                        collections: [],
-                        total_count: 0,
-                        // Do not echo the collection's name: it is content from a
-                        // library the user excluded from Beaver.
-                        error: excludedLibraryMessage(result.libraryID),
-                        error_code: 'library_not_searchable',
-                        available_libraries: getSearchableLibraries(),
-                    };
-                }
-                library = resolvedLib;
-            }
-            
+
             parentCollectionId = result.collection.id;
         }
         
@@ -158,6 +147,7 @@ export async function handleListCollectionsRequest(
 
         // Build results
         const allResults: CollectionInfo[] = filteredCollections.map((collection: any) => ({
+            ...serializeCollectionIdentity(collection),
             library_id: library.libraryID,
             library_ref: libraryRef,
             collection_key: collection.key,
@@ -199,8 +189,8 @@ export async function handleListCollectionsRequest(
             request_id: request.request_id,
             collections: [],
             total_count: 0,
-            error: String(error),
-            error_code: 'list_failed',
+            error: error instanceof Error ? error.message : String(error),
+            error_code: error instanceof CollectionResolutionError ? error.code : 'list_failed',
         };
     }
 }

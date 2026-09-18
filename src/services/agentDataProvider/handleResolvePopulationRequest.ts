@@ -31,6 +31,8 @@
  * `findVacuousNegation`.
  */
 
+import { CollectionResolutionError, resolveCollectionList } from '../collections/collectionIdentity';
+
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSResolvePopulationRequest,
@@ -38,7 +40,7 @@ import {
     ZoteroSearchCondition,
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { modelObjectId, parseItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
-import { resolveStoredTagName, validateLibraryAccess } from './utils';
+import { resolveStoredTagName, validateCollectionLibraryAccess } from './utils';
 import { addSearchCondition, findVacuousNegation, vacuousNegationMessage } from './searchConditions';
 
 /** SQLite's bound-variable limit is well above this; 500 keeps a margin. */
@@ -83,9 +85,14 @@ async function itemIdsWithAttachments(itemIds: number[]): Promise<Set<number>> {
 }
 
 /**
- * The non-trashed attachments of the given items, as item ids.
+ * The non-trashed file attachments of the given items, as item ids.
  * The population of an attachment scope: the filters describe bibliographic
  * items, and these are the attachments hanging off the ones that matched.
+ *
+ * Linked-URL attachments are left out. They carry no file, so extraction and
+ * reading refuse them, and a library where each item has a web link (e.g. one
+ * added by a sync tool) would otherwise spend a large share of every tranche on
+ * rows that can only come back blocked.
  */
 async function attachmentIdsForItems(itemIds: number[]): Promise<number[]> {
     const attachmentIds: number[] = [];
@@ -96,8 +103,9 @@ async function attachmentIdsForItems(itemIds: number[]): Promise<number[]> {
         await Zotero.DB.queryAsync(
             'SELECT ia.itemID FROM itemAttachments ia '
                 + 'LEFT JOIN deletedItems di ON di.itemID = ia.itemID '
-                + `WHERE ia.parentItemID IN (${placeholders}) AND di.itemID IS NULL`,
-            chunk,
+                + `WHERE ia.parentItemID IN (${placeholders}) AND di.itemID IS NULL `
+                + 'AND ia.linkMode != ?',
+            [...chunk, Zotero.Attachments.LINK_MODE_LINKED_URL],
             {
                 onRow: (row: any) => {
                     attachmentIds.push(row.getResultByIndex(0));
@@ -107,6 +115,31 @@ async function attachmentIdsForItems(itemIds: number[]): Promise<number[]> {
     }
 
     return attachmentIds;
+}
+
+/**
+ * The given attachment ids minus linked-URL attachments, in input order.
+ * Standalone attachments reach the population through the search rather than
+ * through `attachmentIdsForItems`, so they need the same exclusion.
+ */
+async function withoutLinkedUrlAttachments(attachmentIds: number[]): Promise<number[]> {
+    const linkedUrl = new Set<number>();
+
+    for (let i = 0; i < attachmentIds.length; i += SQL_CHUNK_SIZE) {
+        const chunk = attachmentIds.slice(i, i + SQL_CHUNK_SIZE);
+        const placeholders = chunk.map(() => '?').join(', ');
+        await Zotero.DB.queryAsync(
+            `SELECT itemID FROM itemAttachments WHERE itemID IN (${placeholders}) AND linkMode = ?`,
+            [...chunk, Zotero.Attachments.LINK_MODE_LINKED_URL],
+            {
+                onRow: (row: any) => {
+                    linkedUrl.add(row.getResultByIndex(0));
+                },
+            },
+        );
+    }
+
+    return attachmentIds.filter(id => !linkedUrl.has(id));
 }
 
 /** Non-bibliographic types excluded unless standalone attachments are requested. */
@@ -448,7 +481,12 @@ export async function handleResolvePopulationRequest(
 
     try {
         // Validate library (checks both existence and searchability)
-        const validation = validateLibraryAccess(request.library_id);
+        const collectionConditions = [...(request.conditions ?? []), ...(request.any_conditions ?? [])]
+            .filter(condition => condition.field === 'collection' || condition.field === 'collectionID')
+            .map(condition => condition.value ?? '');
+        const validation = validateCollectionLibraryAccess(
+            request.library_id, [...(request.collection_keys ?? []), ...collectionConditions],
+        );
         if (!validation.valid) {
             return errorResponse(
                 request.request_id,
@@ -537,29 +575,11 @@ export async function handleResolvePopulationRequest(
             }
         }
 
-        // Resolve the collection scope. The wire always carries BARE keys; the
-        // backend has already down-converted library-qualified ones. The names
-        // are kept alongside: they are the only thing that turns the keys back
-        // into something the approval card can show the user, and they are
-        // returned in the order the request named them.
-        //
-        // A key the library does not have fails the whole request. Zotero's
-        // own answer for an unknown collection is to match nothing, which the
-        // backend would read as "these filters select no items" and hand the
-        // model as a reason to change the filters rather than fix the key.
-        const collectionNames: string[] = [];
-        for (const key of requestedCollectionKeys) {
-            const collection = Zotero.Collections.getByLibraryAndKey(library.libraryID, key);
-            if (!collection) {
-                return errorResponse(
-                    request.request_id,
-                    `Collection not found: "${key}" in library "${library.name}". `
-                        + 'Use list_collections to get the collection key.',
-                    'collection_not_found',
-                );
-            }
-            collectionNames.push(collection.name);
-        }
+        const collectionResolution = resolveCollectionList(requestedCollectionKeys, { libraryID: library.libraryID });
+        if (collectionResolution.failures.length) throw collectionResolution.failures[0].error;
+        const collectionNames = collectionResolution.resolvedInputs.map(entry => entry.resolved.name);
+        const collectionIds = collectionResolution.resolvedInputs.map(entry => entry.resolved.collectionId);
+        const collectionKeys = collectionResolution.collections.map(entry => entry.key);
 
         // Warnings are surfaced to the backend so the agent can correct bad
         // conditions rather than mutate a silently-widened population.
@@ -624,7 +644,7 @@ export async function handleResolvePopulationRequest(
         // scope properly, which is exactly why the bug is invisible there.) So
         // the first group becomes the scope and the rest are intersected below.
         const groups = [
-            valuesOrGroup(library.libraryID, 'collection', requestedCollectionKeys, recursive),
+            valuesOrGroup(library.libraryID, 'collection', collectionKeys, recursive),
             valuesOrGroup(library.libraryID, 'tag', resolvedTags, recursive),
             conditionsJoinMode === 'any'
                 ? conditionsOrGroup(library.libraryID, requestedConditions, recursive, warnings)
@@ -758,6 +778,9 @@ export async function handleResolvePopulationRequest(
         const standaloneSet = new Set(standaloneIds);
         const parentIds = itemIds.filter(id => !standaloneSet.has(id));
         const matchedItemCount = parentIds.length;
+        if (standaloneIds.length > 0) {
+            standaloneIds = await withoutLinkedUrlAttachments(standaloneIds);
+        }
         const matchedIds = itemCategory === 'attachment'
             ? [...await attachmentIdsForItems(parentIds), ...standaloneIds]
             : itemIds;
@@ -790,6 +813,7 @@ export async function handleResolvePopulationRequest(
                 truncated: totalCount > 0,
                 library_name: library.name,
                 collection_names: collectionNames,
+                collection_ids: collectionIds,
                 // Echoed so a caller that asked for 'any' can tell an applied
                 // 'any' from a provider that never knew the field.
                 conditions_join_mode: conditionsJoinMode,
@@ -843,6 +867,7 @@ export async function handleResolvePopulationRequest(
             // places. The approval card states the location from these alone.
             library_name: library.name,
             collection_names: collectionNames,
+            collection_ids: collectionIds,
             // Echoed so a caller that asked for 'any' can tell an applied
             // 'any' from a provider that never knew the field.
             conditions_join_mode: conditionsJoinMode,
@@ -857,6 +882,6 @@ export async function handleResolvePopulationRequest(
         };
     } catch (error) {
         logger(`handleResolvePopulationRequest: Error: ${error}`, 1);
-        return errorResponse(request.request_id, String(error), 'internal_error');
+        return errorResponse(request.request_id, error instanceof Error ? error.message : String(error), error instanceof CollectionResolutionError ? error.code : 'internal_error');
     }
 }

@@ -100,6 +100,7 @@ export function processingIssuesSql(entitlements: IssueEntitlements): string {
         SELECT library_id, zotero_key, extract_status, ocr_status, upsert_status, last_error,
             COALESCE(attempted_at, CAST(strftime('%s', updated_at) AS INTEGER) * 1000) AS timestamp, read_succeeded,
             CASE
+                WHEN ${hasCodeSql('low_confidence')} THEN 'no_text'
                 WHEN extract_status IN ('failed', 'skipped') THEN CASE
                     WHEN ${anyCodeSql(FILE_UNAVAILABLE_CODES)} THEN 'file_unavailable'
                     WHEN ${hasCodeSql('encrypted')} THEN 'encrypted'
@@ -151,10 +152,16 @@ export const PROCESSING_ISSUE_REASON_ORDER: ProcessingIssueReason[] = [
 ];
 
 /**
- * Reasons a user can retry from the issues list. The rest describe the bytes
- * themselves (encrypted, too large, unsupported, no text) or an entitlement
- * (scans without OCR access), so re-running them fails identically; a replaced
- * file is picked up by the reconciler's own signature check instead.
+ * Reasons a user can retry from the issues list.
+ *
+ * Verdicts about the bytes themselves (encrypted, too large, no text) are
+ * included because the user's fix, replacing the file or raising the size
+ * limit, changes nothing the reconciler watches: a file overwritten in place
+ * sends no Zotero notification, and the size preference is not observed, so
+ * without a retry the row waits for the weekly source sweep. Retrying unchanged
+ * bytes is cheap (a stat, a preflight) and fails identically. Excluded are
+ * `scanned`, whose remedy is an entitlement, and `unsupported`, which no file
+ * change can fix.
  */
 export const RETRYABLE_PROCESSING_ISSUE_REASONS: readonly ProcessingIssueReason[] = [
     'ocr_page_cap',
@@ -162,6 +169,9 @@ export const RETRYABLE_PROCESSING_ISSUE_REASONS: readonly ProcessingIssueReason[
     'extract_failed',
     'ocr_failed',
     'index_failed',
+    'encrypted',
+    'too_large',
+    'no_text',
 ];
 
 export function isRetryableProcessingIssue(reason: ProcessingIssueReason): boolean {
@@ -201,6 +211,7 @@ export function classifyProcessingIssue(
     entitlements: IssueEntitlements,
 ): ProcessingIssueReason | null {
     // Extraction retries can leave downstream statuses from the previous attempt.
+    if (hasCode(row.lastError, 'low_confidence')) return 'no_text';
     const extractTerminal = row.extractStatus === 'failed' || row.extractStatus === 'skipped';
     if (extractTerminal) {
         const error = row.lastError;

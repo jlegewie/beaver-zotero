@@ -40,12 +40,11 @@ export class MockDBConnection {
         // `( ?`. Reproduce that here so tests exercise the statement production
         // actually runs. See zoteroQueryParams.ts.
         const [sql, params] = parseQueryAndParams(sqlIn, paramsIn);
-        const trimmed = sql.trim().toUpperCase();
 
         // Reader PRAGMAs like table_info return rows in Zotero's queryAsync, so
         // they go through the reader path; assignment PRAGMAs fall through to
         // run() (better-sqlite3 marks the difference via stmt.reader).
-        if (trimmed.startsWith('SELECT') || (trimmed.startsWith('PRAGMA') && this.db.prepare(sql).reader)) {
+        if (this.db.prepare(sql).reader) {
             const stmt = this.db.prepare(sql);
             const rows = stmt.all(...params);
 

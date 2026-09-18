@@ -5,13 +5,12 @@ import { reconcileRemoteRefs } from "../backgroundProcessing/remoteRefsReconcile
 import { logger } from "@beaver/agent-core/platform/logger";
 
 const INDEX_LANE_MAX_IN_FLIGHT = 2;
-const UNTAG_REDRIVE_INTERVAL_MS = 6 * 60 * 60_000;
+const CLEANUP_RESTORE_INTERVAL_MS = 6 * 60 * 60_000;
 
 export function startFulltextUpsertLane(
     searchableLibraryIds: number[],
     hasAccess: boolean,
 ): () => Promise<void> {
-    if (!hasAccess) return async () => {};
     let cancelled = false;
     const executor = new FulltextUpsertExecutor();
     const untagExecutor = new FulltextUpsertExecutor(
@@ -19,15 +18,15 @@ export function startFulltextUpsertLane(
         "fulltext_untag",
     );
     const dispatcher = Zotero.Beaver.backgroundExtractor!;
-    dispatcher.registerExecutor(executor, {
+    if (hasAccess) dispatcher.registerExecutor(executor, {
         maxInFlight: INDEX_LANE_MAX_IN_FLIGHT,
     });
-    dispatcher.registerExecutor(untagExecutor, { maxInFlight: 1 });
+    dispatcher.registerExecutor(untagExecutor, { maxInFlight: 1, survivesLibraryExclusion: true });
     let sweeping = false;
     let sweep: Promise<void> | undefined;
-    let redrive: Promise<unknown> | undefined;
+    let restoration: Promise<unknown> | undefined;
     const runSweep = () => {
-        if (cancelled || sweeping) return;
+        if (cancelled || sweeping || !hasAccess) return;
         sweeping = true;
         sweep = reconcileRemoteRefs(searchableLibraryIds, () => cancelled)
             .catch((error) =>
@@ -39,33 +38,33 @@ export function startFulltextUpsertLane(
     };
     const initialTimer = setTimeout(runSweep, 2_000);
     const sweepTimer = setInterval(runSweep, INDEX_RECONCILE_INTERVAL_MS);
-    const redriveUntags = () => {
+    const restoreCleanup = () => {
         const db = Zotero.Beaver?.db;
-        if (!db || cancelled || redrive) return;
-        redrive = db
-            .redriveDeadUntagJobs(Date.now(), 100)
+        if (!db || cancelled || restoration) return;
+        const accountId = Zotero.Beaver?.account?.getSnapshot().session?.user.id;
+        restoration = (accountId ? db.restoreIndexCleanup(accountId) : Promise.resolve(0))
             .then((count) => {
                 if (count > 0) Zotero.Beaver?.backgroundExtractor?.notify();
             })
             .catch((error) =>
-                logger(`Fulltext lane: untag redrive failed: ${error}`, 2),
+                logger(`Fulltext lane: untag restoration failed: ${error}`, 2),
             )
             .finally(() => {
-                redrive = undefined;
+                restoration = undefined;
             });
     };
-    const redriveTimer = setTimeout(redriveUntags, 5_000);
-    const redriveInterval = setInterval(
-        redriveUntags,
-        UNTAG_REDRIVE_INTERVAL_MS,
+    const restorationTimer = setTimeout(restoreCleanup, 5_000);
+    const restorationInterval = setInterval(
+        restoreCleanup,
+        CLEANUP_RESTORE_INTERVAL_MS,
     );
 
     return async () => {
         cancelled = true;
         clearTimeout(initialTimer);
         clearInterval(sweepTimer);
-        clearTimeout(redriveTimer);
-        clearInterval(redriveInterval);
+        clearTimeout(restorationTimer);
+        clearInterval(restorationInterval);
         Zotero.Beaver?.backgroundExtractor?.unregisterExecutor(
             executor.jobType,
             executor,
@@ -74,6 +73,6 @@ export function startFulltextUpsertLane(
             untagExecutor.jobType,
             untagExecutor,
         );
-        await Promise.allSettled([sweep, redrive]);
+        await Promise.allSettled([sweep, restoration]);
     };
 }

@@ -238,6 +238,15 @@ export const indexingPlanLabelAtom = selectAtom(
     (profile: SafeProfileWithPlan | null) => profile?.indexing_plan_label ?? null,
 );
 
+/** User-facing name of the plan whose cloud features (OCR + full-text search) cloud consent covers. */
+export const cloudProductNameAtom = selectAtom(
+    indexingPlanLabelAtom,
+    (label) => label === 'search' ? 'Beaver Search' : 'Beaver Pro',
+);
+
+/** True while the cloud features are enabled for an account without a plan label (beta access). */
+export const cloudBetaAtom = selectAtom(indexingPlanLabelAtom, (label) => label === null);
+
 export const processingModeAtom = atom<ProcessingMode>(() => ProcessingMode.FRONTEND);
 
 // Plan features

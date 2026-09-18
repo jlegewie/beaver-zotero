@@ -12,6 +12,8 @@
 
 import { isRunActive } from '../agents/types';
 import type { AgentRun, ModelMessage } from '../agents/types';
+import { parseItemReference, UNRESOLVED_LIBRARY_ID } from '../identity/libraryRef';
+import type { ZoteroItemReference } from '../types/zotero';
 
 /** How far a batch got, and how it ended. */
 export type BatchProgressStatus = 'active' | 'completed' | 'failed_out' | 'cancelled';
@@ -486,4 +488,303 @@ export function batchOutcomeTarget(
     }
     if (operation === 'tag') return { kind: 'tag', name, libraryRef: library };
     return null;
+}
+
+/**
+ * The items behind one outcome row, keyed the way the row is: `kind` plus
+ * `reference` when the row has one (a collection key for `sort`), else `kind`
+ * plus `label`. Ids are model-facing item ids (`u-KEY` / `g<groupID>-KEY`, or
+ * the legacy numeric form) — see {@link batchItemReference}.
+ */
+export interface BatchItemGroup {
+    kind: BatchOutcomeBlockKind;
+    label: string;
+    reference?: string;
+    /** Every item the row was recorded for, in population order. */
+    item_ids: string[];
+}
+
+/**
+ * Which items each outcome row of one batch stands for.
+ *
+ * Written ONCE by the backend, on the tool return that ended the batch (or the
+ * first after it), never on the live stamps — so unlike `batch_progress` it is
+ * collected, not superseded: the newest record per batch wins, wherever in
+ * the thread it sits. Complete rather than capped: every row the block cap
+ * hid is here with every item under it. Absent on records written before it
+ * existed, and every surface must render without it.
+ */
+export interface BatchItemsRecord {
+    batch_id: string;
+    groups: BatchItemGroup[];
+}
+
+/** The item records one tool return carried. */
+export interface BatchItemsStamp {
+    batches: BatchItemsRecord[];
+}
+
+const ITEM_GROUP_KINDS: ReadonlySet<string> = new Set([
+    'destination', 'removal', 'finding', 'failure', 'no_change',
+]);
+
+function isItemGroup(value: unknown): value is BatchItemGroup {
+    if (!value || typeof value !== 'object') return false;
+    const group = value as BatchItemGroup;
+    return (
+        typeof group.kind === 'string' &&
+        ITEM_GROUP_KINDS.has(group.kind) &&
+        typeof group.label === 'string' &&
+        Array.isArray(group.item_ids) &&
+        group.item_ids.every((id) => typeof id === 'string')
+    );
+}
+
+/**
+ * Narrow an unknown metadata value to a {@link BatchItemsStamp}.
+ *
+ * Per-record and per-group rather than all-or-nothing: one unreadable group
+ * costs that group, not every batch on the stamp. A record with no readable
+ * batch id is dropped.
+ */
+export function readBatchItemsStamp(value: unknown): BatchItemsStamp | null {
+    if (!value || typeof value !== 'object') return null;
+    const batches = (value as { batches?: unknown }).batches;
+    if (!Array.isArray(batches)) return null;
+    const usable: BatchItemsRecord[] = [];
+    for (const record of batches) {
+        if (!record || typeof record !== 'object') continue;
+        const { batch_id, groups } = record as { batch_id?: unknown; groups?: unknown };
+        if (typeof batch_id !== 'string' || !Array.isArray(groups)) continue;
+        usable.push({ batch_id, groups: groups.filter(isItemGroup) });
+    }
+    return { batches: usable };
+}
+
+/** Item records by batch id. */
+export type BatchItemsByBatch = ReadonlyMap<string, BatchItemsRecord>;
+
+/** Shared empty result, so a thread without records never re-renders a consumer. */
+const NO_ITEMS: BatchItemsByBatch = new Map();
+
+/**
+ * The newest item record for every batch in these runs.
+ *
+ * Walks newest-first and keeps the first record seen per batch — the backend
+ * re-records a batch whose ledger moved after it ended, and the newest
+ * statement is the one that matches the newest progress stamp. Reads
+ * `metadata.batch_items` off tool returns, the same carrier as the progress
+ * stamp; a thread whose runs predate the field yields an empty map, and
+ * every consumer renders the counts alone.
+ */
+export function selectChainBatchItems(runs: readonly AgentRun[]): BatchItemsByBatch {
+    let found: Map<string, BatchItemsRecord> | null = null;
+    for (let runIndex = runs.length - 1; runIndex >= 0; runIndex--) {
+        const messages = runs[runIndex]?.model_messages;
+        if (!messages?.length) continue;
+        for (let index = messages.length - 1; index >= 0; index--) {
+            const message = messages[index];
+            if (message.kind !== 'request') continue;
+            for (let part = message.parts.length - 1; part >= 0; part--) {
+                const candidate = message.parts[part];
+                if (candidate.part_kind !== 'tool-return') continue;
+                const raw = (candidate.metadata as { batch_items?: unknown } | undefined)?.batch_items;
+                if (!raw) continue;
+                const stamp = readBatchItemsStamp(raw);
+                if (!stamp) continue;
+                for (const record of stamp.batches) {
+                    if (found?.has(record.batch_id)) continue;
+                    (found ??= new Map()).set(record.batch_id, record);
+                }
+            }
+        }
+    }
+    return found ?? NO_ITEMS;
+}
+
+/**
+ * The item group behind an outcome row, or `null` when the record has none.
+ *
+ * A row with a `reference` is matched on it — two `sort` destinations can
+ * share a name — and every other row on its label, within the block's kind.
+ */
+export function batchItemGroupFor(
+    record: BatchItemsRecord | undefined,
+    block: Pick<BatchOutcomeBlock, 'kind'>,
+    row: Pick<BatchOutcomeTally, 'label' | 'reference'>,
+): BatchItemGroup | null {
+    if (!record) return null;
+    const reference = row.reference?.trim();
+    for (const group of record.groups) {
+        if (group.kind !== block.kind) continue;
+        if (reference ? group.reference === reference : (!group.reference && group.label === row.label)) {
+            return group;
+        }
+    }
+    return null;
+}
+
+/** The groups of one block's kind, in the order the backend listed them. */
+export function batchItemGroupsOfKind(
+    record: BatchItemsRecord | undefined,
+    kind: BatchOutcomeBlockKind,
+): BatchItemGroup[] {
+    return record ? record.groups.filter((group) => group.kind === kind) : [];
+}
+
+/**
+ * A recorded item id as a reference the host can resolve, or `null` when it
+ * is not one. A portable prefix names the library; a legacy numeric prefix is
+ * this device's rowid, which for the personal library is the same everywhere.
+ */
+export function batchItemReference(itemId: string): ZoteroItemReference | null {
+    const parsed = parseItemReference(itemId);
+    if (!parsed) return null;
+    return {
+        zotero_key: parsed.zotero_key,
+        library_id: parsed.library_id ?? UNRESOLVED_LIBRARY_ID,
+        ...(parsed.library_ref ? { library_ref: parsed.library_ref } : {}),
+    };
+}
+
+// ---------------------------------------------------------------------------
+// The population record: how a batch's items look
+// ---------------------------------------------------------------------------
+
+/**
+ * One item of a batch's population, as a list draws it.
+ *
+ * One-letter keys because the record repeats them once per item, up to the
+ * population cap, on every load of the thread — the keys would otherwise
+ * weigh as much as the values. The same conventions as `ItemRowView`: `n` is
+ * the headline ("Author Year" for a regular item, the title for a note or
+ * standalone attachment) and `s` the quieter second line.
+ */
+export interface BatchPopulationItem {
+    /** Model-facing item id, spelled the way `BatchItemGroup.item_ids` spells it. */
+    id: string;
+    /** Display name: the row's headline. */
+    n: string;
+    /** Subtitle: title and context, or the parent for a child item. */
+    s?: string;
+    /** Zotero item type, for the icon. */
+    t?: string;
+    /** Attachments only: broad content kind, for the icon. */
+    c?: string;
+}
+
+/**
+ * How the items of one batch's population look, as of its declaration.
+ *
+ * Written ONCE by the backend, on the `batch_start` return that minted the
+ * population, and never again: an update to the batch reuses its frozen ids,
+ * and a continuation mints a new batch with its own record. A snapshot, like
+ * an item-list view: a rename after the batch ran does not reach it. Read
+ * beside {@link BatchItemsRecord}, whose groups name these items by id; a
+ * thread without the record, or a row the record lacks, draws the id (or
+ * whatever the host can resolve live).
+ */
+export interface BatchPopulationRecord {
+    batch_id: string;
+    items: BatchPopulationItem[];
+}
+
+function isPopulationItem(value: unknown): value is BatchPopulationItem {
+    if (!value || typeof value !== 'object') return false;
+    const item = value as BatchPopulationItem;
+    return typeof item.id === 'string' && item.id !== '' && typeof item.n === 'string' && item.n !== '';
+}
+
+/**
+ * Narrow an unknown metadata value to a {@link BatchPopulationRecord}.
+ *
+ * Per-item rather than all-or-nothing: one unreadable row costs that row, not
+ * the record. A record with no readable batch id is dropped.
+ */
+export function readBatchPopulationRecord(value: unknown): BatchPopulationRecord | null {
+    if (!value || typeof value !== 'object') return null;
+    const { batch_id, items } = value as { batch_id?: unknown; items?: unknown };
+    if (typeof batch_id !== 'string' || !Array.isArray(items)) return null;
+    return { batch_id, items: items.filter(isPopulationItem) };
+}
+
+/** Population rows by item identity — see {@link batchItemIdentityKey}. */
+export type BatchPopulationLookup = ReadonlyMap<string, BatchPopulationItem>;
+
+/** Population lookups by batch id. */
+export type BatchPopulationsByBatch = ReadonlyMap<string, BatchPopulationLookup>;
+
+/** Shared empty result, so a thread without records never re-renders a consumer. */
+const NO_POPULATIONS: BatchPopulationsByBatch = new Map();
+
+/**
+ * Zotero pins the personal library to this rowid on every install, which is
+ * why the backend treats the portable `u` and the legacy `1-` prefix as one
+ * library. A group is portable only as `g<groupID>`: a bare rowid for one
+ * names a library only on the install that wrote it.
+ */
+const PERSONAL_LIBRARY_ROWID = 1;
+
+/**
+ * The identity an item id names, whichever grammar spells it, or `null` when
+ * it is not an item id. Two records written by different clients can spell
+ * the same item `u-KEY` and `1-KEY`; joining them by this key keeps the
+ * population's rows attached to the outcome groups either way.
+ */
+export function batchItemIdentityKey(itemId: string): string | null {
+    const parsed = parseItemReference(itemId);
+    if (!parsed) return null;
+    const token =
+        parsed.library_ref
+        ?? (parsed.library_id === PERSONAL_LIBRARY_ROWID ? 'u' : String(parsed.library_id));
+    return `${token}-${parsed.zotero_key}`;
+}
+
+function populationLookup(record: BatchPopulationRecord): BatchPopulationLookup {
+    const lookup = new Map<string, BatchPopulationItem>();
+    for (const item of record.items) {
+        const key = batchItemIdentityKey(item.id);
+        if (key && !lookup.has(key)) lookup.set(key, item);
+    }
+    return lookup;
+}
+
+/**
+ * The newest population record for every batch in these runs, as lookups.
+ *
+ * Reads `metadata.batch_population` off tool returns, the carrier the ledger
+ * and the item record share. Walks newest-first and keeps the first record
+ * seen per batch, the same rule as {@link selectChainBatchItems}; a thread
+ * whose runs predate the field yields an empty map.
+ */
+export function selectChainBatchPopulations(runs: readonly AgentRun[]): BatchPopulationsByBatch {
+    let found: Map<string, BatchPopulationLookup> | null = null;
+    for (let runIndex = runs.length - 1; runIndex >= 0; runIndex--) {
+        const messages = runs[runIndex]?.model_messages;
+        if (!messages?.length) continue;
+        for (let index = messages.length - 1; index >= 0; index--) {
+            const message = messages[index];
+            if (message.kind !== 'request') continue;
+            for (let part = message.parts.length - 1; part >= 0; part--) {
+                const candidate = message.parts[part];
+                if (candidate.part_kind !== 'tool-return') continue;
+                const raw = (candidate.metadata as { batch_population?: unknown } | undefined)?.batch_population;
+                if (!raw) continue;
+                const record = readBatchPopulationRecord(raw);
+                if (!record || found?.has(record.batch_id)) continue;
+                (found ??= new Map()).set(record.batch_id, populationLookup(record));
+            }
+        }
+    }
+    return found ?? NO_POPULATIONS;
+}
+
+/** The population row for an item, or `null` when the record has none. */
+export function batchPopulationItemFor(
+    population: BatchPopulationLookup | undefined,
+    itemId: string,
+): BatchPopulationItem | null {
+    if (!population) return null;
+    const key = batchItemIdentityKey(itemId);
+    return (key && population.get(key)) || null;
 }

@@ -1,3 +1,4 @@
+import { CollectionResolutionError, serializeCollectionIdentity } from '../collections/collectionIdentity';
 import { cleanMetadataUrl } from '../../utils/metadataUrl';
 /**
  * Agent Data Provider
@@ -28,10 +29,11 @@ import { getCreatorTypeInfo } from '../../utils/zoteroUtils';
  * Enrich an item's collection memberships into {collection_key, name} objects
  * so the agent sees meaningful names instead of opaque keys.
  */
-function enrichItemCollections(item: Zotero.Item): { collection_key: string; name: string }[] {
+function enrichItemCollections(item: Zotero.Item) {
     return item.getCollections().map((collId: number) => {
         const coll = Zotero.Collections.get(collId);
         return {
+            ...(coll ? serializeCollectionIdentity(coll) : {}),
             collection_key: coll ? coll.key : String(collId),
             name: coll ? coll.name : String(collId),
         };
@@ -265,10 +267,12 @@ export async function handleGetMetadataRequest(
                     try {
                         const coll = Zotero.Collections.getByLibraryAndKey(libraryId, collKey);
                         return {
+                            ...(coll ? serializeCollectionIdentity(coll) : {}),
                             collection_key: collKey,
                             name: coll ? coll.name : collKey,
                         };
-                    } catch {
+                    } catch (error) {
+                        if (error instanceof CollectionResolutionError) throw error;
                         return { collection_key: collKey, name: collKey };
                     }
                 });
@@ -359,6 +363,12 @@ export async function handleGetMetadataRequest(
             items.push(result);
             
         } catch (error) {
+            if (error instanceof CollectionResolutionError) {
+                return {
+                    type: 'get_metadata', request_id: request.request_id, items: [], detail,
+                    not_found: notFound, error: error.message, error_code: error.code,
+                };
+            }
             logger(`handleGetMetadataRequest: Failed to get item ${itemId}: ${error}`, 1);
             notFound.push(itemId);
         }

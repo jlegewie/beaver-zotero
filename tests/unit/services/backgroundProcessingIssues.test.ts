@@ -23,6 +23,10 @@ const noOcr = { hasOcrAccess: false, hasSearchIndexAccess: false };
 const withOcr = { hasOcrAccess: true, hasSearchIndexAccess: true };
 
 describe('classifyProcessingIssue', () => {
+    it('shows strongly low OCR confidence as No readable text', () => {
+        expect(classifyProcessingIssue(row({ extractStatus: 'done', ocrStatus: 'failed',
+            lastError: 'low_confidence: Recognition confidence is too low' }), withOcr)).toBe('no_text');
+    });
     it('maps availability codes to "file not available" in every recorded shape', () => {
         for (const error of ['file_missing', 'download_failed: 404', 'ocr load: read_failed']) {
             expect(classifyProcessingIssue(row({ extractStatus: 'skipped', lastError: error }), noOcr))
