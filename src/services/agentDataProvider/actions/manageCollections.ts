@@ -180,7 +180,7 @@ export async function validateManageCollectionsAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `collection_key embeds library ${parsed.libraryId} but library_id=${hintLibraryId} was also provided`,
+            error: `Collection reference "${trimmedCollectionKey}" belongs to a different library than the requested library. Call list_collections in the intended library and retry with a returned collection ID and matching library reference. Do not strip the collection reference’s library prefix.`,
             error_code: 'invalid_library_id',
             preference: 'always_ask',
         };
@@ -306,14 +306,16 @@ export async function validateManageCollectionsAction(
                     type: 'agent_action_validate_response',
                     request_id: request.request_id,
                     valid: false,
-                    error: `new_parent_key '${trimmedParent}' is in library ${parsedParent.libraryId}, but the collection is in library ${libraryID}. Cross-library moves are not supported.`,
+                    error: parsedParent.libraryId === UNRESOLVED_LIBRARY_ID
+                        ? `The parent collection’s library is unavailable on this computer. Call list_libraries to check available library references, then retry with the same qualified parent ID once its library is available.`
+                        : `Parent collection reference "${trimmedParent}" belongs to a different library than the collection being moved. Cross-library moves are not supported. Call list_collections in the collection’s library and use a returned parent ID.`,
                     error_code: 'invalid_parent',
                     preference: 'always_ask',
                 };
             }
             const parentKeyLookup = parsedParent.key;
             const parent = await Zotero.Collections.getByLibraryAndKeyAsync(libraryID, parentKeyLookup);
-            if (!parent) {
+            if (!parent || parent.deleted) {
                 return {
                     type: 'agent_action_validate_response',
                     request_id: request.request_id,
@@ -484,7 +486,7 @@ export async function executeManageCollectionsAction(
 
     try {
         const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryId, collection_key);
-        if (!collection) {
+        if (!collection || collection.deleted) {
             return {
                 type: 'agent_action_execute_response',
                 request_id: request.request_id,
@@ -537,6 +539,18 @@ export async function executeManageCollectionsAction(
             await collection.saveTx();
             logger(`executeManageCollectionsAction: Renamed collection ${resolvedLibraryId}-${collection_key} → '${target}'`, 1);
         } else if (action === 'move') {
+            if (new_parent_key) {
+                const parent = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryId, new_parent_key);
+                if (!parent || parent.deleted) {
+                    return {
+                        type: 'agent_action_execute_response',
+                        request_id: request.request_id,
+                        success: false,
+                        error: `Parent collection not found: ${new_parent_key}. Call list_collections in the intended library and retry with a live parent collection.`,
+                        error_code: 'parent_not_found',
+                    };
+                }
+            }
             // Zotero uses `false` to signal top-level (see collection.js parentKey setter).
             checkAborted(ctx, 'manage_collections:before_move');
             (collection as any).parentKey = new_parent_key ? new_parent_key : false;

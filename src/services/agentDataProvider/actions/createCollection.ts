@@ -97,7 +97,7 @@ async function validateCreateCollectionAction(
     // Validate parent collection if provided
     if (parent_key) {
         const parentCollection = await Zotero.Collections.getByLibraryAndKeyAsync(library_id, parent_key);
-        if (!parentCollection) {
+        if (!parentCollection || parentCollection.deleted) {
             return {
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
@@ -236,7 +236,7 @@ async function executeCreateCollectionAction(
     // Set parent if provided
     if (parent_key) {
         const parentCollection = await Zotero.Collections.getByLibraryAndKeyAsync(library_id, parent_key);
-        if (parentCollection) {
+        if (parentCollection && !parentCollection.deleted) {
             collectionParams.parentID = parentCollection.id;
         } else {
             return {

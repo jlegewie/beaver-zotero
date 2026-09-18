@@ -59,3 +59,22 @@ when necessary, user action in Zotero. Access-loading errors recommend retrying 
 same request after initialization. Errors never suggest stripping qualification or
 removing a narrowing condition to obtain results, and do not expose excluded names,
 paths, or inferred library mappings.
+
+## Backend integration follow-ups
+
+The backend must preserve `unresolved_collections` in model-facing discovery
+results so partial success cannot silently drop a requested collection. Population
+results must retain `collection_ids` aligned with `collection_names`, including
+repeated aliases. Typed plugin errors should retain their recovery message rather
+than being wrapped with another “Collection not found” prefix or replaced.
+
+Search input validation must allow the collection reference grammar described
+above. Write tools need a coordinated normalization step before broadening their
+model-facing inputs: `create_collection` currently consumes a native `parent_key`,
+and `organize_items` consumes native collection keys scoped to the items' library.
+Resolve richer references under that same library constraint and persist normalized
+keys for execution and undo; changing only the backend schema is insufficient.
+
+Full metadata memberships exclude trashed collections. Collection write validation
+rejects trashed targets, and execution rechecks create parents, move parents and
+sources, and organize add targets after approval.
