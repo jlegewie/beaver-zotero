@@ -33,7 +33,10 @@ export async function toValidatedMessageAttachment(item: Zotero.Item): Promise<M
         const code = entry?.unavailable ? entry.error_code : response.error_code ?? 'provider_unavailable';
         throw new Error(`Table unavailable (${code}).`);
     }
-    return { type: 'table', reference: { kind: 'table', key, title: entry.title.slice(0, 300) } };
+    // Match the current local display after validation; renaming the Zotero
+    // item does not rewrite the title embedded in its snapshot.
+    const title = String(item.getField('title') || entry.title || 'Untitled table');
+    return { type: 'table', reference: { kind: 'table', key, title: title.slice(0, 300) } };
 }
 
 

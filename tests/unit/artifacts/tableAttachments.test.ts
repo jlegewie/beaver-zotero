@@ -14,6 +14,7 @@ import {
 } from "../../../react/types/attachments/converters";
 
 const provider = vi.fn();
+let itemTitle = "Validated title";
 const item = {
     id: 4,
     libraryID: 1,
@@ -24,11 +25,12 @@ const item = {
     isTopLevelItem: () => true,
     isRegularItem: () => false,
     getField: (field: string) =>
-        field === "url" ? "beaver://table/example" : "Unvalidated title",
+        field === "url" ? "beaver://table/example" : itemTitle,
 };
 
 beforeEach(() => {
     vi.clearAllMocks();
+    itemTitle = "Validated title";
     vi.stubGlobal("Zotero", {
         Beaver: {
             data: { env: "development" },
@@ -73,16 +75,19 @@ describe("submitted table attachments", () => {
     });
     it("takes a fresh observation on each submission without rewriting an earlier message", async () => {
         const first = await toValidatedMessageAttachment(item as any);
-        provider.mockResolvedValue({
-            ok: true,
-            items: [
-                { key: "u-ABCDEFGH", unavailable: false, title: "Renamed" },
-            ],
-        });
+        // The provider still returns the title embedded in the document.
+        itemTitle = "Renamed";
         const second = await toValidatedMessageAttachment(item as any);
         expect(first).toHaveProperty("reference.title", "Validated title");
         expect(second).toHaveProperty("reference.title", "Renamed");
         expect(provider).toHaveBeenCalledTimes(2);
+    });
+    it("uses the validated document title when the local item title is empty", async () => {
+        itemTitle = "";
+        expect(await toValidatedMessageAttachment(item as any)).toHaveProperty(
+            "reference.title",
+            "Validated title",
+        );
     });
     it.each(["library_excluded", "file_missing", "not_found", "invalid_spec"])(
         "does not submit cached metadata when the provider refuses %s",
