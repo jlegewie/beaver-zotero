@@ -1,3 +1,4 @@
+import { captureAccountGuard } from '../accountGuard';
 import type {
     AttachmentProcessingStateRecord,
     BackgroundJobRecord,
@@ -16,15 +17,15 @@ import {
 } from '../searchIndex/searchIndexApiClient';
 import {
     BACKGROUND_EXTRACT_PRIORITY,
-    BACKGROUND_UNTAG_PRIORITY,
-    EXPECTED_SEARCH_INDEX_VERSION,
 } from '../backgroundProcessing/constants';
 import {
     buildBackgroundExtractPayload,
+    buildUntagJobInput,
     isBackgroundProcessingLibraryEnabled,
 } from '../backgroundProcessing/utils';
 import { getIndexScopeRef, getZoteroUserIdentifier } from '../../utils/zoteroUtils';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
+import { isLibraryScopeKnown } from '../libraryScope';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isApiError } from '@beaver/agent-core/types/apiErrors';
 import type {
@@ -61,11 +62,11 @@ export class FulltextUpsertExecutor implements JobExecutor {
         record: BackgroundJobRecord,
         ctx: JobExecutionContext,
     ): Promise<JobOutcome> {
-        if (Zotero.Beaver?.hasSearchIndexAccess !== true) {
-            return { kind: 'complete', reason: 'not_entitled' };
-        }
         if (record.jobType === 'fulltext_untag') {
-            return this.executeUntag(record);
+            return this.executeUntag(record, ctx);
+        }
+        if (Zotero.Beaver?.hasSearchIndexAccess !== true) {
+            return { kind: 'release', reason: 'not_entitled' };
         }
         if (!isBackgroundProcessingLibraryEnabled(record.libraryId)) {
             return { kind: 'complete', reason: 'library_excluded' };
@@ -92,12 +93,12 @@ export class FulltextUpsertExecutor implements JobExecutor {
         record: BackgroundJobRecord,
         ctx: JobExecutionContext,
     ): Promise<JobOutcome> {
-        const row = await ctx.db.getAttachmentProcessingState(
+        const initial = await ctx.db.getAttachmentProcessingState(
             record.libraryId,
             record.zoteroKey,
         );
-        if (!row?.structuredDocumentHash || row.extractStatus !== 'done') {
-            if (row?.extractStatus === 'done' && row.ocrStatus === 'needed') {
+        if (!initial?.structuredDocumentHash || initial.extractStatus !== 'done') {
+            if (initial?.extractStatus === 'done' && initial.ocrStatus === 'needed') {
                 // Cache recovery can temporarily remove the hash while OCR runs.
                 // Keep this request (and its priority) until the claim becomes visible
                 // again; OCR need not create a replacement upsert while paused.
@@ -105,13 +106,31 @@ export class FulltextUpsertExecutor implements JobExecutor {
             }
             return { kind: 'complete', reason: 'ledger_not_ready' };
         }
+        let row = { ...initial, structuredDocumentHash: initial.structuredDocumentHash };
         const scopeRef = getIndexScopeRef(record.libraryId);
         if (!scopeRef) return { kind: 'complete', reason: 'invalid_scope_ref' };
         const { localUserKey } = getZoteroUserIdentifier();
+        const accountId = Zotero.Beaver?.account?.getSnapshot().session?.user.id;
+        const accountIsCurrent = captureAccountGuard(accountId);
+        const accessChanged = () => ctx.externalAbortSignal.aborted || !accountIsCurrent();
+        const remoteIdentity = accountId ? { index_account_id: accountId, index_scope_ref: scopeRef, index_local_id: localUserKey } : undefined;
+        let requirements;
+        try {
+            requirements = await this.api.requirements();
+        } catch (error) {
+            return this.mapApiError(record, row, error, ctx);
+        }
         const schemaVersion = row.extractSchemaVersion
             ?? expectedExtractionSchemaVersion(row.contentKind);
-        if (!schemaVersion) {
+        if (!schemaVersion || !requirements.extract_schema_versions[row.contentKind]?.includes(schemaVersion)) {
             return this.terminal(record, row, 'unsupported_schema_version', undefined, ctx);
+        }
+        if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+        if (remoteIdentity) {
+            const acquired = await ctx.db.recordAttachmentIndexIdentity(row.libraryId, row.zoteroKey,
+                row.structuredDocumentHash, remoteIdentity);
+            if (!acquired) return { kind: 'defer', reason: 'index_identity_changed' };
+            row = acquired;
         }
         const baseRequest: IndexUpsertRequest = {
             source: 'zotero_attachment',
@@ -153,7 +172,7 @@ export class FulltextUpsertExecutor implements JobExecutor {
                 return { kind: 'complete', reason: 'stale_payload' };
             }
             try {
-                if (ctx.externalAbortSignal.aborted || Zotero.Beaver?.hasSearchIndexAccess !== true
+                if (accessChanged() || Zotero.Beaver?.hasSearchIndexAccess !== true
                     || !isBackgroundProcessingLibraryEnabled(record.libraryId)) return { kind: 'release', reason: 'access_changed' };
                 return await this.api.upsertPayload({ ...baseRequest, payload });
             } catch (payloadError) {
@@ -162,49 +181,45 @@ export class FulltextUpsertExecutor implements JobExecutor {
         };
 
         let response;
-        const storedVersion = row.upsertIndexVersion == null
-            ? null
-            : Number(row.upsertIndexVersion);
-        if (storedVersion != null && storedVersion < EXPECTED_SEARCH_INDEX_VERSION) {
+        try {
+            if (accessChanged() || Zotero.Beaver?.hasSearchIndexAccess !== true
+                || !isBackgroundProcessingLibraryEnabled(record.libraryId)) return { kind: 'release', reason: 'access_changed' };
+            response = await this.api.upsertHash(baseRequest);
+        } catch (error) {
+            if (!(isApiError(error))
+                || error.status !== 409
+                || error.code !== 'payload_required') {
+                return this.mapApiError(record, row, error, ctx);
+            }
             const result = await upsertWithPayload();
             if ('kind' in result) return result;
             response = result;
-        } else {
-            try {
-                if (ctx.externalAbortSignal.aborted || Zotero.Beaver?.hasSearchIndexAccess !== true
-                    || !isBackgroundProcessingLibraryEnabled(record.libraryId)) return { kind: 'release', reason: 'access_changed' };
-                response = await this.api.upsertHash(baseRequest);
-            } catch (error) {
-                if (!(isApiError(error))
-                    || error.status !== 409
-                    || error.code !== 'payload_required') {
-                    return this.mapApiError(record, row, error, ctx);
-                }
-                const result = await upsertWithPayload();
-                if ('kind' in result) return result;
-                response = result;
-            }
+        }
 
-            // A tag append reports the generation already stored remotely.
-            // Older rows require an explicit payload request; repeating the
-            // hash-only request would only return the same old generation.
-            if (
-                response.status === 'tagged'
-                && (
-                    response.index_version < EXPECTED_SEARCH_INDEX_VERSION
-                    || response.extract_schema_version !== schemaVersion
-                )
-            ) {
-                const result = await upsertWithPayload();
-                if ('kind' in result) return result;
-                response = result;
-            }
+        // A tag append reports the generation already stored remotely.
+        // Older rows require an explicit payload request; repeating the
+        // hash-only request would only return the same old generation.
+        if (
+            response.status === 'tagged'
+            && (
+                response.index_version !== requirements.index_version
+                || response.extract_schema_version !== schemaVersion
+            )
+        ) {
+            const result = await upsertWithPayload();
+            if ('kind' in result) return result;
+            response = result;
         }
 
         if (response.status === 'accepted') {
             return { kind: 'retry', error: 'index_upsert_accepted' };
         }
+        if (response.index_version !== requirements.index_version
+            || response.extract_schema_version !== schemaVersion) {
+            return { kind: 'retry', error: 'index_requirements_changed' };
+        }
 
+        if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
         await ctx.db.clearDocumentProcessingFailure(
             row.structuredDocumentHash,
             'fulltext_upsert',
@@ -214,28 +229,14 @@ export class FulltextUpsertExecutor implements JobExecutor {
             zoteroKey: row.zoteroKey,
             structuredDocumentHash: row.structuredDocumentHash,
             upsertIndexVersion: String(response.index_version),
+            remoteIdentity,
             expectedUpsertStatus: row.upsertStatus,
             expectedUpsertIndexVersion: row.upsertIndexVersion,
             expectedExtractStatus: row.extractStatus,
         });
-        const priorHash = record.payload?.previous_doc_hash;
-        if (priorHash && priorHash !== row.structuredDocumentHash) {
-            await ctx.enqueue({
-                jobType: 'fulltext_untag',
-                libraryId: row.libraryId,
-                itemId: row.itemId,
-                zoteroKey: row.zoteroKey,
-                contentKind: row.contentKind,
-                payloadKind: 'structured',
-                priority: BACKGROUND_UNTAG_PRIORITY,
-                payload: {
-                    ...record.payload!,
-                    index_action: 'untag',
-                    doc_hash: priorHash,
-                    previous_doc_hash: undefined,
-                },
-                now: Date.now(),
-            });
+        if (!applied) {
+            await ctx.enqueue(buildUntagJobInput({ ...row, upsertRemoteIdentity: remoteIdentity },
+                Date.now(), { reason: 'stale_completion' }));
         }
         return {
             kind: 'complete',
@@ -243,21 +244,55 @@ export class FulltextUpsertExecutor implements JobExecutor {
         };
     }
 
-    private async executeUntag(record: BackgroundJobRecord): Promise<JobOutcome> {
-        const scopeRef = getIndexScopeRef(record.libraryId);
+    private async executeUntag(record: BackgroundJobRecord, ctx: JobExecutionContext): Promise<JobOutcome> {
+        const accountId = record.payload?.index_account_id;
+        // Older releases could queue cleanup without ever having index access.
+        // There is no trustworthy remote owner to remove on their behalf.
+        if (!accountId) return { kind: 'complete', reason: 'legacy_unowned' };
+        if (accountId !== Zotero.Beaver?.account?.getSnapshot().session?.user.id) {
+            // Keep the durable intent; its owner's next lane startup restores it.
+            return { kind: 'complete', reason: 'cleanup_account_unavailable' };
+        }
+        const accountIsCurrent = captureAccountGuard(accountId);
+        const accessChanged = () => ctx.externalAbortSignal.aborted || !accountIsCurrent() || !isLibraryScopeKnown();
+        if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+        const scopeRef = record.payload?.index_scope_ref ?? getIndexScopeRef(record.libraryId);
         const hash = record.payload?.doc_hash;
         if (!scopeRef || !hash) return { kind: 'complete', reason: 'invalid_untag' };
-        return this.untagOne({
+        // Excluded libraries need no supersession read.
+        if (isBackgroundProcessingLibraryEnabled(record.libraryId)) {
+            const current = await ctx.db.getAttachmentProcessingState(record.libraryId, record.zoteroKey);
+            if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+            if (isBackgroundProcessingLibraryEnabled(record.libraryId) && current?.structuredDocumentHash === hash
+                && current.extractStatus === 'done'
+                && current.upsertRemoteIdentity?.index_account_id === accountId
+                && current.upsertRemoteIdentity?.index_scope_ref === scopeRef
+                && current.upsertRemoteIdentity?.index_local_id === record.payload?.index_local_id) {
+                // Ownership is recorded before upload. Its response can still be
+                // pending even after the remote membership has been restored.
+                if (current.upsertStatus !== 'done') {
+                    return { kind: 'defer', reason: 'index_acquisition_pending' };
+                }
+                await ctx.db.acknowledgeIndexCleanup(record);
+                return { kind: 'complete', reason: 'cleanup_superseded' };
+            }
+        }
+        const outcome = await this.untagOne({
             scope_ref: scopeRef,
             zotero_key: record.zoteroKey,
             doc_hash: hash,
-        });
+        }, record.payload?.index_local_id);
+        if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+        if (outcome.kind === 'complete') {
+            await ctx.db.acknowledgeIndexCleanup(record);
+        }
+        return outcome;
     }
 
-    private async untagOne(ref: IndexDocumentRef): Promise<JobOutcome> {
+    private async untagOne(ref: IndexDocumentRef, storedLocalId?: string): Promise<JobOutcome> {
         const { localUserKey } = getZoteroUserIdentifier();
         try {
-            const response = await this.api.untag(localUserKey, [ref]);
+            const response = await this.api.untag(storedLocalId ?? localUserKey, [ref]);
             const result = response.results[0];
             if (!result || result.outcome === 'failed') {
                 return { kind: 'retry', error: 'index_untag_failed' };

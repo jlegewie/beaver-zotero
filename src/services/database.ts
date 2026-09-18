@@ -1,3 +1,4 @@
+import { buildUntagJobInput, indexCleanupIdentity } from './backgroundProcessing/utils';
 import { v4 as uuidv4 } from 'uuid';
 import { ProcessingProgressStore, type ProcessingProgressScope } from './backgroundProcessing/progress';
 import { ThreadData } from '../../react/atoms/threads';
@@ -16,7 +17,6 @@ import type {
     DocumentCachePageLabels,
     ExtractContentKind,
 } from '@beaver/agent-core/extract/document/shared/contentKinds';
-import { BACKGROUND_UNTAG_PRIORITY } from './backgroundProcessing/constants';
 import {
     processingIssuesSql,
     PROCESSING_ISSUE_REASON_ORDER,
@@ -394,6 +394,7 @@ export interface AttachmentProcessingStateRecord {
     ocrEngineVersion: string | null;
     upsertStatus: AttachmentUpsertStatus;
     upsertIndexVersion: string | null;
+    upsertRemoteIdentity?: { index_account_id: string; index_scope_ref: string; index_local_id: string } | null;
     lastError: string | null;
     createdAt: string;
     updatedAt: string;
@@ -452,7 +453,7 @@ const ATTACHMENT_PROCESSING_COLUMNS = `
     library_id, zotero_key, item_id, content_kind,
     file_mtime_ms, file_size_bytes, file_hash, structured_document_hash,
     extract_status, extract_schema_version, ocr_status, ocr_engine_version,
-    upsert_status, upsert_index_version, last_error, created_at, updated_at, extraction_source
+    upsert_status, upsert_index_version, last_error, created_at, updated_at, extraction_source, upsert_remote_identity
 `;
 
 /**
@@ -707,6 +708,11 @@ export class BeaverDB {
             );
         `);
 
+        // Cleanup identities are durable even when the derived queue schema resets.
+        await this.queryAsync(`CREATE TABLE IF NOT EXISTS index_cleanup_outbox (
+            identity TEXT PRIMARY KEY, account_id TEXT NOT NULL, job_json TEXT NOT NULL
+        )`);
+
         // Attachment progress is derived and recoverable during the pre-GA
         // schema-churn period. Version both new tables through the same
         // drop/recreate framework as the document cache and queue.
@@ -745,6 +751,9 @@ export class BeaverDB {
                 UNIQUE(library_id, zotero_key)
             );
         `);
+        if (!(await this.getTableColumns('attachment_processing_state')).has('upsert_remote_identity')) {
+            await this.queryAsync('ALTER TABLE attachment_processing_state ADD COLUMN upsert_remote_identity TEXT');
+        }
         // Extend the ledger in place: completed index membership must survive upgrades.
         if (!(await this.getTableColumns('attachment_processing_state')).has('extraction_source')) {
             await this.queryAsync('ALTER TABLE attachment_processing_state ADD COLUMN extraction_source TEXT');
@@ -2542,29 +2551,6 @@ export class BeaverDB {
         const params = libraryId === undefined ? [] : [libraryId];
         await this.conn.executeTransaction(async () => {
             await this.queryAsync(`DELETE FROM attachment_reading_state${where}`, params);
-            if (!discardRemoteState) {
-                // Upserts may be the only remaining record of a replaced document hash.
-                const cleanup: BackgroundJobInput[] = [];
-                for (const table of ['background_jobs', 'background_jobs_dead']) {
-                    await this.queryAsync(
-                        `SELECT library_id, zotero_key, content_kind, payload_json FROM ${table}
-                         ${where} ${where ? 'AND' : 'WHERE'} job_type = 'fulltext_upsert'`,
-                        params,
-                        { onRow: (row: any) => {
-                            const payload = JSON.parse(row.getResultByIndex(3)) as BackgroundJobPayload;
-                            if (!payload?.previous_doc_hash || payload.previous_doc_hash === payload.doc_hash) return;
-                            cleanup.push({
-                                jobType: 'fulltext_untag', libraryId: row.getResultByIndex(0),
-                                zoteroKey: row.getResultByIndex(1), contentKind: row.getResultByIndex(2),
-                                payloadKind: 'structured', priority: BACKGROUND_UNTAG_PRIORITY, now: Date.now(),
-                                payload: { ...payload, index_action: 'untag', doc_hash: payload.previous_doc_hash,
-                                    previous_doc_hash: undefined },
-                            });
-                        } },
-                    );
-                }
-                for (const job of cleanup) await this.enqueueBackgroundJobInTransaction(job);
-            }
             for (const table of ['background_jobs', 'background_jobs_dead']) {
                 await this.queryAsync(
                     `DELETE FROM ${table}${where}${discardRemoteState ? '' :
@@ -2572,6 +2558,8 @@ export class BeaverDB {
                 );
             }
             if (discardRemoteState) {
+                await this.queryAsync(`DELETE FROM index_cleanup_outbox${libraryId === undefined ? '' :
+                    " WHERE json_extract(job_json, '$.libraryId') = ?"}`, params);
                 await this.queryAsync(`DELETE FROM attachment_processing_state${where}`, params);
             } else {
                 // Keep hash and membership facts until a replacement extraction can
@@ -2595,70 +2583,6 @@ export class BeaverDB {
              WHERE library_id = ? AND job_type != 'fulltext_untag'`,
             [libraryId],
         );
-    }
-
-    /**
-     * Redrive durable remote-cleanup intents after their ordinary retry budget
-     * was exhausted. Untags are idempotent and their dead rows retain the full
-     * content-addressed reference, so replay is safe and needs no library read.
-     */
-    public async redriveDeadUntagJobs(now: number, limit = 100): Promise<number> {
-        const candidates: Array<{
-            id: number;
-            libraryId: number;
-            zoteroKey: string;
-            contentKind: ExtractContentKind;
-            payloadKind: DocumentCachePayloadKind;
-            payload: BackgroundJobPayload;
-        }> = [];
-        await this.queryAsync(
-            `SELECT id, library_id, zotero_key, content_kind,
-                    payload_kind, payload_json
-             FROM background_jobs_dead
-             WHERE job_type = 'fulltext_untag'
-             ORDER BY died_at ASC LIMIT ?`,
-            [Math.max(1, Math.min(1_000, Math.floor(limit)))],
-            {
-                onRow: (row: any) => {
-                    const contentKind = row.getResultByIndex(3) as ExtractContentKind;
-                    const payload = parseBackgroundJobPayload(
-                        contentKind,
-                        row.getResultByIndex(5),
-                    );
-                    if (!payload?.doc_hash) return;
-                    candidates.push({
-                        id: row.getResultByIndex(0),
-                        libraryId: row.getResultByIndex(1),
-                        zoteroKey: row.getResultByIndex(2),
-                        contentKind,
-                        payloadKind: row.getResultByIndex(4) as DocumentCachePayloadKind,
-                        payload,
-                    });
-                },
-            },
-        );
-        if (candidates.length === 0) return 0;
-
-        await this.conn.executeTransaction(async () => {
-            for (const candidate of candidates) {
-                await this.enqueueBackgroundJobInTransaction({
-                    jobType: 'fulltext_untag',
-                    libraryId: candidate.libraryId,
-                    itemId: null,
-                    zoteroKey: candidate.zoteroKey,
-                    contentKind: candidate.contentKind,
-                    payloadKind: candidate.payloadKind,
-                    priority: BACKGROUND_UNTAG_PRIORITY,
-                    payload: candidate.payload,
-                    now,
-                });
-                await this.queryAsync(
-                    `DELETE FROM background_jobs_dead WHERE id = ?`,
-                    [candidate.id],
-                );
-            }
-        });
-        return candidates.length;
     }
 
     /** Reconciler-owned reset of one processing stage back to "not started". */
@@ -2763,7 +2687,10 @@ export class BeaverDB {
     }): Promise<boolean> {
         const hashChanged = input.previousDocumentHash !== input.structuredDocumentHash;
         const refreshDownstream = hashChanged || input.ocrStatus === 'needed';
-        return await this.executeChangedRow(
+        let applied = false;
+        await this.conn.executeTransaction(async () => {
+            const previous = await this.getAttachmentProcessingState(input.libraryId, input.zoteroKey);
+            const changed = await this.executeChangedRow(
             `UPDATE attachment_processing_state SET
                 file_mtime_ms = ?, file_size_bytes = ?, file_hash = ?,
                 structured_document_hash = ?, extract_status = 'done',
@@ -2772,6 +2699,7 @@ export class BeaverDB {
                 ocr_engine_version = CASE WHEN ? THEN NULL ELSE ocr_engine_version END,
                 upsert_status = CASE WHEN ? THEN NULL ELSE upsert_status END,
                 upsert_index_version = CASE WHEN ? THEN NULL ELSE upsert_index_version END,
+                upsert_remote_identity = CASE WHEN ? THEN NULL ELSE upsert_remote_identity END,
                 last_error = NULL, updated_at = datetime('now')
              WHERE library_id = ? AND zotero_key = ?
                AND file_mtime_ms IS ? AND file_size_bytes IS ?
@@ -2788,6 +2716,7 @@ export class BeaverDB {
                 refreshDownstream ? 1 : 0,
                 refreshDownstream ? 1 : 0,
                 refreshDownstream ? 1 : 0,
+                hashChanged ? 1 : 0,
                 input.libraryId,
                 input.zoteroKey,
                 input.expectedFileMtimeMs,
@@ -2796,6 +2725,10 @@ export class BeaverDB {
                 input.expectedExtractStatus,
             ],
         );
+            if (changed) await this.enqueueReplacementUntag(previous, input.structuredDocumentHash);
+            applied = changed;
+        });
+        return applied;
     }
 
     public async markAttachmentExtractFailure(input: {
@@ -2832,18 +2765,23 @@ export class BeaverDB {
         expectedOcrEngineVersion: string | null;
         expectedExtractStatus: AttachmentExtractStatus;
     }): Promise<boolean> {
-        return await this.executeChangedRow(
+        let applied = false;
+        await this.conn.executeTransaction(async () => {
+            const previous = await this.getAttachmentProcessingState(input.libraryId, input.zoteroKey);
+            const changed = await this.executeChangedRow(
             `UPDATE attachment_processing_state SET
                 ocr_status = 'done', ocr_engine_version = ?,
                 structured_document_hash = ?,
                 upsert_status = CASE WHEN structured_document_hash IS NOT ? THEN NULL ELSE upsert_status END,
                 upsert_index_version = CASE WHEN structured_document_hash IS NOT ? THEN NULL ELSE upsert_index_version END,
+                upsert_remote_identity = CASE WHEN structured_document_hash IS NOT ? THEN NULL ELSE upsert_remote_identity END,
                 last_error = NULL, updated_at = datetime('now')
              WHERE library_id = ? AND zotero_key = ? AND file_hash = ?
                AND ocr_status IS ? AND ocr_engine_version IS ?
                AND extract_status IS ?`,
             [
                 input.ocrEngineVersion,
+                input.structuredDocumentHash,
                 input.structuredDocumentHash,
                 input.structuredDocumentHash,
                 input.structuredDocumentHash,
@@ -2855,6 +2793,10 @@ export class BeaverDB {
                 input.expectedExtractStatus,
             ],
         );
+            if (changed) await this.enqueueReplacementUntag(previous, input.structuredDocumentHash);
+            applied = changed;
+        });
+        return applied;
     }
 
     /** OCR may originate from the on-demand detector before a backlog row exists. */
@@ -2885,11 +2827,47 @@ export class BeaverDB {
         );
     }
 
+    private async enqueueReplacementUntag(previous: AttachmentProcessingStateRecord | null, newHash: string | null): Promise<void> {
+        if (previous?.upsertRemoteIdentity && previous.structuredDocumentHash && previous.structuredDocumentHash !== newHash) {
+            await this.enqueueBackgroundJobInTransaction(buildUntagJobInput(previous, Date.now(), { reason: 'replacement' }));
+        }
+    }
+
+    /** Preserve the previous owner's cleanup before transferring an unchanged document. */
+    public async recordAttachmentIndexIdentity(libraryId: number, zoteroKey: string, hash: string,
+        identity: NonNullable<AttachmentProcessingStateRecord['upsertRemoteIdentity']>): Promise<(AttachmentProcessingStateRecord & { structuredDocumentHash: string }) | null> {
+        let result: (AttachmentProcessingStateRecord & { structuredDocumentHash: string }) | null = null;
+        await this.conn.executeTransaction(async () => {
+            const previous = await this.getAttachmentProcessingState(libraryId, zoteroKey);
+            if (previous?.structuredDocumentHash !== hash || previous.extractStatus !== 'done') return;
+            const old = previous.upsertRemoteIdentity;
+            const transferred = !!old && (old.index_account_id !== identity.index_account_id
+                || old.index_scope_ref !== identity.index_scope_ref || old.index_local_id !== identity.index_local_id);
+            if (old && !transferred) {
+                result = { ...previous, structuredDocumentHash: hash };
+                return;
+            }
+            if (transferred) {
+                await this.enqueueBackgroundJobInTransaction(buildUntagJobInput(previous, Date.now(), { reason: 'replacement' }));
+            }
+            const applied = await this.executeChangedRow(`UPDATE attachment_processing_state SET upsert_remote_identity = ?,
+                upsert_status = CASE WHEN ? THEN NULL ELSE upsert_status END,
+                upsert_index_version = CASE WHEN ? THEN NULL ELSE upsert_index_version END
+                WHERE library_id = ? AND zotero_key = ? AND structured_document_hash = ? AND extract_status = 'done'`,
+                [JSON.stringify(identity), transferred ? 1 : 0, transferred ? 1 : 0, libraryId, zoteroKey, hash]);
+            if (applied) result = { ...previous, structuredDocumentHash: hash, upsertRemoteIdentity: identity,
+                upsertStatus: transferred ? null : previous.upsertStatus,
+                upsertIndexVersion: transferred ? null : previous.upsertIndexVersion };
+        });
+        return result;
+    }
+
     public async markAttachmentUpsertDone(input: {
         libraryId: number;
         zoteroKey: string;
         structuredDocumentHash: string;
         upsertIndexVersion: string;
+        remoteIdentity?: AttachmentProcessingStateRecord['upsertRemoteIdentity'];
         expectedUpsertStatus?: AttachmentUpsertStatus;
         expectedUpsertIndexVersion?: string | null;
         expectedExtractStatus?: AttachmentExtractStatus;
@@ -2899,15 +2877,20 @@ export class BeaverDB {
         const guardExtract = input.expectedExtractStatus !== undefined;
         return await this.executeChangedRow(
             `UPDATE attachment_processing_state SET
-                upsert_status = 'done', upsert_index_version = ?,
+                upsert_status = 'done', upsert_index_version = ?, upsert_remote_identity = COALESCE(upsert_remote_identity, ?),
                 last_error = NULL, updated_at = datetime('now')
              WHERE library_id = ? AND zotero_key = ?
                AND structured_document_hash = ?
                AND (? = 0 OR upsert_status IS ?)
                AND (? = 0 OR upsert_index_version IS ?)
-               AND (? = 0 OR extract_status IS ?)`,
+               AND (? = 0 OR extract_status IS ?)
+               AND (? = 0 OR upsert_remote_identity IS NULL OR (
+                 json_extract(upsert_remote_identity, '$.index_account_id') = ? AND
+                 json_extract(upsert_remote_identity, '$.index_scope_ref') = ? AND
+                 json_extract(upsert_remote_identity, '$.index_local_id') = ?))`,
             [
                 input.upsertIndexVersion,
+                input.remoteIdentity ? JSON.stringify(input.remoteIdentity) : null,
                 input.libraryId,
                 input.zoteroKey,
                 input.structuredDocumentHash,
@@ -2917,6 +2900,10 @@ export class BeaverDB {
                 input.expectedUpsertIndexVersion ?? null,
                 guardExtract ? 1 : 0,
                 input.expectedExtractStatus ?? null,
+                input.remoteIdentity ? 1 : 0,
+                input.remoteIdentity?.index_account_id ?? null,
+                input.remoteIdentity?.index_scope_ref ?? null,
+                input.remoteIdentity?.index_local_id ?? null,
             ],
         );
     }
@@ -3283,6 +3270,7 @@ export class BeaverDB {
                 createdAt: row.getResultByIndex(15),
                 updatedAt: row.getResultByIndex(16),
                 extractionSource: row.getResultByIndex(17) ?? null,
+                upsertRemoteIdentity: row.getResultByIndex(18) ? JSON.parse(row.getResultByIndex(18)) : null,
             }),
         });
         return rows;
@@ -4553,10 +4541,18 @@ export class BeaverDB {
     private async enqueueBackgroundJobInTransaction(
         input: BackgroundJobInput,
     ): Promise<BackgroundJobEnqueueResult> {
+        if (input.jobType === 'fulltext_untag' && input.payload?.doc_hash) {
+            const payload = input.payload;
+            if (payload.index_account_id && payload.index_scope_ref && payload.index_local_id) {
+                await this.queryAsync(`INSERT OR REPLACE INTO index_cleanup_outbox
+                    (identity, account_id, job_json) VALUES (?, ?, ?)`,
+                    [indexCleanupIdentity(input), payload.index_account_id, JSON.stringify(input)]);
+            }
+        }
         const priority = input.priority ?? 100;
         const payloadJson = input.payload ? JSON.stringify(input.payload) : null;
         const dedupeKey = input.jobType === 'fulltext_untag'
-            ? input.payload?.doc_hash ?? ''
+            ? indexCleanupIdentity(input)
             : '';
         const itemId = input.itemId ?? null;
 
@@ -4649,6 +4645,49 @@ export class BeaverDB {
         id = idRows[0] ?? 0;
 
         return { enqueued, id };
+    }
+
+    /** Replay only the authenticated account's unacknowledged cleanup identities. */
+    public async restoreIndexCleanup(accountId: string): Promise<number> {
+        let restored = 0;
+        // Acknowledgment takes the same transaction lock, so a selected
+        // identity cannot be acknowledged before its queue entry is restored.
+        await this.conn.executeTransaction(async () => {
+            const jobs: BackgroundJobInput[] = [];
+            await this.queryAsync(`SELECT job_json, EXISTS (
+                SELECT 1 FROM background_jobs WHERE job_type = 'fulltext_untag'
+                    AND library_id = json_extract(job_json, '$.libraryId')
+                    AND zotero_key = json_extract(job_json, '$.zoteroKey')
+                    AND payload_kind = json_extract(job_json, '$.payloadKind')
+                    AND dedupe_key = index_cleanup_outbox.identity
+            ) FROM index_cleanup_outbox WHERE account_id = ?`, [accountId], {
+                onRow: (row: any) => {
+                    if (!row.getResultByIndex(1)) jobs.push(JSON.parse(row.getResultByIndex(0)));
+                },
+            });
+            for (const job of jobs) {
+                await this.enqueueBackgroundJobInTransaction({ ...job, now: Date.now() });
+                restored++;
+            }
+        });
+        return restored;
+    }
+
+    /** Retire an identity after removal, confirmed supersession, or terminal rejection. */
+    public async acknowledgeIndexCleanup(job: BackgroundJobRecord): Promise<void> {
+        await this.conn.executeTransaction(async () => {
+            await this.queryAsync('DELETE FROM index_cleanup_outbox WHERE identity = ?', [indexCleanupIdentity(job)]);
+            // A restored live job can still have a diagnostic dead-letter copy.
+            // Retire every copy of this exact remote identity in the same transaction.
+            await this.queryAsync(`DELETE FROM background_jobs_dead
+                WHERE job_type = 'fulltext_untag' AND zotero_key = ?
+                  AND json_extract(payload_json, '$.index_account_id') IS ?
+                  AND json_extract(payload_json, '$.index_scope_ref') IS ?
+                  AND json_extract(payload_json, '$.index_local_id') IS ?
+                  AND json_extract(payload_json, '$.doc_hash') IS ?`,
+                [job.zoteroKey, job.payload?.index_account_id ?? null, job.payload?.index_scope_ref ?? null,
+                    job.payload?.index_local_id ?? null, job.payload?.doc_hash ?? null]);
+        });
     }
 
     /**

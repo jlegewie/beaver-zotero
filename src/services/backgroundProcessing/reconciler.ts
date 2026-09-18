@@ -217,7 +217,7 @@ export class ReconcilerService {
 
     private async removeAttachment(db: QueueDB, libraryId: number, key: string): Promise<void> {
         const row = await db.getAttachmentProcessingState(libraryId, key);
-        if (row?.upsertStatus === 'done' && row.structuredDocumentHash) {
+        if (row?.structuredDocumentHash && row.upsertRemoteIdentity) {
             await db.enqueueBackgroundJob(buildUntagJobInput(row, Date.now()));
         }
         await db.deleteAttachmentProcessingState(libraryId, key);
@@ -519,7 +519,7 @@ export class ReconcilerService {
         // happening. Untag work is persisted before the local ledger rows drop.
         const staleRows = ledgerRows.filter((row) => !liveKeys.has(row.zoteroKey));
         await db.enqueueBackgroundJobs(staleRows
-            .filter((row) => row.upsertStatus === 'done' && row.structuredDocumentHash)
+            .filter((row) => row.structuredDocumentHash && row.upsertRemoteIdentity)
             .map((row) => buildUntagJobInput(row, Date.now())));
         for (const row of staleRows) {
             await db.deleteAttachmentProcessingState(libraryId, row.zoteroKey);
@@ -575,6 +575,8 @@ export class ReconcilerService {
             await db.resetAttachmentOcr(item.libraryID, item.key, 'ocr_engine_changed');
             row = { ...row, ocrStatus: null, lastError: 'ocr_engine_changed' };
         }
+        // This offline check uses a minimum floor; online reconciliation and
+        // uploads use the server requirements, which may advertise a newer version.
         const storedIndexVersion = Number(row.upsertIndexVersion ?? 0);
         if (row.upsertStatus === 'done' && storedIndexVersion < EXPECTED_SEARCH_INDEX_VERSION) {
             await db.resetAttachmentUpsert(item.libraryID, item.key, 'index_version_changed');
@@ -710,7 +712,7 @@ export class ReconcilerService {
             if (!liveKeys.has(key)) {
                 const row = await db.getAttachmentProcessingState(libraryId, key);
                 // Preserve remote cleanup before dropping either local observation.
-                if (row?.upsertStatus === 'done' && row.structuredDocumentHash) {
+                if (row?.structuredDocumentHash && row.upsertRemoteIdentity) {
                     await db.enqueueBackgroundJob(buildUntagJobInput(row, Date.now()));
                 }
                 await db.deleteAttachmentProcessingState(libraryId, key);

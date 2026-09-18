@@ -1,3 +1,4 @@
+import { captureAccountGuard } from '../../accountGuard';
 /**
  * Dev-only HTTP handlers for the whole-library background processing pipeline
  * (`ReconcilerService` producer + `attachment_processing_state` ledger).
@@ -11,6 +12,19 @@ import { resetLocalProcessingState } from '../../backgroundProcessing/resetLocal
 import { collectProcessingStatus } from '../../backgroundProcessing/statusSnapshot';
 import type { AttachmentProcessingStateRecord } from '../../database';
 import { getPref } from '../../../utils/prefs';
+import { reconcileRemoteRefs } from '../../backgroundProcessing/remoteRefsReconcile';
+
+/** Run the production membership sweep within the current account and library scope. */
+export async function handleTestIndexReconcileHttpRequest() {
+    if (!Zotero.Beaver.hasSearchIndexAccess || getPref('backgroundProcessingEnabled') !== true) {
+        return { ok: false, error: 'index_reconciliation_not_enabled' };
+    }
+    const accountIsCurrent = captureAccountGuard();
+    const scope = [...(Zotero.Beaver.searchableLibraryIds ?? [])];
+    await reconcileRemoteRefs(scope, () => !accountIsCurrent()
+        || JSON.stringify(scope) !== JSON.stringify(Zotero.Beaver.searchableLibraryIds));
+    return { ok: true };
+}
 
 /**
  * Force a full reconcile pass and wait for it to finish (the same entry point

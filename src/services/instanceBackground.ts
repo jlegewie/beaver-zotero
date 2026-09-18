@@ -369,6 +369,14 @@ export class InstanceBackground {
         if (key === this.key) return;
         this.key = key;
         this.clearGeneration();
+        if (snapshot.session) {
+            this.cleanups.push(startFulltextUpsertLane(ids,
+                authorized && !!owner.libraryScopeInitialized && !!owner.hasSearchIndexAccess));
+        }
+        if (snapshot.session && owner.libraryScopeInitialized) {
+            this.cleanups.push(startBackgroundProcessingScopeCleanup(
+                snapshot.libraries, ids));
+        }
         if (!owner.libraryScopeInitialized || !authorized) {
             this.publish({ ...initialEmbeddingState });
             return;
@@ -377,16 +385,6 @@ export class InstanceBackground {
         owner.backgroundExtractor!.registerExecutor(ocr, { maxInFlight: 3 });
         this.cleanups.push(() =>
             owner.backgroundExtractor?.unregisterExecutor(ocr.jobType, ocr),
-        );
-        this.cleanups.push(
-            startFulltextUpsertLane(ids, !!owner.hasSearchIndexAccess),
-        );
-        this.cleanups.push(
-            startBackgroundProcessingScopeCleanup(
-                snapshot.libraries,
-                ids,
-                !!owner.hasSearchIndexAccess,
-            ),
         );
         this.restartEmbedding(ids, this.pendingReindex);
     }

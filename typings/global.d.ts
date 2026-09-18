@@ -472,7 +472,8 @@ declare namespace Zotero {
             ): Promise<import("../src/services/database").AttachmentProcessingStateRecord | null>;
             deleteAttachmentProcessingStatesByLibrary(libraryId: number): Promise<void>;
             deleteBackgroundJobsByLibrary(libraryId: number): Promise<void>;
-            redriveDeadUntagJobs(now: number, limit?: number): Promise<number>;
+            restoreIndexCleanup(accountId: string): Promise<number>;
+            acknowledgeIndexCleanup(job: import('../src/services/database').BackgroundJobRecord): Promise<void>;
             adoptAttachmentExtractionSource(input: {
                 libraryId: number; zoteroKey: string; source: string;
                 contentKind: import("../src/services/database").AttachmentProcessingStateRecord['contentKind'];
@@ -504,9 +505,11 @@ declare namespace Zotero {
                 expectedExtractStatus: import("../src/services/database").AttachmentExtractStatus;
             }): Promise<boolean>;
             markAttachmentOcrFailed(libraryId: number, zoteroKey: string, fileHash: string, error: string): Promise<void>;
+            recordAttachmentIndexIdentity: import('../src/services/database').BeaverDB['recordAttachmentIndexIdentity'];
             markAttachmentUpsertDone(input: {
                 libraryId: number; zoteroKey: string; structuredDocumentHash: string;
                 upsertIndexVersion: string;
+                remoteIdentity?: import('../src/services/database').AttachmentProcessingStateRecord['upsertRemoteIdentity'];
                 expectedUpsertStatus?: import("../src/services/database").AttachmentUpsertStatus;
                 expectedUpsertIndexVersion?: string | null;
                 expectedExtractStatus?: import("../src/services/database").AttachmentExtractStatus;

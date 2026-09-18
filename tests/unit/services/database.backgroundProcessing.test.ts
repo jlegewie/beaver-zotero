@@ -391,13 +391,11 @@ describe('BeaverDB background processing state', () => {
             payload: {
                 content_kind: 'pdf', maxPages: null,
                 timeoutSeconds: 120, doc_hash: 'b'.repeat(64),
-                previous_doc_hash: 'a'.repeat(64),
             },
         });
         const [job] = await db.peekBackgroundJobs();
         expect(job.payload).toMatchObject({
             doc_hash: 'b'.repeat(64),
-            previous_doc_hash: 'a'.repeat(64),
         });
         expect(job.attemptCount).toBe(1);
         expect(job.lastError).toBe('temporary index error');
@@ -651,7 +649,7 @@ describe('BeaverDB background processing state', () => {
             .toEqual(['ABCDEFGH:fulltext_untag', 'ZZZZZZZZ:document_extract']);
     });
 
-    it('redrives dead content-addressed untag jobs', async () => {
+    it('restores failed cleanup from its durable intent', async () => {
         const hash = 'e'.repeat(64);
         const queued = await db.enqueueBackgroundJob({
             jobType: 'fulltext_untag',
@@ -663,6 +661,7 @@ describe('BeaverDB background processing state', () => {
             payload: {
                 content_kind: 'pdf', maxPages: null,
                 timeoutSeconds: 120, index_action: 'untag', doc_hash: hash,
+                index_account_id: 'owner', index_scope_ref: 'g123', index_local_id: 'LOCAL123',
             },
             now: 0,
         });
@@ -675,15 +674,15 @@ describe('BeaverDB background processing state', () => {
         }
         expect((await db.getBackgroundQueueStats(10)).dead).toBe(1);
 
-        await expect(db.redriveDeadUntagJobs(100)).resolves.toBe(1);
+        await expect(db.restoreIndexCleanup('owner')).resolves.toBe(1);
         const [redriven] = await db.peekBackgroundJobs();
         expect(redriven).toMatchObject({
             jobType: 'fulltext_untag',
             zoteroKey: 'ABCDEFGH',
             attemptCount: 0,
-            availableAt: 100,
         });
         expect(redriven.payload?.doc_hash).toBe(hash);
-        expect((await db.getBackgroundQueueStats(100)).dead).toBe(0);
+        await db.acknowledgeIndexCleanup(redriven);
+        expect((await db.getBackgroundQueueStats(Date.now())).dead).toBe(0);
     });
 });

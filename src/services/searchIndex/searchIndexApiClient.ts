@@ -4,6 +4,21 @@ import type { DocumentExtractResult } from '@beaver/agent-core/extract/document/
 
 export const SEARCH_INDEX_API_PREFIX = '/api/v1/index';
 
+export interface IndexRequirements {
+    index_version: number;
+    extract_schema_versions: Record<'pdf' | 'epub' | 'snapshot', string[]>;
+}
+
+export interface IndexVerifyResponse {
+    refs: Array<IndexDocumentRef & {
+        state: 'current' | 'empty' | 'obsolete' | 'missing' | 'pending';
+        index_version: number | null;
+        extract_schema_version: string | null;
+        chunk_count: number | null;
+    }>;
+    checked_at: string;
+}
+
 export interface IndexUpsertRequest {
     source: 'zotero_attachment';
     scope_ref: string;
@@ -62,6 +77,26 @@ export interface IndexStatusResponse {
 }
 
 export class SearchIndexApiClient extends ApiService {
+    private requirementsCache?: { generation: number | undefined; expires: number; request: Promise<IndexRequirements> };
+
+    requirements(): Promise<IndexRequirements> {
+        const generation = Zotero.Beaver?.account?.getGeneration();
+        if (this.requirementsCache && this.requirementsCache.generation === generation && this.requirementsCache.expires > Date.now()) {
+            return this.requirementsCache.request;
+        }
+        const request = this.get<IndexRequirements>(`${SEARCH_INDEX_API_PREFIX}/requirements`);
+        const cache = { generation, expires: Date.now() + 5 * 60_000, request };
+        this.requirementsCache = cache;
+        void request.catch(() => { if (this.requirementsCache === cache) this.requirementsCache = undefined; });
+        return request;
+    }
+
+    verify(zoteroLocalId: string, refs: IndexDocumentRef[]): Promise<IndexVerifyResponse> {
+        return this.post<IndexVerifyResponse>(`${SEARCH_INDEX_API_PREFIX}/verify`, {
+            source: 'zotero_attachment', zotero_local_id: zoteroLocalId, refs,
+        });
+    }
+
     upsertHash(request: IndexUpsertRequest): Promise<IndexUpsertResponse> {
         return this.post<IndexUpsertResponse>(`${SEARCH_INDEX_API_PREFIX}/upsert`, request);
     }
@@ -133,4 +168,3 @@ export class SearchIndexApiClient extends ApiService {
 }
 
 export const searchIndexApiClient = new SearchIndexApiClient();
-

@@ -270,6 +270,60 @@ describe('BackgroundExtractor', () => {
             await expect(db.peekBackgroundJobs()).resolves.toHaveLength(1);
         });
 
+        it.each(['unresolved', 'mid-claim', 'signed-out', 'signout-mid-claim'])('waits for known scope for every lane: %s', async (scenario) => {
+            let session: any = scenario === 'signed-out' ? null : { user: { id: 'owner' } };
+            Zotero.Beaver.account = { getSnapshot: () => ({ session }) };
+            Zotero.Beaver.libraryScopeInitialized = scenario === 'mid-claim' || scenario === 'signout-mid-claim';
+            await enqueueJob(1);
+            for (const jobType of ['document_ocr', 'fulltext_upsert', 'fulltext_untag'] as const) {
+                await db.enqueueBackgroundJob({
+                    jobType, libraryId: 1, zoteroKey: 'BBBBBBBB', contentKind: 'pdf',
+                    payloadKind: 'structured', now: 0,
+                    payload: { ...payload(), doc_hash: 'a'.repeat(64), index_account_id: 'owner',
+                        index_scope_ref: 'g123', index_local_id: 'DEVICE' },
+                });
+            }
+            const realClaim = db.claimNextBackgroundJob.bind(db);
+            const claim = vi.spyOn(db, 'claimNextBackgroundJob').mockImplementation(async (...args) => {
+                const record = await realClaim(...args);
+                if (scenario === 'mid-claim') Zotero.Beaver.libraryScopeInitialized = false;
+                if (scenario === 'signout-mid-claim') {
+                    session = null;
+                    Zotero.Beaver.libraryScopeInitialized = false;
+                }
+                return record;
+            });
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            const cleanup = vi.fn(async () => ({ kind: 'complete', reason: 'index_untagged' } as const));
+            const other = vi.fn(async () => ({ kind: 'complete', reason: 'unexpected' } as const));
+            for (const jobType of ['document_ocr', 'fulltext_upsert', 'fulltext_untag'] as const) {
+                proc.registerExecutor({ jobType, execute: jobType === 'fulltext_untag' ? cleanup : other }, { maxInFlight: 1, survivesLibraryExclusion: jobType === 'fulltext_untag' });
+            }
+            expect((await proc.processOnce({ awaitLaunchedJobs: true })).processed).toBe(false);
+            expect(cleanup).not.toHaveBeenCalled();
+            expect(other).not.toHaveBeenCalled();
+            expect(mockState.extractCalls).toHaveLength(0);
+            expect(await db.peekBackgroundJobs()).toHaveLength(4);
+            expect(claim).toHaveBeenCalledTimes(scenario.endsWith('mid-claim') ? 1 : 0);
+            expect(proc.isBacklogGateOpen()).toBe(false);
+        });
+
+        it('runs authenticated cleanup for an excluded library once scope is known', async () => {
+            Zotero.Beaver.account = { getSnapshot: () => ({ session: { user: { id: 'owner' } } }) };
+            Zotero.Beaver.libraryScopeInitialized = true;
+            Zotero.Beaver.searchableLibraryIds = [];
+            await db.enqueueBackgroundJob({ jobType: 'fulltext_untag', libraryId: 1, zoteroKey: 'BBBBBBBB',
+                contentKind: 'pdf', payloadKind: 'structured', now: 0, payload: payload() });
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            const cleanup = vi.fn(async () => ({ kind: 'complete', reason: 'index_untagged' } as const));
+            proc.registerExecutor({ jobType: 'fulltext_untag', execute: cleanup }, { maxInFlight: 1, survivesLibraryExclusion: true });
+            await proc.processOnce({ awaitLaunchedJobs: true });
+            expect(cleanup).toHaveBeenCalledTimes(1);
+            expect(await db.peekBackgroundJobs()).toEqual([]);
+        });
+
         it('releases (not retires) a claimed row when the scope goes unknown mid-claim', async () => {
             await enqueueJob(1);
             const realClaim = db.claimNextBackgroundJob.bind(db);

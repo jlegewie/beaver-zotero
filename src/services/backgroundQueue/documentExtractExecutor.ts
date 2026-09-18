@@ -249,7 +249,6 @@ export class DocumentExtractExecutor implements JobExecutor {
                 priority: BACKGROUND_UPSERT_PRIORITY,
                 payload: buildIndexJobPayload(kind, {
                     docHash: documentHash,
-                    previousDocumentHash: previous.structuredDocumentHash ?? undefined,
                 }),
                 now: Date.now(),
             });
