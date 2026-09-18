@@ -1,6 +1,6 @@
 import type { PopupMessage } from '../types/popupMessage';
 import type { VersionUpdateMessageConfig } from '../constants/versionUpdateMessages';
-import { quickPromptShortcutLabel } from './quickPromptShortcut';
+import { beaverWindowShortcutLabel, quickPromptShortcutLabel } from './quickPromptShortcut';
 
 /**
  * Placeholders a release note's copy may use for what differs per machine.
@@ -8,6 +8,7 @@ import { quickPromptShortcutLabel } from './quickPromptShortcut';
  */
 const PLACEHOLDERS: Record<string, () => string> = {
     '{{quickPromptShortcut}}': quickPromptShortcutLabel,
+    '{{beaverWindowShortcut}}': beaverWindowShortcutLabel,
 };
 
 function fillPlaceholders<T extends string | undefined>(text: T): T {
@@ -33,6 +34,7 @@ export function versionUpdatePopupMessage(config: VersionUpdateMessageConfig): O
         steps: config.steps?.map((step) => ({ ...step, description: fillPlaceholders(step.description) })),
         subtitle: fillPlaceholders(config.subtitle),
         showcase: config.showcase,
+        alsoNew: config.alsoNew && { ...config.alsoNew, description: fillPlaceholders(config.alsoNew.description) },
         primaryAction: config.primaryAction,
         expire: false,
     };

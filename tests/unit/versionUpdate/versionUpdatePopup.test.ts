@@ -33,6 +33,7 @@ describe('versionUpdatePopupMessage', () => {
             learnMoreLabel: 'More',
             steps: [{ title: 'Step', showcase: 'quick-prompt' }],
             showcase: 'quick-prompt',
+            alsoNew: { title: 'Also', description: 'Press {{beaverWindowShortcut}}.', shortcut: 'beaver-window' },
             primaryAction: { type: 'quick-prompt', label: 'Try now' },
         };
         expect(versionUpdatePopupMessage(config)).toEqual({
@@ -47,6 +48,7 @@ describe('versionUpdatePopupMessage', () => {
             featureList: undefined,
             steps: config.steps,
             showcase: 'quick-prompt',
+            alsoNew: { title: 'Also', description: 'Press ⌘⇧J.', shortcut: 'beaver-window' },
             primaryAction: config.primaryAction,
             expire: false,
         });
@@ -66,13 +68,29 @@ describe('versionUpdatePopupMessage', () => {
         mocks.prefs = { keyboardShortcut: 'k' };
         expect(versionUpdatePopupMessage(config).text).toBe('Press Ctrl+Alt+K to start.');
     });
+
+    it('names the Beaver window chord for this machine wherever the copy asks for it', () => {
+        const config: VersionUpdateMessageConfig = {
+            version: '9.9.9',
+            title: 'T',
+            steps: [{ title: 'S', description: 'Press {{beaverWindowShortcut}}.' }],
+        };
+        expect(versionUpdatePopupMessage(config).steps?.[0].description).toBe('Press ⌘⇧J.');
+
+        (globalThis as any).Zotero = { isMac: false };
+        mocks.prefs = { keyboardShortcut: 'k' };
+        expect(versionUpdatePopupMessage(config).steps?.[0].description).toBe('Press Ctrl+Shift+K.');
+    });
 });
 
-describe('the quick prompt release note', () => {
-    it('floats in the corner the feature lives in, with its showcase', () => {
-        const config = getVersionUpdateMessageConfig('0.25.0-beta.1');
+describe('the 0.25 release note', () => {
+    it('floats in the corner the feature lives in, with its showcase and the rest of the release beneath', () => {
+        const config = getVersionUpdateMessageConfig('0.25.0');
         expect(config?.inPanel).toBe(false);
         expect(config?.showcase).toBe('quick-prompt');
+        expect(config?.steps).toBeUndefined();
+        expect(config?.alsoNew).toEqual(expect.objectContaining({ title: 'Redesigned Beaver window', shortcut: 'beaver-window' }));
+        expect(config?.footer).toContain('/tag/v0.25.0"');
         expect(getVersionShowcase(config?.showcase)).toEqual(expect.any(Function));
         expect(getVersionShowcase(undefined)).toBeUndefined();
     });

@@ -1,8 +1,10 @@
 /**
- * The quick prompt chord as the user should read it: Cmd+Option+<key> on
- * macOS, Ctrl+Alt+<key> elsewhere, with the key the user configured for
- * Beaver's shortcuts. The chord itself is matched in `src/utils/shortcuts.ts`;
- * this is its display form, shared by everything that names it.
+ * Beaver's chords as the user should read them, with the key the user
+ * configured for Beaver's shortcuts: the quick prompt is Cmd+Option+<key> on
+ * macOS and Ctrl+Alt+<key> elsewhere; the Beaver window is Cmd+Shift+<key>
+ * and Ctrl+Shift+<key>. The chords themselves are matched in
+ * `src/utils/shortcuts.ts` and `src/ui/ui.ts`; these are their display forms,
+ * shared by everything that names them.
  */
 import { getPref } from '../../src/utils/prefs';
 
@@ -20,4 +22,16 @@ export function quickPromptShortcutKeys(): string[] {
 export function quickPromptShortcutLabel(): string {
     const key = shortcutKey();
     return Zotero.isMac ? `⌘⌥${key}` : `Ctrl+Alt+${key}`;
+}
+
+/** The Beaver window chord key by key, for drawing keycaps. */
+export function beaverWindowShortcutKeys(): string[] {
+    const key = shortcutKey();
+    return Zotero.isMac ? ['⌘', '⇧', key] : ['Ctrl', 'Shift', key];
+}
+
+/** The Beaver window chord as one piece of text. */
+export function beaverWindowShortcutLabel(): string {
+    const key = shortcutKey();
+    return Zotero.isMac ? `⌘⇧${key}` : `Ctrl+Shift+${key}`;
 }
