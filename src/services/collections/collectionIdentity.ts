@@ -33,6 +33,8 @@ export interface CollectionScope {
     libraryID?: number;
     /** Local history enrichment may read excluded libraries without exporting data. */
     access?: 'agent' | 'local';
+    /** Exact recorded targets only, for explicit undo/restore operations. */
+    includeTrashed?: boolean;
 }
 
 export interface ResolvedCollection {
@@ -44,6 +46,13 @@ export interface ResolvedCollection {
     collection: Zotero.Collection;
 }
 
+/** Format a scoped native key without guessing an unavailable library mapping. */
+export function formatCollectionId(libraryID: number, key: string): string {
+    const ref = libraryRefForLibraryID(libraryID);
+    if (!ref) throw new CollectionResolutionError('library_unavailable', 'The collection library identity is unavailable. Call list_libraries and retry in the intended library.');
+    return `${ref}-${key}`;
+}
+
 /** Portable identity never fabricates a personal-library ID for an unmapped group. */
 export function serializeCollectionIdentity(collection: Zotero.Collection): {
     collection_id: string; library_ref: string; name: string; parent_collection_id?: string;
@@ -51,10 +60,10 @@ export function serializeCollectionIdentity(collection: Zotero.Collection): {
     const ref = libraryRefForLibraryID(collection.libraryID);
     if (!ref) throw new CollectionResolutionError('library_unavailable', `Cannot produce a portable ID for collection key "${collection.key}": its library identity is unavailable on this computer. Call list_libraries to check available library references. If the intended library is still unavailable, ask the user to make it available in Zotero, then retry; do not assume the personal library.`);
     return {
-        collection_id: `${ref}-${collection.key}`,
+        collection_id: formatCollectionId(collection.libraryID, collection.key),
         library_ref: ref,
         name: collection.name,
-        ...(collection.parentKey ? { parent_collection_id: `${ref}-${collection.parentKey}` } : {}),
+        ...(collection.parentKey ? { parent_collection_id: formatCollectionId(collection.libraryID, collection.parentKey) } : {}),
     };
 }
 
@@ -113,7 +122,7 @@ export function resolveCollection(input: string | number, scope: CollectionScope
     const exact = (id: number, key: string) => {
         checkLibrary(id);
         const collection = Zotero.Collections.getByLibraryAndKey(id, key);
-        if (!collection || collection.deleted) throw missing();
+        if (!collection || (collection.deleted && !scope.includeTrashed)) throw missing();
         return found(collection);
     };
     const value = String(input).trim();

@@ -1,3 +1,5 @@
+import { resolveCollection } from './collections/collectionIdentity';
+import { recheckCollectionMemberships } from './collections/collectionMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { CreateItemProposedAction, CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { ExternalReference, NormalizedPublicationType } from '@beaver/agent-core/types/externalReferences';
@@ -72,6 +74,7 @@ async function resolveImportTarget(options?: ImportItemOptions): Promise<{
         throw new Error('Target library is not editable');
     }
     
+    if (collectionId != null) resolveCollection(collectionId, { libraryID: libraryId });
     return { libraryId, collectionId };
 }
 
@@ -349,39 +352,44 @@ export async function createZoteroItem(reference: ExternalReference, options?: I
         item = await track('manual_creation_ms', () => createItemManually(reference, libraryId));
     }
 
-    // 4. Add to collection if specified
-    if (collectionId) {
-        const collection = Zotero.Collections.get(collectionId);
-        if (collection) {
-            await track('add_to_collection_ms', () =>
-                Zotero.DB.executeTransaction(async () => {
-                    await collection.addItem(item!.id);
-                })
-            );
-            logger(`createZoteroItem: Added item to collection ${collection.name}`, 2);
+    try {
+        // 4. Add to collection if specified
+        if (collectionId) {
+            const collection = resolveCollection(collectionId, { libraryID: libraryId }).collection;
+            if (collection) {
+                await track('add_to_collection_ms', () =>
+                    Zotero.DB.executeTransaction(async () => {
+                        await collection.addItem(item!.id);
+                    })
+                );
+                logger(`createZoteroItem: Added item to collection ${collection.name}`, 2);
+            }
         }
-    }
 
-    // 5. Schedule background PDF fetch (unless caller handles it separately)
-    if (!options?.skipBackgroundPdfFetch) {
-        // Check if item already has a PDF (may have been added by translation)
-        const existingAttachments = await item.getAttachments();
-        const existingPdfAttachments = await filterPdfAttachments(existingAttachments);
+        // 5. Schedule background PDF fetch (unless caller handles it separately)
+        if (!options?.skipBackgroundPdfFetch) {
+            // Check if item already has a PDF (may have been added by translation)
+            const existingAttachments = await item.getAttachments();
+            const existingPdfAttachments = await filterPdfAttachments(existingAttachments);
 
-        if (existingPdfAttachments.length === 0 && !isPdfFetchInProgress(libraryId, item.key)) {
-            schedulePdfFetchTask(libraryId, item.key, {
-                openAccessUrl: reference.open_access_url,
-                fallbackUrl: reference.url,
-                fileAvailable: reference.is_open_access,
-                actionId: options?.actionId,
-                runId: options?.runId,
-                threadId: options?.threadId,
-                onAttachmentResolved: options?.onAttachmentResolved,
-            });
+            if (existingPdfAttachments.length === 0 && !isPdfFetchInProgress(libraryId, item.key)) {
+                schedulePdfFetchTask(libraryId, item.key, {
+                    openAccessUrl: reference.open_access_url,
+                    fallbackUrl: reference.url,
+                    fileAvailable: reference.is_open_access,
+                    actionId: options?.actionId,
+                    runId: options?.runId,
+                    threadId: options?.threadId,
+                    onAttachmentResolved: options?.onAttachmentResolved,
+                });
+            }
         }
-    }
 
-    return item;
+        return item;
+    } catch (error) {
+        await cleanupFailedImport(item);
+        throw error;
+    }
 }
 
 /**
@@ -405,6 +413,9 @@ export async function applyCreateItemData(
     const track = <T>(name: string, fn: () => Promise<T>): Promise<T> =>
         timing ? timing.track(name, fn) : fn();
 
+    const target = await resolveImportTarget(options);
+    const memberships = recheckCollectionMemberships(proposedData.collection_ids ?? proposedData.collection_keys ?? [], target.libraryId);
+
     // Create or Import the item (handles library/collection resolution internally)
     // Skip background PDF fetch here - we'll schedule it below with more context
     const item = await track('create_zotero_item_ms', () =>
@@ -416,129 +427,143 @@ export async function applyCreateItemData(
     const libraryId = item.libraryID;
     const itemKey = item.key;
     
-    // Track if we need to save (consolidate all modifications)
-    let needsSave = false;
+    try {
+        // Track if we need to save (consolidate all modifications)
+        let needsSave = false;
     
-    // Post-processing (Things that apply regardless of how item was created)
+        // Post-processing (Things that apply regardless of how item was created)
     
-    // 1. Add Extra fields (Identifiers that aren't standard fields, Beaver provenance)
-    const extraLines: string[] = [];
-    const identifiers = itemData.identifiers;
+        // 1. Add Extra fields (Identifiers that aren't standard fields, Beaver provenance)
+        const extraLines: string[] = [];
+        const identifiers = itemData.identifiers;
     
-    if (identifiers) {
-        const currentExtra = item.getField('extra') as string || '';
-        if (identifiers.arXivID && !currentExtra.includes(identifiers.arXivID)) {
-            extraLines.push(`arXiv: ${identifiers.arXivID}`);
+        if (identifiers) {
+            const currentExtra = item.getField('extra') as string || '';
+            if (identifiers.arXivID && !currentExtra.includes(identifiers.arXivID)) {
+                extraLines.push(`arXiv: ${identifiers.arXivID}`);
+            }
+            if (identifiers.pmid && !currentExtra.includes(identifiers.pmid)) {
+                extraLines.push(`PMID: ${identifiers.pmid}`);
+            }
+            if (identifiers.pmcid && !currentExtra.includes(identifiers.pmcid)) {
+                extraLines.push(`PMCID: ${identifiers.pmcid}`);
+            }
         }
-        if (identifiers.pmid && !currentExtra.includes(identifiers.pmid)) {
-            extraLines.push(`PMID: ${identifiers.pmid}`);
-        }
-        if (identifiers.pmcid && !currentExtra.includes(identifiers.pmcid)) {
-            extraLines.push(`PMCID: ${identifiers.pmcid}`);
-        }
-    }
 
-    if (extraLines.length > 0) {
-        const currentExtra = item.getField('extra') as string;
-        item.setField('extra', currentExtra ? `${currentExtra}\n${extraLines.join('\n')}` : extraLines.join('\n'));
-        needsSave = true;
-    }
-
-    needsSave = stampBeaverProvenanceExtra(item, { reason: proposedData.reason }) || needsSave;
-
-    // 2. Collections (from proposed data, in addition to context collection)
-    if (proposedData.collection_keys && proposedData.collection_keys.length > 0) {
-        const collectionIds: number[] = [];
-        for (const key of proposedData.collection_keys) {
-            const collection = Zotero.Collections.getByLibraryAndKey(libraryId, key);
-            if (collection) collectionIds.push(collection.id);
-        }
-        if (collectionIds.length > 0) {
-            // Append to existing collections if any (from translation or context)
-            const currentCollections = item.getCollections();
-            const newCollections = [...new Set([...currentCollections, ...collectionIds])];
-            item.setCollections(newCollections);
+        if (extraLines.length > 0) {
+            const currentExtra = item.getField('extra') as string;
+            item.setField('extra', currentExtra ? `${currentExtra}\n${extraLines.join('\n')}` : extraLines.join('\n'));
             needsSave = true;
         }
-    }
-    
-    // 3. Tags
-    if (proposedData.suggested_tags && proposedData.suggested_tags.length > 0) {
-        for (const tag of proposedData.suggested_tags) {
-            item.addTag(tag);
+
+        needsSave = stampBeaverProvenanceExtra(item, { reason: proposedData.reason }) || needsSave;
+
+        // 2. Collections (from proposed data, in addition to context collection)
+        if (memberships.length > 0) {
+            const collectionIds = recheckCollectionMemberships(memberships.map(entry => entry.collectionId), libraryId)
+                .map(entry => entry.collection.id);
+            if (collectionIds.length > 0) {
+                // Append to existing collections if any (from translation or context)
+                const currentCollections = item.getCollections();
+                const newCollections = [...new Set([...currentCollections, ...collectionIds])];
+                item.setCollections(newCollections);
+                needsSave = true;
+            }
         }
-        needsSave = true;
-    }
 
-    // Single consolidated save for all modifications
-    if (needsSave) {
-        await track('post_save_ms', () => item.saveTx());
-        logger(`applyCreateItemData: Saved item with extra fields, collections, and tags`, 2);
-    }
+        // 3. Tags
+        if (proposedData.suggested_tags && proposedData.suggested_tags.length > 0) {
+            for (const tag of proposedData.suggested_tags) {
+                item.addTag(tag);
+            }
+            needsSave = true;
+        }
 
-    if (getPref('addBeaverProvenanceNote') === true) {
-        await createProvenanceNote(
-            {
-                library_id: libraryId,
-                zotero_key: itemKey,
-                library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
-            },
-            {
-                reason: proposedData.reason,
-                threadId: options?.threadId,
-                runId: options?.runId,
-            },
-        );
-    }
+        // Single consolidated save for all modifications
+        if (needsSave) {
+            await track('post_save_ms', () => item.saveTx());
+            logger(`applyCreateItemData: Saved item with extra fields, collections, and tags`, 2);
+        }
 
-    // Check for existing PDF attachments (may have been added by translation)
-    const pdfCheckStart = Date.now();
-    const existingAttachments = item.getAttachments();
-    const existingPdfAttachments = await filterPdfAttachments(existingAttachments);
-    timing?.record('pdf_check_ms', Date.now() - pdfCheckStart);
+        if (getPref('addBeaverProvenanceNote') === true) {
+            await createProvenanceNote(
+                {
+                    library_id: libraryId,
+                    zotero_key: itemKey,
+                    library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
+                },
+                {
+                    reason: proposedData.reason,
+                    threadId: options?.threadId,
+                    runId: options?.runId,
+                },
+            );
+        }
 
-    // Schedule PDF fetching as background task (non-blocking)
-    // Only if no PDF exists and we have potential sources
-    let didScheduleBgFetch = false;
-    let fetchAlreadyInProgress = false;
-    if (existingPdfAttachments.length === 0) {
-        if (isPdfFetchInProgress(libraryId, itemKey)) {
-            fetchAlreadyInProgress = true;
+        // Check for existing PDF attachments (may have been added by translation)
+        const pdfCheckStart = Date.now();
+        const existingAttachments = item.getAttachments();
+        const existingPdfAttachments = await filterPdfAttachments(existingAttachments);
+        timing?.record('pdf_check_ms', Date.now() - pdfCheckStart);
+
+        // Schedule PDF fetching as background task (non-blocking)
+        // Only if no PDF exists and we have potential sources
+        let didScheduleBgFetch = false;
+        let fetchAlreadyInProgress = false;
+        if (existingPdfAttachments.length === 0) {
+            if (isPdfFetchInProgress(libraryId, itemKey)) {
+                fetchAlreadyInProgress = true;
+            } else {
+                const pdfUrl = itemData.open_access_url || proposedData.downloaded_url;
+                schedulePdfFetchTask(libraryId, itemKey, {
+                    pdfCandidates: proposedData.pdf_candidates,
+                    openAccessUrl: pdfUrl,
+                    fallbackUrl: itemData.url,
+                    fileAvailable: proposedData.file_available,
+                    actionId: options?.actionId,
+                    runId: options?.runId,
+                    threadId: options?.threadId,
+                    onAttachmentResolved: options?.onAttachmentResolved,
+                });
+                didScheduleBgFetch = true;
+            }
+        }
+
+        // Compute initial attachment_status
+        let attachmentStatus: CreateItemResultData['attachment_status'];
+        let attachmentKey: string | undefined;
+        if (existingPdfAttachments.length > 0) {
+            attachmentStatus = 'available';
+            attachmentKey = `${libraryId}-${existingPdfAttachments[0].key}`;
+        } else if (didScheduleBgFetch || fetchAlreadyInProgress) {
+            attachmentStatus = 'pending';
         } else {
-            const pdfUrl = itemData.open_access_url || proposedData.downloaded_url;
-            schedulePdfFetchTask(libraryId, itemKey, {
-                pdfCandidates: proposedData.pdf_candidates,
-                openAccessUrl: pdfUrl,
-                fallbackUrl: itemData.url,
-                fileAvailable: proposedData.file_available,
-                actionId: options?.actionId,
-                runId: options?.runId,
-                threadId: options?.threadId,
-                onAttachmentResolved: options?.onAttachmentResolved,
-            });
-            didScheduleBgFetch = true;
+            attachmentStatus = 'none';
         }
-    }
 
-    // Compute initial attachment_status
-    let attachmentStatus: CreateItemResultData['attachment_status'];
-    let attachmentKey: string | undefined;
-    if (existingPdfAttachments.length > 0) {
-        attachmentStatus = 'available';
-        attachmentKey = `${libraryId}-${existingPdfAttachments[0].key}`;
-    } else if (didScheduleBgFetch || fetchAlreadyInProgress) {
-        attachmentStatus = 'pending';
-    } else {
-        attachmentStatus = 'none';
+        return {
+            library_id: libraryId,
+            zotero_key: itemKey,
+            library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
+            collection_ids: memberships.map(entry => entry.collectionId),
+            collection_keys: memberships.map(entry => entry.key),
+            attachment_status: attachmentStatus,
+            attachment_key: attachmentKey,
+        };
+    } catch (error) {
+        await cleanupFailedImport(item);
+        throw error;
     }
+}
 
-    return {
-        library_id: libraryId,
-        zotero_key: itemKey,
-        library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
-        attachment_status: attachmentStatus,
-        attachment_key: attachmentKey,
-    };
+/** Remove an item owned by an import that failed after persistence. */
+async function cleanupFailedImport(item: Zotero.Item): Promise<void> {
+    try {
+        // Erasing the parent also removes any translated attachments or provenance notes.
+        await item.eraseTx();
+    } catch (error) {
+        logger(`Failed to clean up imported item ${item.libraryID}-${item.key}: ${error}`, 1);
+    }
 }
 
 /**

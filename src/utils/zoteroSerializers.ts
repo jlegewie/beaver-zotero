@@ -1,3 +1,4 @@
+import { serializeCollectionIdentity } from '../services/collections/collectionIdentity';
 import type { ContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { AnnotationResultItem, NoteResultItem } from '@beaver/agent-core/protocol/agentProtocol';
@@ -47,8 +48,6 @@ export function getCollectionKeysFromItem(item: Zotero.Item): string[] | null {
 export function getCollectionSummariesFromItem(item: Zotero.Item): CollectionSummary[] | null {
     const collectionIds = item.getCollections();
     if (collectionIds.length === 0) return null;
-    // Constant across all of this item's collections; computed once.
-    const libraryRef = libraryRefForLibraryID(item.libraryID) ?? undefined;
     const summaries = collectionIds
         .map(id => {
             const collection = Zotero.Collections.get(id);
@@ -59,8 +58,7 @@ export function getCollectionSummariesFromItem(item: Zotero.Item): CollectionSum
             return {
                 library_id: item.libraryID,
                 zotero_key: collection.key,
-                library_ref: libraryRef,
-                name: collection.name,
+                ...serializeCollectionIdentity(collection),
             } as CollectionSummary;
         })
         .filter((s): s is CollectionSummary => s !== null);
@@ -125,8 +123,6 @@ export function formatZoteroCreatorsString(creators: ZoteroCreator[] | null | un
  * @returns Array of collections
  */
 async function getCollectionsFromItem(item: Zotero.Item): Promise<ZoteroCollection[] | null> {
-    // Constant across all of this item's collections; computed once.
-    const libraryRef = libraryRefForLibraryID(item.libraryID) ?? undefined;
     const collectionPromises = item.getCollections()
         .map(async (collection_id) => {
             const col = Zotero.Collections.get(collection_id);
@@ -138,8 +134,7 @@ async function getCollectionsFromItem(item: Zotero.Item): Promise<ZoteroCollecti
             return {
                 library_id: item.libraryID,
                 zotero_key: collection.key,
-                library_ref: libraryRef,
-                name: collection.name,
+                ...serializeCollectionIdentity(col),
                 zotero_version: collection.version,
                 date_modified: await getCollectionClientDateModifiedAsISOString(collection_id),
                 parent_collection: collection.parentCollection || null,
@@ -271,8 +266,7 @@ export async function serializeCollection(
     return {
         library_id: collection.libraryID,
         zotero_key: collection.key,
-        library_ref: libraryRefForLibraryID(collection.libraryID) ?? undefined,
-        name: collection.name,
+        ...serializeCollectionIdentity(collection),
         zotero_version: collection.version,
         date_modified: finalDateModified,
         parent_collection: collectionJSON.parentCollection || null,

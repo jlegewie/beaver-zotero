@@ -1,3 +1,5 @@
+import { serializeCollectionIdentity, formatCollectionId } from '../collections/collectionIdentity';
+import { assertCollectionLibraryWritable, recheckCollection, recheckCollectionParent } from '../collections/collectionMutations';
 /**
  * Utilities for executing and undoing manage_collections agent actions
  * from the UI (post-run apply / undo).
@@ -34,7 +36,9 @@ import { libraryRefForLibraryID, resolveWriteTargetLibrary } from '../../utils/l
 export async function executeManageCollectionsAction(
     action: AgentAction
 ): Promise<ManageCollectionsResultData> {
-    const data = action.proposed_data as ManageCollectionsProposedData;
+    const raw = action.proposed_data;
+    const data = { ...raw, collection_key: raw.collection_id ?? raw.collection_key,
+        new_parent_key: raw.new_parent_collection_id !== undefined ? raw.new_parent_collection_id : raw.new_parent_key } as ManageCollectionsProposedData;
     const { action: op, collection_key, new_name, new_parent_key, library_id, library_ref } = data;
     // A destructive write must carry an explicit target. Reject a
     // stale/malformed action (e.g. library_id: 0 with no library_ref) instead
@@ -51,7 +55,7 @@ export async function executeManageCollectionsAction(
     if (!resolution.ok) throw new Error(resolution.message);
     const resolvedLibraryID = resolution.libraryID;
 
-    const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryID, collection_key);
+    const collection = recheckCollection(collection_key, resolvedLibraryID).collection;
     if (!collection) {
         throw new Error(`Collection not found: ${collection_key}`);
     }
@@ -87,7 +91,7 @@ export async function executeManageCollectionsAction(
         await collection.saveTx();
         logger(`executeManageCollectionsAction: Renamed collection ${resolvedLibraryID}-${collection_key}`, 1);
     } else if (op === 'move') {
-        (collection as any).parentKey = new_parent_key ? new_parent_key : false;
+        (collection as any).parentKey = recheckCollectionParent(collection, new_parent_key) || false;
         await collection.saveTx();
         logger(`executeManageCollectionsAction: Moved collection ${resolvedLibraryID}-${collection_key}`, 1);
     } else if (op === 'delete') {
@@ -102,11 +106,14 @@ export async function executeManageCollectionsAction(
         library_id: resolvedLibraryID,
         library_ref: libraryRefForLibraryID(resolvedLibraryID) ?? undefined,
         action: op,
-        collection_key,
+        collection_key: collection.key,
+        collection_id: serializeCollectionIdentity(collection).collection_id,
         new_name: new_name ?? null,
-        new_parent_key: new_parent_key ?? null,
+        new_parent_key: new_parent_key ? collection.parentKey || null : null,
+        new_parent_collection_id: new_parent_key && collection.parentKey ? formatCollectionId(resolvedLibraryID, collection.parentKey) : null,
         items_affected: itemsAffected,
         old_name: oldName,
+        old_parent_collection_id: oldParentKey ? formatCollectionId(resolvedLibraryID, oldParentKey) : null,
         old_parent_key: oldParentKey,
     };
 }
@@ -125,7 +132,9 @@ export async function executeManageCollectionsAction(
 export async function undoManageCollectionsAction(
     action: AgentAction,
 ): Promise<void> {
-    const data = action.proposed_data as ManageCollectionsProposedData;
+    const raw = action.proposed_data;
+    const data = { ...raw, collection_key: raw.collection_id ?? raw.collection_key,
+        new_parent_key: raw.new_parent_collection_id !== undefined ? raw.new_parent_collection_id : raw.new_parent_key } as ManageCollectionsProposedData;
     const { library_id, action: op, collection_key } = data;
     if ((!library_id || typeof library_id !== 'number') && !data.library_ref) {
         logger(`undoManageCollectionsAction: missing target library (${collection_key}); skipping`, 1);
@@ -137,12 +146,13 @@ export async function undoManageCollectionsAction(
         return;
     }
     const resolvedLibraryID = resolution.libraryID;
+    assertCollectionLibraryWritable(resolvedLibraryID);
     const result = (action.result_data ?? {}) as Partial<ManageCollectionsResultData>;
     const old_name = result.old_name ?? null;
-    const old_parent_key = result.old_parent_key ?? null;
+    const old_parent_key = result.old_parent_collection_id ?? result.old_parent_key ?? null;
 
     if (op === 'rename') {
-        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryID, collection_key);
+        const collection = recheckCollection(collection_key, resolvedLibraryID, true).collection;
         if (!collection) {
             logger(`undoManageCollectionsAction: Collection ${resolvedLibraryID}-${collection_key} not found; skipping`, 1);
             return;
@@ -156,19 +166,19 @@ export async function undoManageCollectionsAction(
     }
 
     if (op === 'move') {
-        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryID, collection_key);
+        const collection = recheckCollection(collection_key, resolvedLibraryID, true).collection;
         if (!collection) {
             logger(`undoManageCollectionsAction: Collection ${resolvedLibraryID}-${collection_key} not found; skipping`, 1);
             return;
         }
-        (collection as any).parentKey = old_parent_key ? old_parent_key : false;
+        (collection as any).parentKey = recheckCollectionParent(collection, old_parent_key) || false;
         await collection.saveTx();
         logger(`undoManageCollectionsAction: Restored parent '${old_parent_key ?? 'top-level'}'`, 1);
         return;
     }
 
     if (op === 'delete') {
-        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(resolvedLibraryID, collection_key);
+        const collection = recheckCollection(collection_key, resolvedLibraryID, true).collection;
         if (!collection) {
             // Trash was emptied (manually or by auto-empty). The collection
             // is gone from the DB and its key is unrecoverable.
@@ -183,6 +193,7 @@ export async function undoManageCollectionsAction(
             logger(`undoManageCollectionsAction: Collection ${resolvedLibraryID}-${collection_key} already restored; skipping`, 1);
             return;
         }
+        recheckCollectionParent(collection, collection.parentKey || null);
         (collection as any).deleted = false;
         await collection.saveTx();
         logger(`undoManageCollectionsAction: Restored collection '${collection.name}' from trash`, 1);

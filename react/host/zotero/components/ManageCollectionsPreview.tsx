@@ -1,14 +1,17 @@
+import { resolveCollection } from '../../../../src/services/collections/collectionIdentity';
 import React, { useEffect, useState } from 'react';
 import { CSSIcon, Icon, ArrowRightIcon } from '../../../components/icons/icons';
 import type { ManageCollectionsResultData } from '@beaver/agent-core/types/agentActions/base';
 import { shortenActionError } from './agentActionViewHelpers';
-import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
+import { resolveLibraryRef, resolveObjectId } from '../../../../src/utils/libraryIdentity';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
 interface ManageCollectionsPreviewProps {
     actionData: {
         action?: 'rename' | 'move' | 'delete';
+        collection_id?: string;
+        new_parent_collection_id?: string | null;
         collection_key?: string;
         new_name?: string | null;
         new_parent_key?: string | null;
@@ -104,12 +107,13 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
 }) => {
     const action: 'rename' | 'move' | 'delete' = actionData.action ?? 'rename';
     const newName = actionData.new_name ?? undefined;
-    const newParentKey = actionData.new_parent_key ?? null;
-    const libraryId = resolveLibraryRef({
+    const newParentKey = actionData.new_parent_collection_id ?? actionData.new_parent_key ?? null;
+    const identity = resolveObjectId(resultData?.collection_id ?? actionData.collection_id ?? '');
+    const libraryId = resolveLibraryRef(identity ?? {
         library_ref: resultData?.library_ref ?? actionData.library_ref,
         library_id: resultData?.library_id ?? currentValue?.library_id ?? actionData.library_id,
     });
-    const collectionKey = actionData.collection_key;
+    const collectionKey = actionData.collection_id ?? actionData.collection_key;
 
     const isApplied = status === 'applied';
     const isRejectedOrUndone = status === 'rejected' || status === 'undone';
@@ -129,7 +133,7 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
         (async () => {
             try {
                 const lib = Zotero.Libraries.get(libraryId) as Zotero.Library | false;
-                const collectionResult = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collectionKey);
+                const collectionResult = resolveCollection(collectionKey, { libraryID: libraryId, access: 'local' }).collection;
                 const collection = collectionResult || null;
                 if (cancelled) return;
                 const oldItemCount = collection
@@ -165,7 +169,7 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
         const resolve = async (key: string | null, setter: (s: string | null) => void) => {
             if (!key) { setter(null); return; }
             try {
-                const c = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, key);
+                const c = resolveCollection(key, { libraryID: libraryId, access: 'local' }).collection;
                 setter(c ? c.name : key);
             } catch {
                 setter(key);

@@ -2515,6 +2515,8 @@ const sendWSMessage = async (
         for (const col of messageCollections) {
             attachments.push({
                 type: 'collection',
+                collection_id: col.collection_id,
+                parent_collection_id: col.parent_collection_id,
                 library_id: col.library_id,
                 zotero_key: col.zotero_key,
                 library_ref: col.library_ref,

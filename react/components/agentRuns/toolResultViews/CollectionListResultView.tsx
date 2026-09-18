@@ -1,3 +1,4 @@
+import { normalizeBackendCollection } from '@beaver/agent-core/run-state/toolResultTypes';
 import React, { useState } from 'react';
 import { CollectionListView } from '@beaver/agent-core/run-state/toolResultViews';
 import { CSSIcon } from '../../icons/icons';
@@ -21,17 +22,14 @@ export const CollectionListResultView: React.FC<{ view: CollectionListView }> = 
     }
 
     const revealCollection = (collection: CollectionListView['collections'][number]) => {
-        getHost().navigation?.revealCollection({
-            library_id: collection.library_id,
-            zotero_key: collection.collection_key,
-            library_ref: collection.library_ref,
-        });
+        const ref = normalizeBackendCollection(collection, collection.library_id, collection.library_ref);
+        if (ref) getHost().navigation?.revealCollection(ref);
     };
 
     return (
         <div className="display-flex flex-col">
             {collections.map((collection) => {
-                const compositeKey = `${collection.library_id}-${collection.collection_key}`;
+                const compositeKey = collection.collection_id ?? `${collection.library_ref ?? collection.library_id}-${collection.collection_key}`;
                 const isHovered = hoveredKey === compositeKey;
 
                 return (

@@ -1,3 +1,5 @@
+import { assertCollectionLibraryWritable } from '../collections/collectionMutations';
+import { recheckCollectionMemberships } from '../collections/collectionMutations';
 import { collectionNotFoundError } from '../collections/collectionIdentity';
 import type { OperationContext } from '../agentDataProvider/operationContext';
 /**
@@ -21,6 +23,7 @@ export interface CreateNoteResultData {
     parent_key?: string;
     collection_key?: string;
     /** All collection keys the note was added to (create_note_tags_collections). */
+    collection_ids?: string[];
     collection_keys?: string[];
     /** Tags applied to the created note (create_note_tags_collections). */
     tags?: string[];
@@ -48,6 +51,9 @@ export async function executeCreateNoteAction(action: AgentAction, runId: string
         library_id?: number;       // resolved by validation (normalized_action_data)
         parent_key?: string;       // resolved by validation (normalized_action_data)
         collection_key?: string;   // resolved by validation (normalized_action_data)
+        collection_ids?: string[];
+        related_item_key?: string;
+        warning?: string;
         collection_keys?: string[]; // resolved by validation (create_note_tags_collections)
         library?: string;
         collection?: string;
@@ -61,11 +67,8 @@ export async function executeCreateNoteAction(action: AgentAction, runId: string
         throw new Error('Title and content are required');
     }
 
-    // Re-resolve the parent on manual apply whenever parent_item_id is set.
-    // The resolver is the source of truth for the standalone-fallback path
-    // (relatedItemKey/warning); stored normalized fields like library_id or
-    // parent_key don't carry that data, so skipping resolution when they're
-    // present would lose the fallback link.
+    // Legacy actions may need parent recovery; normalized actions retain the
+    // approved parent and standalone-fallback fields across replay.
     const targetLibrary = resolveWriteTargetLibrary({
         library_ref: proposed.library_ref,
         library_id: proposed.library_id,
@@ -74,10 +77,10 @@ export async function executeCreateNoteAction(action: AgentAction, runId: string
     if (!targetLibrary.ok) throw new Error(targetLibrary.message);
     let targetLibraryId = targetLibrary.libraryID;
     let parentKey: string | null = proposed.parent_key || null;
-    let relatedItemKey: string | null = null;
-    let warning: string | null = null;
+    let relatedItemKey: string | null = proposed.related_item_key ?? null;
+    let warning: string | null = proposed.warning ?? null;
 
-    if (proposed.parent_item_id) {
+    if (proposed.parent_item_id && !Object.prototype.hasOwnProperty.call(proposed, 'parent_key')) {
         const resolution = await resolveCreateNoteParent(proposed.parent_item_id, proposed.library_ref);
         if (!resolution.ok) {
             throw new Error(resolution.error);
@@ -96,8 +99,12 @@ export async function executeCreateNoteAction(action: AgentAction, runId: string
     let collectionKeysToApply: string[] = [];
     if (parentKey) {
         collectionKeysToApply = [];
-    } else if (proposed.collection_keys && proposed.collection_keys.length > 0) {
+    } else if (proposed.collection_ids) {
+        collectionKeysToApply = proposed.collection_ids;
+    } else if (proposed.collection_keys) {
         collectionKeysToApply = [...proposed.collection_keys];
+    } else if (proposed.collection_key) {
+        collectionKeysToApply = [proposed.collection_key];
     } else {
         const rawCollections = (proposed.collections && proposed.collections.length > 0)
             ? proposed.collections
@@ -139,7 +146,9 @@ export async function executeCreateNoteAction(action: AgentAction, runId: string
     }
 
     // Inherit collection from the standalone parent when none was specified.
-    if (relatedItem && collectionKeysToApply.length === 0) {
+    if (relatedItem && collectionKeysToApply.length === 0
+        && !Object.prototype.hasOwnProperty.call(proposed, 'collection_keys')
+        && !Object.prototype.hasOwnProperty.call(proposed, 'collection_ids')) {
         try {
             await Zotero.Items.loadDataTypes([relatedItem], ['collections']);
             const collectionIds = relatedItem.getCollections();
@@ -174,14 +183,11 @@ export async function executeCreateNoteAction(action: AgentAction, runId: string
     // Child notes (with parentKey) cannot be in collections — Zotero's
     // fki_collectionItems_itemID_parentItemID trigger aborts saveTx if we try.
     const appliedCollectionKeys: string[] = [];
+    const memberships = recheckCollectionMemberships(parentKey ? [] : collectionKeysToApply, targetLibraryId);
     if (!parentKey) {
-        for (const key of collectionKeysToApply) {
-            try {
-                zoteroNote.addToCollection(key);
-                appliedCollectionKeys.push(key);
-            } catch (error: any) {
-                logger(`executeCreateNoteAction: Failed to stage collection assignment for ${key}: ${error.message}`, 1);
-            }
+        for (const entry of memberships) {
+            zoteroNote.addToCollection(entry.collection.id);
+            appliedCollectionKeys.push(entry.key);
         }
     }
 
@@ -221,7 +227,7 @@ export async function executeCreateNoteAction(action: AgentAction, runId: string
         library_ref: libraryRefForLibraryID(zoteroNote.libraryID) ?? undefined,
         ...(zoteroNote.parentKey ? { parent_key: zoteroNote.parentKey } : {}),
         ...(appliedCollectionKeys.length > 0 ? { collection_key: appliedCollectionKeys[0] } : {}),
-        ...(appliedCollectionKeys.length > 0 ? { collection_keys: appliedCollectionKeys } : {}),
+        ...(appliedCollectionKeys.length > 0 ? { collection_keys: appliedCollectionKeys, collection_ids: memberships.map(entry => entry.collectionId) } : {}),
         ...(appliedTags.length > 0 ? { tags: appliedTags } : {}),
         ...(relatedItemKey ? { related_item_key: relatedItemKey } : {}),
         ...(warning ? { warning } : {}),
@@ -251,6 +257,7 @@ export async function undoCreateNoteAction(action: AgentAction): Promise<void> {
         return;
     }
 
+    assertCollectionLibraryWritable(resolved.item.libraryID);
     await resolved.item.eraseTx();
     logger(`undoCreateNoteAction: Deleted note ${resultData.library_id}-${resultData.zotero_key}`, 1);
 }

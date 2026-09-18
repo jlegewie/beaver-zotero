@@ -75,10 +75,11 @@ describe('validateCreateCollectionAction', () => {
                 getLibraryIDFromGroupID: vi.fn((groupId: number) => (groupId === 12345 ? 100 : false)),
             },
             Collections: {
-                getByLibraryAndKeyAsync: vi.fn(async () => null),
+                getByLibrary: vi.fn(() => []),
+                getByLibraryAndKey: vi.fn(() => null),
             },
             Items: {
-                getByLibraryAndKeyAsync: vi.fn(async (libId: number, key: string) => makeItem(libId, key)),
+                getByLibraryAndKeyAsync: vi.fn((libId: number, key: string) => makeItem(libId, key)),
             },
         };
 
@@ -163,9 +164,10 @@ describe('executeCreateCollectionAction', () => {
                 this.eraseTx = vi.fn(async () => undefined);
                 this.addItems = vi.fn(async () => undefined);
             }),
-            Collections: { getByLibraryAndKeyAsync: vi.fn(async () => null) },
+            Collections: {
+                getByLibrary: vi.fn(() => []), getByLibraryAndKey: vi.fn(() => null) },
             Items: {
-                getByLibraryAndKeyAsync: vi.fn(async (libId: number, key: string) => makeItem(libId, key)),
+                getByLibraryAndKeyAsync: vi.fn((libId: number, key: string) => makeItem(libId, key)),
             },
             DB: {
                 executeTransaction: vi.fn(async (fn: any) => fn()),

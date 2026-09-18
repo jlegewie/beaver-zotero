@@ -85,6 +85,7 @@ describe('executeOrganizeItemsAction unchanged_items', () => {
         items = {};
         previousZotero = (globalThis as any).Zotero;
         (globalThis as any).Zotero = {
+            Beaver: { libraryScopeInitialized: true, searchableLibraryIds: [1] },
             Libraries: {
                 get: vi.fn(() => ({ libraryID: 1, name: 'My Library', editable: true })),
                 userLibraryID: 1,
@@ -94,13 +95,14 @@ describe('executeOrganizeItemsAction unchanged_items', () => {
                 getLibraryIDFromGroupID: vi.fn(() => false),
             },
             Collections: {
+                getByLibrary: vi.fn(() => []),
                 get: vi.fn((id: number) => (id === COLLECTION_ID ? { key: COLLECTION_KEY, id } : null)),
-                getByLibraryAndKeyAsync: vi.fn(async (_lib: number, key: string) =>
-                    key === COLLECTION_KEY ? { id: COLLECTION_ID, key } : null
+                getByLibraryAndKey: vi.fn((_lib: number, key: string) =>
+                    key === COLLECTION_KEY ? { id: COLLECTION_ID, key, libraryID: 1, name: 'Collection' } : null
                 ),
             },
             Items: {
-                getByLibraryAndKeyAsync: vi.fn(async (_lib: number, key: string) => items[key] ?? null),
+                getByLibraryAndKeyAsync: vi.fn((_lib: number, key: string) => items[key] ?? null),
             },
             DB: {
                 executeTransaction: vi.fn(async (fn: () => Promise<void>) => fn()),
@@ -208,7 +210,7 @@ describe('executeOrganizeItemsAction unchanged_items', () => {
         expect(items.AAAAAAAA.save).not.toHaveBeenCalled();
     });
 
-    it('treats a deleted remove-target as already satisfied', async () => {
+    it('rejects a deleted remove-target before changing items', async () => {
         // An item cannot be in a collection that no longer exists, so the
         // requested state holds and the item belongs in unchanged_items.
         items.AAAAAAAA = makeItem('AAAAAAAA', [], []);
@@ -221,8 +223,7 @@ describe('executeOrganizeItemsAction unchanged_items', () => {
             timeoutCtx()
         );
 
-        expect(response.success).toBe(true);
-        expect(response.result_data?.items_modified).toBe(0);
-        expect(response.result_data?.unchanged_items).toEqual(['1-AAAAAAAA']);
+        expect(response.success).toBe(false);
+        expect(response.error_code).toBe('collection_not_found');
     });
 });

@@ -1,3 +1,4 @@
+import { resolveCollection } from '../../../src/services/collections/collectionIdentity';
 import { tryGetWindowRuntime } from '../../runtime/windowRuntime';
 import type { NavigationHost, AttachmentMatchNavigation } from '@beaver/agent-ui/host/types';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
@@ -39,22 +40,13 @@ function batchLibraryID(libraryRef?: string): number | null | 'unavailable' {
     return resolveLibraryRef({ library_ref: libraryRef }) ?? 'unavailable';
 }
 
-/**
- * Find a collection by key, in one library or across all of them.
- *
- * Scanning is safe where the batch named no library: keys are per-library but
- * random 8-character strings, so a collision is not a practical concern.
- */
+/** Resolve history navigation without widening an explicit library scope. */
 function findCollectionByKey(key: string, libraryID: number | null): Zotero.Collection | null {
-    const libraryIDs = libraryID
-        ? [libraryID]
-        : Zotero.Libraries.getAll().map((library) => library.libraryID);
-    for (const id of libraryIDs) {
-        // Returns false when this library holds no such collection.
-        const found = Zotero.Collections.getByLibraryAndKey(id, key);
-        if (found) return found as Zotero.Collection;
+    try {
+        return resolveCollection(key, { libraryID: libraryID ?? undefined, access: 'local' }).collection;
+    } catch {
+        return null;
     }
-    return null;
 }
 
 /**

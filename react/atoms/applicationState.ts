@@ -1,3 +1,4 @@
+import { serializeCollectionIdentity } from '../../src/services/collections/collectionIdentity';
 /**
  * Application-state builder.
  *
@@ -216,7 +217,8 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                 const counts = countsFor(itemCounts, collection.id);
                 return {
                     collection_key: collection.key,
-                    name: collection.name,
+                    ...serializeCollectionIdentity(collection),
+
                     library_id: collection.libraryID,
                     library_ref: libraryRefForLibraryID(collection.libraryID) ?? undefined,
                     parent_key: collection.parentKey || null,
