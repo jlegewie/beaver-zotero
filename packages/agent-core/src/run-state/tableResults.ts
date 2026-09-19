@@ -1,11 +1,75 @@
+import type { AgentRun } from "../agents/types";
+import type { TableRecord } from "../protocol/artifactProtocol";
+
+/** Tools that change a stored table; their cards and the artifacts list are table-shaped. */
+const TABLE_WRITE_TOOL_NAMES = new Set([
+    "create_table",
+    "edit_rows",
+    "edit_table",
+    "fill_table",
+]);
+
 export function isTableToolName(name: string): boolean {
-    return [
-        "create_table",
-        "read_table",
-        "edit_rows",
-        "edit_table",
-        "fill_table",
-    ].includes(name);
+    return name === "read_table" || TABLE_WRITE_TOOL_NAMES.has(name);
+}
+
+export function isTableWriteToolName(name: string): boolean {
+    return TABLE_WRITE_TOOL_NAMES.has(name);
+}
+
+/** The `TableRecord` a tool return carries in its view model, if any. */
+export function tableRecordFromMetadata(
+    metadata: Record<string, unknown> | undefined,
+): TableRecord | null {
+    const view = metadata?.view as
+        | { view_type?: unknown; record?: TableRecord }
+        | undefined;
+    const record = view?.view_type === "table" ? view.record : undefined;
+    return record?.reference?.kind === "table" ? record : null;
+}
+
+/** One table an answer wrote, for the end-of-run artifacts list. */
+export interface TableArtifact {
+    runId: string;
+    /** First tool call in the answer that wrote this table. */
+    toolcallId: string;
+    /** Latest observation of the table within the answer. */
+    record: TableRecord;
+    /** True when the answer created the table rather than editing an existing one. */
+    created: boolean;
+}
+
+/**
+ * Collect the tables an answer wrote, one entry per table in the order they
+ * were first written. Several writes to one table (create, then fill) fold into
+ * one entry that keeps its first tool call for identity and its last record
+ * for display, so the list reports the table as the answer left it.
+ */
+export function collectTableArtifacts(
+    runs: ReadonlyArray<Pick<AgentRun, "id" | "model_messages">>,
+): TableArtifact[] {
+    const byKey = new Map<string, TableArtifact>();
+    for (const run of runs) {
+        for (const message of run.model_messages ?? []) {
+            if (message.kind !== "request") continue;
+            for (const part of message.parts) {
+                if (part.part_kind !== "tool-return") continue;
+                if (!isTableWriteToolName(part.tool_name)) continue;
+                const record = tableRecordFromMetadata(part.metadata);
+                if (!record) continue;
+                const existing = byKey.get(record.reference.key);
+                byKey.set(record.reference.key, {
+                    runId: existing?.runId ?? run.id,
+                    toolcallId: existing?.toolcallId ?? part.tool_call_id,
+                    record,
+                    created:
+                        existing?.created === true ||
+                        part.tool_name === "create_table",
+                });
+            }
+        }
+    }
+    return [...byKey.values()];
 }
 
 export function tableResultBody(value: unknown): Record<string, unknown> {

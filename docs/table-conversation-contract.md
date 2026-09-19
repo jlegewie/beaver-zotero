@@ -18,6 +18,14 @@ change when the document changes. Current local metadata is displayed separately
 and refreshed after item notifications and table writes. Opening always targets
 the current snapshot reader. No full table spec enters the chat view.
 
+Table writes (`create_table`, `edit_rows`, `edit_table`, `fill_table`) render as
+cards shaped like the note actions: the header names the tool and the table and
+opens it, the body carries the step summary and any recovery notice. `read_table`
+stays a plain tool row. A terminal answer also lists each table it wrote in the
+end-of-run artifacts list beside the notes it created; those rows come from the
+runs' tool returns, not from agent actions, and fold every write to one table
+into one entry.
+
 `tables` is declared only by the Zotero identity provider in development builds.
 The shared default feature list excludes it. Other chat clients must supply their
 own table views before opting in; provider support alone is insufficient.

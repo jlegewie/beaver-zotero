@@ -16,19 +16,36 @@ const record = {
 };
 
 describe("historical table cards", () => {
-    it("renders without a provider or a full result body", () => {
+    it("renders the step summary without a provider or a full result body", () => {
         const html = renderToStaticMarkup(
             React.createElement(TableResultView, {
                 view: { view_type: "table", record },
             }),
         );
-        expect(html).toContain("Original title");
         expect(html).toContain("Added a column");
-        expect(html).toContain("Open table");
+        expect(html).toContain("3 rows · 2 columns");
         expect(html).toContain("Changes are committed");
-        expect(html).toContain("Retrying chat leaves this table intact");
         expect(html).not.toContain("<table");
         expect(html).not.toContain("Edit table");
+        expect(html).not.toContain("<button");
+    });
+    it("lists the change counters on their own line, singular for one", () => {
+        const html = renderToStaticMarkup(
+            React.createElement(TableResultView, {
+                view: {
+                    view_type: "table",
+                    record: {
+                        ...record,
+                        saved: true,
+                        changes: { rows_added: 1, cells_changed: 9, columns_removed: 0 },
+                    },
+                },
+            }),
+        );
+        expect(html).toContain("3 rows · 2 columns");
+        expect(html).toContain("1 row added · 9 cells changed");
+        expect(html).not.toContain("columns removed");
+        expect(html).not.toContain("Changes are committed");
     });
     it("renders unknown outcomes as inspection instructions", () => {
         const result = {

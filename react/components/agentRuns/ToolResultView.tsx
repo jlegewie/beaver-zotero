@@ -70,7 +70,9 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ result }) => {
         delete body.saved;
     }
     const messages = isTable ? tableResultMessages(body) : [];
-    const notices = messages.map((message, index) => <div key={index} role="status" className="p-2 text-sm">{message}</div>);
+    const notices = messages.map((message, index) => (
+        <div key={index} role="status" className="px-3 py-2 text-sm font-color-secondary">{message}</div>
+    ));
     if (isToolResultView(view)) {
         const fromView = renderFromView(view);
         if (fromView) return <>{fromView}{notices}</>;
