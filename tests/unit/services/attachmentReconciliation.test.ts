@@ -389,6 +389,18 @@ describe('attachment change reconciliation', () => {
         expect(handoff.mock.calls[0][0].map(event => event.id)).toEqual([7, 8, 9]);
     });
 
+    it('invalidates readiness only once when a watcher batch reaches the reconciler', async () => {
+        const notifyAttachments = vi.fn();
+        (Zotero.Beaver as any).background = { searchReadiness: { notifyAttachments } };
+        observer.notify('add', 'item', [7], { 7: { libraryID: 1 } });
+        observer.notify('modify', 'item', [7], { 7: { libraryID: 1 } });
+        expect(notifyAttachments).not.toHaveBeenCalled();
+        await (watcher as any).flush();
+        expect(notifyAttachments).toHaveBeenCalledTimes(1);
+        expect(notifyAttachments.mock.calls[0][0]).toHaveLength(1);
+        delete (Zotero.Beaver as any).background;
+    });
+
     it('does not refresh readiness for known note edits or excluded-library events', async () => {
         const notifyAttachments = vi.fn();
         (Zotero.Beaver as any).background = { searchReadiness: { notifyAttachments } };
@@ -415,7 +427,7 @@ describe('attachment change reconciliation', () => {
         expect(event.extra?.libraryID).toBe(1);
         if (change === 'trash') expect(event.event).toBe('trash');
         else expect(event.extra?.changed).toHaveProperty('deleted');
-        expect(notifyAttachments).toHaveBeenCalled();
+        expect(notifyAttachments).not.toHaveBeenCalled();
         delete (Zotero.Beaver as any).background;
     });
 

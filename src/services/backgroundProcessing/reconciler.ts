@@ -94,7 +94,7 @@ export class ReconcilerService {
     private running = false;
     private activeForce = false;
     private pendingWake = false;
-    private inventoryRetry = false;
+    private discoveryRetryAt = 0;
     private pendingForce = false;
     private scheduledForce = false;
     private admissionScopes = new Map<number, string>();
@@ -109,6 +109,7 @@ export class ReconcilerService {
         this.stopped = false;
         this.nextScanAt = 0;
         this.nextRecoveryAt = 0;
+        this.discoveryRetryAt = 0;
         this.generation += 1;
         for (const pref of ['extensions.zotero.beaver.backgroundProcessingEnabled', 'extensions.zotero.beaver.accessRemoteFiles']) {
             try {
@@ -181,6 +182,8 @@ export class ReconcilerService {
                 ...event,
                 event: event.event === 'modify' && pending?.event === 'add' ? 'add' : event.event,
                 backfill: pending?.backfill === true || event.backfill === true,
+                extra: { ...pending?.extra, ...event.extra,
+                    changed: { ...pending?.extra?.changed, ...event.extra?.changed } },
             });
         }
         this.notify();
@@ -224,6 +227,8 @@ export class ReconcilerService {
                 if (!isBackgroundProcessingLibraryEnabled(ref.libraryID)) continue;
                 const kind = item && safeIsInTrash(item) === false ? getReadableContentKind(item) : null;
                 if (item && !item.isAttachment()) {
+                    if (event.event === 'modify' && !['parentKey', 'deleted'].some(field =>
+                        Object.prototype.hasOwnProperty.call(event.extra?.changed ?? {}, field))) continue;
                     await Zotero.DB.queryAsync('SELECT itemID FROM itemAttachments WHERE parentItemID = ?', [event.id], {
                         onRow: (row: any) => events.push({ id: row.getResultByIndex(0), event: 'modify', backfill: event.backfill }),
                     });
@@ -469,9 +474,8 @@ export class ReconcilerService {
             // Reading activity needs an attachment check, not a whole-library enumeration.
             // Keep the periodic deadline independent of those notifications.
             const readiness = Zotero.Beaver?.background?.searchReadiness;
-            const targetedOnly = targeted && !force && Date.now() < this.nextScanAt;
+            const targetedOnly = (targeted || this.discoveryRetryAt > 0) && !force && Date.now() < this.nextScanAt;
             if (targetedOnly && !readiness?.needsDiscovery()) return;
-            this.inventoryRetry = false;
             const libraries = Zotero.Libraries.getAll().filter((library) =>
                 (library.libraryType === 'user' || library.libraryType === 'group')
                 && isBackgroundProcessingLibraryEnabled(library.libraryID));
@@ -481,11 +485,14 @@ export class ReconcilerService {
             for (const library of libraries) {
                 if (this.cancelled(generation)) return;
                 if (targetedOnly && !readiness?.needsDiscovery(library.libraryID)) continue;
+                if (!force && readiness?.needsDiscovery(library.libraryID)
+                    && (Date.now() < this.discoveryRetryAt || Zotero.Sync?.Runner?.syncInProgress)) continue;
                 await this.reconcileLibrary(db, library.libraryID, force, generation);
             }
-            this.inventoryRetry ||= backgroundProcessingEnabled() && readiness?.needsDiscovery() === true;
-            this.pendingWake ||= this.inventoryRetry;
-            this.nextScanAt = this.inventoryRetry ? 0 : Date.now() + PROCESSING_RECONCILE_INTERVAL_MS;
+            if (backgroundProcessingEnabled() && readiness?.needsDiscovery()) {
+                if (this.discoveryRetryAt <= Date.now()) this.discoveryRetryAt = Date.now() + 5_000;
+            } else this.discoveryRetryAt = 0;
+            if (!targetedOnly) this.nextScanAt = Date.now() + PROCESSING_RECONCILE_INTERVAL_MS;
             Zotero.Beaver?.backgroundExtractor?.notify();
         } catch (error) {
             logger(`ReconcilerService: reconcile failed: ${error}`, 1);
@@ -507,7 +514,7 @@ export class ReconcilerService {
                 const nextScan = this.nextScanAt > now ? this.nextScanAt : now + PROCESSING_RECONCILE_INTERVAL_MS;
                 const delay = wake ? 0 : this.pendingAttachments.size
                     ? Math.max(0, this.retryNotBefore - now)
-                    : Math.max(0, Math.min(nextScan, this.nextRecoveryAt) - now);
+                    : Math.max(0, Math.min(nextScan, this.nextRecoveryAt, this.discoveryRetryAt > now ? this.discoveryRetryAt : Infinity) - now);
                 this.schedule(delay, forceNext);
             }
         }
@@ -618,10 +625,8 @@ export class ReconcilerService {
         };
         await db.upsertProcessingIndexState(state);
         this.admissionScopes.set(libraryId, admissionScope);
-        if (!this.cancelled(generation) && discovery !== undefined && readiness
-            && !readiness.completeDiscovery(libraryId, discovery)) {
-            this.inventoryRetry = true;
-            this.pendingWake = true;
+        if (!this.cancelled(generation) && discovery !== undefined) {
+            readiness?.completeDiscovery(libraryId, discovery);
         }
     }
 

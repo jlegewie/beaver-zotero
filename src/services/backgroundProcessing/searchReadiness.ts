@@ -34,6 +34,11 @@ export function classifyPreparation(row: AttachmentProcessingStateRecord | undef
     return 'pending';
 }
 
+function classificationKey(requirements?: IndexRequirements): string {
+    return JSON.stringify([requirements?.namespace_generation, requirements?.index_version,
+        requirements?.extract_schema_versions]);
+}
+
 /** Library counts cached between durable writes and completed membership passes. */
 export class SearchReadiness {
     private scopeKey = '';
@@ -128,9 +133,13 @@ export class SearchReadiness {
     setRequirements(requirements: IndexRequirements): void {
         this.syncScope();
         if (JSON.stringify(this.requirements) === JSON.stringify(requirements)) return;
+        const classificationChanged = classificationKey(this.requirements) !== classificationKey(requirements);
         this.requirements = requirements;
         this.summary = null;
-        for (const library of this.libraries.values()) this.invalidate(library);
+        if (classificationChanged) {
+            for (const library of this.libraries.values()) this.invalidate(library);
+        }
+        this.publish();
         this.schedule();
     }
 
@@ -176,7 +185,7 @@ export class SearchReadiness {
                         db.getAttachmentReadingErrorsByLibrary(id),
                     ]);
                     this.syncScope();
-                    if (this.requirements !== requirements) return;
+                    if (classificationKey(this.requirements) !== classificationKey(requirements)) return;
                     if (this.disposed || this.libraries.get(id) !== library || library.revision !== revision) continue;
                     const count: Count = { scope_ref: scopeRef, discovery_complete: true,
                         inventory_revision: revision, indexed: 0, pending: 0, unavailable: 0 };

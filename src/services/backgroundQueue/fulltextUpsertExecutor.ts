@@ -220,12 +220,15 @@ export class FulltextUpsertExecutor implements JobExecutor {
         }
 
         if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
-        const acknowledgedRequirements = {
-            ...requirements, namespace_generation: response.namespace_generation ?? null,
+        const currentRequirements = this.api.getCachedRequirements?.() ?? requirements;
+        const acknowledgedRequirements = response.namespace_generation != null
+            && response.namespace_generation < (currentRequirements.namespace_generation ?? 0)
+            ? currentRequirements : {
+            ...currentRequirements, namespace_generation: response.namespace_generation ?? null,
             index_validity: response.namespace_generation && response.chunks_total > 0
                 ? 'current' as const
-                : response.namespace_generation === requirements.namespace_generation
-                    ? requirements.index_validity : 'unknown' as const,
+                : response.namespace_generation === currentRequirements.namespace_generation
+                    ? currentRequirements.index_validity : 'unknown' as const,
         };
         this.api.recordRequirements?.(acknowledgedRequirements);
         Zotero.Beaver?.background?.searchReadiness?.setRequirements(acknowledgedRequirements);

@@ -458,3 +458,49 @@ it('keeps legacy acknowledgements pending instead of inferring their generation'
     expect(classifyPreparation({ ...indexed, upsertRemoteIdentity: identity }, undefined,
         requirements, 'account', 'lLOCAL123', 'LOCAL123')).toBe('pending');
 });
+
+it('reuses counts across validity-only changes and immediately fails closed', async () => {
+    await discover();
+    const counts = service.getSummary()!.libraries;
+    const read = owner.db.getAttachmentProcessingStatesByLibrary;
+    read.mockClear();
+    service.setRequirements({ ...requirements, index_validity: 'unknown' });
+    expect(service.getSummary()).toBeNull();
+    await service.refresh();
+    service.setRequirements(requirements);
+    expect(service.getSummary()!.libraries).toEqual(counts);
+    await service.refresh();
+    expect(read).not.toHaveBeenCalled();
+});
+
+it('keeps a count read in flight through a validity-only change', async () => {
+    service.completeDiscovery(1, service.beginDiscovery(1)!);
+    let resolve!: (value: AttachmentProcessingStateRecord[]) => void;
+    owner.db.getAttachmentProcessingStatesByLibrary.mockImplementation(() => new Promise(r => { resolve = r; }));
+    const refresh = service.refresh();
+    service.setRequirements({ ...requirements, index_validity: 'unknown' });
+    resolve(rows);
+    await refresh;
+    expect(service.getSummary()).toBeNull();
+    service.setRequirements(requirements);
+    expect(service.getSummary()?.libraries[0].indexed).toBe(1);
+    expect(owner.db.getAttachmentProcessingStatesByLibrary).toHaveBeenCalledTimes(1);
+});
+
+it('does not classify later libraries using requirements superseded during a read', async () => {
+    owner.searchableLibraryIds = [1, 2];
+    service.setRequirements(requirements);
+    for (const id of [1, 2]) service.completeDiscovery(id, service.beginDiscovery(id)!);
+    let resolve!: (value: AttachmentProcessingStateRecord[]) => void;
+    owner.db.getAttachmentProcessingStatesByLibrary.mockImplementation(async (id: number) => rows.map(row => ({
+        ...row, upsertRemoteIdentity: { ...row.upsertRemoteIdentity!, index_scope_ref: id === 1 ? 'lLOCAL123' : 'g2' },
+    })));
+    owner.db.getAttachmentProcessingStatesByLibrary.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
+    const refresh = service.refresh();
+    service.setRequirements({ ...requirements, index_version: 4 });
+    resolve(rows);
+    await refresh;
+    await service.refresh();
+    expect(service.getSummary()?.libraries.map(lib => lib.indexed)).toEqual([0, 0]);
+    expect(service.getSummary()?.libraries.map(lib => lib.pending)).toEqual([1, 1]);
+});

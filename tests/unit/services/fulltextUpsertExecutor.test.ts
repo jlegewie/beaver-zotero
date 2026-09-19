@@ -184,6 +184,25 @@ describe('FulltextUpsertExecutor', () => {
         }));
     });
 
+    it.each([2, 3])('does not let a late acknowledgement regress cached validity or generation %s', async currentGeneration => {
+        const initialRequirements = { index_version: 3, extract_schema_versions: { pdf: ['4'], epub: ['2'], snapshot: ['1'] },
+            namespace_generation: 2, index_validity: 'missing' };
+        let cached = initialRequirements;
+        api.requirements.mockResolvedValue(initialRequirements);
+        (api as any).getCachedRequirements = () => cached;
+        const recordRequirements = vi.fn(value => { cached = value; });
+        (api as any).recordRequirements = recordRequirements;
+        // Another completion or requirements read wins while this upload is in flight.
+        api.upsertHash.mockImplementation(async () => {
+            cached = { ...initialRequirements, namespace_generation: currentGeneration, index_validity: 'current' };
+            return { ...response(), chunks_total: 0, namespace_generation: 2 };
+        });
+        expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx)).toMatchObject({ kind: 'complete' });
+        expect(recordRequirements).toHaveBeenCalledWith(expect.objectContaining({
+            namespace_generation: currentGeneration, index_validity: 'current',
+        }));
+    });
+
     it('cleans up without paid access using the frozen remote identity', async () => {
         (Zotero.Beaver as any).hasSearchIndexAccess = false;
         Zotero.Beaver.libraryScopeInitialized = true;

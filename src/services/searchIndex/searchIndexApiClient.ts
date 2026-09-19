@@ -58,11 +58,17 @@ export interface IndexRefsResponse {
 }
 
 export class SearchIndexApiClient extends ApiService {
-    private requirementsCache?: { generation: number | undefined; expires: number; request: Promise<IndexRequirements> };
+    private requirementsCache?: { generation: number | undefined; expires: number; request: Promise<IndexRequirements>; value?: IndexRequirements };
+
+    /** Last resolved requirements for the active account, without a network refresh. */
+    getCachedRequirements(): IndexRequirements | undefined {
+        return this.requirementsCache?.generation === Zotero.Beaver?.account?.getGeneration()
+            ? this.requirementsCache?.value : undefined;
+    }
 
     recordRequirements(requirements: IndexRequirements): void {
         this.requirementsCache = { generation: Zotero.Beaver?.account?.getGeneration(),
-            expires: Date.now() + 5 * 60_000, request: Promise.resolve(requirements) };
+            expires: Date.now() + 5 * 60_000, request: Promise.resolve(requirements), value: requirements };
     }
 
     requirements(): Promise<IndexRequirements> {
@@ -71,9 +77,11 @@ export class SearchIndexApiClient extends ApiService {
             return this.requirementsCache.request;
         }
         const request = this.get<IndexRequirements>(`${SEARCH_INDEX_API_PREFIX}/requirements`);
-        const cache = { generation, expires: Date.now() + 5 * 60_000, request };
+        const cache = { generation, expires: Date.now() + 5 * 60_000, request,
+            value: this.getCachedRequirements() };
         this.requirementsCache = cache;
-        void request.catch(() => { if (this.requirementsCache === cache) this.requirementsCache = undefined; });
+        void request.then(value => { if (this.requirementsCache === cache) cache.value = value; },
+            () => { if (this.requirementsCache === cache) this.requirementsCache = undefined; });
         return request;
     }
 

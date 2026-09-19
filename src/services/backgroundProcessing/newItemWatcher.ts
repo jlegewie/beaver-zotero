@@ -54,10 +54,7 @@ export class NewItemWatcher {
                     this.pending.set(id, change);
                     accepted.push(change);
                 }
-                if (accepted.length) {
-                    Zotero.Beaver?.background?.searchReadiness?.notifyAttachments(accepted);
-                    this.schedule();
-                }
+                if (accepted.length) this.schedule();
             },
         } as any;
         this.observerId = Zotero.Notifier.registerObserver(

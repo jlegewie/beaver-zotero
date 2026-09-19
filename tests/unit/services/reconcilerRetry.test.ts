@@ -178,7 +178,7 @@ describe('ReconcilerService.retryAttachments', () => {
         await expect((reconciler as any).listProcessableAttachments(1)).resolves.toEqual([]);
     });
 
-    it('targets children after parent edits without re-enumerating the library', async () => {
+    it.each([['title', false], ['parentKey', true], ['deleted', true]])('targets parent children only for membership edits: %s', async (field, checkChildren) => {
         await connection.queryAsync('CREATE TABLE items (itemID INTEGER PRIMARY KEY, libraryID INTEGER, key TEXT, clientDateModified TEXT)');
         await connection.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, linkMode INTEGER, contentType TEXT)');
         await connection.queryAsync('CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY)');
@@ -193,16 +193,18 @@ describe('ReconcilerService.retryAttachments', () => {
         const check = vi.spyOn(reconciler as any, 'reconcileAttachment').mockResolvedValue(undefined);
         const scan = vi.spyOn(reconciler as any, 'listProcessableAttachments');
         reconciler.start();
-        reconciler.notifyAttachments([{ id: 10, event: 'modify' }]);
+        reconciler.notifyAttachments([{ id: 10, event: 'modify', extra: { changed: { [field as string]: 'previous' } } }]);
+        reconciler.notifyAttachments([{ id: 10, event: 'modify', extra: { changed: { title: 'previous title' } } }]);
         await (reconciler as any).reconcileNotifiedAttachments(db, (reconciler as any).generation);
-        expect(check).toHaveBeenCalledTimes(1);
-        expect(check.mock.calls[0][1]).toBe(child);
+        expect(check).toHaveBeenCalledTimes(checkChildren ? 1 : 0);
+        if (checkChildren) expect(check.mock.calls[0][1]).toBe(child);
         expect(readiness.requestDiscovery).not.toHaveBeenCalled();
         expect(scan).not.toHaveBeenCalled();
         expect((await (reconciler as any).readLibraryCursor(1)).maxClientDateModified).toBe('2025');
     });
 
-    it('immediately retries inventory rejected after a scope invalidation', async () => {
+    it('backs off rejected discovery while keeping the periodic deadline', async () => {
+        vi.useFakeTimers();
         vi.spyOn(reconciler as any, 'reconcileReadingState').mockResolvedValue(undefined);
         vi.spyOn(reconciler as any, 'readLibraryCursor').mockResolvedValue({ maxClientDateModified: '', attachmentCount: 0 });
         vi.spyOn(reconciler as any, 'listProcessableAttachments').mockResolvedValue([]);
@@ -214,8 +216,46 @@ describe('ReconcilerService.retryAttachments', () => {
         const schedule = vi.spyOn(reconciler as any, 'schedule');
         await (reconciler as any).run(false);
         expect(readiness.completeDiscovery).toHaveBeenCalled();
-        expect(schedule).toHaveBeenLastCalledWith(0, false);
-        expect((reconciler as any).nextScanAt).toBe(0);
+        expect(schedule).toHaveBeenLastCalledWith(5000, false);
+        const deadline = (reconciler as any).nextScanAt;
+        await (reconciler as any).run(false);
+        expect(readiness.completeDiscovery).toHaveBeenCalledTimes(1);
+        expect((reconciler as any).nextScanAt).toBe(deadline);
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(readiness.completeDiscovery).toHaveBeenCalledTimes(2);
+        expect((reconciler as any).nextScanAt).toBe(deadline);
+        reconciler.stop();
+        vi.useRealTimers();
+    });
+
+    it('defers discovery during sync and leaves other libraries on their periodic deadline', async () => {
+        vi.useFakeTimers();
+        const readiness = { needsDiscovery: (id?: number) => id === undefined || id === 1,
+            requestDiscovery: vi.fn(), notifyAttachments: vi.fn() };
+        (Zotero.Beaver as any).background = { searchReadiness: readiness, beginProcessingDiscovery: vi.fn() };
+        vi.stubGlobal('Zotero', { ...Zotero, Sync: { Runner: { syncInProgress: true } },
+            Libraries: { getAll: () => [{ libraryID: 1, libraryType: 'user' }, { libraryID: 2, libraryType: 'group' }] } });
+        const scan = vi.spyOn(reconciler as any, 'reconcileLibrary').mockResolvedValue(undefined);
+        (Zotero.Beaver as any).searchableLibraryIds = [1, 2];
+        vi.spyOn(reconciler as any, 'reconcileNotifiedAttachments').mockImplementation(async () => {
+            (reconciler as any).pendingAttachments.clear();
+        });
+        reconciler.start();
+        const deadline = Date.now() + 30_000;
+        (reconciler as any).nextScanAt = deadline;
+        try {
+            reconciler.notifyAttachments([{ id: 1, event: 'add' }]);
+            await (reconciler as any).run(false);
+            expect(scan).not.toHaveBeenCalled();
+            await vi.advanceTimersByTimeAsync(5000);
+            expect(scan).not.toHaveBeenCalled();
+            Zotero.Sync.Runner.syncInProgress = false;
+            await vi.advanceTimersByTimeAsync(5000);
+            expect(scan.mock.calls.map(call => call[1])).toEqual([1]);
+            expect((reconciler as any).nextScanAt).toBe(deadline);
+            await vi.advanceTimersByTimeAsync(20_000);
+            expect(scan.mock.calls.some(call => call[1] === 2)).toBe(true);
+        } finally { reconciler.stop(); vi.useRealTimers(); }
     });
 
     it('handles parent and child deletes without invalidating the library', async () => {
