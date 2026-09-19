@@ -6,9 +6,6 @@ import type {
 } from '../database';
 import type { DocumentCacheStats } from '../documentCache';
 import type { ProcessingIssueSummary } from './issues';
-import type { IndexStatusResponse } from '../searchIndex/searchIndexApiClient';
-import { searchIndexApiClient } from '../searchIndex/searchIndexApiClient';
-import { getZoteroUserIdentifier } from '../../utils/zoteroUtils';
 import { getUncachedCandidates } from './cachePreparation';
 
 /** Entitlements the snapshot's shape depends on. */
@@ -18,8 +15,6 @@ export interface ProcessingStatusEntitlements {
 }
 
 export interface ProcessingStatusOptions {
-    /** Fetch cloud-index coverage (only meaningful with search-index access). */
-    includeCoverage?: boolean;
     /**
      * Fetch the recent-failures list (three-way union across tables) and the
      * reason-grouped issues the preferences UI renders.
@@ -56,7 +51,7 @@ export interface BackgroundWorkerSnapshot {
 
 /**
  * One background-processing status read: queue counts, ledger aggregates,
- * failures and reason-grouped issues, worker activity, cloud coverage and
+ * failures and reason-grouped issues, worker activity and
  * local cache size.
  *
  * Entitlements arrive as parameters rather than being read here so the React
@@ -74,14 +69,13 @@ export async function collectProcessingStatus(
     failures: BackgroundProcessingFailureSummary[] | undefined;
     issues: ProcessingIssueSummary[] | undefined;
     worker: BackgroundWorkerSnapshot;
-    coverage: IndexStatusResponse | null | undefined;
     documentCache: DocumentCacheStats | null;
 }> {
     const db = Zotero.Beaver?.db;
     if (!db) throw new Error('db not available');
     const { hasOcrAccess, hasSearchIndexAccess } = entitlements;
     const progress = await Zotero.Beaver?.background?.getProcessingProgress(options.libraryId) ?? null;
-    const [queue, ledger, failures, issues, coverage, documentCache] = await Promise.all([
+    const [queue, ledger, failures, issues, documentCache] = await Promise.all([
         db.getBackgroundQueueStats(Date.now()),
         db.getAttachmentProcessingAggregates(options.libraryId, {
             ocr: hasOcrAccess,
@@ -92,10 +86,6 @@ export async function collectProcessingStatus(
             : Promise.resolve(undefined),
         options.includeFailures
             ? db.getProcessingIssueCounts(entitlements)
-            : Promise.resolve(undefined),
-        options.includeCoverage && hasSearchIndexAccess
-            ? searchIndexApiClient.status(getZoteroUserIdentifier().localUserKey)
-                .catch(() => null)
             : Promise.resolve(undefined),
         Zotero.Beaver?.documentCache?.getStats().catch(() => null)
             ?? Promise.resolve(null),
@@ -126,5 +116,5 @@ export async function collectProcessingStatus(
         drainNow: extractor?.isImmediateDrainRequested?.() ?? false,
         backlogGateOpen: extractor?.isBacklogGateOpen?.() ?? false,
     };
-    return { progress, queue, ledger, failures, issues, worker, coverage, documentCache };
+    return { progress, queue, ledger, failures, issues, worker, documentCache };
 }

@@ -830,7 +830,7 @@ export class OcrExecutor implements JobExecutor {
     private failureOutcome(job: ResolvedJob, error: OcrError | null | undefined): JobOutcome {
         if (error?.kind === 'permanent') {
             logger(`OcrExecutor: ${job.sourceKey} OCR backend permanent failure: ${error.code}: ${error.message}`, 2);
-            return this.terminal(job, OCR_TERMINAL_FAILED, `${error.code}: ${error.message}`);
+            return this.terminal(job, error.code || OCR_TERMINAL_FAILED, `${error.code}: ${error.message}`);
         }
         const detail = error ? `${error.code}: ${error.message}` : 'unknown';
         logger(`OcrExecutor: ${job.sourceKey} OCR backend transient failure: ${detail}`, 2);

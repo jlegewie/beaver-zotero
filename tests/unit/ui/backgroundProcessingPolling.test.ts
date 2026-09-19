@@ -15,7 +15,7 @@ vi.mock('../../../react/atoms/profile', async () => {
     return { accountGenerationAtom: atom(1), hasOcrAccessAtom: atom(false), hasSearchIndexAccessAtom: atom(true) };
 });
 function Consumer() {
-    useBackgroundProcessingStatus({ includeCoverage: true, includeFailures: true, pollIntervalMs: 1000 });
+    useBackgroundProcessingStatus({ includeFailures: true, pollIntervalMs: 1000 });
     return null;
 }
 function GeneralStatusConsumer() {
@@ -23,7 +23,7 @@ function GeneralStatusConsumer() {
     return null;
 }
 beforeEach(() => { vi.clearAllMocks(); collect.mockReset(); coverage.mockReset(); });
-it('updates local progress while coverage is slow and preserves coverage after its own failure', async () => {
+it('polls local progress without requesting remote coverage', async () => {
     vi.useFakeTimers();
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     const previous = Zotero.Beaver;
@@ -31,25 +31,14 @@ it('updates local progress while coverage is slow and preserves coverage after i
     const store = createStore();
     const snapshot = { ...store.get(backgroundProcessingStatusAtom), documentCache: null };
     collect.mockResolvedValue(snapshot);
-    let resolve!: (value: any) => void;
-    coverage.mockReturnValueOnce(new Promise(done => { resolve = done; }));
-    coverage.mockResolvedValue(null);
     const root = createRoot(document.createElement('div'));
     try {
         await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(Consumer))));
         expect(store.get(backgroundProcessingStatusAtom).updatedAt).not.toBeNull();
         await act(async () => vi.advanceTimersByTimeAsync(5000));
         expect(collect).toHaveBeenCalledTimes(6);
-        expect(coverage).toHaveBeenCalledTimes(1);
-        expect(collect).toHaveBeenLastCalledWith({ includeCoverage: false, includeFailures: true });
-        const remote = { namespace_exists: true, approx_row_count: 100, documents: [] };
-        await act(async () => resolve(remote));
-        const confirmedAt = store.get(backgroundProcessingStatusAtom).coverageUpdatedAt;
-        await act(async () => vi.advanceTimersByTimeAsync(60_000));
-        expect(store.get(backgroundProcessingStatusAtom)).toMatchObject({
-            coverage: remote, coverageUpdatedAt: confirmedAt,
-            coverageError: 'Could not check search coverage.', error: null,
-        });
+        expect(coverage).not.toHaveBeenCalled();
+        expect(collect).toHaveBeenLastCalledWith({ includeFailures: true });
     } finally {
         act(() => root.unmount());
         Zotero.Beaver = previous;

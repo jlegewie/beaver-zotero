@@ -178,7 +178,7 @@ export function isRetryableProcessingIssue(reason: ProcessingIssueReason): boole
     return RETRYABLE_PROCESSING_ISSUE_REASONS.includes(reason);
 }
 
-const FILE_UNAVAILABLE_CODES = ['file_missing', 'download_failed', 'read_failed'];
+const FILE_UNAVAILABLE_CODES = ['file_missing', 'remote_download_denied', 'download_failed', 'read_failed'];
 const TOO_LARGE_CODES = ['file_too_large', 'too_many_pages'];
 const NO_TEXT_CODES = ['no_text_layer', 'empty_document', 'insufficient_text'];
 

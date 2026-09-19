@@ -10,7 +10,6 @@ import { tryGetWindowRuntime } from "../runtime/windowRuntime";
 
 export function useBackgroundProcessingStatus(
     options: {
-        includeCoverage?: boolean;
         includeFailures?: boolean;
         pollIntervalMs?: number;
     } = {},
@@ -45,7 +44,6 @@ export function useBackgroundProcessingStatus(
                 try {
                     const result =
                         await Zotero.Beaver.background!.collectStatus({
-                            includeCoverage: false,
                             includeFailures: options.includeFailures,
                         });
                     if (epoch !== generation.current || !result) return;
@@ -66,13 +64,6 @@ export function useBackgroundProcessingStatus(
                         ledger,
                         worker,
                         documentCache,
-                        coverage: hasSearchAccess ? previous.coverage : null,
-                        coverageUpdatedAt: hasSearchAccess
-                            ? previous.coverageUpdatedAt
-                            : null,
-                        coverageError: hasSearchAccess
-                            ? previous.coverageError
-                            : null,
                         failures: failures ?? previous.failures,
                         issues: issues ?? previous.issues,
                         issuesUpdatedAt:
@@ -135,39 +126,6 @@ export function useBackgroundProcessingStatus(
             if (timer !== undefined) clearTimeout(timer);
         };
     }, [options.pollIntervalMs, refresh]);
-
-    useEffect(() => {
-        if (!options.includeCoverage || !hasSearchAccess) return;
-        let cancelled = false;
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        const poll = async () => {
-            const coverage = await Zotero.Beaver?.background?.collectCoverage();
-            if (cancelled) return;
-            if (coverage !== undefined)
-                setStatus((previous) => ({
-                    ...previous,
-                    coverage: coverage ?? previous.coverage,
-                    coverageUpdatedAt: coverage
-                        ? Date.now()
-                        : previous.coverageUpdatedAt,
-                    coverageError:
-                        coverage === null
-                            ? "Could not check search coverage."
-                            : null,
-                }));
-            timer = setTimeout(() => void poll(), 60_000);
-        };
-        void poll();
-        return () => {
-            cancelled = true;
-            if (timer !== undefined) clearTimeout(timer);
-        };
-    }, [
-        accountGeneration,
-        options.includeCoverage,
-        hasSearchAccess,
-        setStatus,
-    ]);
 
     return refresh;
 }

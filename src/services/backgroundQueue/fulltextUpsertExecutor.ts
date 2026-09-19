@@ -220,6 +220,12 @@ export class FulltextUpsertExecutor implements JobExecutor {
         }
 
         if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+        const acknowledgedRequirements = {
+            ...requirements, index_incarnation: response.index_incarnation ?? null,
+            index_validity: response.index_incarnation ? 'current' as const : 'unknown' as const,
+        };
+        this.api.recordRequirements?.(acknowledgedRequirements);
+        Zotero.Beaver?.background?.searchReadiness?.setRequirements(acknowledgedRequirements);
         await ctx.db.clearDocumentProcessingFailure(
             row.structuredDocumentHash,
             'fulltext_upsert',
@@ -229,7 +235,7 @@ export class FulltextUpsertExecutor implements JobExecutor {
             zoteroKey: row.zoteroKey,
             structuredDocumentHash: row.structuredDocumentHash,
             upsertIndexVersion: String(response.index_version),
-            remoteIdentity,
+            remoteIdentity: remoteIdentity ? { ...remoteIdentity, index_incarnation: response.index_incarnation ?? null } : undefined,
             expectedUpsertStatus: row.upsertStatus,
             expectedUpsertIndexVersion: row.upsertIndexVersion,
             expectedExtractStatus: row.extractStatus,

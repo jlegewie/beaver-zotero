@@ -33,6 +33,11 @@ vi.mock("../../../src/services/instanceEmbeddingIndex", () => ({
 vi.mock("../../../src/services/backgroundProcessing/statusSnapshot", () => ({
     collectProcessingStatus: mocks.collect,
 }));
+vi.mock('../../../src/utils/zoteroUtils', async importOriginal => ({
+    ...await importOriginal<typeof import('../../../src/utils/zoteroUtils')>(),
+    getIndexScopeRef: () => 'lLOCAL123',
+    getZoteroUserIdentifier: () => ({ localUserKey: 'LOCAL123' }),
+}));
 import { InstanceBackground } from "../../../src/services/instanceBackground";
 import { BeaverDB } from '../../../src/services/database';
 import { MockDBConnection } from '../../mocks/mockDBConnection';

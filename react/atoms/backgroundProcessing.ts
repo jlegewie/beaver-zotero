@@ -5,7 +5,6 @@ import type {
     BackgroundQueueStats,
     BackgroundProcessingFailureSummary,
 } from '../../src/services/database';
-import type { IndexStatusResponse } from '../../src/services/searchIndex/searchIndexApiClient';
 import type { DocumentCacheStats } from '../../src/services/documentCache';
 import type { ProcessingIssueSummary } from '../../src/services/backgroundProcessing/issues';
 import type { BackgroundWorkerSnapshot } from '../../src/services/backgroundProcessing/statusSnapshot';
@@ -14,9 +13,6 @@ export interface BackgroundProcessingStatus {
     progress: ProcessingProgress | null;
     queue: BackgroundQueueStats;
     ledger: AttachmentProcessingAggregates;
-    coverage: IndexStatusResponse | null;
-    coverageUpdatedAt: number | null;
-    coverageError: string | null;
     failures: BackgroundProcessingFailureSummary[];
     /** Attachments that could not be processed, grouped by user-facing reason. */
     issues: ProcessingIssueSummary[];
@@ -57,9 +53,6 @@ export const EMPTY_BACKGROUND_PROCESSING_STATUS: BackgroundProcessingStatus = {
     progress: null,
     queue: EMPTY_BACKGROUND_QUEUE_STATS,
     ledger: EMPTY_ATTACHMENT_PROCESSING_AGGREGATES,
-    coverage: null,
-    coverageUpdatedAt: null,
-    coverageError: null,
     failures: [],
     issues: [],
     issuesUpdatedAt: null,

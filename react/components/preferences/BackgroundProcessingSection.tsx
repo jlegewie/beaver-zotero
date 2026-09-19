@@ -145,22 +145,6 @@ const ProcessingStatusRow: React.FC<{
  * poll keeps the last successful check when a later one fails, so a failure
  * is named ahead of that stale result rather than hidden behind it.
  */
-function searchIndexStatusLine(status: BackgroundProcessingStatus): string {
-    const known = status.coverage
-        ? (status.coverage.namespace_exists
-            ? 'Full-text search index available.'
-            : 'Full-text search index not built yet.')
-        : null;
-    const checked = known && status.coverageUpdatedAt
-        ? ` Last checked ${new Date(status.coverageUpdatedAt).toLocaleString()}.`
-        : '';
-    if (status.coverageError) {
-        return 'The full-text search index could not be checked.'
-            + (known ? ` Last known status: ${known}${checked}` : '');
-    }
-    return known ? known + checked : 'Checking the full-text search index…';
-}
-
 /** True while the local metadata search index has something to fix. */
 function hasMetadataIndexProblem(indexState: EmbeddingIndexState): boolean {
     return indexState.failedItems > 0 || (indexState.status === 'error' && Boolean(indexState.error));
@@ -213,7 +197,6 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
     );
     const working = (status.worker?.inFlight ?? 0) > 0 || status.worker?.drainNow === true;
     const refresh = useBackgroundProcessingStatus({
-        includeCoverage: hasSearchAccess,
         includeFailures: true,
         // Poll faster while files are being processed so the bar keeps up.
         pollIntervalMs: working ? 4_000 : 15_000,
@@ -319,7 +302,6 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                     description={<>{locked
                         ? 'Background processing is required for full-text search and OCR. Files process after 30 seconds without keyboard or mouse activity on your computer. Use Start now to process immediately, or Stop to return to idle processing.'
                         : 'Process files ahead of time while your computer is idle for faster responses.'}
-                        {hasSearchAccess && <span className="display-flex mt-1">{searchIndexStatusLine(status)}</span>}
                     </>}
                     onClick={() => updateEnabled(!enabled)}
                     control={<input

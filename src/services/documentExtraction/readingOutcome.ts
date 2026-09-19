@@ -3,7 +3,7 @@ import { isLibraryInScope } from '../libraryScope';
 
 /** Document verdicts only: cancellation, worker availability and request limits are not file failures. */
 const READING_ERRORS = new Set([
-    'file_missing', 'download_failed', 'read_failed', 'file_too_large',
+    'file_missing', 'remote_download_denied', 'download_failed', 'read_failed', 'file_too_large',
     'encrypted', 'invalid_pdf', 'no_text_layer', 'empty_document',
     'insufficient_text', 'too_many_pages', 'pdf_too_complex', 'extraction_failed',
 ]);

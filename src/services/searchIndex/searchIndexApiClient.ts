@@ -5,6 +5,8 @@ import type { DocumentExtractResult } from '@beaver/agent-core/extract/document/
 export const SEARCH_INDEX_API_PREFIX = '/api/v1/index';
 
 export interface IndexRequirements {
+    index_validity?: 'current' | 'missing' | 'unknown';
+    index_incarnation?: string | null;
     index_version: number;
     extract_schema_versions: Record<'pdf' | 'epub' | 'snapshot', string[]>;
 }
@@ -32,6 +34,7 @@ export interface IndexUpsertRequest {
 }
 
 export interface IndexUpsertResponse {
+    index_incarnation?: string | null;
     status: 'completed' | 'tagged' | 'accepted';
     namespace_ready: boolean;
     chunks_total: number;
@@ -78,6 +81,11 @@ export interface IndexStatusResponse {
 
 export class SearchIndexApiClient extends ApiService {
     private requirementsCache?: { generation: number | undefined; expires: number; request: Promise<IndexRequirements> };
+
+    recordRequirements(requirements: IndexRequirements): void {
+        this.requirementsCache = { generation: Zotero.Beaver?.account?.getGeneration(),
+            expires: Date.now() + 5 * 60_000, request: Promise.resolve(requirements) };
+    }
 
     requirements(): Promise<IndexRequirements> {
         const generation = Zotero.Beaver?.account?.getGeneration();

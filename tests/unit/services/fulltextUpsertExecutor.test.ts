@@ -154,6 +154,15 @@ describe('FulltextUpsertExecutor', () => {
         await connection.closeDatabase();
     });
 
+    it('persists the server incarnation with a successful acknowledgement', async () => {
+        Zotero.Beaver.account = { getGeneration: () => 1,
+            getSnapshot: () => ({ session: { user: { id: 'owner' } } }) } as any;
+        api.upsertHash.mockResolvedValue({ ...response('tagged'), index_incarnation: 'epoch' });
+        expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx)).toMatchObject({ kind: 'complete' });
+        expect((await db.getAttachmentProcessingState(1, record.zoteroKey))?.upsertRemoteIdentity)
+            .toMatchObject({ index_account_id: 'owner', index_incarnation: 'epoch' });
+    });
+
     it('cleans up without paid access using the frozen remote identity', async () => {
         (Zotero.Beaver as any).hasSearchIndexAccess = false;
         Zotero.Beaver.libraryScopeInitialized = true;

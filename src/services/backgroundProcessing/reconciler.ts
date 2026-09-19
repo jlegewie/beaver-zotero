@@ -56,6 +56,7 @@ const IDLE_THRESHOLD_MS = 30_000;
  */
 const RECOVERABLE_AVAILABILITY_ERRORS = [
     'file_missing',
+    'remote_download_denied',
     'download_failed',
     'read_failed',
 ];
@@ -86,9 +87,11 @@ export class ReconcilerService {
     private stopped = true;
     private nextScanAt = 0;
     private pendingAttachments = new Map<number, AttachmentChange>();
+    private inventoryChangeFence?: number;
     private running = false;
     private activeForce = false;
     private pendingWake = false;
+    private inventoryRetry = false;
     private pendingForce = false;
     private scheduledForce = false;
     private admissionScopes = new Map<number, string>();
@@ -103,11 +106,19 @@ export class ReconcilerService {
         this.stopped = false;
         this.nextScanAt = 0;
         this.generation += 1;
-        for (const pref of ['extensions.zotero.beaver.backgroundProcessingEnabled']) {
+        for (const pref of ['extensions.zotero.beaver.backgroundProcessingEnabled', 'extensions.zotero.beaver.accessRemoteFiles']) {
             try {
                 this.prefObservers.push(Zotero.Prefs.registerObserver(
                     pref,
-                    () => this.notify(),
+                    () => {
+                        if (pref.endsWith('.accessRemoteFiles')) {
+                            Zotero.Beaver?.background?.searchReadiness?.invalidateInventory();
+                            if (this.running) {
+                                this.pendingForce = true;
+                                this.pendingWake = true;
+                            } else this.schedule(0, true);
+                        } else this.notify();
+                    },
                     true,
                 ));
             } catch (error) {
@@ -154,6 +165,7 @@ export class ReconcilerService {
     /** Notifications are hints, never evidence that file content changed. */
     notifyAttachments(events: AttachmentChange[]): void {
         if (this.stopped) return;
+        this.inventoryChangeFence = Zotero.Beaver?.background?.searchReadiness?.beginChanges();
         for (const event of events) {
             const pending = this.pendingAttachments.get(event.id);
             // Watcher batches can overlap a running pass; retain import intent
@@ -169,6 +181,7 @@ export class ReconcilerService {
 
     private async reconcileNotifiedAttachments(db: QueueDB, generation: number): Promise<void> {
         const events = [...this.pendingAttachments.values()];
+        const inventoryFence = this.inventoryChangeFence;
         this.pendingAttachments.clear();
         // One new supported attachment in a 500ms quiet notification batch is
         // interactive. Multiple attachments (including individually emitted adds)
@@ -180,10 +193,13 @@ export class ReconcilerService {
             if (item && isBackgroundProcessingLibraryEnabled(item.libraryID)
                 && getReadableContentKind(item)) addedAttachments.push(event.id);
         }
+        const visited = new Set<number>();
         for (const event of events) {
+            if (visited.has(event.id)) continue;
+            visited.add(event.id);
             if (this.cancelled(generation)) return;
+            let ref = event.extra;
             try {
-                let ref = event.extra;
                 if (event.event !== 'delete') {
                     const identities: Array<{ libraryID: number; key: string }> = [];
                     await Zotero.DB.queryAsync('SELECT libraryID, key FROM items WHERE itemID = ? LIMIT 1', [event.id], {
@@ -196,6 +212,14 @@ export class ReconcilerService {
                 if (item && item.parentID) await Zotero.Items.getAsync(item.parentID);
                 if (!isBackgroundProcessingLibraryEnabled(ref.libraryID)) continue;
                 const kind = item && safeIsInTrash(item) === false ? getReadableContentKind(item) : null;
+                if (item && !item.isAttachment()) {
+                    await Zotero.DB.queryAsync('SELECT itemID FROM itemAttachments WHERE parentItemID = ?', [event.id], {
+                        onRow: (row: any) => events.push({ id: row.getResultByIndex(0), event: 'modify', backfill: event.backfill }),
+                    });
+                    continue;
+                }
+                Zotero.Beaver?.background?.searchReadiness?.updateAttachment(ref.libraryID, ref.key,
+                    kind === 'pdf' || kind === 'epub' || kind === 'snapshot');
                 if (kind === 'text') continue;
                 if (!item || (kind !== 'pdf' && kind !== 'epub' && kind !== 'snapshot')) {
                     await this.removeAttachment(db, ref.libraryID, ref.key);
@@ -210,8 +234,15 @@ export class ReconcilerService {
                     await db.enqueueBackgroundJobs(jobs);
                 }
             } catch (error) {
+                const readiness = Zotero.Beaver?.background?.searchReadiness;
+                if (ref?.libraryID) readiness?.invalidateLibrary(ref.libraryID);
+                else readiness?.invalidateInventory();
+                this.nextScanAt = 0;
                 logger(`ReconcilerService: attachment ${event.id} check failed: ${error}`, 2);
             }
+        }
+        if (events.length && inventoryFence !== undefined) {
+            Zotero.Beaver?.background?.searchReadiness?.completeChanges(inventoryFence);
         }
     }
 
@@ -301,6 +332,7 @@ export class ReconcilerService {
                 // The original scan observation can remain after OCR prepares the text.
                 // It must not turn a subsequent index retry into another extraction.
                 const unresolvedReadingError = Boolean(readingError)
+                    && (!ocrFailed || ['file_missing', 'remote_download_denied', 'download_failed', 'read_failed'].includes(readingError!))
                     && !(readingError === 'ocr_required' && row.ocrStatus === 'done');
                 const restartExtraction = unresolvedReadingError || extractFailed
                     || (ocrFailed && (
@@ -403,6 +435,7 @@ export class ReconcilerService {
         this.running = true;
         this.activeForce = force;
         const generation = this.generation;
+        const membershipFence = Zotero.Beaver?.background?.searchReadiness?.membershipFence();
         let finishDiscovery: (() => Promise<void>) | undefined;
         try {
             finishDiscovery = await Zotero.Beaver?.background?.beginProcessingDiscovery();
@@ -419,6 +452,7 @@ export class ReconcilerService {
             // Reading activity needs an attachment check, not a whole-library enumeration.
             // Keep the periodic deadline independent of those notifications.
             if (targeted && !force && Date.now() < this.nextScanAt) return;
+            this.inventoryRetry = false;
             const libraries = Zotero.Libraries.getAll().filter((library) =>
                 (library.libraryType === 'user' || library.libraryType === 'group')
                 && isBackgroundProcessingLibraryEnabled(library.libraryID));
@@ -427,9 +461,18 @@ export class ReconcilerService {
             }
             for (const library of libraries) {
                 if (this.cancelled(generation)) return;
-                await this.reconcileLibrary(db, library.libraryID, force, generation);
+                try {
+                    await this.reconcileLibrary(db, library.libraryID, force, generation);
+                } catch (error) {
+                    Zotero.Beaver?.background?.searchReadiness?.invalidateLibrary(library.libraryID);
+                    throw error;
+                }
             }
-            this.nextScanAt = Date.now() + PROCESSING_RECONCILE_INTERVAL_MS;
+            if (!this.cancelled(generation) && !this.inventoryRetry && !this.pendingAttachments.size
+                && membershipFence !== undefined) {
+                Zotero.Beaver?.background?.searchReadiness?.completeChanges(membershipFence);
+            }
+            this.nextScanAt = this.inventoryRetry ? 0 : Date.now() + PROCESSING_RECONCILE_INTERVAL_MS;
             Zotero.Beaver?.backgroundExtractor?.notify();
         } catch (error) {
             logger(`ReconcilerService: reconcile failed: ${error}`, 1);
@@ -470,7 +513,9 @@ export class ReconcilerService {
         const previous = await db.getProcessingIndexState(libraryId);
         const safetyDiffDue = !!previous
             && Date.now() - previous.lastScanTimestamp >= FULL_DIFF_SAFETY_INTERVAL_MS;
-        const fullDiffDue = force || !previous || safetyDiffDue;
+        const fullDiffDue = force || !previous || safetyDiffDue
+            || (Zotero.Beaver?.background?.searchReadiness != null
+                && !Zotero.Beaver.background.searchReadiness.hasInventory(libraryId));
         const admissionScope = JSON.stringify([
             Zotero.Beaver?.account?.getGeneration(),
             Zotero.Beaver?.hasOcrAccess,
@@ -490,6 +535,8 @@ export class ReconcilerService {
         const idleForStats = force || getSystemIdleTimeMs() >= IDLE_THRESHOLD_MS;
         if (!cursorChanged && safetyDiffDue && !idleForStats && !admissionChanged) return;
         const statFiles = force || (safetyDiffDue && idleForStats);
+        Zotero.Beaver?.background?.searchReadiness?.invalidateLibrary(libraryId);
+        const inventoryFence = Zotero.Beaver?.background?.searchReadiness?.discoveryFence();
         const items = await this.listProcessableAttachments(libraryId);
         const ledgerRows = await db.getAttachmentProcessingStatesByLibrary(libraryId);
         const ledgerByKey = new Map(ledgerRows.map((row) => [row.zoteroKey, row]));
@@ -538,6 +585,12 @@ export class ReconcilerService {
         };
         await db.upsertProcessingIndexState(state);
         this.admissionScopes.set(libraryId, admissionScope);
+        if (!this.cancelled(generation) && inventoryFence !== undefined) {
+            if (Zotero.Beaver?.background?.searchReadiness?.publishInventory(libraryId, liveKeys, inventoryFence) === false) {
+                this.inventoryRetry = true;
+                this.pendingWake = true;
+            }
+        }
     }
 
     private async reconcileAttachment(
@@ -630,7 +683,7 @@ export class ReconcilerService {
                     libraryId: item.libraryID,
                     zoteroKey: item.key,
                     status: 'skipped',
-                    error: source.code,
+                    error: source.code === 'file_missing' && source.remoteAvailable ? 'remote_download_denied' : source.code,
                     attemptedAt,
                     extractionSource: observation?.identity ?? null,
                 });
@@ -725,7 +778,7 @@ export class ReconcilerService {
         const rows: LibraryCursor[] = [];
         await Zotero.DB.queryAsync(
             `SELECT
-                MAX(I.clientDateModified),
+                MAX(CASE WHEN IA.itemID IS NOT NULL THEN I.clientDateModified END),
                 SUM(CASE WHEN IA.itemID IS NOT NULL
                     AND IA.linkMode != ?
                     AND (LOWER(COALESCE(IA.contentType, '')) IN (
@@ -767,9 +820,7 @@ export class ReconcilerService {
             { onRow: (row: any) => ids.push(row.getResultByIndex(0)) },
         );
         if (ids.length === 0) return [];
-        const items = (await Zotero.Items.getAsync(ids)).filter(
-            (item): item is Zotero.Item => !!item && safeIsInTrash(item) !== true,
-        );
-        return items;
+        const items = await Zotero.Items.getAsync(ids);
+        return items.filter((item): item is Zotero.Item => !!item && safeIsInTrash(item) !== true);
     }
 }

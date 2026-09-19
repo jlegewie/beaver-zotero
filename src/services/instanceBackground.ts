@@ -1,6 +1,5 @@
+import { SearchReadiness } from "./backgroundProcessing/searchReadiness";
 import type { ProcessingProgress } from "./backgroundProcessing/progress";
-import { searchIndexApiClient } from "./searchIndex/searchIndexApiClient";
-import { getZoteroUserIdentifier } from "../utils/zoteroUtils";
 import {
     collectProcessingStatus,
     type ProcessingStatusOptions,
@@ -23,6 +22,7 @@ import { logger } from "@beaver/agent-core/platform/logger";
 
 /** Owns background lane registrations, scope reconciliation and UI projections. */
 export class InstanceBackground {
+    readonly searchReadiness = new SearchReadiness();
     private unsubscribe?: () => void;
     private cleanups: (() => void | Promise<void>)[] = [];
     private key = "";
@@ -202,26 +202,6 @@ export class InstanceBackground {
         };
     }
 
-    /** Remote coverage has its own request lifetime and never blocks local progress. */
-    async collectCoverage() {
-        const owner = Zotero.Beaver;
-        const generation = owner.account?.getGeneration();
-        if (!owner.hasSearchIndexAccess) return undefined;
-        const revision = owner.account?.getSnapshot().revision;
-        let coverage;
-        try {
-            coverage = await searchIndexApiClient.status(
-                getZoteroUserIdentifier().localUserKey,
-            );
-        } catch {
-            coverage = null;
-        }
-        return owner.account?.getGeneration() === generation &&
-            owner.account?.getSnapshot().revision === revision
-            ? coverage
-            : undefined;
-    }
-
     claimVersionNotifications(): string[] {
         const versions = getPendingVersionNotifications();
         clearPendingVersionNotifications();
@@ -279,6 +259,8 @@ export class InstanceBackground {
         this.progressUnsubscribe = Zotero.Beaver.db?.subscribeProcessingChanges(
             this.statusChanged,
         );
+        const unsubscribeReadiness = Zotero.Beaver.db?.subscribeReadinessChanges(this.searchReadiness.changed);
+        if (unsubscribeReadiness) this.activityUnsubscribes.push(unsubscribeReadiness);
         for (const event of [
             "background-worker:status",
             "background-job:done",
@@ -403,6 +385,7 @@ export class InstanceBackground {
         }
     }
     async dispose(): Promise<void> {
+        this.searchReadiness.dispose();
         this.disposed = true;
         this.progressUnsubscribe?.();
         for (const unsubscribe of this.activityUnsubscribes.splice(0))

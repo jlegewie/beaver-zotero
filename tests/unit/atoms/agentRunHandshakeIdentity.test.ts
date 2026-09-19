@@ -50,12 +50,16 @@ vi.mock('../../../src/beaver-extract', () => ({
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
 import { store } from '../../../react/store';
-import { sendWSMessageAtom } from '../../../react/atoms/agentRunAtoms';
+import { sendWSMessageAtom, isWSChatPendingAtom, isWSReadyAtom } from '../../../react/atoms/agentRunAtoms';
+import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { sessionAtom } from '../../../react/atoms/auth';
 
 describe('sendWSMessageAtom connect() identity', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        store.set(activeRunAtom, null);
+        store.set(isWSChatPendingAtom, false);
+        store.set(isWSReadyAtom, false);
         connectMock.mockResolvedValue(undefined);
         resolveClientIdentityMock.mockReturnValue(FIXTURE_IDENTITY);
         store.set(sessionAtom, { user: { id: 'user-1' } } as any);
@@ -74,4 +78,20 @@ describe('sendWSMessageAtom connect() identity', () => {
         // copy needed since the seam already builds a fresh object per call.
         expect(zoteroInstance).toBe(FIXTURE_IDENTITY.zoteroInstance);
     });
+    it('refreshes readiness at the ready handshake immediately before dispatch', async () => {
+        const previous = Zotero.Beaver;
+        let current: any = { version: 2, scope_revision: 1 };
+        (Zotero as any).Beaver = { ...previous, background: { searchReadiness: { getSummary: () => current } } };
+        connectMock.mockImplementation(async (request, callbacks) => {
+            expect(request.search_readiness.scope_revision).toBe(1);
+            current = { version: 2, scope_revision: 2 };
+            callbacks.onReady({});
+            expect(request.search_readiness).toBe(current);
+        });
+        try {
+            await store.set(sendWSMessageAtom, 'hello');
+            expect(connectMock).toHaveBeenCalledTimes(1);
+        } finally { Zotero.Beaver = previous; }
+    });
+
 });

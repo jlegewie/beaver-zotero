@@ -2335,11 +2335,19 @@ async function executeWSRequest(
         );
     };
 
+    const callbacks = createWSCallbacks(set, () => attemptsMade, restoreComposer);
+    const updateSearchReadiness = () => {
+        request.search_readiness = Zotero.Beaver?.background?.searchReadiness?.getSummary() ?? null;
+    };
+    updateSearchReadiness();
     connectLoopsInFlight++;
     const result = await connectWithRetry({
         service: agentService,
         request,
-        callbacks: createWSCallbacks(set, () => attemptsMade, restoreComposer),
+        callbacks: { ...callbacks, onReady: (data) => {
+            updateSearchReadiness();
+            callbacks.onReady(data);
+        } },
         logLabel: `run ${run.id}`,
         // Every attempt starts from a clean ready state.
         onAttempt: () => set(isWSReadyAtom, false),

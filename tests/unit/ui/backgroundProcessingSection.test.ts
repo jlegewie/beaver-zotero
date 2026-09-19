@@ -339,7 +339,7 @@ it('keeps known problems visible with background processing off, without status,
         expect(container.querySelector('[data-retry="group"]')).not.toBeNull();
     });
 });
-it('lists server indexing problems with reading problems and keeps the search status on the toggle row', async () => {
+it('lists server indexing problems without a search readiness indicator', async () => {
     const store = createStore();
     access.search = true;
     store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
@@ -347,42 +347,18 @@ it('lists server indexing problems with reading problems and keeps the search st
         ledger: { ...store.get(backgroundProcessingStatusAtom).ledger, total: 2, readable: 2 },
         issues: [{ reason: 'index_failed', count: 2 }],
         worker: { available: 0, deferred: 0, inFlight: 0, dispatchBlocker: null, drainNow: false, backlogGateOpen: false },
-        coverage: { namespace_exists: true, approx_row_count: 1000, documents: [] },
-        coverageUpdatedAt: Date.now(),
     });
     await withView(store, (container) => {
         expect(container.textContent).not.toContain('Full-text Search');
         expect(container.textContent).toContain('Keep Full-Text Search Up to Date');
         expect(container.querySelector('[role="status"]')?.textContent).toBe('Up to date');
         expect(container.textContent).toContain('2 files could not be read or indexed. See Problems below.');
-        expect(container.textContent).toContain('Full-text search index available. Last checked');
+        expect(container.textContent).not.toContain('Full-text search index available.');
         expect(container.textContent).not.toContain('Updates paused.');
         expect(container.textContent).toContain('2 attachments could not be read or indexed');
         expect(container.querySelector('[data-issue-reason="index_failed"]')).not.toBeNull();
     });
 });
-it.each([
-    [{ coverage: { namespace_exists: false, approx_row_count: 0, documents: [] }, coverageError: null }, 'Full-text search index not built yet.'],
-    [{ coverage: null, coverageError: 'Could not check search coverage.' }, 'The full-text search index could not be checked.'],
-    [{ coverage: null, coverageError: null }, 'Checking the full-text search index…'],
-    [
-        { coverage: { namespace_exists: true, approx_row_count: 10, documents: [] }, coverageError: 'Could not check search coverage.', coverageUpdatedAt: 0 },
-        'The full-text search index could not be checked. Last known status: Full-text search index available.',
-    ],
-])('keeps the search index status %j visible while processing is paused', async (coverageState, line) => {
-    prefs.backgroundProcessingEnabled = false;
-    const store = createStore();
-    access.search = true;
-    store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom), updatedAt: Date.now(), ...coverageState });
-    await withView(store, (container) => {
-        expect(container.querySelector('[role="status"]')).toBeNull();
-        expect(container.textContent).toContain(line);
-        const paused = Array.from(container.querySelectorAll('span')).find((node) => node.textContent?.startsWith(line));
-        expect(paused?.closest('[aria-hidden="true"]')).toBeNull();
-        expect(container.textContent).toContain('No problems found in the files Beaver has processed so far.');
-    });
-});
-
 it('restores evicted cached text through Rebuild cache once the backlog is settled', async () => {
     const store = createStore();
     store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),

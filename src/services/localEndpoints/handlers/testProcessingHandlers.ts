@@ -50,7 +50,7 @@ export async function handleTestProcessingReconcileNowHttpRequest(_request: unkn
  * searchable-library scope.
  */
 export async function handleTestProcessingStatusHttpRequest(
-    request: { libraryId?: number; includeCoverage?: boolean; includeFailures?: boolean } = {},
+    request: { libraryId?: number; includeFailures?: boolean } = {},
 ) {
     const hasOcrAccess = !!Zotero.Beaver.hasOcrAccess;
     const hasSearchIndexAccess = !!Zotero.Beaver.hasSearchIndexAccess;
@@ -59,7 +59,6 @@ export async function handleTestProcessingStatusHttpRequest(
             { hasOcrAccess, hasSearchIndexAccess },
             {
                 libraryId: typeof request?.libraryId === 'number' ? request.libraryId : undefined,
-                includeCoverage: request?.includeCoverage !== false,
                 includeFailures: request?.includeFailures !== false,
             },
         );

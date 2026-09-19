@@ -1,3 +1,4 @@
+import { OCR_ENGINE_VERSION } from './ocr/constants';
 import { buildUntagJobInput, indexCleanupIdentity } from './backgroundProcessing/utils';
 import { v4 as uuidv4 } from 'uuid';
 import { ProcessingProgressStore, type ProcessingProgressScope } from './backgroundProcessing/progress';
@@ -394,7 +395,7 @@ export interface AttachmentProcessingStateRecord {
     ocrEngineVersion: string | null;
     upsertStatus: AttachmentUpsertStatus;
     upsertIndexVersion: string | null;
-    upsertRemoteIdentity?: { index_account_id: string; index_scope_ref: string; index_local_id: string } | null;
+    upsertRemoteIdentity?: { index_account_id: string; index_scope_ref: string; index_local_id: string; index_incarnation?: string | null } | null;
     lastError: string | null;
     createdAt: string;
     updatedAt: string;
@@ -533,11 +534,61 @@ export class BeaverDB {
         this.conn = dbConnection;
     }
 
-    /**
-     * Every BeaverDB query runs through here so NULL parameters are spliced
-     * into the SQL rather than bound; see `inlineNullParams` for why Zotero
-     * cannot be trusted to do that itself.
-     */
+    // Connection-local changes identify affected attachments without scanning the ledger.
+    private readinessListeners = new Set<(refs?: Array<{ libraryId: number; zoteroKey: string }>) => void>();
+    private readinessJournalReady = false;
+
+    public subscribeReadinessChanges(listener: (refs?: Array<{ libraryId: number; zoteroKey: string }>) => void): () => void {
+        this.readinessListeners.add(listener);
+        return () => { this.readinessListeners.delete(listener); };
+    }
+
+    private async publishReadinessChanges(): Promise<void> {
+        if (!this.readinessJournalReady || !this.readinessListeners.size) return;
+        const refs = new Map<string, { libraryId: number; zoteroKey: string }>();
+        let through = 0;
+        await this.conn.queryAsync('SELECT id, library_id, zotero_key FROM readiness_changes', [], {
+            onRow: (row: any) => {
+                through = Math.max(through, row.getResultByIndex(0));
+                const ref = { libraryId: row.getResultByIndex(1), zoteroKey: row.getResultByIndex(2) };
+                refs.set(`${ref.libraryId}/${ref.zoteroKey}`, ref);
+            },
+        });
+        if (!through) return;
+        for (const listener of this.readinessListeners) {
+            try { listener([...refs.values()]); } catch (error) { logger(`Readiness listener: ${error}`, 2); }
+        }
+        await this.conn.queryAsync('DELETE FROM readiness_changes WHERE id <= ?', [through]);
+    }
+
+    private async initReadinessJournal(): Promise<void> {
+        await this.conn.queryAsync(`CREATE TEMP TABLE IF NOT EXISTS readiness_changes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, library_id INTEGER NOT NULL, zotero_key TEXT NOT NULL)`);
+        const ledgerFields = ['content_kind', 'file_hash', 'structured_document_hash', 'extract_status',
+            'extract_schema_version', 'ocr_status', 'ocr_engine_version', 'upsert_status',
+            'upsert_index_version', 'upsert_remote_identity', 'extraction_source'];
+        for (const table of ['attachment_processing_state', 'attachment_reading_state']) {
+            for (const event of ['INSERT', 'UPDATE', 'DELETE']) {
+                const row = event === 'DELETE' ? 'OLD' : 'NEW';
+                const fields = table === 'attachment_processing_state' ? ledgerFields : ['error_code'];
+                const when = event === 'UPDATE' ? 'WHEN ' + fields.map(f => `OLD.${f} IS NOT NEW.${f}`).join(' OR ') : '';
+                await this.conn.queryAsync(`CREATE TEMP TRIGGER IF NOT EXISTS readiness_${table}_${event}
+                    AFTER ${event} ON ${table} ${when} BEGIN
+                    INSERT INTO readiness_changes (library_id, zotero_key) VALUES (${row}.library_id, ${row}.zotero_key);
+                    END`);
+            }
+        }
+        for (const event of ['INSERT', 'UPDATE', 'DELETE']) {
+            const row = event === 'DELETE' ? 'OLD' : 'NEW';
+            await this.conn.queryAsync(`CREATE TEMP TRIGGER IF NOT EXISTS readiness_failure_${event}
+                AFTER ${event} ON document_processing_failures BEGIN
+                INSERT INTO readiness_changes (library_id, zotero_key)
+                SELECT library_id, zotero_key FROM attachment_processing_state WHERE file_hash = ${row}.file_hash;
+                END`);
+        }
+        this.readinessJournalReady = true;
+    }
+
     private processingListeners = new Set<() => void>();
     private processingProgress = new ProcessingProgressStore((...args) => this.queryAsync(...args));
 
@@ -562,8 +613,19 @@ export class BeaverDB {
         const [preparedSql, preparedParams] = inlineNullParams(sql, params);
         const result = this.conn.queryAsync(preparedSql, preparedParams, options);
         if (/^\s*(INSERT|UPDATE|DELETE)\b/i.test(sql)
-            && /\b(attachment_processing_state|background_jobs|background_jobs_dead)\b/.test(sql)) {
-            return result.then((rows: any[]) => {
+            && /\b(attachment_processing_state|attachment_reading_state|document_processing_failures|background_jobs|background_jobs_dead)\b/.test(sql)) {
+            return result.then(async (rows: any[]) => {
+                if (/\b(attachment_processing_state|attachment_reading_state|document_processing_failures)\b/.test(sql)) {
+                    try {
+                        await this.publishReadinessChanges();
+                    } catch (error) {
+                        // The write succeeded; unknown changed keys require a conservative refresh.
+                        for (const listener of this.readinessListeners) {
+                            try { listener(); } catch { /* isolate observers from committed writes */ }
+                        }
+                        logger(`Readiness journal unavailable: ${error}`, 2);
+                    }
+                }
                 for (const listener of this.processingListeners) {
                     try { listener(); } catch (error) { logger(`Processing status listener: ${error}`, 2); }
                 }
@@ -1138,6 +1200,7 @@ export class BeaverDB {
             );
         `);
         await this.processingProgress.init();
+        await this.initReadinessJournal();
     }
 
     /**
@@ -2466,13 +2529,13 @@ export class BeaverDB {
     }
 
     public async getAttachmentProcessingStatesByLibrary(
-        libraryId: number,
+        libraryId: number, keys?: string[],
     ): Promise<AttachmentProcessingStateRecord[]> {
         return this.selectAttachmentProcessingStates(
             `SELECT ${ATTACHMENT_PROCESSING_COLUMNS}
              FROM attachment_processing_state
-             WHERE library_id = ? ORDER BY zotero_key`,
-            [libraryId],
+             WHERE library_id = ? ${keys ? `AND zotero_key IN (${keys.map(() => '?').join(',')})` : ''} ORDER BY zotero_key`,
+            [libraryId, ...(keys ?? [])],
         );
     }
 
@@ -2495,11 +2558,57 @@ export class BeaverDB {
         );
     }
 
+    public async getAttachmentIndexRecoveryCandidates(libraryId: number, identity: {
+        accountId: string; scopeRef: string; localId: string; incarnation: string | null; indexVersion: number;
+    }, limit: number): Promise<AttachmentProcessingStateRecord[]> {
+        return this.selectAttachmentProcessingStates(
+            `SELECT ${ATTACHMENT_PROCESSING_COLUMNS} FROM attachment_processing_state
+             WHERE library_id = ? AND extract_status = 'done' AND structured_document_hash IS NOT NULL
+               AND (upsert_status IS NOT 'failed' OR (? IS NOT NULL
+                   AND json_extract(upsert_remote_identity, '$.index_incarnation') IS NOT ?))
+               AND NOT EXISTS (SELECT 1 FROM background_jobs J WHERE J.library_id = attachment_processing_state.library_id
+                   AND J.zotero_key = attachment_processing_state.zotero_key AND J.job_type = 'fulltext_upsert')
+               AND NOT EXISTS (SELECT 1 FROM background_jobs_dead J WHERE J.library_id = attachment_processing_state.library_id
+                   AND J.zotero_key = attachment_processing_state.zotero_key AND J.job_type = 'fulltext_upsert'
+                   AND (? IS NULL OR json_extract(J.payload_json, '$.recovery_incarnation') IS ?))
+               AND (upsert_status IS NOT 'done' OR upsert_index_version IS NOT ?
+                 OR json_extract(upsert_remote_identity, '$.index_account_id') IS NOT ?
+                 OR json_extract(upsert_remote_identity, '$.index_scope_ref') IS NOT ?
+                 OR json_extract(upsert_remote_identity, '$.index_local_id') IS NOT ?
+                 OR json_extract(upsert_remote_identity, '$.index_incarnation') IS NOT ?
+                 OR json_extract(upsert_remote_identity, '$.index_incarnation') IS NULL)
+             ORDER BY updated_at, zotero_key LIMIT ?`,
+            [libraryId, identity.incarnation, identity.incarnation, identity.incarnation, identity.incarnation,
+                String(identity.indexVersion), identity.accountId, identity.scopeRef,
+                identity.localId, identity.incarnation, Math.max(0, Math.min(limit, 50))],
+        );
+    }
+
+    public async getAttachmentReadingErrorsByLibrary(libraryId: number, keys?: string[]): Promise<Map<string, string>> {
+        const errors = new Map<string, string>();
+        await this.queryAsync(
+            `SELECT P.zotero_key, CASE WHEN P.ocr_status = 'failed' THEN COALESCE(F.terminal_code, R.error_code) ELSE R.error_code END
+             FROM attachment_processing_state P
+             LEFT JOIN attachment_reading_state R ON R.library_id = P.library_id AND R.zotero_key = P.zotero_key
+             LEFT JOIN document_processing_failures F ON F.file_hash = P.file_hash AND F.task = 'ocr' AND F.engine_version = ?
+             WHERE P.library_id = ? ${keys ? `AND P.zotero_key IN (${keys.map(() => '?').join(',')})` : ''}`,
+            [OCR_ENGINE_VERSION, libraryId, ...(keys ?? [])], { onRow: (row: any) => {
+                const code = row.getResultByIndex(1);
+                if (code) errors.set(row.getResultByIndex(0), code);
+            } },
+        );
+        return errors;
+    }
+
     public async getAttachmentReadingError(libraryId: number, zoteroKey: string): Promise<string | null> {
         let code: string | null = null;
         await this.queryAsync(
-            `SELECT error_code FROM attachment_reading_state WHERE library_id = ? AND zotero_key = ?`,
-            [libraryId, zoteroKey],
+            `SELECT CASE WHEN P.ocr_status = 'failed' THEN COALESCE(F.terminal_code, R.error_code) ELSE R.error_code END
+             FROM (SELECT ? AS library_id, ? AS zotero_key) K
+             LEFT JOIN attachment_reading_state R ON R.library_id = K.library_id AND R.zotero_key = K.zotero_key
+             LEFT JOIN attachment_processing_state P ON P.library_id = K.library_id AND P.zotero_key = K.zotero_key
+             LEFT JOIN document_processing_failures F ON F.file_hash = P.file_hash AND F.task = 'ocr' AND F.engine_version = ?`,
+            [libraryId, zoteroKey, OCR_ENGINE_VERSION],
             { onRow: (row: any) => { code = row.getResultByIndex(0) ?? null; } },
         );
         return code;
@@ -2877,7 +2986,7 @@ export class BeaverDB {
         const guardExtract = input.expectedExtractStatus !== undefined;
         return await this.executeChangedRow(
             `UPDATE attachment_processing_state SET
-                upsert_status = 'done', upsert_index_version = ?, upsert_remote_identity = COALESCE(upsert_remote_identity, ?),
+                upsert_status = 'done', upsert_index_version = ?, upsert_remote_identity = COALESCE(?, upsert_remote_identity),
                 last_error = NULL, updated_at = datetime('now')
              WHERE library_id = ? AND zotero_key = ?
                AND structured_document_hash = ?

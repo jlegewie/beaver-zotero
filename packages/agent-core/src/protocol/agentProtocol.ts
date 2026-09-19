@@ -2993,7 +2993,27 @@ export interface ChargingPermissions {
  * Agent run request sent by the client after receiving the 'ready' event.
  * Model selection is included in this request (moved from auth message).
  */
+export interface SearchReadinessSummary {
+    version: 2;
+    account_id: string;
+    installation_id: string;
+    scope_revision: number;
+    index_version: number;
+    extract_schema_versions: Record<'pdf' | 'epub' | 'snapshot', string[]>;
+    index_incarnation: string | null;
+    libraries: Array<{
+        scope_ref: string;
+        discovery_complete: boolean;
+        inventory_revision: number;
+        indexed: number;
+        pending: number;
+        unavailable: number;
+        unavailable_reasons: Record<string, number>;
+    }>;
+}
+
 export interface AgentRunRequest {
+    search_readiness?: SearchReadinessSummary | null;
     /** Request type discriminator */
     type: 'chat';
     /** Client-generated run ID for this agent run */

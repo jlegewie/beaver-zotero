@@ -52,7 +52,7 @@ describe('attachment change reconciliation', () => {
         await connection.queryAsync('CREATE TABLE items (itemID INTEGER, libraryID INTEGER, key TEXT)');
         await connection.queryAsync("INSERT INTO items VALUES (7, 1, 'SNAPSHOT')");
         item = { id: 7, libraryID: 1, key: 'SNAPSHOT', getFilePathAsync: async () => '/a.html',
-            loadAllData: async () => {}, isRegularItem: () => false, attachmentContentType: 'text/html' };
+            loadAllData: async () => {}, isAttachment: () => true, isRegularItem: () => false, attachmentContentType: 'text/html' };
         reconciler = new ReconcilerService();
         watcher = new NewItemWatcher();
         vi.stubGlobal('IOUtils', { stat: mocks.stat });
@@ -377,6 +377,31 @@ describe('attachment change reconciliation', () => {
         await (reconciler as any).run(false);
     }
 
+    it('flushes notification bursts without waiting for a quiet interval', async () => {
+        const handoff = vi.spyOn(reconciler, 'notifyAttachments').mockImplementation(() => {});
+        observer.notify('modify', 'item', [7], { 7: { libraryID: 1 } });
+        await vi.advanceTimersByTimeAsync(200);
+        observer.notify('modify', 'item', [8], { 8: { libraryID: 1 } });
+        await vi.advanceTimersByTimeAsync(200);
+        observer.notify('modify', 'item', [9], { 9: { libraryID: 1 } });
+        await vi.advanceTimersByTimeAsync(100);
+        expect(handoff).toHaveBeenCalledTimes(1);
+        expect(handoff.mock.calls[0][0].map(event => event.id)).toEqual([7, 8, 9]);
+    });
+
+    it('does not fence known note edits or excluded-library events', async () => {
+        const beginChanges = vi.fn();
+        (Zotero.Beaver as any).background = { searchReadiness: { beginChanges } };
+        (Zotero.Items as any).get = vi.fn(() => ({ libraryID: 1, isNote: () => true }));
+        observer.notify('modify', 'item', [7]);
+        (Zotero.Items as any).get.mockReturnValue(undefined);
+        observer.notify('modify', 'item', [8], { 8: { libraryID: 42 } });
+        observer.notify('download', 'file', [8], { 8: { libraryID: 42 } });
+        expect(beginChanges).not.toHaveBeenCalled();
+        expect((watcher as any).pending.size).toBe(0);
+        delete (Zotero.Beaver as any).background;
+    });
+
     it('subscribes to item and file notifications', () => {
         expect(Zotero.Notifier.registerObserver).toHaveBeenCalledWith(observer, ['item', 'file'], 'beaver-background-processing');
     });
@@ -512,6 +537,7 @@ describe('attachment change reconciliation', () => {
     it.each([true, false])('upgrades the source identity column without losing processing history (failed=%s)', async (failed) => {
         await seed(failed);
         const before = await db.getAttachmentProcessingState(1, item.key);
+        await connection.queryAsync('DROP TRIGGER readiness_attachment_processing_state_UPDATE');
         await connection.queryAsync('ALTER TABLE attachment_processing_state DROP COLUMN extraction_source');
         await db.initDatabase('0.99.0');
         expect(await db.getAttachmentProcessingState(1, item.key)).toEqual({ ...before, extractionSource: null });

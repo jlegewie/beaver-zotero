@@ -396,7 +396,7 @@ describe('OcrExecutor', () => {
         if (outcome.kind === 'failPermanent') {
             expect(outcome.failure.task).toBe('ocr');
             expect(outcome.failure.fileHash).toBe('hash123');
-            expect(outcome.failure.terminalCode).toBe('ocr_failed_permanent');
+            expect(outcome.failure.terminalCode).toBe('encrypted_pdf');
             expect(outcome.failure.engineVersion).toBe(OCR_ENGINE_VERSION);
         }
         // Backend-permanent failures are already logged backend-side; don't re-report.
