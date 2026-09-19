@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import type { MessageSearchFilters } from '@beaver/agent-core/agents/types';
 import type { ZoteroCollection } from '@beaver/agent-core/types/zotero';
 import {
@@ -13,10 +13,11 @@ import AddSourcesMenu, { type AddSourcesTarget } from './AddSourcesMenu';
 import type { MessageFiltersState } from '../../../atoms/messageComposition';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 import { useAttachExternalFiles } from '../../../hooks/useAttachExternalFiles';
-import { externalFileRecordToAttachment, toMessageAttachment } from '../../../types/attachments/converters';
+import { externalFileRecordToAttachment, toValidatedMessageAttachment } from '../../../types/attachments/converters';
 import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
 import { serializeCollection, serializeZoteroLibrary } from '../../../../src/utils/zoteroSerializers';
 import { loadFullItemData } from '../../../../src/utils/zoteroUtils';
+import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
 
 /**
  * "+" picker on a user message being edited: the composer's Add Sources menu,
@@ -50,6 +51,7 @@ export function RequestSourcesMenu({
 }: RequestSourcesMenuProps) {
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     const attachExternalFiles = useAttachExternalFiles();
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
     // Staging a pick is async, so the overlay holds sending until it lands.
     const [pendingCount, setPendingCount] = useState(0);
@@ -65,10 +67,16 @@ export function RequestSourcesMenu({
             await work();
         } catch (error) {
             logger(`RequestSourcesMenu: staging a pick failed: ${error}`, 1);
+            addPopupMessage({
+                type: 'error',
+                title: 'Unable to add source',
+                text: `${error instanceof Error ? error.message : String(error)} Check that the source is available in Zotero, then try again. Your edit has been kept.`,
+                expire: false,
+            });
         } finally {
             setPendingCount((count) => count - 1);
         }
-    }, []);
+    }, [addPopupMessage]);
 
     // Portable and legacy aliases, qualified by object kind so a collection
     // filter is never mistaken for an item that happens to share its key.
@@ -105,7 +113,7 @@ export function RequestSourcesMenu({
                 includeChildren: false,
                 dataTypes: ['primaryData', 'itemData', 'creators', 'note'],
             });
-            const attachment = toMessageAttachment(item);
+            const attachment = await toValidatedMessageAttachment(item);
             if (!attachment) return;
             onAddAttachments([attachment], session);
         });

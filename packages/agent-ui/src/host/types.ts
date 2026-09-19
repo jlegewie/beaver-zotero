@@ -100,6 +100,7 @@ export interface AttachmentMatchNavigation {
  * components consume the same slice.
  */
 export interface NavigationHost {
+    openTable?(key: string): Promise<{ ok: true; warning?: string } | { error: string }>;
     /** Reveal/select the referenced item in the library view. */
     revealInLibrary(ref: ZoteroItemReference): void;
     /** Reveal/select the referenced library in the library view. */
@@ -203,6 +204,8 @@ export interface ResolvedItemDisplay {
  * and shrinking: it only covers data that older stored rows did not persist.
  */
 export interface ItemDataHost {
+    resolveTableDisplay?(key: string): Promise<TableDisplay>;
+    subscribeTableChanges?(key: string, changed: () => void): () => void;
     /**
      * Resolve printed page labels for a citation when the metadata does not
      * already carry them. Returns a sparse 0-based page index -> printed label
@@ -701,6 +704,10 @@ export interface DialogsHost {
  * Aggregate client host. Registered once per client at bundle init via
  * {@link setHost}. Slices are optional — check before use.
  */
+export type TableDisplay =
+    | { status: 'available'; title: string; rows: number; columns: number }
+    | { status: 'unavailable'; reason: string };
+
 export interface ClientHost {
     navigation?: NavigationHost;
     itemData?: ItemDataHost;

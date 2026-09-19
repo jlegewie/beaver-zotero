@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart, isEmptyWriteReturn, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
 import { getToolCallStatusFromResult, toolResultAtom } from '@beaver/agent-core/run-state/atoms';
+import { isTableToolName, tableResultMessages } from '@beaver/agent-core/run-state/tableResults';
 import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
 import {
     isToolResultView,
@@ -40,7 +41,7 @@ import {
     FlowConnectionIcon,
     WrenchIcon,
 } from '../icons/icons';
-import { toolExpandedAtom, toggleToolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
+import { toolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
 import { resolveToolCallLabelEnrich } from '../../utils/toolCallLabelEnrich';
 
 type IconComponent = React.FC<React.SVGProps<SVGSVGElement>>;
@@ -336,9 +337,10 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
     const expansionKey = `${runId}:${responseIndex}:${part.tool_call_id}`;
     const expansionState = useAtomValue(toolExpandedAtom);
-    const toggleExpanded = useSetAtom(toggleToolExpandedAtom);
     const setExpanded = useSetAtom(setToolExpandedAtom);
-    const isExpanded = expansionState[expansionKey] ?? false;
+    const hasTableStatus = isTableToolName(part.tool_name) && !!result
+        && tableResultMessages(result.content).length > 0;
+    const isExpanded = expansionState[expansionKey] ?? (view?.view_type === 'table' || hasTableStatus);
     const wasConfirmApprovalRef = useRef(isConfirmApproval);
 
     // When extract/external_search approval resolves, collapse once so the completed result
@@ -360,9 +362,8 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const canExpand =
         hasResult &&
         result?.part_kind === 'tool-return' &&
-        // A non-success return holds an explanatory message, not a result
-        // payload. Keep it collapsed so it reads as a failed call, not a result.
-        !isUnsuccessfulToolReturn(result) &&
+        // Table failures can include actionable commit or recovery status.
+        (!isUnsuccessfulToolReturn(result) || hasTableStatus) &&
         // If we can compute a count (search-like tools), block expansion for 0 results.
         (renderableCount === null || renderableCount > 0) &&
         !NON_EXPANDABLE_TOOLS.has(part.tool_name) &&
@@ -377,7 +378,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
 
     const handleToggleExpanded = () => {
         if (canExpand) {
-            toggleExpanded(expansionKey);
+            setExpanded({ key: expansionKey, expanded: !isExpanded });
         }
     };
 

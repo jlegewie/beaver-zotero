@@ -4,6 +4,7 @@
  */
 
 import type { AttachmentStub, ItemStub } from "../zotero";
+import type { TableReference } from "../../protocol/artifactProtocol";
 
 // Valid annotation types
 export const VALID_ANNOTATION_TYPES = ["highlight", "underline", "note", "image"] as const;
@@ -22,7 +23,13 @@ export type MessageAttachment =
     | AnnotationAttachment
     | NoteAttachment
     | CollectionAttachment
+    | TableAttachment
     | ExternalFileAttachment;
+
+export interface TableAttachment {
+    type: "table";
+    reference: TableReference;
+}
 
 interface BaseMessageAttachment {
     library_id: number;
@@ -228,6 +235,7 @@ export function zoteroReferenceLookupKeys(ref: {
  * reading identity fields off the union directly — external files have none.
  */
 export function messageAttachmentKey(attachment: MessageAttachment): string {
+    if (attachment.type === 'table') return attachment.reference.key;
     if (isExternalFileAttachment(attachment)) {
         return `ext-${attachment.ext_key}`;
     }
@@ -236,6 +244,7 @@ export function messageAttachmentKey(attachment: MessageAttachment): string {
 
 /** Portable and legacy aliases used to look up an existing attachment. */
 export function messageAttachmentLookupKeys(attachment: MessageAttachment): string[] {
+    if (attachment.type === 'table') return [attachment.reference.key];
     if (isExternalFileAttachment(attachment)) {
         return [`ext-${attachment.ext_key}`];
     }
@@ -308,6 +317,10 @@ export function messageAttachmentsHaveSameIdentity(
     left: MessageAttachment,
     right: MessageAttachment,
 ): boolean {
+    if (left.type === 'table' || right.type === 'table') {
+        return attachmentNamespace(left) === attachmentNamespace(right)
+            && messageAttachmentKey(left) === messageAttachmentKey(right);
+    }
     if (isExternalFileAttachment(left) || isExternalFileAttachment(right)) {
         return isExternalFileAttachment(left) &&
             isExternalFileAttachment(right) &&

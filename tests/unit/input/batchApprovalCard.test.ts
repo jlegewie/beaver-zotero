@@ -567,3 +567,38 @@ describe('a read-only batch', () => {
         expect(findAll(tree, isModeMenu)).toHaveLength(1);
     });
 });
+
+describe('table batch approval', () => {
+    const table = {
+        reference: { kind: 'table' as const, key: 'u-ABCDEFGH', title: 'Study comparison' },
+        schema_id: 'schema-1', population_id: 'population-1', population_count: 40,
+        columns: [{ id: 'design', question: 'What is the study design?' }], cost_estimate: '8 credits',
+    };
+    beforeEach(() => { hookState.slots = []; hookState.index = 0; });
+    it('renders the plan read-only and identifies the cost as an estimate', () => {
+        const tree = render(vi.fn(), { table });
+        const text = renderedText(tree).join(' ');
+        expect(text).toContain('Study comparison');
+        expect(text).toContain('What is the study design?');
+        expect(text).toContain('Estimated cost:');
+        expect(text).toContain('Final charges depend on work executed');
+        expect(text).toContain('cancel this proposal');
+        expect(findAll(tree, el => el.type === 'input')).toHaveLength(0);
+    });
+    it('echoes the approved immutable identity', () => {
+        const submit = vi.fn();
+        findOne(render(submit, { table }), byAriaLabel('Approve batch job')).props.onClick();
+        expect(submit).toHaveBeenCalledWith(expect.objectContaining({ approved: true,
+            table: { key: 'u-ABCDEFGH', schema_id: 'schema-1', population_id: 'population-1' },
+        }));
+    });
+    it('requires cancellation when the user requests changes to a table plan', () => {
+        const submit = vi.fn();
+        const tree = renderWithInstructions(submit, { table });
+        findOne(tree, isTextarea).props.onChange({ target: { value: 'Replace the question with sample size' } });
+        const changed = render(submit, { table });
+        expect(findOne(changed, byAriaLabel('Approve batch job')).props.disabled).toBe(true);
+        findOne(changed, byAriaLabel('Cancel batch job and send instructions')).props.onClick();
+        expect(submit).toHaveBeenCalledWith(expect.objectContaining({ approved: false, user_instructions: 'Replace the question with sample size' }));
+    });
+});

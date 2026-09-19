@@ -13,6 +13,20 @@ import { ChipButton } from './ChipButton';
 import { ChipRemovableIcon } from './ChipRemovableIcon';
 
 const MAX_CHIP_TEXT_LENGTH = 30;
+
+export function TableChip({ title, tableKey, remove }: { title: string; tableKey: string; remove?: ChipRemoveConfig }) {
+    const [error, setError] = React.useState('');
+    return <>
+        <ChipShell icon={<CSSItemTypeIcon itemType="attachmentSnapshot" />} label={truncateText(title || 'Table', MAX_CHIP_TEXT_LENGTH)} remove={remove}
+            onClick={() => {
+                const open = getHost().navigation?.openTable;
+                if (!open) { setError('Table provider unavailable.'); return; }
+                void open(tableKey).then(result => setError('error' in result ? result.error : result.warning ?? ''))
+                    .catch(() => setError('Table provider unavailable.'));
+            }} />
+        {error && <span role="status">{error}</span>}
+    </>;
+}
 const MAX_ANNOTATION_TOOLTIP_TEXT_LENGTH = 160;
 
 /**

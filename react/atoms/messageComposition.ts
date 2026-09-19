@@ -3,6 +3,7 @@ import { getContextWindow, tryGetWindowRuntime } from '../runtime/windowRuntime'
 import { getSelectedCollections } from '../../src/utils/zoteroSelection';
 import { collectionToReference } from '../utils/zoteroReferences';
 import { atom, type Getter, type Setter } from "jotai";
+import { isTableAttachment } from '../../src/services/artifacts/tableItemIdentity';
 import { truncateText } from "@beaver/agent-ui/utils/stringUtils";
 import { allUserAttachmentKeysAtom } from "@beaver/agent-core/run-state/atoms";
 import { createElement } from 'react';
@@ -634,7 +635,9 @@ async function validateItemsInBackground(
             // Show error message with custom content
             let title = `${rejectedItems.length} Items Removed`;
             if (rejectedItems.length === 1) {
-                const label = rejectedItems[0].item.isAttachment() ? 'File Removed' : 'Item Removed';
+                const label = isTableAttachment(rejectedItems[0].item)
+                    ? 'Table Removed from Message'
+                    : rejectedItems[0].item.isAttachment() ? 'File Removed' : 'Item Removed';
                 const name = rejectedItems[0].item.isAnnotation()
                     ? 'Annotation'
                     : rejectedItems[0].item.isNote() ? 'Note' : `"${rejectedItems[0].item.getDisplayTitle()}"`

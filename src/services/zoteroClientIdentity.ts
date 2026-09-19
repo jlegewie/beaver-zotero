@@ -9,12 +9,13 @@
 import { ZOTERO_PLUGIN_CLIENT_TYPE, ZOTERO_PLUGIN_FEATURES } from '@beaver/agent-core/protocol/agentProtocol';
 import { ClientIdentity, setClientIdentityProvider } from '@beaver/agent-core/transport/clientIdentity';
 import { buildZoteroInstanceWire } from './zoteroInstanceWire';
+import { isTableChatEnabled } from './tableCapability';
 
 function resolveZoteroClientIdentity(): ClientIdentity {
     return {
         frontendVersion: Zotero.Beaver?.pluginVersion || '',
         clientType: ZOTERO_PLUGIN_CLIENT_TYPE,
-        clientFeatures: ZOTERO_PLUGIN_FEATURES,
+        clientFeatures: isTableChatEnabled() ? [...ZOTERO_PLUGIN_FEATURES, 'tables'] : ZOTERO_PLUGIN_FEATURES,
         zoteroInstance: buildZoteroInstanceWire(Zotero.Beaver?.searchableLibraryIds ?? []),
     };
 }
