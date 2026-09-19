@@ -185,7 +185,7 @@ describe('ReconcilerService.retryAttachments', () => {
         const child = { id: 11, libraryID: 1, key: 'CHILD001', parentID: 10, isAttachment: () => true };
         vi.stubGlobal('Zotero', { ...Zotero, DB: { queryAsync: connection.queryAsync.bind(connection) },
             Attachments: { LINK_MODE_LINKED_URL: 3 }, Items: { getAsync: vi.fn(async id => id === 10 ? parent : child) } });
-        const readiness = { beginChanges: vi.fn(() => 1), completeChanges: vi.fn(), updateAttachment: vi.fn(), invalidateLibrary: vi.fn() };
+        const readiness = { notifyAttachments: vi.fn(), needsDiscovery: () => false, updateAttachment: vi.fn(), requestDiscovery: vi.fn() };
         (Zotero.Beaver as any).background = { searchReadiness: readiness, beginProcessingDiscovery: vi.fn() };
         const check = vi.spyOn(reconciler as any, 'reconcileAttachment').mockResolvedValue(undefined);
         const scan = vi.spyOn(reconciler as any, 'listProcessableAttachments');
@@ -194,7 +194,7 @@ describe('ReconcilerService.retryAttachments', () => {
         await (reconciler as any).reconcileNotifiedAttachments(db, (reconciler as any).generation);
         expect(check).toHaveBeenCalledTimes(1);
         expect(check.mock.calls[0][1]).toBe(child);
-        expect(readiness.invalidateLibrary).not.toHaveBeenCalled();
+        expect(readiness.requestDiscovery).not.toHaveBeenCalled();
         expect(scan).not.toHaveBeenCalled();
         expect((await (reconciler as any).readLibraryCursor(1)).maxClientDateModified).toBe('2025');
     });
@@ -203,8 +203,8 @@ describe('ReconcilerService.retryAttachments', () => {
         vi.spyOn(reconciler as any, 'reconcileReadingState').mockResolvedValue(undefined);
         vi.spyOn(reconciler as any, 'readLibraryCursor').mockResolvedValue({ maxClientDateModified: '', attachmentCount: 0 });
         vi.spyOn(reconciler as any, 'listProcessableAttachments').mockResolvedValue([]);
-        const readiness = { membershipFence: () => 1, hasInventory: () => false, discoveryFence: () => 1, invalidateLibrary: vi.fn(),
-            publishInventory: vi.fn(() => false), completeChanges: vi.fn(), invalidateInventory: vi.fn() };
+        const readiness = { hasInventory: () => false, beginDiscovery: () => ({}), cancelDiscovery: vi.fn(), needsDiscovery: () => false, requestDiscovery: vi.fn(),
+            publishInventory: vi.fn(() => false),  };
         (Zotero.Beaver as any).background = { searchReadiness: readiness, beginProcessingDiscovery: vi.fn() };
         vi.stubGlobal('Zotero', { ...Zotero, Libraries: { getAll: () => [{ libraryID: 1, libraryType: 'user' }] } });
         reconciler.start();
@@ -216,7 +216,7 @@ describe('ReconcilerService.retryAttachments', () => {
     });
 
     it('handles parent and child deletes without invalidating the library', async () => {
-        const readiness = { beginChanges: vi.fn(() => 1), completeChanges: vi.fn(), updateAttachment: vi.fn(), invalidateLibrary: vi.fn() };
+        const readiness = { notifyAttachments: vi.fn(), needsDiscovery: () => false, updateAttachment: vi.fn(), requestDiscovery: vi.fn() };
         (Zotero.Beaver as any).background = { searchReadiness: readiness };
         const remove = vi.spyOn(reconciler as any, 'removeAttachment').mockResolvedValue(undefined);
         reconciler.start();
@@ -229,11 +229,11 @@ describe('ReconcilerService.retryAttachments', () => {
         await (reconciler as any).reconcileNotifiedAttachments(db, (reconciler as any).generation);
         expect(remove).toHaveBeenCalledWith(db, 1, 'CHILD001');
         expect(readiness.updateAttachment).toHaveBeenCalledWith(1, 'CHILD001', false);
-        expect(readiness.invalidateLibrary).not.toHaveBeenCalled();
+        expect(readiness.requestDiscovery).not.toHaveBeenCalled();
         expect((reconciler as any).nextScanAt).toBe(deadline);
     });
 
-    function installReadiness(libraryIds = [1]) {
+    async function installReadiness(libraryIds = [1]) {
         const readiness = new SearchReadiness();
         Object.assign(Zotero.Beaver, {
             account: { getGeneration: () => 1, getSnapshot: () => ({ session: { user: { id: 'account' } } }) },
@@ -243,13 +243,44 @@ describe('ReconcilerService.retryAttachments', () => {
         });
         readiness.setRequirements({ index_version: 3, index_validity: 'current', index_incarnation: 'epoch',
             extract_schema_versions: { pdf: ['4'], epub: ['1'], snapshot: ['1'] } });
-        for (const id of libraryIds) readiness.publishInventory(id, [], readiness.discoveryFence());
+        for (const id of libraryIds) await readiness.publishInventory(readiness.beginDiscovery(id), [], [], new Map());
         return readiness;
     }
 
-    it.each([false, true])('releases a suspended watcher hold after the full pass, but preserves a newer hold=%s', async newer => {
+    it('publishes reconciler writes and their error reasons in the first snapshot with only touched-key rereads', async () => {
+        const readiness = await installReadiness();
+        const unsubscribe = db.subscribeReadinessChanges(readiness.changed);
+        const first = items.get('1-INDEXED1')!;
+        const second = items.get('1-MISSING1')!;
+        for (const item of [first, second]) {
+            await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: item.key, itemId: item.id, contentKind: 'pdf' });
+        }
+        await connection.queryAsync(`UPDATE attachment_processing_state SET extract_status='done',
+            extract_schema_version='4', structured_document_hash='hash', upsert_status='done',
+            upsert_index_version='3', upsert_remote_identity=?`, [JSON.stringify({ index_account_id: 'account',
+            index_scope_ref: 'lLOCAL123', index_local_id: 'LOCAL123', index_incarnation: 'epoch' })]);
+        vi.spyOn(reconciler as any, 'reconcileReadingState').mockResolvedValue(undefined);
+        vi.spyOn(reconciler as any, 'readLibraryCursor').mockResolvedValue({ maxClientDateModified: '2026', attachmentCount: 2 });
+        vi.spyOn(reconciler as any, 'listProcessableAttachments').mockResolvedValue([first, second]);
+        vi.spyOn(reconciler as any, 'reconcileAttachment').mockImplementation(async (_db, item: any) => {
+            if (item.key !== first.key) return;
+            await db.resetAttachmentExtraction(1, first.key);
+            await db.markAttachmentExtractFailure({ libraryId: 1, zoteroKey: first.key, status: 'skipped',
+                error: 'file_missing', attemptedAt: Date.now() });
+        });
+        const reads = vi.spyOn(db, 'getAttachmentProcessingStatesByLibrary');
+        try {
+            reconciler.start();
+            await (reconciler as any).reconcileLibrary(db, 1, true, (reconciler as any).generation);
+            expect(readiness.getSummary()?.libraries[0]).toMatchObject({ indexed: 1, pending: 0,
+                unavailable: 1, unavailable_reasons: { file_missing: 1 } });
+            expect(reads.mock.calls).toEqual([[1], [1, [first.key]]]);
+        } finally { unsubscribe(); readiness.dispose(); reconciler.stop(); }
+    });
+
+    it.each([false, true])('keeps snapshots through suspension and retains rediscovery requested during a pass=%s', async newer => {
         vi.useFakeTimers();
-        const readiness = installReadiness();
+        const readiness = await installReadiness();
         const watcher = new NewItemWatcher();
         let observer: any;
         vi.stubGlobal('Zotero', { ...Zotero,
@@ -259,7 +290,7 @@ describe('ReconcilerService.retryAttachments', () => {
         vi.spyOn(reconciler as any, 'reconcileReadingState').mockResolvedValue(undefined);
         vi.spyOn(reconciler as any, 'readLibraryCursor').mockResolvedValue({ maxClientDateModified: '', attachmentCount: 0 });
         vi.spyOn(reconciler as any, 'listProcessableAttachments').mockImplementation(async () => {
-            if (newer) readiness.beginChanges();
+            if (newer) readiness.requestDiscovery(1);
             return [];
         });
         try {
@@ -269,22 +300,20 @@ describe('ReconcilerService.retryAttachments', () => {
             observer.notify('modify', 'item', [13], { 13: { libraryID: 1, key: 'INDEXED1' } });
             await vi.advanceTimersByTimeAsync(500);
             expect((reconciler as any).pendingAttachments.size).toBe(0);
-            expect(readiness.getSummary()).toBeNull();
-            const held = readiness.membershipFence();
-            expect(readiness.membershipFence()).toBe(held);
+            expect(readiness.getSummary()?.libraries[0].discovery_complete).toBe(true);
             resume();
             await (reconciler as any).run(false);
             await readiness.refresh();
-            if (newer) expect(readiness.getSummary()).toBeNull();
-            else expect(readiness.getSummary()?.libraries[0].discovery_complete).toBe(true);
+            expect(readiness.getSummary()?.libraries[0].discovery_complete).toBe(true);
+            expect(readiness.needsDiscovery(1)).toBe(newer);
         } finally {
             watcher.stop(); reconciler.stop(); readiness.dispose(); vi.useRealTimers();
         }
     });
 
-    it('does not release a batch discarded by suspension before a successful full pass', async () => {
+    it('keeps the last snapshot after a suspended batch and failed discovery', async () => {
         vi.useFakeTimers();
-        const readiness = installReadiness();
+        const readiness = await installReadiness();
         vi.stubGlobal('Zotero', { ...Zotero,
             Libraries: { getAll: () => [{ libraryID: 1, libraryType: 'user' }] },
         });
@@ -295,13 +324,13 @@ describe('ReconcilerService.retryAttachments', () => {
             const resume = await reconciler.suspendForMaintenance();
             resume();
             await (reconciler as any).run(false);
-            expect(readiness.getSummary()).toBeNull();
+            expect(readiness.getSummary()?.libraries[0].discovery_complete).toBe(true);
         } finally { reconciler.stop(); readiness.dispose(); vi.useRealTimers(); }
     });
 
     it.each(['attachment', 'library'])('preserves unrelated inventories after a %s failure', async path => {
         vi.useFakeTimers();
-        const readiness = installReadiness([1, 2]);
+        const readiness = await installReadiness([1, 2]);
         vi.stubGlobal('Zotero', { ...Zotero,
             Libraries: { getAll: () => [1, 2].map(libraryID => ({ libraryID, libraryType: 'user' })) },
         });
@@ -315,15 +344,16 @@ describe('ReconcilerService.retryAttachments', () => {
                 vi.spyOn(reconciler as any, 'reconcileReadingState').mockRejectedValueOnce(new Error('temporary read failure'));
                 await (reconciler as any).run(false);
             }
-            expect(readiness.hasInventory(1)).toBe(path === 'attachment');
+            expect(readiness.hasInventory(1)).toBe(true);
+            expect(readiness.needsDiscovery(1)).toBe(path === 'library');
             expect(readiness.hasInventory(2)).toBe(true);
         } finally { reconciler.stop(); readiness.dispose(); vi.useRealTimers(); }
     });
 
     it('retries a transient deletion with backoff without resurrecting the key or enumerating', async () => {
         vi.useFakeTimers();
-        const readiness = installReadiness();
-        readiness.publishInventory(1, ['INDEXED1'], readiness.discoveryFence());
+        const readiness = await installReadiness();
+        await readiness.publishInventory(readiness.beginDiscovery(1), ['INDEXED1'], [], new Map());
         const remove = vi.spyOn(reconciler as any, 'removeAttachment').mockRejectedValueOnce(new Error('busy')).mockResolvedValue(undefined);
         const enumerate = vi.spyOn(reconciler as any, 'reconcileLibrary');
         try {
@@ -345,7 +375,7 @@ describe('ReconcilerService.retryAttachments', () => {
 
     it('retains an added attachment when its initial lookups fail', async () => {
         vi.useFakeTimers();
-        const readiness = installReadiness();
+        const readiness = await installReadiness();
         vi.stubGlobal('Zotero', { ...Zotero,
             Items: { getAsync: vi.fn().mockRejectedValue(new Error('temporarily unavailable')) },
             DB: { queryAsync: vi.fn(async (_sql, _params, options) => options.onRow({ getResultByIndex: (i: number) => i === 0 ? 1 : 'INDEXED1' })) },
@@ -355,21 +385,22 @@ describe('ReconcilerService.retryAttachments', () => {
             reconciler.notifyAttachments([{ id: 13, event: 'add', extra: { libraryID: 1, key: 'INDEXED1' } }]);
             await (reconciler as any).reconcileNotifiedAttachments(db, (reconciler as any).generation);
             expect((reconciler as any).pendingAttachments.get(13)?.event).toBe('add');
-            expect(readiness.hasInventory(1)).toBe(true);
-            expect(readiness.getSummary()).toBeNull();
+            expect(readiness.needsDiscovery(1)).toBe(true);
+            expect(readiness.getSummary()?.libraries[0].discovery_complete).toBe(true);
         } finally { reconciler.stop(); readiness.dispose(); vi.useRealTimers(); }
     });
 
     it('falls back to only the affected inventory after bounded targeted retries exhaust', async () => {
         vi.useFakeTimers();
-        const readiness = installReadiness([1, 2]);
+        const readiness = await installReadiness([1, 2]);
         vi.spyOn(reconciler as any, 'removeAttachment').mockRejectedValue(new Error('busy'));
         try {
             reconciler.start();
             reconciler.notifyAttachments([{ id: 13, event: 'delete', extra: { libraryID: 1, key: 'INDEXED1' } }]);
             for (let i = 0; i < 4; i++) await (reconciler as any).reconcileNotifiedAttachments(db, (reconciler as any).generation);
             expect((reconciler as any).pendingAttachments.size).toBe(0);
-            expect(readiness.hasInventory(1)).toBe(false);
+            expect(readiness.hasInventory(1)).toBe(true);
+            expect(readiness.needsDiscovery(1)).toBe(true);
             expect(readiness.hasInventory(2)).toBe(true);
         } finally { reconciler.stop(); readiness.dispose(); vi.useRealTimers(); }
     });

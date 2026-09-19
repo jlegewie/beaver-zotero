@@ -49,6 +49,11 @@ beforeEach(() => {
     service.setRequirements(requirements);
 });
 afterEach(() => { service.dispose(); vi.useRealTimers(); });
+async function inventory(keys: Iterable<string> = rows.map(row => row.zoteroKey), libraryId = 1) {
+    return service.publishInventory(service.beginDiscovery(libraryId), keys,
+        rows.filter(row => row.libraryId === libraryId), new Map());
+}
+
 
 it.each(['network_error', 'not_entitled', 'retry_exhausted', 'unsupported_schema_version', 'extraction_failed', 'download_failed', 'ocr_geometry_mismatch', 'page_count_mismatch', 'unknown_ocr_error'])('keeps %s pending', code => {
     const row = { ...indexed, extractStatus: 'failed' as const, lastError: code };
@@ -61,13 +66,13 @@ it.each(['encrypted', 'invalid_pdf', 'file_missing'])('classifies structured doc
 });
 it('requires completed discovery and counts unknown inventory rows as pending', async () => {
     await service.refresh();
-    expect(service.getSummary()?.libraries[0].discovery_complete).toBe(false);
-    service.publishInventory(1, ['KEY00001', 'MISSING1'], service.discoveryFence());
+    expect(service.getSummary()).toBeNull();
+    await inventory(['KEY00001', 'MISSING1']);
     await service.refresh();
     expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 1, pending: 1, discovery_complete: true });
 });
 it('invalidates acknowledgements after reset but preserves rows during an outage', async () => {
-    service.publishInventory(1, ['KEY00001'], service.discoveryFence());
+    await inventory(['KEY00001']);
     await service.refresh();
     service.setRequirements({ ...requirements, index_validity: 'unknown', index_incarnation: null });
     await service.refresh();
@@ -77,45 +82,15 @@ it('invalidates acknowledgements after reset but preserves rows during an outage
     await service.refresh();
     expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 0, pending: 1 });
 });
-it('fences scopes but replays additions without rejecting discovery', async () => {
-    const fence = service.discoveryFence();
-    account = 'other';
-    service.publishInventory(1, ['KEY00001'], fence);
-    service.setRequirements(requirements);
-    await service.refresh();
-    expect(service.getSummary()?.libraries[0].discovery_complete).toBe(false);
-    const beforeChange = service.discoveryFence();
-    const change = service.beginChanges();
-    expect(service.publishInventory(1, ['KEY00001'], beforeChange)).toBe(true);
-    expect(service.getSummary()).toBeNull();
-    service.updateAttachment(1, 'ADDED001', true);
-    service.completeChanges(change);
-    await service.refresh();
-    expect(service.getSummary()?.libraries[0]).toMatchObject({ discovery_complete: true, pending: 2 });
-    owner.searchableLibraryIds.push(42);
-    expect(service.getSummary()).toBeNull();
-});
-it('updates small additions without another inventory and preserves successful state on idle reads', async () => {
-    service.publishInventory(1, ['KEY00001'], service.discoveryFence());
-    const fence = service.beginChanges();
-    service.updateAttachment(1, 'NEW00001', true);
-    expect(service.getSummary()).toBeNull();
-    service.completeChanges(fence);
-    await service.refresh();
-    expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 1, pending: 1, discovery_complete: true });
-    const calls = owner.db.getAttachmentProcessingStatesByLibrary.mock.calls.length;
-    for (let i = 0; i < 100; i++) service.getSummary();
-    expect(owner.db.getAttachmentProcessingStatesByLibrary).toHaveBeenCalledTimes(calls);
-});
 it('re-establishes inventory after restart and accepts zero-chunk acknowledgements', async () => {
     expect(classifyPreparation(indexed, undefined, requirements, 'account', 'lLOCAL123', 'LOCAL123')).toBe('indexed');
-    service.publishInventory(1, ['KEY00001'], service.discoveryFence());
+    await inventory(['KEY00001']);
     await service.refresh();
     service.dispose();
     service = new SearchReadiness();
     service.setRequirements(requirements);
     await service.refresh();
-    expect(service.getSummary()?.libraries[0].discovery_complete).toBe(false);
+    expect(service.getSummary()).toBeNull();
 });
 it('limits recovery to fifty jobs and never verifies settled attachments', async () => {
     rows = Array.from({ length: 10000 }, (_, n) => ({ ...indexed, zoteroKey: String(n).padStart(8, '0'),
@@ -189,7 +164,8 @@ it('measures a 10,000-attachment SQLite summary with zero per-document network r
         SELECT 1, printf('%08d',x), 'pdf', 'hash', 'done', '4', 'done', '3', ? FROM n`, [identity]);
     const reads = vi.spyOn(db, 'getAttachmentProcessingStatesByLibrary');
     const start = performance.now();
-    service.publishInventory(1, Array.from({ length: 10000 }, (_, n) => String(n+1).padStart(8,'0')), service.discoveryFence());
+    rows = await db.getAttachmentProcessingStatesByLibrary(1);
+    await inventory(Array.from({ length: 10000 }, (_, n) => String(n+1).padStart(8,'0')));
     await service.refresh();
     const refreshMs = performance.now() - start;
     expect(service.getSummary()?.libraries[0].indexed).toBe(10000);
@@ -209,7 +185,7 @@ it('measures a 10,000-attachment SQLite summary with zero per-document network r
 
 it('keeps ninety percent indexed while uploads continue and reads only changed keys', async () => {
     rows = Array.from({ length: 100 }, (_, n) => ({ ...indexed, zoteroKey: String(n) }));
-    service.publishInventory(1, rows.map(r => r.zoteroKey), service.discoveryFence());
+    await inventory(rows.map(r => r.zoteroKey));
     await service.refresh();
     owner.db.getAttachmentProcessingStatesByLibrary.mockClear();
     service.changed(rows.slice(90).map(r => ({ libraryId: 1, zoteroKey: r.zoteroKey })));
@@ -228,7 +204,8 @@ it('keeps ninety percent indexed while uploads continue and reads only changed k
 });
 
 it('retries a failed local read after a bounded delay without losing pending work', async () => {
-    service.publishInventory(1, ['KEY00001'], service.discoveryFence());
+    await inventory(['KEY00001']);
+    service.changed([{ libraryId: 1, zoteroKey: 'KEY00001' }]);
     owner.db.getAttachmentProcessingStatesByLibrary.mockRejectedValueOnce(new Error('busy'));
     await service.refresh();
     expect(service.getSummary()?.libraries[0].pending).toBe(1);
@@ -248,7 +225,7 @@ it.each(['empty_document', 'insufficient_text', 'remote_download_denied'])('clas
         .toEqual({ unavailable: code === 'remote_download_denied' ? code : 'no_extractable_text' });
 });
 
-it('journals affected attachment identities without invalidating on queue bookkeeping', async () => {
+it('reports affected attachment identities without invalidating on queue bookkeeping', async () => {
     const connection = new MockDBConnection();
     const db = new BeaverDB(connection);
     await db.initDatabase('0.99.0');
@@ -266,6 +243,11 @@ it('journals affected attachment identities without invalidating on queue bookke
         listener.mockClear();
         await db.recordAttachmentReadingOutcome({ libraryId: 1, zoteroKey: 'KEY00001', contentKind: 'pdf', errorCode: 'file_missing', attemptedAt: 2 });
         expect(listener).not.toHaveBeenCalled();
+        await db.recordAttachmentReadingOutcome({ libraryId: 1, zoteroKey: 'KEY00001', contentKind: 'pdf', errorCode: null, attemptedAt: 1 });
+        expect(listener).not.toHaveBeenCalled();
+        expect(await db.getAttachmentReadingError(1, 'KEY00001')).toBe('file_missing');
+        await db.recordAttachmentReadingOutcome({ libraryId: 1, zoteroKey: 'KEY00001', contentKind: 'pdf', errorCode: null, attemptedAt: 3 });
+        expect(listener).toHaveBeenCalledExactlyOnceWith([{ libraryId: 1, zoteroKey: 'KEY00001' }]);
     } finally { unsubscribe(); await connection.closeDatabase(); }
 });
 
@@ -293,47 +275,6 @@ it.each([
 ])('classifies the explicit OCR document limitation %s', (code, reason) => {
     expect(classifyPreparation({ ...indexed, upsertStatus: null, ocrStatus: 'failed' }, code, requirements, 'account', 'lLOCAL123', 'LOCAL123'))
         .toEqual({ unavailable: reason });
-});
-
-it('clears old membership holds on scope reset and never releases a newer batch', async () => {
-    const old = service.beginChanges();
-    owner.searchableLibraryIds.push(42);
-    service.setRequirements(requirements);
-    expect(service.getSummary()?.libraries.every(lib => !lib.discovery_complete)).toBe(true);
-    const current = service.beginChanges();
-    service.completeChanges(old);
-    expect(service.getSummary()).toBeNull();
-    service.completeChanges(current);
-    expect(service.getSummary()).not.toBeNull();
-});
-it('keeps discovery stable throughout notification bursts but rejects preference invalidation', () => {
-    const fence = service.discoveryFence();
-    let batch = 0;
-    for (let i = 0; i < 100; i++) batch = service.beginChanges();
-    expect(service.publishInventory(1, ['KEY00001'], fence)).toBe(true);
-    service.completeChanges(batch - 1);
-    expect(service.getSummary()).toBeNull();
-    service.completeChanges(batch);
-    expect(service.getSummary()?.libraries[0].discovery_complete).toBe(true);
-    service.invalidateInventory();
-    expect(service.publishInventory(1, ['KEY00001'], fence)).toBe(false);
-});
-it('does not reject a committed ledger write if reading the readiness journal fails', async () => {
-    const connection = new MockDBConnection();
-    const db = new BeaverDB(connection);
-    await db.initDatabase('0.99.0');
-    const listener = vi.fn();
-    const unsubscribe = db.subscribeReadinessChanges(listener);
-    const query = connection.queryAsync.bind(connection);
-    const spy = vi.spyOn(connection, 'queryAsync').mockImplementation(async (sql, ...args) => {
-        if (sql.startsWith('SELECT id, library_id, zotero_key FROM readiness_changes')) throw new Error('journal unavailable');
-        return query(sql, ...args);
-    });
-    try {
-        await expect(db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'KEY00001', contentKind: 'pdf' })).resolves.toMatchObject({ zoteroKey: 'KEY00001' });
-        expect(listener).toHaveBeenCalledWith();
-        expect(await db.getAttachmentProcessingState(1, 'KEY00001')).not.toBeNull();
-    } finally { spy.mockRestore(); unsubscribe(); await connection.closeDatabase(); }
 });
 
 it.each([true, false])('treats raw PDF no-text observations as OCR preparation (access=%s)', access => {
@@ -368,7 +309,7 @@ it('uses an indexed dead-letter lookup with a large unrelated history', async ()
 
 it('keeps indexed counts available through an identified add, its handoff, and delete', async () => {
     rows = Array.from({ length: 1000 }, (_, i) => ({ ...indexed, zoteroKey: `KEY${i}` }));
-    service.publishInventory(1, rows.map(row => row.zoteroKey), service.discoveryFence());
+    await inventory(rows.map(row => row.zoteroKey));
     await service.refresh();
     const originalItems = Zotero.Items;
     const originalAttachments = Zotero.Attachments;
@@ -383,7 +324,7 @@ it('keeps indexed counts available through an identified add, its handoff, and d
         return 'readiness-watcher';
     });
     const watcher = new NewItemWatcher();
-    owner.processingReconciler = { notifyAttachments: vi.fn(events => service.beginChanges(events)) };
+    owner.processingReconciler = { notifyAttachments: vi.fn(events => service.notifyAttachments(events)) };
     watcher.start();
     try {
         observer.notify('add', 'item', [77], {});
@@ -392,7 +333,7 @@ it('keeps indexed counts available through an identified add, its handoff, and d
         expect(owner.processingReconciler.notifyAttachments).toHaveBeenCalledTimes(1);
         await service.refresh();
         expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 1000, pending: 1 });
-        service.beginChanges([{ event: 'delete', id: 78, extra: { libraryID: 1, key: 'KEY0' } }]);
+        service.notifyAttachments([{ event: 'delete', id: 78, extra: { libraryID: 1, key: 'KEY0' } }]);
         expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 999, pending: 1 });
     } finally {
         watcher.stop();
@@ -402,25 +343,193 @@ it('keeps indexed counts available through an identified add, its handoff, and d
     }
 });
 
-it('holds a notification during rediscovery until targeted replay corrects the enumerated inventory', async () => {
-    service.publishInventory(1, ['KEY00001'], service.discoveryFence());
-    await service.refresh();
-    service.invalidateLibrary(1);
-    const discovery = service.discoveryFence();
-    const fence = service.beginChanges([{ event: 'delete', id: 78, extra: { libraryID: 1, key: 'KEY00001' } }]);
-    service.publishInventory(1, ['KEY00001'], discovery);
-    await service.refresh();
+
+it('publishes the first completed snapshot immediately without rereading the ledger', async () => {
     expect(service.getSummary()).toBeNull();
-    service.updateAttachment(1, 'KEY00001', false);
-    service.completeChanges(fence);
-    expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 0, pending: 0, discovery_complete: true });
+    await inventory();
+    expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 1, pending: 0 });
+    for (let i = 0; i < 100; i++) service.getSummary();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(owner.db.getAttachmentProcessingStatesByLibrary).not.toHaveBeenCalled();
+    expect(owner.db.getAttachmentReadingErrorsByLibrary).not.toHaveBeenCalled();
 });
 
-it('does not release an unknown notification when a known deletion arrives', async () => {
-    service.publishInventory(1, ['KEY00001'], service.discoveryFence());
-    await service.refresh();
-    const unknown = service.beginChanges([{ event: 'delete', id: 77 }]);
-    service.beginChanges([{ event: 'delete', id: 78, extra: { libraryID: 1, key: 'KEY00001' } }]);
-    service.completeChanges(unknown);
+it('keeps completed snapshots through cancelled and failed scans', async () => {
+    await inventory();
+    const before = service.getSummary();
+    const cancelled = service.beginDiscovery(1);
+    expect(service.getSummary()).toBe(before);
+    service.cancelDiscovery(cancelled);
+    expect(service.getSummary()).toBe(before);
+    expect(service.needsDiscovery(1)).toBe(true);
+    const failed = service.beginDiscovery(1);
+    service.changed([{ libraryId: 1, zoteroKey: 'OTHERKEY' }]);
+    owner.db.getAttachmentProcessingStatesByLibrary.mockRejectedValueOnce(new Error('busy'));
+    await expect(service.publishInventory(failed, [], [], new Map())).rejects.toThrow('busy');
+    service.cancelDiscovery(failed);
+    expect(service.getSummary()?.libraries[0].indexed).toBe(1);
+});
+
+it('replays additions and deletions over an older enumeration without hiding either library', async () => {
+    owner.searchableLibraryIds = [1, 2];
+    service.setRequirements(requirements);
+    await inventory();
     expect(service.getSummary()).toBeNull();
+    await inventory([], 2);
+    const scan = service.beginDiscovery(1);
+    service.updateAttachment(1, 'KEY00001', false);
+    service.updateAttachment(1, 'ADDED001', true);
+    expect(service.getSummary()?.libraries.map(lib => lib.pending)).toEqual([1, 0]);
+    await service.publishInventory(scan, ['KEY00001'], rows, new Map());
+    expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 0, pending: 1 });
+    expect(service.getSummary()?.libraries[1]).toMatchObject({ indexed: 0, pending: 0 });
+});
+
+it('keeps unknown identities available and requests rediscovery only for their library', async () => {
+    owner.searchableLibraryIds = [1, 2];
+    service.setRequirements(requirements);
+    await inventory();
+    await inventory([], 2);
+    service.notifyAttachments([{ id: 987654, event: 'modify', extra: { libraryID: 1 } }]);
+    expect(service.getSummary()?.libraries[0].indexed).toBe(1);
+    expect(service.needsDiscovery(1)).toBe(true);
+    expect(service.needsDiscovery(2)).toBe(false);
+    service.notifyAttachments([{ id: 987655, event: 'delete' }]);
+    expect(service.needsDiscovery(2)).toBe(true);
+    expect(service.getSummary()).not.toBeNull();
+});
+
+it('preserves indexed state on repeated membership and metadata-only updates', async () => {
+    await inventory();
+    service.updateAttachment(1, 'KEY00001', true);
+    service.updateAttachment(1, 'KEY00001', true);
+    expect(service.getSummary()?.libraries[0].indexed).toBe(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(owner.db.getAttachmentProcessingStatesByLibrary).not.toHaveBeenCalled();
+});
+
+it('refreshes only writes made during discovery before publishing', async () => {
+    const scan = service.beginDiscovery(1);
+    const staleRows = structuredClone(rows);
+    rows = [{ ...indexed, extractStatus: null }];
+    service.changed([{ libraryId: 1, zoteroKey: 'KEY00001' }]);
+    await service.publishInventory(scan, ['KEY00001'], staleRows, new Map());
+    expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 0, pending: 1 });
+    expect(owner.db.getAttachmentProcessingStatesByLibrary).toHaveBeenCalledExactlyOnceWith(1, ['KEY00001']);
+});
+
+it('does not lose a write or deletion during the final scan refresh', async () => {
+    await inventory();
+    const scan = service.beginDiscovery(1);
+    service.changed([{ libraryId: 1, zoteroKey: 'KEY00001' }]);
+    let release!: (rows: AttachmentProcessingStateRecord[]) => void;
+    owner.db.getAttachmentProcessingStatesByLibrary.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    const publication = service.publishInventory(scan, ['KEY00001', 'DELETE01'], rows, new Map());
+    rows = [{ ...indexed, upsertStatus: null }];
+    service.changed([{ libraryId: 1, zoteroKey: 'KEY00001' }]);
+    service.updateAttachment(1, 'DELETE01', false);
+    release([indexed]);
+    await publication;
+    expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 0, pending: 1 });
+    await service.refresh();
+    expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 0, pending: 1 });
+    expect(owner.db.getAttachmentProcessingStatesByLibrary).toHaveBeenLastCalledWith(1, ['KEY00001']);
+});
+
+it.each(['account', 'scope', 'cancel'])('discards a scan that becomes invalid during its final read: %s', async reason => {
+    await inventory();
+    const scan = service.beginDiscovery(1);
+    service.changed([{ libraryId: 1, zoteroKey: 'KEY00001' }]);
+    let release!: (rows: AttachmentProcessingStateRecord[]) => void;
+    let cancelled = false;
+    owner.db.getAttachmentProcessingStatesByLibrary.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    const publication = service.publishInventory(scan, ['KEY00001'], rows, new Map(), () => cancelled);
+    if (reason === 'account') account = 'other';
+    if (reason === 'scope') owner.searchableLibraryIds = [];
+    if (reason === 'cancel') cancelled = true;
+    release(rows);
+    expect(await publication).toBe(false);
+    service.cancelDiscovery(scan);
+    if (reason !== 'cancel') expect(service.getSummary()).toBeNull();
+    else expect(service.getSummary()).not.toBeNull();
+});
+
+it('reclassifies cached rows for requirements and OCR access without SQLite reads', async () => {
+    rows.push({ ...indexed, zoteroKey: 'OCR00001', extractStatus: 'failed', ocrStatus: 'needed' });
+    await service.publishInventory(service.beginDiscovery(1), rows.map(row => row.zoteroKey), rows,
+        new Map([['OCR00001', 'ocr_required']]));
+    expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 1, pending: 0, unavailable: 1 });
+    owner.hasOcrAccess = true;
+    expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 1, pending: 1, unavailable: 0 });
+    service.setRequirements({ ...requirements, index_incarnation: 'replacement' });
+    expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 0, pending: 2 });
+    service.setRequirements(requirements);
+    expect(service.getSummary()?.libraries[0].indexed).toBe(1);
+    service.setRequirements({ ...requirements, extract_schema_versions: { pdf: ['next'] } });
+    expect(service.getSummary()?.libraries[0].indexed).toBe(0);
+    expect(owner.db.getAttachmentProcessingStatesByLibrary).not.toHaveBeenCalled();
+    expect(owner.db.getAttachmentReadingErrorsByLibrary).not.toHaveBeenCalled();
+});
+
+it.each(['unknown', 'missing', undefined] as const)('fails closed on index validity %s', async validity => {
+    await inventory();
+    service.setRequirements({ ...requirements, index_validity: validity });
+    expect(service.getSummary()).toBeNull();
+});
+
+it('bounds changed-key queries for large imports without a whole-library reread', async () => {
+    rows = Array.from({ length: 1000 }, (_, i) => ({ ...indexed, zoteroKey: String(i) }));
+    await inventory();
+    service.changed(rows.slice(0, 600).map(row => ({ libraryId: 1, zoteroKey: row.zoteroKey })));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(owner.db.getAttachmentProcessingStatesByLibrary.mock.calls.map((call: any[]) => call[1].length)).toEqual([250, 250, 100]);
+    expect(service.getSummary()?.libraries[0].indexed).toBe(1000);
+});
+
+it('reports shared OCR failures for all affected refs and isolates listener errors', async () => {
+    const connection = new MockDBConnection();
+    const db = new BeaverDB(connection);
+    await db.initDatabase('0.99.0');
+    const listener = vi.fn();
+    db.subscribeReadinessChanges(() => { throw new Error('observer'); });
+    db.subscribeReadinessChanges(listener);
+    try {
+        for (const libraryId of [1, 2]) {
+            await db.ensureAttachmentProcessingState({ libraryId, zoteroKey: 'KEY00001', contentKind: 'pdf' });
+            await db.ensureAttachmentFileHash(libraryId, 'KEY00001', 'shared');
+        }
+        listener.mockClear();
+        await db.recordDocumentProcessingFailure({ fileHash: 'shared', task: 'ocr', error: 'encrypted', terminalCode: 'encrypted_pdf' });
+        expect(listener).toHaveBeenCalledExactlyOnceWith([
+            { libraryId: 1, zoteroKey: 'KEY00001' }, { libraryId: 2, zoteroKey: 'KEY00001' },
+        ]);
+        listener.mockClear();
+        await db.clearDocumentProcessingFailure('shared', 'ocr');
+        expect(listener).toHaveBeenCalledTimes(1);
+        listener.mockClear();
+        await db.clearDocumentProcessingFailure('shared', 'ocr');
+        expect(listener).not.toHaveBeenCalled();
+        expect(connection.getRawDB().prepare("SELECT name FROM sqlite_temp_master WHERE name LIKE 'readiness_%'").all()).toEqual([]);
+    } finally { await connection.closeDatabase(); }
+});
+
+it('does not notify guarded writes that lost their race or rolled-back resets', async () => {
+    const connection = new MockDBConnection();
+    const db = new BeaverDB(connection);
+    await db.initDatabase('0.99.0');
+    await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'KEY00001', contentKind: 'pdf' });
+    const listener = vi.fn();
+    db.subscribeReadinessChanges(listener);
+    try {
+        expect(await db.markAttachmentUpsertDone({ libraryId: 1, zoteroKey: 'KEY00001',
+            structuredDocumentHash: 'obsolete', upsertIndexVersion: '3' })).toBe(false);
+        expect(listener).not.toHaveBeenCalled();
+        const query = connection.queryAsync.bind(connection);
+        vi.spyOn(connection, 'queryAsync').mockImplementation(async (sql, ...args) => {
+            if (sql.startsWith('DELETE FROM processing_index_state')) throw new Error('rollback');
+            return query(sql, ...args);
+        });
+        await expect(db.resetLocalProcessingState(1)).rejects.toThrow('rollback');
+        expect(listener).not.toHaveBeenCalled();
+    } finally { await connection.closeDatabase(); }
 });

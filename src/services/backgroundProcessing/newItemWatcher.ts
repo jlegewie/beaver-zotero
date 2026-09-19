@@ -48,7 +48,7 @@ export class NewItemWatcher {
                     accepted.push(change);
                 }
                 if (accepted.length) {
-                    Zotero.Beaver?.background?.searchReadiness?.beginChanges(accepted);
+                    Zotero.Beaver?.background?.searchReadiness?.notifyAttachments(accepted);
                     this.schedule();
                 }
             },
