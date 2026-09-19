@@ -334,3 +334,32 @@ it('does not reject a committed ledger write if reading the readiness journal fa
         expect(await db.getAttachmentProcessingState(1, 'KEY00001')).not.toBeNull();
     } finally { spy.mockRestore(); unsubscribe(); await connection.closeDatabase(); }
 });
+
+it.each([true, false])('treats raw PDF no-text observations as OCR preparation (access=%s)', access => {
+    const row = { ...indexed, extractStatus: 'failed' as const, ocrStatus: null };
+    expect(classifyPreparation(row, 'no_text_layer', requirements, 'account', 'lLOCAL123', 'LOCAL123', access))
+        .toEqual(access ? 'pending' : { unavailable: 'ocr_unavailable' });
+});
+it('classifies a settled non-PDF no-text observation as a document limitation', () => {
+    const row = { ...indexed, contentKind: 'snapshot' as const, extractStatus: 'failed' as const };
+    expect(classifyPreparation(row, 'no_text_layer', requirements, 'account', 'lLOCAL123', 'LOCAL123'))
+        .toEqual({ unavailable: 'no_extractable_text' });
+});
+
+it('uses an indexed dead-letter lookup with a large unrelated history', async () => {
+    const connection = new MockDBConnection();
+    const db = new BeaverDB(connection);
+    await db.initDatabase('0.99.0');
+    try {
+        await connection.queryAsync(`WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<10000)
+            INSERT INTO background_jobs_dead (job_type,library_id,zotero_key,content_kind,payload_kind,enqueued_at,died_at,attempt_count,payload_json)
+            SELECT 'fulltext_upsert',1,printf('%08d',x),'pdf','structured',0,1,3,'{}' FROM n`);
+        const query = vi.spyOn(connection, 'queryAsync');
+        await db.getAttachmentIndexRecoveryCandidates(1, { accountId: 'account', scopeRef: 'lLOCAL123', localId: 'LOCAL123', incarnation: 'epoch', indexVersion: 3 }, 50);
+        const call = query.mock.calls.find(([sql]) => sql.includes('NOT EXISTS (SELECT 1 FROM background_jobs_dead'))!;
+        query.mockRestore();
+        const details: string[] = [];
+        await connection.queryAsync('EXPLAIN QUERY PLAN ' + call[0], call[1], { onRow: row => details.push(row.getResultByIndex(3)) });
+        expect(details.some(detail => detail.includes('idx_background_jobs_dead_identity') && detail.includes('SEARCH'))).toBe(true);
+    } finally { await connection.closeDatabase(); }
+});

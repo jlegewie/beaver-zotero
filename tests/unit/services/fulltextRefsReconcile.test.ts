@@ -48,9 +48,24 @@ describe('bounded fulltext recovery', () => {
         expect(db.markAttachmentUpsertDone).not.toHaveBeenCalled();
         expect(verify).not.toHaveBeenCalled();
     });
+    it('refreshes validity without querying the ledger when selection is not requested', async () => {
+        await reconcileRemoteRefs([1], () => false, () => false);
+        expect(requirements).toHaveBeenCalledTimes(1);
+        expect(owner.background.searchReadiness.setRequirements).toHaveBeenCalled();
+        expect(db.getAttachmentIndexRecoveryCandidates).not.toHaveBeenCalled();
+    });
+    it('does not query the ledger against a legacy requirements contract', async () => {
+        requirements.mockResolvedValue({ index_version: 3, extract_schema_versions: current.extract_schema_versions });
+        const select = vi.fn(() => true);
+        await reconcileRemoteRefs([1], () => false, select);
+        expect(select).not.toHaveBeenCalled();
+        expect(db.getAttachmentIndexRecoveryCandidates).not.toHaveBeenCalled();
+    });
     it('does not recover during unknown validity or a transport outage', async () => {
         requirements.mockResolvedValueOnce({ ...current, index_validity: 'unknown', index_incarnation: null });
-        await reconcileRemoteRefs([1], () => false);
+        const select = vi.fn(() => true);
+        await reconcileRemoteRefs([1], () => false, select);
+        expect(select).not.toHaveBeenCalled();
         expect(db.getAttachmentIndexRecoveryCandidates).not.toHaveBeenCalled();
         requirements.mockRejectedValueOnce(new Error('offline'));
         await expect(reconcileRemoteRefs([1], () => false)).rejects.toThrow('offline');

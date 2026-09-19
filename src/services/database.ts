@@ -450,6 +450,9 @@ const BACKGROUND_JOB_COLUMNS = `
     enqueued_at, available_at, attempt_count, last_error
 `;
 
+const ATTACHMENT_READING_ERROR_EXPRESSION = `CASE WHEN P.ocr_status = 'failed' THEN COALESCE(F.terminal_code, R.error_code) ELSE R.error_code END`;
+const ATTACHMENT_OCR_FAILURE_JOIN = `LEFT JOIN document_processing_failures F ON F.file_hash = P.file_hash AND F.task = 'ocr' AND F.engine_version = ?`;
+
 const ATTACHMENT_PROCESSING_COLUMNS = `
     library_id, zotero_key, item_id, content_kind,
     file_mtime_ms, file_size_bytes, file_hash, structured_document_hash,
@@ -1199,6 +1202,8 @@ export class BeaverDB {
                 last_error      TEXT
             );
         `);
+        await this.queryAsync(`CREATE INDEX IF NOT EXISTS idx_background_jobs_dead_identity
+            ON background_jobs_dead (job_type, library_id, zotero_key)`);
         await this.processingProgress.init();
         await this.initReadinessJournal();
     }
@@ -2587,10 +2592,10 @@ export class BeaverDB {
     public async getAttachmentReadingErrorsByLibrary(libraryId: number, keys?: string[]): Promise<Map<string, string>> {
         const errors = new Map<string, string>();
         await this.queryAsync(
-            `SELECT P.zotero_key, CASE WHEN P.ocr_status = 'failed' THEN COALESCE(F.terminal_code, R.error_code) ELSE R.error_code END
+            `SELECT P.zotero_key, ${ATTACHMENT_READING_ERROR_EXPRESSION}
              FROM attachment_processing_state P
              LEFT JOIN attachment_reading_state R ON R.library_id = P.library_id AND R.zotero_key = P.zotero_key
-             LEFT JOIN document_processing_failures F ON F.file_hash = P.file_hash AND F.task = 'ocr' AND F.engine_version = ?
+             ${ATTACHMENT_OCR_FAILURE_JOIN}
              WHERE P.library_id = ? ${keys ? `AND P.zotero_key IN (${keys.map(() => '?').join(',')})` : ''}`,
             [OCR_ENGINE_VERSION, libraryId, ...(keys ?? [])], { onRow: (row: any) => {
                 const code = row.getResultByIndex(1);
@@ -2603,11 +2608,11 @@ export class BeaverDB {
     public async getAttachmentReadingError(libraryId: number, zoteroKey: string): Promise<string | null> {
         let code: string | null = null;
         await this.queryAsync(
-            `SELECT CASE WHEN P.ocr_status = 'failed' THEN COALESCE(F.terminal_code, R.error_code) ELSE R.error_code END
+            `SELECT ${ATTACHMENT_READING_ERROR_EXPRESSION}
              FROM (SELECT ? AS library_id, ? AS zotero_key) K
              LEFT JOIN attachment_reading_state R ON R.library_id = K.library_id AND R.zotero_key = K.zotero_key
              LEFT JOIN attachment_processing_state P ON P.library_id = K.library_id AND P.zotero_key = K.zotero_key
-             LEFT JOIN document_processing_failures F ON F.file_hash = P.file_hash AND F.task = 'ocr' AND F.engine_version = ?`,
+             ${ATTACHMENT_OCR_FAILURE_JOIN}`,
             [libraryId, zoteroKey, OCR_ENGINE_VERSION],
             { onRow: (row: any) => { code = row.getResultByIndex(0) ?? null; } },
         );

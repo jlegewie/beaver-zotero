@@ -88,6 +88,8 @@ export class ReconcilerService {
     private nextScanAt = 0;
     private pendingAttachments = new Map<number, AttachmentChange>();
     private inventoryChangeFence?: number;
+    private attachmentRetries = new Map<number, number>();
+    private retryNotBefore = 0;
     private running = false;
     private activeForce = false;
     private pendingWake = false;
@@ -131,6 +133,8 @@ export class ReconcilerService {
     stop(): void {
         this.stopped = true;
         this.pendingAttachments.clear();
+        this.attachmentRetries.clear();
+        this.retryNotBefore = 0;
         this.generation += 1;
         if (this.timer) clearTimeout(this.timer);
         this.timer = null;
@@ -189,9 +193,13 @@ export class ReconcilerService {
         const addedAttachments: number[] = [];
         for (const event of events) {
             if (event.event !== 'add') continue;
-            const item = await Zotero.Items.getAsync(event.id);
-            if (item && isBackgroundProcessingLibraryEnabled(item.libraryID)
-                && getReadableContentKind(item)) addedAttachments.push(event.id);
+            try {
+                const item = await Zotero.Items.getAsync(event.id);
+                if (item && isBackgroundProcessingLibraryEnabled(item.libraryID)
+                    && getReadableContentKind(item)) addedAttachments.push(event.id);
+            } catch {
+                // The per-item path retries lookup and retains failed notifications.
+            }
         }
         const visited = new Set<number>();
         for (const event of events) {
@@ -199,6 +207,7 @@ export class ReconcilerService {
             visited.add(event.id);
             if (this.cancelled(generation)) return;
             let ref = event.extra;
+            let failed = false;
             try {
                 if (event.event !== 'delete') {
                     const identities: Array<{ libraryID: number; key: string }> = [];
@@ -235,13 +244,25 @@ export class ReconcilerService {
                 }
             } catch (error) {
                 const readiness = Zotero.Beaver?.background?.searchReadiness;
-                if (ref?.libraryID) readiness?.invalidateLibrary(ref.libraryID);
-                else readiness?.invalidateInventory();
-                this.nextScanAt = 0;
+                failed = true;
+                const attempts = (this.attachmentRetries.get(event.id) ?? 0) + 1;
+                if (ref?.libraryID && ref.key && attempts <= 3) {
+                    readiness?.changed([{ libraryId: ref.libraryID, zoteroKey: ref.key }]);
+                    this.attachmentRetries.set(event.id, attempts);
+                    if (!this.pendingAttachments.has(event.id)) this.pendingAttachments.set(event.id, { ...event, extra: ref });
+                    this.retryNotBefore = Math.max(this.retryNotBefore, Date.now() + 1000 * 2 ** (attempts - 1));
+                } else {
+                    if (ref?.libraryID) readiness?.invalidateLibrary(ref.libraryID);
+                    else readiness?.invalidateInventory();
+                    this.attachmentRetries.delete(event.id);
+                    this.nextScanAt = 0;
+                }
                 logger(`ReconcilerService: attachment ${event.id} check failed: ${error}`, 2);
+            } finally {
+                if (!failed) this.attachmentRetries.delete(event.id);
             }
         }
-        if (events.length && inventoryFence !== undefined) {
+        if (events.length && !this.pendingAttachments.size && inventoryFence !== undefined) {
             Zotero.Beaver?.background?.searchReadiness?.completeChanges(inventoryFence);
         }
     }
@@ -489,7 +510,7 @@ export class ReconcilerService {
                 const forceNext = this.pendingForce;
                 this.pendingWake = false;
                 this.pendingForce = false;
-                this.schedule(wake ? 0 : this.nextScanAt > Date.now()
+                this.schedule(wake ? 0 : this.pendingAttachments.size ? Math.max(0, this.retryNotBefore - Date.now()) : this.nextScanAt > Date.now()
                     ? this.nextScanAt - Date.now() : PROCESSING_RECONCILE_INTERVAL_MS, forceNext);
             }
         }

@@ -11,7 +11,7 @@ const DOCUMENT_REASONS: Record<string, string> = {
     file_too_large: 'document_too_large', too_many_pages: 'document_too_large',
     pdf_too_complex: 'unsupported_document', empty_document: 'no_extractable_text',
     insufficient_text: 'no_extractable_text', low_confidence: 'no_extractable_text',
-    ocr_no_text: 'no_extractable_text', unsupported: 'unsupported_document',
+    no_text_layer: 'no_extractable_text', ocr_no_text: 'no_extractable_text', unsupported: 'unsupported_document',
     digital_signature: 'unsupported_document', image_too_large: 'document_too_large',
     render_failed: 'unsupported_document',
 };
@@ -30,7 +30,8 @@ export function classifyPreparation(row: AttachmentProcessingStateRecord | undef
         && identity.index_account_id === accountId && identity.index_scope_ref === scopeRef
         && identity.index_local_id === localId && Number(row.upsertIndexVersion) === requirements.index_version
         && requirements.extract_schema_versions[row.contentKind]?.includes(row.extractSchemaVersion ?? '')) return 'indexed';
-    if (row.ocrStatus === 'needed' || errorCode === 'ocr_required') {
+    if (row.ocrStatus === 'needed' || errorCode === 'ocr_required'
+        || (row.contentKind === 'pdf' && errorCode === 'no_text_layer')) {
         return hasOcrAccess ? 'pending' : { unavailable: 'ocr_unavailable' };
     }
     if ((row.extractStatus === 'failed' || row.extractStatus === 'skipped' || row.ocrStatus === 'failed')

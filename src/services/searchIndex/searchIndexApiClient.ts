@@ -11,16 +11,6 @@ export interface IndexRequirements {
     extract_schema_versions: Record<'pdf' | 'epub' | 'snapshot', string[]>;
 }
 
-export interface IndexVerifyResponse {
-    refs: Array<IndexDocumentRef & {
-        state: 'current' | 'empty' | 'obsolete' | 'missing' | 'pending';
-        index_version: number | null;
-        extract_schema_version: string | null;
-        chunk_count: number | null;
-    }>;
-    checked_at: string;
-}
-
 export interface IndexUpsertRequest {
     source: 'zotero_attachment';
     scope_ref: string;
@@ -67,18 +57,6 @@ export interface IndexRefsResponse {
     next_cursor: string | null;
 }
 
-export interface IndexStatusResponse {
-    namespace_exists: boolean;
-    approx_row_count: number | null;
-    documents: Array<{
-        source: 'zotero_attachment';
-        scope_ref: string;
-        indexed: number;
-        pending: number;
-        indexed_chunks: number;
-    }>;
-}
-
 export class SearchIndexApiClient extends ApiService {
     private requirementsCache?: { generation: number | undefined; expires: number; request: Promise<IndexRequirements> };
 
@@ -97,12 +75,6 @@ export class SearchIndexApiClient extends ApiService {
         this.requirementsCache = cache;
         void request.catch(() => { if (this.requirementsCache === cache) this.requirementsCache = undefined; });
         return request;
-    }
-
-    verify(zoteroLocalId: string, refs: IndexDocumentRef[]): Promise<IndexVerifyResponse> {
-        return this.post<IndexVerifyResponse>(`${SEARCH_INDEX_API_PREFIX}/verify`, {
-            source: 'zotero_attachment', zotero_local_id: zoteroLocalId, refs,
-        });
     }
 
     upsertHash(request: IndexUpsertRequest): Promise<IndexUpsertResponse> {
@@ -168,11 +140,6 @@ export class SearchIndexApiClient extends ApiService {
         return refs;
     }
 
-    status(zoteroLocalId: string): Promise<IndexStatusResponse> {
-        return this.get<IndexStatusResponse>(
-            `${SEARCH_INDEX_API_PREFIX}/status?zotero_local_id=${encodeURIComponent(zoteroLocalId)}`,
-        );
-    }
 }
 
 export const searchIndexApiClient = new SearchIndexApiClient();

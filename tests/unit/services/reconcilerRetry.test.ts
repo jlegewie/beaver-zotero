@@ -299,7 +299,7 @@ describe('ReconcilerService.retryAttachments', () => {
         } finally { reconciler.stop(); readiness.dispose(); vi.useRealTimers(); }
     });
 
-    it.each(['attachment', 'library'])('invalidates only the affected library after a %s failure', async path => {
+    it.each(['attachment', 'library'])('preserves unrelated inventories after a %s failure', async path => {
         vi.useFakeTimers();
         const readiness = installReadiness([1, 2]);
         vi.stubGlobal('Zotero', { ...Zotero,
@@ -315,6 +315,60 @@ describe('ReconcilerService.retryAttachments', () => {
                 vi.spyOn(reconciler as any, 'reconcileReadingState').mockRejectedValueOnce(new Error('temporary read failure'));
                 await (reconciler as any).run(false);
             }
+            expect(readiness.hasInventory(1)).toBe(path === 'attachment');
+            expect(readiness.hasInventory(2)).toBe(true);
+        } finally { reconciler.stop(); readiness.dispose(); vi.useRealTimers(); }
+    });
+
+    it('retries a transient deletion with backoff without resurrecting the key or enumerating', async () => {
+        vi.useFakeTimers();
+        const readiness = installReadiness();
+        readiness.publishInventory(1, ['INDEXED1'], readiness.discoveryFence());
+        const remove = vi.spyOn(reconciler as any, 'removeAttachment').mockRejectedValueOnce(new Error('busy')).mockResolvedValue(undefined);
+        const enumerate = vi.spyOn(reconciler as any, 'reconcileLibrary');
+        try {
+            reconciler.start();
+            (reconciler as any).nextScanAt = Date.now() + 300000;
+            reconciler.notifyAttachments([{ id: 13, event: 'delete', extra: { libraryID: 1, key: 'INDEXED1' } }]);
+            await vi.advanceTimersByTimeAsync(1);
+            expect(remove).toHaveBeenCalledTimes(1);
+            expect(readiness.hasInventory(1)).toBe(true);
+            expect(readiness.getSummary()).toBeNull();
+            await vi.advanceTimersByTimeAsync(998);
+            expect(remove).toHaveBeenCalledTimes(1);
+            await vi.advanceTimersByTimeAsync(2);
+            expect(remove).toHaveBeenCalledTimes(2);
+            expect(readiness.getSummary()?.libraries[0]).toMatchObject({ indexed: 0, pending: 0, unavailable: 0 });
+            expect(enumerate).not.toHaveBeenCalled();
+        } finally { reconciler.stop(); readiness.dispose(); vi.useRealTimers(); }
+    });
+
+    it('retains an added attachment when its initial lookups fail', async () => {
+        vi.useFakeTimers();
+        const readiness = installReadiness();
+        vi.stubGlobal('Zotero', { ...Zotero,
+            Items: { getAsync: vi.fn().mockRejectedValue(new Error('temporarily unavailable')) },
+            DB: { queryAsync: vi.fn(async (_sql, _params, options) => options.onRow({ getResultByIndex: (i: number) => i === 0 ? 1 : 'INDEXED1' })) },
+        });
+        try {
+            reconciler.start();
+            reconciler.notifyAttachments([{ id: 13, event: 'add', extra: { libraryID: 1, key: 'INDEXED1' } }]);
+            await (reconciler as any).reconcileNotifiedAttachments(db, (reconciler as any).generation);
+            expect((reconciler as any).pendingAttachments.get(13)?.event).toBe('add');
+            expect(readiness.hasInventory(1)).toBe(true);
+            expect(readiness.getSummary()).toBeNull();
+        } finally { reconciler.stop(); readiness.dispose(); vi.useRealTimers(); }
+    });
+
+    it('falls back to only the affected inventory after bounded targeted retries exhaust', async () => {
+        vi.useFakeTimers();
+        const readiness = installReadiness([1, 2]);
+        vi.spyOn(reconciler as any, 'removeAttachment').mockRejectedValue(new Error('busy'));
+        try {
+            reconciler.start();
+            reconciler.notifyAttachments([{ id: 13, event: 'delete', extra: { libraryID: 1, key: 'INDEXED1' } }]);
+            for (let i = 0; i < 4; i++) await (reconciler as any).reconcileNotifiedAttachments(db, (reconciler as any).generation);
+            expect((reconciler as any).pendingAttachments.size).toBe(0);
             expect(readiness.hasInventory(1)).toBe(false);
             expect(readiness.hasInventory(2)).toBe(true);
         } finally { reconciler.stop(); readiness.dispose(); vi.useRealTimers(); }

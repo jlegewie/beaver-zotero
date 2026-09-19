@@ -2339,7 +2339,6 @@ async function executeWSRequest(
     const updateSearchReadiness = () => {
         request.search_readiness = Zotero.Beaver?.background?.searchReadiness?.getSummary() ?? null;
     };
-    updateSearchReadiness();
     connectLoopsInFlight++;
     const result = await connectWithRetry({
         service: agentService,
