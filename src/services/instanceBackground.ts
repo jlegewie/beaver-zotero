@@ -352,7 +352,7 @@ export class InstanceBackground {
         this.key = key;
         this.clearGeneration();
         if (snapshot.session) {
-            this.cleanups.push(startFulltextUpsertLane(ids,
+            this.cleanups.push(startFulltextUpsertLane(
                 authorized && !!owner.libraryScopeInitialized && !!owner.hasSearchIndexAccess));
         }
         if (snapshot.session && owner.libraryScopeInitialized) {

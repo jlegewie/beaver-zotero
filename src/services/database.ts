@@ -395,7 +395,7 @@ export interface AttachmentProcessingStateRecord {
     ocrEngineVersion: string | null;
     upsertStatus: AttachmentUpsertStatus;
     upsertIndexVersion: string | null;
-    upsertRemoteIdentity?: { index_account_id: string; index_scope_ref: string; index_local_id: string; index_incarnation?: string | null } | null;
+    upsertRemoteIdentity?: { index_account_id: string; index_scope_ref: string; index_local_id: string; namespace_generation?: number | null } | null;
     lastError: string | null;
     createdAt: string;
     updatedAt: string;
@@ -2509,13 +2509,13 @@ export class BeaverDB {
     }
 
     public async getAttachmentProcessingStatesByLibrary(
-        libraryId: number, keys?: string[],
+        libraryId: number,
     ): Promise<AttachmentProcessingStateRecord[]> {
         return this.selectAttachmentProcessingStates(
             `SELECT ${ATTACHMENT_PROCESSING_COLUMNS}
              FROM attachment_processing_state
-             WHERE library_id = ? ${keys ? `AND zotero_key IN (${keys.map(() => '?').join(',')})` : ''} ORDER BY zotero_key`,
-            [libraryId, ...(keys ?? [])],
+             WHERE library_id = ? ORDER BY zotero_key`,
+            [libraryId],
         );
     }
 
@@ -2548,40 +2548,37 @@ export class BeaverDB {
     }
 
     public async getAttachmentIndexRecoveryCandidates(libraryId: number, identity: {
-        accountId: string; scopeRef: string; localId: string; incarnation: string | null; indexVersion: number;
+        accountId: string; scopeRef: string; localId: string; namespaceGeneration: number | null; indexVersion: number;
     }, limit: number): Promise<AttachmentProcessingStateRecord[]> {
         return this.selectAttachmentProcessingStates(
             `SELECT ${ATTACHMENT_PROCESSING_COLUMNS} FROM attachment_processing_state
              WHERE library_id = ? AND extract_status = 'done' AND structured_document_hash IS NOT NULL
-               AND (upsert_status IS NOT 'failed' OR (? IS NOT NULL
-                   AND json_extract(upsert_remote_identity, '$.index_incarnation') IS NOT ?))
+               AND upsert_status IS NOT 'failed'
                AND NOT EXISTS (SELECT 1 FROM background_jobs J WHERE J.library_id = attachment_processing_state.library_id
                    AND J.zotero_key = attachment_processing_state.zotero_key AND J.job_type = 'fulltext_upsert')
                AND NOT EXISTS (SELECT 1 FROM background_jobs_dead J WHERE J.library_id = attachment_processing_state.library_id
-                   AND J.zotero_key = attachment_processing_state.zotero_key AND J.job_type = 'fulltext_upsert'
-                   AND (? IS NULL OR json_extract(J.payload_json, '$.recovery_incarnation') IS ?))
+                   AND J.zotero_key = attachment_processing_state.zotero_key AND J.job_type = 'fulltext_upsert')
                AND (upsert_status IS NOT 'done' OR upsert_index_version IS NOT ?
                  OR json_extract(upsert_remote_identity, '$.index_account_id') IS NOT ?
                  OR json_extract(upsert_remote_identity, '$.index_scope_ref') IS NOT ?
                  OR json_extract(upsert_remote_identity, '$.index_local_id') IS NOT ?
-                 OR json_extract(upsert_remote_identity, '$.index_incarnation') IS NOT ?
-                 OR json_extract(upsert_remote_identity, '$.index_incarnation') IS NULL)
+                 OR json_extract(upsert_remote_identity, '$.namespace_generation') IS NOT ?
+                 OR json_extract(upsert_remote_identity, '$.namespace_generation') IS NULL)
              ORDER BY updated_at, zotero_key LIMIT ?`,
-            [libraryId, identity.incarnation, identity.incarnation, identity.incarnation, identity.incarnation,
-                String(identity.indexVersion), identity.accountId, identity.scopeRef,
-                identity.localId, identity.incarnation, Math.max(0, Math.min(limit, 50))],
+            [libraryId, String(identity.indexVersion), identity.accountId, identity.scopeRef,
+                identity.localId, identity.namespaceGeneration, Math.max(0, Math.min(limit, 50))],
         );
     }
 
-    public async getAttachmentReadingErrorsByLibrary(libraryId: number, keys?: string[]): Promise<Map<string, string>> {
+    public async getAttachmentReadingErrorsByLibrary(libraryId: number): Promise<Map<string, string>> {
         const errors = new Map<string, string>();
         await this.queryAsync(
             `SELECT P.zotero_key, ${ATTACHMENT_READING_ERROR_EXPRESSION}
              FROM attachment_processing_state P
              LEFT JOIN attachment_reading_state R ON R.library_id = P.library_id AND R.zotero_key = P.zotero_key
              ${ATTACHMENT_OCR_FAILURE_JOIN}
-             WHERE P.library_id = ? ${keys ? `AND P.zotero_key IN (${keys.map(() => '?').join(',')})` : ''}`,
-            [OCR_ENGINE_VERSION, libraryId, ...(keys ?? [])], { onRow: (row: any) => {
+             WHERE P.library_id = ?`,
+            [OCR_ENGINE_VERSION, libraryId], { onRow: (row: any) => {
                 const code = row.getResultByIndex(1);
                 if (code) errors.set(row.getResultByIndex(0), code);
             } },

@@ -6,7 +6,7 @@ export const SEARCH_INDEX_API_PREFIX = '/api/v1/index';
 
 export interface IndexRequirements {
     index_validity?: 'current' | 'missing' | 'unknown';
-    index_incarnation?: string | null;
+    namespace_generation?: number | null;
     index_version: number;
     extract_schema_versions: Record<'pdf' | 'epub' | 'snapshot', string[]>;
 }
@@ -24,7 +24,7 @@ export interface IndexUpsertRequest {
 }
 
 export interface IndexUpsertResponse {
-    index_incarnation?: string | null;
+    namespace_generation?: number | null;
     status: 'completed' | 'tagged' | 'accepted';
     namespace_ready: boolean;
     chunks_total: number;

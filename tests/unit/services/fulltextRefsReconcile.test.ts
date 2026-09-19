@@ -14,7 +14,7 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
 import { reconcileRemoteRefs } from '../../../src/services/backgroundProcessing/remoteRefsReconcile';
 
 const row = (key = 'LOCAL001') => ({ libraryId: 1, zoteroKey: key, itemId: 10, contentKind: 'pdf', structuredDocumentHash: 'a'.repeat(64), extractStatus: 'done', extractSchemaVersion: '4', upsertStatus: 'done', upsertIndexVersion: '3' });
-const current = { index_version: 3, index_validity: 'current', index_incarnation: 'epoch', extract_schema_versions: { pdf: ['4'], epub: ['1'], snapshot: ['1'] } };
+const current = { index_version: 3, index_validity: 'current', namespace_generation: 2, extract_schema_versions: { pdf: ['4'], epub: ['1'], snapshot: ['1'] } };
 
 describe('bounded fulltext recovery', () => {
     let db: any;
@@ -38,43 +38,51 @@ describe('bounded fulltext recovery', () => {
         expect(db.enqueueBackgroundJobs).toHaveBeenCalledWith([]);
         expect(db.markAttachmentUpsertDone).not.toHaveBeenCalled();
     });
-    it('recovers through ordinary upserts bound to the current account and incarnation', async () => {
+    it('recovers through ordinary upserts bound to the current account and namespace generation', async () => {
         await reconcileRemoteRefs([1], () => false);
         expect(db.getAttachmentIndexRecoveryCandidates).toHaveBeenCalledWith(1, {
-            accountId: 'account', scopeRef: 'lLOCAL123', localId: 'LOCAL123', incarnation: 'epoch', indexVersion: 3,
+            accountId: 'account', scopeRef: 'lLOCAL123', localId: 'LOCAL123', namespaceGeneration: 2, indexVersion: 3,
         }, 50);
         expect(db.enqueueBackgroundJobs).toHaveBeenCalledWith([expect.objectContaining({ jobType: 'fulltext_upsert',
-            payload: expect.objectContaining({ recovery_incarnation: 'epoch', doc_hash: row().structuredDocumentHash }) })]);
+            payload: expect.objectContaining({ doc_hash: row().structuredDocumentHash }) })]);
         expect(db.markAttachmentUpsertDone).not.toHaveBeenCalled();
         expect(verify).not.toHaveBeenCalled();
     });
-    it('refreshes validity without querying the ledger when selection is not requested', async () => {
-        await reconcileRemoteRefs([1], () => false, () => false);
-        expect(requirements).toHaveBeenCalledTimes(1);
-        expect(owner.background.searchReadiness.setRequirements).toHaveBeenCalled();
-        expect(db.getAttachmentIndexRecoveryCandidates).not.toHaveBeenCalled();
-    });
     it('does not query the ledger against a legacy requirements contract', async () => {
         requirements.mockResolvedValue({ index_version: 3, extract_schema_versions: current.extract_schema_versions });
-        const select = vi.fn(() => true);
-        await reconcileRemoteRefs([1], () => false, select);
-        expect(select).not.toHaveBeenCalled();
+        await reconcileRemoteRefs([1], () => false);
         expect(db.getAttachmentIndexRecoveryCandidates).not.toHaveBeenCalled();
     });
     it('does not recover during unknown validity or a transport outage', async () => {
-        requirements.mockResolvedValueOnce({ ...current, index_validity: 'unknown', index_incarnation: null });
-        const select = vi.fn(() => true);
-        await reconcileRemoteRefs([1], () => false, select);
-        expect(select).not.toHaveBeenCalled();
+        requirements.mockResolvedValueOnce({ ...current, index_validity: 'unknown', namespace_generation: null });
+        await reconcileRemoteRefs([1], () => false);
         expect(db.getAttachmentIndexRecoveryCandidates).not.toHaveBeenCalled();
         requirements.mockRejectedValueOnce(new Error('offline'));
         await expect(reconcileRemoteRefs([1], () => false)).rejects.toThrow('offline');
         expect(db.enqueueBackgroundJobs).not.toHaveBeenCalled();
     });
-    it('recovers a missing index without acknowledging local successes', async () => {
-        requirements.mockResolvedValue({ ...current, index_validity: 'missing', index_incarnation: null });
+    it('does not repeatedly recover against incarnation-only requirements', async () => {
+        requirements.mockResolvedValue({ index_version: 3, extract_schema_versions: current.extract_schema_versions,
+            index_validity: 'current', index_incarnation: 'legacy' });
+        expect(await reconcileRemoteRefs([1], () => false)).toBe(0);
+        expect(await reconcileRemoteRefs([1], () => false)).toBe(0);
+        expect(db.getAttachmentIndexRecoveryCandidates).not.toHaveBeenCalled();
+        expect(db.enqueueBackgroundJobs).not.toHaveBeenCalled();
+        expect(owner.backgroundExtractor.notify).not.toHaveBeenCalled();
+    });
+    it.each([undefined, null, 0, -1, 1.5, '2', true, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+        'rejects an invalid namespace generation: %s', async namespace_generation => {
+            requirements.mockResolvedValue({ ...current, namespace_generation });
+            expect(await reconcileRemoteRefs([1], () => false)).toBe(0);
+            expect(db.getAttachmentIndexRecoveryCandidates).not.toHaveBeenCalled();
+            expect(db.enqueueBackgroundJobs).not.toHaveBeenCalled();
+        },
+    );
+    it('recovers a missing index using its current generation without acknowledging local successes', async () => {
+        requirements.mockResolvedValue({ ...current, index_validity: 'missing', namespace_generation: 2 });
         await reconcileRemoteRefs([1], () => false);
-        expect(db.enqueueBackgroundJobs).toHaveBeenCalledWith([expect.objectContaining({ payload: expect.objectContaining({ recovery_incarnation: null }) })]);
+        expect(db.getAttachmentIndexRecoveryCandidates).toHaveBeenCalledWith(1, expect.objectContaining({ namespaceGeneration: 2 }), 50);
+        expect(db.enqueueBackgroundJobs).toHaveBeenCalledWith([expect.objectContaining({ payload: expect.objectContaining({ doc_hash: row().structuredDocumentHash }) })]);
         expect(db.markAttachmentUpsertDone).not.toHaveBeenCalled();
     });
     it('shares the fifty-job limit across libraries and leaves excluded libraries untouched', async () => {
@@ -87,7 +95,7 @@ describe('bounded fulltext recovery', () => {
         expect(verify).not.toHaveBeenCalled();
     });
     it('does no attachment reads for a settled current summary', async () => {
-        owner.background.searchReadiness.getSummary.mockReturnValue({ index_incarnation: 'epoch', libraries: [{ discovery_complete: true, pending: 0 }] });
+        owner.background.searchReadiness.getSummary.mockReturnValue({ namespace_generation: 2, libraries: [{ discovery_complete: true, pending: 0 }] });
         await reconcileRemoteRefs([1], () => false);
         expect(requirements).toHaveBeenCalledTimes(1);
         expect(db.getAttachmentIndexRecoveryCandidates).not.toHaveBeenCalled();

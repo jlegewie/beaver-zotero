@@ -1,3 +1,4 @@
+import { reconcileRemoteRefs } from './remoteRefsReconcile';
 import type {
     AttachmentProcessingStateRecord,
     BackgroundJobInput,
@@ -32,11 +33,11 @@ import {
 } from './utils';
 
 export interface AttachmentChange {
-    event: 'add' | 'modify' | 'delete';
+    event: 'add' | 'modify' | 'delete' | 'trash';
     id: number;
     /** Capture sync origin before the notification batch outlives the sync. */
     backfill?: boolean;
-    extra?: { libraryID?: number; key?: string };
+    extra?: { libraryID?: number; key?: string; changed?: Record<string, unknown> };
 }
 
 type ProcessableKind = AttachmentProcessingStateRecord['contentKind'];
@@ -86,6 +87,7 @@ function hasRecoverableAvailabilityFailure(
 export class ReconcilerService {
     private stopped = true;
     private nextScanAt = 0;
+    private nextRecoveryAt = 0;
     private pendingAttachments = new Map<number, AttachmentChange>();
     private attachmentRetries = new Map<number, number>();
     private retryNotBefore = 0;
@@ -106,6 +108,7 @@ export class ReconcilerService {
         if (!this.stopped) return;
         this.stopped = false;
         this.nextScanAt = 0;
+        this.nextRecoveryAt = 0;
         this.generation += 1;
         for (const pref of ['extensions.zotero.beaver.backgroundProcessingEnabled', 'extensions.zotero.beaver.accessRemoteFiles']) {
             try {
@@ -130,6 +133,7 @@ export class ReconcilerService {
     }
 
     stop(): void {
+        Zotero.Beaver?.background?.searchReadiness?.requestDiscovery();
         this.stopped = true;
         this.pendingAttachments.clear();
         this.attachmentRetries.clear();
@@ -225,8 +229,6 @@ export class ReconcilerService {
                     });
                     continue;
                 }
-                Zotero.Beaver?.background?.searchReadiness?.updateAttachment(ref.libraryID, ref.key,
-                    kind === 'pdf' || kind === 'epub' || kind === 'snapshot');
                 if (kind === 'text') continue;
                 if (!item || (kind !== 'pdf' && kind !== 'epub' && kind !== 'snapshot')) {
                     await this.removeAttachment(db, ref.libraryID, ref.key);
@@ -479,12 +481,7 @@ export class ReconcilerService {
             for (const library of libraries) {
                 if (this.cancelled(generation)) return;
                 if (targetedOnly && !readiness?.needsDiscovery(library.libraryID)) continue;
-                try {
-                    await this.reconcileLibrary(db, library.libraryID, force, generation);
-                } catch (error) {
-                    Zotero.Beaver?.background?.searchReadiness?.requestDiscovery(library.libraryID);
-                    throw error;
-                }
+                await this.reconcileLibrary(db, library.libraryID, force, generation);
             }
             this.inventoryRetry ||= backgroundProcessingEnabled() && readiness?.needsDiscovery() === true;
             this.pendingWake ||= this.inventoryRetry;
@@ -493,6 +490,7 @@ export class ReconcilerService {
         } catch (error) {
             logger(`ReconcilerService: reconcile failed: ${error}`, 1);
         } finally {
+            await this.recoverIndex(generation);
             await finishDiscovery?.();
             this.running = false;
             for (const resolve of this.idleWaiters.splice(0)) resolve();
@@ -505,9 +503,27 @@ export class ReconcilerService {
                 const forceNext = this.pendingForce;
                 this.pendingWake = false;
                 this.pendingForce = false;
-                this.schedule(wake ? 0 : this.pendingAttachments.size ? Math.max(0, this.retryNotBefore - Date.now()) : this.nextScanAt > Date.now()
-                    ? this.nextScanAt - Date.now() : PROCESSING_RECONCILE_INTERVAL_MS, forceNext);
+                const now = Date.now();
+                const nextScan = this.nextScanAt > now ? this.nextScanAt : now + PROCESSING_RECONCILE_INTERVAL_MS;
+                const delay = wake ? 0 : this.pendingAttachments.size
+                    ? Math.max(0, this.retryNotBefore - now)
+                    : Math.max(0, Math.min(nextScan, this.nextRecoveryAt) - now);
+                this.schedule(delay, forceNext);
             }
+        }
+    }
+
+    private async recoverIndex(generation: number): Promise<void> {
+        if (this.cancelled(generation) || Date.now() < this.nextRecoveryAt) return;
+        this.nextRecoveryAt = Date.now() + PROCESSING_RECONCILE_INTERVAL_MS;
+        if (!Zotero.Beaver?.libraryScopeInitialized || !Zotero.Beaver.hasSearchIndexAccess
+            || !backgroundProcessingEnabled()) return;
+        try {
+            const count = await reconcileRemoteRefs([...(Zotero.Beaver.searchableLibraryIds ?? [])],
+                () => this.cancelled(generation));
+            if (count >= 50) this.nextRecoveryAt = Date.now() + 60_000;
+        } catch (error) {
+            logger(`Fulltext recovery failed: ${error}`, 2);
         }
     }
 
@@ -531,7 +547,7 @@ export class ReconcilerService {
             && Date.now() - previous.lastScanTimestamp >= FULL_DIFF_SAFETY_INTERVAL_MS;
         const readiness = Zotero.Beaver?.background?.searchReadiness;
         const discoveryNeeded = readiness != null
-            && (!readiness.hasInventory(libraryId) || readiness.needsDiscovery(libraryId));
+            && readiness.needsDiscovery(libraryId);
         const fullDiffDue = force || !previous || safetyDiffDue || discoveryNeeded;
         const admissionScope = JSON.stringify([
             Zotero.Beaver?.account?.getGeneration(),
@@ -553,66 +569,59 @@ export class ReconcilerService {
         if (!cursorChanged && safetyDiffDue && !idleForStats && !admissionChanged
             && !discoveryNeeded) return;
         const statFiles = force || (safetyDiffDue && idleForStats);
-        const discovery = readiness?.beginDiscovery(libraryId);
-        try {
-            const items = await this.listProcessableAttachments(libraryId);
-            const ledgerRows = await db.getAttachmentProcessingStatesByLibrary(libraryId);
-            const ledgerByKey = new Map(ledgerRows.map((row) => [row.zoteroKey, row]));
-            const liveKeys = new Set<string>();
-            for (let start = 0; start < items.length; start += ATTACHMENT_SCAN_BATCH_SIZE) {
-                const batch = items.slice(start, start + ATTACHMENT_SCAN_BATCH_SIZE);
-                const jobs: BackgroundJobInput[] = [];
-                for (const item of batch) {
-                    if (this.cancelled(generation)) return;
-                    const kind = getReadableContentKind(item);
-                    if (kind !== 'pdf' && kind !== 'epub' && kind !== 'snapshot') continue;
-                    liveKeys.add(item.key);
-                    await this.reconcileAttachment(
-                        db,
-                        item,
-                        kind,
-                        statFiles,
-                        jobs,
-                        ledgerByKey.get(item.key),
-                    );
-                }
-                await db.enqueueBackgroundJobs(jobs);
-                await new Promise<void>((resolve) => setTimeout(resolve, 0));
-            }
-
-            // Heal missed delete notifications while a full enumeration is already
-            // happening. Untag work is persisted before the local ledger rows drop.
-            const staleRows = ledgerRows.filter((row) => !liveKeys.has(row.zoteroKey));
-            await db.enqueueBackgroundJobs(staleRows
-                .filter((row) => row.structuredDocumentHash && row.upsertRemoteIdentity)
-                .map((row) => buildUntagJobInput(row, Date.now())));
-            for (const row of staleRows) {
-                await db.deleteAttachmentProcessingState(libraryId, row.zoteroKey);
-            }
-
-            if (!isBackgroundProcessingLibraryEnabled(libraryId)) return;
-            const ledgerRowCount = (await db.getAttachmentProcessingAggregates(libraryId)).total;
-            const state: ProcessingIndexStateRecord = {
-                libraryId,
-                maxClientDateModified: cursor.maxClientDateModified,
-                attachmentCount: cursor.attachmentCount,
-                ledgerRowCount,
-                lastScanTimestamp: !statFiles && previous
-                    ? previous.lastScanTimestamp
-                    : Date.now(),
-            };
-            await db.upsertProcessingIndexState(state);
-            this.admissionScopes.set(libraryId, admissionScope);
-            if (!this.cancelled(generation) && discovery && readiness) {
-                const errors = await db.getAttachmentReadingErrorsByLibrary(libraryId);
+        const discovery = discoveryNeeded ? readiness.beginDiscovery(libraryId) : undefined;
+        const items = await this.listProcessableAttachments(libraryId);
+        const ledgerRows = await db.getAttachmentProcessingStatesByLibrary(libraryId);
+        const ledgerByKey = new Map(ledgerRows.map((row) => [row.zoteroKey, row]));
+        const liveKeys = new Set<string>();
+        for (let start = 0; start < items.length; start += ATTACHMENT_SCAN_BATCH_SIZE) {
+            const batch = items.slice(start, start + ATTACHMENT_SCAN_BATCH_SIZE);
+            const jobs: BackgroundJobInput[] = [];
+            for (const item of batch) {
                 if (this.cancelled(generation)) return;
-                if (!await readiness.publishInventory(discovery, liveKeys, ledgerRows, errors, () => this.cancelled(generation))) {
-                    this.inventoryRetry = true;
-                    this.pendingWake = true;
-                }
+                const kind = getReadableContentKind(item);
+                if (kind !== 'pdf' && kind !== 'epub' && kind !== 'snapshot') continue;
+                liveKeys.add(item.key);
+                await this.reconcileAttachment(
+                    db,
+                    item,
+                    kind,
+                    statFiles,
+                    jobs,
+                    ledgerByKey.get(item.key),
+                );
             }
-        } finally {
-            if (discovery) readiness?.cancelDiscovery(discovery);
+            await db.enqueueBackgroundJobs(jobs);
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
+
+        // Heal missed delete notifications while a full enumeration is already
+        // happening. Untag work is persisted before the local ledger rows drop.
+        const staleRows = ledgerRows.filter((row) => !liveKeys.has(row.zoteroKey));
+        await db.enqueueBackgroundJobs(staleRows
+            .filter((row) => row.structuredDocumentHash && row.upsertRemoteIdentity)
+            .map((row) => buildUntagJobInput(row, Date.now())));
+        for (const row of staleRows) {
+            await db.deleteAttachmentProcessingState(libraryId, row.zoteroKey);
+        }
+
+        if (!isBackgroundProcessingLibraryEnabled(libraryId)) return;
+        const ledgerRowCount = (await db.getAttachmentProcessingAggregates(libraryId)).total;
+        const state: ProcessingIndexStateRecord = {
+            libraryId,
+            maxClientDateModified: cursor.maxClientDateModified,
+            attachmentCount: cursor.attachmentCount,
+            ledgerRowCount,
+            lastScanTimestamp: !statFiles && previous
+                ? previous.lastScanTimestamp
+                : Date.now(),
+        };
+        await db.upsertProcessingIndexState(state);
+        this.admissionScopes.set(libraryId, admissionScope);
+        if (!this.cancelled(generation) && discovery !== undefined && readiness
+            && !readiness.completeDiscovery(libraryId, discovery)) {
+            this.inventoryRetry = true;
+            this.pendingWake = true;
         }
     }
 

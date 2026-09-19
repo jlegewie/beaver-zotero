@@ -402,6 +402,23 @@ describe('attachment change reconciliation', () => {
         delete (Zotero.Beaver as any).background;
     });
 
+    it.each(['trash', 'restore'])('retains %s membership evidence across metadata and download batching', async change => {
+        const notifyAttachments = vi.fn();
+        (Zotero.Beaver as any).background = { searchReadiness: { notifyAttachments } };
+        const handoff = vi.spyOn(reconciler, 'notifyAttachments').mockImplementation(() => {});
+        if (change === 'trash') observer.notify('trash', 'item', [7], { 7: { libraryID: 1 } });
+        else observer.notify('modify', 'item', [7], { 7: { libraryID: 1, changed: { deleted: true } } });
+        observer.notify('modify', 'item', [7], { 7: { changed: { title: 'Old title' } } });
+        observer.notify('download', 'file', [7]);
+        await (watcher as any).flush();
+        const event = handoff.mock.calls[0][0][0];
+        expect(event.extra?.libraryID).toBe(1);
+        if (change === 'trash') expect(event.event).toBe('trash');
+        else expect(event.extra?.changed).toHaveProperty('deleted');
+        expect(notifyAttachments).toHaveBeenCalled();
+        delete (Zotero.Beaver as any).background;
+    });
+
     it('subscribes to item and file notifications', () => {
         expect(Zotero.Notifier.registerObserver).toHaveBeenCalledWith(observer, ['item', 'file'], 'beaver-background-processing');
     });

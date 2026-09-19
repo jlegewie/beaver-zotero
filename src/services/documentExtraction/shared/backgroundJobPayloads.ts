@@ -4,8 +4,6 @@ import {
 } from "@beaver/agent-core/extract/document/shared/contentKinds";
 
 export interface IndexBackgroundJobMetadata {
-  /** Limits automatic dead-letter recovery to one attempt per index incarnation. */
-  recovery_incarnation?: string | null;
   /** Explicit local preparation stops claiming files when the cache fills. */
   prepare_cache?: boolean;
   /** Semantic OCR admission intent; absent legacy values remain backfill. */

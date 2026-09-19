@@ -20,10 +20,10 @@ export class NewItemWatcher {
                 event: string,
                 type: string,
                 ids: number[],
-                extraData: Record<number, { libraryID?: number; key?: string }> | undefined,
+                extraData: Record<number, AttachmentChange['extra']> | undefined,
             ) => {
                 const downloaded = type === 'file' && event === 'download';
-                if (!downloaded && (type !== 'item' || !['add', 'modify', 'delete'].includes(event))) return;
+                if (!downloaded && (type !== 'item' || !['add', 'modify', 'delete', 'trash'].includes(event))) return;
                 if (Zotero.__beaverShuttingDown === true) return;
                 const accepted: AttachmentChange[] = [];
                 for (const id of ids) {
@@ -35,14 +35,21 @@ export class NewItemWatcher {
                     if (item?.isNote?.() || item?.isAnnotation?.()) continue;
                     // A late download must not erase the identity needed for deletion cleanup.
                     if (downloaded && this.pending.get(id)?.event === 'delete') continue;
+                    const pending = this.pending.get(id);
                     const change: AttachmentChange = {
                         event: event === 'delete' ? 'delete'
-                            : this.pending.get(id)?.event === 'add' ? 'add'
-                                : downloaded ? 'modify' : event as AttachmentChange['event'],
+                            : pending?.event === 'add' ? 'add'
+                                : event === 'trash' || pending?.event === 'trash' ? 'trash'
+                                    : downloaded ? 'modify' : event as AttachmentChange['event'],
                         id,
                         backfill: this.pending.get(id)?.backfill === true
                             || Zotero.Sync?.Runner?.syncInProgress === true,
-                        extra: extraData?.[id],
+                        extra: {
+                            ...pending?.extra,
+                            ...extraData?.[id],
+                            libraryID: libraryId ?? pending?.extra?.libraryID,
+                            changed: { ...pending?.extra?.changed, ...extraData?.[id]?.changed },
+                        },
                     };
                     this.pending.set(id, change);
                     accepted.push(change);
