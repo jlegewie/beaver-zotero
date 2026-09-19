@@ -295,9 +295,64 @@ describe("instance account ownership", () => {
         const remove = account.subscribe(() => {});
         remove();
         const count = mocks.profile.mock.calls.length;
-        await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
+        await vi.advanceTimersByTimeAsync(4 * 60 * 60 * 1000);
         expect(mocks.profile.mock.calls.length).toBeGreaterThan(count);
         expect(account.getSnapshot().data).not.toBeNull();
+    });
+    it("refreshes every 4 hours while Beaver is hidden and every 15 minutes while visible", async () => {
+        await load();
+        const count = mocks.profile.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+        expect(mocks.profile).toHaveBeenCalledTimes(count);
+        await vi.advanceTimersByTimeAsync(3 * 60 * 60 * 1000);
+        expect(mocks.profile).toHaveBeenCalledTimes(count + 1);
+
+        account.setUIVisible("w1", true);
+        await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
+        expect(mocks.profile).toHaveBeenCalledTimes(count + 2);
+        await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
+        expect(mocks.profile).toHaveBeenCalledTimes(count + 3);
+
+        account.setUIVisible("w1", false);
+        await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+        expect(mocks.profile).toHaveBeenCalledTimes(count + 3);
+    });
+    it("refreshes a stale profile as soon as Beaver becomes visible", async () => {
+        await load();
+        const count = mocks.profile.mock.calls.length;
+        account.setUIVisible("w1", true);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(mocks.profile).toHaveBeenCalledTimes(count);
+        account.setUIVisible("w1", false);
+        await vi.advanceTimersByTimeAsync(20 * 60 * 1000);
+        expect(mocks.profile).toHaveBeenCalledTimes(count);
+        account.setUIVisible("w1", true);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(mocks.profile).toHaveBeenCalledTimes(count + 1);
+    });
+    it("stays on the visible cadence until every window hides Beaver", async () => {
+        await load();
+        const count = mocks.profile.mock.calls.length;
+        account.setUIVisible("main", true);
+        account.setUIVisible("standalone", true);
+        account.setUIVisible("main", false);
+        await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
+        expect(mocks.profile).toHaveBeenCalledTimes(count + 1);
+        account.setUIVisible("standalone", false);
+        await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+        expect(mocks.profile).toHaveBeenCalledTimes(count + 1);
+    });
+    it("keeps the retry backoff when visibility changes during a transient failure", async () => {
+        await load();
+        const count = mocks.profile.mock.calls.length;
+        mocks.profile.mockRejectedValueOnce(Object.assign(new Error("down"), { status: 503 }));
+        await account.refresh(true);
+        expect(account.getSnapshot().status.kind).toBe("transient");
+        account.setUIVisible("w1", true);
+        account.setUIVisible("w1", false);
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(mocks.profile).toHaveBeenCalledTimes(count + 2);
+        expect(account.getSnapshot().status.kind).toBe("ok");
     });
     it("pauses offline retries and resumes through one instance network observer", async () => {
         await load();
