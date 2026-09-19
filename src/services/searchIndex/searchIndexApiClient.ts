@@ -4,6 +4,8 @@ import type { DocumentExtractResult } from '@beaver/agent-core/extract/document/
 
 export const SEARCH_INDEX_API_PREFIX = '/api/v1/index';
 
+const requirementsTtl = (value: IndexRequirements) => value.index_validity === 'unknown' ? 5_000 : 5 * 60_000;
+
 export interface IndexRequirements {
     index_validity?: 'current' | 'missing' | 'unknown';
     namespace_generation?: number | null;
@@ -68,7 +70,7 @@ export class SearchIndexApiClient extends ApiService {
 
     recordRequirements(requirements: IndexRequirements): void {
         this.requirementsCache = { generation: Zotero.Beaver?.account?.getGeneration(),
-            expires: Date.now() + 5 * 60_000, request: Promise.resolve(requirements), value: requirements };
+            expires: Date.now() + requirementsTtl(requirements), request: Promise.resolve(requirements), value: requirements };
     }
 
     requirements(): Promise<IndexRequirements> {
@@ -80,7 +82,12 @@ export class SearchIndexApiClient extends ApiService {
         const cache = { generation, expires: Date.now() + 5 * 60_000, request,
             value: this.getCachedRequirements() };
         this.requirementsCache = cache;
-        void request.then(value => { if (this.requirementsCache === cache) cache.value = value; },
+        void request.then(value => {
+            if (this.requirementsCache === cache) {
+                cache.value = value;
+                cache.expires = Date.now() + requirementsTtl(value);
+            }
+        },
             () => { if (this.requirementsCache === cache) this.requirementsCache = undefined; });
         return request;
     }

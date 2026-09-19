@@ -44,4 +44,23 @@ describe('search index wire contract', () => {
         expect(client.getCachedRequirements()).toBeUndefined();
     });
 
+    it.each([false, true])('expires unknown requirements promptly (recorded=%s)', async recorded => {
+        vi.useFakeTimers();
+        try {
+            const client = new SearchIndexApiClient();
+            const unknown = { index_version: 3, index_validity: 'unknown' as const, namespace_generation: null,
+                extract_schema_versions: { pdf: ['4'], epub: ['1'], snapshot: ['1'] } };
+            const get = vi.spyOn(client as any, 'get').mockResolvedValue(unknown);
+            if (recorded) client.recordRequirements(unknown);
+            else await client.requirements();
+            get.mockClear();
+            await vi.advanceTimersByTimeAsync(4999);
+            await client.requirements();
+            expect(get).not.toHaveBeenCalled();
+            await vi.advanceTimersByTimeAsync(1);
+            await client.requirements();
+            expect(get).toHaveBeenCalledTimes(1);
+        } finally { vi.useRealTimers(); }
+    });
+
 });

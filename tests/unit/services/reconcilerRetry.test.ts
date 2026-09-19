@@ -228,7 +228,7 @@ describe('ReconcilerService.retryAttachments', () => {
         vi.useRealTimers();
     });
 
-    it('defers discovery during sync and leaves other libraries on their periodic deadline', async () => {
+    it('skips discovery retries during sync while preserving startup, periodic and notified work', async () => {
         vi.useFakeTimers();
         const readiness = { needsDiscovery: (id?: number) => id === undefined || id === 1,
             requestDiscovery: vi.fn(), notifyAttachments: vi.fn() };
@@ -237,25 +237,69 @@ describe('ReconcilerService.retryAttachments', () => {
             Libraries: { getAll: () => [{ libraryID: 1, libraryType: 'user' }, { libraryID: 2, libraryType: 'group' }] } });
         const scan = vi.spyOn(reconciler as any, 'reconcileLibrary').mockResolvedValue(undefined);
         (Zotero.Beaver as any).searchableLibraryIds = [1, 2];
-        vi.spyOn(reconciler as any, 'reconcileNotifiedAttachments').mockImplementation(async () => {
+        const notified = vi.spyOn(reconciler as any, 'reconcileNotifiedAttachments').mockImplementation(async () => {
             (reconciler as any).pendingAttachments.clear();
         });
         reconciler.start();
-        const deadline = Date.now() + 30_000;
-        (reconciler as any).nextScanAt = deadline;
         try {
-            reconciler.notifyAttachments([{ id: 1, event: 'add' }]);
             await (reconciler as any).run(false);
-            expect(scan).not.toHaveBeenCalled();
+            const deadline = (reconciler as any).nextScanAt;
+            expect(scan.mock.calls.map(call => call[1])).toEqual([1, 2]);
             await vi.advanceTimersByTimeAsync(5000);
-            expect(scan).not.toHaveBeenCalled();
+            expect(scan).toHaveBeenCalledTimes(2);
+            notified.mockClear();
+            reconciler.notifyAttachments([{ id: 1, event: 'add' }]);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(notified).toHaveBeenCalledTimes(1);
+            expect(scan).toHaveBeenCalledTimes(2);
             Zotero.Sync.Runner.syncInProgress = false;
             await vi.advanceTimersByTimeAsync(5000);
-            expect(scan.mock.calls.map(call => call[1])).toEqual([1]);
+            expect(scan.mock.calls.map(call => call[1])).toEqual([1, 2, 1]);
             expect((reconciler as any).nextScanAt).toBe(deadline);
-            await vi.advanceTimersByTimeAsync(20_000);
-            expect(scan.mock.calls.some(call => call[1] === 2)).toBe(true);
+            Zotero.Sync.Runner.syncInProgress = true;
+            await vi.advanceTimersByTimeAsync(deadline - Date.now());
+            expect(scan.mock.calls.map(call => call[1])).toEqual([1, 2, 1, 1, 2]);
         } finally { reconciler.stop(); vi.useRealTimers(); }
+    });
+
+    it('enqueues startup backlog during sync without certifying discovery', async () => {
+        const readiness = await installReadiness();
+        readiness.requestDiscovery(1);
+        const begin = vi.spyOn(readiness, 'beginDiscovery');
+        const first = items.get('1-INDEXED1')!;
+        vi.stubGlobal('Zotero', { ...Zotero, Sync: { Runner: { syncInProgress: true } } });
+        vi.spyOn(reconciler as any, 'reconcileReadingState').mockResolvedValue(undefined);
+        vi.spyOn(reconciler as any, 'readLibraryCursor').mockResolvedValue({ maxClientDateModified: '2026', attachmentCount: 1 });
+        vi.spyOn(reconciler as any, 'listProcessableAttachments').mockResolvedValue([first]);
+        vi.spyOn(reconciler as any, 'reconcileAttachment').mockImplementation(async (_db, _item, _kind, _stat, jobs: any) => {
+            jobs.push({ jobType: 'fulltext_upsert', libraryId: 1, zoteroKey: first.key,
+                contentKind: 'pdf', payloadKind: 'structured', priority: 100, now: Date.now() });
+        });
+        try {
+            reconciler.start();
+            await (reconciler as any).reconcileLibrary(db, 1, false, (reconciler as any).generation);
+            expect(await db.peekBackgroundJobs()).toHaveLength(1);
+            expect(begin).not.toHaveBeenCalled();
+            expect(readiness.needsDiscovery(1)).toBe(true);
+            Zotero.Sync.Runner.syncInProgress = false;
+            await (reconciler as any).reconcileLibrary(db, 1, false, (reconciler as any).generation);
+            expect(begin).toHaveBeenCalledTimes(1);
+            expect(readiness.needsDiscovery(1)).toBe(false);
+        } finally { readiness.dispose(); reconciler.stop(); }
+    });
+
+    it('does not rearm reconciliation during shutdown before stop is called', async () => {
+        vi.useFakeTimers();
+        try {
+            reconciler.start();
+            Zotero.__beaverShuttingDown = true;
+            const schedule = vi.spyOn(reconciler as any, 'schedule');
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(schedule).not.toHaveBeenCalled();
+            expect(mocks.recovery).not.toHaveBeenCalled();
+            await vi.advanceTimersByTimeAsync(10_000);
+            expect(schedule).not.toHaveBeenCalled();
+        } finally { Zotero.__beaverShuttingDown = false; reconciler.stop(); vi.useRealTimers(); }
     });
 
     it('handles parent and child deletes without invalidating the library', async () => {

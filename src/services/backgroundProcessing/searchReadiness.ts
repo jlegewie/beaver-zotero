@@ -48,6 +48,7 @@ export class SearchReadiness {
     private requirements?: IndexRequirements;
     private summary: SearchReadinessSummary | null = null;
     private reading = false;
+    private nextRefreshAt = 0;
     private disposed = false;
     private timer?: ReturnType<typeof setTimeout>;
     private ocrAccess = false;
@@ -132,6 +133,10 @@ export class SearchReadiness {
 
     setRequirements(requirements: IndexRequirements): void {
         this.syncScope();
+        // Unknown validity is not evidence that the last observed generation changed.
+        if (requirements.index_validity === 'unknown' && requirements.namespace_generation == null) {
+            requirements = { ...requirements, namespace_generation: this.requirements?.namespace_generation };
+        }
         if (JSON.stringify(this.requirements) === JSON.stringify(requirements)) return;
         const classificationChanged = classificationKey(this.requirements) !== classificationKey(requirements);
         this.requirements = requirements;
@@ -161,7 +166,7 @@ export class SearchReadiness {
     private schedule(delay = 250): void {
         if (this.disposed || this.timer !== undefined || this.reading || !this.requirements
             || ![...this.libraries.values()].some(library => library.discovered && !library.count)) return;
-        this.timer = setTimeout(() => { this.timer = undefined; void this.refresh(); }, delay);
+        this.timer = setTimeout(() => { this.timer = undefined; void this.refresh(); }, Math.max(delay, this.nextRefreshAt - Date.now()));
     }
 
     async refresh(): Promise<void> {
@@ -201,6 +206,8 @@ export class SearchReadiness {
             }
             this.publish();
         } finally {
+            // Bound full-ledger work even when writes invalidate an in-flight read.
+            this.nextRefreshAt = Date.now() + 5_000;
             this.reading = false;
             this.schedule(retryDelay);
         }

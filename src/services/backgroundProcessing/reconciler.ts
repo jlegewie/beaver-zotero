@@ -486,7 +486,8 @@ export class ReconcilerService {
                 if (this.cancelled(generation)) return;
                 if (targetedOnly && !readiness?.needsDiscovery(library.libraryID)) continue;
                 if (!force && readiness?.needsDiscovery(library.libraryID)
-                    && (Date.now() < this.discoveryRetryAt || Zotero.Sync?.Runner?.syncInProgress)) continue;
+                    && (Date.now() < this.discoveryRetryAt
+                        || (targetedOnly && Zotero.Sync?.Runner?.syncInProgress))) continue;
                 await this.reconcileLibrary(db, library.libraryID, force, generation);
             }
             if (backgroundProcessingEnabled() && readiness?.needsDiscovery()) {
@@ -505,7 +506,7 @@ export class ReconcilerService {
             if (force) {
                 for (const resolve of this.forceWaiters.splice(0)) resolve();
             }
-            if (!this.stopped) {
+            if (!this.stopped && !Zotero.__beaverShuttingDown) {
                 const wake = this.pendingWake;
                 const forceNext = this.pendingForce;
                 this.pendingWake = false;
@@ -514,7 +515,7 @@ export class ReconcilerService {
                 const nextScan = this.nextScanAt > now ? this.nextScanAt : now + PROCESSING_RECONCILE_INTERVAL_MS;
                 const delay = wake ? 0 : this.pendingAttachments.size
                     ? Math.max(0, this.retryNotBefore - now)
-                    : Math.max(0, Math.min(nextScan, this.nextRecoveryAt, this.discoveryRetryAt > now ? this.discoveryRetryAt : Infinity) - now);
+                    : Math.max(0, Math.min(nextScan, this.nextRecoveryAt || Infinity, this.discoveryRetryAt > now ? this.discoveryRetryAt : Infinity) - now);
                 this.schedule(delay, forceNext);
             }
         }
@@ -554,7 +555,8 @@ export class ReconcilerService {
             && Date.now() - previous.lastScanTimestamp >= FULL_DIFF_SAFETY_INTERVAL_MS;
         const readiness = Zotero.Beaver?.background?.searchReadiness;
         const discoveryNeeded = readiness != null
-            && readiness.needsDiscovery(libraryId);
+            && readiness.needsDiscovery(libraryId)
+            && (force || !Zotero.Sync?.Runner?.syncInProgress);
         const fullDiffDue = force || !previous || safetyDiffDue || discoveryNeeded;
         const admissionScope = JSON.stringify([
             Zotero.Beaver?.account?.getGeneration(),

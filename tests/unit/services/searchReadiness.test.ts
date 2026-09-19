@@ -276,7 +276,7 @@ it('coalesces ledger changes into a library read and keeps dispatch free of read
     rows[0] = { ...rows[0], upsertStatus: null };
     for (const row of rows) service.changed([{ libraryId: 1, zoteroKey: row.zoteroKey }]);
     expect(service.getSummary()).toBe(previous);
-    await vi.advanceTimersByTimeAsync(250);
+    await vi.advanceTimersByTimeAsync(5000);
     expect(owner.db.getAttachmentProcessingStatesByLibrary).toHaveBeenCalledExactlyOnceWith(1);
     expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 999, pending: 1 });
     for (let i = 0; i < 1000; i++) service.getSummary();
@@ -503,4 +503,48 @@ it('does not classify later libraries using requirements superseded during a rea
     await service.refresh();
     expect(service.getSummary()?.libraries.map(lib => lib.indexed)).toEqual([0, 0]);
     expect(service.getSummary()?.libraries.map(lib => lib.pending)).toEqual([1, 1]);
+});
+
+it('bounds full-ledger reads under sustained writes and refreshes after they settle', async () => {
+    await discover();
+    const read = owner.db.getAttachmentProcessingStatesByLibrary;
+    read.mockClear();
+    for (let i = 0; i < 100; i++) {
+        service.changed([{ libraryId: 1, zoteroKey: indexed.zoteroKey }]);
+        await vi.advanceTimersByTimeAsync(100);
+    }
+    expect(read).toHaveBeenCalledTimes(2);
+    rows[0] = { ...rows[0], upsertStatus: null };
+    service.changed([{ libraryId: 1, zoteroKey: indexed.zoteroKey }]);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 0, pending: 1 });
+});
+
+it('backs off when writes supersede an in-flight count read', async () => {
+    await discover();
+    const read = owner.db.getAttachmentProcessingStatesByLibrary;
+    let resolve!: (value: AttachmentProcessingStateRecord[]) => void;
+    read.mockClear().mockImplementationOnce(() => new Promise(r => { resolve = r; }));
+    service.changed([{ libraryId: 1, zoteroKey: indexed.zoteroKey }]);
+    await vi.advanceTimersByTimeAsync(5000);
+    service.changed([{ libraryId: 1, zoteroKey: indexed.zoteroKey }]);
+    resolve(rows);
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(read).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(read).toHaveBeenCalledTimes(2);
+});
+
+it.each([2, 3])('retains counts through unknown/null generation but checks returning generation %s', async generation => {
+    await discover();
+    const read = owner.db.getAttachmentProcessingStatesByLibrary;
+    read.mockClear();
+    service.setRequirements({ ...requirements, index_validity: 'unknown', namespace_generation: null });
+    expect(service.getSummary()).toBeNull();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(read).not.toHaveBeenCalled();
+    service.setRequirements({ ...requirements, namespace_generation: generation });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(read).toHaveBeenCalledTimes(generation === 2 ? 0 : 1);
+    expect(service.getSummary()?.libraries[0].indexed).toBe(generation === 2 ? 1 : 0);
 });
