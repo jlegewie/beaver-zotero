@@ -45,6 +45,10 @@ export interface AccountSnapshot {
           }
         | { kind: "fatal"; message: string };
 }
+/** Profile refresh cadence while a Beaver surface is showing in any window. */
+const VISIBLE_REFRESH_MS = 15 * 60 * 1000;
+/** Profile refresh cadence while Beaver is hidden everywhere; plan changes still land. */
+const HIDDEN_REFRESH_MS = 4 * 60 * 60 * 1000;
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const freeze = <T>(value: T): T => {
     if (value && typeof value === "object") {
@@ -72,6 +76,11 @@ export class InstanceAccount {
     private disposed = false;
     private authSubscription?: { unsubscribe(): void };
     private timer?: ReturnType<typeof setTimeout>;
+    /** Whether `timer` is the periodic refresh (re-timed on visibility changes) or a retry. */
+    private periodic = false;
+    private lastSuccessAt = 0;
+    /** Renderers currently showing a Beaver surface, keyed by window runtime id. */
+    private visibleSurfaces = new Set<string>();
     private refreshing?: { generation: number; promise: Promise<void> };
     private refreshAgain = false;
     private attempts = 0;
@@ -307,6 +316,8 @@ export class InstanceAccount {
         this.realtime.clear();
         if (this.timer) clearTimeout(this.timer);
         this.timer = undefined;
+        this.periodic = false;
+        this.lastSuccessAt = 0;
         this.snapshot = {
             ...this.snapshot,
             generation: this.snapshot.generation + 1,
@@ -388,13 +399,41 @@ export class InstanceAccount {
                       },
             );
     }
-    private schedule(delay: number): void {
+    private schedule(delay: number, periodic = false): void {
         if (this.timer) clearTimeout(this.timer);
+        this.timer = undefined;
+        this.periodic = false;
         if (this.disposed || !this.snapshot.session || this.isOffline()) return;
+        this.periodic = periodic;
         this.timer = setTimeout(() => {
             this.timer = undefined;
+            this.periodic = false;
             void this.refresh();
         }, delay);
+    }
+    /** Time until the next periodic refresh is due, given current visibility. */
+    private periodicDelay(): number {
+        const interval = this.visibleSurfaces.size
+            ? VISIBLE_REFRESH_MS
+            : HIDDEN_REFRESH_MS;
+        return Math.max(0, this.lastSuccessAt + interval - Date.now());
+    }
+    /**
+     * Record whether a renderer is showing Beaver. The periodic refresh runs every
+     * 15 minutes while any surface is visible and every 4 hours otherwise; becoming
+     * visible with a profile older than 15 minutes refreshes immediately. Renderers
+     * must report `false` when they unmount.
+     */
+    setUIVisible(key: string, visible: boolean): void {
+        if (this.disposed) return;
+        const wasVisible = this.visibleSurfaces.size > 0;
+        if (visible) this.visibleSurfaces.add(key);
+        else this.visibleSurfaces.delete(key);
+        if (wasVisible === this.visibleSurfaces.size > 0) return;
+        // Retries and in-flight reads keep their own schedule; a successful read
+        // schedules the next periodic refresh from the current visibility.
+        if (this.periodic && this.timer)
+            this.schedule(this.periodicDelay(), true);
     }
     private isOffline(): boolean {
         return typeof Services !== "undefined" && Services.io?.offline === true;
@@ -429,6 +468,7 @@ export class InstanceAccount {
         }
         if (this.timer) clearTimeout(this.timer);
         this.timer = undefined;
+        this.periodic = false;
         const generation = this.snapshot.generation;
         const mutation = this.mutationRevision;
         const current = () =>
@@ -500,9 +540,10 @@ export class InstanceAccount {
                 this.snapshot.scopeReady = true;
                 this.snapshot.status = { kind: "ok" };
                 this.attempts = 0;
+                this.lastSuccessAt = Date.now();
                 this.publish();
                 void this.claimPreSyncThreads();
-                this.schedule(15 * 60 * 1000);
+                this.schedule(this.periodicDelay(), true);
             } catch (error) {
                 if (!current()) return;
                 const e = error as any;
