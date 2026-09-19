@@ -57,7 +57,9 @@ admission and hides progress until scope is available.
 
 The instance coalesces database and dispatcher changes into status notifications
 and settles runs even with no windows open. Renderers subscribe with polling as a
-fallback. Cloud coverage is refreshed separately and cannot delay local progress.
+fallback. The planned search-readiness contract derives a whole-library summary from successful
+inventory discovery and the durable ledger; it is separate from current-run progress.
+See [search readiness](search-readiness.md) for the backend validity gate and cost limits.
 
 Window detach removes only renderer subscriptions. Instance shutdown closes
 admission, cancels document requests and background generations, settles protected
