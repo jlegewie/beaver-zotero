@@ -389,16 +389,45 @@ describe('attachment change reconciliation', () => {
         expect(handoff.mock.calls[0][0].map(event => event.id)).toEqual([7, 8, 9]);
     });
 
-    it('does not fence known note edits or excluded-library events', async () => {
-        const beginChanges = vi.fn();
-        (Zotero.Beaver as any).background = { searchReadiness: { beginChanges } };
+    it('invalidates readiness only once when a watcher batch reaches the reconciler', async () => {
+        const notifyAttachments = vi.fn();
+        (Zotero.Beaver as any).background = { searchReadiness: { notifyAttachments } };
+        observer.notify('add', 'item', [7], { 7: { libraryID: 1 } });
+        observer.notify('modify', 'item', [7], { 7: { libraryID: 1 } });
+        expect(notifyAttachments).not.toHaveBeenCalled();
+        await (watcher as any).flush();
+        expect(notifyAttachments).toHaveBeenCalledTimes(1);
+        expect(notifyAttachments.mock.calls[0][0]).toHaveLength(1);
+        delete (Zotero.Beaver as any).background;
+    });
+
+    it('does not refresh readiness for known note edits or excluded-library events', async () => {
+        const notifyAttachments = vi.fn();
+        (Zotero.Beaver as any).background = { searchReadiness: { notifyAttachments } };
         (Zotero.Items as any).get = vi.fn(() => ({ libraryID: 1, isNote: () => true }));
         observer.notify('modify', 'item', [7]);
         (Zotero.Items as any).get.mockReturnValue(undefined);
         observer.notify('modify', 'item', [8], { 8: { libraryID: 42 } });
         observer.notify('download', 'file', [8], { 8: { libraryID: 42 } });
-        expect(beginChanges).not.toHaveBeenCalled();
+        expect(notifyAttachments).not.toHaveBeenCalled();
         expect((watcher as any).pending.size).toBe(0);
+        delete (Zotero.Beaver as any).background;
+    });
+
+    it.each(['trash', 'restore'])('retains %s membership evidence across metadata and download batching', async change => {
+        const notifyAttachments = vi.fn();
+        (Zotero.Beaver as any).background = { searchReadiness: { notifyAttachments } };
+        const handoff = vi.spyOn(reconciler, 'notifyAttachments').mockImplementation(() => {});
+        if (change === 'trash') observer.notify('trash', 'item', [7], { 7: { libraryID: 1 } });
+        else observer.notify('modify', 'item', [7], { 7: { libraryID: 1, changed: { deleted: true } } });
+        observer.notify('modify', 'item', [7], { 7: { changed: { title: 'Old title' } } });
+        observer.notify('download', 'file', [7]);
+        await (watcher as any).flush();
+        const event = handoff.mock.calls[0][0][0];
+        expect(event.extra?.libraryID).toBe(1);
+        if (change === 'trash') expect(event.event).toBe('trash');
+        else expect(event.extra?.changed).toHaveProperty('deleted');
+        expect(notifyAttachments).not.toHaveBeenCalled();
         delete (Zotero.Beaver as any).background;
     });
 
@@ -537,7 +566,6 @@ describe('attachment change reconciliation', () => {
     it.each([true, false])('upgrades the source identity column without losing processing history (failed=%s)', async (failed) => {
         await seed(failed);
         const before = await db.getAttachmentProcessingState(1, item.key);
-        await connection.queryAsync('DROP TRIGGER readiness_attachment_processing_state_UPDATE');
         await connection.queryAsync('ALTER TABLE attachment_processing_state DROP COLUMN extraction_source');
         await db.initDatabase('0.99.0');
         expect(await db.getAttachmentProcessingState(1, item.key)).toEqual({ ...before, extractionSource: null });

@@ -154,13 +154,53 @@ describe('FulltextUpsertExecutor', () => {
         await connection.closeDatabase();
     });
 
-    it('persists the server incarnation with a successful acknowledgement', async () => {
+    it('persists the server namespace generation with a successful acknowledgement', async () => {
         Zotero.Beaver.account = { getGeneration: () => 1,
             getSnapshot: () => ({ session: { user: { id: 'owner' } } }) } as any;
-        api.upsertHash.mockResolvedValue({ ...response('tagged'), index_incarnation: 'epoch' });
+        api.upsertHash.mockResolvedValue({ ...response('tagged'), namespace_generation: 2 });
         expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx)).toMatchObject({ kind: 'complete' });
         expect((await db.getAttachmentProcessingState(1, record.zoteroKey))?.upsertRemoteIdentity)
-            .toMatchObject({ index_account_id: 'owner', index_incarnation: 'epoch' });
+            .toMatchObject({ index_account_id: 'owner', namespace_generation: 2 });
+    });
+
+    it.each([
+        [0, 2, 'missing', 2, 'missing'],
+        [0, 2, 'current', 2, 'current'],
+        [0, 1, 'current', 2, 'unknown'],
+        [2, 1, 'current', 2, 'current'],
+        [2, 2, 'current', undefined, 'unknown'],
+    ])('uses acknowledged generation and preserves honest namespace validity (%s chunks, %s → %s)', async (
+        chunks, previousGeneration, previousValidity, acknowledgedGeneration, expectedValidity,
+    ) => {
+        const requirements = { index_version: 3, extract_schema_versions: { pdf: ['4'], epub: ['2'], snapshot: ['1'] },
+            namespace_generation: previousGeneration, index_validity: previousValidity };
+        api.requirements.mockResolvedValue(requirements);
+        api.upsertHash.mockResolvedValue({ ...response(), chunks_total: chunks, namespace_generation: acknowledgedGeneration });
+        const recordRequirements = vi.fn();
+        (api as any).recordRequirements = recordRequirements;
+        expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx)).toMatchObject({ kind: 'complete' });
+        expect(recordRequirements).toHaveBeenCalledWith(expect.objectContaining({
+            namespace_generation: acknowledgedGeneration ?? null, index_validity: expectedValidity,
+        }));
+    });
+
+    it.each([2, 3])('does not let a late acknowledgement regress cached validity or generation %s', async currentGeneration => {
+        const initialRequirements = { index_version: 3, extract_schema_versions: { pdf: ['4'], epub: ['2'], snapshot: ['1'] },
+            namespace_generation: 2, index_validity: 'missing' };
+        let cached = initialRequirements;
+        api.requirements.mockResolvedValue(initialRequirements);
+        (api as any).getCachedRequirements = () => cached;
+        const recordRequirements = vi.fn(value => { cached = value; });
+        (api as any).recordRequirements = recordRequirements;
+        // Another completion or requirements read wins while this upload is in flight.
+        api.upsertHash.mockImplementation(async () => {
+            cached = { ...initialRequirements, namespace_generation: currentGeneration, index_validity: 'current' };
+            return { ...response(), chunks_total: 0, namespace_generation: 2 };
+        });
+        expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx)).toMatchObject({ kind: 'complete' });
+        expect(recordRequirements).toHaveBeenCalledWith(expect.objectContaining({
+            namespace_generation: currentGeneration, index_validity: 'current',
+        }));
     });
 
     it('cleans up without paid access using the frozen remote identity', async () => {

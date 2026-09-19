@@ -70,6 +70,7 @@ describe("instance embedding events across background generations", () => {
         owner = {
             db: {
                 deleteEmbeddingsBatch: mocks.deleteEmbeddings,
+                subscribeReadinessChanges: vi.fn(() => () => {}),
                 subscribeProcessingChanges: () => () => {},
                 configureProcessingProgress: async () => {},
                 getProcessingProgress: async () => ({ runId: 0, total: 0, pending: 0 }),

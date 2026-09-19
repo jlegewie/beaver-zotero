@@ -220,9 +220,15 @@ export class FulltextUpsertExecutor implements JobExecutor {
         }
 
         if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
-        const acknowledgedRequirements = {
-            ...requirements, index_incarnation: response.index_incarnation ?? null,
-            index_validity: response.index_incarnation ? 'current' as const : 'unknown' as const,
+        const currentRequirements = this.api.getCachedRequirements?.() ?? requirements;
+        const acknowledgedRequirements = response.namespace_generation != null
+            && response.namespace_generation < (currentRequirements.namespace_generation ?? 0)
+            ? currentRequirements : {
+            ...currentRequirements, namespace_generation: response.namespace_generation ?? null,
+            index_validity: response.namespace_generation && response.chunks_total > 0
+                ? 'current' as const
+                : response.namespace_generation === currentRequirements.namespace_generation
+                    ? currentRequirements.index_validity : 'unknown' as const,
         };
         this.api.recordRequirements?.(acknowledgedRequirements);
         Zotero.Beaver?.background?.searchReadiness?.setRequirements(acknowledgedRequirements);
@@ -235,7 +241,7 @@ export class FulltextUpsertExecutor implements JobExecutor {
             zoteroKey: row.zoteroKey,
             structuredDocumentHash: row.structuredDocumentHash,
             upsertIndexVersion: String(response.index_version),
-            remoteIdentity: remoteIdentity ? { ...remoteIdentity, index_incarnation: response.index_incarnation ?? null } : undefined,
+            remoteIdentity: remoteIdentity ? { ...remoteIdentity, namespace_generation: response.namespace_generation ?? null } : undefined,
             expectedUpsertStatus: row.upsertStatus,
             expectedUpsertIndexVersion: row.upsertIndexVersion,
             expectedExtractStatus: row.extractStatus,

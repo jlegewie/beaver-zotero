@@ -3000,7 +3000,7 @@ export interface SearchReadinessSummary {
     scope_revision: number;
     index_version: number;
     extract_schema_versions: Record<'pdf' | 'epub' | 'snapshot', string[]>;
-    index_incarnation: string | null;
+    namespace_generation: number | null;
     libraries: Array<{
         scope_ref: string;
         discovery_complete: boolean;
@@ -3008,7 +3008,6 @@ export interface SearchReadinessSummary {
         indexed: number;
         pending: number;
         unavailable: number;
-        unavailable_reasons: Record<string, number>;
     }>;
 }
 

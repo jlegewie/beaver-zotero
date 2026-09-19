@@ -26,4 +26,22 @@ describe('search index wire contract', () => {
         await client.requirements();
         expect(get).toHaveBeenCalledTimes(3);
     });
+    it('keeps the latest resolved requirements synchronously and fences late fetches by account', async () => {
+        let generation = 1;
+        (Zotero.Beaver as any) = { account: { getGeneration: () => generation } };
+        const client = new SearchIndexApiClient();
+        let resolve!: (value: any) => void;
+        vi.spyOn(client as any, 'get').mockImplementation(() => new Promise(r => { resolve = r; }));
+        const request = client.requirements();
+        expect(client.getCachedRequirements()).toBeUndefined();
+        const current = { index_version: 3, namespace_generation: 2, index_validity: 'current' as const,
+            extract_schema_versions: { pdf: ['4'], epub: ['1'], snapshot: ['1'] } };
+        client.recordRequirements(current);
+        resolve({ ...current, index_validity: 'missing' });
+        await request;
+        expect(client.getCachedRequirements()).toBe(current);
+        generation++;
+        expect(client.getCachedRequirements()).toBeUndefined();
+    });
+
 });
