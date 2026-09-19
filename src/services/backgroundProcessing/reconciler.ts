@@ -169,7 +169,7 @@ export class ReconcilerService {
     /** Notifications are hints, never evidence that file content changed. */
     notifyAttachments(events: AttachmentChange[]): void {
         if (this.stopped) return;
-        this.inventoryChangeFence = Zotero.Beaver?.background?.searchReadiness?.beginChanges();
+        this.inventoryChangeFence = Zotero.Beaver?.background?.searchReadiness?.beginChanges(events);
         for (const event of events) {
             const pending = this.pendingAttachments.get(event.id);
             // Watcher batches can overlap a running pass; retain import intent

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { NewItemWatcher } from '../../../src/services/backgroundProcessing/newItemWatcher';
 import { SearchReadiness, classifyPreparation } from '../../../src/services/backgroundProcessing/searchReadiness';
 import { reconcileRemoteRefs } from '../../../src/services/backgroundProcessing/remoteRefsReconcile';
 import { BeaverDB, type AttachmentProcessingStateRecord } from '../../../src/services/database';
@@ -362,4 +363,64 @@ it('uses an indexed dead-letter lookup with a large unrelated history', async ()
         await connection.queryAsync('EXPLAIN QUERY PLAN ' + call[0], call[1], { onRow: row => details.push(row.getResultByIndex(3)) });
         expect(details.some(detail => detail.includes('idx_background_jobs_dead_identity') && detail.includes('SEARCH'))).toBe(true);
     } finally { await connection.closeDatabase(); }
+});
+
+
+it('keeps indexed counts available through an identified add, its handoff, and delete', async () => {
+    rows = Array.from({ length: 1000 }, (_, i) => ({ ...indexed, zoteroKey: `KEY${i}` }));
+    service.publishInventory(1, rows.map(row => row.zoteroKey), service.discoveryFence());
+    await service.refresh();
+    const originalItems = Zotero.Items;
+    const originalAttachments = Zotero.Attachments;
+    (Zotero as any).Items = { get: vi.fn(() => ({
+        libraryID: 1, key: 'NEWPDF01', isAttachment: () => true,
+        isInTrash: () => false, isPDFAttachment: () => true, attachmentLinkMode: 0,
+    })) };
+    (Zotero as any).Attachments = { LINK_MODE_LINKED_URL: 3 };
+    let observer: any;
+    const register = vi.spyOn(Zotero.Notifier, 'registerObserver').mockImplementation((value: any) => {
+        observer = value;
+        return 'readiness-watcher';
+    });
+    const watcher = new NewItemWatcher();
+    owner.processingReconciler = { notifyAttachments: vi.fn(events => service.beginChanges(events)) };
+    watcher.start();
+    try {
+        observer.notify('add', 'item', [77], {});
+        expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 1000, pending: 1, discovery_complete: true });
+        await vi.advanceTimersByTimeAsync(500);
+        expect(owner.processingReconciler.notifyAttachments).toHaveBeenCalledTimes(1);
+        await service.refresh();
+        expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 1000, pending: 1 });
+        service.beginChanges([{ event: 'delete', id: 78, extra: { libraryID: 1, key: 'KEY0' } }]);
+        expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 999, pending: 1 });
+    } finally {
+        watcher.stop();
+        register.mockRestore();
+        (Zotero as any).Items = originalItems;
+        (Zotero as any).Attachments = originalAttachments;
+    }
+});
+
+it('holds a notification during rediscovery until targeted replay corrects the enumerated inventory', async () => {
+    service.publishInventory(1, ['KEY00001'], service.discoveryFence());
+    await service.refresh();
+    service.invalidateLibrary(1);
+    const discovery = service.discoveryFence();
+    const fence = service.beginChanges([{ event: 'delete', id: 78, extra: { libraryID: 1, key: 'KEY00001' } }]);
+    service.publishInventory(1, ['KEY00001'], discovery);
+    await service.refresh();
+    expect(service.getSummary()).toBeNull();
+    service.updateAttachment(1, 'KEY00001', false);
+    service.completeChanges(fence);
+    expect(service.getSummary()?.libraries[0]).toMatchObject({ indexed: 0, pending: 0, discovery_complete: true });
+});
+
+it('does not release an unknown notification when a known deletion arrives', async () => {
+    service.publishInventory(1, ['KEY00001'], service.discoveryFence());
+    await service.refresh();
+    const unknown = service.beginChanges([{ event: 'delete', id: 77 }]);
+    service.beginChanges([{ event: 'delete', id: 78, extra: { libraryID: 1, key: 'KEY00001' } }]);
+    service.completeChanges(unknown);
+    expect(service.getSummary()).toBeNull();
 });

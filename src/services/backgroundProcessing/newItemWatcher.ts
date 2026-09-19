@@ -25,7 +25,7 @@ export class NewItemWatcher {
                 const downloaded = type === 'file' && event === 'download';
                 if (!downloaded && (type !== 'item' || !['add', 'modify', 'delete'].includes(event))) return;
                 if (Zotero.__beaverShuttingDown === true) return;
-                let accepted = false;
+                const accepted: AttachmentChange[] = [];
                 for (const id of ids) {
                     let item: Zotero.Item | undefined;
                     try { item = Zotero.Items.get(id) || undefined; } catch { /* not loaded */ }
@@ -33,10 +33,9 @@ export class NewItemWatcher {
                     if (Zotero.Beaver?.libraryScopeInitialized && libraryId != null
                         && !isBackgroundProcessingLibraryEnabled(libraryId)) continue;
                     if (item?.isNote?.() || item?.isAnnotation?.()) continue;
-                    accepted = true;
                     // A late download must not erase the identity needed for deletion cleanup.
                     if (downloaded && this.pending.get(id)?.event === 'delete') continue;
-                    this.pending.set(id, {
+                    const change: AttachmentChange = {
                         event: event === 'delete' ? 'delete'
                             : this.pending.get(id)?.event === 'add' ? 'add'
                                 : downloaded ? 'modify' : event as AttachmentChange['event'],
@@ -44,10 +43,12 @@ export class NewItemWatcher {
                         backfill: this.pending.get(id)?.backfill === true
                             || Zotero.Sync?.Runner?.syncInProgress === true,
                         extra: extraData?.[id],
-                    });
+                    };
+                    this.pending.set(id, change);
+                    accepted.push(change);
                 }
-                if (accepted) {
-                    Zotero.Beaver?.background?.searchReadiness?.beginChanges();
+                if (accepted.length) {
+                    Zotero.Beaver?.background?.searchReadiness?.beginChanges(accepted);
                     this.schedule();
                 }
             },

@@ -1,5 +1,8 @@
 import type { SearchReadinessSummary } from '@beaver/agent-core/protocol/agentProtocol';
 import type { AttachmentProcessingStateRecord } from '../database';
+import type { AttachmentChange } from './reconciler';
+import { getReadableContentKind } from '../documentExtraction/attachmentResolution';
+import { safeIsInTrash } from '../../utils/zoteroItemUtils';
 import type { IndexRequirements } from '../searchIndex/searchIndexApiClient';
 import { getIndexScopeRef, getZoteroUserIdentifier } from '../../utils/zoteroUtils';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -93,12 +96,42 @@ export class SearchReadiness {
         return true;
     }
 
-    beginChanges(): number {
+    beginChanges(events?: AttachmentChange[]): number {
         this.syncScope();
         this.membershipRevision++;
-        this.pendingChanges = true;
-        this.summary = null;
+        let unresolved = events === undefined;
+        for (const event of events ?? []) {
+            if (!this.applyMembershipNotification(event)) unresolved = true;
+        }
+        if (unresolved) {
+            this.pendingChanges = true;
+            this.summary = null;
+        }
         return this.membershipRevision;
+    }
+
+    private applyMembershipNotification(event: AttachmentChange): boolean {
+        // Modifications can affect children or require loading attachment data.
+        if (event.event === 'modify') return false;
+        try {
+            const item = event.event === 'delete' ? undefined : Zotero.Items.get(event.id);
+            const libraryId = item?.libraryID ?? event.extra?.libraryID;
+            const key = item?.key ?? event.extra?.key;
+            if (libraryId == null || !key || !this.inventory.has(libraryId)) return false;
+            if (event.event === 'delete') {
+                this.updateAttachment(libraryId, key, false);
+                return true;
+            }
+            if (!item?.isAttachment()) return false;
+            const trashed = safeIsInTrash(item);
+            if (trashed === null) return false;
+            const kind = getReadableContentKind(item);
+            this.updateAttachment(libraryId, key, !trashed
+                && (kind === 'pdf' || kind === 'epub' || kind === 'snapshot'));
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     completeChanges(fence: number): void {

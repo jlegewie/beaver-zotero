@@ -291,7 +291,7 @@ describe('ReconcilerService.retryAttachments', () => {
         vi.spyOn(reconciler as any, 'reconcileReadingState').mockRejectedValueOnce(new Error('temporary read failure'));
         try {
             reconciler.start();
-            reconciler.notifyAttachments([{ id: 13, event: 'delete', extra: { libraryID: 1, key: 'INDEXED1' } }]);
+            reconciler.notifyAttachments([{ id: 13, event: 'modify', extra: { libraryID: 1, key: 'INDEXED1' } }]);
             const resume = await reconciler.suspendForMaintenance();
             resume();
             await (reconciler as any).run(false);
@@ -333,7 +333,7 @@ describe('ReconcilerService.retryAttachments', () => {
             await vi.advanceTimersByTimeAsync(1);
             expect(remove).toHaveBeenCalledTimes(1);
             expect(readiness.hasInventory(1)).toBe(true);
-            expect(readiness.getSummary()).toBeNull();
+            expect(readiness.getSummary()?.libraries[0]).toMatchObject({ indexed: 0, pending: 0, unavailable: 0 });
             await vi.advanceTimersByTimeAsync(998);
             expect(remove).toHaveBeenCalledTimes(1);
             await vi.advanceTimersByTimeAsync(2);
