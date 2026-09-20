@@ -1,3 +1,4 @@
+import type { SearchPreparationRow } from './searchIndexState';
 import { buildUntagJobInput, indexCleanupIdentity } from './backgroundProcessing/utils';
 import { v4 as uuidv4 } from 'uuid';
 import { ProcessingProgressStore, type ProcessingProgressScope } from './backgroundProcessing/progress';
@@ -2921,6 +2922,30 @@ export class BeaverDB {
                AND structured_document_hash = ?`,
             [error, libraryId, zoteroKey, structuredDocumentHash],
         );
+    }
+
+    /** Compact preparation facts; reading successes supersede earlier file limitations. */
+    public async getSearchPreparationRows(libraryIds: number[]): Promise<SearchPreparationRow[]> {
+        if (!libraryIds.length) return [];
+        const rows: SearchPreparationRow[] = [];
+        await this.queryAsync(
+            `SELECT s.library_id, s.zotero_key, s.content_kind, s.extract_status,
+                s.extract_schema_version, s.ocr_status, s.upsert_status, s.upsert_index_version,
+                s.upsert_remote_identity, s.last_error,
+                CASE WHEN r.library_id IS NOT NULL AND r.error_code IS NULL THEN 1 ELSE 0 END
+             FROM attachment_processing_state s
+             LEFT JOIN attachment_reading_state r USING (library_id, zotero_key)
+             WHERE s.library_id IN (${libraryIds.map(() => '?').join(',')})`, libraryIds,
+            { onRow: (row: any) => rows.push({
+                libraryId: row.getResultByIndex(0), key: row.getResultByIndex(1),
+                contentKind: row.getResultByIndex(2), extractStatus: row.getResultByIndex(3),
+                extractSchemaVersion: row.getResultByIndex(4), ocrStatus: row.getResultByIndex(5),
+                upsertStatus: row.getResultByIndex(6), upsertIndexVersion: row.getResultByIndex(7),
+                remoteIdentity: row.getResultByIndex(8), error: row.getResultByIndex(9),
+                readingSucceeded: row.getResultByIndex(10) === 1,
+            }) },
+        );
+        return rows;
     }
 
     public async getAttachmentProcessingAggregates(

@@ -1,3 +1,4 @@
+import { getSearchIndexState } from '../../src/services/searchIndexState';
 import { isThreadConflict } from "@beaver/agent-core/types/apiErrors";
 import {
     threadAdmissionAtom,
@@ -2334,6 +2335,12 @@ async function executeWSRequest(
             (activeRun.status === 'in_progress' || activeRun.status === 'awaiting_deferred')
         );
     };
+
+    const searchIndexState = await getSearchIndexState();
+    assertWriter(requestWriter);
+    if (clientShutDown || supersededByLiveRun()) return;
+    delete request.search_index_state;
+    if (searchIndexState) request.search_index_state = searchIndexState;
 
     connectLoopsInFlight++;
     const result = await connectWithRetry({
