@@ -490,7 +490,8 @@ export class ReconcilerService {
                         || (targetedOnly && Zotero.Sync?.Runner?.syncInProgress))) continue;
                 await this.reconcileLibrary(db, library.libraryID, force, generation);
             }
-            if (backgroundProcessingEnabled() && readiness?.needsDiscovery()) {
+            if (backgroundProcessingEnabled() && !Zotero.Sync?.Runner?.syncInProgress
+                && libraries.some(library => readiness?.needsDiscovery(library.libraryID))) {
                 if (this.discoveryRetryAt <= Date.now()) this.discoveryRetryAt = Date.now() + 5_000;
             } else this.discoveryRetryAt = 0;
             if (!targetedOnly) this.nextScanAt = Date.now() + PROCESSING_RECONCILE_INTERVAL_MS;

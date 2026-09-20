@@ -9,7 +9,7 @@ const DOCUMENT_ERRORS = new Set([
     'file_missing', 'remote_download_denied', 'encrypted', 'encrypted_pdf', 'corrupt_pdf',
     'invalid_pdf', 'invalid_epub', 'invalid_snapshot', 'file_too_large', 'too_many_pages',
     'pdf_too_complex', 'empty_document', 'insufficient_text', 'low_confidence', 'no_text_layer',
-    'ocr_no_text', 'unsupported', 'digital_signature', 'image_too_large', 'render_failed', 'page_count_mismatch',
+    'ocr_no_text', 'unsupported', 'unsupported_type', 'digital_signature', 'image_too_large', 'render_failed', 'page_count_mismatch',
 ]);
 type Outcome = 'indexed' | 'pending' | 'unavailable';
 type Count = SearchReadinessSummary['libraries'][number];

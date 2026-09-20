@@ -2576,6 +2576,26 @@ describe('BackgroundExtractor', () => {
             }
         });
 
+        it.each(['finish', 'stop'])('wakes reconciliation when sync emits %s without item notifications', async event => {
+            const wake = vi.fn();
+            (Zotero.Beaver as any).processingReconciler = { notify: wake };
+            let observer: any;
+            (Zotero as any).Notifier.registerObserver = vi.fn((value, types) => {
+                if (types.includes('sync')) observer = value;
+                return 'sync-observer';
+            });
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            try {
+                proc.start();
+                observer.notify('start', 'sync', [], {});
+                expect(wake).not.toHaveBeenCalled();
+                observer.notify(event, 'sync', [], {});
+                expect(wake).toHaveBeenCalledTimes(1);
+                expect((proc as any).syncInProgress).toBe(false);
+            } finally { await proc.stop(); }
+        });
+
         it('stop() unregisters pref, notifier, and idle observers', async () => {
             const prefDisposer = vi.fn();
             const notifierDisposer = vi.fn();

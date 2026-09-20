@@ -252,13 +252,33 @@ describe('ReconcilerService.retryAttachments', () => {
             await vi.advanceTimersByTimeAsync(0);
             expect(notified).toHaveBeenCalledTimes(1);
             expect(scan).toHaveBeenCalledTimes(2);
+            expect((reconciler as any).discoveryRetryAt).toBe(0);
             Zotero.Sync.Runner.syncInProgress = false;
-            await vi.advanceTimersByTimeAsync(5000);
+            reconciler.notifyAttachments([{ id: 1, event: 'modify' }]);
+            await vi.advanceTimersByTimeAsync(0);
             expect(scan.mock.calls.map(call => call[1])).toEqual([1, 2, 1]);
             expect((reconciler as any).nextScanAt).toBe(deadline);
             Zotero.Sync.Runner.syncInProgress = true;
             await vi.advanceTimersByTimeAsync(deadline - Date.now());
             expect(scan.mock.calls.map(call => call[1])).toEqual([1, 2, 1, 1, 2]);
+        } finally { reconciler.stop(); vi.useRealTimers(); }
+    });
+
+    it.each([true, false])('does not poll discovery blocked by sync or an absent library (sync=%s)', async syncing => {
+        vi.useFakeTimers();
+        const readiness = { needsDiscovery: () => true, requestDiscovery: vi.fn() };
+        (Zotero.Beaver as any).background = { searchReadiness: readiness, beginProcessingDiscovery: vi.fn() };
+        vi.stubGlobal('Zotero', { ...Zotero, Sync: { Runner: { syncInProgress: syncing } },
+            Libraries: { getAll: () => syncing ? [{ libraryID: 1, libraryType: 'user' }] : [] } });
+        vi.spyOn(reconciler as any, 'reconcileLibrary').mockResolvedValue(undefined);
+        try {
+            reconciler.start();
+            await vi.advanceTimersByTimeAsync(1000);
+            const begin = Zotero.Beaver.background!.beginProcessingDiscovery as any;
+            begin.mockClear();
+            expect((reconciler as any).discoveryRetryAt).toBe(0);
+            await vi.advanceTimersByTimeAsync(60_000);
+            expect(begin).not.toHaveBeenCalled();
         } finally { reconciler.stop(); vi.useRealTimers(); }
     });
 

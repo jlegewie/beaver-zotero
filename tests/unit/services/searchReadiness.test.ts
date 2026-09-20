@@ -57,7 +57,7 @@ it.each(['network_error', 'not_entitled', 'retry_exhausted', 'unsupported_schema
     const row = { ...indexed, extractStatus: 'failed' as const, lastError: code };
     expect(classifyPreparation(row, code, requirements, 'account', 'lLOCAL123', 'LOCAL123')).toBe('pending');
 });
-it.each(['encrypted', 'invalid_pdf', 'file_missing', 'page_count_mismatch'])('classifies structured document reason %s, not prose', code => {
+it.each(['encrypted', 'invalid_pdf', 'file_missing', 'page_count_mismatch', 'unsupported_type'])('classifies structured document reason %s, not prose', code => {
     const row = { ...indexed, extractStatus: 'failed' as const };
     expect(classifyPreparation(row, code, requirements, 'account', 'lLOCAL123', 'LOCAL123')).toEqual('unavailable');
     expect(classifyPreparation(row, `${code}: message`, requirements, 'account', 'lLOCAL123', 'LOCAL123')).toBe('pending');

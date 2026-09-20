@@ -273,6 +273,7 @@ export class BackgroundExtractor {
                     } else if (event === 'finish' || event === 'stop') {
                         this.syncInProgress = false;
                         this.notify();
+                        Zotero.Beaver?.processingReconciler?.notify();
                     }
                 },
             };

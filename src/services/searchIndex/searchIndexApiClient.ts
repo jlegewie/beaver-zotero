@@ -60,7 +60,7 @@ export interface IndexRefsResponse {
 }
 
 export class SearchIndexApiClient extends ApiService {
-    private requirementsCache?: { generation: number | undefined; expires: number; request: Promise<IndexRequirements>; value?: IndexRequirements };
+    private requirementsCache?: { generation: number | undefined; expires: number; request: Promise<IndexRequirements>; value?: IndexRequirements; pending?: boolean };
 
     /** Last resolved requirements for the active account, without a network refresh. */
     getCachedRequirements(): IndexRequirements | undefined {
@@ -69,6 +69,11 @@ export class SearchIndexApiClient extends ApiService {
     }
 
     recordRequirements(requirements: IndexRequirements): void {
+        const cache = this.requirementsCache;
+        if (cache?.pending && cache.generation === Zotero.Beaver?.account?.getGeneration()) {
+            cache.value = requirements;
+            return;
+        }
         this.requirementsCache = { generation: Zotero.Beaver?.account?.getGeneration(),
             expires: Date.now() + requirementsTtl(requirements), request: Promise.resolve(requirements), value: requirements };
     }
@@ -80,15 +85,25 @@ export class SearchIndexApiClient extends ApiService {
         }
         const request = this.get<IndexRequirements>(`${SEARCH_INDEX_API_PREFIX}/requirements`);
         const cache = { generation, expires: Date.now() + 5 * 60_000, request,
-            value: this.getCachedRequirements() };
+            value: this.getCachedRequirements(), pending: true };
         this.requirementsCache = cache;
         void request.then(value => {
             if (this.requirementsCache === cache) {
                 cache.value = value;
+                cache.pending = false;
                 cache.expires = Date.now() + requirementsTtl(value);
             }
         },
-            () => { if (this.requirementsCache === cache) this.requirementsCache = undefined; });
+            () => {
+                if (this.requirementsCache !== cache) return;
+                if (!cache.value) {
+                    this.requirementsCache = undefined;
+                    return;
+                }
+                cache.pending = false;
+                cache.expires = 0;
+                cache.request = Promise.resolve(cache.value);
+            });
         return request;
     }
 

@@ -26,7 +26,7 @@ describe('search index wire contract', () => {
         await client.requirements();
         expect(get).toHaveBeenCalledTimes(3);
     });
-    it('keeps the latest resolved requirements synchronously and fences late fetches by account', async () => {
+    it('retains an authoritative fetch across acknowledgement updates and fences cached values by account', async () => {
         let generation = 1;
         (Zotero.Beaver as any) = { account: { getGeneration: () => generation } };
         const client = new SearchIndexApiClient();
@@ -37,9 +37,34 @@ describe('search index wire contract', () => {
         const current = { index_version: 3, namespace_generation: 2, index_validity: 'current' as const,
             extract_schema_versions: { pdf: ['4'], epub: ['1'], snapshot: ['1'] } };
         client.recordRequirements(current);
-        resolve({ ...current, index_validity: 'missing' });
-        await request;
         expect(client.getCachedRequirements()).toBe(current);
+        const authoritative = { ...current, index_validity: 'missing' };
+        resolve(authoritative);
+        await request;
+        expect(client.getCachedRequirements()).toEqual(authoritative);
+        expect(await client.requirements()).toEqual(authoritative);
+        generation++;
+        expect(client.getCachedRequirements()).toBeUndefined();
+    });
+
+    it('preserves an acknowledgement after a concurrent GET fails while allowing a fresh GET', async () => {
+        let generation = 1;
+        (Zotero.Beaver as any) = { account: { getGeneration: () => generation } };
+        const client = new SearchIndexApiClient();
+        let reject!: (error: Error) => void;
+        const get = vi.spyOn(client as any, 'get').mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+        const request = client.requirements();
+        const current = { index_version: 3, namespace_generation: 2, index_validity: 'current' as const,
+            extract_schema_versions: { pdf: ['4'], epub: ['1'], snapshot: ['1'] } };
+        client.recordRequirements(current);
+        reject(new Error('offline'));
+        await expect(request).rejects.toThrow('offline');
+        expect(client.getCachedRequirements()).toBe(current);
+        const authoritative = { ...current, index_validity: 'missing' };
+        get.mockResolvedValueOnce(authoritative);
+        expect(await client.requirements()).toEqual(authoritative);
+        expect(get).toHaveBeenCalledTimes(2);
+        expect(client.getCachedRequirements()).toEqual(authoritative);
         generation++;
         expect(client.getCachedRequirements()).toBeUndefined();
     });
