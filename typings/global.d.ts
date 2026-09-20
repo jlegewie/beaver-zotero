@@ -464,7 +464,7 @@ declare namespace Zotero {
                 zoteroKey: string,
             ): Promise<import("../src/services/database").AttachmentProcessingStateRecord | null>;
             getAttachmentProcessingStatesByLibrary(
-                libraryId: number, keys?: string[],
+                libraryId: number,
             ): Promise<import("../src/services/database").AttachmentProcessingStateRecord[]>;
             deleteAttachmentProcessingState(
                 libraryId: number,
@@ -558,7 +558,7 @@ declare namespace Zotero {
             }): Promise<void>;
             getAttachmentReadingError(libraryId: number, zoteroKey: string): Promise<string | null>;
             getAttachmentReadingKeysByLibrary(libraryId: number): Promise<string[]>;
-            getAttachmentReadingErrorsByLibrary(libraryId: number, keys?: string[]): Promise<Map<string, string>>;
+            getAttachmentReadingErrorsByLibrary(libraryId: number): Promise<Map<string, string>>;
             getAttachmentIndexRecoveryCandidates: import('../src/services/database').BeaverDB['getAttachmentIndexRecoveryCandidates'];
             deleteAttachmentReadingState(libraryId: number, zoteroKey: string): Promise<void>;
             resetLocalProcessingState(libraryId?: number, discardRemoteState?: boolean): Promise<void>;

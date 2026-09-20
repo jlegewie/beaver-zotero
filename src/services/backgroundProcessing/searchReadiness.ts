@@ -9,11 +9,11 @@ const DOCUMENT_ERRORS = new Set([
     'file_missing', 'remote_download_denied', 'encrypted', 'encrypted_pdf', 'corrupt_pdf',
     'invalid_pdf', 'invalid_epub', 'invalid_snapshot', 'file_too_large', 'too_many_pages',
     'pdf_too_complex', 'empty_document', 'insufficient_text', 'low_confidence', 'no_text_layer',
-    'ocr_no_text', 'unsupported', 'digital_signature', 'image_too_large', 'render_failed',
+    'ocr_no_text', 'unsupported', 'digital_signature', 'image_too_large', 'render_failed', 'page_count_mismatch',
 ]);
 type Outcome = 'indexed' | 'pending' | 'unavailable';
 type Count = SearchReadinessSummary['libraries'][number];
-type Library = { discovered: boolean; membershipRevision: number; revision: number; count?: Count };
+type Library = { discovered: boolean; membershipRevision: number; revision: number; count?: Count; dirty?: boolean };
 
 export function classifyPreparation(row: AttachmentProcessingStateRecord | undefined,
     errorCode: string | undefined, requirements: IndexRequirements, accountId: string,
@@ -158,14 +158,14 @@ export class SearchReadiness {
         this.syncScope();
         for (const id of new Set(refs.map(ref => ref.libraryId))) {
             const library = this.libraries.get(id);
-            if (library) this.invalidate(library);
+            if (library) library.dirty = true;
         }
         this.schedule();
     };
 
     private schedule(delay = 250): void {
         if (this.disposed || this.timer !== undefined || this.reading || !this.requirements
-            || ![...this.libraries.values()].some(library => library.discovered && !library.count)) return;
+            || ![...this.libraries.values()].some(library => library.discovered && (!library.count || library.dirty))) return;
         this.timer = setTimeout(() => { this.timer = undefined; void this.refresh(); }, Math.max(delay, this.nextRefreshAt - Date.now()));
     }
 
@@ -179,11 +179,12 @@ export class SearchReadiness {
             const requirements = this.requirements;
             if (!requirements) return;
             for (const [id, library] of this.libraries) {
-                if (!library.discovered || library.count) continue;
+                if (!library.discovered || (library.count && !library.dirty)) continue;
                 const revision = library.revision;
                 const scopeRef = getIndexScopeRef(id);
                 if (!scopeRef) { retryDelay = 5000; continue; }
                 try {
+                    library.dirty = false;
                     const db = Zotero.Beaver.db!;
                     const [rows, errors] = await Promise.all([
                         db.getAttachmentProcessingStatesByLibrary(id),
@@ -193,20 +194,21 @@ export class SearchReadiness {
                     if (classificationKey(this.requirements) !== classificationKey(requirements)) return;
                     if (this.disposed || this.libraries.get(id) !== library || library.revision !== revision) continue;
                     const count: Count = { scope_ref: scopeRef, discovery_complete: true,
-                        inventory_revision: revision, indexed: 0, pending: 0, unavailable: 0 };
+                        inventory_revision: ++this.revision, indexed: 0, pending: 0, unavailable: 0 };
                     for (const row of rows) {
                         count[classifyPreparation(row, errors.get(row.zoteroKey), requirements,
                             accountId, scopeRef, localId, this.ocrAccess)]++;
                     }
                     library.count = count;
                 } catch (error) {
+                    library.dirty = true;
                     retryDelay = 5000;
                     logger(`Search readiness refresh failed: ${error}`, 2);
                 }
             }
             this.publish();
         } finally {
-            // Bound full-ledger work even when writes invalidate an in-flight read.
+            // Writes during a read request a later refresh without rejecting its snapshot.
             this.nextRefreshAt = Date.now() + 5_000;
             this.reading = false;
             this.schedule(retryDelay);

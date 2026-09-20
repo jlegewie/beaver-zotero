@@ -251,8 +251,8 @@ export class ReconcilerService {
                 const readiness = Zotero.Beaver?.background?.searchReadiness;
                 failed = true;
                 const attempts = (this.attachmentRetries.get(event.id) ?? 0) + 1;
-                if (ref?.libraryID && ref.key && attempts <= 3) {
-                    readiness?.changed([{ libraryId: ref.libraryID, zoteroKey: ref.key }]);
+                if (attempts <= 3) {
+                    if (ref?.libraryID && ref.key) readiness?.changed([{ libraryId: ref.libraryID, zoteroKey: ref.key }]);
                     this.attachmentRetries.set(event.id, attempts);
                     if (!this.pendingAttachments.has(event.id)) this.pendingAttachments.set(event.id, { ...event, extra: ref });
                     this.retryNotBefore = Math.max(this.retryNotBefore, Date.now() + 1000 * 2 ** (attempts - 1));
@@ -522,10 +522,14 @@ export class ReconcilerService {
     }
 
     private async recoverIndex(generation: number): Promise<void> {
-        if (this.cancelled(generation) || Date.now() < this.nextRecoveryAt) return;
-        this.nextRecoveryAt = Date.now() + PROCESSING_RECONCILE_INTERVAL_MS;
+        if (this.cancelled(generation)) return;
         if (!Zotero.Beaver?.libraryScopeInitialized || !Zotero.Beaver.hasSearchIndexAccess
-            || !backgroundProcessingEnabled()) return;
+            || !backgroundProcessingEnabled()) {
+            this.nextRecoveryAt = 0;
+            return;
+        }
+        if (Date.now() < this.nextRecoveryAt) return;
+        this.nextRecoveryAt = Date.now() + PROCESSING_RECONCILE_INTERVAL_MS;
         try {
             const count = await reconcileRemoteRefs([...(Zotero.Beaver.searchableLibraryIds ?? [])],
                 () => this.cancelled(generation));

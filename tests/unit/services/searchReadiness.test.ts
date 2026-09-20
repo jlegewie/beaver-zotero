@@ -53,11 +53,11 @@ async function discover(libraryId = 1) {
     await service.refresh();
 }
 
-it.each(['network_error', 'not_entitled', 'retry_exhausted', 'unsupported_schema_version', 'extraction_failed', 'download_failed', 'ocr_geometry_mismatch', 'page_count_mismatch', 'unknown_ocr_error'])('keeps %s pending', code => {
+it.each(['network_error', 'not_entitled', 'retry_exhausted', 'unsupported_schema_version', 'extraction_failed', 'download_failed', 'ocr_geometry_mismatch', 'unknown_ocr_error'])('keeps %s pending', code => {
     const row = { ...indexed, extractStatus: 'failed' as const, lastError: code };
     expect(classifyPreparation(row, code, requirements, 'account', 'lLOCAL123', 'LOCAL123')).toBe('pending');
 });
-it.each(['encrypted', 'invalid_pdf', 'file_missing'])('classifies structured document reason %s, not prose', code => {
+it.each(['encrypted', 'invalid_pdf', 'file_missing', 'page_count_mismatch'])('classifies structured document reason %s, not prose', code => {
     const row = { ...indexed, extractStatus: 'failed' as const };
     expect(classifyPreparation(row, code, requirements, 'account', 'lLOCAL123', 'LOCAL123')).toEqual('unavailable');
     expect(classifyPreparation(row, `${code}: message`, requirements, 'account', 'lLOCAL123', 'LOCAL123')).toBe('pending');
@@ -334,14 +334,13 @@ it('does not complete discovery after a newer notification or scope change', asy
     expect(service.getSummary()).toBeNull();
 });
 
-it.each(['write', 'membership', 'account', 'scope', 'requirements', 'ocr', 'dispose'])('rejects an async count read after %s changes', async change => {
+it.each(['membership', 'account', 'scope', 'requirements', 'ocr', 'dispose'])('rejects an async count read after %s changes', async change => {
     await discover();
     const previous = service.getSummary();
     service.changed([{ libraryId: 1, zoteroKey: indexed.zoteroKey }]);
     let release!: (value: AttachmentProcessingStateRecord[]) => void;
     owner.db.getAttachmentProcessingStatesByLibrary.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
     const read = service.refresh();
-    if (change === 'write') service.changed([{ libraryId: 1, zoteroKey: indexed.zoteroKey }]);
     if (change === 'membership') service.requestDiscovery(1);
     if (change === 'account') account = 'other';
     if (change === 'scope') owner.searchableLibraryIds = [1, 2];
@@ -350,9 +349,9 @@ it.each(['write', 'membership', 'account', 'scope', 'requirements', 'ocr', 'disp
     if (change === 'dispose') service.dispose();
     release(rows);
     await read;
-    if (change === 'write' || change === 'membership') expect(service.getSummary()).toBe(previous);
+    if (change === 'membership') expect(service.getSummary()).toBe(previous);
     else expect(service.getSummary()).toBeNull();
-    if (change === 'write' || change === 'requirements' || change === 'ocr') {
+    if (change === 'requirements' || change === 'ocr') {
         await service.refresh();
         expect(service.getSummary()?.libraries[0].indexed).toBe(change === 'requirements' ? 0 : 1);
     }
@@ -365,7 +364,7 @@ it('retains the completed snapshot while retrying failed local reads', async () 
     rows[0] = { ...rows[0], upsertStatus: null };
     owner.db.getAttachmentProcessingStatesByLibrary.mockClear().mockRejectedValueOnce(new Error('busy'));
     await service.refresh();
-    expect(service.getSummary()).toBe(previous);
+    expect(service.getSummary()).toEqual(previous);
     await vi.advanceTimersByTimeAsync(4999);
     expect(owner.db.getAttachmentProcessingStatesByLibrary).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
@@ -547,4 +546,24 @@ it.each([2, 3])('retains counts through unknown/null generation but checks retur
     await vi.advanceTimersByTimeAsync(5000);
     expect(read).toHaveBeenCalledTimes(generation === 2 ? 0 : 1);
     expect(service.getSummary()?.libraries[0].indexed).toBe(generation === 2 ? 1 : 0);
+});
+
+it('forms an initial multi-library snapshot even when every read overlaps ledger writes', async () => {
+    owner.searchableLibraryIds = [1, 2];
+    service.setRequirements(requirements);
+    for (const id of [1, 2]) service.completeDiscovery(id, service.beginDiscovery(id)!);
+    const read = owner.db.getAttachmentProcessingStatesByLibrary;
+    read.mockImplementation(async (id: number) => {
+        service.changed([{ libraryId: 1, zoteroKey: indexed.zoteroKey }, { libraryId: 2, zoteroKey: indexed.zoteroKey }]);
+        return [{ ...indexed, upsertRemoteIdentity: { ...indexed.upsertRemoteIdentity!,
+            index_scope_ref: id === 1 ? 'lLOCAL123' : 'g2' } }];
+    });
+    await service.refresh();
+    expect(service.getSummary()?.libraries.map(lib => lib.indexed)).toEqual([1, 1]);
+    expect(read).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(read).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(read).toHaveBeenCalledTimes(4);
+    expect(service.getSummary()?.libraries.map(lib => lib.indexed)).toEqual([1, 1]);
 });

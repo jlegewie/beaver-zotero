@@ -513,6 +513,85 @@ describe('ReconcilerService.retryAttachments', () => {
         } finally { reconciler.stop(); readiness.dispose(); vi.useRealTimers(); }
     });
 
+    it.each(['scope', 'access', 'pref'])('does not consume recovery time before %s is ready', async prerequisite => {
+        vi.useFakeTimers();
+        const ready = (value: boolean) => {
+            if (prerequisite === 'scope') Zotero.Beaver.libraryScopeInitialized = value;
+            if (prerequisite === 'access') (Zotero.Beaver as any).hasSearchIndexAccess = value;
+            if (prerequisite === 'pref') mocks.backgroundEnabled = value;
+        };
+        try {
+            reconciler.start();
+            ready(false);
+            await (reconciler as any).recoverIndex((reconciler as any).generation);
+            expect(mocks.recovery).not.toHaveBeenCalled();
+            expect((reconciler as any).nextRecoveryAt).toBe(0);
+            ready(true);
+            await (reconciler as any).recoverIndex((reconciler as any).generation);
+            expect(mocks.recovery).toHaveBeenCalledTimes(1);
+            expect((reconciler as any).nextRecoveryAt).toBe(Date.now() + 300_000);
+        } finally { ready(true); reconciler.stop(); vi.useRealTimers(); }
+    });
+
+    it.each([
+        ['scope', true], ['access', true], ['pref', true],
+        ['scope', false], ['access', false], ['pref', false],
+    ])('clears established recovery when %s is disabled (notified=%s)', async (prerequisite, notified) => {
+        vi.useFakeTimers();
+        vi.stubGlobal('Zotero', { ...Zotero, Libraries: { getAll: () => [] } });
+        const ready = (value: boolean) => {
+            if (prerequisite === 'scope') Zotero.Beaver.libraryScopeInitialized = value;
+            if (prerequisite === 'access') (Zotero.Beaver as any).hasSearchIndexAccess = value;
+            if (prerequisite === 'pref') mocks.backgroundEnabled = value;
+        };
+        try {
+            reconciler.start();
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(mocks.recovery).toHaveBeenCalledTimes(1);
+            const deadline = (reconciler as any).nextRecoveryAt;
+            expect(deadline).toBeGreaterThan(Date.now());
+            ready(false);
+            if (notified) {
+                reconciler.notify();
+                await vi.advanceTimersByTimeAsync(0);
+            } else {
+                await vi.advanceTimersByTimeAsync(deadline - Date.now());
+            }
+            expect((reconciler as any).nextRecoveryAt).toBe(0);
+            const schedule = vi.spyOn(reconciler as any, 'schedule');
+            await vi.advanceTimersByTimeAsync(300_000);
+            expect(schedule).toHaveBeenCalledTimes(1);
+            expect(schedule.mock.calls[0][0]).toBeGreaterThan(0);
+            expect(mocks.recovery).toHaveBeenCalledTimes(1);
+            ready(true);
+            reconciler.notify();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(mocks.recovery).toHaveBeenCalledTimes(2);
+        } finally { ready(true); reconciler.stop(); vi.useRealTimers(); }
+    });
+
+    it.each(['add', 'modify', 'trash'])('retries a keyless %s identity lookup before requesting a full scan', async event => {
+        vi.useFakeTimers();
+        const readiness = { notifyAttachments: vi.fn(), requestDiscovery: vi.fn(), changed: vi.fn() };
+        (Zotero.Beaver as any).background = { searchReadiness: readiness };
+        const query = vi.fn().mockRejectedValueOnce(new Error('busy')).mockResolvedValue(undefined);
+        vi.stubGlobal('Zotero', { ...Zotero, DB: { queryAsync: query } });
+        try {
+            reconciler.start();
+            (reconciler as any).nextScanAt = Date.now() + 300_000;
+            const deadline = (reconciler as any).nextScanAt;
+            reconciler.notifyAttachments([{ id: 13, event: event as any }]);
+            await (reconciler as any).reconcileNotifiedAttachments(db, (reconciler as any).generation);
+            expect((reconciler as any).pendingAttachments.has(13)).toBe(true);
+            expect((reconciler as any).retryNotBefore).toBe(Date.now() + 1000);
+            expect((reconciler as any).nextScanAt).toBe(deadline);
+            expect(readiness.requestDiscovery).not.toHaveBeenCalled();
+            await (reconciler as any).reconcileNotifiedAttachments(db, (reconciler as any).generation);
+            expect(query).toHaveBeenCalledTimes(2);
+            expect((reconciler as any).pendingAttachments.size).toBe(0);
+        } finally { reconciler.stop(); vi.useRealTimers(); }
+    });
+
     it('continues full recovery batches using the existing reconciliation timer', async () => {
         vi.useFakeTimers();
         vi.setSystemTime(0);
