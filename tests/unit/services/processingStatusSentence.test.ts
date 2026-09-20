@@ -11,6 +11,17 @@ function status(deferred: number, total = 1): BackgroundProcessingStatus & { wor
 }
 
 describe('processing status sentence', () => {
+    it('keeps settled activity neutral even with indexing failures, and active retries waiting', () => {
+        const snapshot = status(0);
+        snapshot.issues = [{ reason: 'index_failed', count: 1 }];
+        expect(describeStatus(snapshot)).toMatchObject({ headline: 'Processing finished', tone: 'idle', processNow: false });
+        snapshot.worker.deferred = 1;
+        expect(describeStatus(snapshot).tone).toBe('waiting');
+        snapshot.worker.deferred = 0;
+        snapshot.issues = [];
+        expect(describeStatus(snapshot).headline).toBe('Processing finished');
+    });
+
     it('reports remote OCR while local occupancy is zero, even with runnable work', () => {
         const snapshot = status(3);
         snapshot.worker.available = 2;
@@ -65,7 +76,7 @@ describe('processing status sentence', () => {
         snapshot.ledger.unreadable = 1;
         snapshot.issues = [{ reason: 'file_unavailable', count: 1 }];
         expect(describeStatus(snapshot)).toMatchObject({
-            tone: 'idle', headline: 'Up to date', processNow: false,
+            tone: 'idle', headline: 'Processing finished', processNow: false,
         });
     });
 
@@ -185,15 +196,10 @@ describe('processing status sentence', () => {
         snapshot.ledger.unreadable = 1;
         snapshot.ledger[outcome] = 1;
         expect(describeStatus(snapshot)).toMatchObject({
-            tone: 'idle', headline: 'Up to date', processNow: false,
+            tone: 'idle', headline: 'Processing finished', processNow: false,
         });
     });
 
-    it('keeps the settled headline for readable files with unresolved index issues', () => {
-        const snapshot = status(0);
-        snapshot.issues = [{ reason: 'index_failed', count: 1 }];
-        expect(describeStatus(snapshot)).toMatchObject({ tone: 'idle', headline: 'Up to date' });
-    });
 
     it.each(['extraction', 'ocr', 'index'])('reports unfinished %s ledger work without a queued job as waiting', (stage) => {
         const snapshot = status(0);
@@ -207,7 +213,7 @@ describe('processing status sentence', () => {
 
     it('folds the empty-library state into the settled caption', () => {
         expect(describeStatus(status(0, 0))).toMatchObject({
-            tone: 'idle', headline: 'Up to date', caption: 'No files to process yet. Beaver checks your libraries for new files automatically.',
+            tone: 'idle', headline: 'Processing finished', caption: 'No files to process yet. Beaver checks your libraries for new files automatically.',
         });
     });
 
@@ -227,7 +233,7 @@ describe('processing status sentence', () => {
 
     it('reports completion only after deferred work finishes', () => {
         expect(describeStatus(status(0))).toMatchObject({
-            tone: 'idle', headline: 'Up to date',
+            tone: 'idle', headline: 'Processing finished',
         });
     });
 
@@ -293,7 +299,7 @@ describe('processing status sentence', () => {
     it('offers Rebuild cache only on a settled status with missing cached text', () => {
         const snapshot = status(0);
         const sentence = describeStatus(snapshot, { canRestoreCache: true });
-        expect(sentence).toMatchObject({ tone: 'idle', headline: 'Up to date', processNow: false, rebuildCache: true });
+        expect(sentence).toMatchObject({ tone: 'idle', headline: 'Processing finished', processNow: false, rebuildCache: true });
         expect(sentence.processNowBlocked).toBeFalsy();
         expect(describeStatus(snapshot, { canRestoreCache: false }).processNow).toBe(false);
     });

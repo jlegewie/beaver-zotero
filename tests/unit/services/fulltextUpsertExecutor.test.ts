@@ -1,8 +1,14 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BeaverDB, type BackgroundJobRecord } from '../../../src/services/database';
 import { FulltextUpsertExecutor } from '../../../src/services/backgroundQueue/fulltextUpsertExecutor';
 import type { JobExecutionContext } from '../../../src/services/backgroundQueue/jobExecutor';
-import { ApiError } from '@beaver/agent-core/types/apiErrors';
+import { ApiError, SessionRefreshError, SessionExpiredError, RequestTimeoutError, ServerError } from '@beaver/agent-core/types/apiErrors';
+import { BackgroundExtractor } from '../../../src/services/backgroundExtractor';
+import { collectProcessingStatus } from '../../../src/services/backgroundProcessing/statusSnapshot';
+import { describeStatus } from '../../../react/components/preferences/processingStatusSentence';
 import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { BACKGROUND_EXTRACT_PRIORITY, BACKGROUND_UPSERT_PRIORITY } from '../../../src/services/backgroundProcessing/constants';
 import { OCR_PRIORITY_ON_DEMAND } from '../../../src/services/ocr/constants';
@@ -11,6 +17,17 @@ async function countCleanupIntents(connection: MockDBConnection, accountId: stri
     const rows = await connection.queryAsync('SELECT COUNT(*) AS n FROM index_cleanup_outbox WHERE account_id = ?', [accountId]);
     return rows[0].n;
 }
+
+vi.mock('../../../src/services/backgroundQueue/documentExtractExecutor', () => ({
+    DocumentExtractExecutor: class { jobType = 'document_extract'; },
+}));
+vi.mock('../../../src/beaver-extract', () => ({
+    getExistingMuPDFWorkerClient: () => null, disposeMuPDFWorker: vi.fn(),
+}));
+vi.mock('../../../src/utils/idleService', () => ({
+    getSystemIdleTimeMs: () => 60_000, registerIdleObserver: () => () => {},
+}));
+vi.mock('../../../src/utils/prefs', () => ({ getPref: (key: string) => key === 'backgroundProcessingEnabled' ? true : undefined }));
 
 vi.mock('../../../src/services/searchIndex/searchIndexApiClient', () => ({
     searchIndexApiClient: {},
@@ -56,6 +73,7 @@ function response(status: 'completed' | 'tagged' = 'tagged', indexVersion = 3) {
 }
 
 describe('FulltextUpsertExecutor', () => {
+    let storageDir: string | undefined;
     let connection: MockDBConnection;
     let db: BeaverDB;
     let api: {
@@ -68,9 +86,11 @@ describe('FulltextUpsertExecutor', () => {
     let ctx: JobExecutionContext;
     let record: BackgroundJobRecord;
 
-    beforeEach(async () => {
+    beforeEach(async ({ task }) => {
         vi.clearAllMocks();
-        connection = new MockDBConnection();
+        storageDir = task.name.startsWith('recovers a throttled backlog')
+            ? mkdtempSync(join(tmpdir(), 'beaver-index-retry-')) : undefined;
+        connection = new MockDBConnection(storageDir ? join(storageDir, 'queue.sqlite') : undefined);
         db = new BeaverDB(connection);
         await db.initDatabase('0.99.0');
         await db.ensureAttachmentProcessingState({
@@ -138,7 +158,7 @@ describe('FulltextUpsertExecutor', () => {
             hasSearchIndexAccess: true,
             libraryScopeInitialized: true,
             searchableLibraryIds: [1],
-            documentCache: { getResult: vi.fn(async () => payload) },
+            documentCache: { getResult: vi.fn(async () => payload), getStats: vi.fn(async () => null) },
         };
         (globalThis as any).Zotero.Items = {
             getByLibraryAndKeyAsync: vi.fn(async () => ({
@@ -151,7 +171,9 @@ describe('FulltextUpsertExecutor', () => {
     });
 
     afterEach(async () => {
+        vi.restoreAllMocks();
         await connection.closeDatabase();
+        if (storageDir) rmSync(storageDir, { recursive: true, force: true });
     });
 
     it('cleans up without paid access using the frozen remote identity', async () => {
@@ -257,7 +279,7 @@ describe('FulltextUpsertExecutor', () => {
 
     it.each([
         [400, 'bad_request', true], [413, 'http_413', true],
-        [422, 'invalid_payload', true], [403, 'not_entitled', true],
+        [422, 'invalid_payload', true],
         [401, 'unauthorized', false], [429, 'rate_limited', false], [503, 'unavailable', false],
     ] as const)('retires only terminal untag failures: %s %s', async (status, code, terminal) => {
         Zotero.Beaver.account = { getGeneration: () => 1, revokeSearchIndexAccess: vi.fn(),
@@ -430,7 +452,8 @@ describe('FulltextUpsertExecutor', () => {
                 expect(api.untag).not.toHaveBeenCalled();
                 expect(await countCleanupIntents(connection, 'owner')).toBe(0);
             } else {
-                expect(result).toMatchObject({ kind: 'retry', error: 'index_untag_busy' });
+                expect(result).toMatchObject({ kind: 'retry', error: 'index_untag_busy', countsAsAttempt: false });
+                expect(result).not.toHaveProperty('laneCooldownMs');
                 expect(api.untag).toHaveBeenCalledWith('OLDDEVICE', [{ scope_ref: 'g123',
                     zotero_key: record.zoteroKey, doc_hash: 'a'.repeat(64) }]);
                 expect(await countCleanupIntents(connection, 'owner')).toBe(1);
@@ -657,4 +680,223 @@ describe('FulltextUpsertExecutor', () => {
             retryAfterMs: 1_000,
         });
     });
+
+    it.each([
+        new ApiError(429, 'busy', 'busy', 'too_many_requests', { retry_after_seconds: 7 }),
+        ...[500, 502, 503, 504].map((status) => new ApiError(status, 'Unavailable')),
+        new ApiError(503, 'Unavailable', 'ambiguous', 'index_write_ambiguous'),
+        new SessionRefreshError('offline', 0), new RequestTimeoutError(), new ServerError(),
+    ])('preserves transient remote failures without spending attempts: %s', async (error) => {
+        api.upsertHash.mockRejectedValue(error);
+        const outcome = await new FulltextUpsertExecutor(api as any).execute(record, ctx);
+        expect(outcome).toMatchObject({ kind: 'retry', countsAsAttempt: false,
+            laneCooldownMs: expect.any(Number), retryAfterMs: expect.any(Number) });
+        if (outcome.kind === 'retry') {
+            expect(outcome.laneCooldownMs).toBe(outcome.retryAfterMs);
+            expect(outcome.retryAfterMs).toBeGreaterThanOrEqual(1_000);
+            if (error instanceof ApiError && error.status === 429) expect(outcome.retryAfterMs).toBe(7_000);
+        }
+        expect((await db.getAttachmentProcessingState(1, record.zoteroKey))?.upsertStatus).toBeNull();
+    });
+
+    it.each([[409, 'claim_busy'], [503, 'lease_lost']])('keeps %s %s contention local to its job', async (status, code) => {
+        api.upsertHash.mockRejectedValue(new ApiError(status as number, 'busy', 'busy', code as string));
+        const outcome = await new FulltextUpsertExecutor(api as any).execute(record, ctx);
+        expect(outcome).toMatchObject({ kind: 'retry', countsAsAttempt: false, retryAfterMs: 5_000 });
+        expect(outcome).not.toHaveProperty('laneCooldownMs');
+    });
+
+    it.each(['accepted', 'requirements'])('waits without spending attempts for %s', async (kind) => {
+        api.upsertHash.mockResolvedValue({ ...response('completed'),
+            ...(kind === 'accepted' ? { status: 'accepted' } : { index_version: 99 }) });
+        const outcome = await new FulltextUpsertExecutor(api as any).execute(record, ctx);
+        expect(outcome).toMatchObject({ kind: 'retry', countsAsAttempt: false });
+        expect(outcome).not.toHaveProperty('laneCooldownMs');
+    });
+
+    it.each([new Error('bug'), new TypeError('local processing bug')])('retains the finite budget for unexpected local errors: %s', async (error) => {
+        api.upsertHash.mockRejectedValue(error);
+        const outcome = await new FulltextUpsertExecutor(api as any).execute(record, ctx);
+        expect(outcome.kind).toBe('retry');
+        expect(outcome).not.toHaveProperty('countsAsAttempt', false);
+        expect(outcome).not.toHaveProperty('laneCooldownMs');
+    });
+
+    it.each(['account', 'scope', 'abort', 'dispose', 'entitlement'])('ignores a late terminal response after %s invalidation', async (change) => {
+        let generation = 1;
+        Zotero.Beaver.account = { getGeneration: () => generation,
+            getSnapshot: () => ({ session: { user: { id: 'owner' } } }) } as any;
+        const controller = new AbortController();
+        ctx.externalAbortSignal = controller.signal;
+        const executor = new FulltextUpsertExecutor(api as any);
+        api.upsertHash.mockImplementation(async () => {
+            if (change === 'account') generation++;
+            if (change === 'scope') Zotero.Beaver.libraryScopeInitialized = false;
+            if (change === 'abort') controller.abort();
+            if (change === 'dispose') executor.dispose();
+            if (change === 'entitlement') (Zotero.Beaver as any).hasSearchIndexAccess = false;
+            throw new ApiError(400, 'Bad request', 'invalid', 'invalid_payload');
+        });
+        expect(await executor.execute(record, ctx)).toEqual({ kind: 'release', reason: 'access_changed' });
+        expect((await db.getAttachmentProcessingState(1, record.zoteroKey))?.upsertStatus).toBeNull();
+    });
+
+    it('checks ownership before rejecting a late requirements response', async () => {
+        api.requirements.mockImplementation(async () => {
+            Zotero.Beaver.libraryScopeInitialized = false;
+            return { index_version: 3, extract_schema_versions: {} };
+        });
+        expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx)).toMatchObject({ kind: 'release' });
+        expect((await db.getAttachmentProcessingState(1, record.zoteroKey))?.upsertStatus).toBeNull();
+    });
+
+    it.each([new SessionExpiredError(), Object.assign(new Error('changed'), { code: 'ACCOUNT_CHANGED' }),
+        Object.assign(new Error('cancelled'), { name: 'AbortError' })])('parks or releases lifecycle errors: %s', async (error) => {
+        api.upsertHash.mockRejectedValue(error);
+        expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx)).toMatchObject({
+            kind: error instanceof SessionExpiredError ? 'defer' : 'release',
+        });
+    });
+
+    it.each(['fulltext_upsert', 'fulltext_untag'] as const)('preserves %s work after entitlement rejection', async (jobType) => {
+        const revokeSearchIndexAccess = vi.fn();
+        Zotero.Beaver.account = { getGeneration: () => 1, revokeSearchIndexAccess,
+            getSnapshot: () => ({ session: { user: { id: 'owner' } } }) } as any;
+        record.jobType = jobType;
+        record.payload = { ...record.payload!, doc_hash: 'b'.repeat(64), index_account_id: 'owner' };
+        const error = new ApiError(403, 'Forbidden', 'no access', 'not_entitled');
+        api.upsertHash.mockRejectedValue(error);
+        api.untag.mockRejectedValue(error);
+        const outcome = await new FulltextUpsertExecutor(api as any, jobType).execute(record, ctx);
+        if (jobType === 'fulltext_upsert') {
+            expect(outcome).toEqual({ kind: 'release', reason: 'not_entitled' });
+            expect(revokeSearchIndexAccess).toHaveBeenCalledOnce();
+        } else {
+            expect(outcome).toMatchObject({ kind: 'retry', reason: 'not_entitled',
+                countsAsAttempt: false, retryAfterMs: 30_000 });
+            expect(outcome).not.toHaveProperty('laneCooldownMs');
+            expect(revokeSearchIndexAccess).not.toHaveBeenCalled();
+        }
+        expect((await db.getAttachmentProcessingState(1, record.zoteroKey))?.upsertStatus).toBeNull();
+    });
+
+    it('delays repeated cleanup entitlement rejections without spending attempts or losing cleanup intent', async () => {
+        let now = 1_000_000;
+        vi.spyOn(Date, 'now').mockImplementation(() => now);
+        (Zotero.Beaver as any).hasSearchIndexAccess = false;
+        const revokeSearchIndexAccess = vi.fn();
+        Zotero.Beaver.account = { getGeneration: () => 1, revokeSearchIndexAccess,
+            getSnapshot: () => ({ session: { user: { id: 'owner' } } }) } as any;
+        const proc = new BackgroundExtractor();
+        Zotero.Beaver.backgroundExtractor = proc;
+        proc.registerExecutor(new FulltextUpsertExecutor(api as any, 'fulltext_untag'),
+            { maxInFlight: 1, survivesLibraryExclusion: true });
+        const queued = await db.enqueueBackgroundJob({ ...record, jobType: 'fulltext_untag', now,
+            payload: { ...record.payload!, doc_hash: 'b'.repeat(64), index_account_id: 'owner',
+                index_scope_ref: 'lLOCAL123', index_local_id: 'LOCAL123' } });
+        for (let attempt = 0; attempt < 2; attempt++) {
+            await db.failBackgroundJob(queued.id, 'previous failure', { maxAttempts: 3, backoffMs: () => 0, now });
+        }
+        api.untag.mockRejectedValue(new ApiError(403, 'Forbidden', 'no access', 'not_entitled'));
+        for (let rejection = 1; rejection <= 4; rejection++) {
+            await proc.processOnce({ awaitLaunchedJobs: true });
+            expect(api.untag).toHaveBeenCalledTimes(rejection);
+            expect((await db.peekBackgroundJobs())[0]).toMatchObject({
+                id: queued.id, attemptCount: 2, availableAt: now + 30_000,
+            });
+            expect(await countCleanupIntents(connection, 'owner')).toBe(1);
+            expect((await db.getBackgroundQueueStats(now)).dead).toBe(0);
+            proc.requestImmediateDrain();
+            for (let wake = 0; wake < 10; wake++) {
+                proc.notify();
+                await proc.processOnce({ awaitLaunchedJobs: true });
+            }
+            now += 29_999;
+            await proc.processOnce({ awaitLaunchedJobs: true });
+            expect(api.untag).toHaveBeenCalledTimes(rejection);
+            now++;
+        }
+        api.untag.mockResolvedValue({ results: [{ outcome: 'untagged' }] });
+        await proc.processOnce({ awaitLaunchedJobs: true });
+        expect(api.untag).toHaveBeenCalledTimes(5);
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+        expect(await countCleanupIntents(connection, 'owner')).toBe(0);
+        expect(revokeSearchIndexAccess).not.toHaveBeenCalled();
+    });
+
+    it('recovers a throttled backlog automatically without exhausting two-attempt documents', async () => {
+        let now = 1_000_000;
+        vi.spyOn(Date, 'now').mockImplementation(() => now);
+        await connection.queryAsync('DELETE FROM attachment_processing_state WHERE zotero_key = ?', [record.zoteroKey]);
+        const scope = { accountId: 'owner', libraryIds: [1], hasOcrAccess: true, hasSearchIndexAccess: true };
+        await db.configureProcessingProgress(scope);
+        const keys = Array.from({ length: 40 }, (_, i) => `RETRY${String(i).padStart(3, '0')}`);
+        for (const key of keys) {
+            await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: key, contentKind: 'pdf' });
+            await connection.queryAsync(`UPDATE attachment_processing_state SET extract_status = 'done',
+                ocr_status = 'na', structured_document_hash = ?, extract_schema_version = '4' WHERE zotero_key = ?`,
+                ['a'.repeat(64), key]);
+            const queued = await db.enqueueBackgroundJob({ ...record, zoteroKey: key, now,
+                payload: { ...record.payload!, doc_hash: 'a'.repeat(64) } });
+            for (let attempt = 0; attempt < 2; attempt++) {
+                await db.failBackgroundJob(queued.id, 'earlier local failure', { maxAttempts: 3, backoffMs: () => 0, now });
+            }
+        }
+        let proc = new BackgroundExtractor();
+        Zotero.Beaver.backgroundExtractor = proc;
+        proc.registerExecutor(new FulltextUpsertExecutor(api as any), { maxInFlight: 2 });
+        for (const status of [429, 500, 502, 503, 504, 429]) {
+            api.upsertHash.mockRejectedValue(new ApiError(status, 'Unavailable', 'temporary',
+                status === 429 ? 'too_many_requests' : 'internal_error', { retry_after_seconds: 5 }));
+            const before = api.upsertHash.mock.calls.length;
+            await proc.processOnce({ awaitLaunchedJobs: true });
+            expect(api.upsertHash.mock.calls.length - before).toBeGreaterThan(0);
+            expect(api.upsertHash.mock.calls.length - before).toBeLessThanOrEqual(2);
+            const queued = await db.peekBackgroundJobs();
+            expect(queued).toHaveLength(40);
+            expect(queued.every((job) => job.attemptCount === 2)).toBe(true);
+            expect((await db.getBackgroundQueueStats(now)).dead).toBe(0);
+            const delayed = queued.find((job) => job.availableAt > now)!;
+            await db.enqueueBackgroundJob({ ...delayed, now });
+            expect((await db.peekBackgroundJobs()).find((job) => job.id === delayed.id)?.availableAt).toBe(delayed.availableAt);
+            proc.requestImmediateDrain();
+            for (let wake = 0; wake < 10; wake++) {
+                proc.notify();
+                expect((await proc.processOnce({ awaitLaunchedJobs: true })).processed).toBe(false);
+            }
+            const snapshot = await collectProcessingStatus(scope, { includeFailures: true });
+            expect(snapshot.worker).toMatchObject({ available: 0, deferred: 40, queuedFiles: 40 });
+            expect(describeStatus({ ...snapshot, updatedAt: now, error: null } as any))
+                .toMatchObject({ tone: 'waiting', headline: '40 files waiting' });
+            const progress = await db.getProcessingProgress(false, 0, undefined, ['fulltext_upsert'], ['fulltext_upsert']);
+            expect(progress).toMatchObject({ pending: 40, queue: { available: 0, deferred: 40, attachments: 40 } });
+            now += 5_000;
+        }
+        // Reopen the SQLite file and dispatcher as after a process restart.
+        api.upsertHash.mockRejectedValueOnce(new SessionRefreshError('offline', 0));
+        await proc.processOnce({ awaitLaunchedJobs: true });
+        const delayed = (await db.peekBackgroundJobs()).find((job) => job.availableAt > now)!;
+        const availableAt = delayed.availableAt;
+        await connection.closeDatabase();
+        connection = new MockDBConnection(join(storageDir!, 'queue.sqlite'));
+        db = new BeaverDB(connection);
+        await db.initDatabase('0.99.0');
+        await db.configureProcessingProgress(scope);
+        Zotero.Beaver.db = db;
+        proc = new BackgroundExtractor();
+        Zotero.Beaver.backgroundExtractor = proc;
+        proc.registerExecutor(new FulltextUpsertExecutor(api as any), { maxInFlight: 2 });
+        expect((await db.peekBackgroundJobs()).find((job) => job.id === delayed.id))
+            .toMatchObject({ attemptCount: 2, availableAt, lastError: delayed.lastError });
+        expect(await db.claimNextBackgroundJob(now, 100, undefined, ['document_ocr'])).toBeNull();
+        api.upsertHash.mockResolvedValue(response('completed'));
+        now += 40_000;
+        for (let pass = 0; pass < 25; pass++) await proc.processOnce({ awaitLaunchedJobs: true });
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+        expect((await db.getBackgroundQueueStats(now)).dead).toBe(0);
+        for (const key of keys) expect((await db.getAttachmentProcessingState(1, key))?.upsertStatus).toBe('done');
+        const snapshot = await collectProcessingStatus(scope, { includeFailures: true });
+        expect(describeStatus({ ...snapshot, updatedAt: now, error: null } as any).headline).toBe('Processing finished');
+    });
+
 });

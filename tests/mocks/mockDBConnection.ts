@@ -17,9 +17,8 @@ import { parseQueryAndParams } from './zoteroQueryParams';
 export class MockDBConnection {
     private db: Database.Database;
 
-    constructor() {
-        // In-memory database — fast and disposable
-        this.db = new Database(':memory:');
+    constructor(filename = ':memory:') {
+        this.db = new Database(filename);
         // Enable WAL mode to mimic Zotero's default
         this.db.pragma('journal_mode = WAL');
     }

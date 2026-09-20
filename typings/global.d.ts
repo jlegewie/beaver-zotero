@@ -420,11 +420,13 @@ declare namespace Zotero {
                 },
             ): Promise<{ dead: boolean }>;
 
+            rescheduleBackgroundJob(id: number, availableAt: number, error: string): Promise<void>;
             releaseBackgroundJob(id: number, now: number): Promise<void>;
 
             getBackgroundQueueStats(
                 now: number,
                 jobTypes?: string[],
+                pausedTypes?: string[],
             ): Promise<import("../src/services/database").BackgroundQueueStats>;
 
             recordDocumentProcessingFailure(

@@ -154,6 +154,32 @@ describe("InstanceBackground", () => {
         await service.dispose();
     });
 
+    it('projects paused index jobs as deferred without losing other runnable stages', async () => {
+        const conn = new MockDBConnection();
+        const db = new BeaverDB(conn as any);
+        await db.initDatabase('0.99.0');
+        owner.db = db;
+        owner.backgroundExtractor.getLaneStatus = () => ({
+            fulltext_upsert: { inFlight: 0, pauseUntil: Date.now() + 30_000 },
+            document_ocr: { inFlight: 0 },
+        });
+        const service = new InstanceBackground();
+        owner.background = service;
+        try {
+            await service.start(owner.account);
+            for (const jobType of ['fulltext_upsert', 'document_ocr'] as const) {
+                await db.enqueueBackgroundJob({ jobType, libraryId: 1, zoteroKey: 'SAMEFILE',
+                    contentKind: 'pdf', payloadKind: 'structured', now: 0 });
+            }
+            expect(await service.getProcessingProgress()).toMatchObject({
+                pending: 1, queue: { available: 1, deferred: 1, attachments: 1 },
+            });
+        } finally {
+            await service.dispose();
+            await conn.closeDatabase();
+        }
+    });
+
     it('tracks and settles work without a renderer, then resumes the stored run in a new owner', async () => {
         vi.useFakeTimers();
         const conn = new MockDBConnection();

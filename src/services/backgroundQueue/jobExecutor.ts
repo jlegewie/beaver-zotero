@@ -18,7 +18,13 @@ export interface JobExecutionContext {
 export type JobOutcome =
     | { kind: 'complete'; reason: string }
     | { kind: 'release'; reason: string }
-    | { kind: 'retry'; error: string; reason?: string; retryAfterMs?: number }
+    | {
+        kind: 'retry'; error: string; reason?: string; retryAfterMs?: number;
+        /** Only document failures consume the finite attempt budget. */
+        countsAsAttempt?: boolean;
+        /** Pause new claims in this lane as well as delaying this job. */
+        laneCooldownMs?: number;
+    }
     | {
         kind: 'failPermanent';
         failure: DocumentProcessingFailureInput;
