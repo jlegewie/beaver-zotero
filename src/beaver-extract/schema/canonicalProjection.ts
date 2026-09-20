@@ -46,7 +46,8 @@ function attachSentences(
         publicItem.kind !== "text" &&
         publicItem.kind !== "caption" &&
         publicItem.kind !== "footnote" &&
-        publicItem.kind !== "list_item"
+        publicItem.kind !== "list_item" &&
+        publicItem.kind !== "reference"
     ) {
         return publicItem;
     }
@@ -95,6 +96,7 @@ export function projectStructuredPage(
             case "caption":
             case "footnote":
             case "list_item":
+            case "reference":
                 return attachSentences({
                     ...base,
                     kind: item.kind,

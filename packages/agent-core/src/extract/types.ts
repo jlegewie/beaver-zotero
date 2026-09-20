@@ -57,6 +57,13 @@ export const DEFAULT_MARGIN_ZONE: MarginSettings = {
  */
 export type GraphicsLayerMode = "off" | "on" | "auto";
 
+/**
+ * Item-classifier mode. `"off"` leaves the detector's kinds untouched;
+ * `"reference"` enables relabeling of bibliographic reference-list entries as
+ * `reference` items. No classifier ships yet, so both values behave the same.
+ */
+export type ItemClassifierMode = "off" | "reference";
+
 /** Options for text extraction. Page selection lives on the args object of the calling op (e.g. `extract(args.pageIndices | args.pageRange)`), not here. */
 export interface ExtractionSettings {
     /** Whether to check for text layer before processing */
@@ -80,6 +87,12 @@ export interface ExtractionSettings {
      */
     graphicsLayerMode?: GraphicsLayerMode;
     /**
+     * Item-classifier mode (see `ItemClassifierMode`). Default `"off"`.
+     * `"reference"` opts in to relabeling reference-list entries as
+     * `reference` items; no classifier ships yet, so it is currently a no-op.
+     */
+    itemClassifier?: ItemClassifierMode;
+    /**
      * Emit verbose analyzer-module log lines (ColumnDetector, StyleAnalyzer,
      * MarginFilter, LineDetector, ParagraphDetector). Default false — even
      * in dev builds. Prefer the CLI `trace` command for structured debugging.
@@ -96,6 +109,7 @@ export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
     repeatThreshold: 3,
     detectPageSequences: true,
     graphicsLayerMode: "off",
+    itemClassifier: "off",
     analyzerLogging: false,
 };
 
@@ -502,6 +516,12 @@ export interface ListItemItem extends TextBearingItem {
     sentences?: SentenceItem[];
 }
 
+/** A single bibliographic reference-list entry. */
+export interface ReferenceItem extends TextBearingItem {
+    kind: "reference";
+    sentences?: SentenceItem[];
+}
+
 export interface MarginItem extends TextBearingItem {
     kind: "margin";
 }
@@ -524,6 +544,7 @@ export type DocItem =
     | FootnoteItem
     | CaptionItem
     | ListItemItem
+    | ReferenceItem
     | MarginItem
     | FormulaItem
     | TableItem

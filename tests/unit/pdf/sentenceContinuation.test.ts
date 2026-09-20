@@ -447,6 +447,31 @@ describe("annotateColumnContinuations", () => {
         expect(a.sentences[0].joinWithNext).toBeUndefined();
     });
 
+    it("joins adjacent reference entries but never a reference with a body paragraph", () => {
+        const left = makeParagraph(0, [
+            makeSentence("Smith and Jones (2020), A very long title that runs into the next"),
+        ]) as TextItem;
+        const right = makeParagraph(1, [
+            makeSentence("column, Journal of Things, 1(2), 3-4."),
+        ]) as TextItem;
+        const leftRef = { ...left, kind: "reference" as const };
+        const rightRef = { ...right, kind: "reference" as const };
+
+        annotateColumnContinuations(
+            [leftRef, rightRef],
+            simpleRegexSentenceSplit,
+            new Set(),
+        );
+        expect(leftRef.sentences[0].joinWithNext).toBe(true);
+
+        annotateColumnContinuations(
+            [leftRef, right],
+            simpleRegexSentenceSplit,
+            new Set(),
+        );
+        expect(leftRef.sentences[0].joinWithNext).toBeUndefined();
+    });
+
     it("sets the flag on every intermediate paragraph in a 3-column chain", () => {
         const p0 = makeParagraph(0, [
             makeSentence("we examined the long sentence that begins"),

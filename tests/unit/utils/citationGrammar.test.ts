@@ -13,6 +13,7 @@ import {
     requestedCitationKey,
     parseRawCitationAttributes,
 } from '@beaver/agent-core/citations/citationGrammar';
+import { ID_PREFIXES } from '@beaver/agent-core/extract/schema';
 
 describe('citationGrammar', () => {
     it('parses registered locator prefixes and ranges', () => {
@@ -29,6 +30,8 @@ describe('citationGrammar', () => {
         expect(parseLoc('list5')).toEqual({ kind: 'list', value: '5', raw: 'list5' });
         expect(parseLoc('caption12')).toEqual({ kind: 'caption', value: '12', raw: 'caption12' });
         expect(parseLoc('footnote4')).toEqual({ kind: 'footnote', value: '4', raw: 'footnote4' });
+        expect(parseLoc('ref12')).toEqual({ kind: 'reference', value: '12', raw: 'ref12' });
+        expect(parseLoc('ref1-ref4')).toEqual({ kind: 'reference', value: '1-4', raw: 'ref1-ref4' });
         expect(parseLoc('margin6')).toEqual({ kind: 'margin', value: '6', raw: 'margin6' });
         expect(parseLoc('fig2')).toEqual({ kind: 'figure', value: '2', raw: 'fig2' });
         expect(parseLoc('eq4')).toEqual({ kind: 'equation', value: '4', raw: 'eq4' });
@@ -43,12 +46,25 @@ describe('citationGrammar', () => {
         expect(citationIndexCandidateIdsForLocator(parseLoc('tab3')!)).toEqual(['table3']);
         expect(citationIndexCandidateIdsForLocator(parseLoc('p10-p12')!)).toEqual(['p10', 'p12']);
         expect(citationIndexCandidateIdsForLocator(parseLoc('heading3')!)).toEqual(['heading3']);
+        expect(citationIndexCandidateIdsForLocator(parseLoc('ref12')!)).toEqual(['ref12']);
+    });
+
+    it('round-trips every extract id prefix through parseLoc and the citation index', () => {
+        for (const prefix of Object.values(ID_PREFIXES)) {
+            const id = `${prefix}1`;
+            const loc = parseLoc(id);
+            expect(loc, id).toBeDefined();
+            expect(loc!.kind, id).not.toBe('unknown');
+            expect(citationIndexCandidateIdsForLocator(loc!), id).toEqual([id]);
+        }
     });
 
     it('keeps unknown and legacy page locators stable', () => {
         expect(parseLoc('10-12')).toEqual({ kind: 'unknown', value: '10-12', raw: '10-12' });
         expect(parseLoc('paragraph')).toEqual({ kind: 'unknown', value: 'paragraph', raw: 'paragraph' });
         expect(parseLoc('paragraphIntro')).toEqual({ kind: 'unknown', value: 'paragraphIntro', raw: 'paragraphIntro' });
+        expect(parseLoc('ref')).toEqual({ kind: 'unknown', value: 'ref', raw: 'ref' });
+        expect(parseLoc('reflection')).toEqual({ kind: 'unknown', value: 'reflection', raw: 'reflection' });
         expect(locatorFromLegacyPage('222, 237-238')).toEqual({
             kind: 'page',
             value: '222, 237-238',
