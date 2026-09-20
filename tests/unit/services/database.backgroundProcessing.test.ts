@@ -206,6 +206,7 @@ describe('BeaverDB background processing state', () => {
         await db.resetAttachmentExtraction(1, 'ABCDEFGH', 'file_changed');
 
         await expect(db.markAttachmentOcrDone({
+            attemptedAt: 200,
             libraryId: 1,
             zoteroKey: 'ABCDEFGH',
             fileHash: 'file',
@@ -260,6 +261,7 @@ describe('BeaverDB background processing state', () => {
 
         const ocrHash = 'f'.repeat(64);
         await expect(db.markAttachmentOcrDone({
+            attemptedAt: 200,
             libraryId: 1,
             zoteroKey: 'ABCDEFGH',
             fileHash: 'file',

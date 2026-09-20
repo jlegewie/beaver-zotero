@@ -177,11 +177,17 @@ describe('background processing status endpoint', () => {
     });
 });
 
-describe('reconciler refuses to run behind a closed gate', () => {
+describe('reconciler respects the account processing requirement', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, available));
 
-    it('reports an error instead of a silent no-op when the pref is off', async () => {
+    it('keeps required processing enabled and refuses optional processing when disabled', async () => {
         await setPref('backgroundProcessingEnabled', false);
+        const status = await processingStatus({ includeFailures: false });
+        if (status.entitlements?.hasOcrAccess || status.entitlements?.hasSearchIndexAccess) {
+            expect(status.prefs?.backgroundProcessingEnabled).toBe(true);
+            return;
+        }
+        expect(status.prefs?.backgroundProcessingEnabled).toBe(false);
         const result = await processingReconcileNow();
         expect(result.ok).toBe(false);
         expect(result.error).toContain('backgroundProcessingEnabled');

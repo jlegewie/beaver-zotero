@@ -2991,11 +2991,27 @@ export interface ChargingPermissions {
     pause_long_running_agent?: boolean;
 }
 
+/** Current attachment preparation counts; the server owns eligibility policy. */
+export interface SearchIndexLibraryState {
+    library_ref: string;
+    total: number;
+    indexed: number;
+    /** Settled document limitations, disjoint from indexed attachments. */
+    unavailable: number;
+}
+
+export interface SearchIndexState {
+    version: 1;
+    libraries: SearchIndexLibraryState[];
+}
+
 /**
  * Agent run request sent by the client after receiving the 'ready' event.
  * Model selection is included in this request (moved from auth message).
  */
 export interface AgentRunRequest {
+    /** Fresh local preparation snapshot, omitted without search access. */
+    search_index_state?: SearchIndexState;
     /** Request type discriminator */
     type: 'chat';
     /** Client-generated run ID for this agent run */

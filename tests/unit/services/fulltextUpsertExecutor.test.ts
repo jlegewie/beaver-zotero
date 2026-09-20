@@ -547,6 +547,7 @@ describe('FulltextUpsertExecutor', () => {
         expect(api.upsertHash).toHaveBeenCalledTimes(1);
 
         expect(await db.markAttachmentOcrDone({
+            attemptedAt: 200,
             libraryId: 1, zoteroKey: 'ABCDEFGH', fileHash: 'file-md5',
             ocrEngineVersion: '1', structuredDocumentHash: 'a'.repeat(64),
             expectedOcrStatus: 'needed', expectedOcrEngineVersion: null, expectedExtractStatus: 'done',
