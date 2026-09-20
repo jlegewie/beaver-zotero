@@ -22,7 +22,7 @@ export interface SearchPreparationRow {
 // Unknown and service failures remain pending, even after retry exhaustion.
 const UNAVAILABLE_CODES = new Set([
     'file_missing', 'encrypted', 'invalid_pdf', 'file_too_large', 'too_many_pages',
-    'pdf_too_complex', 'empty_document', 'insufficient_text', 'ocr_page_cap',
+    'pdf_too_complex', 'empty_document', 'insufficient_text', 'ocr_page_cap', 'ocr_no_text',
 ]);
 
 export function classifySearchPreparation(
@@ -42,22 +42,25 @@ export function classifySearchPreparation(
     // outcomes can remove an attachment from the denominator.
     const settled = row.extractStatus === 'failed' || row.extractStatus === 'skipped'
         || (row.extractStatus === 'done' && row.ocrStatus === 'failed');
-    const code = row.error?.split(':')[0].trim();
-    if (settled && !row.readingSucceeded && code && UNAVAILABLE_CODES.has(code)) return 'unavailable';
+    const codes = row.error?.split(':').map(part => part.trim()) ?? [];
+    // Exact legacy terminal text is retained for already-persisted outcomes.
+    const unavailable = codes.some(code => UNAVAILABLE_CODES.has(code))
+        || row.error === 'OCR produced no usable text layer';
+    if (settled && !row.readingSucceeded && unavailable) return 'unavailable';
     return 'pending';
 }
 
 /** Two local reads per dispatch; no file I/O, item loading, cache or remote requests. */
 export async function getSearchIndexState(): Promise<SearchIndexState | undefined> {
-    const beaver = Zotero.Beaver;
-    if (!beaver?.hasSearchIndexAccess || !beaver.libraryScopeInitialized || !beaver.db) return undefined;
-    const account = beaver.account;
-    if (!account || !beaver.searchableLibraryIds) return undefined;
-    const generation = account.getGeneration();
-    const accountId = account.getSnapshot().session?.user.id;
-    if (!accountId) return undefined;
-    const libraryIds = [...beaver.searchableLibraryIds].sort((a, b) => a - b);
     try {
+        const beaver = Zotero.Beaver;
+        if (!beaver?.hasSearchIndexAccess || !beaver.libraryScopeInitialized || !beaver.db) return undefined;
+        const account = beaver.account;
+        if (!account || !beaver.searchableLibraryIds) return undefined;
+        const generation = account.getGeneration();
+        const accountId = account.getSnapshot().session?.user.id;
+        if (!accountId) return undefined;
+        const libraryIds = [...beaver.searchableLibraryIds].sort((a, b) => a - b);
         const localId = getZoteroUserIdentifier().localUserKey;
         const libraries = new Map<number, SearchIndexLibraryState>();
         const scopes = new Map<number, string>();

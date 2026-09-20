@@ -24,10 +24,10 @@ describe('search preparation classification', () => {
     ])('keeps incomplete or incompatible evidence pending: %j', extra => {
         expect(classifySearchPreparation(row(extra), identity)).toBe('pending');
     });
-    it.each(['encrypted', 'file_missing', 'invalid_pdf', 'too_many_pages'])('excludes settled %s limitations', error => {
+    it.each(['encrypted', 'file_missing', 'invalid_pdf', 'too_many_pages', 'wrapper: encrypted', 'ocr_remote_download_failed: file_missing', 'ocr_no_text: no usable text', 'OCR produced no usable text layer'])('excludes settled %s limitations', error => {
         expect(classifySearchPreparation(row({ extractStatus: 'failed', error }), identity)).toBe('unavailable');
     });
-    it.each(['download_failed', 'read_failed', 'extraction_failed', 'ocr_required', 'unsupported_schema_version'])('does not shrink the denominator for %s', error => {
+    it.each(['download_failed', 'read_failed', 'extraction_failed', 'ocr_required', 'unsupported_schema_version', 'wrapper: encrypted_extra', 'ocr_backend_failed: download_failed'])('does not shrink the denominator for %s', error => {
         expect(classifySearchPreparation(row({ extractStatus: 'failed', error }), identity)).toBe('pending');
     });
     it('keeps retries and superseded reading failures pending', () => {
@@ -86,6 +86,16 @@ describe('send-time search snapshot', () => {
         read.mockImplementation(async () => { Zotero.Beaver!.searchableLibraryIds = []; return []; });
         expect(await getSearchIndexState()).toBeUndefined();
         read.mockRejectedValue(new Error('db unavailable'));
+        expect(await getSearchIndexState()).toBeUndefined();
+    });
+    it.each(['getGeneration', 'getSnapshot'] as const)('omits if %s fails before a database read', async method => {
+        vi.spyOn(Zotero.Beaver!.account!, method).mockImplementation(() => { throw new Error('account unavailable'); });
+        expect(await getSearchIndexState()).toBeUndefined();
+    });
+    it('drops a snapshot if account generation changes while reading', async () => {
+        let generation = 1;
+        vi.spyOn(Zotero.Beaver!.account!, 'getGeneration').mockImplementation(() => generation);
+        vi.spyOn(db, 'getSearchPreparationRows').mockImplementation(async () => { generation++; return []; });
         expect(await getSearchIndexState()).toBeUndefined();
     });
     it('reads a 20,000-attachment inventory without per-attachment queries', async () => {

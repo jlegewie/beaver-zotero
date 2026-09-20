@@ -717,6 +717,7 @@ export class OcrExecutor implements JobExecutor {
         this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
         // Hand the MuPDF extraction to the serialized background lane.
         logger(`OcrExecutor: ${job.sourceKey} re-extracting OCR searchable PDF`, 3);
+        const attemptedAt = Date.now();
         const result = await ctx.runOnMuPDFWorker(async () => {
             if (await shouldStopCachePreparation(record)) return null;
             return extractPdfBytesAndCacheAsOriginalAttachment({
@@ -765,6 +766,7 @@ export class OcrExecutor implements JobExecutor {
                         return { kind: 'retry', error: 'ocr_source_changed', reason: 'source_changed' };
                     }
                     const applied = await ctx.db.markAttachmentOcrDone({
+                        attemptedAt,
                         libraryId: job.item.libraryID,
                         zoteroKey: job.item.key,
                         fileHash: job.fileHash,
@@ -863,7 +865,9 @@ export class OcrExecutor implements JobExecutor {
             job.item.libraryID,
             job.item.key,
             job.fileHash,
-            outcome.failure.error,
+            outcome.failure.terminalCode === OCR_TERMINAL_NO_TEXT
+                ? `${OCR_TERMINAL_NO_TEXT}: ${outcome.failure.error}`
+                : outcome.failure.error,
         );
     }
 

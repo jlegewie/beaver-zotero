@@ -498,6 +498,7 @@ declare namespace Zotero {
             }): Promise<void>;
             ensureAttachmentFileHash(libraryId: number, zoteroKey: string, fileHash: string): Promise<void>;
             markAttachmentOcrDone(input: {
+                attemptedAt: number;
                 libraryId: number; zoteroKey: string; fileHash: string;
                 ocrEngineVersion: string; structuredDocumentHash: string;
                 expectedOcrStatus: import("../src/services/database").AttachmentOcrStatus;

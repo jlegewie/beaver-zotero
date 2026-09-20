@@ -2757,6 +2757,7 @@ export class BeaverDB {
 
     /** OCR completion is guarded by the exact bytes hash the executor consumed. */
     public async markAttachmentOcrDone(input: {
+        attemptedAt: number;
         libraryId: number;
         zoteroKey: string;
         fileHash: string;
@@ -2794,7 +2795,13 @@ export class BeaverDB {
                 input.expectedExtractStatus,
             ],
         );
-            if (changed) await this.enqueueReplacementUntag(previous, input.structuredDocumentHash);
+            if (changed) {
+                await this.enqueueReplacementUntag(previous, input.structuredDocumentHash);
+                await this.recordAttachmentReadingOutcome({
+                    libraryId: input.libraryId, zoteroKey: input.zoteroKey,
+                    contentKind: 'pdf', errorCode: null, attemptedAt: input.attemptedAt,
+                });
+            }
             applied = changed;
         });
         return applied;

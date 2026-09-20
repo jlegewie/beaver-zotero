@@ -20,10 +20,15 @@ installation and index scope. `unavailable` is disjoint from `indexed` and inclu
 only explicitly classified settled document limitations. Pending is derived as
 `total - indexed - unavailable`.
 
-Generic extraction, download, read and service failures remain pending. Reading
+Generic extraction, download, read and service failures remain pending. Settled OCR
+with no usable text (`ocr_no_text`) is a document limitation and counts as
+unavailable; persisted legacy no-text messages have the same classification.
+Wrapped reason codes are matched as complete colon-separated tokens. Reading
 success supersedes an earlier limitation; reading errors alone do not establish
 unavailability because they survive source changes and retries. Reset processing
-rows remain pending until processing settles again.
+rows remain pending until processing settles again. Accepted OCR completion clears
+the reading error atomically with the processing-ledger update, using the start
+time of re-extraction so it cannot overwrite a newer reading observation.
 
 The plugin reads the processing/reading tables once and the current Zotero
 inventory once, matching identities locally. There is no polling, file inspection,

@@ -447,6 +447,7 @@ describe('OcrExecutor', () => {
             download_ms: expect.any(Number), publication_ms: expect.any(Number),
             quality_result: 'text_and_geometry_passed',
         }));
+        expect(dbStub.markAttachmentOcrDone).toHaveBeenCalledWith(expect.objectContaining({ attemptedAt: expect.any(Number) }));
         api.reportOutcome.mockClear();
         dbStub.markAttachmentOcrDone.mockResolvedValue(false);
         expect(await executor.execute(record, makeCtx())).toMatchObject({ reason: 'stale_completion_ignored' });
@@ -463,6 +464,7 @@ describe('OcrExecutor', () => {
         expect(outcome.kind).toBe('failPermanent');
         if (outcome.kind === 'failPermanent') {
             expect(outcome.failure.terminalCode).toBe('ocr_no_text');
+            expect(dbStub.markAttachmentOcrFailed).toHaveBeenCalledWith(1, 'AAAAAAAA', 'hash123', 'ocr_no_text: OCR produced no usable text layer');
             expect(outcome.failure.task).toBe('ocr');
         }
         // Client-detected terminal is reported to the backend for observability.
