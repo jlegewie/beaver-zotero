@@ -61,7 +61,7 @@ const ProcessingStatusRow: React.FC<{
     } : null;
 
     return (
-        <div className="display-flex flex-col border-top-quinary" style={{ padding: '8px 12px 12px' }}>
+        <div className="display-flex flex-col border-top-quinary p-2" style={{ padding: '8px 12px'}}>
             <div className="display-flex flex-row items-center gap-3" style={{ minHeight: '24px' }}>
                 <div className="display-flex flex-row items-start gap-2 flex-1 min-w-0">
                     <div
