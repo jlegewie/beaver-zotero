@@ -296,44 +296,50 @@ describe('processing status sentence', () => {
         expect(describeStatus(snapshot).tone).toBe('busy');
     });
 
-    it('offers Rebuild cache only on a settled status with missing cached text', () => {
+    it('promises up-to-date search only on settled statuses, and only when asked to', () => {
         const snapshot = status(0);
-        const sentence = describeStatus(snapshot, { canRestoreCache: true });
-        expect(sentence).toMatchObject({ tone: 'idle', headline: 'Processing finished', processNow: false, rebuildCache: true });
-        expect(sentence.processNowBlocked).toBeFalsy();
-        expect(describeStatus(snapshot, { canRestoreCache: false }).processNow).toBe(false);
+        expect(describeStatus(snapshot, { searchIndexUpToDate: true }).headline).toBe('Full-text search is up to date');
+        expect(describeStatus(status(0, 0), { searchIndexUpToDate: true }).headline).toBe('Full-text search is up to date');
+        expect(describeStatus(snapshot, { searchIndexUpToDate: false }).headline).toBe('Processing finished');
+        snapshot.worker.available = 1;
+        snapshot.worker.backlogGateOpen = false;
+        expect(describeStatus(snapshot, { searchIndexUpToDate: true }).headline).toBe('1 file waiting');
     });
 
-    it('keeps cache rebuilding unavailable while work is deferred or not yet queued', () => {
+    it('settles with the plain processing sentence and no Start now', () => {
+        const snapshot = status(0);
+        const sentence = describeStatus(snapshot);
+        expect(sentence).toMatchObject({
+            tone: 'idle', headline: 'Processing finished', processNow: false, stopDrain: false,
+            caption: 'Beaver processes new and changed files automatically.',
+        });
+        expect(sentence.processNowBlocked).toBeFalsy();
+    });
+
+    it('keeps deferred and not-yet-queued work waiting, with Stop only while draining', () => {
         const deferred = status(2);
-        expect(describeStatus(deferred).processNow).toBe(false);
-        expect(describeStatus(deferred, { canRestoreCache: true })).toMatchObject({ headline: '2 files waiting', processNow: false });
-        expect(describeStatus(deferred, { canRestoreCache: true }).rebuildCache).toBeFalsy();
+        expect(describeStatus(deferred)).toMatchObject({ headline: '2 files waiting', processNow: false });
         deferred.worker.drainNow = true;
-        expect(describeStatus(deferred, { canRestoreCache: true })).toMatchObject({ processNow: false, stopDrain: true });
+        expect(describeStatus(deferred)).toMatchObject({ processNow: false, stopDrain: true });
         const unfinished = status(0);
         unfinished.ledger.oldestPendingAt = '2026-09-09 00:00:00';
-        expect(describeStatus(unfinished).processNow).toBe(true);
-        expect(describeStatus(unfinished, { canRestoreCache: true }).rebuildCache).toBeFalsy();
-        expect(describeStatus(unfinished, { canRestoreCache: true })).toMatchObject({ headline: 'Waiting to start', processNow: true });
+        expect(describeStatus(unfinished)).toMatchObject({ headline: 'Waiting to start', processNow: true });
         unfinished.worker.drainNow = true;
-        expect(describeStatus(unfinished, { canRestoreCache: true })).toMatchObject({ processNow: false, stopDrain: true });
+        expect(describeStatus(unfinished)).toMatchObject({ processNow: false, stopDrain: true });
     });
 
-    it('does not let cache restoration outrank queued or running work', () => {
+    it('ranks running work ahead of queued work', () => {
         const snapshot = status(0);
         snapshot.worker.available = 2;
         snapshot.worker.backlogGateOpen = false;
-        expect(describeStatus(snapshot, { canRestoreCache: true })).toMatchObject({
-            headline: '2 files waiting', processNow: true,
-        });
+        expect(describeStatus(snapshot)).toMatchObject({ headline: '2 files waiting', processNow: true });
         snapshot.worker.inFlight = 1;
-        expect(describeStatus(snapshot, { canRestoreCache: true })).toMatchObject({
+        expect(describeStatus(snapshot)).toMatchObject({
             tone: 'busy', headline: 'Finishing current file…', processNow: false, stopDrain: false,
         });
         snapshot.worker.drainNow = true;
         snapshot.worker.backlogGateOpen = true;
-        expect(describeStatus(snapshot, { canRestoreCache: true })).toMatchObject({
+        expect(describeStatus(snapshot)).toMatchObject({
             tone: 'busy', headline: 'Processing files…', processNow: false, stopDrain: true,
         });
     });

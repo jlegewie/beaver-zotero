@@ -3,8 +3,8 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { afterEach, expect, it, vi } from 'vitest';
-import { backgroundProcessingStatusAtom } from '../../../react/atoms/backgroundProcessing';
-import { cloudConsentAtom, hasSearchIndexAccessAtom } from '../../../react/atoms/profile';
+import { backgroundProcessingStatusAtom, type BackgroundProcessingStatus } from '../../../react/atoms/backgroundProcessing';
+import { cloudConsentAtom, hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../../../react/atoms/profile';
 import BackgroundProcessingSection from '../../../react/components/preferences/BackgroundProcessingSection';
 
 const { refresh, prefs, prepareCache, access } = vi.hoisted(() => ({
@@ -213,7 +213,9 @@ it('shows cumulative problems instead of last-run outcomes or a completed progre
     });
     await withView(store, async container => {
         expect(container.querySelector('[role="progressbar"]')).toBeNull();
-        expect(container.textContent).toContain('3 files could not be read. See Problems below.');
+        expect(container.textContent).toContain('5 files could not be read or indexed. See Problems');
+        expect(container.textContent).not.toContain('See Problems below');
+        expect(container.textContent).not.toContain('3 files could not be read.');
         expect(container.textContent).toContain('5 attachments could not be read or indexed.');
         expect(container.textContent).not.toContain('attachments ready');
         expect(container.textContent).not.toContain('attachment needs attention');
@@ -222,7 +224,7 @@ it('shows cumulative problems instead of last-run outcomes or a completed progre
         await act(async () => store.set(backgroundProcessingStatusAtom, {
             ...store.get(backgroundProcessingStatusAtom), error: 'temporary',
         }));
-        expect(container.textContent).toContain('Last reported: 2 files could not be indexed.');
+        expect(container.textContent).toContain('Last reported: 5 files could not be read or indexed.');
     });
 });
 
@@ -342,7 +344,7 @@ it('keeps known problems visible with background processing off, without status,
         expect(container.querySelector('[data-retry="group"]')).not.toBeNull();
     });
 });
-it('lists server indexing problems with reading problems and keeps the search status on the toggle row', async () => {
+it('lists server indexing problems in one line and keeps the settled headline neutral', async () => {
     const store = createStore();
     access.search = true;
     store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
@@ -358,7 +360,9 @@ it('lists server indexing problems with reading problems and keeps the search st
         expect(container.textContent).toContain('Keep Full-Text Search Up to Date');
         expect(container.querySelector('[role="status"]')?.textContent).toBe('Processing finished');
         expect(container.textContent).toContain('2 files could not be indexed. See Problems');
-        expect(container.textContent).toContain('Full-text search index available. Last checked');
+        expect(container.textContent).not.toContain('files could not be read');
+        expect(container.textContent).not.toContain('Last checked');
+        expect(container.textContent).not.toContain('index available');
         expect(container.textContent).not.toContain('Updates paused.');
         expect(container.textContent).toContain('2 attachments could not be read or indexed');
         expect(container.querySelector('[data-issue-reason="index_failed"]')).not.toBeNull();
@@ -374,7 +378,7 @@ it('hides stale indexing issues immediately when search access is revoked', asyn
         worker: { available: 0, deferred: 0, inFlight: 0, dispatchBlocker: null, drainNow: false, backlogGateOpen: false },
     });
     await withView(store, async (container) => {
-        expect(container.textContent).toContain('2 files could not be indexed.');
+        expect(container.textContent).toContain('3 files could not be read or indexed. See Problems');
         const link = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'See Problems')!;
         const heading = Array.from(container.querySelectorAll('[role="heading"]')).find((node) => node.textContent === 'Problems')!.firstElementChild as HTMLElement;
         const scroll = vi.fn();
@@ -385,6 +389,7 @@ it('hides stale indexing issues immediately when search access is revoked', asyn
         expect(focus).toHaveBeenCalledWith({ preventScroll: true });
         await act(async () => store.set(hasSearchIndexAccessAtom as any, false));
         expect(container.textContent).not.toContain('could not be indexed');
+        expect(container.textContent).toContain('1 file could not be read. See Problems');
         expect(container.querySelector('[data-issue-reason="index_failed"]')).toBeNull();
         expect(container.querySelector('[data-issue-reason="file_unavailable"]')).not.toBeNull();
         expect(container.textContent).toContain('1 attachment could not be read or indexed.');
@@ -405,29 +410,58 @@ it('never displays indexing problems from a stale snapshot without search access
     });
 });
 
-it.each([
-    [{ coverage: { namespace_exists: false, approx_row_count: 0, documents: [] }, coverageError: null }, 'Full-text search index not built yet.'],
-    [{ coverage: null, coverageError: 'Could not check search coverage.' }, 'The full-text search index could not be checked.'],
-    [{ coverage: null, coverageError: null }, 'Checking the full-text search index…'],
-    [
-        { coverage: { namespace_exists: true, approx_row_count: 10, documents: [] }, coverageError: 'Could not check search coverage.', coverageUpdatedAt: 0 },
-        'The full-text search index could not be checked. Last known status: Full-text search index available.',
-    ],
-])('keeps the search index status %j visible while processing is paused', async (coverageState, line) => {
-    prefs.backgroundProcessingEnabled = false;
+function settledSearch(store: ReturnType<typeof createStore>, overrides: Partial<BackgroundProcessingStatus>) {
+    store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
+        updatedAt: Date.now(),
+        ledger: { ...store.get(backgroundProcessingStatusAtom).ledger, total: 2, readable: 2 },
+        worker: { available: 0, deferred: 0, inFlight: 0, dispatchBlocker: null, drainNow: false, backlogGateOpen: false },
+        coverage: { namespace_exists: true, approx_row_count: 1000, documents: [] },
+        coverageUpdatedAt: Date.now(),
+        ...overrides,
+    });
+}
+
+it('promises full-text search is current only when the index answered and holds every file', async () => {
     const store = createStore();
     access.search = true;
-    store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom), updatedAt: Date.now(), ...coverageState });
-    await withView(store, (container) => {
-        expect(container.querySelector('[role="status"]')).toBeNull();
-        expect(container.textContent).toContain(line);
-        const paused = Array.from(container.querySelectorAll('span')).find((node) => node.textContent?.startsWith(line));
-        expect(paused?.closest('[aria-hidden="true"]')).toBeNull();
-        expect(container.textContent).toContain('No problems found in the files Beaver has processed so far.');
+    settledSearch(store, {});
+    await withView(store, async (container) => {
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Full-text search is up to date');
+        expect(container.textContent).not.toContain('Last checked');
+        expect(container.textContent).not.toContain('could not be checked');
+        await act(async () => settledSearch(store, { issues: [{ reason: 'index_failed', count: 1 }] }));
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Processing finished');
+        await act(async () => settledSearch(store, { coverage: { namespace_exists: false, approx_row_count: 0, documents: [] } }));
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Processing finished');
+        expect(container.textContent).not.toContain('not built yet');
     });
 });
 
-it('restores evicted cached text through Rebuild cache once the backlog is settled', async () => {
+it('reports a failed index check under the status instead of a stale last-known line', async () => {
+    const store = createStore();
+    access.search = true;
+    settledSearch(store, { coverageError: 'Could not check search coverage.' });
+    await withView(store, async (container) => {
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Processing finished');
+        expect(container.textContent).toContain('The search index could not be checked. Beaver will try again.');
+        expect(container.textContent).not.toContain('Last known status');
+        await act(async () => settledSearch(store, { coverageError: null }));
+        expect(container.textContent).not.toContain('could not be checked');
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Full-text search is up to date');
+    });
+});
+
+it('never mentions the search index without search access', async () => {
+    const store = createStore();
+    settledSearch(store, { coverageError: 'Could not check search coverage.' });
+    await withView(store, (container) => {
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Processing finished');
+        expect(container.textContent).not.toContain('search index');
+        expect(container.textContent).not.toContain('Full-text search');
+    });
+});
+
+it('restores evicted cached text from a separate Cached text row once the backlog is settled', async () => {
     const store = createStore();
     store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
         updatedAt: Date.now(),
@@ -445,7 +479,14 @@ it('restores evicted cached text through Rebuild cache once the backlog is settl
     try {
         await withView(store, async (container) => {
             expect(container.textContent).not.toContain('Process uncached files');
-            expect(container.textContent).toContain('Prepare previously processed files again for faster responses. Uses available cache space.');
+            expect(container.textContent).not.toContain('Prepare previously processed files');
+            // The status row stays about processing; the cache gets its own row.
+            const headline = container.querySelector<HTMLElement>('[role="status"]')!;
+            expect(headline.textContent).toBe('Processing finished');
+            expect(headline.parentElement!.parentElement!.nextElementSibling!.textContent)
+                .toBe('Beaver processes new and changed files automatically.');
+            expect(container.textContent).toContain('Cached text');
+            expect(container.textContent).toContain('Some processed files are no longer cached.');
             const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Rebuild cache')!;
             expect(button).toBeDefined();
             await act(async () => button.click());
@@ -457,10 +498,35 @@ it('restores evicted cached text through Rebuild cache once the backlog is settl
                 documentCache: { ...cacheStats, can_prepare_uncached_files: false },
             }));
             expect(Array.from(container.querySelectorAll('button')).some((node) => node.textContent === 'Rebuild cache')).toBe(false);
+            expect(container.textContent).not.toContain('Cached text');
         });
     } finally {
         Zotero.Beaver = previousBeaver;
     }
+});
+
+it('withholds the Cached text row while files are still waiting or running', async () => {
+    const store = createStore();
+    store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
+        updatedAt: Date.now(),
+        ledger: { ...store.get(backgroundProcessingStatusAtom).ledger, total: 3, readable: 2 },
+        worker: { available: 1, deferred: 0, inFlight: 0, dispatchBlocker: null, drainNow: false, backlogGateOpen: false },
+        documentCache: { ...cacheStats, can_prepare_uncached_files: true },
+    });
+    await withView(store, async (container) => {
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('1 file waiting');
+        expect(container.textContent).not.toContain('Cached text');
+        await act(async () => store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
+            worker: { available: 1, deferred: 0, inFlight: 1, dispatchBlocker: null, drainNow: true, backlogGateOpen: true },
+        }));
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Processing files…');
+        expect(container.textContent).not.toContain('Cached text');
+        await act(async () => store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
+            ledger: { ...store.get(backgroundProcessingStatusAtom).ledger, total: 3, readable: 3 },
+            worker: { available: 0, deferred: 0, inFlight: 0, dispatchBlocker: null, drainNow: false, backlogGateOpen: false },
+        }));
+        expect(container.textContent).toContain('Cached text');
+    });
 });
 
 it('does not restore cached text while background processing is off', async () => {
@@ -472,6 +538,7 @@ it('does not restore cached text while background processing is off', async () =
     });
     await withView(store, (container) => {
         expect(Array.from(container.querySelectorAll('button')).some((node) => node.textContent === 'Rebuild cache')).toBe(false);
+        expect(container.textContent).not.toContain('Cached text');
     });
 });
 
@@ -637,7 +704,23 @@ it.each(['pending', 'declined', 'accepted'] as const)('locks accepted cloud prep
         expect(toggle.disabled).toBe(consent === 'accepted');
         expect(container.textContent).not.toContain('Accept and turn on');
         expect(container.textContent).toContain(consent === 'accepted'
-            ? 'required for full-text search and OCR'
+            ? 'Required for full-text search.'
             : 'Process files ahead of time');
+        expect(container.textContent).not.toContain('Use Start now');
+    });
+});
+
+it('names only the entitled features in the locked description', async () => {
+    const store = createStore();
+    store.set(cloudConsentAtom, 'accepted');
+    store.set(hasOcrAccessAtom as any, true);
+    await withView(store, async container => {
+        expect(container.textContent).toContain('Process Files in the Background');
+        expect(container.textContent).toContain('Required for OCR.');
+        expect(container.textContent).not.toContain('full-text search');
+        expect((container.querySelector('input[type="checkbox"]') as HTMLInputElement).disabled).toBe(true);
+        await act(async () => store.set(hasSearchIndexAccessAtom as any, true));
+        expect(container.textContent).toContain('Keep Full-Text Search Up to Date');
+        expect(container.textContent).toContain('Required for full-text search and OCR.');
     });
 });

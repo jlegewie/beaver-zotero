@@ -14,8 +14,6 @@ export interface StatusSentence {
     outstanding?: number;
     /** Show Start now: queued work can start without waiting for idle. */
     processNow: boolean;
-    /** Offer rebuilding missing cached text only after pending work is settled. */
-    rebuildCache?: boolean;
     /** Disable Start now: a dispatcher blocker, not the idle gate. */
     processNowBlocked?: boolean;
     /** Show Stop: a Start now drain is active and can be cancelled. */
@@ -23,8 +21,11 @@ export interface StatusSentence {
 }
 
 export interface StatusSentenceOptions {
-    /** Missing cached text can be restored within the available cache space. */
-    canRestoreCache?: boolean;
+    /**
+     * The server search index answered and holds every file read so far, so a
+     * settled status can promise search is current rather than just finished.
+     */
+    searchIndexUpToDate?: boolean;
 }
 
 /**
@@ -144,7 +145,7 @@ export function describeStatus(
             stopDrain: draining,
         };
     }
-    const restore = options.canRestoreCache === true;
+    const settled = options.searchIndexUpToDate === true ? 'Full-text search is up to date' : 'Processing finished';
     if (deferred > 0) {
         return {
             tone: 'waiting',
@@ -168,25 +169,15 @@ export function describeStatus(
     if (total === 0) {
         return {
             tone: 'idle',
-            headline: 'Processing finished',
+            headline: settled,
             caption: 'No files to process yet. Beaver checks your libraries for new files automatically.',
             processNow: false,
             stopDrain: false,
         };
     }
-    if (restore) {
-        return {
-            tone: 'idle',
-            headline: 'Processing finished',
-            caption: 'Prepare previously processed files again for faster responses. Uses available cache space.',
-            processNow: false,
-            rebuildCache: !draining,
-            stopDrain: draining,
-        };
-    }
     return {
         tone: 'idle',
-        headline: 'Processing finished',
+        headline: settled,
         caption: 'Beaver processes new and changed files automatically.',
         processNow: false,
         stopDrain: false,

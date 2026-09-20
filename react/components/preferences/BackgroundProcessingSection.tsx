@@ -20,7 +20,7 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { ExternalLink, SettingsGroup, SettingsRow, SectionLabel } from './components/SettingsElements';
 import ProcessingIssueGroupRow from './ProcessingIssueList';
 import { ProgressBar } from '../status/ProgressBar';
-import { describeStatus, plural, type StatusTone } from './processingStatusSentence';
+import { describeStatus, plural, type StatusSentence, type StatusTone } from './processingStatusSentence';
 import PlayIcon from '@beaver/agent-ui/icons/PlayIcon';
 import StopIcon from '@beaver/agent-ui/icons/StopIcon';
 import { prepareUncachedFiles } from '../../../src/services/backgroundProcessing/cachePreparation';
@@ -35,25 +35,33 @@ const TONE_COLOR: Record<StatusTone, string> = {
 /** Activity and its explanation, followed by progress and cumulative file problems. */
 const ProcessingStatusRow: React.FC<{
     status: BackgroundProcessingStatus;
-    canRestoreCache: boolean;
+    sentence: StatusSentence;
     /** The clicked action is still preparing work; the button waits for it. */
     processing: boolean;
-    onProcessNow: (action: 'start' | 'rebuild') => void;
+    onProcessNow: () => void;
     onStopDrain: () => void;
     onShowProblems: () => void;
-}> = ({ status, canRestoreCache, processing, onProcessNow, onStopDrain, onShowProblems }) => {
-    const sentence = describeStatus(status, { canRestoreCache });
+    /** The last server search-index check failed. */
+    searchIndexUnavailable: boolean;
+}> = ({
+    status, sentence, processing, onProcessNow, onStopDrain, onShowProblems, searchIndexUnavailable,
+}) => {
     const run = status.progress;
     const issueCount = status.issues.reduce((sum, group) => sum + group.count, 0);
     const indexIssueCount = status.issues.find((group) => group.reason === 'index_failed')?.count ?? 0;
     const readingIssueCount = issueCount - indexIssueCount;
+    // One line for every kind of problem; the Problems section directly below
+    // breaks them down by reason.
+    const problemVerb = indexIssueCount > 0 && readingIssueCount > 0
+        ? 'read or indexed'
+        : indexIssueCount > 0 ? 'indexed' : 'read';
     const progress = run && run.total > 0 && (run.pending > 0 || (status.worker?.inFlight ?? 0) > 0) ? {
         total: run.total,
         done: run.succeeded + run.problems + run.removed,
     } : null;
 
     return (
-        <div className="display-flex flex-col gap-1 border-top-quinary" style={{ padding: '8px 12px 12px' }}>
+        <div className="display-flex flex-col border-top-quinary" style={{ padding: '8px 12px 12px' }}>
             <div className="display-flex flex-row items-center gap-3" style={{ minHeight: '24px' }}>
                 <div className="display-flex flex-row items-start gap-2 flex-1 min-w-0">
                     <div
@@ -89,10 +97,10 @@ const ProcessingStatusRow: React.FC<{
                             Stop
                         </Button>
                     </Tooltip>
-                ) : sentence.processNow || sentence.rebuildCache ? (
+                ) : sentence.processNow ? (
                     <Tooltip
                         content={sentence.caption}
-                        disabled={!sentence.processNowBlocked && !sentence.rebuildCache}
+                        disabled={!sentence.processNowBlocked}
                         placement="top"
                     >
                         <Button
@@ -104,9 +112,9 @@ const ProcessingStatusRow: React.FC<{
                             ariaLabel={sentence.processNowBlocked
                                 ? `Start now. ${sentence.caption}`
                                 : undefined}
-                            onClick={() => onProcessNow(sentence.rebuildCache ? 'rebuild' : 'start')}
+                            onClick={onProcessNow}
                         >
-                            {sentence.rebuildCache ? 'Rebuild cache' : 'Start now'}
+                            Start now
                         </Button>
                     </Tooltip>
                 ) : null}
@@ -135,40 +143,67 @@ const ProcessingStatusRow: React.FC<{
                     </span>
                 </div>
             )}
-            {indexIssueCount > 0 && <div className="text-base font-medium font-color-primary" style={{ paddingLeft: '22px' }}>
-                {status.error ? 'Last reported: ' : ''}{plural(indexIssueCount, 'file')} could not be indexed.{' '}
+            {searchIndexUnavailable && <div className="text-sm font-color-secondary" style={{ paddingLeft: '22px' }}>
+                The search index could not be checked. Beaver will try again.
+            </div>}
+            {issueCount > 0 && <div className="text-base font-color-secondary mt-2" style={{ paddingLeft: '22px' }}>
+                {status.error ? 'Last reported: ' : ''}{plural(issueCount, 'file')} could not be {problemVerb}.{' '}
                 <button type="button" className="text-link cursor-pointer" onClick={onShowProblems}
                     style={{ background: 'none', border: 'none', padding: 0, font: 'inherit' }}>
                     See Problems
                 </button>
-            </div>}
-            {readingIssueCount > 0 && <div className="text-sm font-color-secondary" style={{ paddingLeft: '22px' }}>
-                {status.error ? 'Last reported: ' : ''}{plural(readingIssueCount, 'file')} could not be read. See Problems below.
             </div>}
         </div>
     );
 };
 
 /**
- * The server search-index check, for accounts with full-text search. Shown
- * with the toggle so it stays visible while processing is paused. The status
- * poll keeps the last successful check when a later one fails, so a failure
- * is named ahead of that stale result rather than hidden behind it.
+ * Restores cached text that was evicted from the local document cache. The
+ * cache is separate from the search index: eviction never removes a file from
+ * search, and restoring only makes responses faster. Offered once processing
+ * is settled, so the rebuild does not compete with pending work.
  */
-function searchIndexStatusLine(status: BackgroundProcessingStatus): string {
-    const known = status.coverage
-        ? (status.coverage.namespace_exists
-            ? 'Full-text search index available.'
-            : 'Full-text search index not built yet.')
-        : null;
-    const checked = known && status.coverageUpdatedAt
-        ? ` Last checked ${new Date(status.coverageUpdatedAt).toLocaleString()}.`
-        : '';
-    if (status.coverageError) {
-        return 'The full-text search index could not be checked.'
-            + (known ? ` Last known status: ${known}${checked}` : '');
+const CachedTextRow: React.FC<{ processing: boolean; onRebuild: () => void }> = ({ processing, onRebuild }) => (
+    <SettingsRow
+        hasBorder
+        announceDescription
+        title="Cached text"
+        description="Some processed files are no longer cached. Rebuilding prepares them again for faster responses."
+        control={
+            <Button
+                variant="outline"
+                rightIcon={PlayIcon}
+                onClick={onRebuild}
+                disabled={processing}
+                loading={processing}
+            >
+                Rebuild cache
+            </Button>
+        }
+    />
+);
+
+/**
+ * Title and description of the setting, from what the account is entitled to.
+ * A locked setting names only the features that lock it, so a user reads about
+ * full-text search or OCR only when they have it.
+ */
+function describeSetting(
+    hasSearchAccess: boolean,
+    hasOcrAccess: boolean,
+    locked: boolean,
+): { title: string; description: string } {
+    const title = hasSearchAccess ? 'Keep Full-Text Search Up to Date' : 'Process Files in the Background';
+    if (!locked) {
+        return { title, description: 'Process files ahead of time while your computer is idle for faster responses.' };
     }
-    return known ? known + checked : 'Checking the full-text search index…';
+    const features = [hasSearchAccess && 'full-text search', hasOcrAccess && 'OCR']
+        .filter((feature): feature is string => Boolean(feature))
+        .join(' and ');
+    return {
+        title,
+        description: `Beaver reads new and changed files while your computer is idle. Required for ${features}.`,
+    };
 }
 
 /** True while the local metadata search index has something to fix. */
@@ -264,7 +299,6 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
     };
 
     const [actionError, setActionError] = useState<string | null>(null);
-    const canRestoreCache = enabled && status.documentCache?.can_prepare_uncached_files === true;
 
     /** Start pending work or explicitly rebuild cached text, according to the clicked action. */
     const [processing, setProcessing] = useState(false);
@@ -314,7 +348,21 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
     };
 
     const issueCount = status.issues.reduce((sum, group) => sum + group.count, 0);
+    const indexIssueCount = status.issues.find((group) => group.reason === 'index_failed')?.count ?? 0;
+    // The status poll keeps the last successful check when a later one fails,
+    // so a failed check is reported rather than hidden behind the stale result.
+    const searchIndexUnavailable = hasSearchAccess && status.coverageError !== null;
+    const searchIndexUpToDate = hasSearchAccess
+        && !searchIndexUnavailable
+        && status.coverage?.namespace_exists === true
+        && indexIssueCount === 0;
     const metadataProblem = hasMetadataIndexProblem(indexState);
+    const setting = describeSetting(hasSearchAccess, hasOcrAccess, locked);
+    const sentence = describeStatus(status, { searchIndexUpToDate });
+    const showStatus = enabled || (status.worker?.inFlight ?? 0) > 0;
+    const canRestoreCache = enabled
+        && sentence.tone === 'idle'
+        && status.documentCache?.can_prepare_uncached_files === true;
     const problemsSummary: React.ReactNode = status.error
         ? 'Could not update the list of problems. Previously reported problems are shown below.'
         : status.updatedAt === null
@@ -334,13 +382,8 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
             <SectionLabel>Background Processing</SectionLabel>
             <SettingsGroup>
                 <SettingsRow
-                    title={hasSearchAccess ? 'Keep Full-Text Search Up to Date' : 'Process Files in the Background'}
-                    announceDescription={hasSearchAccess}
-                    description={<>{locked
-                        ? 'Background processing is required for full-text search and OCR. Files process after 30 seconds without keyboard or mouse activity on your computer. Use Start now to process immediately, or Stop to return to idle processing.'
-                        : 'Process files ahead of time while your computer is idle for faster responses.'}
-                        {hasSearchAccess && <span className="display-flex mt-1">{searchIndexStatusLine(status)}</span>}
-                    </>}
+                    title={setting.title}
+                    description={setting.description}
                     onClick={() => updateEnabled(!enabled)}
                     control={<input
                         type="checkbox"
@@ -351,15 +394,19 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                         onClick={(event) => event.stopPropagation()}
                     />}
                 />
-                {(enabled || (status.worker?.inFlight ?? 0) > 0) && (
+                {showStatus && (
                     <ProcessingStatusRow
                         status={status}
-                        canRestoreCache={canRestoreCache}
+                        sentence={sentence}
                         processing={processing}
-                        onProcessNow={processNow}
+                        onProcessNow={() => processNow('start')}
                         onStopDrain={stopDrain}
                         onShowProblems={showProblems}
+                        searchIndexUnavailable={searchIndexUnavailable}
                     />
+                )}
+                {canRestoreCache && (
+                    <CachedTextRow processing={processing} onRebuild={() => processNow('rebuild')} />
                 )}
                 {actionError && <div role="alert" className="font-color-red text-base border-top-quinary" style={{ padding: '8px 12px' }}>{actionError}</div>}
             </SettingsGroup>
