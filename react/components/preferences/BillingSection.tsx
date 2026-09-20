@@ -8,7 +8,7 @@ import { creditBreakdownAtom, creditPlanAtom, hasCreditPlanAtom, isCreditPlanPas
 import { useAtomValue, useSetAtom } from "jotai";
 import { useBilling } from "../../hooks/useBilling";
 import { PlanInfo } from "@beaver/agent-core/transport/clients/accountService";
-import { CreditBreakdown, ProfileBalance, CreditPlan } from "@beaver/agent-core/types/profile";
+import { CreditBreakdown, ProfileBalance } from "@beaver/agent-core/types/profile";
 import { getPref, setPref } from "../../../src/utils/prefs";
 import {
     parseCreditLimitEntry,
@@ -55,9 +55,12 @@ const CreditPackCard: React.FC<{
     );
 };
 
-const ProgressBar: React.FC<{ creditPlan: CreditPlan, creditBreakdown: CreditBreakdown, profileBalance: ProfileBalance }> = (props) => {
-    const { creditPlan, creditBreakdown, profileBalance } = props;
-    const pool = (creditPlan.monthlyCredits || 0) + (creditBreakdown.rolledOverCredits || 0);
+const ProgressBar: React.FC<{ creditBreakdown: CreditBreakdown, profileBalance: ProfileBalance }> = (props) => {
+    const { creditBreakdown, profileBalance } = props;
+    // The limit already accounts for billing status, so a plan whose credits are
+    // not currently usable reports zero here rather than a pool that cannot be
+    // spent. The caller hides the bar in that case.
+    const pool = profileBalance.subscriptionCreditLimit;
     const used = Math.min(profileBalance.monthlyCreditsUsed, pool);
     const total = pool || 1;
     const remaining = total - used;
@@ -355,8 +358,13 @@ const BillingSection: React.FC = () => {
                             </Button>
                         </div>
 
-                        {/* Progress bar (subscription + rollover credits) */}
-                        <ProgressBar creditPlan={creditPlan} creditBreakdown={creditBreakdown} profileBalance={profileBalance} />
+                        {/* Progress bar (subscription + rollover credits). Hidden when
+                            the plan's credits are not currently usable — an unpaid or
+                            lapsed subscription has nothing to meter, and the payment
+                            banner above already explains why. */}
+                        {profileBalance.subscriptionCreditLimit > 0 && (
+                            <ProgressBar creditBreakdown={creditBreakdown} profileBalance={profileBalance} />
+                        )}
 
                     </div>
                 )}

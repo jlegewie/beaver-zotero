@@ -265,12 +265,14 @@ export const planFeaturesAtom = atom<PlanFeatures>((get) => {
     } as PlanFeatures;
 });
 
+// Spendable credits, not the raw pool. The backend zeroes the subscription side
+// for billing states that grant no access (unpaid, paused, incomplete, past_due
+// past its paid-through date) and the purchased side once the pool has expired,
+// which the raw allowance/rollover/used fields cannot express on their own.
 export const remainingBeaverCreditsAtom = atom<number>((get) => {
     const profile = get(profileWithPlanAtom);
     if (!profile) return 0;
-    const subscriptionRemaining = Math.max(0, (profile.credit_plan_monthly_credits || 0) + (profile.rolled_over_credits || 0) - (profile.chat_credits_used || 0));
-    const purchasedRemaining = profile.purchased_chat_credits || 0;
-    return subscriptionRemaining + purchasedRemaining;
+    return (profile.available_subscription_credits ?? 0) + (profile.available_purchased_credits ?? 0);
 });
 
 export const profileBalanceAtom = atom<ProfileBalance>((get) => {
@@ -279,12 +281,12 @@ export const profileBalanceAtom = atom<ProfileBalance>((get) => {
     // Page balance
     const pagesRemaining = profile ? profile.standard_page_balance + profile.purchased_standard_page_balance : 0;
 
-    // Chat credits remaining (new formula with rolled-over credits)
-    const monthlyCredits = profile?.credit_plan_monthly_credits || 0;
-    const rolledOverCredits = profile?.rolled_over_credits || 0;
-    const monthlyCreditsUsed = profile?.chat_credits_used || 0;
-    const subscriptionChatCreditsRemaining = Math.max(0, monthlyCredits + rolledOverCredits - monthlyCreditsUsed);
-    const purchasedChatCreditsRemaining = profile?.purchased_chat_credits || 0;
+    // Spendable credits come from the backend (see remainingBeaverCreditsAtom).
+    // monthlyCredits / rolledOverCredits / monthlyCreditsUsed stay raw: they
+    // describe the plan and the current period rather than what can be spent,
+    // and callers pair them with subscriptionCreditLimit to render usage.
+    const subscriptionChatCreditsRemaining = profile?.available_subscription_credits ?? 0;
+    const purchasedChatCreditsRemaining = profile?.available_purchased_credits ?? 0;
     const chatCreditsRemaining = subscriptionChatCreditsRemaining + purchasedChatCreditsRemaining;
 
     return {
@@ -292,9 +294,10 @@ export const profileBalanceAtom = atom<ProfileBalance>((get) => {
         subscriptionChatCreditsRemaining,
         purchasedChatCreditsRemaining,
         chatCreditsRemaining,
-        rolledOverCredits,
-        monthlyCredits,
-        monthlyCreditsUsed,
+        subscriptionCreditLimit: profile?.subscription_credit_limit ?? 0,
+        rolledOverCredits: profile?.rolled_over_credits || 0,
+        monthlyCredits: profile?.credit_plan_monthly_credits || 0,
+        monthlyCreditsUsed: profile?.chat_credits_used || 0,
     };
 });
 
@@ -316,8 +319,8 @@ export const creditPlanAtom = atom<CreditPlan>((get) => {
 export const creditBreakdownAtom = atom<CreditBreakdown>((get) => {
     const profile = get(profileWithPlanAtom);
     if (!profile) return { subscriptionRemaining: 0, rolledOverCredits: 0, purchasedCredits: 0, purchasedExpiresAt: null as string | null, total: 0 };
-    const subscriptionRemaining = Math.max(0, (profile.credit_plan_monthly_credits || 0) + (profile.rolled_over_credits || 0) - (profile.chat_credits_used || 0));
-    const purchasedCredits = profile.purchased_chat_credits || 0;
+    const subscriptionRemaining = profile.available_subscription_credits ?? 0;
+    const purchasedCredits = profile.available_purchased_credits ?? 0;
     return {
         subscriptionRemaining,
         rolledOverCredits: profile.rolled_over_credits || 0,
