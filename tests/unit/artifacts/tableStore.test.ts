@@ -1632,3 +1632,314 @@ it('keeps repair pending across repeated failures, preserves newer content, and 
     expect((await openTable(ref)).recovered).not.toContainEqual({ kind: 'bookkeeping_pending' });
     expect(await readFile(htmlPath, 'utf8')).toBe(latest);
 });
+
+describe('group tables through the provider and file store', () => {
+    const groupLibraryID = 7;
+    const groupID = 6073928;
+    const groupRef = { libraryID: groupLibraryID, key: KEY };
+    const remoteKey = `g${groupID}-${KEY}`;
+    let library: {
+        libraryID: number;
+        libraryType: string;
+        editable: boolean;
+        filesEditable: boolean;
+    };
+    let temporaryDirectories: string[];
+    const request = (op: string, fields: Record<string, unknown> = {}) =>
+        handleArtifactRequest({
+            event: 'artifact_request',
+            request_id: `group-${op}`,
+            op,
+            key: remoteKey,
+            ...fields,
+        });
+    const create = () =>
+        request('create', {
+            key: undefined,
+            kind: 'table',
+            library_ref: `g${groupID}`,
+            title: 'Group table',
+            spec: demoSpec(),
+            operation_id: 'group-create',
+            meta: { actor: 'user' },
+        });
+
+    beforeEach(() => {
+        temporaryDirectories = [];
+        library = {
+            libraryID: groupLibraryID,
+            libraryType: 'group',
+            editable: true,
+            filesEditable: true,
+        };
+        item.libraryID = groupLibraryID;
+        vi.mocked(Zotero.Libraries.get).mockImplementation(
+            (id: number) =>
+                (id === groupLibraryID
+                    ? library
+                    : id === 1
+                      ? { libraryID: 1, libraryType: 'user', editable: true }
+                      : false) as any,
+        );
+        (Zotero as any).Groups = {
+            getLibraryIDFromGroupID: (id: number) => (id === groupID ? groupLibraryID : false),
+            getGroupIDFromLibraryID: (id: number) => (id === groupLibraryID ? groupID : false),
+        };
+        vi.mocked(Zotero.Items.getByLibraryAndKey).mockImplementation((id, key) =>
+            id === groupLibraryID && key === KEY ? item : false,
+        );
+        let imported = false;
+        (Zotero as any).DB = {
+            queryAsync: vi.fn(async (_sql: string, params: unknown[], options: any) => {
+                if (imported && params[0] === groupLibraryID)
+                    options.onRow({ getResultByIndex: () => item.id });
+            }),
+        };
+        (Zotero as any).ItemFields = { getID: () => 13 };
+        (Zotero.Items as any).getAsync = vi.fn(async () => item);
+        (Zotero.Attachments as any).createTemporaryStorageDirectory = vi.fn(async () => {
+            const path = await mkdtemp(join(tmpdir(), 'beaver-group-import-'));
+            temporaryDirectories.push(path);
+            return { path };
+        });
+        (Zotero.Attachments as any).createURLAttachmentFromTemporaryStorageDirectory = vi.fn(
+            async (options) => {
+                expect(options.libraryID).toBe(groupLibraryID);
+                expect(options.contentType).toBe('text/html');
+                expect(options).not.toHaveProperty('parentItemID');
+                await writeFile(
+                    htmlPath,
+                    await readFile(join(options.directory, options.filename), 'utf8'),
+                );
+                item.getField = (field: string) => (field === 'url' ? options.url : options.title);
+                imported = true;
+                return item;
+            },
+        );
+    });
+    afterEach(async () => {
+        for (const path of temporaryDirectories) {
+            expect(existsSync(path)).toBe(false);
+            await rm(path, { recursive: true, force: true });
+        }
+    });
+
+    it('creates in the requested group, seeds history, queues upload and replays without another import', async () => {
+        const created = await create();
+        expect(created).toMatchObject({
+            ok: true,
+            saved: true,
+            version: 1,
+            zotero_item: {
+                library_id: groupLibraryID,
+                library_ref: `g${groupID}`,
+                zotero_key: KEY,
+            },
+        });
+        expect(created.spec?.key).toBe(KEY);
+        expect((await readHistory()).tip).toBe(1);
+        expect(item.attachmentSyncState).toBe(0);
+        expect(Zotero.FullText.queueItem).toHaveBeenCalledWith(item);
+        expect(Zotero.Attachments.importFromSnapshotContent).not.toHaveBeenCalled();
+        const replay = await create();
+        expect(replay).toMatchObject({ ok: true, replayed: true, operation: created.operation });
+        expect(
+            Zotero.Attachments.createURLAttachmentFromTemporaryStorageDirectory,
+        ).toHaveBeenCalledTimes(1);
+        expect(await request('list', { key: undefined, keys: [remoteKey] })).toMatchObject({
+            ok: true,
+            items: [{ key: remoteKey, unavailable: false, title: 'Group table' }],
+        });
+    });
+
+    it('files into a collection in the selected group and rejects cross-library collections', async () => {
+        (Zotero as any).Collections = { get: vi.fn(() => ({ libraryID: groupLibraryID })) };
+        await createTable({ libraryID: groupLibraryID, collectionID: 12, spec: demoSpec() });
+        expect(
+            Zotero.Attachments.createURLAttachmentFromTemporaryStorageDirectory,
+        ).toHaveBeenCalledWith(
+            expect.objectContaining({ libraryID: groupLibraryID, collections: [12] }),
+        );
+        (Zotero.Collections.get as any).mockReturnValue({ libraryID: 1 });
+        await expect(
+            createTable({ libraryID: groupLibraryID, collectionID: 12, spec: demoSpec() }),
+        ).rejects.toMatchObject({ code: 'invalid_target' });
+        expect(
+            Zotero.Attachments.createURLAttachmentFromTemporaryStorageDirectory,
+        ).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['editable', 'filesEditable'] as const)(
+        'refuses creation and mutation without %s but preserves reads',
+        async (permission) => {
+            library[permission] = false;
+            const before = await readFile(htmlPath, 'utf8');
+            expect(await create()).toMatchObject({ ok: false, error_code: 'no_writable_library' });
+            expect(await request('read')).toMatchObject({ ok: true });
+            expect(
+                await request('revert', { to_version: 1, meta: { actor: 'user' } }),
+            ).toMatchObject({ ok: false, error_code: 'invalid_target' });
+            expect(await request('delete')).toMatchObject({
+                ok: false,
+                error_code: 'invalid_target',
+            });
+            expect(await readFile(htmlPath, 'utf8')).toBe(before);
+            expect(Zotero.Attachments.createTemporaryStorageDirectory).not.toHaveBeenCalled();
+        },
+    );
+
+    it.each(['permission', 'exclusion'])(
+        'rechecks %s after staging the snapshot before importing',
+        async (change) => {
+            const write = IOUtils.writeUTF8;
+            (IOUtils as any).writeUTF8 = async (path: string, html: string) => {
+                const result = await write(path, html);
+                if (change === 'permission') library.filesEditable = false;
+                else checkLibraryExcluded.mockReturnValue({ message: 'Excluded' });
+                return result;
+            };
+            expect(await create()).toMatchObject({
+                ok: false,
+                error_code: change === 'permission' ? 'no_writable_library' : 'library_excluded',
+            });
+            expect(
+                Zotero.Attachments.createURLAttachmentFromTemporaryStorageDirectory,
+            ).not.toHaveBeenCalled();
+        },
+    );
+
+    it('rechecks source exclusions after staging and before import', async () => {
+        const write = IOUtils.writeUTF8;
+        (IOUtils as any).writeUTF8 = async (path: string, html: string) => {
+            const result = await write(path, html);
+            checkLibraryExcluded.mockImplementation((id) =>
+                id === 1 ? { message: 'Excluded source' } : null,
+            );
+            return result;
+        };
+        const spec = demoSpec();
+        spec.rows[0].ref = { kind: 'item', library_id: 1, zotero_key: 'SOURCEAB' };
+        spec.rows[0].cells = {};
+        const result = await request('create', {
+            key: undefined,
+            kind: 'table',
+            library_ref: `g${groupID}`,
+            title: 'Group sources',
+            spec,
+            operation_id: 'group-source',
+            meta: { actor: 'user' },
+        });
+        expect(result).toMatchObject({ ok: false, error_code: 'library_excluded' });
+        expect(
+            Zotero.Attachments.createURLAttachmentFromTemporaryStorageDirectory,
+        ).not.toHaveBeenCalled();
+    });
+
+    it('does not complete or duplicate an import when file permission is revoked before stamping', async () => {
+        const write = IOUtils.writeUTF8;
+        (IOUtils as any).writeUTF8 = async (path: string, html: string) => {
+            const result = await write(path, html);
+            if (path.endsWith('.beaver-tmp')) library.filesEditable = false;
+            return result;
+        };
+        expect(await create()).toMatchObject({ ok: false, error_code: 'operation_pending' });
+        library.filesEditable = true;
+        expect(await create()).toMatchObject({ ok: false, error_code: 'operation_pending' });
+        expect(
+            Zotero.Attachments.createURLAttachmentFromTemporaryStorageDirectory,
+        ).toHaveBeenCalledTimes(1);
+    });
+
+    it('preserves an ambiguous imported document and refuses duplicate creation after a late import error', async () => {
+        const importer = vi.mocked(
+            Zotero.Attachments.createURLAttachmentFromTemporaryStorageDirectory,
+        );
+        const original = importer.getMockImplementation()!;
+        importer.mockImplementationOnce(async (options) => {
+            await original(options);
+            throw new Error('indexing failed after import');
+        });
+        expect(await create()).toMatchObject({ ok: false, error_code: 'operation_pending' });
+        expect(existsSync(htmlPath)).toBe(true);
+        expect(await create()).toMatchObject({ ok: false, error_code: 'operation_pending' });
+        expect(importer).toHaveBeenCalledTimes(1);
+    });
+
+    it('withholds excluded group metadata before lookup and keeps the local document readable', async () => {
+        checkLibraryExcluded.mockImplementation((id) =>
+            id === groupLibraryID ? { message: 'Private group' } : null,
+        );
+        expect(await create()).toMatchObject({ ok: false, error_code: 'library_excluded' });
+        expect(await request('read')).toMatchObject({ ok: false, error_code: 'library_excluded' });
+        const listed = await request('list', { key: undefined, keys: [remoteKey] });
+        expect(listed.items).toEqual([
+            {
+                key: remoteKey,
+                kind: 'table',
+                unavailable: true,
+                error_code: 'library_excluded',
+                unseen: [],
+            },
+        ]);
+        expect(Zotero.Items.getByLibraryAndKey).not.toHaveBeenCalled();
+        expect(await readTable(groupRef)).toMatchObject({ spec: { title: 'Demo table' } });
+    });
+
+    it('withholds the whole group table when a source library is excluded, including conflict payloads', async () => {
+        const sourced = demoSpec();
+        sourced.rows[0].ref = { kind: 'item', library_id: 1, zotero_key: 'SOURCEAB' };
+        await writeTable(groupRef, sourced, { actor: 'user' });
+        checkLibraryExcluded.mockImplementation((id) =>
+            id === 1 ? { message: 'Excluded source' } : null,
+        );
+        for (const op of ['read', 'write']) {
+            const result = await request(
+                op,
+                op === 'write'
+                    ? {
+                          spec: demoSpec('new'),
+                          expected_version: 1,
+                          expected_sha256: '0'.repeat(64),
+                          operation_id: 'excluded-write',
+                          meta: { actor: 'user' },
+                      }
+                    : {},
+            );
+            expect(result).toMatchObject({ ok: false, error_code: 'library_excluded' });
+            expect(result).not.toHaveProperty('spec');
+            expect(result).not.toHaveProperty('summary');
+        }
+    });
+
+    it('rejects a stale digest after a synced replacement and queues a fresh write for upload', async () => {
+        const base = await request('read');
+        const replaced = { ...base.spec!, title: 'Synced group revision' };
+        await writeFile(htmlPath, buildTableDocument(replaced).html);
+        const fields = {
+            spec: demoSpec('updated'),
+            expected_version: base.version,
+            expected_sha256: base.sha256,
+            operation_id: 'group-write',
+            meta: { actor: 'user' },
+        };
+        expect(await request('write', fields)).toMatchObject({
+            ok: false,
+            conflict: true,
+            spec: { title: 'Synced group revision' },
+        });
+        const fresh = await request('read');
+        item.attachmentSyncState = 1;
+        expect(
+            await request('write', {
+                ...fields,
+                expected_version: fresh.version,
+                expected_sha256: fresh.sha256,
+            }),
+        ).toMatchObject({ ok: true, saved: true });
+        expect(item.attachmentSyncState).toBe(0);
+        expect((await openTable(groupRef)).spec.rows[0].cells.note.value).toEqual({
+            kind: 'text',
+            text: 'updated',
+        });
+    });
+});

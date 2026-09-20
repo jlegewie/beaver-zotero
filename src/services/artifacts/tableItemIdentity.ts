@@ -70,7 +70,7 @@ export type TableItemErrorCode =
     | 'invalid_request'
     | 'library_excluded'
     | 'no_writable_library'
-    /** The library is writable, but the import API cannot file a table there. */
+    /** The library type cannot hold a table. */
     | 'unsupported_library'
     | 'invalid_target'
     | 'import_failed'
