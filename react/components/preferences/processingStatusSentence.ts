@@ -165,6 +165,15 @@ export function describeStatus(
             stopDrain: draining,
         };
     }
+    if (status.issues.some((issue) => issue.reason === 'index_failed' && issue.count > 0)) {
+        return {
+            tone: 'error',
+            headline: 'Indexing incomplete',
+            caption: 'Some files could not be indexed. Open Problems to retry them.',
+            processNow: false,
+            stopDrain: false,
+        };
+    }
     if (total === 0) {
         return {
             tone: 'idle',

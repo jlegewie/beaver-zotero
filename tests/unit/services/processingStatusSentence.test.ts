@@ -11,6 +11,18 @@ function status(deferred: number, total = 1): BackgroundProcessingStatus & { wor
 }
 
 describe('processing status sentence', () => {
+    it('shows settled indexing failures as incomplete, but active retries as waiting', () => {
+        const snapshot = status(0);
+        snapshot.issues = [{ reason: 'index_failed', count: 1 }];
+        expect(describeStatus(snapshot)).toMatchObject({ headline: 'Indexing incomplete', tone: 'error', processNow: false });
+        expect(describeStatus(snapshot).caption).toContain('Problems');
+        snapshot.worker.deferred = 1;
+        expect(describeStatus(snapshot).tone).toBe('waiting');
+        snapshot.worker.deferred = 0;
+        snapshot.issues = [];
+        expect(describeStatus(snapshot).headline).toBe('Up to date');
+    });
+
     it('reports remote OCR while local occupancy is zero, even with runnable work', () => {
         const snapshot = status(3);
         snapshot.worker.available = 2;
@@ -189,11 +201,6 @@ describe('processing status sentence', () => {
         });
     });
 
-    it('keeps the settled headline for readable files with unresolved index issues', () => {
-        const snapshot = status(0);
-        snapshot.issues = [{ reason: 'index_failed', count: 1 }];
-        expect(describeStatus(snapshot)).toMatchObject({ tone: 'idle', headline: 'Up to date' });
-    });
 
     it.each(['extraction', 'ocr', 'index'])('reports unfinished %s ledger work without a queued job as waiting', (stage) => {
         const snapshot = status(0);

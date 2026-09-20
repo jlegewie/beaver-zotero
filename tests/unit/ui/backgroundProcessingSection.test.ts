@@ -353,7 +353,7 @@ it('lists server indexing problems with reading problems and keeps the search st
     await withView(store, (container) => {
         expect(container.textContent).not.toContain('Full-text Search');
         expect(container.textContent).toContain('Keep Full-Text Search Up to Date');
-        expect(container.querySelector('[role="status"]')?.textContent).toBe('Up to date');
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Indexing incomplete');
         expect(container.textContent).toContain('2 files could not be read or indexed. See Problems below.');
         expect(container.textContent).toContain('Full-text search index available. Last checked');
         expect(container.textContent).not.toContain('Updates paused.');

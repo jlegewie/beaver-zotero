@@ -16,6 +16,7 @@ import type {
     BackgroundJobRecord,
     BackgroundJobType,
 } from './database';
+import { captureAccountGuard } from './accountGuard';
 import { DocumentExtractExecutor } from './backgroundQueue/documentExtractExecutor';
 import type {
     JobExecutionContext,
@@ -72,7 +73,7 @@ export interface ProcessOnceResult {
 }
 
 export type BackgroundLaneStatus = Partial<
-    Record<BackgroundJobType, { inFlight: number; capacity: number; remoteWaiting?: number }>
+    Record<BackgroundJobType, { inFlight: number; capacity: number; remoteWaiting?: number; pauseUntil?: number; pauseReason?: string }>
 >;
 
 type LaneEntry = {
@@ -87,6 +88,8 @@ type ExecutorRegistration = {
     executor: JobExecutor;
     maxInFlight: number;
     survivesLibraryExclusion: boolean;
+    pauseUntil?: number;
+    pauseReason?: string;
 };
 
 export class BackgroundExtractor {
@@ -186,6 +189,8 @@ export class BackgroundExtractor {
             status[jobType] = {
                 inFlight: this.laneInFlight.get(jobType)?.size ?? 0,
                 capacity: registration.maxInFlight,
+                pauseUntil: registration.pauseUntil,
+                pauseReason: registration.pauseReason,
                 remoteWaiting: registration.executor.getRemoteWaitingCount?.() ?? 0,
             };
         }
@@ -563,6 +568,7 @@ export class BackgroundExtractor {
             for (let slot = 0; slot < freeSlots; slot += 1) {
                 if (this.stopRequested) return launched;
                 if (!isLibraryScopeKnown()) break;
+                if (this.executors.get(jobType) !== registration || this.laneCapacityFree(jobType) === 0) break;
                 const record = await options.db.claimNextBackgroundJob(
                     Date.now(),
                     VISIBILITY_TIMEOUT_MS,
@@ -577,6 +583,10 @@ export class BackgroundExtractor {
                     return launched;
                 }
 
+                if (this.executors.get(jobType) !== registration || this.laneCapacityFree(jobType) === 0) {
+                    if (!this.shouldSkipDbWrites()) await options.db.releaseBackgroundJob(record.id, Date.now());
+                    break;
+                }
                 if (!isLibraryScopeKnown()) {
                     // The scope went unknown (logout / account switch) while the
                     // claim was in flight. Release rather than retire: the row is
@@ -661,6 +671,8 @@ export class BackgroundExtractor {
         externalAbortSignal: AbortSignal,
     ): Promise<void> {
         const attemptedAt = Date.now();
+        const isIndexJob = record.jobType === 'fulltext_upsert' || record.jobType === 'fulltext_untag';
+        const accountIsCurrent = isIndexJob ? captureAccountGuard() : () => true;
         dispatchBackgroundEvent('background-job:start', { id: record.id, record });
         const db = Zotero.Beaver?.db;
         if (!db) return;
@@ -684,6 +696,11 @@ export class BackgroundExtractor {
             outcome = { kind: 'retry', error: `unexpected: ${message}` };
         }
 
+        if (isIndexJob
+            && (externalAbortSignal.aborted || !accountIsCurrent()
+                || this.executors.get(record.jobType)?.executor !== executor)) {
+            outcome = { kind: 'release', reason: 'access_changed' };
+        }
         await this.persistOutcome(record, executor, outcome, db, attemptedAt);
     }
 
@@ -771,6 +788,23 @@ export class BackgroundExtractor {
         db: QueueDB,
         attemptedAt: number,
     ): Promise<void> {
+        const registration = this.executors.get(record.jobType);
+        const now = Date.now();
+        if (outcome.laneCooldownMs && registration?.executor === executor) {
+            const pauseUntil = now + outcome.laneCooldownMs;
+            if (pauseUntil > (registration.pauseUntil ?? 0)) {
+                registration.pauseUntil = pauseUntil;
+                registration.pauseReason = outcome.reason ?? outcome.error;
+                logger(`BackgroundExtractor: lane ${record.jobType} paused until ${pauseUntil}: ${registration.pauseReason}`, 2);
+            }
+        }
+        if (outcome.countsAsAttempt === false) {
+            const availableAt = now + Math.max(1_000, outcome.retryAfterMs ?? 30_000);
+            await db.rescheduleBackgroundJob(record.id, availableAt, outcome.error);
+            logger(`BackgroundExtractor: job id=${record.id} waiting without attempt until ${availableAt}: ${outcome.error}`, 2);
+            dispatchBackgroundEvent('background-job:deferred', { id: record.id, reason: outcome.reason ?? outcome.error });
+            return;
+        }
         const result = await db.failBackgroundJob(record.id, outcome.error, {
             maxAttempts: MAX_ATTEMPTS,
             backoffMs: (attempt) => outcome.retryAfterMs ?? BACKOFF_MS(attempt),
@@ -835,6 +869,12 @@ export class BackgroundExtractor {
 
     private scheduleTick(delayMs: number): void {
         if (this.stopRequested) return;
+        const now = Date.now();
+        for (const registration of this.executors.values()) {
+            if ((registration.pauseUntil ?? 0) > now) {
+                delayMs = Math.min(delayMs, registration.pauseUntil! - now);
+            }
+        }
         if (this.currentTickId !== undefined) clearTimeout(this.currentTickId);
         const id = setTimeout(() => {
             this.currentTickId = undefined;
@@ -897,6 +937,12 @@ export class BackgroundExtractor {
     private laneCapacityFree(jobType: BackgroundJobType): number {
         const registration = this.executors.get(jobType);
         if (!registration) return 0;
+        if (registration.pauseUntil) {
+            if (registration.pauseUntil > Date.now()) return 0;
+            logger(`BackgroundExtractor: lane ${jobType} cooldown ended`, 3);
+            registration.pauseUntil = undefined;
+            registration.pauseReason = undefined;
+        }
         const inFlight = this.laneInFlight.get(jobType)?.size ?? 0;
         return Math.max(0, registration.maxInFlight - inFlight);
     }

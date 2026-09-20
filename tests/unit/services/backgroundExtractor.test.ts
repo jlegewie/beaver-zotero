@@ -171,6 +171,104 @@ describe('BackgroundExtractor', () => {
         await conn.closeDatabase();
     });
 
+    it('gates promoted index jobs while extraction, OCR and cleanup continue', async () => {
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        const execute = vi.fn(async (): Promise<JobOutcome> => ({ kind: 'retry', error: 'busy',
+            countsAsAttempt: false, retryAfterMs: 30_000, laneCooldownMs: 30_000 }));
+        proc.registerExecutor({ jobType: 'fulltext_upsert', execute }, { maxInFlight: 2 });
+        const first = await db.enqueueBackgroundJob({ jobType: 'fulltext_upsert', libraryId: 1,
+            zoteroKey: 'AAAAAAAA', contentKind: 'pdf', payloadKind: 'structured', now: Date.now() });
+        await proc.processOnce({ awaitLaunchedJobs: true });
+        await db.enqueueBackgroundJob({ jobType: 'fulltext_upsert', libraryId: 1,
+            zoteroKey: 'AAAAAAAA', contentKind: 'pdf', payloadKind: 'structured', now: Date.now(), priority: 1 });
+        const queued = (await db.peekBackgroundJobs()).find((job) => job.id === first.id)!;
+        expect(queued.availableAt).toBeLessThanOrEqual(Date.now());
+        const other = vi.fn(async (): Promise<JobOutcome> => ({ kind: 'complete', reason: 'done' }));
+        for (const jobType of ['document_extract', 'document_ocr', 'fulltext_untag'] as const) {
+            proc.registerExecutor({ jobType, execute: other }, { maxInFlight: 1 });
+            await db.enqueueBackgroundJob({ jobType, libraryId: 1, zoteroKey: 'BBBBBBBB',
+                contentKind: 'pdf', payloadKind: 'structured', now: Date.now() });
+        }
+        proc.requestImmediateDrain();
+        proc.notify();
+        await proc.processOnce({ awaitLaunchedJobs: true });
+        expect(other).toHaveBeenCalledTimes(3);
+        expect(execute).toHaveBeenCalledOnce();
+        expect(await db.peekBackgroundJobs()).toHaveLength(1);
+        expect(proc.getLaneStatus().fulltext_upsert?.pauseReason).toBe('busy');
+    });
+
+    it('never shortens a cooldown when a concurrent shorter failure arrives later', async () => {
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        let settleShort!: (value: JobOutcome) => void;
+        const short = new Promise<JobOutcome>((resolve) => { settleShort = resolve; });
+        const execute = vi.fn().mockResolvedValueOnce({ kind: 'retry', error: 'long', countsAsAttempt: false,
+            retryAfterMs: 60_000, laneCooldownMs: 60_000 }).mockReturnValueOnce(short);
+        proc.registerExecutor({ jobType: 'fulltext_upsert', execute }, { maxInFlight: 2 });
+        for (const zoteroKey of ['AAAAAAAA', 'BBBBBBBB']) await db.enqueueBackgroundJob({
+            jobType: 'fulltext_upsert', libraryId: 1, zoteroKey, contentKind: 'pdf', payloadKind: 'structured', now: 0 });
+        // Hold both responses until both requests have started.
+        let settleLong!: (value: JobOutcome) => void;
+        execute.mockReset().mockImplementationOnce(() => new Promise((resolve) => { settleLong = resolve; }))
+            .mockReturnValueOnce(short);
+        await proc.processOnce();
+        settleLong({ kind: 'retry', error: 'long', countsAsAttempt: false, retryAfterMs: 60_000, laneCooldownMs: 60_000 });
+        await vi.waitFor(() => expect(proc.getLaneStatus().fulltext_upsert?.pauseUntil).toBeGreaterThan(Date.now()));
+        const deadline = proc.getLaneStatus().fulltext_upsert!.pauseUntil;
+        settleShort({ kind: 'retry', error: 'short', countsAsAttempt: false, retryAfterMs: 1_000, laneCooldownMs: 1_000 });
+        await vi.waitFor(() => expect(proc.getLaneStatus().fulltext_upsert?.inFlight).toBe(0));
+        expect(proc.getLaneStatus().fulltext_upsert?.pauseUntil).toBe(deadline);
+    });
+
+    it('releases a replaced executor’s late retry without pausing its replacement', async () => {
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        let settle!: (value: JobOutcome) => void;
+        const execute = vi.fn(() => new Promise<JobOutcome>((resolve) => { settle = resolve; }));
+        proc.registerExecutor({ jobType: 'fulltext_upsert', execute }, { maxInFlight: 2 });
+        await db.enqueueBackgroundJob({ jobType: 'fulltext_upsert', libraryId: 1, zoteroKey: 'AAAAAAAA',
+            contentKind: 'pdf', payloadKind: 'structured', now: 0 });
+        await proc.processOnce();
+        const replacement = vi.fn(async (): Promise<JobOutcome> => ({ kind: 'complete', reason: 'done' }));
+        proc.registerExecutor({ jobType: 'fulltext_upsert', execute: replacement }, { maxInFlight: 2 });
+        settle({ kind: 'retry', error: 'old account busy', countsAsAttempt: false, retryAfterMs: 60_000, laneCooldownMs: 60_000 });
+        await vi.waitFor(() => expect(proc.getLaneStatus().fulltext_upsert?.inFlight).toBe(0));
+        expect(proc.getLaneStatus().fulltext_upsert?.pauseUntil).toBeUndefined();
+        expect((await db.peekBackgroundJobs())[0].attemptCount).toBe(0);
+        await proc.processOnce({ awaitLaunchedJobs: true });
+        expect(replacement).toHaveBeenCalledOnce();
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+    });
+
+    it('wakes automatically at the cooldown deadline using the dispatcher timer', async () => {
+        vi.useFakeTimers();
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        try {
+            const execute = vi.fn().mockResolvedValueOnce({ kind: 'retry', error: 'busy',
+                countsAsAttempt: false, retryAfterMs: 5_000, laneCooldownMs: 5_000 })
+                .mockResolvedValue({ kind: 'complete', reason: 'recovered' });
+            proc.registerExecutor({ jobType: 'fulltext_upsert', execute }, { maxInFlight: 2 });
+            await db.enqueueBackgroundJob({ jobType: 'fulltext_upsert', libraryId: 1, zoteroKey: 'AAAAAAAA',
+                contentKind: 'pdf', payloadKind: 'structured', now: Date.now() });
+            proc.start();
+            await vi.advanceTimersByTimeAsync(30_000);
+            expect(execute).toHaveBeenCalledOnce();
+            proc.notify();
+            proc.requestImmediateDrain();
+            await vi.advanceTimersByTimeAsync(4_999);
+            expect(execute).toHaveBeenCalledOnce();
+            await vi.advanceTimersByTimeAsync(1);
+            expect(execute).toHaveBeenCalledTimes(2);
+            expect(await db.peekBackgroundJobs()).toEqual([]);
+        } finally {
+            await proc.stop();
+            vi.useRealTimers();
+        }
+    });
+
     it.each(['drain', 'idle'].flatMap((mode) =>
         ['startup_delay', 'sync_in_progress', 'hot_busy', 'library_scope_unknown', 'disabled']
             .map((blocker) => [mode, blocker]),
@@ -310,7 +408,7 @@ describe('BackgroundExtractor', () => {
         });
 
         it('runs authenticated cleanup for an excluded library once scope is known', async () => {
-            Zotero.Beaver.account = { getSnapshot: () => ({ session: { user: { id: 'owner' } } }) };
+            Zotero.Beaver.account = { getGeneration: () => 1, getSnapshot: () => ({ session: { user: { id: 'owner' } } }) };
             Zotero.Beaver.libraryScopeInitialized = true;
             Zotero.Beaver.searchableLibraryIds = [];
             await db.enqueueBackgroundJob({ jobType: 'fulltext_untag', libraryId: 1, zoteroKey: 'BBBBBBBB',
