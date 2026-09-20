@@ -394,11 +394,6 @@ const BillingSection: React.FC = () => {
                                         {' '}({formatTimeRemaining(creditPlan.periodEnd, creditPlan.plan?.includes('annual') ?? false)} remaining)
                                     </span>
                                 )}
-                                {creditPlan.plan?.includes('annual') && creditPlan.monthlyResetAt && (
-                                    <div className="text-base font-color-secondary">
-                                        Next monthly credit reset: {new Date(creditPlan.monthlyResetAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                                    </div>
-                                )}
                             </div>
                             <div className="flex-1" />
                             {upgradePlan && (
@@ -427,6 +422,11 @@ const BillingSection: React.FC = () => {
                             banner above already explains why. */}
                         {profileBalance.subscriptionCreditLimit > 0 && (
                             <ProgressBar creditBreakdown={creditBreakdown} profileBalance={profileBalance} />
+                        )}
+                        {creditPlan.plan?.includes('annual') && creditPlan.monthlyResetAt && (
+                            <div className="text-base font-color-secondary">
+                                Credits reset every month. Next reset is on {new Date(creditPlan.monthlyResetAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                            </div>
                         )}
 
                     </div>
