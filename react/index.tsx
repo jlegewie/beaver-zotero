@@ -34,7 +34,10 @@ import { closeWSConnectionForShutdownAtom } from './atoms/agentRunAtoms';
 import { buildZoteroApplicationState } from './atoms/applicationState';
 import { sessionAtom } from './atoms/auth';
 import { isBackgroundWorkerRunningAtom } from './atoms/backgroundExtraction';
-import { currentMessageContentAtom, currentReaderAttachmentAtom } from './atoms/messageComposition';
+import { currentMessageContentAtom, currentReaderAttachmentAtom, currentMessageItemsAtom, addItemToCurrentMessageItemsAtom, removeItemFromMessageAtom } from './atoms/messageComposition';
+import { allRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import { isTableToolName } from '@beaver/agent-core/run-state/tableResults';
+import { selectedModelAtom } from './atoms/models';
 import { preferencesRevisionAtom } from './atoms/preferences';
 import { accountGenerationAtom, accountRevisionAtom, isProfileLoadedAtom, profileWithPlanAtom, searchableLibraryIdsAtom } from './atoms/profile';
 import { runStatusPopupEnabledAtom } from './atoms/runStatusPopup';
@@ -384,6 +387,28 @@ export function inspectRuntime(request?: { runId?: string; command?: string; thr
     if (process.env.NODE_ENV !== 'development') return undefined;
     const runtime = getWindowRuntime();
     switch (request?.command) {
+        case 'table-conversation': {
+            const model = store.get(selectedModelAtom);
+            return {
+                selectedItems: store.get(currentMessageItemsAtom).map(item => ({ libraryID: item.libraryID, key: item.key })),
+                model: model ? { id: model.id, name: model.name, isCustom: model.is_custom, allowByok: model.allow_byok } : null,
+                runs: store.get(allRunsAtom).slice(-10).map(run => ({
+                    id: run.id, status: run.status, attachments: run.user_prompt.attachments,
+                    tables: run.model_messages.flatMap(message => message.kind === 'request'
+                        ? message.parts.filter(part => part.part_kind === 'tool-return' && isTableToolName(part.tool_name)) : []),
+                })),
+            };
+        }
+        case 'table-attach':
+        case 'table-remove': {
+            if (request.itemId === undefined) return { error: 'item_required' };
+            return Zotero.Items.getAsync(request.itemId).then(async item => {
+                if (!item) return { error: 'item_not_found' };
+                if (request.command === 'table-attach') await store.set(addItemToCurrentMessageItemsAtom, item);
+                else store.set(removeItemFromMessageAtom, item);
+                return { ok: true };
+            });
+        }
         case 'admission': return { snapshot: store.get(threadAdmissionAtom), conflict: store.get(threadConflictAtom) };
         case 'surface': return { surface: store.get(windowSurfaceAtom), contextId: runtime.contextWindow?.__beaverRuntime?.id ?? null };
         case 'open-preferences': openPreferencesWindow(); return { ok: true };

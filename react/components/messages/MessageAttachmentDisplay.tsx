@@ -9,6 +9,8 @@ import { LibraryButton } from '../library/LibraryButton';
 import { CollectionButton } from '../library/CollectionButton';
 import { TagButton } from '../library/TagButton';
 import { MessageItemButton } from '../input/MessageItemButton';
+import { TableMessageItemButton } from '../input/TableMessageItemButton';
+import { isTableAttachment } from '../../../src/services/artifacts/tableItemIdentity';
 import { MessageCollectionButton } from '../input/MessageCollectionButton';
 import { ExternalFileButton } from '../input/ExternalFileButton';
 import { collectionReferenceKey } from '@beaver/agent-core/types/zotero';
@@ -130,7 +132,9 @@ const MessageAttachmentDisplay = () => {
 
             {/* Current reader attachment */}
             {currentReaderAttachment && (
-                <MessageItemButton item={currentReaderAttachment} canEdit={false} tabContextType="reader" />
+                isTableAttachment(currentReaderAttachment)
+                    ? <TableMessageItemButton item={currentReaderAttachment} />
+                    : <MessageItemButton item={currentReaderAttachment} canEdit={false} tabContextType="reader" />
             )}
 
             {/* Current note tab item */}
@@ -140,7 +144,8 @@ const MessageAttachmentDisplay = () => {
 
             {/* Current message items */}
             {displayedMessageItems.map((item) => (
-                <MessageItemButton
+                isTableAttachment(item) ? <TableMessageItemButton key={`${item.libraryID}-${item.key}`} item={item}
+                    onRemove={() => removeItemFromMessage(item)} onRemoveAll={handleRemoveAll} /> : <MessageItemButton
                     key={item.key}
                     item={item}
                     onRemove={(item) => {

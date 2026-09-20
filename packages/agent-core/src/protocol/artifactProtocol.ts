@@ -1,6 +1,39 @@
 import type { TableSpec } from "../layouts/table";
 import type { TableSummary } from "../layouts/tableMutations";
 
+/** Historical identity observed in a message or tool result. */
+export interface TableReference {
+    kind: "table";
+    key: string;
+    title: string;
+}
+
+export interface TableRecord {
+    reference: TableReference;
+    change: string;
+    summary: Partial<TableSummary>;
+    changes?: Record<string, number>;
+    operation_id?: string | null;
+    version?: number | null;
+    saved?: boolean | null;
+}
+
+/** Immutable extraction plan shown for approval; identifiers are opaque to the client. */
+export interface TableBatchApproval {
+    reference: TableReference;
+    schema_id: string;
+    population_id: string;
+    population_count: number;
+    columns: Array<{ id: string; question: string }>;
+    cost_estimate: string;
+}
+
+export interface TableApprovalIdentity {
+    key: string;
+    schema_id: string;
+    population_id: string;
+}
+
 /** Portable stored-document provider envelopes. Optional nulls are wire defaults. */
 export interface ArtifactRequest {
     event: "artifact_request";

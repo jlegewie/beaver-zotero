@@ -116,6 +116,7 @@
     "./src/layouts/rowKinds.ts",
     "./src/layouts/tableMutations.ts",
     "./src/run-state/toolResultTypes.ts",
+    "./src/run-state/tableResults.ts",
     "./src/run-state/toolCallRequest.ts",
     "./src/run-state/runResumeHelpers.ts",
     "./src/run-state/loadThreadRuns.ts",

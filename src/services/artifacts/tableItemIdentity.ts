@@ -166,7 +166,8 @@ export function isTableItem(item: Zotero.Item | null | undefined): boolean {
 
 /** Candidate attachment for explicit addressing; the embedded document is checked on read. */
 export function isTableAttachment(item: Zotero.Item | null | undefined): boolean {
-    if (!item || !item.isAttachment() || !item.isTopLevelItem()) return false;
+    if (!item || !item.isAttachment() || item.attachmentContentType !== 'text/html') return false;
+    if (!item.isTopLevelItem()) return false;
     if (item.attachmentLinkMode !== Zotero.Attachments.LINK_MODE_IMPORTED_URL)
         return false;
     if (item.attachmentContentType !== 'text/html') return false;
