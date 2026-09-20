@@ -13,10 +13,11 @@ const deps = vi.hoisted(() => ({
 }));
 vi.mock("../../../src/utils/libraryIdentity", () => ({
     parseItemReference: (key: string) =>
-        key === "u-ABCDEFGH"
-            ? { library_ref: "u", zotero_key: "ABCDEFGH" }
+        ["u-ABCDEFGH", "g6073928-ABCDEFGH"].includes(key)
+            ? { library_ref: key.split("-")[0], zotero_key: "ABCDEFGH" }
             : null,
-    resolveLibraryRef: () => 1,
+    resolveLibraryRef: (ref: { library_ref: string }) =>
+        ref.library_ref === "u" ? 1 : 7,
 }));
 vi.mock("../../../src/services/artifacts/tableItemIdentity", () => ({
     readTableItemSpec: deps.read,
@@ -129,4 +130,13 @@ describe("current table display and snapshot navigation", () => {
         expect(deps.unregister).toHaveBeenCalledExactlyOnceWith("observer");
         expect(deps.removeEvent).toHaveBeenCalledTimes(1);
     });
+});
+
+it("resolves group display and Open to the same local snapshot identity", async () => {
+    expect(await resolveTableDisplay("g6073928-ABCDEFGH")).toMatchObject({
+        status: "available",
+    });
+    expect(deps.lookup).toHaveBeenCalledWith(7, "ABCDEFGH");
+    await openStoredTable("g6073928-ABCDEFGH");
+    expect(deps.open).toHaveBeenCalledWith({ libraryID: 7, key: "ABCDEFGH" });
 });

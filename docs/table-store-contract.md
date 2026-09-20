@@ -2,7 +2,32 @@
 
 The document’s embedded `TableSpec` is authoritative. `tableStore` serializes local
 edits, remote writes, reverts and trims through one lock per library/item key.
-The table feature remains disabled until its transport and consumers are implemented.
+Table chat remains development-only; group support does not change that gate.
+
+## Libraries
+
+Tables can be created in the personal library or a group library that permits both
+item and file edits. An explicit target is never silently replaced by another
+library. An unusable default preference falls back to the personal library.
+Group snapshots use Zotero's stored URL attachment importer with an explicit
+library ID; they remain top-level HTML attachments, identified remotely by
+`g<groupID>-<itemKey>` rather than a device-local library number.
+
+Read-only group documents can be read, attached and opened; creation, content
+changes, restore and trash require write permissions. Exclusions refuse provider
+access and writes, including when an identifiable source in the table belongs to
+an excluded library. Local viewing remains available.
+
+Zotero owns file sync. Group writes use the same upload state, revision/digest
+checks, operation receipts and recovery shadows as personal tables. This does
+not supply a lock across group members or devices: stale writes must be reread
+and conflicts reviewed. Missing local files are reported as unavailable.
+
+The provider and composer live suites accept `BEAVER_TEST_TABLE_LIBRARY_REF`
+(default `u`). Run them again with an editable `g<groupID>` target and an explicit
+`ZOTERO_HTTP_PORT` to exercise both library paths. They cover simulated directory
+replacement and shadow restore; actual multi-device file sync and conflict dialogs
+still require an isolated sync-enabled test setup.
 
 ## Current state and remote writes
 
@@ -189,7 +214,6 @@ The future wire adapter maps `expected_version` to `expectedVersion`, transports
 same digest/operation fields and preserves the structured trim outcomes. In addition
 to conflicts and library errors, it must explicitly map `operation_mismatch`,
 `operation_pending`, `invalid_request`, unsupported formats and corrupt versions.
-
 
 ## Provider and persistent editor
 

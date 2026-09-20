@@ -24,6 +24,7 @@ interface FakeLibrary {
     libraryID: number;
     libraryType: string;
     editable: boolean;
+    filesEditable?: boolean;
 }
 
 const USER_LIBRARY: FakeLibrary = { libraryID: 1, libraryType: 'user', editable: true };
@@ -56,13 +57,20 @@ describe('resolveTableLibrary', () => {
         });
     });
 
-    it('refuses an explicit group library instead of silently filing elsewhere', () => {
-        // Creation can only file a table in the personal library, so a caller
-        // that names a group is told so rather than handed a table in a
-        // library it did not ask for.
-        expect(resolveTableLibrary(EDITABLE_GROUP.libraryID)).toEqual({
-            error: 'unsupported_library',
-        });
+    it('uses an explicitly selected editable group without substituting the user library', () => {
+        expect(resolveTableLibrary(EDITABLE_GROUP.libraryID)).toEqual({ libraryID: 7 });
+    });
+
+    it('refuses groups that allow item edits but not file edits', () => {
+        stubLibraries([USER_LIBRARY, { ...EDITABLE_GROUP, filesEditable: false }]);
+        expect(resolveTableLibrary(7)).toEqual({ error: 'no_writable_library' });
+        getPref.mockReturnValue(7);
+        expect(resolveTableLibrary()).toEqual({ libraryID: 1 });
+    });
+
+    it('does not treat an editable non-group library as a group', () => {
+        stubLibraries([{ ...EDITABLE_GROUP, libraryType: 'feed' }]);
+        expect(resolveTableLibrary(7)).toEqual({ error: 'unsupported_library' });
     });
 
     it('refuses an explicit library the user excluded, rather than substituting another', () => {
@@ -79,14 +87,9 @@ describe('resolveTableLibrary', () => {
         expect(resolveTableLibrary(404)).toEqual({ error: 'no_writable_library' });
     });
 
-    it('falls through a group default to the user library', () => {
-        // The preference can name any library, but only the personal one can
-        // hold a table. A group there must not break table creation — there is
-        // no UI to undo it — so it is skipped like any other unusable default.
+    it('honors an editable group default', () => {
         getPref.mockReturnValue(EDITABLE_GROUP.libraryID);
-
-        expect(resolveTableLibrary()).toEqual({ libraryID: USER_LIBRARY.libraryID });
-        expect(getPref).toHaveBeenCalled();
+        expect(resolveTableLibrary()).toEqual({ libraryID: 7 });
     });
 
     it('falls back to the user library when no default is configured', () => {

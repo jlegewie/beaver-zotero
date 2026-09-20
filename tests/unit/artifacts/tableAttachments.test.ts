@@ -6,7 +6,7 @@ vi.mock("../../../src/utils/zoteroSerializers", () => ({
     serializeItemStub: () => ({}),
 }));
 vi.mock("../../../src/utils/libraryIdentity", () => ({
-    libraryRefForLibraryID: () => "u",
+    libraryRefForLibraryID: (id: number) => (id === 7 ? "g6073928" : "u"),
 }));
 import {
     toValidatedMessageAttachment,
@@ -31,6 +31,7 @@ const item = {
 beforeEach(() => {
     vi.clearAllMocks();
     itemTitle = "Validated title";
+    item.libraryID = 1;
     vi.stubGlobal("Zotero", {
         Beaver: {
             data: { env: "development" },
@@ -116,4 +117,29 @@ describe("submitted table attachments", () => {
         );
         expect(provider).not.toHaveBeenCalled();
     });
+});
+
+it("submits a group table using its portable group ID after provider validation", async () => {
+    item.libraryID = 7;
+    provider.mockResolvedValue({
+        ok: true,
+        items: [
+            {
+                key: "g6073928-ABCDEFGH",
+                kind: "table",
+                unavailable: false,
+                title: "Group table",
+            },
+        ],
+    });
+    expect(await toValidatedMessageAttachment(item as any)).toMatchObject({
+        type: "table",
+        reference: { kind: "table", key: "g6073928-ABCDEFGH" },
+    });
+    expect(provider).toHaveBeenCalledWith("artifact_request", [
+        expect.objectContaining({
+            op: "list",
+            keys: ["g6073928-ABCDEFGH"],
+        }),
+    ]);
 });
