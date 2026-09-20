@@ -1,3 +1,4 @@
+import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useCallback, useEffect, useState } from "react";
 import Button from "@beaver/agent-ui/primitives/Button";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink} from "./components/SettingsElements";
@@ -7,7 +8,7 @@ import { userAtom } from "../../atoms/auth";
 import { creditBreakdownAtom, creditPlanAtom, hasCreditPlanAtom, isCreditPlanPastDueAtom, profileBalanceAtom } from "../../atoms/profile";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useBilling } from "../../hooks/useBilling";
-import { PlanInfo } from "@beaver/agent-core/transport/clients/accountService";
+import { accountService, ScheduledChange, PlanInfo } from "@beaver/agent-core/transport/clients/accountService";
 import { CreditBreakdown, ProfileBalance } from "@beaver/agent-core/types/profile";
 import { getPref, setPref } from "../../../src/utils/prefs";
 import {
@@ -156,7 +157,7 @@ const PlanCards: React.FC<{ plans: PlanInfo[], subscribe: (sku: string) => Promi
 
             <div className="display-flex flex-row justify-end -mt-1 ml-1">
                 <div className="font-color-tertiary text-sm">
-                    Unused credits roll over for 1 month
+                    Carry over up to one monthly allowance
                 </div>
             </div>
 
@@ -187,6 +188,58 @@ const formatTimeRemaining = (periodEnd: string, isAnnual: boolean): string => {
         return `${months} month${months !== 1 ? 's' : ''}`;
     }
     return `${days} day${days !== 1 ? 's' : ''}`;
+};
+
+const ScheduledChangeNotice: React.FC<{
+    currentPlan: string;
+    periodEnd: string | null;
+    onManage: () => Promise<void>;
+    disabled: boolean;
+}> = ({ currentPlan, periodEnd, onManage, disabled }) => {
+    const surfaceWindow = useSurfaceWindow();
+    const [change, setChange] = useState<ScheduledChange | null>(null);
+    const [unavailable, setUnavailable] = useState(false);
+    useEffect(() => {
+        let active = true;
+        let generation = 0;
+        const load = async () => {
+            const request = ++generation;
+            try {
+                const result = await accountService.getScheduledChange();
+                if (active && request === generation) {
+                    setChange(result.scheduled_change);
+                    setUnavailable(!result.scheduled_change);
+                }
+            } catch {
+                if (active && request === generation) {
+                    setChange(null);
+                    setUnavailable(true);
+                }
+            }
+        };
+        void load();
+        const onFocus = () => { void load(); };
+        surfaceWindow.addEventListener('focus', onFocus);
+        return () => { active = false; surfaceWindow.removeEventListener('focus', onFocus); };
+    }, [surfaceWindow]);
+    const date = change?.effective_at ?? periodEnd;
+    const price = change && new Intl.NumberFormat(undefined, {
+        style: 'currency', currency: change.currency,
+    }).format(change.unit_amount / 100);
+    return (
+        <div className="text-sm font-color-secondary" role="status">
+            {change
+                ? `Your plan changes to ${change.name} at ${price}/${change.interval}`
+                : 'Your subscription has a scheduled change'}
+            {date ? ` on ${new Date(date).toLocaleDateString()}` : ' at the end of the current period'}.
+            {change && ' Price before taxes and discounts.'}{' '}
+            Your {currentPlan} plan continues until then. Undoing this change keeps your current plan and billing interval.{' '}
+            {unavailable && 'Scheduled plan details are unavailable here; review them in billing settings. '}
+            <Button variant="ghost-secondary" onClick={onManage} disabled={disabled}>
+                Review or undo the scheduled change
+            </Button>
+        </div>
+    );
 };
 
 const BillingSection: React.FC = () => {
@@ -230,7 +283,7 @@ const BillingSection: React.FC = () => {
         setCreditThresholdText(String(entry.value));
     }, [creditThresholdText]);
 
-    const upgradePlan = hasPlan && !creditPlan.cancelAtPeriodEnd
+    const upgradePlan = hasPlan && !creditPlan.cancelAtPeriodEnd && !creditPlan.pendingDowngrade && !isPastDue
         ? plans.filter(p => p.interval && p.monthly_credits > (creditPlan.monthlyCredits || 0))
             .sort((a, b) => a.monthly_credits - b.monthly_credits)[0] ?? null
         : null;
@@ -317,7 +370,7 @@ const BillingSection: React.FC = () => {
                                             className="text-xs px-15 py-05 rounded-md"
                                             style={{ color: 'var(--tag-orange-secondary)', border: '1px solid var(--tag-orange-tertiary)', background: 'var(--tag-orange-quinary)' }}
                                         >
-                                            Downgrade pending
+                                            Plan change scheduled
                                         </span>
                                     )}
                                     {creditPlan.status === 'past_due' && (
@@ -354,9 +407,19 @@ const BillingSection: React.FC = () => {
                                 </Button>
                             )}
                             <Button variant="surface-light" onClick={manageSubscription} disabled={isBillingLoading} style={{ padding: '4px 6px' }}>
-                                {creditPlan.cancelAtPeriodEnd ? 'Resubscribe' : 'Manage'}
+                                {creditPlan.cancelAtPeriodEnd ? 'Reactivate' : 'Manage'}
                             </Button>
                         </div>
+
+                        {creditPlan.pendingDowngrade && !creditPlan.cancelAtPeriodEnd && (
+                            <ScheduledChangeNotice
+                                key={`${user?.id}:${creditPlan.plan}:${creditPlan.periodEnd}`}
+                                currentPlan={formatPlanName(creditPlan.plan ?? undefined)}
+                                periodEnd={creditPlan.periodEnd}
+                                onManage={manageSubscription}
+                                disabled={isBillingLoading}
+                            />
+                        )}
 
                         {/* Progress bar (subscription + rollover credits). Hidden when
                             the plan's credits are not currently usable — an unpaid or
