@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { cloudConsentAtom, hasOcrAccessAtom, hasSearchIndexAccessAtom } from '../../atoms/profile';
 import {
@@ -40,10 +40,13 @@ const ProcessingStatusRow: React.FC<{
     processing: boolean;
     onProcessNow: (action: 'start' | 'rebuild') => void;
     onStopDrain: () => void;
-}> = ({ status, canRestoreCache, processing, onProcessNow, onStopDrain }) => {
+    onShowProblems: () => void;
+}> = ({ status, canRestoreCache, processing, onProcessNow, onStopDrain, onShowProblems }) => {
     const sentence = describeStatus(status, { canRestoreCache });
     const run = status.progress;
     const issueCount = status.issues.reduce((sum, group) => sum + group.count, 0);
+    const indexIssueCount = status.issues.find((group) => group.reason === 'index_failed')?.count ?? 0;
+    const readingIssueCount = issueCount - indexIssueCount;
     const progress = run && run.total > 0 && (run.pending > 0 || (status.worker?.inFlight ?? 0) > 0) ? {
         total: run.total,
         done: run.succeeded + run.problems + run.removed,
@@ -132,8 +135,15 @@ const ProcessingStatusRow: React.FC<{
                     </span>
                 </div>
             )}
-            {issueCount > 0 && <div className="text-sm font-color-secondary" style={{ paddingLeft: '22px' }}>
-                {status.error ? 'Last reported: ' : ''}{plural(issueCount, 'file')} could not be read or indexed. See Problems below.
+            {indexIssueCount > 0 && <div className="text-base font-medium font-color-primary" style={{ paddingLeft: '22px' }}>
+                {status.error ? 'Last reported: ' : ''}{plural(indexIssueCount, 'file')} could not be indexed.{' '}
+                <button type="button" className="text-link cursor-pointer" onClick={onShowProblems}
+                    style={{ background: 'none', border: 'none', padding: 0, font: 'inherit' }}>
+                    See Problems
+                </button>
+            </div>}
+            {readingIssueCount > 0 && <div className="text-sm font-color-secondary" style={{ paddingLeft: '22px' }}>
+                {status.error ? 'Last reported: ' : ''}{plural(readingIssueCount, 'file')} could not be read. See Problems below.
             </div>}
         </div>
     );
@@ -206,7 +216,17 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
     const hasSearchAccess = useAtomValue(hasSearchIndexAccessAtom);
     const cloudRequired = hasOcrAccess || hasSearchAccess;
     const locked = cloudRequired && consent === 'accepted';
-    const status = useAtomValue(backgroundProcessingStatusAtom);
+    const snapshot = useAtomValue(backgroundProcessingStatusAtom);
+    // Entitlements may change before the next status snapshot arrives.
+    const status = hasSearchAccess ? snapshot : {
+        ...snapshot,
+        issues: snapshot.issues.filter((group) => group.reason !== 'index_failed'),
+    };
+    const problemsHeading = useRef<HTMLSpanElement>(null);
+    const showProblems = () => {
+        problemsHeading.current?.scrollIntoView({ block: 'start' });
+        problemsHeading.current?.focus({ preventScroll: true });
+    };
     const indexState = useAtomValue(embeddingIndexStateAtom);
     const [enabled, setEnabled] = useState(
         () => getPref('backgroundProcessingEnabled') === true,
@@ -338,12 +358,13 @@ export default function BackgroundProcessingSection(): React.ReactElement | null
                         processing={processing}
                         onProcessNow={processNow}
                         onStopDrain={stopDrain}
+                        onShowProblems={showProblems}
                     />
                 )}
                 {actionError && <div role="alert" className="font-color-red text-base border-top-quinary" style={{ padding: '8px 12px' }}>{actionError}</div>}
             </SettingsGroup>
 
-            <SectionLabel>Problems</SectionLabel>
+            <SectionLabel><span ref={problemsHeading} tabIndex={-1}>Problems</span></SectionLabel>
             <SettingsGroup>
                 <div className="font-color-secondary text-base" style={{ padding: '8px 12px' }}>
                     {problemsSummary}

@@ -51,7 +51,7 @@ function blockerCaption(blocker: string): string {
  * Four states: working (with a queue depth), waiting (with the reason), settled,
  * and unreadable. Order matters: an unreadable status wins, then running
  * work, then work queued behind the idle gate or a blocker, then unfinished
- * ledger work, then the settled summary. Files that could not be read never
+ * ledger work, then the settled summary. Files that could not be read or indexed never
  * turn the headline red; the problems list carries them, so a settled
  * headline does not imply every file succeeded.
  *
@@ -165,19 +165,10 @@ export function describeStatus(
             stopDrain: draining,
         };
     }
-    if (status.issues.some((issue) => issue.reason === 'index_failed' && issue.count > 0)) {
-        return {
-            tone: 'error',
-            headline: 'Indexing incomplete',
-            caption: 'Some files could not be indexed. Open Problems to retry them.',
-            processNow: false,
-            stopDrain: false,
-        };
-    }
     if (total === 0) {
         return {
             tone: 'idle',
-            headline: 'Up to date',
+            headline: 'Processing finished',
             caption: 'No files to process yet. Beaver checks your libraries for new files automatically.',
             processNow: false,
             stopDrain: false,
@@ -186,7 +177,7 @@ export function describeStatus(
     if (restore) {
         return {
             tone: 'idle',
-            headline: 'Up to date',
+            headline: 'Processing finished',
             caption: 'Prepare previously processed files again for faster responses. Uses available cache space.',
             processNow: false,
             rebuildCache: !draining,
@@ -195,7 +186,7 @@ export function describeStatus(
     }
     return {
         tone: 'idle',
-        headline: 'Up to date',
+        headline: 'Processing finished',
         caption: 'Beaver processes new and changed files automatically.',
         processNow: false,
         stopDrain: false,

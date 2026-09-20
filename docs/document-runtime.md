@@ -44,8 +44,9 @@ Transient cloud-index failures and protocol waits remain in the durable queue
 without consuming document failure attempts. Service-wide errors pause new upsert
 claims briefly; document contention delays only its job. Start now and priority
 promotion respect the lane cooldown, while extraction, OCR and cleanup continue.
-Status counts paused jobs as waiting, and settled indexing failures direct users
-to Problems. Cooldowns belong to the executor registration; delayed queue rows
+Status counts paused jobs as waiting and labels settled activity as processing
+finished. Indexing failures appear separately with a Problems action, only while
+the account has search-index access. Cooldowns belong to the executor registration; delayed queue rows
 survive a restart independently of that in-memory deadline.
 
 Attachment progress belongs to `addon.background`, with current-run membership

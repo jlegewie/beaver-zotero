@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { afterEach, expect, it, vi } from 'vitest';
 import { backgroundProcessingStatusAtom } from '../../../react/atoms/backgroundProcessing';
-import { cloudConsentAtom } from '../../../react/atoms/profile';
+import { cloudConsentAtom, hasSearchIndexAccessAtom } from '../../../react/atoms/profile';
 import BackgroundProcessingSection from '../../../react/components/preferences/BackgroundProcessingSection';
 
 const { refresh, prefs, prepareCache, access } = vi.hoisted(() => ({
@@ -16,11 +16,13 @@ const { refresh, prefs, prepareCache, access } = vi.hoisted(() => ({
 vi.mock('../../../src/services/backgroundProcessing/cachePreparation', () => ({ prepareUncachedFiles: prepareCache }));
 vi.mock('../../../react/atoms/profile', async () => {
     const { atom } = await import('jotai');
+    const searchOverride = atom<boolean | null>(null);
     return {
         cloudConsentAtom: atom('pending'),
         accountGenerationAtom: atom(1),
         hasOcrAccessAtom: atom(false),
-        hasSearchIndexAccessAtom: atom(() => access.search),
+        hasSearchIndexAccessAtom: atom((get) => get(searchOverride) ?? access.search,
+            (_get, set, value: boolean) => set(searchOverride, value)),
         cloudProductNameAtom: atom('Beaver Search'),
         localZoteroLibrariesAtom: atom([]),
         searchableLibraryIdsAtom: atom([]),
@@ -202,6 +204,7 @@ it('renders service progress unchanged across remounts, pauses, errors and disco
 });
 
 it('shows cumulative problems instead of last-run outcomes or a completed progress bar', async () => {
+    access.search = true;
     const store = createStore();
     store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom), updatedAt: 1,
         issues: [{ reason: 'file_unavailable', count: 3 }, { reason: 'index_failed', count: 2 }],
@@ -210,7 +213,7 @@ it('shows cumulative problems instead of last-run outcomes or a completed progre
     });
     await withView(store, async container => {
         expect(container.querySelector('[role="progressbar"]')).toBeNull();
-        expect(container.textContent).toContain('5 files could not be read or indexed. See Problems below.');
+        expect(container.textContent).toContain('3 files could not be read. See Problems below.');
         expect(container.textContent).toContain('5 attachments could not be read or indexed.');
         expect(container.textContent).not.toContain('attachments ready');
         expect(container.textContent).not.toContain('attachment needs attention');
@@ -219,7 +222,7 @@ it('shows cumulative problems instead of last-run outcomes or a completed progre
         await act(async () => store.set(backgroundProcessingStatusAtom, {
             ...store.get(backgroundProcessingStatusAtom), error: 'temporary',
         }));
-        expect(container.textContent).toContain('Last reported: 5 files could not be read or indexed.');
+        expect(container.textContent).toContain('Last reported: 2 files could not be indexed.');
     });
 });
 
@@ -237,7 +240,7 @@ it('replaces discovery with a settled status once the discovered file finishes',
         await act(async () => store.set(backgroundProcessingStatusAtom, {
             ...store.get(backgroundProcessingStatusAtom), progress: { ...progress, discovering: false, finishedAt: 2 },
         }));
-        expect(container.querySelector('[role="status"]')?.textContent).toBe('Up to date');
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Processing finished');
         expect(container.querySelector('[role="progressbar"]')).toBeNull();
         expect(container.textContent).not.toContain('additional attachment');
         expect(container.textContent).not.toContain('1 of 1');
@@ -257,7 +260,7 @@ it('leaves unreadable files to the issue list instead of a red status headline',
     const root = createRoot(container);
     try {
         await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(BackgroundProcessingSection))));
-        expect(container.querySelector('[role="status"]')?.textContent).toBe('Up to date');
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Processing finished');
         expect(Array.from(container.querySelectorAll('button')).some((node) => node.textContent === 'Start now')).toBe(false);
         expect(container.textContent).toContain('1 attachment could not be read or indexed');
         expect(container.textContent).not.toContain('Libraries to Process');
@@ -353,14 +356,55 @@ it('lists server indexing problems with reading problems and keeps the search st
     await withView(store, (container) => {
         expect(container.textContent).not.toContain('Full-text Search');
         expect(container.textContent).toContain('Keep Full-Text Search Up to Date');
-        expect(container.querySelector('[role="status"]')?.textContent).toBe('Indexing incomplete');
-        expect(container.textContent).toContain('2 files could not be read or indexed. See Problems below.');
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Processing finished');
+        expect(container.textContent).toContain('2 files could not be indexed. See Problems');
         expect(container.textContent).toContain('Full-text search index available. Last checked');
         expect(container.textContent).not.toContain('Updates paused.');
         expect(container.textContent).toContain('2 attachments could not be read or indexed');
         expect(container.querySelector('[data-issue-reason="index_failed"]')).not.toBeNull();
     });
 });
+it('hides stale indexing issues immediately when search access is revoked', async () => {
+    const store = createStore();
+    access.search = true;
+    store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
+        updatedAt: Date.now(),
+        ledger: { ...store.get(backgroundProcessingStatusAtom).ledger, total: 3, readable: 2, unreadable: 1 },
+        issues: [{ reason: 'index_failed', count: 2 }, { reason: 'file_unavailable', count: 1 }],
+        worker: { available: 0, deferred: 0, inFlight: 0, dispatchBlocker: null, drainNow: false, backlogGateOpen: false },
+    });
+    await withView(store, async (container) => {
+        expect(container.textContent).toContain('2 files could not be indexed.');
+        const link = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'See Problems')!;
+        const heading = Array.from(container.querySelectorAll('[role="heading"]')).find((node) => node.textContent === 'Problems')!.firstElementChild as HTMLElement;
+        const scroll = vi.fn();
+        heading.scrollIntoView = scroll;
+        const focus = vi.spyOn(heading, 'focus');
+        await act(async () => link.click());
+        expect(scroll).toHaveBeenCalledWith({ block: 'start' });
+        expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+        await act(async () => store.set(hasSearchIndexAccessAtom as any, false));
+        expect(container.textContent).not.toContain('could not be indexed');
+        expect(container.querySelector('[data-issue-reason="index_failed"]')).toBeNull();
+        expect(container.querySelector('[data-issue-reason="file_unavailable"]')).not.toBeNull();
+        expect(container.textContent).toContain('1 attachment could not be read or indexed.');
+        expect(container.querySelector('[role="status"]')?.textContent).toBe('Processing finished');
+        expect(store.get(backgroundProcessingStatusAtom).issues).toHaveLength(2);
+    });
+});
+
+it('never displays indexing problems from a stale snapshot without search access', async () => {
+    const store = createStore();
+    store.set(backgroundProcessingStatusAtom, { ...store.get(backgroundProcessingStatusAtom),
+        updatedAt: Date.now(), issues: [{ reason: 'index_failed', count: 2 }],
+    });
+    await withView(store, (container) => {
+        expect(container.textContent).not.toContain('could not be indexed');
+        expect(container.querySelector('[data-issue-reason="index_failed"]')).toBeNull();
+        expect(container.textContent).toContain('No problems found');
+    });
+});
+
 it.each([
     [{ coverage: { namespace_exists: false, approx_row_count: 0, documents: [] }, coverageError: null }, 'Full-text search index not built yet.'],
     [{ coverage: null, coverageError: 'Could not check search coverage.' }, 'The full-text search index could not be checked.'],

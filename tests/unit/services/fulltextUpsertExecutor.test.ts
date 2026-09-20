@@ -896,7 +896,7 @@ describe('FulltextUpsertExecutor', () => {
         expect((await db.getBackgroundQueueStats(now)).dead).toBe(0);
         for (const key of keys) expect((await db.getAttachmentProcessingState(1, key))?.upsertStatus).toBe('done');
         const snapshot = await collectProcessingStatus(scope, { includeFailures: true });
-        expect(describeStatus({ ...snapshot, updatedAt: now, error: null } as any).headline).toBe('Up to date');
+        expect(describeStatus({ ...snapshot, updatedAt: now, error: null } as any).headline).toBe('Processing finished');
     });
 
 });
