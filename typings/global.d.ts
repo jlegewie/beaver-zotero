@@ -519,6 +519,7 @@ declare namespace Zotero {
             }): Promise<boolean>;
             markAttachmentUpsertFailed(libraryId: number, zoteroKey: string, structuredDocumentHash: string, error: string): Promise<void>;
             getSearchPreparationRows: import('../src/services/database').BeaverDB['getSearchPreparationRows'];
+            getPendingFulltextUpsertKeys: import('../src/services/database').BeaverDB['getPendingFulltextUpsertKeys'];
             getAttachmentProcessingAggregates(
                 libraryId?: number,
                 targets?: { ocr?: boolean; upsert?: boolean },
