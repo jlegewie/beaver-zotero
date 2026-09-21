@@ -22,7 +22,7 @@ export const profileWithPlanAtom = atom(get => get(profileProjectionAtom));
 export type ProfileSyncStatus =
     | { kind: 'ok' }
     | { kind: 'transient'; message: string; attempt: number; offline: boolean }
-    | { kind: 'fatal'; message: string };
+    | { kind: 'fatal'; message: string; title?: string; helpUrl?: string };
 
 export const profileSyncStatusAtom = atom<ProfileSyncStatus>({ kind: 'ok' });
 

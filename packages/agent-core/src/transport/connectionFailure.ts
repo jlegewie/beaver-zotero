@@ -175,6 +175,22 @@ export const CONNECTION_TROUBLESHOOTING_URL =
 
 const troubleshootingLink = ` See our <a href="${CONNECTION_TROUBLESHOOTING_URL}">connection troubleshooting guide</a> for help.`;
 
+/**
+ * Shown when the server reports that a request carried no credentials while
+ * Beaver holds a valid session (see `CredentialsBlockedError`). The account is
+ * fine, so the copy points at the network rather than at signing in again —
+ * the raw server text ("Not authenticated") reads as a failed login and sends
+ * users to re-enter a password that was never the problem.
+ */
+export const CREDENTIALS_BLOCKED_MESSAGE =
+    'You are signed in, but your credentials are not reaching Beaver. A VPN, '
+    + 'network proxy, firewall, or antivirus is most likely removing them. Try a '
+    + 'different network, or ask your IT team to allow api.beaverapp.ai without '
+    + 'TLS inspection.';
+
+/** Heading for `CREDENTIALS_BLOCKED_MESSAGE`. */
+export const CREDENTIALS_BLOCKED_TITLE = 'Your network is blocking Beaver';
+
 // "error code" matches the wording used on the troubleshooting docs page.
 function codeSuffix(code: number | null): string {
     return code === null ? '' : ` (error code ${code})`;

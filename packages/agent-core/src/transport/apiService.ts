@@ -1,5 +1,5 @@
 import { AuthApiError, AuthError, AuthSessionMissingError, isAuthRetryableFetchError } from '@supabase/supabase-js';
-import { isApiError, isSessionExpiredError, isSessionRefreshError, ApiError, RequestTimeoutError, ServerError, SessionExpiredError, SessionRefreshError } from '../types/apiErrors';
+import { isApiError, isSessionExpiredError, isSessionRefreshError, ApiError, CredentialsBlockedError, RequestTimeoutError, ServerError, SessionExpiredError, SessionRefreshError } from '../types/apiErrors';
 import { logger } from '../platform/logger';
 import { credentials, getCredentialGeneration, assertCredentialGeneration, reportSessionRejected } from './credentials';
 import { recordBackendHttpSuccess } from './backendReachability';
@@ -7,6 +7,19 @@ import { getApiBaseUrl, getTransportConfigurationError } from './config';
 import { getRuntimeAdapter } from '../platform/runtime';
 
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
+
+/**
+ * The 403 details the backend's bearer scheme emits when a request arrives
+ * without a usable `Authorization` header.
+ *
+ * Reaching one of these proves the header was lost in transit rather than
+ * rejected: `getAuthHeaders` throws instead of dispatching a request without a
+ * token, so every request this class sends carries one.
+ */
+const CREDENTIALS_BLOCKED_DETAILS = new Set([
+    'Not authenticated',
+    'Invalid authentication credentials',
+]);
 
 /** Per-request overrides. */
 export interface RequestOptions {
@@ -381,6 +394,9 @@ export class ApiService {
             logger(`API error ${response.status} ${response.statusText}: ${errorBody}`, 2);
             const errorJson = JSON.parse(errorBody);
             const detail = errorJson.detail;
+            if (response.status === 403 && typeof detail === 'string' && CREDENTIALS_BLOCKED_DETAILS.has(detail)) {
+                throw new CredentialsBlockedError();
+            }
             if (typeof detail === 'object' && detail !== null && !Array.isArray(detail)) {
                 throw new ApiError(
                     response.status,
