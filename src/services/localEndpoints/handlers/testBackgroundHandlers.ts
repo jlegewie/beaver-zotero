@@ -3,7 +3,7 @@
  *
  * Exercises the queue API on `Zotero.Beaver?.db` plus the lifecycle on
  * `Zotero.Beaver?.backgroundExtractor`. All endpoints are wired via the
- * `process.env.NODE_ENV === 'development'` branch in `useHttpEndpoints.ts`.
+ * development/staging branch in `localEndpoints/http.ts`.
  */
 
 import type {

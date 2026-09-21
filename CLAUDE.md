@@ -402,9 +402,9 @@ Three tiers — **`tests/README.md` has the details, templates, and shared-state
   mocks (`supabaseClient`, `zoteroUtils`, `react/atoms/profile`, `react/store`) for anything
   importing `agentDataProvider`. Behavior-driven test names.
 
-## Dev-only HTTP endpoints
+## Development and staging HTTP endpoints
 
-The plugin registers dev-only endpoints under `/beaver/test/*` (see
+Development and staging builds register endpoints under `/beaver/test/*` (see
 `src/services/localEndpoints/http.ts`) for inspecting extraction, cache, and run state without
 driving the UI:
 
@@ -413,7 +413,11 @@ curl -sS -X POST http://127.0.0.1:<port>/beaver/test/<name> \
   -H 'Content-Type: application/json' -d '{}'
 ```
 
-They are registered by `addon.localEndpoints` and gated on authentication, so **they exist
+Staging builds also enable in-memory Zotero debug capture at plugin startup, without
+changing the profile's logging preferences. Production builds do not enable these
+diagnostics. The fake voice-session endpoint remains development-only.
+
+The endpoints are registered by `addon.localEndpoints` and gated on authentication, so **they exist
 only once Beaver is logged in on that instance**, including with zero windows. UI commands
 accept `windowId` and resolve it once at entry; a missing or closing target returns
 `window_unavailable`. Enumerate stable ids with `/beaver/test/window-runtime` and
