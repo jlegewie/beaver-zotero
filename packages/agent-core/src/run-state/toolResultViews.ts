@@ -231,8 +231,14 @@ export interface TagListView {
 
 export interface AttachmentSearchView {
     view_type: "attachment_search";
-    tool_name: "find_in_attachments";
+    tool_name: "find_in_attachments" | "fulltext_search";
     query: string;
+    /**
+     * Phrases to mark in match previews (lowercase words, matched at word
+     * boundaries). Absent/null: derive single terms from `query` (legacy
+     * producers). Empty: mark nothing and show each preview from its start.
+     */
+    highlight_phrases?: string[] | null;
     total_matches: number;
     attachment_count: number;
     attachments: AttachmentSearchRowView[];
