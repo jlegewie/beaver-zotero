@@ -99,6 +99,12 @@ import {
     extractSentencesForPage,
     runSentenceExtractionFromDoc,
 } from "./sentenceExtraction";
+import {
+    FEATURE_NAMES,
+    FEATURE_VERSION,
+} from "../classify/itemFeatures";
+import { createDocContext, type DocContext } from "../classify/docContext";
+import { resolveExportPageIndices } from "../classify/exportPagePolicy";
 import { resolveSplitter } from "./splitterResolver";
 import type { SentenceSplitter } from "../SentenceMapper";
 import type { ParagraphDetectionSettings } from "../ParagraphDetector";
@@ -1503,6 +1509,223 @@ export async function opStructuredExtractWithDebug(
             args.debugMode === "full",
         );
         return { result: { result, debug } };
+    } catch (e) {
+        docFailed = true;
+        throw e;
+    } finally {
+        releaseDoc(doc, docFailed);
+    }
+}
+
+/** One item's exported feature row, joined to the item it describes. */
+export interface ItemFeatureExportItem {
+    /** Matches the emitted `DocItem.id` for this item. */
+    itemId: string;
+    /** Page-local item index. */
+    index: number;
+    columnIndex: number;
+    /** Item kind the pipeline assigns today (`text` / `section_header`). */
+    kind: string;
+    /** Item text as the features saw it: a heading's `## ` marker is removed. */
+    text: string;
+    /** Item bbox in MuPDF coordinates. */
+    bbox: BoundingBox;
+    features: number[];
+    neighborIds: { prev: string[]; next: string[] };
+}
+
+export interface ItemFeatureExportPage {
+    pageIndex: number;
+    items: ItemFeatureExportItem[];
+}
+
+export interface ItemFeatureExtractResult {
+    pageCount: number;
+    featureVersion: number;
+    featureNames: readonly string[];
+    pages: ItemFeatureExportPage[];
+}
+
+/**
+ * Item-feature extraction over an explicit page subset.
+ *
+ * Runs the same structured per-page pipeline as `opExtract`
+ * (`extractSentencesForPage`) with feature extraction switched on, and
+ * returns only the feature rows. Unlike structured extraction it accepts a
+ * page subset: explicit `pageIndices`, or `applyExportPagePolicy`, which
+ * resolves the export's head/tail policy against the page count read from
+ * the document itself (a manifest's count can disagree with what the page
+ * tree actually resolves, and a stale count would silently drop the tail).
+ *
+ * The document context accumulates across the processed pages in the order
+ * given, so the running document features stay meaningful for a sampled
+ * page set (pages in between simply do not contribute). The document-wide
+ * style profile and repeated-text model are likewise built from the
+ * requested pages only, so on a subset they can differ from what a
+ * full-document extraction computes; for a full page set they are
+ * identical.
+ */
+export async function opExtractItemFeatures(
+    args: {
+        pdfData: Uint8Array | ArrayBuffer;
+        /** Pages to featurize. Omitted / empty means the whole document. */
+        pageIndices?: number[];
+        /**
+         * Select pages with the export page policy (see
+         * `classify/exportPagePolicy.ts`) against the document's own page
+         * count. Ignored when `pageIndices` is given.
+         */
+        applyExportPagePolicy?: boolean;
+        settings?: ExtractionSettings;
+        paragraphSettings?: ParagraphDetectionSettings;
+        analysisWindow?: number;
+        splitterConfig?: SentenceSplitterConfig;
+    },
+): Promise<OpReply<ItemFeatureExtractResult>> {
+    const doc = await acquireDoc(args.pdfData);
+    let docFailed = false;
+    try {
+        const requestedRepeatThreshold = args.settings?.repeatThreshold;
+        const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}) };
+        setAnalyzerLogging(!!opts.analyzerLogging);
+        assertDocumentHasPages(doc.countPages());
+        const pageCount = resolveTruePageCount(doc);
+        assertDocumentHasPages(pageCount);
+
+        const fontApi = (await ensureApi()).Font;
+        const pageCache = new PageWalkCache(doc, fontApi);
+
+        if (opts.checkTextLayer) {
+            const ocrProvider: RawPageProvider = {
+                getPageCount: () => pageCount,
+                extractRawPage: (i) =>
+                    pageCache.getDetailed(i, true) as unknown as RawPageData,
+            };
+            const ocr = new DocumentAnalyzer(ocrProvider).getDetailedOCRAnalysis({
+                minTextPerPage: opts.minTextPerPage,
+            });
+            if (ocr.needsOCR) {
+                throw workerError(
+                    ERROR_CODES.NO_TEXT_LAYER,
+                    `Document may require OCR (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
+                    { ocrAnalysis: ocr, pageCount },
+                );
+            }
+        }
+
+        const requestedIndices =
+            (args.pageIndices?.length ?? 0) > 0
+                ? args.pageIndices
+                : args.applyExportPagePolicy
+                  ? resolveExportPageIndices(pageCount)
+                  : undefined;
+        const targetIndices = resolveExplicitPageIndicesOrThrow(
+            pageCount,
+            requestedIndices,
+        );
+        const analysisIndices = resolveAnalysisPages({
+            targetPageIndices: targetIndices,
+            totalPageCount: pageCount,
+            analysisWindow: args.analysisWindow,
+        });
+        const splitter = await resolveSplitter(
+            args.splitterConfig ?? { type: "sentencex" },
+        );
+
+        // Pre-walk the targets in detailed mode so the analysis-window walk
+        // reuses them instead of paying a second JSON walk per target.
+        const preWalkedDetailed = new Map<number, RawPageDataDetailed>();
+        const preWalkedPlain = new Map<number, RawPageData>();
+        for (const i of targetIndices) {
+            // Each detailed walk is synchronous; yield between them so a
+            // caller's timer can fire during this phase as well as during
+            // the page loop below.
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            try {
+                const detailed = pageCache.getDetailed(i, false);
+                preWalkedDetailed.set(i, detailed);
+                preWalkedPlain.set(i, detailed as unknown as RawPageData);
+            } catch (err) {
+                // One unresolvable leaf should cost one page of training
+                // rows, not the document. The page is then absent from
+                // the analysis set and the page loop below skips it.
+                if (!isRecoverablePageError(err)) throw err;
+                postLog(
+                    "warn",
+                    `[mupdf-worker] opExtractItemFeatures: skipping unresolvable page ${i}: ${String(err)}`,
+                );
+            }
+        }
+
+        const {
+            analysisPages,
+            analysisPageByIndex,
+            styleProfile,
+            marginRemoval,
+            compoundVocabulary,
+        } = buildAnalysisFromDoc(
+            doc,
+            opts,
+            requestedRepeatThreshold,
+            analysisIndices,
+            pageCount,
+            preWalkedPlain,
+            pageCache,
+        );
+
+        const pages: ItemFeatureExportPage[] = [];
+        let docContext: DocContext = createDocContext();
+        for (const i of targetIndices) {
+            if (!analysisPageByIndex.has(i)) continue;
+            // Page processing is synchronous; yield between pages so a
+            // caller's timer can observe a document that grinds on.
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            const { sentenceResult, itemFeatures } = extractSentencesForPage({
+                doc,
+                pageIndex: i,
+                analysisPages,
+                splitter,
+                paragraphSettings: args.paragraphSettings,
+                marginRemoval,
+                styleProfile,
+                compoundVocabulary,
+                margins: opts.margins,
+                marginZone: opts.marginZone,
+                graphicsLayerMode: opts.graphicsLayerMode,
+                preWalkedDetailed: preWalkedDetailed.get(i),
+                fontApi,
+                itemFeatures: { pageCount, docContext },
+            });
+            if (!itemFeatures) continue;
+            docContext = itemFeatures.docContext;
+
+            // `sentenceResult.items` is index-aligned with the paragraph
+            // items the features were computed from (margin items are
+            // appended after them), so the row index addresses both.
+            const items: ItemFeatureExportItem[] = itemFeatures.rows.map((row) => {
+                const docItem = sentenceResult.items[row.index];
+                return {
+                    itemId: row.itemId,
+                    index: row.index,
+                    columnIndex: row.columnIndex,
+                    kind: docItem?.kind ?? "text",
+                    text: row.text,
+                    bbox: docItem ? docItem.bbox : { l: 0, t: 0, r: 0, b: 0, origin: "top-left" },
+                    features: row.features,
+                    neighborIds: row.neighborIds,
+                };
+            });
+            pages.push({ pageIndex: i, items });
+        }
+
+        return {
+            result: {
+                pageCount,
+                featureVersion: FEATURE_VERSION,
+                featureNames: FEATURE_NAMES,
+                pages,
+            },
+        };
     } catch (e) {
         docFailed = true;
         throw e;

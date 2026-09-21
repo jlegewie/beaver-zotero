@@ -21,6 +21,7 @@ import {
     opAnalyzeLayout,
     opAnalyzeOCRNeeds,
     opExtract,
+    opExtractItemFeatures,
     opExtractRawPageDetailed,
     opGetMetadata,
     opGetPageCount,
@@ -44,6 +45,7 @@ import type {
     BeaverExtractResult,
     StructuredExtractWithDebugResult,
 } from "../schema";
+import type { ItemFeatureExtractResult } from "../worker/ops";
 import type { ParagraphDetectionSettings } from "../ParagraphDetector";
 import type { SentenceSplitterConfig } from "../sentenceTypes";
 
@@ -130,6 +132,33 @@ export async function structuredExtractWithDebug(
 ): Promise<StructuredExtractWithDebugResult> {
     await ensureExtractionRuntime();
     const reply = await enqueue(() => opStructuredExtractWithDebug(input));
+    return reply.result;
+}
+
+export interface ItemFeaturesInput {
+    pdfData: PdfBytes;
+    /** Pages to featurize. Omitted / empty means the whole document. */
+    pageIndices?: number[];
+    /**
+     * Select pages with the export head/tail policy against the document's
+     * own page count. Ignored when `pageIndices` is given.
+     */
+    applyExportPagePolicy?: boolean;
+    settings?: ExtractionSettings;
+    paragraphSettings?: ParagraphDetectionSettings;
+    analysisWindow?: number;
+    splitterConfig?: SentenceSplitterConfig;
+}
+
+/**
+ * Item-level classifier features for a page subset. Backs the `features`
+ * CLI command that builds the classifier's training export.
+ */
+export async function extractItemFeatures(
+    input: ItemFeaturesInput,
+): Promise<ItemFeatureExtractResult> {
+    await ensureExtractionRuntime();
+    const reply = await enqueue(() => opExtractItemFeatures(input));
     return reply.result;
 }
 
