@@ -435,12 +435,15 @@ export class ApiService {
         endpoint: string,
         rawBody: Uint8Array,
         headers: Record<string, string>,
+        options?: RequestOptions,
     ): Promise<T> {
-        const response = await this.request(endpoint, 'POST', undefined, undefined, {
-            rawBody,
-            headers,
+        return withDeadline(options, async (deadline) => {
+            const response = await this.request(endpoint, 'POST', undefined, deadline, {
+                rawBody,
+                headers,
+            });
+            return await this.parseJsonResponse<T>(response, 'POST');
         });
-        return await this.parseJsonResponse<T>(response, 'POST');
     }
     
     /**

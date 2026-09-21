@@ -13,6 +13,22 @@ describe('search index wire contract', () => {
         expect(post.mock.calls[0][2]).toEqual({ 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
         expect(JSON.parse(pako.ungzip(post.mock.calls[0][1] as Uint8Array, { to: 'string' }))).toEqual(request);
     });
+    it('bounds both upsert paths with a client deadline', async () => {
+        // Without a deadline an upsert waits forever and pins one of the
+        // lane's in-flight slots, so this backstop must not be dropped.
+        const client = new SearchIndexApiClient();
+        const request = { source: 'zotero_attachment', scope_ref: 'lDEVICE01', zotero_key: 'ABCDEFGH', zotero_local_id: 'DEVICE01', content_kind: 'snapshot', doc_hash: 'a'.repeat(64), extract_schema_version: '1' };
+        const postRaw = vi.spyOn(client as any, 'postRaw').mockResolvedValue({ status: 'completed' });
+        const post = vi.spyOn(client as any, 'post').mockResolvedValue({ status: 'tagged' });
+
+        await client.upsertPayload({ ...request, payload: { text: 'x' } } as any);
+        await client.upsertHash(request as any);
+
+        // Held above the backend's own whole-document deadline so the server
+        // answers with a coded, retry-carrying 503 before this fires.
+        expect((postRaw.mock.calls[0][3] as any).timeoutMs).toBeGreaterThan(300_000);
+        expect((post.mock.calls[0][2] as any).timeoutMs).toBeGreaterThan(300_000);
+    });
     it('shares requirements within an account generation and retries failed reads', async () => {
         let generation = 1;
         (Zotero.Beaver as any) = { account: { getGeneration: () => generation } };

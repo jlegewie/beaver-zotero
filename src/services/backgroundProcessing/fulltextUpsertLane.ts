@@ -4,7 +4,14 @@ import { INDEX_RECONCILE_INTERVAL_MS } from "../backgroundProcessing/constants";
 import { reconcileRemoteRefs } from "../backgroundProcessing/remoteRefsReconcile";
 import { logger } from "@beaver/agent-core/platform/logger";
 
-const INDEX_LANE_MAX_IN_FLIGHT = 2;
+/**
+ * Concurrent cloud-index upserts. Sized to where THIS pipeline saturates, not
+ * the backend's dependencies: the embedding and vector-store services both
+ * scale well past this, but `document_extract` feeds this lane from a single
+ * serial MuPDF worker, so slots beyond ~4 have nothing to do. Must stay in
+ * sync with the backend's own per-user in-flight guard.
+ */
+const INDEX_LANE_MAX_IN_FLIGHT = 4;
 const CLEANUP_RESTORE_INTERVAL_MS = 6 * 60 * 60_000;
 
 export function startFulltextUpsertLane(

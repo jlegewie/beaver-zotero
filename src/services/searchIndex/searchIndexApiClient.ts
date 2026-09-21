@@ -4,6 +4,20 @@ import type { DocumentExtractResult } from '@beaver/agent-core/extract/document/
 
 export const SEARCH_INDEX_API_PREFIX = '/api/v1/index';
 
+/**
+ * Client-side ceiling for an upsert, held slightly above the backend's own
+ * whole-document deadline so the server always gets to answer first — a coded
+ * 503 carries retry guidance a bare client timeout cannot. This is the
+ * backstop for the server never answering at all.
+ *
+ * Without it an upsert waits indefinitely and pins one of the lane's
+ * in-flight slots. Abandoning the request is safe: the backend's per-document
+ * claim is the serialization point and an unfinished write keeps its lease,
+ * so the retry either resumes cleanly or gets `claim_busy` until the lease
+ * expires.
+ */
+const UPSERT_TIMEOUT_MS = 360_000;
+
 export interface IndexRequirements {
     index_version: number;
     extract_schema_versions: Record<'pdf' | 'epub' | 'snapshot', string[]>;
@@ -98,7 +112,10 @@ export class SearchIndexApiClient extends ApiService {
     }
 
     upsertHash(request: IndexUpsertRequest): Promise<IndexUpsertResponse> {
-        return this.post<IndexUpsertResponse>(`${SEARCH_INDEX_API_PREFIX}/upsert`, request);
+        return this.post<IndexUpsertResponse>(
+            `${SEARCH_INDEX_API_PREFIX}/upsert`, request,
+            { timeoutMs: UPSERT_TIMEOUT_MS },
+        );
     }
 
     /** Payload upserts are large, so the body goes over the wire gzipped. */
@@ -107,6 +124,7 @@ export class SearchIndexApiClient extends ApiService {
             `${SEARCH_INDEX_API_PREFIX}/upsert`,
             await gzipJsonValueChunked(request),
             { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' },
+            { timeoutMs: UPSERT_TIMEOUT_MS },
         );
     }
 
