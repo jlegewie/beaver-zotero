@@ -316,3 +316,15 @@ it('still requires portable identity for manual collection changes in an unmappe
     expect(row.memberships).toEqual([]);
     expect(row.saveTx).not.toHaveBeenCalled();
 });
+
+it.each([1, 7])('undoes legacy create-collection history with a numeric collection ID in library %s', async libraryID => {
+    const target = collections.find(c => c.libraryID === libraryID)!;
+    const other = collections.find(c => c.libraryID !== libraryID)!;
+    const restored = action('create_collection', { library_id: libraryID, name: target.name }, {
+        library_id: libraryID, collection_id: target.id, collection_key: target.key,
+    });
+    await manualCreate.undoCreateCollectionAction(restored);
+    expect(target.eraseTx).toHaveBeenCalledOnce();
+    expect(other.eraseTx).not.toHaveBeenCalled();
+    expect(collections).not.toContain(target);
+});

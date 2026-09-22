@@ -82,3 +82,14 @@ it('retains a native collection key when the portable collection ID is null', ()
     expect(decoded.collection_key).toBe('SAMEKEY1');
     expect(decoded.new_parent_key).toBeNull();
 });
+
+it.each([
+    ['collection_id', 'collection_key'],
+    ['parent_collection_id', 'parent_key'],
+    ['new_parent_collection_id', 'new_parent_key'],
+    ['old_parent_collection_id', 'old_parent_key'],
+])('preserves the native key when %s is a legacy numeric ID', (portable, native) => {
+    const decoded = readCollectionActionData({ [portable]: 42, [native]: 'SAMEKEY1' });
+    expect(decoded[native]).toBe('SAMEKEY1');
+    expect(decoded[portable]).toBe(42);
+});

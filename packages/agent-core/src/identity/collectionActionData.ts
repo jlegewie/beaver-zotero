@@ -9,7 +9,10 @@ export function readCollectionActionData(data: Record<string, any>): Record<stri
         ['new_parent_collection_id', 'new_parent_key'],
         ['old_parent_collection_id', 'old_parent_key'],
     ]) {
-        if (data[portable] !== undefined && (native !== 'collection_key' || data[portable] != null)) result[native] = data[portable];
+        const value = data[portable];
+        if (typeof value === 'string' || (native !== 'collection_key' && value === null)) {
+            result[native] = value;
+        }
     }
     const target = resolveObjectIdReference(typeof data.collection_id === 'string' ? data.collection_id : data.collection_key ?? '');
     if (target && !data.library_ref && !data.library_id) {
