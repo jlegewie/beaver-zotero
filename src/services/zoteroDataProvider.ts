@@ -1,3 +1,4 @@
+import { handleDuplicatesRequest } from './duplicates/discovery';
 import { handleArtifactRequest, artifactFailure } from './artifacts/artifactProvider';
 import type { OperationContext } from './agentDataProvider/operationContext';
 /**
@@ -262,6 +263,10 @@ export function createZoteroDataProvider(options: ZoteroDataProviderOptions = {}
                 error: String(err),
                 error_code: 'internal_error',
             }),
+        },
+        duplicates_request: {
+            handle: handleDuplicatesRequest,
+            errorResponse: (event, err) => ({ type: 'duplicates', request_id: event.request_id, view_type: 'duplicates', mode: event.mode, groups: [], total_count: 0, has_more: false, next_offset: null, snapshot_id: '', error: String(err), error_code: 'internal_error' }),
         },
         find_annotations_request: {
             handle: handleFindAnnotationsRequest,

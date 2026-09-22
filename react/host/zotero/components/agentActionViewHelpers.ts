@@ -1,3 +1,4 @@
+import { withMergeChoicesForDisplay } from '../../../atoms/mergeItemsChoices';
 import { getHostWindow } from '../../../runtime/windowRuntime';
 import React from 'react';
 import { AgentAction, isCreateAnnotationsAgentAction } from '../../../agents/agentActions';
@@ -286,6 +287,7 @@ export function getActionLabel(
             return completed ? 'Created Collection' : 'Create Collection';
         case 'organize_items':
             return completed ? 'Organized' : 'Organize';
+        case 'merge_items': return completed ? 'Merged Items' : 'Merge Items';
         case 'manage_tags':
             return 'Tag';
         case 'manage_collections':
@@ -333,6 +335,7 @@ export function getActionTitle(
                 ? itemTitle
                 : `${itemCount} item${itemCount !== 1 ? 's' : ''}`;
         }
+        case 'merge_items': return actionData?.preview?.members?.find((m: any) => m.item_id === actionData.master_item_id)?.title ?? null;
         case 'manage_tags': {
             const name = actionData?.name;
             const op = actionData?.action;
@@ -420,7 +423,7 @@ export function buildPreviewData(
     if (action) {
         return {
             actionType: action.action_type,
-            actionData: action.proposed_data,
+            actionData: withMergeChoicesForDisplay(action).proposed_data,
             currentValue: undefined, // We don't have this for stored actions
             resultData: action.result_data,
             errorMessage: action.error_message,

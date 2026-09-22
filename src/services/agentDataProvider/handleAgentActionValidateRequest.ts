@@ -1,3 +1,4 @@
+import { validateMergeItemsAction } from '../duplicates/merge';
 import { CollectionResolutionError } from '../collections/collectionIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
@@ -68,6 +69,8 @@ export async function handleAgentActionValidateRequest(
         if (request.action_type === 'edit_annotations') {
             return await validateEditAnnotationsAction(request);
         }
+
+        if (request.action_type === 'merge_items') return await validateMergeItemsAction(request);
 
         if (request.action_type === 'manage_tags') {
             return await validateManageTagsAction(request);

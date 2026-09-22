@@ -1209,10 +1209,11 @@ export class AgentService {
      *   client. The caller must recover the card rather than wait for a reply
      *   that cannot come.
      */
-    sendApprovalResponse(actionId: string, approved: boolean, userInstructions?: string | null): boolean {
+    sendApprovalResponse(actionId: string, approved: boolean, userInstructions?: string | null, actionChanges?: import('../protocol/duplicates').MergeItemsChoices): boolean {
         logger(`AgentService: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
         return this.send({
             type: 'deferred_approval_response',
+            action_changes: actionChanges,
             action_id: actionId,
             approved,
             user_instructions: userInstructions,

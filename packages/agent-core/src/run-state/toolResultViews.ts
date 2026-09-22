@@ -1,3 +1,4 @@
+import type { DuplicatesResultView } from '../protocol/duplicates';
 import type { BatchProgressEntry } from "./batchProgress";
 import type { TableRecord } from "../protocol/artifactProtocol";
 export { tableResultMessages } from './tableResults';
@@ -319,6 +320,7 @@ export interface TableView {
 }
 
 export type ToolResultView =
+    | DuplicatesResultView
     | TableView
     | ItemListView
     | AnnotationListView
@@ -347,6 +349,7 @@ export function isToolResultView(value: unknown): value is ToolResultView {
             && !!record.summary && typeof record.summary === 'object';
     }
     return (
+        viewType === "duplicates" ||
         viewType === "item_list" ||
         viewType === "annotation_list" ||
         viewType === "external_reference_list" ||
@@ -409,6 +412,7 @@ export function isAnnotationRow(row: ItemListRow): row is AnnotationRowView {
  */
 export function getToolResultRenderableCount(view: ToolResultView): number | null {
     switch (view.view_type) {
+        case "duplicates": return view.groups.length;
         case "item_list":
             return view.items.length;
         case "annotation_list":
