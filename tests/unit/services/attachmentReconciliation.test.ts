@@ -318,6 +318,66 @@ describe('attachment change reconciliation', () => {
         expect(mocks.invalidate).not.toHaveBeenCalled();
     });
 
+    it.each(['attachment', 'parent'] as const)(
+        'preserves an unchanged text reading failure after %s metadata changes',
+        async (target) => {
+            mocks.kind = 'text';
+            const { change } = await parentFixture();
+            await db.recordAttachmentReadingOutcome({
+                libraryId: 1, zoteroKey: item.key, contentKind: 'text',
+                errorCode: 'read_failed', attemptedAt: 100,
+            });
+            const issues = await db.getProcessingIssueCounts(entitlements);
+            expect(issues).not.toEqual([]);
+
+            if (target === 'parent') await change();
+            else await notify();
+
+            expect(await db.getAttachmentReadingError(1, item.key)).toBe('read_failed');
+            expect(await db.getProcessingIssueCounts(entitlements)).toEqual(issues);
+            expect(await db.getAttachmentProcessingState(1, item.key)).toBeNull();
+            expect(await db.peekBackgroundJobs()).toEqual([]);
+            expect(mocks.invalidate).not.toHaveBeenCalled();
+        },
+    );
+
+    it.each(['text', 'image', null] as const)(
+        'removes an indexed PDF immediately when a notification changes it to %s',
+        async (kind) => {
+            mocks.kind = 'pdf';
+            await seed(false);
+            mocks.kind = kind as any;
+
+            await notify();
+
+            expect(await db.getAttachmentProcessingState(1, item.key)).toBeNull();
+            expect(await db.peekBackgroundJobs()).toEqual([
+                expect.objectContaining({ jobType: 'fulltext_untag' }),
+            ]);
+            expect(mocks.invalidate).toHaveBeenCalledWith(1, item.key);
+        },
+    );
+
+    it('starts fresh processing when a plain-text replacement changes back to PDF', async () => {
+        mocks.kind = 'pdf';
+        await seed(false);
+        mocks.kind = 'text';
+        await notify();
+        expect(await db.getAttachmentProcessingState(1, item.key)).toBeNull();
+
+        mocks.kind = 'pdf';
+        await notify();
+
+        expect(await db.getAttachmentProcessingState(1, item.key)).toMatchObject({
+            contentKind: 'pdf',
+            extractStatus: null,
+        });
+        expect(await db.peekBackgroundJobs()).toEqual(expect.arrayContaining([
+            expect.objectContaining({ jobType: 'fulltext_untag' }),
+            expect.objectContaining({ jobType: 'document_extract' }),
+        ]));
+    });
+
     it('preserves PDF geometry cache through repeated annotation parent modifications', async () => {
         mocks.kind = 'pdf';
         await seed(false);

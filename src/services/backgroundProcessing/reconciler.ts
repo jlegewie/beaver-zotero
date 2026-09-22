@@ -220,7 +220,8 @@ export class ReconcilerService {
                 if (item && item.parentID) await Zotero.Items.getAsync(item.parentID);
                 if (!isBackgroundProcessingLibraryEnabled(ref.libraryID)) continue;
                 const kind = item && safeIsInTrash(item) === false ? getReadableContentKind(item) : null;
-                if (kind === 'text') continue;
+                // Text has independent reading outcomes; only stale processing state needs cleanup.
+                if (kind === 'text' && !await db.getAttachmentProcessingState(ref.libraryID, ref.key)) continue;
                 if (!item || (kind !== 'pdf' && kind !== 'epub' && kind !== 'snapshot')) {
                     await this.removeAttachment(db, ref.libraryID, ref.key);
                     continue;
