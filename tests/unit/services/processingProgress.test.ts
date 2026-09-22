@@ -182,6 +182,49 @@ describe("durable attachment progress", () => {
         });
     });
 
+    it("reports OCR admission unavailability as a problem instead of pending work", async () => {
+        await pending("DISABLED");
+        await conn.queryAsync(`UPDATE attachment_processing_state SET
+            extract_status = 'done', ocr_status = 'needed', file_hash = 'hash',
+            last_error = 'ocr_service_unavailable' WHERE zotero_key = 'DISABLED'`);
+        expect(await read()).toMatchObject({
+            total: 1,
+            pending: 0,
+            problems: 1,
+            finishedAt: expect.any(Number),
+        });
+
+        const retry = await queue("DISABLED", "document_ocr");
+        expect(await read()).toMatchObject({ pending: 0, problems: 1 });
+        await db.clearAttachmentOcrUnavailable(1, "DISABLED", "hash");
+        expect(await read()).toMatchObject({ pending: 1, problems: 0 });
+        await db.completeBackgroundJob(retry.id);
+        await db.markAttachmentOcrUnavailable(1, "DISABLED", "hash", "ocr_service_unavailable");
+
+        await conn.queryAsync('DROP VIEW processing_progress_pending');
+        await conn.queryAsync('DROP VIEW processing_progress_stages');
+        await conn.queryAsync(`CREATE VIEW processing_progress_stages AS
+            SELECT s.*, CASE
+                WHEN s.extract_status IS NULL THEN 'document_extract'
+                WHEN s.extract_status = 'done' AND s.ocr_status = 'needed' AND r.ocr = 1 THEN 'document_ocr'
+                END AS pending_stage,
+                CASE WHEN s.extract_status IN ('failed', 'skipped') OR s.ocr_status = 'failed'
+                    OR (s.ocr_status = 'needed' AND r.ocr = 0) THEN 1 ELSE 0 END AS problem
+            FROM attachment_processing_state s
+            JOIN processing_progress_libraries l USING (library_id)
+            CROSS JOIN processing_progress_run r`);
+        await conn.queryAsync(`CREATE VIEW processing_progress_pending AS
+            SELECT library_id, zotero_key FROM processing_progress_jobs
+            UNION SELECT library_id, zotero_key FROM processing_progress_stages
+                WHERE pending_stage IS NOT NULL`);
+        expect(await read()).toMatchObject({ pending: 1, problems: 0 });
+
+        db = new BeaverDB(conn as any);
+        await db.initDatabase("0.99.0");
+        await db.configureProcessingProgress(scope);
+        expect(await read()).toMatchObject({ pending: 0, problems: 1 });
+    });
+
     it("keeps a run open through empty discovery and active job settlement", async () => {
         await pending("FIRST");
         const first = await read();

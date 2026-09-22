@@ -68,6 +68,14 @@ describe('classifyProcessingIssue', () => {
         expect(classifyProcessingIssue(needed, withOcr)).toBeNull();
     });
 
+    it('reports unavailable OCR admission separately', () => {
+        const unavailable = row({
+            extractStatus: 'done', ocrStatus: 'needed', lastError: 'ocr_service_unavailable',
+        });
+        expect(classifyProcessingIssue(unavailable, withOcr)).toBe('ocr_unavailable');
+        expect(classifyProcessingIssue(unavailable, noOcr)).toBe('ocr_unavailable');
+    });
+
     it('reports downstream failures after successful extraction', () => {
         expect(classifyProcessingIssue(row({ extractStatus: 'done', ocrStatus: 'failed' }), withOcr)).toBe('ocr_failed');
         expect(classifyProcessingIssue(row({ extractStatus: 'done', ocrStatus: 'done', upsertStatus: 'failed' }), withOcr)).toBe('index_failed');

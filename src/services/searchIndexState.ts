@@ -23,6 +23,7 @@ export interface SearchPreparationRow {
 const UNAVAILABLE_CODES = new Set([
     'file_missing', 'encrypted', 'invalid_pdf', 'file_too_large', 'too_many_pages',
     'pdf_too_complex', 'empty_document', 'insufficient_text', 'ocr_page_cap', 'ocr_no_text',
+    'ocr_service_unavailable',
 ]);
 
 export function classifySearchPreparation(
@@ -53,7 +54,9 @@ export function classifySearchPreparation(
     );
     const unavailable = nativeDocumentLimitation || codes.some(code => UNAVAILABLE_CODES.has(code))
         || row.error === 'OCR produced no usable text layer';
-    if (settled && !row.readingSucceeded && unavailable) return 'unavailable';
+    const ocrAdmissionUnavailable = row.ocrStatus === 'needed'
+        && codes.includes('ocr_service_unavailable');
+    if (!row.readingSucceeded && unavailable && (settled || ocrAdmissionUnavailable)) return 'unavailable';
     return 'pending';
 }
 

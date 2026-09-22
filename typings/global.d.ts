@@ -508,6 +508,8 @@ declare namespace Zotero {
                 expectedExtractStatus: import("../src/services/database").AttachmentExtractStatus;
             }): Promise<boolean>;
             markAttachmentOcrFailed(libraryId: number, zoteroKey: string, fileHash: string, error: string): Promise<void>;
+            markAttachmentOcrUnavailable(libraryId: number, zoteroKey: string, fileHash: string, error: string): Promise<boolean>;
+            clearAttachmentOcrUnavailable(libraryId: number, zoteroKey: string, fileHash: string): Promise<boolean>;
             recordAttachmentIndexIdentity: import('../src/services/database').BeaverDB['recordAttachmentIndexIdentity'];
             markAttachmentUpsertDone(input: {
                 libraryId: number; zoteroKey: string; structuredDocumentHash: string;

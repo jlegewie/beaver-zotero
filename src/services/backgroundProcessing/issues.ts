@@ -17,6 +17,7 @@ export type ProcessingIssueReason =
     | 'unsupported'
     | 'extract_failed'
     | 'ocr_failed'
+    | 'ocr_unavailable'
     | 'ocr_page_cap'
     | 'index_failed';
 
@@ -82,7 +83,9 @@ export function processingIssuesSql(entitlements: IssueEntitlements): string {
             CASE WHEN r.library_id IS NULL THEN s.ocr_status
                 WHEN r.content_kind = 'pdf' AND r.error_code = 'ocr_required' THEN CASE WHEN s.ocr_status IN ('done', 'failed') THEN s.ocr_status ELSE 'needed' END
                 WHEN r.error_code IS NULL THEN 'na' ELSE NULL END AS ocr_status,
-            s.upsert_status, CASE WHEN r.error_code = 'ocr_required' AND s.ocr_status = 'failed' THEN s.last_error ELSE COALESCE(r.error_code, s.last_error) END AS last_error,
+            s.upsert_status, CASE WHEN r.error_code = 'ocr_required'
+                AND (s.ocr_status = 'failed' OR s.last_error = 'ocr_service_unavailable')
+                THEN s.last_error ELSE COALESCE(r.error_code, s.last_error) END AS last_error,
             s.updated_at, r.attempted_at,
             CASE WHEN r.library_id IS NOT NULL AND r.error_code IS NULL THEN 1 ELSE 0 END AS read_succeeded
         FROM attachment_processing_state s
@@ -114,6 +117,7 @@ export function processingIssuesSql(entitlements: IssueEntitlements): string {
                     WHEN ${hasCodeSql('ocr_page_cap')} THEN 'ocr_page_cap'
                     WHEN ${anyCodeSql(FILE_UNAVAILABLE_CODES)} THEN 'file_unavailable'
                     ELSE 'ocr_failed' END
+                WHEN ocr_status = 'needed' AND ${hasCodeSql('ocr_service_unavailable')} THEN 'ocr_unavailable'
                 WHEN ocr_status = 'needed' AND ${entitlements.hasOcrAccess ? 0 : 1} THEN 'scanned'
                 WHEN upsert_status = 'failed' AND ${entitlements.hasSearchIndexAccess ? 1 : 0} THEN 'index_failed'
             END AS reason
@@ -144,6 +148,7 @@ export const PROCESSING_ISSUE_REASON_ORDER: ProcessingIssueReason[] = [
     'extract_failed',
     'no_text',
     'ocr_failed',
+    'ocr_unavailable',
     'ocr_page_cap',
     'index_failed',
     'encrypted',
@@ -168,6 +173,7 @@ export const RETRYABLE_PROCESSING_ISSUE_REASONS: readonly ProcessingIssueReason[
     'file_unavailable',
     'extract_failed',
     'ocr_failed',
+    'ocr_unavailable',
     'index_failed',
     'encrypted',
     'too_large',
@@ -229,6 +235,7 @@ export function classifyProcessingIssue(
         if (hasCode(row.lastError, 'ocr_page_cap')) return 'ocr_page_cap';
         return hasAnyCode(row.lastError, FILE_UNAVAILABLE_CODES) ? 'file_unavailable' : 'ocr_failed';
     }
+    if (row.ocrStatus === 'needed' && hasCode(row.lastError, 'ocr_service_unavailable')) return 'ocr_unavailable';
     if (row.ocrStatus === 'needed' && !entitlements.hasOcrAccess) return 'scanned';
     if (row.upsertStatus === 'failed' && entitlements.hasSearchIndexAccess) return 'index_failed';
     return null;

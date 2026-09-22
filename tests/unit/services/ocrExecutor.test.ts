@@ -128,6 +128,8 @@ beforeEach(() => {
         getAttachmentProcessingState: vi.fn(async () => null),
         markAttachmentOcrDone: vi.fn(async () => true),
         markAttachmentOcrFailed: vi.fn(async () => undefined),
+        markAttachmentOcrUnavailable: vi.fn(async () => true),
+        clearAttachmentOcrUnavailable: vi.fn(async () => true),
         recordAttachmentReadingOutcome: vi.fn(async () => undefined),
     };
 
@@ -330,15 +332,25 @@ describe('OcrExecutor', () => {
         expect(second).toEqual({ kind: 'complete', reason: 'ocr_ok' });
     });
 
-    it('completes without work when the backend reports disabled', async () => {
-        api.requestOcr.mockResolvedValue({ status: 'disabled' });
+    it('records a recoverable unavailable state when the backend reports disabled', async () => {
+        api.requestOcr
+            .mockResolvedValueOnce({ status: 'disabled' })
+            .mockResolvedValueOnce({ status: 'ready', get_url: 'https://gcs/get' });
         const ctx = makeCtx();
 
         const outcome = await executor.execute(record, ctx);
 
         expect(mockedPut).not.toHaveBeenCalled();
         expect(ctx.runOnMuPDFWorker).not.toHaveBeenCalled();
+        expect(dbStub.markAttachmentOcrUnavailable).toHaveBeenCalledWith(
+            1, 'AAAAAAAA', 'hash123', 'ocr_service_unavailable',
+        );
+        expect(dbStub.markAttachmentOcrFailed).not.toHaveBeenCalled();
         expect(outcome).toEqual({ kind: 'complete', reason: 'ocr_disabled' });
+
+        await expect(executor.execute(record, makeCtx())).resolves.toEqual({ kind: 'complete', reason: 'ocr_ok' });
+        expect(dbStub.clearAttachmentOcrUnavailable).toHaveBeenCalledWith(1, 'AAAAAAAA', 'hash123');
+        expect(dbStub.markAttachmentOcrUnavailable).toHaveBeenCalledOnce();
     });
 
     it('recovers legacy detection metadata through native extraction before requesting OCR', async () => {

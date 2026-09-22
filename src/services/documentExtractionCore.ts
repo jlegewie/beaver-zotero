@@ -1115,7 +1115,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                     return {
                         kind: 'cached_error',
                         code: 'no_text_layer',
-                        message: `The PDF file for ${resolvedKeyStr} is not prepared (no text layer). Enable cloud preparation in Beaver Preferences; reading does not start OCR`,
+                        message: `The PDF file for ${resolvedKeyStr} is not prepared (no text layer). Cloud preparation may be turned off or temporarily unavailable; reading does not start OCR`,
                         pageCount: preflight.pageCount,
                         resolvedAttachment,
                     };
@@ -1482,7 +1482,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                         ? `The PDF file for ${errorKey} is password-protected`
                         : cachedCode === 'invalid_pdf'
                             ? `The PDF file for ${errorKey} is invalid or corrupted`
-                            : `The PDF file for ${errorKey} is not prepared (no text layer). Enable cloud preparation in Beaver Preferences; reading does not start OCR`,
+                            : `The PDF file for ${errorKey} is not prepared (no text layer). Cloud preparation may be turned off or temporarily unavailable; reading does not start OCR`,
                     pageCount: extractionError.pageCount ?? totalPages,
                     resolvedAttachment,
                 };
@@ -1502,7 +1502,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                     return {
                         kind: 'response_error',
                         code: 'no_text_layer',
-                        message: `The PDF file for ${errorKey} is not prepared (no text layer). Enable cloud preparation in Beaver Preferences; reading does not start OCR`,
+                        message: `The PDF file for ${errorKey} is not prepared (no text layer). Cloud preparation may be turned off or temporarily unavailable; reading does not start OCR`,
                         pageCount: totalPagesForError,
                         resolvedAttachment,
                     };

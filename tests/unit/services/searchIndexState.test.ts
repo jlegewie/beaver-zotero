@@ -51,6 +51,14 @@ describe('search preparation classification', () => {
         expect(classifySearchPreparation(row({ extractStatus: null, error: 'encrypted' }), identity)).toBe('pending');
         expect(classifySearchPreparation(row({ extractStatus: 'failed', error: 'encrypted', readingSucceeded: true }), identity)).toBe('pending');
     });
+    it('counts recoverable OCR admission closure as unavailable while preserving stronger evidence', () => {
+        const unavailable = row({
+            ocrStatus: 'needed', upsertStatus: null, error: 'ocr_service_unavailable',
+        });
+        expect(classifySearchPreparation(unavailable, identity)).toBe('unavailable');
+        expect(classifySearchPreparation({ ...unavailable, readingSucceeded: true }, identity)).toBe('pending');
+        expect(classifySearchPreparation(row({ error: 'ocr_service_unavailable' }), identity)).toBe('indexed');
+    });
 });
 
 describe('send-time search snapshot', () => {

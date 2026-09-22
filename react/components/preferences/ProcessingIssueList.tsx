@@ -64,6 +64,11 @@ function reasonCopy(reason: ProcessingIssueReason, hasOcrAccess: boolean): Reaso
                 title: 'OCR failed',
                 description: 'Text recognition did not succeed for these scans.',
             };
+        case 'ocr_unavailable':
+            return {
+                title: 'OCR temporarily unavailable',
+                description: 'Cloud text recognition is not accepting work right now. Beaver will retry automatically, or you can retry now.',
+            };
         case 'ocr_page_cap':
             return {
                 title: 'Exceeds the OCR page limit',

@@ -29,6 +29,7 @@ import {
     type ProcessingIssueItem,
 } from './backgroundProcessing/issues';
 import { logger } from '@beaver/agent-core/platform/logger';
+import { OCR_SERVICE_UNAVAILABLE } from './ocr/constants';
 
 export type { DocumentCachePageLabels } from '@beaver/agent-core/extract/document/shared/contentKinds';
 
@@ -2835,6 +2836,38 @@ export class BeaverDB {
         );
     }
 
+    /** Record a recoverable OCR admission failure without making the stage terminal. */
+    public async markAttachmentOcrUnavailable(
+        libraryId: number,
+        zoteroKey: string,
+        fileHash: string,
+        error: string,
+    ): Promise<boolean> {
+        return await this.executeChangedRow(
+            `UPDATE attachment_processing_state SET
+                last_error = ?, updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ?
+               AND file_hash = ? AND extract_status = 'done' AND ocr_status = 'needed'`,
+            [error, libraryId, zoteroKey, fileHash],
+        );
+    }
+
+    /** Clear only the matching recoverable marker once the OCR API accepts work. */
+    public async clearAttachmentOcrUnavailable(
+        libraryId: number,
+        zoteroKey: string,
+        fileHash: string,
+    ): Promise<boolean> {
+        return await this.executeChangedRow(
+            `UPDATE attachment_processing_state SET
+                last_error = NULL, updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ?
+               AND file_hash = ? AND extract_status = 'done' AND ocr_status = 'needed'
+               AND last_error = ?`,
+            [libraryId, zoteroKey, fileHash, OCR_SERVICE_UNAVAILABLE],
+        );
+    }
+
     private async enqueueReplacementUntag(previous: AttachmentProcessingStateRecord | null, newHash: string | null): Promise<void> {
         if (previous?.upsertRemoteIdentity && previous.structuredDocumentHash && previous.structuredDocumentHash !== newHash) {
             await this.enqueueBackgroundJobInTransaction(buildUntagJobInput(previous, Date.now(), { reason: 'replacement' }));
@@ -2963,7 +2996,7 @@ export class BeaverDB {
         const where = libraryId == null ? '' : ' WHERE library_id = ?';
         const params = libraryId == null ? [] : [libraryId];
         const pendingConditions = ['extract_status IS NULL'];
-        if (targets.ocr) pendingConditions.push(`ocr_status = 'needed'`);
+        if (targets.ocr) pendingConditions.push(`(ocr_status = 'needed' AND last_error IS NOT '${OCR_SERVICE_UNAVAILABLE}')`);
         if (targets.upsert) {
             pendingConditions.push(`(
                 upsert_status IS NULL
@@ -2983,8 +3016,10 @@ export class BeaverDB {
                 MIN(CASE WHEN ${pendingConditions.join(' OR ')} THEN created_at END),
                 SUM(CASE WHEN extract_status = 'done' AND (ocr_status IS NULL OR ocr_status IN ('na', 'done')) THEN 1 ELSE 0 END),
                 SUM(CASE WHEN extract_status IN ('failed', 'skipped')
-                    OR (extract_status = 'done' AND (ocr_status = 'failed' ${targets.ocr ? '' : "OR ocr_status = 'needed'"})) THEN 1 ELSE 0 END),
-                SUM(CASE WHEN extract_status = 'done' AND ocr_status = 'needed' AND ${targets.ocr ? '1' : '0'} THEN 1 ELSE 0 END)
+                    OR (extract_status = 'done' AND (ocr_status = 'failed'
+                        OR (ocr_status = 'needed' AND (${targets.ocr ? `last_error IS '${OCR_SERVICE_UNAVAILABLE}'` : '1'})))) THEN 1 ELSE 0 END),
+                SUM(CASE WHEN extract_status = 'done' AND ocr_status = 'needed'
+                    AND last_error IS NOT '${OCR_SERVICE_UNAVAILABLE}' AND ${targets.ocr ? '1' : '0'} THEN 1 ELSE 0 END)
              FROM attachment_processing_state${where}`,
             params,
             {

@@ -29,6 +29,7 @@ import { NewItemWatcher } from '../../../src/services/backgroundProcessing/newIt
 import { observeAttachmentSource } from '../../../src/services/documentExtraction/sourceObservation';
 import { DocumentExtractExecutor } from '../../../src/services/backgroundQueue/documentExtractExecutor';
 import { BackgroundExtractor } from '../../../src/services/backgroundExtractor';
+import { maybeEnqueueOcrJob } from '../../../src/services/ocr/enqueueOcr';
 import { expectedExtractionSchemaVersion } from '../../../src/services/documentExtraction/shared/extractionSchemaVersions';
 
 const entitlements = { hasOcrAccess: true, hasSearchIndexAccess: true };
@@ -216,6 +217,27 @@ describe('attachment change reconciliation', () => {
             jobType: 'document_extract', priority: 90,
             payload: expect.objectContaining({ request_context: 'interactive' }),
         })]);
+    });
+
+    it('re-enqueues OCR after a recoverable service-unavailable response', async () => {
+        mocks.kind = 'pdf';
+        item.attachmentContentType = 'application/pdf';
+        await db.ensureAttachmentProcessingState({
+            libraryId: 1, zoteroKey: item.key, itemId: item.id, contentKind: 'pdf',
+        });
+        await connection.queryAsync(`UPDATE attachment_processing_state SET
+            extract_status = 'done', extract_schema_version = ?, ocr_status = 'needed', file_hash = 'hash',
+            last_error = 'ocr_service_unavailable' WHERE zotero_key = ?`,
+            [expectedExtractionSchemaVersion('pdf'), item.key]);
+
+        await (reconciler as any).reconcileAttachment(
+            db, item, 'pdf', false, [], await db.getAttachmentProcessingState(1, item.key), false, 'backfill',
+        );
+
+        expect(maybeEnqueueOcrJob).toHaveBeenCalledWith(expect.objectContaining({
+            zoteroKey: item.key,
+            requestContext: 'backfill',
+        }));
     });
 
     it.each([
