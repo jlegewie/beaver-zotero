@@ -571,9 +571,24 @@ export async function lookupZoteroReferences(
         }
     }
 
+    // Library scope can change while serialization awaits file/status data.
+    const stillSearchable = (entry: { library_id: number; zotero_key: string }) => {
+        const excluded = checkLibraryExcluded(entry.library_id);
+        if (!excluded) return true;
+        errors.push({
+            reference: {
+                library_id: entry.library_id,
+                zotero_key: entry.zotero_key,
+                library_ref: libraryRefForLibraryID(entry.library_id) ?? undefined,
+            },
+            error: excluded.message,
+            error_code: 'library_excluded',
+        });
+        return false;
+    };
     return {
-        items,
-        attachments,
+        items: items.filter(entry => stillSearchable(entry.item)),
+        attachments: attachments.filter(entry => stillSearchable(entry.attachment)),
         notes: noteResults,
         annotations: annotationResults,
         errors,

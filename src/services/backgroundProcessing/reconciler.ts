@@ -168,8 +168,31 @@ export class ReconcilerService {
     }
 
     private async reconcileNotifiedAttachments(db: QueueDB, generation: number): Promise<void> {
-        const events = [...this.pendingAttachments.values()];
+        const changes = new Map(this.pendingAttachments);
         this.pendingAttachments.clear();
+        // Parent trash/restore changes eligibility without modifying its children.
+        // Include trashed children and let the attachment check read current state.
+        const parentIds: number[] = [];
+        for (const event of changes.values()) {
+            if (this.cancelled(generation)) return;
+            if (event.event === 'delete') continue;
+            const item = await Zotero.Items.getAsync(event.id);
+            if (item?.isRegularItem() && isBackgroundProcessingLibraryEnabled(item.libraryID)) {
+                parentIds.push(event.id);
+            }
+        }
+        for (let start = 0; start < parentIds.length; start += ATTACHMENT_SCAN_BATCH_SIZE) {
+            const batch = parentIds.slice(start, start + ATTACHMENT_SCAN_BATCH_SIZE);
+            await Zotero.DB.queryAsync(
+                `SELECT itemID FROM itemAttachments WHERE parentItemID IN (${batch.map(() => '?').join(',')})`,
+                batch,
+                { onRow: (row: any) => {
+                    const id = row.getResultByIndex(0);
+                    if (!changes.has(id)) changes.set(id, { id, event: 'modify', backfill: true });
+                } },
+            );
+        }
+        const events = [...changes.values()];
         // One new supported attachment in a 500ms quiet notification batch is
         // interactive. Multiple attachments (including individually emitted adds)
         // are backfill. Parent items do not count as attachments.
@@ -193,6 +216,7 @@ export class ReconcilerService {
                 }
                 if (!ref?.libraryID || !ref.key || !isBackgroundProcessingLibraryEnabled(ref.libraryID)) continue;
                 const item = event.event === 'delete' ? null : await Zotero.Items.getAsync(event.id);
+                if (item?.isRegularItem()) continue;
                 if (item && item.parentID) await Zotero.Items.getAsync(item.parentID);
                 if (!isBackgroundProcessingLibraryEnabled(ref.libraryID)) continue;
                 const kind = item && safeIsInTrash(item) === false ? getReadableContentKind(item) : null;

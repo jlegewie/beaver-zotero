@@ -48,6 +48,8 @@ const TERMINAL_CODES = new Set([
 
 /** Authenticated cloud-index work owned by the background runtime. */
 export class FulltextUpsertExecutor implements JobExecutor {
+    // Upsert and cleanup use separate lanes but mutate the same membership.
+    private static activeAttachments = new Set<string>();
     readonly jobType: Extract<BackgroundJobType, 'fulltext_upsert' | 'fulltext_untag'>;
 
     private disposed = false;
@@ -65,6 +67,19 @@ export class FulltextUpsertExecutor implements JobExecutor {
         record: BackgroundJobRecord,
         ctx: JobExecutionContext,
     ): Promise<JobOutcome> {
+        const key = `${record.libraryId}-${record.zoteroKey}`;
+        if (FulltextUpsertExecutor.activeAttachments.has(key)) {
+            return { kind: 'retry', error: 'index_membership_busy', countsAsAttempt: false, retryAfterMs: 1_000 };
+        }
+        FulltextUpsertExecutor.activeAttachments.add(key);
+        try {
+            return await this.executeExclusive(record, ctx);
+        } finally {
+            FulltextUpsertExecutor.activeAttachments.delete(key);
+        }
+    }
+
+    private async executeExclusive(record: BackgroundJobRecord, ctx: JobExecutionContext): Promise<JobOutcome> {
         if (record.jobType === 'fulltext_untag') {
             return this.executeUntag(record, ctx);
         }
@@ -118,6 +133,31 @@ export class FulltextUpsertExecutor implements JobExecutor {
             return { kind: 'complete', reason: 'ledger_not_ready' };
         }
         let row = { ...initial, structuredDocumentHash: initial.structuredDocumentHash };
+        const checkEligibility = async (): Promise<JobOutcome | null> => {
+            let item: Zotero.Item | false;
+            try {
+                item = await Zotero.Items.getByLibraryAndKeyAsync(record.libraryId, record.zoteroKey);
+                if (item && item.parentID) await Zotero.Items.getAsync(item.parentID);
+            } catch {
+                return { kind: 'retry', error: 'trash_state_unavailable' };
+            }
+            if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+            const trash = item ? safeIsInTrash(item) : true;
+            if (trash === null) return { kind: 'retry', error: 'trash_state_unavailable' };
+            if (!trash) return null;
+            if (row.upsertRemoteIdentity) {
+                await ctx.enqueue(buildUntagJobInput(row, Date.now()));
+            }
+            if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+            await ctx.db.deleteAttachmentProcessingState(record.libraryId, record.zoteroKey);
+            await Zotero.Beaver?.documentCache?.invalidate(record.libraryId, record.zoteroKey);
+            if (record.itemId) {
+                Zotero.Beaver?.processingReconciler?.notifyAttachments([{ id: record.itemId, event: 'modify' }]);
+            }
+            return { kind: 'complete', reason: item ? 'in_trash' : 'item_missing' };
+        };
+        const initialEligibility = await checkEligibility();
+        if (initialEligibility) return initialEligibility;
         const scopeRef = getIndexScopeRef(record.libraryId);
         if (!scopeRef) return { kind: 'complete', reason: 'invalid_scope_ref' };
         const { localUserKey } = getZoteroUserIdentifier();
@@ -156,6 +196,8 @@ export class FulltextUpsertExecutor implements JobExecutor {
             Awaited<ReturnType<SearchIndexApiClient['upsertPayload']>> | JobOutcome
         > => {
             if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+            const eligibility = await checkEligibility();
+            if (eligibility) return eligibility;
             const payload = await this.readCachedPayload(record, row);
             if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
             if (!payload) {
@@ -185,6 +227,8 @@ export class FulltextUpsertExecutor implements JobExecutor {
             }
             try {
                 if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+                const eligibility = await checkEligibility();
+                if (eligibility) return eligibility;
                 return await this.api.upsertPayload({ ...baseRequest, payload });
             } catch (payloadError) {
                 return this.mapApiError(record, row, payloadError, ctx, accessChanged);
@@ -194,6 +238,8 @@ export class FulltextUpsertExecutor implements JobExecutor {
         let response;
         try {
             if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+            const eligibility = await checkEligibility();
+            if (eligibility) return eligibility;
             response = await this.api.upsertHash(baseRequest);
         } catch (error) {
             if (!(isApiError(error))
@@ -205,6 +251,9 @@ export class FulltextUpsertExecutor implements JobExecutor {
             if ('kind' in result) return result;
             response = result;
         }
+
+        const completedEligibility = await checkEligibility();
+        if (completedEligibility) return completedEligibility;
 
         // A tag append reports the generation already stored remotely.
         // Older rows require an explicit payload request; repeating the
@@ -236,6 +285,8 @@ export class FulltextUpsertExecutor implements JobExecutor {
             'fulltext_upsert',
         ).catch(() => undefined);
         if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+        const finalEligibility = await checkEligibility();
+        if (finalEligibility) return finalEligibility;
         const applied = await ctx.db.markAttachmentUpsertDone({
             libraryId: row.libraryId,
             zoteroKey: row.zoteroKey,
@@ -334,7 +385,8 @@ export class FulltextUpsertExecutor implements JobExecutor {
                 record.zoteroKey,
             ) || null;
         } catch { /* handled below */ }
-        if (!item || safeIsInTrash(item) === true) return null;
+        if (item?.parentID) await Zotero.Items.getAsync(item.parentID);
+        if (!item || safeIsInTrash(item) !== false) return null;
         const source = await resolveAttachmentFileSource({
             item,
             localSizeStrategy: 'stat',

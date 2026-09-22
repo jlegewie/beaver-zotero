@@ -22,7 +22,7 @@ export class NewItemWatcher {
                 extraData: Record<number, { libraryID?: number; key?: string }> | undefined,
             ) => {
                 const downloaded = type === 'file' && event === 'download';
-                if (!downloaded && (type !== 'item' || !['add', 'modify', 'delete'].includes(event))) return;
+                if (!downloaded && (type !== 'item' || !['add', 'modify', 'trash', 'delete'].includes(event))) return;
                 if (Zotero.__beaverShuttingDown === true) return;
                 for (const id of ids) {
                     // A late download must not erase the identity needed for deletion cleanup.
@@ -30,7 +30,7 @@ export class NewItemWatcher {
                     this.pending.set(id, {
                         event: event === 'delete' ? 'delete'
                             : this.pending.get(id)?.event === 'add' ? 'add'
-                                : downloaded ? 'modify' : event as AttachmentChange['event'],
+                                : downloaded || event === 'trash' ? 'modify' : event as AttachmentChange['event'],
                         id,
                         backfill: this.pending.get(id)?.backfill === true
                             || Zotero.Sync?.Runner?.syncInProgress === true,
