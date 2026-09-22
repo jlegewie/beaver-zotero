@@ -556,7 +556,7 @@ export const loadThreadAtom = atom(
                 for (const run of processedRuns) {
                     const attachments = run.user_prompt.attachments || [];
                     attachments
-                        .filter(att => att.type !== 'external_file')
+                        .filter(att => att.type !== 'external_file' && att.type !== 'table')
                         .filter(att => !!att.zotero_key)
                         .forEach(att => allItemReferences.set(zoteroReferenceKey(att), {
                             library_id: att.library_id,

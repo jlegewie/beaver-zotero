@@ -70,7 +70,7 @@ export type TableItemErrorCode =
     | 'invalid_request'
     | 'library_excluded'
     | 'no_writable_library'
-    /** The library is writable, but the import API cannot file a table there. */
+    /** The library type cannot hold a table. */
     | 'unsupported_library'
     | 'invalid_target'
     | 'import_failed'
@@ -166,7 +166,8 @@ export function isTableItem(item: Zotero.Item | null | undefined): boolean {
 
 /** Candidate attachment for explicit addressing; the embedded document is checked on read. */
 export function isTableAttachment(item: Zotero.Item | null | undefined): boolean {
-    if (!item || !item.isAttachment() || !item.isTopLevelItem()) return false;
+    if (!item || !item.isAttachment() || item.attachmentContentType !== 'text/html') return false;
+    if (!item.isTopLevelItem()) return false;
     if (item.attachmentLinkMode !== Zotero.Attachments.LINK_MODE_IMPORTED_URL)
         return false;
     if (item.attachmentContentType !== 'text/html') return false;

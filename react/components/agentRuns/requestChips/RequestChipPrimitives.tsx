@@ -1,5 +1,5 @@
 import React from 'react';
-import { CSSIcon, CSSItemTypeIcon, LibraryIcon, NoteIcon, HighlighterIcon, ExternalLinkIcon } from '../../icons/icons';
+import { CSSIcon, CSSItemTypeIcon, Icon, LibraryIcon, NoteIcon, HighlighterIcon, ExternalLinkIcon, TableIcon } from '../../icons/icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
 import { getHost } from '@beaver/agent-ui/host';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
@@ -13,6 +13,33 @@ import { ChipButton } from './ChipButton';
 import { ChipRemovableIcon } from './ChipRemovableIcon';
 
 const MAX_CHIP_TEXT_LENGTH = 30;
+
+/**
+ * A stored table as a request chip. Carries the table glyph rather than the
+ * snapshot glyph of its Zotero item so it reads as the same thing the table
+ * cards and the artifacts list show; clicking opens the current snapshot.
+ */
+export function TableChip({ title, tableKey, remove }: { title: string; tableKey: string; remove?: ChipRemoveConfig }) {
+    const [error, setError] = React.useState('');
+    return <>
+        <ChipShell
+            icon={
+                <span className="scale-80 display-flex">
+                    <Icon icon={TableIcon} />
+                </span>
+            }
+            label={truncateText(title || 'Table', MAX_CHIP_TEXT_LENGTH)}
+            remove={remove}
+            onClick={() => {
+                const open = getHost().navigation?.openTable;
+                if (!open) { setError('Table provider unavailable.'); return; }
+                void open(tableKey).then(result => setError('error' in result ? result.error : result.warning ?? ''))
+                    .catch(() => setError('Table provider unavailable.'));
+            }}
+        />
+        {error && <span role="status">{error}</span>}
+    </>;
+}
 const MAX_ANNOTATION_TOOLTIP_TEXT_LENGTH = 160;
 
 /**

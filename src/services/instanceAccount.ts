@@ -14,6 +14,12 @@ import {
 } from "@beaver/agent-core/transport/supabaseClient";
 import { setCredentialAdapter } from "@beaver/agent-core/transport/credentials";
 import { setTransportConfig, getTransportConfig } from "@beaver/agent-core/transport/config";
+import { isCredentialsBlockedError } from "@beaver/agent-core/types/apiErrors";
+import {
+    CONNECTION_TROUBLESHOOTING_URL,
+    CREDENTIALS_BLOCKED_MESSAGE,
+    CREDENTIALS_BLOCKED_TITLE,
+} from "@beaver/agent-core/transport/connectionFailure";
 import { registerZoteroSupabaseStorage } from "./zoteroSupabaseStorage";
 import { registerZoteroClientIdentity } from "./zoteroClientIdentity";
 import { prepareServiceRealm } from "../runtime/realm";
@@ -43,7 +49,14 @@ export interface AccountSnapshot {
               attempt: number;
               offline: boolean;
           }
-        | { kind: "fatal"; message: string };
+        | {
+              kind: "fatal";
+              message: string;
+              /** Replaces the generic heading when the cause is known. */
+              title?: string;
+              /** Documentation the user can act on, rendered as a link. */
+              helpUrl?: string;
+          };
 }
 /** Profile refresh cadence while a Beaver surface is showing in any window. */
 const VISIBLE_REFRESH_MS = 15 * 60 * 1000;
@@ -564,7 +577,14 @@ export class InstanceAccount {
                           attempt: ++this.attempts,
                           offline: this.isOffline(),
                       }
-                    : { kind: "fatal", message: e?.message ?? String(error) };
+                    : isCredentialsBlockedError(error)
+                      ? {
+                            kind: "fatal",
+                            title: CREDENTIALS_BLOCKED_TITLE,
+                            message: CREDENTIALS_BLOCKED_MESSAGE,
+                            helpUrl: CONNECTION_TROUBLESHOOTING_URL,
+                        }
+                      : { kind: "fatal", message: e?.message ?? String(error) };
                 this.publish();
                 if (transient)
                     this.schedule(

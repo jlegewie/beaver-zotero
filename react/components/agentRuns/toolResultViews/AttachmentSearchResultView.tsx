@@ -10,7 +10,7 @@ import { getHost } from '@beaver/agent-ui/host';
 
 /**
  * Shared renderer for the {@link AttachmentSearchView} view model
- * (find_in_attachments).
+ * (find_in_attachments and fulltext_search).
  *
  * Each attachment renders as a header row with nested matches. Reveal/open and
  * match navigation route through the navigation host.
@@ -25,24 +25,73 @@ const TOKEN_RE = /[\p{L}\p{N}_]+/gu;
 /** Leading context kept before the first hit when re-anchoring a preview. */
 const PREVIEW_LEAD_CHARS = 20;
 
-function queryTokenSet(query: string): Set<string> {
-    const terms = new Set<string>();
-    for (const m of query.toLowerCase().matchAll(TOKEN_RE)) {
-        terms.add(m[0]);
-    }
-    return terms;
+/** A phrase as lowercase word tokens, matched against consecutive snippet tokens. */
+type Phrase = string[];
+
+/** Half-open character range of one highlight within a snippet. */
+type HighlightRange = [number, number];
+
+function tokenizePhrase(text: string): Phrase {
+    return Array.from(text.toLowerCase().matchAll(TOKEN_RE), (m) => m[0]);
 }
 
-/** Move the first query-term hit toward the start of a long preview. */
-function anchorSnippetOnMatch(snippet: string, terms: Set<string>): string {
-    if (terms.size === 0) return snippet;
-    let hit = -1;
-    for (const m of snippet.matchAll(TOKEN_RE)) {
-        if (terms.has(m[0].toLowerCase())) {
-            hit = m.index;
-            break;
+/**
+ * What to mark in previews. A producer that sends `highlight_phrases` owns
+ * the decision (an empty list marks nothing); legacy producers omit it and
+ * every query term is marked individually.
+ */
+function highlightPhrasesFor(view: AttachmentSearchView): Phrase[] {
+    if (view.highlight_phrases == null) {
+        return Array.from(new Set(tokenizePhrase(view.query)), (term) => [term]);
+    }
+    // Invalid explicit values must not invent query hits or break rendering.
+    if (!Array.isArray(view.highlight_phrases)) return [];
+    return view.highlight_phrases
+        .filter((phrase): phrase is string => typeof phrase === 'string')
+        .map(tokenizePhrase)
+        .filter((phrase) => phrase.length > 0);
+}
+
+/** Merged character ranges where any phrase occurs as consecutive tokens. */
+function phraseRanges(snippet: string, phrases: Phrase[]): HighlightRange[] {
+    if (phrases.length === 0) return [];
+    const tokens = Array.from(snippet.matchAll(TOKEN_RE), (m) => ({
+        token: m[0].toLowerCase(),
+        start: m.index,
+        end: m.index + m[0].length,
+    }));
+    const ranges: HighlightRange[] = [];
+    for (let i = 0; i < tokens.length; i++) {
+        for (const phrase of phrases) {
+            if (i + phrase.length > tokens.length) continue;
+            let matches = true;
+            for (let k = 0; k < phrase.length; k++) {
+                // Allow word spacing and hyphenated compounds, but not punctuation
+                // that can separate clauses or sentences.
+                const gap = k > 0 ? snippet.slice(tokens[i + k - 1].end, tokens[i + k].start) : '';
+                if (tokens[i + k].token !== phrase[k] || !/^[\s\-\u2010\u2011]*$/u.test(gap)) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) ranges.push([tokens[i].start, tokens[i + phrase.length - 1].end]);
         }
     }
+    ranges.sort((a, b) => a[0] - b[0]);
+    const merged: HighlightRange[] = [];
+    for (const range of ranges) {
+        const last = merged[merged.length - 1];
+        if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
+        else merged.push([range[0], range[1]]);
+    }
+    return merged;
+}
+
+/** Move the first highlighted phrase toward the start of a long preview. */
+function anchorSnippetOnMatch(snippet: string, phrases: Phrase[]): string {
+    const first = phraseRanges(snippet, phrases)[0];
+    if (!first) return snippet;
+    const hit = first[0];
     if (hit <= PREVIEW_LEAD_CHARS) return snippet;
     let cut = hit - PREVIEW_LEAD_CHARS;
     const space = snippet.indexOf(' ', cut);
@@ -50,33 +99,28 @@ function anchorSnippetOnMatch(snippet: string, terms: Set<string>): string {
     return '… ' + snippet.slice(cut).replace(/^…\s*/, '');
 }
 
-/** Render a snippet with query-term hits highlighted. */
-function highlightSnippet(snippet: string, terms: Set<string>): React.ReactNode {
-    if (terms.size === 0) return snippet;
+/** Render a snippet with phrase hits highlighted. */
+function highlightSnippet(snippet: string, phrases: Phrase[]): React.ReactNode {
+    const ranges = phraseRanges(snippet, phrases);
+    if (ranges.length === 0) return snippet;
     const nodes: React.ReactNode[] = [];
     let lastIndex = 0;
     let key = 0;
-    for (const m of snippet.matchAll(TOKEN_RE)) {
-        const token = m[0];
-        const start = m.index;
+    for (const [start, end] of ranges) {
         if (start > lastIndex) nodes.push(snippet.slice(lastIndex, start));
-        if (terms.has(token.toLowerCase())) {
-            nodes.push(
-                <mark
-                    key={key++}
-                    style={{
-                        backgroundColor: 'var(--tag-yellow-tertiary)',
-                        color: 'var(--fill-primary)',
-                        borderRadius: '2px',
-                    }}
-                >
-                    {token}
-                </mark>
-            );
-        } else {
-            nodes.push(token);
-        }
-        lastIndex = start + token.length;
+        nodes.push(
+            <mark
+                key={key++}
+                style={{
+                    backgroundColor: 'var(--tag-yellow-tertiary)',
+                    color: 'var(--fill-primary)',
+                    borderRadius: '2px',
+                }}
+            >
+                {snippet.slice(start, end)}
+            </mark>
+        );
+        lastIndex = end;
     }
     if (lastIndex < snippet.length) nodes.push(snippet.slice(lastIndex));
     return nodes;
@@ -155,7 +199,7 @@ const StatusBadge: React.FC<{ text: string; variant: 'match' | 'muted' }> = ({ t
 );
 
 export const AttachmentSearchResultView: React.FC<{ view: AttachmentSearchView }> = ({ view }) => {
-    const queryTerms = React.useMemo(() => queryTokenSet(view.query), [view.query]);
+    const phrases = React.useMemo(() => highlightPhrasesFor(view), [view]);
     const [hoveredKey, setHoveredKey] = useState<string | null>(null);
     const [showNoMatches, setShowNoMatches] = useState(false);
 
@@ -259,7 +303,7 @@ export const AttachmentSearchResultView: React.FC<{ view: AttachmentSearchView }
                                     onMouseLeave={() => setHoveredKey(null)}
                                 >
                                     <div className="text-sm truncate min-w-0 flex-1 font-color-secondary">
-                                        &ldquo;{highlightSnippet(anchorSnippetOnMatch(match.snippet, queryTerms), queryTerms)}&rdquo;
+                                        &ldquo;{highlightSnippet(anchorSnippetOnMatch(match.snippet, phrases), phrases)}&rdquo;
                                     </div>
                                     {pageText && (
                                         <div className="text-sm font-color-secondary whitespace-nowrap">

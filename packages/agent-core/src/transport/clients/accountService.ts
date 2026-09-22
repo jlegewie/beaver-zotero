@@ -73,6 +73,19 @@ interface PlansResponse {
     plans: PlanInfo[];
 }
 
+export interface ScheduledChange {
+    sku: string;
+    name: string;
+    unit_amount: number;
+    currency: string;
+    interval: 'month' | 'year';
+    effective_at: string;
+}
+
+interface ScheduledChangeResponse {
+    scheduled_change: ScheduledChange | null;
+}
+
 interface CheckoutSessionRequest {
     sku: string;
     success_url: string;
@@ -326,6 +339,10 @@ export class AccountService extends ApiService {
      */
     async getPlans(): Promise<PlansResponse> {
         return this.get<PlansResponse>('/api/v1/billing/plans');
+    }
+
+    async getScheduledChange(): Promise<ScheduledChangeResponse> {
+        return this.get<ScheduledChangeResponse>('/api/v1/billing/scheduled-change');
     }
 
     /**

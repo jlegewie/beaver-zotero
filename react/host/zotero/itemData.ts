@@ -1,4 +1,5 @@
 import { type PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
+import { resolveTableDisplay, subscribeTableChanges } from './tables';
 import { getBestPDFAttachment } from '../../../src/utils/zoteroItemHelpers';
 import { getLibraryByIdOrName, getCollectionByIdOrName } from '../../../src/services/agentDataProvider/utils';
 import type { CitationRef } from '@beaver/agent-core/citations/citationGrammar';
@@ -101,6 +102,8 @@ export function getPageLabelsForItem(
 
 /** Zotero implementation of {@link ItemDataHost}. */
 export const zoteroItemData: ItemDataHost = {
+    resolveTableDisplay,
+    subscribeTableChanges,
     resolvePageLabels(
         ref: CitationRef,
         labelsByAttachmentId: PageLabelsByAttachmentId,

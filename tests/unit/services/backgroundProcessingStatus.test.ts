@@ -9,6 +9,28 @@ vi.mock('../../../src/services/searchIndex/searchIndexApiClient', () => ({ searc
 afterEach(() => vi.unstubAllGlobals());
 
 describe('processing status runnable lanes', () => {
+    it('keeps available work in other lanes runnable during an index cooldown', async () => {
+        const connection = new MockDBConnection();
+        const db = new BeaverDB(connection);
+        try {
+            await db.initDatabase('0.99.0');
+            for (const jobType of ['fulltext_upsert', 'document_ocr'] as const) {
+                await db.enqueueBackgroundJob({ jobType, libraryId: 1, zoteroKey: 'SAMEFILE',
+                    contentKind: 'pdf', payloadKind: 'structured', now: 0 });
+            }
+            vi.stubGlobal('Zotero', { Beaver: { db, backgroundExtractor: {
+                getLaneStatus: () => ({ fulltext_upsert: { inFlight: 0, pauseUntil: Date.now() + 30_000 },
+                    document_ocr: { inFlight: 0 } }),
+                isBacklogGateOpen: () => true,
+            } } });
+            const snapshot = await collectProcessingStatus({ hasOcrAccess: true, hasSearchIndexAccess: true });
+            expect(snapshot.worker).toMatchObject({ available: 1, deferred: 1, queuedFiles: 1, backlogGateOpen: true });
+            expect(snapshot.queue).toMatchObject({ available: 2, attachments: 1 });
+        } finally {
+            await connection.closeDatabase();
+        }
+    });
+
     it.each([
         [false, false], [false, true], [true, false], [true, true],
     ])('uses OCR entitlement independently of search access (%s, %s)', async (hasOcrAccess, hasSearchIndexAccess) => {

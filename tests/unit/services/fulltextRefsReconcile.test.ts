@@ -22,7 +22,7 @@ describe('strong fulltext reconciliation', () => {
         enabled.mockReturnValue(true);
         requirements.mockResolvedValue({ index_version: 3, extract_schema_versions: { pdf: ['4'], epub: ['2'], snapshot: ['1'] } });
         verify.mockImplementation(async (_device, refs) => ({ checked_at: '2026-09-17T00:00:00Z', refs: refs.map((ref: any) => ({ ...ref, state: 'current', index_version: 3, extract_schema_version: '4', chunk_count: 1 })) }));
-        db = { getAttachmentProcessingStatesByLibrary: vi.fn(async () => [row()]), markAttachmentUpsertDone: vi.fn(), enqueueBackgroundJobs: vi.fn() };
+        db = { getPendingFulltextUpsertKeys: vi.fn(async () => new Set()), getAttachmentProcessingStatesByLibrary: vi.fn(async () => [row()]), markAttachmentUpsertDone: vi.fn(), enqueueBackgroundJobs: vi.fn() };
         (globalThis as any).Zotero.Beaver = { hasSearchIndexAccess: true, db, backgroundExtractor: { notify: vi.fn() } };
     });
     it('never deletes remote data when this device has an empty ledger', async () => {
@@ -61,6 +61,24 @@ describe('strong fulltext reconciliation', () => {
         db.getAttachmentProcessingStatesByLibrary.mockResolvedValue(Array.from({ length: 101 }, (_, i) => row(String(i))));
         await reconcileRemoteRefs([1], () => false);
         expect(verify.mock.calls.map((call) => call[1].length)).toEqual([50, 50, 1]);
+    });
+    it('lets a queued upload own this sweep, then verifies it on a later sweep', async () => {
+        const pending = row('PENDING1');
+        db.getPendingFulltextUpsertKeys.mockResolvedValueOnce(new Set(['1/PENDING1'])).mockResolvedValueOnce(new Set());
+        db.getAttachmentProcessingStatesByLibrary.mockResolvedValue([pending]);
+        verify.mockImplementation(async (_device, refs) => ({ refs: refs.map((ref: any) => ({ ...ref, state: 'missing' })) }));
+
+        await reconcileRemoteRefs([1], () => false);
+        expect(verify).not.toHaveBeenCalled();
+        expect(db.enqueueBackgroundJobs).toHaveBeenLastCalledWith([]);
+
+        await reconcileRemoteRefs([1], () => false);
+        expect(verify).toHaveBeenCalledWith('LOCAL123', [{
+            scope_ref: 'lLOCAL123', zotero_key: 'PENDING1', doc_hash: pending.structuredDocumentHash,
+        }]);
+        expect(db.enqueueBackgroundJobs).toHaveBeenCalledWith([
+            expect.objectContaining({ zoteroKey: 'PENDING1', jobType: 'fulltext_upsert' }),
+        ]);
     });
     it('ignores late results after cancellation', async () => {
         let cancelled = false;

@@ -275,6 +275,10 @@ async function onStartup() {
     }
 
     registerQuitObserver();
+    // Capture staging diagnostics without changing the profile's logging preferences.
+    if (process.env.BUILD_ENV === 'staging' && !Zotero.Debug.storing) {
+        Zotero.Debug.setStore(true);
+    }
     initLocale();
     ztoolkit.log("Startup");
 

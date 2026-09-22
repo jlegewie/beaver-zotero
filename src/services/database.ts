@@ -1,3 +1,4 @@
+import type { SearchPreparationRow } from './searchIndexState';
 import { buildUntagJobInput, indexCleanupIdentity } from './backgroundProcessing/utils';
 import { v4 as uuidv4 } from 'uuid';
 import { ProcessingProgressStore, type ProcessingProgressScope } from './backgroundProcessing/progress';
@@ -550,8 +551,8 @@ export class BeaverDB {
         await this.conn.executeTransaction(() => this.processingProgress.configure(scope));
     }
 
-    public getProcessingProgress(discovering: boolean, inFlight: number, libraryId?: number, jobTypes?: string[]) {
-        return this.processingProgress.read(discovering, inFlight, libraryId, jobTypes);
+    public getProcessingProgress(discovering: boolean, inFlight: number, libraryId?: number, jobTypes?: string[], pausedTypes: string[] = []) {
+        return this.processingProgress.read(discovering, inFlight, libraryId, jobTypes, pausedTypes);
     }
 
     private queryAsync(
@@ -2756,6 +2757,7 @@ export class BeaverDB {
 
     /** OCR completion is guarded by the exact bytes hash the executor consumed. */
     public async markAttachmentOcrDone(input: {
+        attemptedAt: number;
         libraryId: number;
         zoteroKey: string;
         fileHash: string;
@@ -2793,7 +2795,13 @@ export class BeaverDB {
                 input.expectedExtractStatus,
             ],
         );
-            if (changed) await this.enqueueReplacementUntag(previous, input.structuredDocumentHash);
+            if (changed) {
+                await this.enqueueReplacementUntag(previous, input.structuredDocumentHash);
+                await this.recordAttachmentReadingOutcome({
+                    libraryId: input.libraryId, zoteroKey: input.zoteroKey,
+                    contentKind: 'pdf', errorCode: null, attemptedAt: input.attemptedAt,
+                });
+            }
             applied = changed;
         });
         return applied;
@@ -2921,6 +2929,30 @@ export class BeaverDB {
                AND structured_document_hash = ?`,
             [error, libraryId, zoteroKey, structuredDocumentHash],
         );
+    }
+
+    /** Compact preparation facts; reading successes supersede earlier file limitations. */
+    public async getSearchPreparationRows(libraryIds: number[]): Promise<SearchPreparationRow[]> {
+        if (!libraryIds.length) return [];
+        const rows: SearchPreparationRow[] = [];
+        await this.queryAsync(
+            `SELECT s.library_id, s.zotero_key, s.content_kind, s.extract_status,
+                s.extract_schema_version, s.ocr_status, s.upsert_status, s.upsert_index_version,
+                s.upsert_remote_identity, s.last_error,
+                CASE WHEN r.library_id IS NOT NULL AND r.error_code IS NULL THEN 1 ELSE 0 END
+             FROM attachment_processing_state s
+             LEFT JOIN attachment_reading_state r USING (library_id, zotero_key)
+             WHERE s.library_id IN (${libraryIds.map(() => '?').join(',')})`, libraryIds,
+            { onRow: (row: any) => rows.push({
+                libraryId: row.getResultByIndex(0), key: row.getResultByIndex(1),
+                contentKind: row.getResultByIndex(2), extractStatus: row.getResultByIndex(3),
+                extractSchemaVersion: row.getResultByIndex(4), ocrStatus: row.getResultByIndex(5),
+                upsertStatus: row.getResultByIndex(6), upsertIndexVersion: row.getResultByIndex(7),
+                remoteIdentity: row.getResultByIndex(8), error: row.getResultByIndex(9),
+                readingSucceeded: row.getResultByIndex(10) === 1,
+            }) },
+        );
+        return rows;
     }
 
     public async getAttachmentProcessingAggregates(
@@ -4903,12 +4935,15 @@ export class BeaverDB {
         return { dead: false };
     }
 
-    /**
-     * Release a claimed job without counting it as a failed attempt. Used
-     * when the processor itself aborts an in-flight job (e.g. shutdown),
-     * so the row can be picked again on the next start without burning an
-     * attempt or recording a misleading error.
-     */
+    /** Reschedule remote waiting without consuming the document's failure budget. */
+    public async rescheduleBackgroundJob(id: number, availableAt: number, error: string): Promise<void> {
+        await this.queryAsync(
+            `UPDATE background_jobs SET available_at = ?, last_error = ? WHERE id = ?`,
+            [availableAt, error, id],
+        );
+    }
+
+    /** Release interrupted work so its next owner can claim it immediately. */
     public async releaseBackgroundJob(id: number, now: number): Promise<void> {
         await this.queryAsync(
             `UPDATE background_jobs SET available_at = ? WHERE id = ?`,
@@ -4943,23 +4978,25 @@ export class BeaverDB {
     public async getBackgroundQueueStats(
         now: number,
         jobTypes?: string[],
+        pausedTypes: string[] = [],
     ): Promise<BackgroundQueueStats> {
         const laneFilter = jobTypes === undefined ? '1' : jobTypes.length === 0
             ? '0' : `job_type IN (${jobTypes.map(() => '?').join(', ')})`;
         const laneParams = jobTypes ?? [];
+        const runnable = pausedTypes.length ? ` AND job_type NOT IN (${pausedTypes.map(() => "?").join(", ")})` : "";
         const stats: BackgroundQueueStats = {
             pending: 0, available: 0, deferred: 0, attachments: 0, dead: 0, byJobType: {},
         };
         await this.queryAsync(`SELECT * FROM (
             WITH jobs AS (SELECT * FROM background_jobs WHERE ${laneFilter})
             SELECT NULL AS job_type, COUNT(*) AS pending,
-                COALESCE(SUM(CASE WHEN available_at <= ? THEN 1 ELSE 0 END), 0) AS available,
+                COALESCE(SUM(CASE WHEN available_at <= ?${runnable} THEN 1 ELSE 0 END), 0) AS available,
                 COUNT(DISTINCT library_id || '/' || zotero_key) AS attachments,
                 (SELECT COUNT(*) FROM background_jobs_dead WHERE ${laneFilter}) AS dead
             FROM jobs
             UNION ALL
             SELECT job_type, COUNT(*), 0, 0, 0 FROM jobs GROUP BY job_type
-        )`, [...laneParams, now, ...laneParams], {
+        )`, [...laneParams, now, ...pausedTypes, ...laneParams], {
             onRow: row => {
                 const type = row.getResultByIndex(0);
                 if (type === null) {

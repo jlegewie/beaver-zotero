@@ -1,3 +1,4 @@
+import { getSearchIndexState } from '../../src/services/searchIndexState';
 import { isThreadConflict } from "@beaver/agent-core/types/apiErrors";
 import {
     threadAdmissionAtom,
@@ -64,11 +65,11 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { selectedModelAtom, ModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { saveInterruptedThread } from '../../src/utils/interruptedThreadPrefs';
-import { MessageAttachment, SourceAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
+import { MessageAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import type { ZoteroCollection } from '@beaver/agent-core/types/zotero';
-import { toMessageAttachment, externalFileRecordToAttachment } from '../types/attachments/converters';
+import { toMessageAttachment, toValidatedMessageAttachment, externalFileRecordToAttachment } from '../types/attachments/converters';
 import { promptEditDraftsAtom } from './promptEdits';
-import { safeStub, serializeAttachmentStub, serializeCollection, serializeItemStub, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
+import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { SubscriptionStatus, ProcessingMode } from '@beaver/agent-core/types/profile';
 import {
     isDatabaseSyncSupportedAtom,
@@ -2335,6 +2336,12 @@ async function executeWSRequest(
         );
     };
 
+    const searchIndexState = await getSearchIndexState();
+    assertWriter(requestWriter);
+    if (clientShutDown || supersededByLiveRun()) return;
+    delete request.search_index_state;
+    if (searchIndexState) request.search_index_state = searchIndexState;
+
     connectLoopsInFlight++;
     const result = await connectWithRetry({
         service: agentService,
@@ -2551,8 +2558,7 @@ const sendWSMessage = async (
         }
 
         let attachments: MessageAttachment[] =
-            selectedItems
-                .map(item => toMessageAttachment(item))
+            (await Promise.all(selectedItems.map(item => toValidatedMessageAttachment(item))))
                 .filter((attachment): attachment is MessageAttachment => attachment !== null);
         attachments = await processImageAnnotations(attachments);
 
@@ -2612,15 +2618,8 @@ const sendWSMessage = async (
                 if (readerAttachment.parentItem) {
                     await Zotero.Items.loadDataTypes([readerAttachment.parentItem], ['itemData', 'creators']);
                 }
-                attachments.push({
-                    library_id: readerAttachment.libraryID,
-                    zotero_key: readerAttachment.key,
-                    library_ref: libraryRefForLibraryID(readerAttachment.libraryID) ?? undefined,
-                    type: 'source',
-                    attachment: safeStub(() => serializeAttachmentStub(readerAttachment)),
-                    parent_item: safeStub(() => readerAttachment.parentItem ? serializeItemStub(readerAttachment.parentItem) : undefined),
-                    include: 'fulltext'
-                } as SourceAttachment);
+                const readerMessageAttachment = await toValidatedMessageAttachment(readerAttachment);
+                if (readerMessageAttachment) attachments.push(readerMessageAttachment);
             } else {
                 logger(`sendWSMessageAtom: Handeling reader attachment - Skipping reader attachment: ${readerKeys[0]}`, 1);
             }
@@ -3801,8 +3800,9 @@ export const sendCreditConfirmationResponseAtom = atom(
  */
 export const sendBatchApprovalResponseAtom = atom(
     null,
-    (_get, set, { approvalId, approved, mode, userInstructions }: {
+    (_get, set, { approvalId, approved, mode, userInstructions, table }: {
         approvalId: string;
+        table?: import('@beaver/agent-core/protocol/artifactProtocol').TableApprovalIdentity;
         approved: boolean;
         mode: BatchApprovalMode;
         userInstructions?: string | null;
@@ -3814,6 +3814,7 @@ export const sendBatchApprovalResponseAtom = atom(
             approved,
             mode,
             userInstructions,
+            table,
         );
         if (!delivered) {
             logger(`sendBatchApprovalResponseAtom: Batch approval response for ${approvalId} was not sent`, 1);

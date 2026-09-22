@@ -4,7 +4,13 @@ import {
     skipIfNoZotero,
 } from "../../helpers/zoteroAvailability";
 import { post } from "../../helpers/zoteroHttpClient";
+import {
+    getExcludedLibraries,
+    setExcludedLibraries,
+    restoreExcludedLibraries,
+} from "../../helpers/cacheInspector";
 
+const libraryRef = process.env.BEAVER_TEST_TABLE_LIBRARY_REF || "u";
 let available = false;
 let key: string;
 let created: any;
@@ -45,7 +51,7 @@ describe("portable artifact provider in Zotero", () => {
         skipIfNoZotero(ctx, available);
         created = await call("create", {
             kind: "table",
-            library_ref: "u",
+            library_ref: libraryRef,
             title: spec.title,
             spec,
             meta: { actor: "user" },
@@ -58,6 +64,7 @@ describe("portable artifact provider in Zotero", () => {
             operation: { operation_id: operationId },
         });
         key = `${created.zotero_item.library_ref}-${created.zotero_item.zotero_key}`;
+        expect(created.zotero_item.library_ref).toBe(libraryRef);
         expect(created.spec.key).toBe(created.zotero_item.zotero_key);
     });
     it("reads fresh state and commits a completed not-reported result", async (ctx) => {
@@ -110,7 +117,7 @@ describe("portable artifact provider in Zotero", () => {
     it("edits locally, retains user ownership of a blank, and replays without overwriting it", async (ctx) => {
         skipIfNoZotero(ctx, available);
         const edited = await post<any>("/beaver/test/table-edit", {
-            library_id: created.zotero_item.library_id,
+            libraryID: created.zotero_item.library_id,
             key: created.spec.key,
             mutations: [
                 {
@@ -193,5 +200,66 @@ describe("portable artifact provider in Zotero", () => {
                 spec: { ...writeRequest.spec, title: "Different payload" },
             }),
         ).toMatchObject({ ok: false, error_code: "operation_mismatch" });
+    });
+    it("retains displaced work after a simulated sync conflict and restores its shadow", async (ctx) => {
+        skipIfNoZotero(ctx, available);
+        const before = await call("read");
+        const at = {
+            libraryID: created.zotero_item.library_id,
+            key: created.spec.key,
+        };
+        expect(
+            await post("/beaver/test/table-corrupt", {
+                ...at,
+                mode: "sync_conflict",
+                toVersion: 1,
+            }),
+        ).toMatchObject({ ok: true });
+        const opened = await post<any>("/beaver/test/table-open", at);
+        expect(opened.conflict).toMatchObject({
+            kind: "sync_conflict",
+            restorable: true,
+        });
+        expect(
+            await post("/beaver/test/table-restore-shadow", {
+                ...at,
+                actor: "user",
+            }),
+        ).toMatchObject({ ok: true });
+        const restored = await call("read");
+        expect(restored.spec.rows).toEqual(before.spec.rows);
+        expect(await post("/beaver/test/table-read", at)).toMatchObject({
+            ok: true,
+            sync_state: 0,
+        });
+    });
+    it("refuses excluded table metadata while preserving local snapshot opening", async (ctx) => {
+        skipIfNoZotero(ctx, available);
+        const original = await getExcludedLibraries();
+        try {
+            expect(
+                await setExcludedLibraries([created.zotero_item.library_id]),
+            ).toMatchObject({ ok: true });
+            const refused = await call("read");
+            expect(refused).toMatchObject({
+                ok: false,
+                error_code: "library_excluded",
+            });
+            expect(refused).not.toHaveProperty("spec");
+            const listed = await call("list", { key: null, keys: [key] });
+            expect(listed.items[0]).toMatchObject({
+                unavailable: true,
+                error_code: "library_excluded",
+            });
+            expect(listed.items[0]).not.toHaveProperty("title");
+            expect(
+                await post("/beaver/test/open-stored-table", {
+                    libraryID: created.zotero_item.library_id,
+                    key: created.spec.key,
+                }),
+            ).toMatchObject({ ok: true });
+        } finally {
+            await restoreExcludedLibraries(original.excluded_libraries);
+        }
     });
 });

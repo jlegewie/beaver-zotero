@@ -171,8 +171,14 @@ export class ProcessingProgressStore {
         inFlight: number,
         libraryId?: number,
         jobTypes?: string[],
+        pausedTypes: string[] = [],
     ): Promise<ProcessingProgress> {
-        const result = await this.snapshot(discovering, libraryId, jobTypes);
+        const result = await this.snapshot(
+            discovering,
+            libraryId,
+            jobTypes,
+            pausedTypes,
+        );
         if (
             !discovering &&
             inFlight === 0 &&
@@ -187,7 +193,7 @@ export class ProcessingProgressStore {
                     AND NOT EXISTS (SELECT 1 FROM processing_progress_pending)`,
                 [Date.now(), result.runId],
             );
-            return this.snapshot(discovering, libraryId, jobTypes);
+            return this.snapshot(discovering, libraryId, jobTypes, pausedTypes);
         }
         return result;
     }
@@ -196,8 +202,12 @@ export class ProcessingProgressStore {
         discovering: boolean,
         libraryId?: number,
         jobTypes?: string[],
+        pausedTypes: string[] = [],
     ): Promise<ProcessingProgress> {
         let result!: ProcessingProgress;
+        const runnable = pausedTypes.length
+            ? ` AND job_type NOT IN (${pausedTypes.map(() => "?").join(", ")})`
+            : "";
         const types =
             jobTypes === undefined
                 ? "1"
@@ -230,7 +240,7 @@ export class ProcessingProgressStore {
             ) d USING (library_id, zotero_key)
             CROSS JOIN (
                 SELECT COUNT(*) AS pending,
-                    COALESCE(SUM(CASE WHEN available_at <= ? THEN 1 ELSE 0 END), 0) AS available,
+                    COALESCE(SUM(CASE WHEN available_at <= ?${runnable} THEN 1 ELSE 0 END), 0) AS available,
                     COUNT(DISTINCT library_id || '/' || zotero_key) AS attachments
                 FROM processing_progress_jobs WHERE ${types}
                     ${libraryId === undefined ? "" : "AND library_id = ?"}
@@ -239,6 +249,7 @@ export class ProcessingProgressStore {
             [
                 ...(libraryId === undefined ? [] : [libraryId]),
                 Date.now(),
+                ...pausedTypes,
                 ...(jobTypes ?? []),
                 ...(libraryId === undefined ? [] : [libraryId]),
             ],

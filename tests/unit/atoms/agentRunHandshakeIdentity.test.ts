@@ -24,6 +24,10 @@ vi.mock('@beaver/agent-core/transport/clientIdentity', () => ({
     resolveClientIdentity: resolveClientIdentityMock,
 }));
 
+vi.mock('../../../src/services/searchIndexState', () => ({
+    getSearchIndexState: vi.fn().mockResolvedValue({ version: 1, libraries: [{ library_ref: 'u', total: 100, indexed: 91, unavailable: 0 }] }),
+}));
+
 vi.mock('../../../react/atoms/applicationState', () => ({
     getApplicationStateProvider: vi.fn(() => async () => ({})),
 }));
@@ -66,6 +70,7 @@ describe('sendWSMessageAtom connect() identity', () => {
 
         expect(resolveClientIdentityMock).toHaveBeenCalledTimes(1);
         expect(connectMock).toHaveBeenCalledTimes(1);
+        expect(connectMock.mock.calls[0][0].search_index_state).toEqual({ version: 1, libraries: [{ library_ref: 'u', total: 100, indexed: 91, unavailable: 0 }] });
         const [, , frontendVersion, clientType, clientFeatures, zoteroInstance] = connectMock.mock.calls[0];
         expect(frontendVersion).toBe(FIXTURE_IDENTITY.frontendVersion);
         expect(clientType).toBe(FIXTURE_IDENTITY.clientType);

@@ -420,11 +420,13 @@ declare namespace Zotero {
                 },
             ): Promise<{ dead: boolean }>;
 
+            rescheduleBackgroundJob(id: number, availableAt: number, error: string): Promise<void>;
             releaseBackgroundJob(id: number, now: number): Promise<void>;
 
             getBackgroundQueueStats(
                 now: number,
                 jobTypes?: string[],
+                pausedTypes?: string[],
             ): Promise<import("../src/services/database").BackgroundQueueStats>;
 
             recordDocumentProcessingFailure(
@@ -498,6 +500,7 @@ declare namespace Zotero {
             }): Promise<void>;
             ensureAttachmentFileHash(libraryId: number, zoteroKey: string, fileHash: string): Promise<void>;
             markAttachmentOcrDone(input: {
+                attemptedAt: number;
                 libraryId: number; zoteroKey: string; fileHash: string;
                 ocrEngineVersion: string; structuredDocumentHash: string;
                 expectedOcrStatus: import("../src/services/database").AttachmentOcrStatus;
@@ -515,6 +518,8 @@ declare namespace Zotero {
                 expectedExtractStatus?: import("../src/services/database").AttachmentExtractStatus;
             }): Promise<boolean>;
             markAttachmentUpsertFailed(libraryId: number, zoteroKey: string, structuredDocumentHash: string, error: string): Promise<void>;
+            getSearchPreparationRows: import('../src/services/database').BeaverDB['getSearchPreparationRows'];
+            getPendingFulltextUpsertKeys: import('../src/services/database').BeaverDB['getPendingFulltextUpsertKeys'];
             getAttachmentProcessingAggregates(
                 libraryId?: number,
                 targets?: { ocr?: boolean; upsert?: boolean },

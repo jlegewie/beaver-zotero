@@ -44,6 +44,8 @@ const {
     // The FIRST await, reached only when the retried run is still live.
     cancelMock: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock('../../../src/services/searchIndexState', () => ({ getSearchIndexState: vi.fn() }));
+import { getSearchIndexState } from '../../../src/services/searchIndexState';
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
     agentRunService: { getThreadRuns: historyMock },
     agentService: { connect: connectMock, close: vi.fn(), cancel: cancelMock },
@@ -207,6 +209,7 @@ describe('retry via synchronous truncation', () => {
         });
         store.set(threadConflictAtom, null);
         vi.clearAllMocks();
+        vi.mocked(getSearchIndexState).mockReset();
         connectMock.mockResolvedValue(undefined);
         truncateMock.mockResolvedValue(okReport([]));
         loadThreadRunsMock.mockResolvedValue({
@@ -1244,6 +1247,28 @@ describe('retry via synchronous truncation', () => {
             await store.set(resumeFromRunAtom, 'failed');
 
             expect(connectMock).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('search snapshot on replacement runs', () => {
+        it.each(['retry', 'resume'] as const)('omits the prior snapshot on %s after search access is lost', async action => {
+            const snapshot = { version: 1 as const, libraries: [{ library_ref: 'u', total: 100, indexed: 90, unavailable: 0 }] };
+            vi.mocked(getSearchIndexState).mockResolvedValueOnce(snapshot).mockResolvedValue(undefined);
+            await store.set(sendWSMessageAtom, 'first message');
+            const firstRequest = sentRequest();
+            expect(firstRequest.search_index_state).toEqual(snapshot);
+            const failed = store.get(activeRunAtom)!;
+            store.set(activeRunAtom, { ...failed, status: 'error', error: { type: 'llm_error', message: 'failed', is_resumable: true } });
+            store.set(isWSChatPendingAtom, false);
+            store.set(threadAdmissionAtom, { threadId: 'thread-1', tailRunId: failed.id, activity: { state: 'idle', run_id: null } });
+            historyMock.mockResolvedValue({ runs: [{ ...failed, status: 'error' }], tail_run_id: failed.id, activity: { state: 'idle', run_id: null } });
+            truncateMock.mockResolvedValue(okReport([failed.id]));
+            if (action === 'retry') await store.set(autoRetryErroredRunAtom, failed.id);
+            else await store.set(resumeFromRunAtom, failed.id);
+            expect(connectMock).toHaveBeenCalledTimes(2);
+            expect(getSearchIndexState).toHaveBeenCalledTimes(2);
+            expect(sentRequest()).not.toHaveProperty('search_index_state');
+            expect(sentRequest()).not.toBe(firstRequest);
         });
     });
 

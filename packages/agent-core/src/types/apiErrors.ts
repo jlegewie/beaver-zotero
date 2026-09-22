@@ -71,6 +71,28 @@ export class RequestTimeoutError extends SessionRefreshError {
 }
 
 /**
+ * The server received the request without usable credentials, even though the
+ * client attached a bearer token.
+ *
+ * The backend's bearer scheme rejects such a request before any Beaver auth
+ * code runs, so this is never a token problem — an expired or malformed token
+ * comes back as 401. It means the `Authorization` header did not survive the
+ * trip, which in practice is a VPN, proxy, or TLS-inspecting antivirus
+ * rewriting the request.
+ */
+export class CredentialsBlockedError extends ApiError {
+    constructor(message?: string) {
+        super(
+            403,
+            'Forbidden',
+            message || 'Authorization header did not reach the server',
+            'CREDENTIALS_BLOCKED',
+        );
+        this.name = 'CredentialsBlockedError';
+    }
+}
+
+/**
  * Error thrown for server-side errors
  */
 export class ServerError extends Error {
@@ -92,6 +114,9 @@ export function isSessionExpiredError(error: unknown): error is SessionExpiredEr
 }
 export function isSessionRefreshError(error: unknown): error is SessionRefreshError {
     return isApiError(error) && error.code === 'SESSION_REFRESH_FAILED';
+}
+export function isCredentialsBlockedError(error: unknown): error is CredentialsBlockedError {
+    return isApiError(error) && error.code === 'CREDENTIALS_BLOCKED';
 }
 export function isServerError(error: unknown): error is ServerError {
     return !!error && typeof error === 'object' && (error as Error).name === 'ServerError';

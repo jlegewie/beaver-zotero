@@ -2,8 +2,7 @@
  * A stored table, as a Zotero library item.
  *
  * A table is a snapshot attachment and nothing else: no database row, no server
- * copy. `Zotero.Attachments.importFromSnapshotContent` — the same path the
- * connector uses for single-file page captures — gives us a `text/html` file
+ * copy. Zotero’s snapshot attachment APIs give us a `text/html` file
  * attachment that opens in the reader, is full-text indexed, can be annotated
  * and syncs like any other stored file. The document it holds is
  * {@link buildTableDocument}'s, which embeds the `TableSpec` it was rendered
@@ -103,9 +102,7 @@ export type ResolvedTableLibrary =
  * Preference holding the library new tables are filed in. Unset (or 0) means
  * "no preference"; see {@link resolveTableLibrary}.
  *
- * Only the personal library can currently hold a table ({@link createTableItem}).
- * A group here is skipped, not an error the user sees, so the preference is
- * inert rather than destructive.
+ * An unavailable, excluded or read-only default falls back to the user library.
  */
 const DEFAULT_LIBRARY_PREF = 'tables.defaultLibraryID';
 
@@ -121,21 +118,18 @@ function preferredLibraryID(): number | null {
 /**
  * Whether one candidate library can hold a table.
  *
- * Order matters: existence first, because `checkLibraryExcluded` answers `null`
- * for a library that does not exist so a bad reference is never mislabeled
- * "excluded". Exclusion next: it is the access-control boundary, and names
- * something the user can change. Groups last: {@link createTableItem} can only
- * file in the personal library, so refusing here lets {@link resolveTableLibrary}
- * fall through to that library instead of returning something creation would
- * reject.
+ * Exclusions are checked before permissions. Personal and group libraries must
+ * permit both item and stored-file edits; other library types are unsupported.
  */
 function checkTableLibrary(libraryID: number): ResolvedTableLibrary {
     const library = Zotero.Libraries.get(libraryID);
     if (!library) return { error: 'no_writable_library' };
-    if (!library.editable) return { error: 'no_writable_library' };
     if (checkLibraryExcluded(libraryID)) return { error: 'library_excluded' };
-    if (libraryID !== Zotero.Libraries.userLibraryID)
+    if (libraryID !== Zotero.Libraries.userLibraryID &&
+        library.libraryType !== 'group')
         return { error: 'unsupported_library' };
+    if (!library.editable || library.filesEditable === false)
+        return { error: 'no_writable_library' };
     return { libraryID };
 }
 
@@ -151,8 +145,7 @@ function checkTableLibrary(libraryID: number): ResolvedTableLibrary {
  * still reveal and open what is already in their library.
  *
  * An explicit id is answered as given: a caller that names a library gets that
- * library or an error, never a silent substitution — so naming a group is
- * refused rather than quietly redirected. The default preference is a
+ * library or an error, never a silent substitution. The default preference is a
  * *preference*, so an unusable one falls through to the user library rather
  * than failing the whole request.
  */
@@ -184,12 +177,14 @@ const TABLE_LIBRARY_REFUSALS: Record<
     library_excluded:
         'That library is excluded in Beaver preferences, so Beaver will not write to it.',
     unsupported_library:
-        'Beaver can currently only create tables in your personal library.',
-    no_writable_library: 'No writable library is available for a new table.',
+        'Tables require a personal or group library.',
+    no_writable_library: 'Tables require permission to edit both items and files in the library.',
 };
 
 export interface CreateTableItemOptions {
     spec: TableSpec;
+    /** Provider source-library checks repeated at each content write. */
+    accessGuard?: (spec: TableSpec) => void;
     /** Store-owned identity for a retriable import. */
     creationOperation?: {
         operation_id: string;
@@ -261,14 +256,6 @@ export async function createTableItem(
 ): Promise<CreatedTableItem> {
     const { spec, collectionID } = options;
 
-    // `Zotero.Attachments.importFromSnapshotContent` has no `libraryID` option:
-    // its `_addToDB` takes the library from the *parent item*, and a top-level
-    // attachment therefore always lands in the user library (`setCollections`
-    // assigns `Zotero.Libraries.userLibraryID` before it resolves anything).
-    // Passing a group collection would file a user-library item against a group
-    // collection, so `checkTableLibrary` refuses a group rather than let one be
-    // misfiled here. Filing tables in a group needs the item built by hand — a
-    // separate decision, not something to fake through this API.
     const resolved = resolveTableLibrary(options.libraryID);
     if ('error' in resolved) {
         throw new TableItemError(TABLE_LIBRARY_REFUSALS[resolved.error], resolved.error);
@@ -318,12 +305,8 @@ export async function createTableItem(
         );
     }
 
-    // Re-checked immediately before the write: exclusion may have changed while
-    // the document was being rendered.
-    const excludedNow = checkLibraryExcluded(libraryID);
-    if (excludedNow) {
-        throw new TableItemError(excludedNow.message, 'library_excluded');
-    }
+    requireTableLibrary(libraryID);
+    options.accessGuard?.(named);
 
     const importOptions: Record<string, unknown> = {
         url: creation?.url ?? buildTableUrl(title),
@@ -332,8 +315,19 @@ export async function createTableItem(
     };
     if (collectionID) importOptions.collections = [collectionID];
 
+    let imported = false;
     try {
-        const item = await Zotero.Attachments.importFromSnapshotContent(importOptions);
+        const item = libraryID === Zotero.Libraries.userLibraryID
+            ? await Zotero.Attachments.importFromSnapshotContent(importOptions)
+            : await importGroupSnapshot({
+                libraryID,
+                collectionID,
+                title,
+                url: creation?.url ?? buildTableUrl(title),
+                html: first.html,
+                beforeImport: () => options.accessGuard?.(named),
+            });
+        imported = true;
         if (!item?.key) {
             throw new TableItemError(
                 'Zotero returned no attachment for the table snapshot.',
@@ -377,6 +371,8 @@ export async function createTableItem(
         }
         const tempPath = `${path}.beaver-tmp`;
         await IOUtils.writeUTF8(tempPath, second.html);
+        requireTableLibrary(libraryID);
+        options.accessGuard?.(stored);
         await IOUtils.move(tempPath, path);
 
         // The stamped document is committed; bookkeeping failures cannot undo it.
@@ -385,6 +381,7 @@ export async function createTableItem(
             item.addTag(TABLE_TAG, 1);
             item.addTag(TABLE_EMOJI_TAG, 1);
             await queueTableFullText(item, true);
+            item.attachmentSyncState = Zotero.Sync.Storage.Local.SYNC_STATE_TO_UPLOAD;
             await item.saveTx();
         } catch (error) {
             saved = false;
@@ -393,6 +390,10 @@ export async function createTableItem(
         return { ...describeTableItem(item, stored, second.html, second.cssRuleCount), saved };
 
     } catch (error) {
+        if (!imported && error instanceof TableItemError &&
+            ['library_excluded', 'no_writable_library', 'unsupported_library'].includes(error.code)) {
+            throw error;
+        }
         if (creation) throw new TableItemError(
             'The import may exist but its document is not confirmed complete. Inspect it before creating another table.',
             'operation_pending',
@@ -400,6 +401,48 @@ export async function createTableItem(
         throw error;
     }
 
+}
+
+/** Recheck access immediately before an import or document replacement. */
+function requireTableLibrary(libraryID: number): void {
+    const checked = checkTableLibrary(libraryID);
+    if ('error' in checked)
+        throw new TableItemError(TABLE_LIBRARY_REFUSALS[checked.error], checked.error);
+}
+
+/** The snapshot-content importer defaults top-level items to the personal library. */
+async function importGroupSnapshot(options: {
+    libraryID: number;
+    collectionID?: number | null;
+    title: string;
+    url: string;
+    html: string;
+    beforeImport: () => void;
+}): Promise<Zotero.Item> {
+    const directory = (await Zotero.Attachments.createTemporaryStorageDirectory()).path;
+    try {
+        const filename = `${buildTableUrl(options.title).split('/').pop()}.html`;
+        await IOUtils.writeUTF8(PathUtils.join(directory, filename), options.html);
+        requireTableLibrary(options.libraryID);
+        options.beforeImport();
+        return await Zotero.Attachments.createURLAttachmentFromTemporaryStorageDirectory({
+            directory,
+            libraryID: options.libraryID,
+            filename,
+            url: options.url,
+            title: options.title,
+            contentType: 'text/html',
+            ...(options.collectionID ? { collections: [options.collectionID] } : {}),
+        });
+    } finally {
+        // Zotero moves this directory on success. Never remove the destination:
+        // an import that threw late may already contain the operation marker.
+        try {
+            await IOUtils.remove(directory, { recursive: true, ignoreAbsent: true });
+        } catch (error) {
+            logger(`importGroupSnapshot: temporary directory cleanup failed: ${String(error)}`, 2);
+        }
+    }
 }
 
 /** Describe the stored attachment consistently for imports and replays. */

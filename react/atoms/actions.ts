@@ -38,7 +38,7 @@ import { searchableLibraryIdsAtom } from './profile';
 import { getActionCommand, toSlashToken, type SlashCommandDescriptor } from '@beaver/agent-ui/composer/slashCommands';
 import type { PromptAction } from '@beaver/agent-core/agents/types';
 import { MessageAttachment, messageAttachmentKey, messageAttachmentLookupKeys } from '@beaver/agent-core/types/attachments/apiTypes';
-import { toMessageAttachment } from '../types/attachments/converters';
+import { toValidatedMessageAttachment } from '../types/attachments/converters';
 
 // ---------------------------------------------------------------------------
 // Base atom — initialised once from prefs + built-ins
@@ -752,7 +752,18 @@ export const buildEditedPromptActionsAtom = atom(
             await Promise.all(noteItems.map(i => i.loadDataType('note')));
 
             for (const item of resolved.items) {
-                const attachment = toMessageAttachment(item);
+                let attachment: MessageAttachment | null;
+                try {
+                    attachment = await toValidatedMessageAttachment(item);
+                } catch (error) {
+                    set(addPopupMessageAtom, {
+                        type: 'error',
+                        title: 'Unable to submit edit',
+                        text: `${error instanceof Error ? error.message : String(error)} Restore access to the source or remove the action, then try again. Your edit has been kept.`,
+                        expire: false,
+                    });
+                    return null;
+                }
                 if (!attachment) continue;
                 const aliases = messageAttachmentLookupKeys(attachment);
                 if (aliases.some(key => existingKeys.has(key))) continue;

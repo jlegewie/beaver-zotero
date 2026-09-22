@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart, isEmptyWriteReturn, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
 import { getToolCallStatusFromResult, toolResultAtom } from '@beaver/agent-core/run-state/atoms';
+import { isTableToolName, isTableWriteToolName, tableResultMessages } from '@beaver/agent-core/run-state/tableResults';
 import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
 import {
     isToolResultView,
@@ -9,6 +10,7 @@ import {
     type ToolResultView as ToolResultViewModel,
 } from '@beaver/agent-core/run-state/toolResultViews';
 import { ToolResultView } from './ToolResultView';
+import { TableToolCallView } from './TableToolCallView';
 import { GenericAgentActionView } from './GenericAgentActionView';
 import { getHost } from '@beaver/agent-ui/host';
 import { getPendingApprovalForToolcallAtom, getAgentActionsByToolcallAtom } from '../../agents/agentActions';
@@ -39,8 +41,9 @@ import {
     LayersIcon,
     FlowConnectionIcon,
     WrenchIcon,
+    TableIcon,
 } from '../icons/icons';
-import { toolExpandedAtom, toggleToolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
+import { toolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
 import { resolveToolCallLabelEnrich } from '../../utils/toolCallLabelEnrich';
 
 type IconComponent = React.FC<React.SVGProps<SVGSVGElement>>;
@@ -87,6 +90,13 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     read_note: TextAlignLeftIcon,
     edit_note: PropertyEditIcon,
     create_note: DocumentValidationIcon,
+
+    // Table tools (the writes render as TableToolCallView; read_table is a plain row)
+    create_table: TableIcon,
+    read_table: TableIcon,
+    edit_rows: TableIcon,
+    edit_table: TableIcon,
+    fill_table: TableIcon,
 
     // Extract tool
     extract: TaskDailyIcon,
@@ -336,9 +346,11 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
     const expansionKey = `${runId}:${responseIndex}:${part.tool_call_id}`;
     const expansionState = useAtomValue(toolExpandedAtom);
-    const toggleExpanded = useSetAtom(toggleToolExpandedAtom);
     const setExpanded = useSetAtom(setToolExpandedAtom);
-    const isExpanded = expansionState[expansionKey] ?? false;
+    // A failed table read can still carry recovery status worth opening.
+    const hasTableStatus = isTableToolName(part.tool_name) && !!result
+        && tableResultMessages(result.content).length > 0;
+    const isExpanded = expansionState[expansionKey] ?? hasTableStatus;
     const wasConfirmApprovalRef = useRef(isConfirmApproval);
 
     // When extract/external_search approval resolves, collapse once so the completed result
@@ -361,8 +373,9 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         hasResult &&
         result?.part_kind === 'tool-return' &&
         // A non-success return holds an explanatory message, not a result
-        // payload. Keep it collapsed so it reads as a failed call, not a result.
-        !isUnsuccessfulToolReturn(result) &&
+        // payload. Keep it collapsed so it reads as a failed call, not a result —
+        // unless it is a table status the user can act on.
+        (!isUnsuccessfulToolReturn(result) || hasTableStatus) &&
         // If we can compute a count (search-like tools), block expansion for 0 results.
         (renderableCount === null || renderableCount > 0) &&
         !NON_EXPANDABLE_TOOLS.has(part.tool_name) &&
@@ -377,7 +390,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
 
     const handleToggleExpanded = () => {
         if (canExpand) {
-            toggleExpanded(expansionKey);
+            setExpanded({ key: expansionKey, expanded: !isExpanded });
         }
     };
 
@@ -398,6 +411,20 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const streamingArgs = part.streaming_args;
     const showStreamingPreview = !!streamingArgs && runStatus === 'in_progress'
         && STREAMING_PREVIEW_TOOLS.has(part.tool_name) && !showAgentActionView && !hasError;
+
+    // Table writes are cards like the note actions: the header names the table
+    // and opens it, the body carries the call's summary and recovery notices.
+    if (isTableWriteToolName(part.tool_name)) {
+        return (
+            <TableToolCallView
+                part={part}
+                result={result}
+                runId={runId}
+                responseIndex={responseIndex}
+                runStatus={runStatus}
+            />
+        );
+    }
 
     // Note: a pending ask_user_question renders as the composer-takeover panel
     // (AskUserQuestionPanel, swapped in by Sidebar) — here the call stays a

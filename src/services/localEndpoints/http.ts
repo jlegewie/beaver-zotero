@@ -770,9 +770,7 @@ async function handleTestProviderCloseHttpRequest(_request: any) {
  *
  * Callers must gate this on the build: `LocalEndpoints` registers only in
  * development and staging builds, so NONE of the paths below — not just the
- * `/beaver/test/*` block near the end — reach a released build. The nested
- * `NODE_ENV === 'development'` check further restricts the test-only endpoints
- * to development, keeping them out of staging.
+ * `/beaver/test/*` block near the end — reach a production build.
  */
 export function registerEndpoints(): (() => void) | undefined {
     if (!Zotero?.Server?.Endpoints) return;
@@ -849,9 +847,12 @@ export function registerEndpoints(): (() => void) | undefined {
     endpoints['/beaver/note/read'] =
         createEndpoint(handleReadNoteHttpRequest);
 
-    // Test-only endpoints (dev builds only)
-    if (process.env.NODE_ENV === 'development') {
-        endpoints['/beaver/test/voice'] = createEndpoint(handleTestVoiceHttpRequest);
+    // Diagnostics and test commands are available in development and staging.
+    if (process.env.NODE_ENV === 'development' || process.env.BUILD_ENV === 'staging') {
+        // Fake voice sessions require the development-only voice harness.
+        if (process.env.NODE_ENV === 'development') {
+            endpoints['/beaver/test/voice'] = createEndpoint(handleTestVoiceHttpRequest);
+        }
         endpoints['/beaver/test/ping'] =
             createEndpoint(handleTestPingHttpRequest);
 
@@ -1200,4 +1201,3 @@ export function registerEndpoints(): (() => void) | undefined {
     logger(`LocalEndpoints: Registered ${releases.length} HTTP endpoints`, 3);
     return () => { for (const release of releases) release(); };
 }
-
