@@ -1,3 +1,4 @@
+import { DuplicateError } from '../duplicates/discovery';
 import { validateMergeItemsAction } from '../duplicates/merge';
 import { CollectionResolutionError } from '../collections/collectionIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -98,7 +99,7 @@ export async function handleAgentActionValidateRequest(
             request_id: request.request_id,
             valid: false,
             error: error instanceof Error ? error.message : String(error),
-            error_code: error instanceof CollectionResolutionError ? error.code : 'validation_failed',
+            error_code: error instanceof CollectionResolutionError || error instanceof DuplicateError ? error.code : 'validation_failed',
             preference: 'always_ask',
         };
     }

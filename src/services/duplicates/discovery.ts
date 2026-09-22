@@ -16,8 +16,14 @@ import {
     resolveLibraryRef,
 } from "../../utils/libraryIdentity";
 
-export function duplicateError(message: string, code = "invalid_merge"): Error {
-    return Object.assign(new Error(message), { code });
+export class DuplicateError extends Error {
+    constructor(message: string, public readonly code: string) {
+        super(message);
+        this.name = "DuplicateError";
+    }
+}
+export function duplicateError(message: string, code = "invalid_merge"): DuplicateError {
+    return new DuplicateError(message, code);
 }
 export function stableJSON(value: unknown): string {
     if (Array.isArray(value))
@@ -108,6 +114,7 @@ const SYSTEM_FIELDS = new Set([
     "deleted",
     "parentItem",
     "inPublications",
+    "citationKey",
 ]);
 export async function describeGroup(
     items: Zotero.Item[],

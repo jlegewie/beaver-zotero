@@ -39,6 +39,7 @@ export const MergeItemsPreview: React.FC<{
     const masterID = result?.master_item_id ?? choices.master_item_id;
     const master =
         group.members.find((m) => m.item_id === masterID) ?? group.members[0];
+    const otherCount = group.members.length - 1;
     const canEdit =
         editable && !!actionId && !result && !inFlight.has(actionId);
     const update = (patch: Partial<typeof choices>) => {
@@ -65,7 +66,7 @@ export const MergeItemsPreview: React.FC<{
                     {master.title} · {master.zotero_key}
                 </div>
                 <div className="font-color-secondary">
-                    {group.members.length - 1} other records ·{" "}
+                    {otherCount} other {otherCount === 1 ? "record" : "records"} ·{" "}
                     {group.differing_fields.length} differing fields
                 </div>
                 {group.warnings.map((warning) => (
@@ -130,7 +131,7 @@ export const MergeItemsPreview: React.FC<{
             <div className="text-xs font-color-secondary">
                 Collections and tags are combined. Zotero consolidates
                 attachments and moves notes and annotations. The other{" "}
-                {group.members.length - 1} records go to Trash. This merge can
+                {otherCount} {otherCount === 1 ? "record goes" : "records go"} to Trash. This merge can
                 be undone from Changes.
             </div>
             {group.warnings.map((w) => (

@@ -57,6 +57,7 @@ beforeEach(() => {
         toJSON: () => ({
             title: `Paper ${Math.ceil(id / 2)}`,
             inPublications: id % 2 === 0,
+            citationKey: `paper${id}`,
             abstractNote: id % 2 ? "" : "Abstract",
         }),
         getAttachments: () => [],
@@ -154,6 +155,8 @@ it("returns complete field comparisons only for inspect", async () => {
     });
     expect(result.groups[0].differing_fields).toContain("abstractNote");
     expect(result.groups[0].differing_fields).not.toContain("inPublications");
+    expect(result.groups[0].differing_fields).not.toContain("citationKey");
+    expect(result.groups[0].members[1].fields).not.toHaveProperty("citationKey");
     expect(result.groups[0].members[1].fields.abstractNote).toBe("Abstract");
 });
 it("enforces exclusions before querying and after asynchronous inspection", async () => {
