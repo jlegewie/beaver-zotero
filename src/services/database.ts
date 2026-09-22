@@ -4663,7 +4663,12 @@ export class BeaverDB {
                     available_at  = CASE WHEN content_kind != ? OR ? < priority
                                          THEN MIN(available_at, ?) ELSE available_at END,
                     content_kind  = ?,
-                    payload_json  = CASE WHEN content_kind = ? AND json_extract(?, '$.request_context') = 'interactive'
+                    payload_json  = CASE WHEN ? = 'fulltext_upsert' AND content_kind = ? AND ? >= priority
+                                              AND json_extract(payload_json, '$.cache_recovery') IS NOT NULL
+                                              AND json_extract(payload_json, '$.doc_hash') IS json_extract(?, '$.doc_hash')
+                                         THEN json_set(?, '$.cache_recovery',
+                                             json_extract(payload_json, '$.cache_recovery'))
+                                         WHEN content_kind = ? AND json_extract(?, '$.request_context') = 'interactive'
                                          THEN json_set(COALESCE(payload_json, ?), '$.request_context', 'interactive')
                                          WHEN priority >= 100 AND ? >= 100
                                               AND json_extract(?, '$.prepare_cache') = 1 THEN ?
@@ -4681,6 +4686,7 @@ export class BeaverDB {
                     priority,
                     input.now,
                     input.contentKind,
+                    input.jobType, input.contentKind, priority, payloadJson, payloadJson,
                     input.contentKind, payloadJson, payloadJson,
                     priority, payloadJson, payloadJson,
                     input.contentKind, priority,
@@ -4829,6 +4835,80 @@ export class BeaverDB {
         return { exists: true, promoted: true };
     }
 
+    /** Mark a claimed upsert as waiting for this account's cached document. */
+    public async beginFulltextCacheRecovery(
+        job: BackgroundJobRecord,
+        accountId: string,
+        documentHash: string,
+        extractionSource: string | null,
+    ): Promise<boolean> {
+        const marker = JSON.stringify({ account_id: accountId, doc_hash: documentHash,
+            extraction_source: extractionSource, state: 'active' });
+        return this.executeChangedRow(`UPDATE background_jobs
+            SET payload_json = json_set(payload_json, '$.cache_recovery', json(?))
+            WHERE id = ? AND job_type = 'fulltext_upsert' AND payload_kind = 'structured'
+              AND library_id = ? AND zotero_key = ? AND available_at = ?
+              AND json_extract(payload_json, '$.cache_recovery') IS NULL`,
+        [marker, job.id, job.libraryId, job.zoteroKey, job.availableAt]);
+    }
+
+    /** Complete the active-to-deferred handoff after a payload cache miss. */
+    public async deferFulltextCacheRecovery(id: number, claimedAvailableAt: number, now: number): Promise<boolean> {
+        let woken = false;
+        await this.conn.executeTransaction(async () => {
+            woken = await this.executeChangedRow(`UPDATE background_jobs
+                SET available_at = ?, payload_json = json_remove(payload_json, '$.cache_recovery')
+                WHERE id = ? AND job_type = 'fulltext_upsert' AND available_at = ?
+                  AND json_extract(payload_json, '$.cache_recovery.state') = 'ready'`,
+            [now, id, claimedAvailableAt]);
+            if (!woken) {
+                await this.queryAsync(`UPDATE background_jobs
+                    SET payload_json = json_set(payload_json, '$.cache_recovery.state', 'deferred')
+                    WHERE id = ? AND job_type = 'fulltext_upsert' AND available_at = ?
+                      AND json_extract(payload_json, '$.cache_recovery.state') = 'active'`,
+                [id, claimedAvailableAt]);
+            }
+        });
+        return woken;
+    }
+
+    /** Wake only the upsert parked for the cache that extraction just rebuilt. */
+    public async finishFulltextCacheRecovery(input: {
+        libraryId: number; zoteroKey: string; accountId: string;
+        documentHash: string; extractionSource: string | null; now: number;
+    }): Promise<boolean> {
+        const match = `job_type = 'fulltext_upsert' AND payload_kind = 'structured'
+            AND library_id = ? AND zotero_key = ? AND available_at > ?
+            AND json_extract(payload_json, '$.cache_recovery.account_id') = ?
+            AND json_extract(payload_json, '$.cache_recovery.doc_hash') = ?
+            AND json_extract(payload_json, '$.cache_recovery.extraction_source') IS ?`;
+        const params = [input.libraryId, input.zoteroKey, input.now, input.accountId,
+            input.documentHash, input.extractionSource];
+        let woken = false;
+        await this.conn.executeTransaction(async () => {
+            woken = await this.executeChangedRow(`UPDATE background_jobs
+                SET available_at = ?, payload_json = json_remove(payload_json, '$.cache_recovery')
+                WHERE ${match} AND json_extract(payload_json, '$.cache_recovery.state') = 'deferred'`,
+            [input.now, ...params]);
+            if (!woken) {
+                await this.queryAsync(`UPDATE background_jobs
+                    SET payload_json = json_set(payload_json, '$.cache_recovery.state', 'ready')
+                    WHERE ${match} AND json_extract(payload_json, '$.cache_recovery.state') = 'active'`,
+                params);
+            }
+        });
+        return woken;
+    }
+
+    /** Remove a wait marker when the recovery enqueue itself failed. */
+    public async cancelFulltextCacheRecovery(id: number, claimedAvailableAt: number): Promise<void> {
+        await this.queryAsync(`UPDATE background_jobs
+            SET payload_json = json_remove(payload_json, '$.cache_recovery')
+            WHERE id = ? AND job_type = 'fulltext_upsert' AND available_at = ?
+              AND json_extract(payload_json, '$.cache_recovery') IS NOT NULL`,
+        [id, claimedAvailableAt]);
+    }
+
     /**
      * Claim the next visible job (pgmq-style): pick lowest-priority, then
      * oldest-available row whose `available_at <= now`, then bump its
@@ -4861,7 +4941,9 @@ export class BeaverDB {
             params.push(...jobTypes);
         }
         const claimed = await this.selectBackgroundJobs(
-            `UPDATE background_jobs SET available_at = ?
+            `UPDATE background_jobs SET available_at = ?,
+                payload_json = CASE WHEN job_type = 'fulltext_upsert'
+                    THEN json_remove(payload_json, '$.cache_recovery') ELSE payload_json END
              WHERE id = (
                  SELECT id FROM background_jobs
                  WHERE available_at <= ?${priorityClause}${jobTypesClause}

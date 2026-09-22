@@ -201,18 +201,27 @@ export class FulltextUpsertExecutor implements JobExecutor {
             const payload = await this.readCachedPayload(record, row);
             if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
             if (!payload) {
-                await ctx.enqueue({
-                    jobType: 'document_extract',
-                    libraryId: record.libraryId,
-                    itemId: record.itemId,
-                    zoteroKey: record.zoteroKey,
-                    contentKind: row.contentKind,
-                    payloadKind: 'structured',
-                    // Cache recovery must remain runnable for an on-demand retry while paused.
-                    priority: Math.min(record.priority, BACKGROUND_EXTRACT_PRIORITY),
-                    payload: buildBackgroundExtractPayload(row.contentKind),
-                    now: Date.now(),
-                });
+                const armed = accountId
+                    ? await ctx.db.beginFulltextCacheRecovery(
+                        record, accountId, row.structuredDocumentHash, row.extractionSource)
+                    : false;
+                try {
+                    await ctx.enqueue({
+                        jobType: 'document_extract',
+                        libraryId: record.libraryId,
+                        itemId: record.itemId,
+                        zoteroKey: record.zoteroKey,
+                        contentKind: row.contentKind,
+                        payloadKind: 'structured',
+                        // Cache recovery must remain runnable for an on-demand retry while paused.
+                        priority: Math.min(record.priority, BACKGROUND_EXTRACT_PRIORITY),
+                        payload: buildBackgroundExtractPayload(row.contentKind),
+                        now: Date.now(),
+                    });
+                } catch (error) {
+                    if (armed) await ctx.db.cancelFulltextCacheRecovery(record.id, record.availableAt);
+                    throw error;
+                }
                 return { kind: 'defer', reason: 'payload_cache_miss' };
             }
             const liveHash = await computeStructuredDocumentHash(row.contentKind, payload);
