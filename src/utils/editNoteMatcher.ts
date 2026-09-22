@@ -37,7 +37,10 @@
  *                                 (`<td><p>` vs `<td>\n<p>`). Gated on
  *                                 uniqueness and a non-ws character floor;
  *                                 conservative last resort.
- *  13. markdown_render          — match a handler-rendered Markdown fragment
+ *  13. legacy_math              — restore dollar-only math from older read_note
+ *                                 output and retry strategies 1–12, after all
+ *                                 literal strategies miss
+ *  14. markdown_render          — match a handler-rendered Markdown fragment
  *                                 against note HTML after first-pass strategies
  *                                 miss. Rendering stays outside this synchronous
  *                                 module.
@@ -89,6 +92,7 @@ export type MatchStrategyName =
     | 'tag_attribute_strip'
     | 'markdown_to_html'
     | 'whitespace_relaxed'
+    | 'legacy_math'
     | 'markdown_render';
 
 export interface MatchInput {
@@ -166,9 +170,14 @@ export interface MatchResult {
     normalizeAnchor: (anchor: string) => string;
 }
 
+interface StrategyInput extends MatchInput {
+    /** Internal second-pass policy; callers always start with literal math. */
+    oldMathContext?: 'legacy-old';
+}
+
 interface Strategy {
     name: MatchStrategyName;
-    tryMatch(input: MatchInput, base: BaseExpansion): MatchResult | null;
+    tryMatch(input: StrategyInput, base: BaseExpansion): MatchResult | null;
 }
 
 // =============================================================================
@@ -176,6 +185,11 @@ interface Strategy {
 // =============================================================================
 
 const identity = (s: string): string => s;
+
+function expandOldAnchor(input: StrategyInput, anchor: string): string {
+    return expandToRawHtml(anchor, input.metadata, input.oldMathContext ?? 'old');
+}
+
 
 function rewriteInsertReplacementForTrim(
     operation: EditNoteOperation,
@@ -200,7 +214,7 @@ function rewriteInsertReplacementForTrim(
  */
 export function expandBase(input: MatchInput): BaseExpansion {
     return {
-        expandedOld: expandToRawHtml(input.oldString, input.metadata, 'old'),
+        expandedOld: expandOldAnchor(input, input.oldString),
         expandedNew: expandToRawHtml(
             input.newString,
             input.metadata,
@@ -440,7 +454,7 @@ const trimTrailingNewlinesStrategy: Strategy = {
 
         let expandedOld: string;
         try {
-            expandedOld = expandToRawHtml(trimmedOld, input.metadata, 'old');
+            expandedOld = expandOldAnchor(input, trimmedOld);
         } catch {
             return null;
         }
@@ -503,7 +517,7 @@ const jsonUnescapeStrategy: Strategy = {
 
         let expandedOld: string;
         try {
-            expandedOld = expandToRawHtml(unescapedOld, input.metadata, 'old');
+            expandedOld = expandOldAnchor(input, unescapedOld);
         } catch {
             return null;
         }
@@ -550,7 +564,7 @@ const partialElementStripStrategy: Strategy = {
         let expandedOld: string;
         let expandedNew: string;
         try {
-            expandedOld = expandToRawHtml(stripped.strippedOld, input.metadata, 'old');
+            expandedOld = expandOldAnchor(input, stripped.strippedOld);
             expandedNew = expandToRawHtml(
                 stripped.strippedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.resolvedLocatorPages,
             );
@@ -568,11 +582,7 @@ const partialElementStripStrategy: Strategy = {
         if (matchCount > 1 && input.operation !== 'str_replace_all') {
             try {
                 const strippedStart = simplifiedPos + stripped.leadingStrip;
-                const expandedBefore = expandToRawHtml(
-                    input.simplified.substring(0, strippedStart),
-                    input.metadata,
-                    'old',
-                );
+                const expandedBefore = expandOldAnchor(input, input.simplified.substring(0, strippedStart));
                 const unwrapped = stripNoteWrapperDiv(input.strippedHtml);
                 const wrapperPrefixLen = unwrapped !== input.strippedHtml
                     ? input.strippedHtml.indexOf('>') + 1
@@ -612,7 +622,7 @@ const spuriousWrapStripStrategy: Strategy = {
             let expandedOld: string;
             let expandedNew: string;
             try {
-                expandedOld = expandToRawHtml(candidate.strippedOld, input.metadata, 'old');
+                expandedOld = expandOldAnchor(input, candidate.strippedOld);
                 expandedNew = expandToRawHtml(
                     candidate.strippedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.resolvedLocatorPages,
                 );
@@ -666,7 +676,7 @@ const tagAttributeStripStrategy: Strategy = {
 
         let expandedOld: string;
         try {
-            expandedOld = expandToRawHtml(strippedOld, input.metadata, 'old');
+            expandedOld = expandOldAnchor(input, strippedOld);
         } catch {
             return null;
         }
@@ -744,7 +754,7 @@ const markdownToHtmlStrategy: Strategy = {
 
         let expandedOld: string;
         try {
-            expandedOld = expandToRawHtml(convertedOld, input.metadata, 'old');
+            expandedOld = expandOldAnchor(input, convertedOld);
         } catch {
             return null;
         }
@@ -1202,6 +1212,59 @@ const whitespaceRelaxedStrategy: Strategy = {
     },
 };
 
+/**
+ * Dollar-delimited anchors inside a math wrapper must target the whole wrapper
+ * through the legacy fallback, not create nested math or leave a wrapper when
+ * replacing a formula with prose. A mix of literal and wrapped occurrences
+ * needs a more specific anchor, including for replace-all.
+ */
+function mathAnchorMatches(html: string, needle: string): 'literal' | 'wrapped' | 'mixed' {
+    if (!needle.includes('$')) return 'literal';
+    const wrappers = [...html.matchAll(/<(span|pre)\b[^>]*class="math"[^>]*>[\s\S]*?<\/\1>/g)]
+        .map(match => ({ start: match.index!, end: match.index! + match[0].length }));
+    let literal = false;
+    let wrapped = false;
+    let pos = html.indexOf(needle);
+    while (pos !== -1) {
+        const end = pos + needle.length;
+        if (wrappers.some(range => pos < range.end && end > range.start
+            && !(pos <= range.start && end >= range.end))) {
+            wrapped = true;
+        } else {
+            literal = true;
+        }
+        pos = html.indexOf(needle, end);
+    }
+    return wrapped ? (literal ? 'mixed' : 'wrapped') : 'literal';
+}
+
+/** Preserve a dollar-bearing insertion anchor; expand only the injected text. */
+function preserveMathInsertAnchor(input: MatchInput, result: MatchResult): MatchResult {
+    if (!result.oldString.includes('$')) return result;
+    const { operation } = input;
+    if (operation !== 'insert_after' && operation !== 'insert_before') return result;
+    // Strategies that return the actual raw slice may also change oldString.
+    // Rewrite a copied anchor in merged payloads before storing normalized data.
+    const newString = rewriteInsertReplacementForTrim(
+        operation, input.oldString, result.newString, result.oldString,
+    );
+    result = { ...result, newString };
+    const injected = operation === 'insert_after' && result.newString.startsWith(result.oldString)
+        ? result.newString.substring(result.oldString.length)
+        : operation === 'insert_before' && result.newString.endsWith(result.oldString)
+            ? result.newString.substring(0, result.newString.length - result.oldString.length)
+            : result.newString;
+    const expandedInjected = expandToRawHtml(
+        injected, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.resolvedLocatorPages,
+    );
+    return {
+        ...result,
+        expandedNew: operation === 'insert_after'
+            ? result.expandedOld + expandedInjected
+            : expandedInjected + result.expandedOld,
+    };
+}
+
 const markdownRenderStrategy: Strategy = {
     name: 'markdown_render',
     tryMatch(input) {
@@ -1210,7 +1273,7 @@ const markdownRenderStrategy: Strategy = {
 
         let expandedOld: string;
         try {
-            expandedOld = expandToRawHtml(renderedOld, input.metadata, 'old');
+            expandedOld = expandOldAnchor(input, renderedOld);
         } catch {
             return null;
         }
@@ -1265,23 +1328,53 @@ const STRATEGIES: Strategy[] = [
     tagAttributeStripStrategy,
     markdownToHtmlStrategy,
     whitespaceRelaxedStrategy,
-    markdownRenderStrategy,
 ];
 
+/** Apply the same boundary and insertion safeguards to either expansion mode. */
+function runStrategies(
+    input: StrategyInput,
+    base: BaseExpansion,
+    strategies: Strategy[] = STRATEGIES,
+): MatchResult | null {
+    for (const strategy of strategies) {
+        const result = strategy.tryMatch(input, base);
+        if (!result || result.matchCount === 0) continue;
+        const mathMatches = mathAnchorMatches(input.strippedHtml, result.expandedOld);
+        if (mathMatches === 'mixed') {
+            throw Object.assign(new Error(
+                'old_string matches both literal dollar text and part of a math element. '
+                + 'For math, copy the whole <span class="math"> or <pre class="math"> '
+                + 'element from read_note. For literal text, include surrounding prose '
+                + 'or its paragraph so the anchor does not also match inside math.',
+            ), { code: 'ambiguous_match' });
+        }
+        if (mathMatches === 'wrapped') continue;
+        return preserveMathInsertAnchor(input, result);
+    }
+    return null;
+}
+
 /**
- * Run each strategy in rank order and return the first one that produces at
- * least one match. Returns `null` when nothing matches — callers should
- * translate that to an `old_string_not_found` response with a zero-match hint.
+ * Prefer every literal normalization strategy before retrying the same chain
+ * with legacy dollar expansion. Mutation strategies re-expand their rewritten
+ * anchors under the current pass's policy. Markdown rendering remains last.
  */
 export function findBestMatch(
     input: MatchInput,
     base: BaseExpansion,
 ): MatchResult | null {
-    for (const strategy of STRATEGIES) {
-        const result = strategy.tryMatch(input, base);
-        if (result && result.matchCount > 0) return result;
+    const literal = runStrategies(input, base);
+    if (literal) return literal;
+
+    if (input.oldString.includes('$')) {
+        const legacyInput: StrategyInput = { ...input, oldMathContext: 'legacy-old' };
+        const legacyBase = { ...base, expandedOld: expandOldAnchor(legacyInput, input.oldString) };
+        const legacy = runStrategies(legacyInput, legacyBase);
+        if (legacy) {
+            return { ...legacy, strategy: legacy.strategy === 'exact' ? 'legacy_math' : legacy.strategy };
+        }
     }
-    return null;
+    return runStrategies(input, base, [markdownRenderStrategy]);
 }
 
 /**

@@ -320,6 +320,9 @@ function matchEdit(
         const base = expandBase(matchInput);
         match = findBestMatch(matchInput, base);
     } catch (e: any) {
+        if (e?.code === 'ambiguous_match') {
+            return failure(spec.index, e.message, 'ambiguous_match');
+        }
         // Base old/new expansion threw. The Markdown-render fallback does not
         // need the base, so try it before surfacing expansion_failed.
         match = findMarkdownRenderMatch(matchInput);

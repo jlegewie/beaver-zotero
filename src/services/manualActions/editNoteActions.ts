@@ -1101,7 +1101,9 @@ export async function undoEditNoteAction(
 
         try {
             if (expandedOld === undefined) {
-                expandedOld = expandToRawHtml(old_string ?? '', metadata, 'old');
+                // Actions predating raw undo snapshots used dollar-only math anchors.
+                // Current actions always restore their stored undo_old_html verbatim.
+                expandedOld = expandToRawHtml(old_string ?? '', metadata, 'legacy-old');
             }
             if (!isDeletion && expandedNew === undefined) {
                 expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, undoPageLabels);

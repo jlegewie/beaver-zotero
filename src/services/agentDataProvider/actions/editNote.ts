@@ -598,7 +598,19 @@ async function validateEditNoteAction(
     // 13. Run the ranked matcher. The first strategy that produces a match
     //     wins. See editNoteMatcher.ts for the full chain.
     if (!match && base) {
-        match = findBestMatch(matchInput, base);
+        try {
+            match = findBestMatch(matchInput, base);
+        } catch (error: any) {
+            if (error?.code !== 'ambiguous_match') throw error;
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: error.message,
+                error_code: 'ambiguous_match',
+                preference: 'always_ask',
+            };
+        }
         if (!match) {
             match = await findMarkdownRenderFallbackMatch(
                 matchInput,
@@ -1109,7 +1121,18 @@ async function executeEditNoteAction(
     //    between validation and execution (PM re-normalization, concurrent
     //    edit) so we re-match here against the current HTML.
     if (!match && base) {
-        match = findBestMatch(matchInput, base);
+        try {
+            match = findBestMatch(matchInput, base);
+        } catch (error: any) {
+            if (error?.code !== 'ambiguous_match') throw error;
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: error.message,
+                error_code: 'ambiguous_match',
+            };
+        }
         if (!match) {
             match = await findMarkdownRenderFallbackMatch(
                 matchInput,

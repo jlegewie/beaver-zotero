@@ -472,24 +472,10 @@ export function simplifyNoteHtml(
         );
     }
 
-    // 6. Simplify math to dollar notation
-    // Strip HTML wrappers from math elements, leaving dollar-delimited content.
-    // Empty math blocks (`$$$$` / `$$`) are intentionally left as HTML: the
-    // expandToRawHtml regex requires non-empty content between `$` delimiters,
-    // so simplifying them would break the round-trip (the expander can't
-    // rewrap them, and edit_note old_string matching fails).
-    // Display math: <pre class="math">$$...$$</pre> → $$...$$
-    simplified = simplified.replace(
-        /<pre\s+class="math">(\$\$[^<]+\$\$)<\/pre>/g,
-        (_match, content) => content
-    );
-    // Inline math: <span class="math">$...$</span> → $...$
-    simplified = simplified.replace(
-        /<span\s+class="math">(\$[^<]+\$)<\/span>/g,
-        (_match, content) => content
-    );
+    // Keep math wrappers: they distinguish literal dollar text from math and
+    // preserve inline vs display structure for exact edit anchors.
 
-    // 7. Strip the outer wrapper div.
+    // 6. Strip the outer wrapper div.
     // Zotero notes are wrapped in <div data-schema-version="N">...</div>.
     // This wrapper is structural metadata, not content the agent should edit.
     // Stripping it prevents the agent from anchoring edits on </div>.

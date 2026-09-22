@@ -2441,3 +2441,31 @@ describe('citation anchor recovery', () => {
         },
     );
 });
+
+
+describe('mixed literal and wrapped math anchors', () => {
+    it.each(['str_replace', 'str_replace_all', 'insert_before', 'insert_after'] as const)(
+        'rejects ambiguous %s anchors in validation and execution without paste hints', async (operation) => {
+            const html = '<p>Literal $x$ and <span class="math">$x$</span>.</p>';
+            const item = makeMockItem({ getNote: vi.fn(() => html) });
+            (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync.mockResolvedValue(item);
+            vi.mocked(getOrSimplify).mockReturnValue({
+                simplified: html, metadata: { elements: new Map() }, isStale: false,
+            });
+            const action_data = {
+                library_id: 1, zotero_key: 'NOTE0001', operation,
+                old_string: '$x$', new_string: '$y$',
+            };
+            const validation = await handleAgentActionValidateRequest(makeValidateRequest({ action_data }));
+            const execution = await handleAgentActionExecuteRequest(makeExecuteRequest({ action_data }));
+            expect(validation.valid).toBe(false);
+            expect(execution.success).toBe(false);
+            for (const response of [validation, execution]) {
+                expect(response.error_code).toBe('ambiguous_match');
+                expect(response.error).toContain('copy the whole <span class="math">');
+            }
+            expect(item.setNote).not.toHaveBeenCalled();
+            expect(findCandidateSnippets).not.toHaveBeenCalled();
+        },
+    );
+});

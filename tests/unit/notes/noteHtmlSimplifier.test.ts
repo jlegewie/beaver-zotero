@@ -2724,32 +2724,32 @@ describe('findRangeByContexts', () => {
 // =============================================================================
 
 describe('Math simplification', () => {
-    it('simplifies inline math to dollar notation', () => {
+    it('preserves inline math with its wrapper', () => {
         const html = wrap(`<p>The formula ${rawInlineMath('E=mc^2')} is famous.</p>`);
         const { simplified } = simplifyNoteHtml(html, 1);
         expect(simplified).toContain('$E=mc^2$');
-        expect(simplified).not.toContain('class="math"');
-        expect(simplified).not.toContain('<span');
+        expect(simplified).toContain('class="math"');
+        expect(simplified).toContain('<span');
     });
 
-    it('simplifies display math to dollar notation', () => {
+    it('preserves display math with its wrapper', () => {
         const html = wrap(`<p>Consider:</p>${rawDisplayMath('\\int_0^1 f(x) dx')}`);
         const { simplified } = simplifyNoteHtml(html, 1);
         expect(simplified).toContain('$$\\int_0^1 f(x) dx$$');
-        expect(simplified).not.toContain('class="math"');
-        expect(simplified).not.toContain('<pre');
+        expect(simplified).toContain('class="math"');
+        expect(simplified).toContain('<pre');
     });
 
-    it('simplifies multiple inline math expressions', () => {
+    it('preserves multiple inline math expressions', () => {
         const html = wrap(`<p>Given ${rawInlineMath('x')} and ${rawInlineMath('y')}, then ${rawInlineMath('x+y')}.</p>`);
         const { simplified } = simplifyNoteHtml(html, 1);
         expect(simplified).toContain('$x$');
         expect(simplified).toContain('$y$');
         expect(simplified).toContain('$x+y$');
-        expect(simplified).not.toContain('class="math"');
+        expect(simplified).toContain('class="math"');
     });
 
-    it('simplifies mixed inline and display math', () => {
+    it('preserves mixed inline and display math', () => {
         const html = wrap(
             `<p>Inline ${rawInlineMath('a^2+b^2=c^2')} and display:</p>`
             + rawDisplayMath('\\sum_{i=1}^n i = \\frac{n(n+1)}{2}')
@@ -2757,18 +2757,18 @@ describe('Math simplification', () => {
         const { simplified } = simplifyNoteHtml(html, 1);
         expect(simplified).toContain('$a^2+b^2=c^2$');
         expect(simplified).toContain('$$\\sum_{i=1}^n i = \\frac{n(n+1)}{2}$$');
-        expect(simplified).not.toContain('<span');
-        expect(simplified).not.toContain('<pre');
+        expect(simplified).toContain('<span');
+        expect(simplified).toContain('<pre');
     });
 
-    it('simplifies math with HTML entities', () => {
+    it('preserves math with HTML entities', () => {
         const html = wrap(`<p>${rawInlineMath('x &lt; y')}</p>`);
         const { simplified } = simplifyNoteHtml(html, 1);
         expect(simplified).toContain('$x &lt; y$');
-        expect(simplified).not.toContain('class="math"');
+        expect(simplified).toContain('class="math"');
     });
 
-    it('simplifies math alongside citations', () => {
+    it('preserves math alongside citations', () => {
         const cit = rawCitation('MC1', 1, '', 'Author, 2024');
         const html = wrap(`<p>As shown by ${cit}, ${rawInlineMath('p < 0.05')}.</p>`);
         const { simplified } = simplifyNoteHtml(html, 1);
@@ -2789,11 +2789,11 @@ describe('Math simplification', () => {
         // PM normalizes math spans by adding $ delimiters
         const html = wrap('<p><span class="math">x^2</span></p>');
         const { simplified } = simplifyNoteHtml(html, 1);
-        // PM adds $ delimiters, then simplification converts to dollar notation
+        // PM adds $ delimiters; simplification preserves the wrapper.
         expect(simplified).toContain('$x^2$');
     });
 
-    it('simplifies math with LaTeX backslash commands', () => {
+    it('preserves math with LaTeX backslash commands', () => {
         const html = wrap(`<p>${rawInlineMath('\\alpha + \\beta')}</p>`);
         const { simplified } = simplifyNoteHtml(html, 1);
         expect(simplified).toContain('$\\alpha + \\beta$');
@@ -2809,6 +2809,41 @@ describe('Math expansion', () => {
     function emptyMetadata(): SimplificationMetadata {
         return { elements: new Map() };
     }
+
+    it.each([
+        '$a<em>b</em>c$',
+        '$$a<em>b</em>c$$',
+        '$$a\n<em>b</em>\nc$$',
+        '$x < y$',
+        '$$x < y$$',
+        String.raw`$x\<y$`,
+        String.raw`$$x\<y$$`,
+        String.raw`<p>$x\<y$</p>`,
+    ])('preserves old math anchors containing < verbatim: %s', (input) => {
+        expect(expandToRawHtml(input, emptyMetadata(), 'old')).toBe(input);
+    });
+
+    it('expands ordinary math in new context', () => {
+        const input = String.raw`Inline $a b$ and $\$5$; display $$a
+b$$; inequality $x &lt; y$.`;
+        expect(expandToRawHtml(input, emptyMetadata(), 'new')).toBe(
+            `Inline ${rawInlineMath('a b')} and ${rawInlineMath(String.raw`\$5`)}; display ${rawDisplayMath('a\nb')}; inequality ${rawInlineMath('x &lt; y')}.`
+        );
+    });
+
+    it.each([
+        ['$x < y$', rawInlineMath('x < y')],
+        ['$$x < y$$', rawDisplayMath('x < y')],
+    ])('expands new math containing < : %s', (input, expected) => {
+        expect(expandToRawHtml(input, emptyMetadata(), 'new')).toBe(expected);
+    });
+
+    it('preserves markup and adjacent literal dollars in an old anchor', () => {
+        const input = `$a<em>b</em>c$ and $x$; $$d<em>e</em>f$$ then $$y$$`;
+        expect(expandToRawHtml(input, emptyMetadata(), 'old')).toBe(
+            input
+        );
+    });
 
     it('expands inline math to span.math', () => {
         const input = 'The formula $E=mc^2$ is famous.';
@@ -2993,9 +3028,9 @@ describe('Math round-trips', () => {
         const html = wrap(`<p>The formula ${raw} is famous.</p>`);
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
 
-        // Simplified form should have dollar notation, no HTML wrapper
+        // The read representation preserves the math wrapper.
         expect(simplified).toContain('$E=mc^2$');
-        expect(simplified).not.toContain('class="math"');
+        expect(simplified).toContain('class="math"');
 
         // Expanding should restore the raw HTML
         const expanded = expandToRawHtml(simplified, metadata, 'old');
@@ -3008,19 +3043,14 @@ describe('Math round-trips', () => {
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
 
         expect(simplified).toContain('$$\\frac{a}{b}$$');
-        expect(simplified).not.toContain('<pre');
+        expect(simplified).toContain('<pre');
 
         const expanded = expandToRawHtml(simplified, metadata, 'old');
         expect(expanded).toContain(raw);
     });
 
     it('empty display math round-trips (kept as raw HTML)', () => {
-        // Empty display math placeholders (`<pre class="math">$$$$</pre>`) must
-        // survive simplify → expand. The expander can't rewrap an empty `$$$$`
-        // (the dollar regex requires non-empty content), so the simplifier
-        // must leave empty blocks as raw HTML instead of producing `$$$$`.
-        // Regression for edit_note failures where the agent targeted an empty
-        // formula placeholder and old_string matching returned zero matches.
+        // Empty placeholders retain the same explicit representation as other math.
         const raw = '<pre class="math">$$$$</pre>';
         const html = wrap(`<h3>Theorem 3</h3>${raw}<p>Next section.</p>`);
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
@@ -3080,7 +3110,7 @@ describe('Math round-trips', () => {
         const { metadata } = simplifyNoteHtml(html, 1);
 
         // Agent proposes changing E=mc^2 to E=mc^3
-        const expandedOld = expandToRawHtml('$E=mc^2$', metadata, 'old');
+        const expandedOld = expandToRawHtml(rawInlineMath('E=mc^2'), metadata, 'old');
         const expandedNew = expandToRawHtml('$E=mc^3$', metadata, 'new');
 
         expect(expandedOld).toBe(rawInlineMath('E=mc^2'));
@@ -3095,7 +3125,7 @@ describe('Math round-trips', () => {
         const strippedHtml = stripDataCitationItems(html);
         const { metadata } = simplifyNoteHtml(html, 1);
 
-        const expandedOld = expandToRawHtml('$x^2$ ', metadata, 'old');
+        const expandedOld = expandToRawHtml(`${rawInlineMath('x^2')} `, metadata, 'old');
         expect(expandedOld).toBe(`${rawInlineMath('x^2')} `);
         expect(strippedHtml).toContain(rawInlineMath('x^2'));
     });
@@ -3136,10 +3166,10 @@ describe('Math apply-undo-apply cycle', () => {
         // --- Step 1: Simplify ---
         const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
         expect(simplified).toContain('$E=mc^2$');
-        expect(simplified).not.toContain('class="math"');
+        expect(simplified).toContain('class="math"');
 
         // --- Step 2: Agent proposes edit ---
-        const oldString = '$E=mc^2$';
+        const oldString = rawInlineMath('E=mc^2');
         const newString = '$E=mc^3$';
 
         // --- Step 3: Expand ---
@@ -3183,7 +3213,7 @@ describe('Math apply-undo-apply cycle', () => {
         expect(simplified).toContain('$$a^2 + b^2 = c^2$$');
 
         // Agent changes the equation
-        const oldString = '$$a^2 + b^2 = c^2$$';
+        const oldString = rawDisplayMath('a^2 + b^2 = c^2');
         const newString = '$$a^n + b^n = c^n$$';
 
         // Expand
@@ -3241,7 +3271,7 @@ describe('Math apply-undo-apply cycle', () => {
         const { metadata } = simplifyNoteHtml(noteHtml, 1);
 
         // Agent removes math (include enough surrounding context for unique match)
-        const oldString = 'Text $x^2$ end.';
+        const oldString = `Text ${rawInlineMath('x^2')} end.`;
         const newString = 'Text end.';
 
         const expandedOld = expandToRawHtml(oldString, metadata, 'old');
@@ -3271,7 +3301,7 @@ describe('Math apply-undo-apply cycle', () => {
         expect(citTag).toBeTruthy();
 
         // Agent modifies the math but keeps the citation
-        const oldString = `${citTag} shows, $p=0.01$.`;
+        const oldString = `${citTag} shows, ${rawInlineMath('p=0.01')}.`;
         const newString = `${citTag} shows, $p=0.001$.`;
 
         const expandedOld = expandToRawHtml(oldString, metadata, 'old');

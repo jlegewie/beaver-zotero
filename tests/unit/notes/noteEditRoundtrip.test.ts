@@ -1689,6 +1689,117 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
         expect(undoItem.saveTx).toHaveBeenCalled();
     });
 
+    it.each([
+        ['inline', 'wrapped'],
+        ['inline', 'legacy'],
+        ['inline', 'legacy-newline'],
+        ['display', 'wrapped'],
+        ['display', 'legacy'],
+        ['display', 'legacy-newline'],
+    ])('applies and undoes a %s math edit from a %s anchor after editor normalization', async (kind, format) => {
+        const delimiter = kind === 'inline' ? '$' : '$$';
+        const tag = kind === 'inline' ? 'span' : 'pre';
+        const formula = `${delimiter}x${delimiter}`;
+        const rawMath = `<${tag} class="math">${formula}</${tag}>`;
+        const noteHtml = normalizeNoteHtml(wrap(kind === 'inline'
+            ? `<p>Equation: ${rawMath}.</p>`
+            : `<p>Equation:</p>${rawMath}<p>End.</p>`));
+        const item = makeMockItem(noteHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+        const { executeEditNoteAction, undoEditNoteAction } = await importEditNoteActions();
+        const action = makeAction({
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: format === 'wrapped' ? rawMath : formula + (format === 'legacy-newline' ? '\n\n' : ''),
+                new_string: `${delimiter}y${delimiter}`,
+            },
+        });
+
+        const result = await executeEditNoteAction(action);
+        expect(result.occurrences_replaced).toBe(1);
+        expect(result.undo_old_html).toBe(rawMath);
+        expect(item.getNote()).toContain(`<${tag} class="math">${delimiter}y${delimiter}</${tag}>`);
+        expect(item.getNote().match(/class="math"/g)).toHaveLength(1);
+        item.setNote(normalizeNoteHtml(item.getNote()));
+
+        await undoEditNoteAction({ ...action, result_data: result });
+        expect(stripDataCitationItems(item.getNote())).toBe(stripDataCitationItems(noteHtml));
+    });
+
+    it('undo reconstructs math for a legacy action without raw undo snapshots', async () => {
+        const original = normalizeNoteHtml(wrap('<p>Value <span class="math">$x$</span>.</p>'));
+        const current = normalizeNoteHtml(wrap('<p>Value <span class="math">$y$</span>.</p>'));
+        const item = makeMockItem(current);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+        const { undoEditNoteAction } = await importEditNoteActions();
+        const action = makeAction({
+            proposed_data: {
+                library_id: 1, zotero_key: 'NOTE0001',
+                old_string: '$x$', new_string: '$y$',
+            },
+            result_data: undefined,
+        });
+        await undoEditNoteAction(action);
+        expect(stripDataCitationItems(item.getNote())).toBe(stripDataCitationItems(original));
+    });
+
+    it.each(['insert_before', 'insert_after'] as const)('applies and undoes %s without converting a literal dollar anchor to math', async (operation) => {
+        const noteHtml = normalizeNoteHtml(wrap('<p>Literal $x$.</p>'));
+        const item = makeMockItem(noteHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+        const { executeEditNoteAction, undoEditNoteAction } = await importEditNoteActions();
+        const action = makeAction({
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                operation,
+                old_string: '$x$',
+                new_string: 'added $y$ ',
+            },
+        });
+        const result = await executeEditNoteAction(action);
+        const injected = 'added <span class="math">$y$</span> ';
+        expect(item.getNote()).toContain(operation === 'insert_after'
+            ? `$x$${injected}` : `${injected}$x$`);
+        expect(item.getNote()).not.toContain('<span class="math">$x$</span>');
+        item.setNote(normalizeNoteHtml(item.getNote()));
+        await undoEditNoteAction({ ...action, result_data: result });
+        expect(stripDataCitationItems(item.getNote())).toBe(stripDataCitationItems(noteHtml));
+    });
+
+    it.each(['$', '$$'])('edits a copied %s math anchor containing emphasis and restores it on undo', async (delimiter) => {
+        const formula = delimiter + String.raw`\hat{x}<em>k^- = f(\hat{x}</em>{k-1}^+)` + delimiter;
+        const noteHtml = normalizeNoteHtml(wrap(`<p>Prediction: ${formula}.</p>`));
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+        expect(simplified).toContain(formula);
+        expect(expandToRawHtml(formula, metadata, 'old')).toBe(formula);
+
+        const item = makeMockItem(noteHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+        const { executeEditNoteAction, undoEditNoteAction } = await importEditNoteActions();
+        const action = makeAction({
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: formula,
+                new_string: 'corrected prediction',
+            },
+        });
+
+        const result = await executeEditNoteAction(action);
+        expect(result.occurrences_replaced).toBe(1);
+        expect(item.getNote()).toContain('<p>Prediction: corrected prediction.</p>');
+        expect(item.getNote()).not.toContain(formula);
+
+        await undoEditNoteAction({ ...action, result_data: result });
+        expect(stripDataCitationItems(item.getNote())).toBe(stripDataCitationItems(noteHtml));
+    });
+
     it('str_replace on a code block with dollars applies on the first try and undo restores it', async () => {
         // PM-normalize so item.getNote() matches the expanded old_string.
         const noteHtml = normalizeNoteHtml(wrap(

@@ -3,7 +3,8 @@
  * Zotero note HTML.
  *
  * The simplifier produces tags like `<citation ref="..."/>`,
- * `<annotation id="..."/>`, `<image id="..."/>`, and `$...$` math notation.
+ * `<annotation id="..."/>` and `<image id="..."/>`, retaining math wrappers.
+ * New content can also use `$...$` math notation.
  * This module turns them back into the full raw HTML that Zotero's note editor
  * expects (with data-citation payloads, annotation spans, and `<pre
  * class="math">` wrappers).
@@ -727,11 +728,13 @@ export function isCitationRefNotFoundError(error: unknown): boolean {
 
 /**
  * Expand simplified tags in a string back to their raw HTML equivalents.
- * Handles citations, annotations, images, and math dollar notation.
+ * Handles citations, annotations, images, and new-content math dollar notation.
+ * Old anchors retain math markup and literal dollars as returned by read_note.
  *
  * @param str - String containing simplified tags (from old_string or new_string)
  * @param metadata - The metadata map from simplification
- * @param context - 'old' for old_string, 'new' for new_string
+ * @param context - 'old' preserves anchor math, 'new' expands dollar notation.
+ * 'legacy-old' is reserved for the matcher's fallback for older read results.
  * @param externalRefContext - Optional. When provided, citations using
  *   `external_id` (chat-side external work IDs from search tools) are
  *   auto-resolved to a Zotero `item_id` if the work is in the library, or
@@ -745,11 +748,14 @@ export function isCitationRefNotFoundError(error: unknown): boolean {
 export function expandToRawHtml(
     str: string,
     metadata: SimplificationMetadata,
-    context: 'old' | 'new',
+    context: 'old' | 'new' | 'legacy-old',
     externalRefContext?: ExternalRefContext,
     pageLabels?: PageLabelsByAttachmentId,
     resolvedLocatorPages?: ResolvedLocatorPages,
 ): string {
+    const legacyOldMath = context === 'legacy-old';
+    if (legacyOldMath) context = 'old';
+
     // Expand citations (all self-closing: <citation ... />)
     str = str.replace(
         noteCitationTagPattern(),
@@ -983,10 +989,17 @@ export function expandToRawHtml(
         }
     );
 
-    // Preserve math wrappers that already exist in the edited string. Empty
-    // placeholders now survive simplification as raw HTML, and the model may
-    // keep those wrappers when filling them in. Shield them before the dollar
-    // pass so `$...$` / `$$...$$` inside the wrapper doesn't get re-expanded
+    // Old anchors reproduce read_note literally. Dollar expansion is only an
+    // authoring convenience, or an explicit fallback for older read results.
+    if (context === 'old' && !legacyOldMath) {
+        return str.replace(
+            /__BEAVER_RAW_LINK_(\d+)__/g,
+            (match, idx) => rawLinkAnchors[Number(idx)] ?? match
+        );
+    }
+
+    // Preserve math wrappers copied from read_note, including empty math
+    // placeholders. Shield them before the dollar pass so `$...$` / `$$...$$` inside the wrapper doesn't get re-expanded
     // into nested math HTML.
     const preservedMathWrappers: string[] = [];
     const preserveMathWrapper = (wrapper: string): string => {
@@ -1043,20 +1056,29 @@ export function expandToRawHtml(
         // <p ...>$...$</p> → $$...$$ (standalone single-dollar math = display intent)
         segment = segment.replace(
             /<p(?:\s[^>]*)?>(\s*)\$(?!\$)((?:[^$\\<]|\\.)+?)\$(?!\$)(\s*)<\/p>/g,
-            (_match, _ws1, content) => `$$${content}$$`
+            (match, _ws1, content) => context === 'old' && content.includes('<')
+                ? match
+                : `$$${content}$$`
         );
+
+        // Legacy simplification only removed wrappers with no '<' in the content.
+        // Preserve other old anchors verbatim, including embedded HTML. Check
+        // the whole match so a rejected pair's closing dollars cannot become
+        // the opening delimiter of a different match with neighboring math.
+        const preserveOldMarkup = (match: string): boolean =>
+            context === 'old' && match.includes('<');
 
         // Display math: $$...$$ → <pre class="math">$$...$$</pre>
         segment = segment.replace(
             /\$\$([\s\S]+?)\$\$/g,
-            (match) => `<pre class="math">${match}</pre>`
+            (match) => preserveOldMarkup(match) ? match : `<pre class="math">${match}</pre>`
         );
         // Inline math: $...$ → <span class="math">$...$</span>
         // Rules: not adjacent to another $, content starts/ends with non-whitespace,
         // allows backslash-escaped chars (e.g. \$ for literal dollar in LaTeX)
         segment = segment.replace(
             /(?<!\$)\$(?!\$)(?=\S)((?:[^$\\]|\\.)+?)(?<=\S)\$(?!\$)/g,
-            (match) => `<span class="math">${match}</span>`
+            (match) => preserveOldMarkup(match) ? match : `<span class="math">${match}</span>`
         );
         return segment;
     };
