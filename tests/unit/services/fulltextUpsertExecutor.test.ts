@@ -12,6 +12,7 @@ import { describeStatus } from '../../../react/components/preferences/processing
 import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { BACKGROUND_EXTRACT_PRIORITY, BACKGROUND_UPSERT_PRIORITY } from '../../../src/services/backgroundProcessing/constants';
 import { OCR_PRIORITY_ON_DEMAND } from '../../../src/services/ocr/constants';
+import { computeStructuredDocumentHash } from '../../../src/services/documentExtraction/structuredDocumentHash';
 
 async function countCleanupIntents(connection: MockDBConnection, accountId: string): Promise<number> {
     const rows = await connection.queryAsync('SELECT COUNT(*) AS n FROM index_cleanup_outbox WHERE account_id = ?', [accountId]);
@@ -609,6 +610,32 @@ describe('FulltextUpsertExecutor', () => {
             doc_hash: 'a'.repeat(64),
             payload: expect.objectContaining({ schemaVersion: '4' }),
         }));
+    });
+
+    it('discards a rejected payload and parks the upsert until extraction rebuilds it', async () => {
+        api.upsertHash.mockRejectedValueOnce(new ApiError(409, 'Conflict', 'payload needed', 'payload_required'));
+        vi.mocked(computeStructuredDocumentHash).mockResolvedValueOnce('b'.repeat(64));
+        (Zotero.Beaver.documentCache as any).discardRejectedStructuredPayload = vi.fn(async () => 'discarded');
+        const outcome = await new FulltextUpsertExecutor(api as any).execute(record, ctx);
+        expect(outcome).toEqual({ kind: 'defer', reason: 'payload_cache_miss' });
+        expect(api.upsertPayload).not.toHaveBeenCalled();
+        expect(Zotero.Beaver.documentCache?.discardRejectedStructuredPayload).toHaveBeenCalledWith(
+            { libraryId: 1, zoteroKey: 'ABCDEFGH' }, 'pdf', '/tmp/file.pdf', 'b'.repeat(64));
+        expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({
+            jobType: 'document_extract', zoteroKey: 'ABCDEFGH', payloadKind: 'structured',
+        }));
+        expect(await db.getAttachmentProcessingState(1, 'ABCDEFGH')).toMatchObject({ extractStatus: 'done' });
+    });
+
+    it('does not reset extraction or upload a protected OCR payload with a mismatched hash', async () => {
+        api.upsertHash.mockRejectedValueOnce(new ApiError(409, 'Conflict', 'payload needed', 'payload_required'));
+        vi.mocked(computeStructuredDocumentHash).mockResolvedValueOnce('b'.repeat(64));
+        (Zotero.Beaver.documentCache as any).discardRejectedStructuredPayload = vi.fn(async () => 'protected');
+        const outcome = await new FulltextUpsertExecutor(api as any).execute(record, ctx);
+        expect(outcome).toMatchObject({ kind: 'failPermanent', reason: 'terminal:cached_payload_hash_mismatch' });
+        expect(api.upsertPayload).not.toHaveBeenCalled();
+        expect(enqueue).not.toHaveBeenCalled();
+        expect(await db.getAttachmentProcessingState(1, 'ABCDEFGH')).toMatchObject({ extractStatus: 'done' });
     });
 
     it.each([

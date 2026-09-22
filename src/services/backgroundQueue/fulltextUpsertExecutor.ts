@@ -195,12 +195,7 @@ export class FulltextUpsertExecutor implements JobExecutor {
         const upsertWithPayload = async (): Promise<
             Awaited<ReturnType<SearchIndexApiClient['upsertPayload']>> | JobOutcome
         > => {
-            if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
-            const eligibility = await checkEligibility();
-            if (eligibility) return eligibility;
-            const payload = await this.readCachedPayload(record, row);
-            if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
-            if (!payload) {
+            const enqueueCacheRecovery = async (): Promise<JobOutcome> => {
                 const armed = accountId
                     ? await ctx.db.beginFulltextCacheRecovery(
                         record, accountId, row.structuredDocumentHash, row.extractionSource)
@@ -223,16 +218,35 @@ export class FulltextUpsertExecutor implements JobExecutor {
                     throw error;
                 }
                 return { kind: 'defer', reason: 'payload_cache_miss' };
+            };
+            if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+            const eligibility = await checkEligibility();
+            if (eligibility) return eligibility;
+            const cached = await this.readCachedPayload(record, row);
+            if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+            if (!cached) {
+                return enqueueCacheRecovery();
             }
+            const { payload, filePath } = cached;
             const liveHash = await computeStructuredDocumentHash(row.contentKind, payload);
             if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
             if (liveHash !== row.structuredDocumentHash) {
-                await ctx.db.resetAttachmentExtraction(
-                    record.libraryId,
-                    record.zoteroKey,
-                    'cached_payload_hash_mismatch',
+                const discarded = await Zotero.Beaver?.documentCache?.discardRejectedStructuredPayload(
+                    { libraryId: row.libraryId, zoteroKey: row.zoteroKey },
+                    row.contentKind,
+                    filePath,
+                    liveHash,
                 );
-                return { kind: 'complete', reason: 'stale_payload' };
+                if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+                if (discarded === 'protected') {
+                    return this.terminal(record, row, 'cached_payload_hash_mismatch',
+                        'Protected OCR payload differs from recorded document hash', ctx, accessChanged);
+                }
+                if (discarded !== 'discarded') {
+                    return { kind: 'retry', error: 'cached_payload_changed', countsAsAttempt: false,
+                        retryAfterMs: 1_000 };
+                }
+                return enqueueCacheRecovery();
             }
             try {
                 if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
@@ -386,7 +400,7 @@ export class FulltextUpsertExecutor implements JobExecutor {
     private async readCachedPayload(
         record: BackgroundJobRecord,
         row: AttachmentProcessingStateRecord,
-    ): Promise<DocumentExtractResult | null> {
+    ): Promise<{ payload: DocumentExtractResult; filePath: string } | null> {
         let item: Zotero.Item | null = null;
         try {
             item = await Zotero.Items.getByLibraryAndKeyAsync(
@@ -404,22 +418,25 @@ export class FulltextUpsertExecutor implements JobExecutor {
         const cache = Zotero.Beaver?.documentCache;
         if (!cache) return null;
         if (row.contentKind === 'pdf') {
-            return await cache.getResult(
+            const payload = await cache.getResult(
                 { libraryId: row.libraryId, zoteroKey: row.zoteroKey },
                 'structured',
                 source.source.filePath,
             ) as DocumentExtractResult | null;
+            return payload ? { payload, filePath: source.source.filePath } : null;
         }
         if (row.contentKind === 'epub') {
-            return await cache.getEpubResult(
+            const payload = await cache.getEpubResult(
                 { libraryId: row.libraryId, zoteroKey: row.zoteroKey },
                 source.source.filePath,
             );
+            return payload ? { payload, filePath: source.source.filePath } : null;
         }
-        return await cache.getSnapshotResult(
+        const payload = await cache.getSnapshotResult(
             { libraryId: row.libraryId, zoteroKey: row.zoteroKey },
             source.source.filePath,
         );
+        return payload ? { payload, filePath: source.source.filePath } : null;
     }
 
     private async mapApiError(

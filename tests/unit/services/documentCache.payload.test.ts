@@ -7,6 +7,7 @@ import { createMockAttachment } from '../../helpers/factories';
 import type { BeaverExtractResult } from '@beaver/agent-core/extract/schema';
 import type { PageGeometry } from '../../../src/services/documentCache';
 import type { EpubDocument } from '../../../src/services/documentExtraction/epub';
+import { computeStructuredDocumentHash } from '../../../src/services/documentExtraction/structuredDocumentHash';
 
 const mockIOUtils = (globalThis as any).IOUtils as {
     exists: ReturnType<typeof vi.fn>;
@@ -38,6 +39,12 @@ const structuredResult: BeaverExtractResult = {
         citationIndex: {},
     },
 };
+
+function structuredResultWithLabel(label: string): BeaverExtractResult {
+    const result = structuredClone(structuredResult);
+    result.document.pages[0].label = label;
+    return result;
+}
 
 const epubDocument: EpubDocument = {
     content_kind: 'epub',
@@ -129,6 +136,65 @@ describe('DocumentCache payloads', () => {
 
     afterEach(async () => {
         await conn.closeDatabase();
+    });
+
+    async function putStructured(result = structuredResult, extractionSource?: 'ocr') {
+        await cache.putResult({
+            item: createCacheAttachment(), filePath: sourcePath, mode: 'structured',
+            sourceSizeBytes: 3, contentType: 'application/pdf', result,
+            metadata: { pageCount: 1, pageLabels: { '0': '1' }, pages: onePageGeometry,
+                ...(extractionSource ? { extractionSource } : {}) },
+        });
+    }
+
+    it('discards a native structured payload whose bytes match the rejected result', async () => {
+        await putStructured();
+        const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
+        const hash = await computeStructuredDocumentHash('pdf', structuredResult);
+        expect(await cache.discardRejectedStructuredPayload(ref, 'pdf', sourcePath, hash)).toBe('discarded');
+        expect(await db.getDocumentCachePayload(1, 'ABCD1234', 'structured')).toBeNull();
+        expect(await cache.getResult(ref, 'structured', sourcePath)).toBeNull();
+    });
+
+    it('keeps a replacement written after the rejected payload was read', async () => {
+        await putStructured();
+        const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
+        const replacement = structuredResultWithLabel('Replaced');
+        const originalGet = cache.getResult.bind(cache);
+        vi.spyOn(cache, 'getResult').mockImplementationOnce(async (...args) => {
+            const result = await originalGet(...args);
+            await putStructured(replacement);
+            return result;
+        });
+        const hash = await computeStructuredDocumentHash('pdf', structuredResult);
+        expect(await cache.discardRejectedStructuredPayload(ref, 'pdf', sourcePath, hash)).toBe('changed');
+        expect(await cache.getResult(ref, 'structured', sourcePath)).toEqual(replacement);
+    });
+
+    it('keeps a current payload when its hash differs from the rejected result', async () => {
+        const replacement = structuredResultWithLabel('Replaced');
+        await putStructured(replacement);
+        const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
+        const rejectedHash = await computeStructuredDocumentHash('pdf', structuredResult);
+        expect(await cache.discardRejectedStructuredPayload(ref, 'pdf', sourcePath, rejectedHash)).toBe('changed');
+        expect(await cache.getResult(ref, 'structured', sourcePath)).toEqual(replacement);
+    });
+
+    it('preserves protected OCR bytes when their structured hash is rejected', async () => {
+        await putStructured(structuredResult, 'ocr');
+        const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
+        const hash = await computeStructuredDocumentHash('pdf', structuredResult);
+        expect(await cache.discardRejectedStructuredPayload(ref, 'pdf', sourcePath, hash)).toBe('protected');
+        expect(await cache.getResult(ref, 'structured', sourcePath)).toEqual(structuredResult);
+    });
+
+    it('does not claim a deletion succeeded when its compare-and-set fails', async () => {
+        await putStructured();
+        const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
+        const hash = await computeStructuredDocumentHash('pdf', structuredResult);
+        vi.spyOn(db, 'deleteDocumentCachePayloadIfUnchanged').mockResolvedValueOnce(null);
+        expect(await cache.discardRejectedStructuredPayload(ref, 'pdf', sourcePath, hash)).toBe('changed');
+        expect(await cache.getResult(ref, 'structured', sourcePath)).toEqual(structuredResult);
     });
 
     it('putResult then getResult returns the cached extraction result', async () => {

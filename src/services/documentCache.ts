@@ -41,6 +41,8 @@ import {
 } from './documentExtraction/shared/extractionSchemaVersions';
 import { validateEpubDocument, type EpubDocument } from './documentExtraction/epub';
 import { validateSnapshotDocument, type SnapshotDocument } from './documentExtraction/snapshot';
+import { computeStructuredDocumentHash } from './documentExtraction/structuredDocumentHash';
+import type { DocumentExtractResult } from '@beaver/agent-core/extract/document/shared/documentExtractResult';
 
 export const DOCUMENT_METADATA_FORMAT_VERSION = 1;
 export const DOCUMENT_PAYLOAD_FORMAT_VERSION = 1;
@@ -955,6 +957,28 @@ export class DocumentCache {
         } catch (error) {
             logger(`DocumentCache.invalidate error: ${error}`, 1);
         }
+    }
+
+    /** Discard a rejected native structured payload only if the inspected row is still current. */
+    async discardRejectedStructuredPayload(
+        ref: DocumentRef,
+        kind: Extract<ExtractContentKind, 'pdf' | 'epub' | 'snapshot'>,
+        filePath: string,
+        rejectedHash: string,
+    ): Promise<'discarded' | 'changed' | 'protected'> {
+        const before = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, 'structured');
+        if (!before) return 'changed';
+        const result = kind === 'pdf'
+            ? await this.getResult(ref, 'structured', filePath)
+            : kind === 'epub'
+                ? await this.getEpubResult(ref, filePath)
+                : await this.getSnapshotResult(ref, filePath);
+        if (!result || await computeStructuredDocumentHash(kind, result as DocumentExtractResult) !== rejectedHash) return 'changed';
+        const after = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, 'structured');
+        if (!after || after.id !== before.id || after.payloadSha256 !== before.payloadSha256
+            || after.payloadPath !== before.payloadPath) return 'changed';
+        if (before.extractionSource === 'ocr') return 'protected';
+        return await this.deletePayload(before) ? 'discarded' : 'changed';
     }
 
     /** Invalidate all document-cache state for a library. */
