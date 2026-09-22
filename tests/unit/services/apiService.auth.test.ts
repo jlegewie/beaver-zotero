@@ -15,6 +15,7 @@ vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
 }));
 
 import {
+    isCredentialsBlockedError,
     RequestTimeoutError,
     SessionExpiredError,
     SessionRefreshError,
@@ -225,6 +226,75 @@ describe('ApiService authentication recovery', () => {
         expect(fetchMock).not.toHaveBeenCalled();
     });
 });
+
+/**
+ * A request this class sends always carries a bearer token — `getAuthHeaders`
+ * throws rather than dispatch one without. So a 403 whose body says the server
+ * saw no credentials means they were stripped in transit, which is a network
+ * problem the user can act on, not a session problem.
+ */
+describe('ApiService blocked-credentials classification', () => {
+    let service: ApiService;
+    let fetchMock: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+        service = new ApiService('https://api.example.com');
+        fetchMock = vi.fn();
+        vi.stubGlobal('fetch', fetchMock);
+
+        mockSupabase.auth.getSession.mockReset();
+        mockSupabase.auth.refreshSession.mockReset();
+        mockSupabase.auth.getSession.mockResolvedValue({
+            data: {
+                session: {
+                    access_token: 'token',
+                    expires_at: Math.floor(Date.now() / 1000) + 3600,
+                },
+            },
+            error: null,
+        });
+    });
+
+    afterEach(() => {
+        setCredentialAdapter(undefined);
+        vi.unstubAllGlobals();
+    });
+
+    function respond(status: number, body: unknown) {
+        fetchMock.mockImplementation(async () => new Response(JSON.stringify(body), { status }));
+    }
+
+    it.each([
+        ['a missing header', 'Not authenticated'],
+        ['a rewritten scheme', 'Invalid authentication credentials'],
+    ])('classifies a 403 reporting %s as blocked credentials', async (_case, detail) => {
+        respond(403, { detail });
+
+        const error = await service.get('/api/v1/account/profile').catch(e => e);
+
+        expect(isCredentialsBlockedError(error)).toBe(true);
+        expect(error.status).toBe(403);
+    });
+
+    it('leaves an application 403 alone', async () => {
+        respond(403, { detail: { code: 'SYNC_NOT_ALLOWED', message: 'Sync is not available' } });
+
+        const error = await service.get('/api/v1/sync/status').catch(e => e);
+
+        expect(isCredentialsBlockedError(error)).toBe(false);
+        expect(error.code).toBe('SYNC_NOT_ALLOWED');
+    });
+
+    it('does not refresh the session or retry, since the token was never rejected', async () => {
+        respond(403, { detail: 'Not authenticated' });
+
+        await expect(service.get('/api/v1/account/profile')).rejects.toBeDefined();
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(mockSupabase.auth.refreshSession).not.toHaveBeenCalled();
+    });
+});
+
 
 describe('ApiService version headers', () => {
     let service: ApiService;

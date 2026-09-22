@@ -26,6 +26,7 @@ import {
     WSToolCallArgsStreamEvent,
 } from "../protocol/agentProtocol";
 import { MessageAttachment, messageAttachmentKey, messageAttachmentsHaveSameIdentity } from "../types/attachments/apiTypes";
+import { isTableToolName, tableResultBody } from './tableResults';
 import { collectResumeChain, continuationOfferFor, shouldOfferResume } from "./runResumeHelpers";
 
 // =============================================================================
@@ -563,6 +564,7 @@ export function getToolCallStatusFromResult(
     if (result.part_kind === 'retry-prompt' || isUnsuccessfulToolReturn(result)) {
         return 'error';
     }
+    if (isTableToolName(result.tool_name) && tableResultBody(result.content).ok === false) return 'error';
 
     return 'completed';
 }

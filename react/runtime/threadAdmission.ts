@@ -29,6 +29,8 @@ import { viewedHistoryRevisionAtom } from "./threadProjection";
 export interface AdmissionSnapshot {
     threadId: string;
     tailRunId: string | null;
+    /** A claimed run whose persistence has not been confirmed. */
+    unconfirmedRunId?: string;
     activity: ThreadActivity | { state: "unknown"; run_id: null };
 }
 export const threadAdmissionAtom = atom<AdmissionSnapshot | null>(null);
@@ -146,10 +148,12 @@ export function setAdmission(
     threadId: string,
     tailRunId: string | null,
     activity: AdmissionSnapshot["activity"] | "idle" | "unknown",
+    unconfirmedRunId?: string,
 ): void {
     set(threadAdmissionAtom, {
         threadId,
         tailRunId,
+        ...(unconfirmedRunId ? { unconfirmedRunId } : {}),
         activity:
             typeof activity === "string"
                 ? { state: activity, run_id: null }

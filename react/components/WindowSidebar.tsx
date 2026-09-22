@@ -10,6 +10,7 @@ import { windowNavCollapsedAtom } from '../atoms/windowLayout';
 import { chatAccessGateAtom } from '../atoms/chatAccess';
 import { isFirstRunVisibleAtom } from '../atoms/firstRun';
 import { whereToStartVisibleAtom } from '../atoms/whereToStart';
+import { useReportBeaverUIVisibility } from '../hooks/useProfileSync';
 
 /**
  * WindowSidebar is rendered in the separate Beaver window.
@@ -29,6 +30,9 @@ const WindowSidebar = () => {
     // and stages the current Zotero selection on open. Runs for either surface:
     // the window's context tracking is about the window, not its contents.
     useBeaverWindowContext();
+    // The standalone has no GlobalContextInitializer; report its visibility so the
+    // account keeps the in-use profile refresh cadence while it is open.
+    useReportBeaverUIVisibility();
 
     const surface = useAtomValue(windowSurfaceAtom);
     const collapsed = useAtomValue(windowNavCollapsedAtom);

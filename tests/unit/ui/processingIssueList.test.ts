@@ -72,6 +72,15 @@ it('offers Retry all only for retryable reasons and routes it to the group', asy
     });
 });
 
+it('explains that unavailable OCR is temporary and retryable', async () => {
+    const onRetry = vi.fn(async () => undefined);
+    await render({ group: { reason: 'ocr_unavailable', count: 1 }, onRetry }, (container) => {
+        expect(container.textContent).toContain('OCR temporarily unavailable');
+        expect(container.textContent).toContain('retry automatically');
+        expect(buttonLabels(container)).toContain('Retry all');
+    });
+});
+
 it('keeps the current page visible while an issue refresh is in flight', async () => {
     let finishRefresh!: (items: Array<{ libraryId: number; zoteroKey: string }>) => void;
     const getProcessingIssuePage = vi.fn()

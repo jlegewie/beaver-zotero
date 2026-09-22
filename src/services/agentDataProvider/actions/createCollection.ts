@@ -1,5 +1,5 @@
 import { readCollectionActionData } from '@beaver/agent-core/identity/collectionActionData';
-import { resolveCollection, formatCollectionId } from '../../collections/collectionIdentity';
+import { CollectionResolutionError, resolveCollection, formatCollectionId, type ResolvedCollection } from '../../collections/collectionIdentity';
 import { assertLibraryWritable, recheckCollection } from '../../collections/collectionMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
@@ -46,10 +46,25 @@ async function validateCreateCollectionAction(
         };
     }
     let library_id = targetResolution.libraryID;
-    const parent = parent_key ? resolveCollection(parent_key, {
-        libraryID: library_ref || rawLibraryId || library_name ? library_id : undefined,
-    }) : null;
-    if (parent) library_id = parent.libraryID;
+    let parent: ResolvedCollection | null = null;
+    if (parent_key) {
+        try {
+            parent = resolveCollection(parent_key, {
+                libraryID: library_ref || rawLibraryId || library_name ? library_id : undefined,
+            });
+        } catch (error) {
+            if (!(error instanceof CollectionResolutionError) || error.code !== 'collection_not_found') throw error;
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `Parent collection not found: ${parent_key}`,
+                error_code: 'parent_not_found',
+                preference: 'always_ask',
+            };
+        }
+        library_id = parent.libraryID;
+    }
 
     // Validate library exists
     const library = Zotero.Libraries.get(library_id);
@@ -234,7 +249,12 @@ async function executeCreateCollectionAction(
 
     // Set parent if provided
     if (parent_key) {
-        const parentCollection = recheckCollection(parent_key, library_id).collection;
+        let parentCollection: Zotero.Collection | null = null;
+        try {
+            parentCollection = recheckCollection(parent_key, library_id).collection;
+        } catch (error) {
+            if (!(error instanceof CollectionResolutionError) || error.code !== 'collection_not_found') throw error;
+        }
         if (parentCollection) {
             collectionParams.parentID = parentCollection.id;
         } else {

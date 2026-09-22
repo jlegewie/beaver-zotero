@@ -49,6 +49,7 @@ describe('reading outcomes shared by on-demand and background extraction', () =>
             (job_type, library_id, zotero_key, content_kind, payload_kind, enqueued_at, died_at, attempt_count)
             VALUES ('document_ocr', 1, 'READTEST', 'pdf', 'structured', 0, 1, 3)`);
         expect(await db.markAttachmentOcrDone({
+            attemptedAt: 200,
             libraryId: 1, zoteroKey: item.key, fileHash: 'source', ocrEngineVersion: '1',
             structuredDocumentHash: 'ocr-result', expectedOcrStatus: 'needed',
             expectedOcrEngineVersion: null, expectedExtractStatus: 'done',
@@ -58,6 +59,21 @@ describe('reading outcomes shared by on-demand and background extraction', () =>
             expect(await db.getProcessingIssuePage(access, 'scanned')).toEqual([]);
             expect(await db.getProcessingIssueRefs(access, 'scanned')).toEqual([]);
         }
+    });
+    it.each([
+        { attemptedAt: 200, fileHash: 'source', expected: null, applied: true },
+        { attemptedAt: 50, fileHash: 'source', expected: 'file_missing', applied: true },
+        { attemptedAt: 200, fileHash: 'old-source', expected: 'file_missing', applied: false },
+    ])('OCR success only supersedes an older reading error for the accepted source: %j', async test => {
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: item.key, contentKind: 'pdf' });
+        await connection.queryAsync(`UPDATE attachment_processing_state SET extract_status='done', ocr_status='needed', file_hash='source'`);
+        await recordReadingOutcome(item, 'pdf', { kind: 'response_error', code: 'file_missing' }, 100);
+        expect(await db.markAttachmentOcrDone({
+            libraryId: 1, zoteroKey: item.key, fileHash: test.fileHash, ocrEngineVersion: '1',
+            structuredDocumentHash: 'ocr-result', expectedOcrStatus: 'needed',
+            expectedOcrEngineVersion: null, expectedExtractStatus: 'done', attemptedAt: test.attemptedAt,
+        })).toBe(test.applied);
+        expect(await db.getAttachmentReadingError(1, item.key)).toBe(test.expected);
     });
     it('preserves an OCR failure when the reading observation still describes the original scan', async () => {
         await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: item.key, contentKind: 'pdf' });

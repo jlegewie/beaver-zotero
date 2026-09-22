@@ -21,6 +21,7 @@ import {
     LibraryChip,
     NoteChip,
     TagChip,
+    TableChip,
 } from './RequestChipPrimitives';
 import type { ChipPopupSubtitle } from '@beaver/agent-ui/chat/ChipPopup';
 
@@ -161,6 +162,8 @@ export function RequestChips({
             {attachments.map((att) => {
                 const attachmentRemove = removeConfig({ kind: 'attachment', key: messageAttachmentIdentity(att) });
                 switch (att.type) {
+                    case 'table':
+                        return <TableChip key={messageAttachmentIdentity(att)} title={att.reference.title} tableKey={att.reference.key} remove={attachmentRemove} />;
                     case 'item': {
                         const ref = attachmentRef(att);
                         return (

@@ -349,6 +349,14 @@ describe('AgentService batch approval transport', () => {
         });
     });
 
+    it('sends the approved table schema and population identity unchanged', async () => {
+        const service = new AgentService('https://api.example.com');
+        const socket = await completeConnect(service, createCallbacks());
+        const table = { key: 'u-ABCDEFGH', schema_id: 'schema-1', population_id: 'population-1' };
+        expect(service.sendBatchApprovalResponse('appr-1', true, 'ask_each_time', null, table)).toBe(true);
+        expect(socket.sentMessages().find(message => message.type === 'batch_approval_response')).toMatchObject({ table, approved: true });
+    });
+
     it('reports a decision that never left the client', () => {
         const service = new AgentService('https://api.example.com');
 
@@ -434,7 +442,7 @@ describe('sendBatchApprovalResponseAtom', () => {
             userInstructions: 'keep CD4/CD8',
         });
 
-        expect(send).toHaveBeenCalledWith('appr-1', true, 'full_access', 'keep CD4/CD8');
+        expect(send).toHaveBeenCalledWith('appr-1', true, 'full_access', 'keep CD4/CD8', undefined);
         expect(store.get(pendingBatchApprovalsAtom).has('appr-1')).toBe(false);
     });
 

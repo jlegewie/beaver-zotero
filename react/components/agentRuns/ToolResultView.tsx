@@ -10,6 +10,9 @@ import { AnnotationListResultView } from './toolResultViews/AnnotationListResult
 import { AttachmentSearchResultView } from './toolResultViews/AttachmentSearchResultView';
 import { UserQuestionResultView } from './toolResultViews/UserQuestionResultView';
 import { BatchJobResultView } from './toolResultViews/BatchJobResultView';
+import { TableResultView } from './toolResultViews/TableResultView';
+import { tableResultMessages } from '@beaver/agent-core/run-state/toolResultViews';
+import { isTableToolName, tableResultBody } from '@beaver/agent-core/run-state/tableResults';
 
 interface ToolResultViewProps {
     result: ToolReturnPart;
@@ -23,6 +26,8 @@ interface ToolResultViewProps {
  */
 function renderFromView(view: ToolResultViewModel): React.ReactNode | null {
     switch (view.view_type) {
+        case 'table':
+            return <TableResultView view={view} />;
         case 'item_list':
             return <ItemListResultView view={view} />;
         case 'external_reference_list':
@@ -57,10 +62,22 @@ function renderFromView(view: ToolResultViewModel): React.ReactNode | null {
  */
 export const ToolResultView: React.FC<ToolResultViewProps> = ({ result }) => {
     const view = result.metadata?.view;
+    const isTable = isTableToolName(result.tool_name);
+    const body = { ...tableResultBody(result.content) };
+    if (isToolResultView(view) && view.view_type === 'table') {
+        // The card retains repair status even after its body is dehydrated.
+        delete body.repair_warning;
+        delete body.saved;
+    }
+    const messages = isTable ? tableResultMessages(body) : [];
+    const notices = messages.map((message, index) => (
+        <div key={index} role="status" className="px-3 py-2 text-sm font-color-secondary">{message}</div>
+    ));
     if (isToolResultView(view)) {
         const fromView = renderFromView(view);
-        if (fromView) return <>{fromView}</>;
+        if (fromView) return <>{fromView}{notices}</>;
     }
+    if (messages.length) return <>{notices}</>;
     return <GenericResultView content={result.content} />;
 };
 

@@ -223,7 +223,20 @@ export async function validateManageCollectionsAction(
     } else if (action === 'move') {
         const trimmedParent = rawNewParentKey ? rawNewParentKey.trim() || null : null;
         if (trimmedParent) {
-            const parent = resolveCollection(trimmedParent, { libraryID }).collection;
+            let parent;
+            try {
+                parent = resolveCollection(trimmedParent, { libraryID }).collection;
+            } catch (error) {
+                if (!(error instanceof CollectionResolutionError) || error.code !== 'collection_not_found') throw error;
+                return {
+                    type: 'agent_action_validate_response',
+                    request_id: request.request_id,
+                    valid: false,
+                    error: `Parent collection not found in library '${library.name}': ${trimmedParent}`,
+                    error_code: 'parent_not_found',
+                    preference: 'always_ask',
+                };
+            }
             // Cannot move into self
             if (parent.id === collection.id) {
                 return {
@@ -443,7 +456,18 @@ export async function executeManageCollectionsAction(
         } else if (action === 'move') {
             // Zotero uses `false` to signal top-level (see collection.js parentKey setter).
             checkAborted(ctx, 'manage_collections:before_move');
-            (collection as any).parentKey = recheckCollectionParent(collection, new_parent_key) || false;
+            try {
+                (collection as any).parentKey = recheckCollectionParent(collection, new_parent_key) || false;
+            } catch (error) {
+                if (!(error instanceof CollectionResolutionError) || error.code !== 'collection_not_found') throw error;
+                return {
+                    type: 'agent_action_execute_response',
+                    request_id: request.request_id,
+                    success: false,
+                    error: `Parent collection not found: ${new_parent_key}. Call list_collections in the intended library and retry with a live parent collection.`,
+                    error_code: 'parent_not_found',
+                };
+            }
             await collection.saveTx();
             logger(`executeManageCollectionsAction: Moved collection ${resolvedLibraryId}-${collection_key} to parent ${new_parent_key ?? 'top-level'}`, 1);
         } else if (action === 'delete') {

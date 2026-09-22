@@ -12,6 +12,8 @@ import { isLibraryAccessReadyAtom, searchableLibraryIdsAtom } from './profile';
 import { selectedModelAtom } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { getContentKind } from '../../src/services/documentExtraction/attachmentResolution';
+import { isTableAttachment, loadTableItemFields } from '../../src/services/artifacts/tableItemIdentity';
+import { toValidatedMessageAttachment } from '../types/attachments/converters';
 
 /**
  * Generate unique key for a Zotero item
@@ -127,7 +129,14 @@ export const validateItemAtom = atom(
                 canHandleOCRLocally: canHandleOCRLocally(get),
             };
             
-            const result = await itemValidationManager.validateItem(item, options);
+            if (item.isAttachment() && item.attachmentContentType === 'text/html') await loadTableItemFields([item]);
+            let result: ItemValidationResult;
+            if (isTableAttachment(item)) {
+                await toValidatedMessageAttachment(item);
+                result = { state: 'readable', contentKind: 'snapshot' };
+            } else {
+                result = await itemValidationManager.validateItem(item, options);
+            }
             
             // Update with actual result (add isValidating: false)
             const updatedResults = new Map(get(itemValidationResultsAtom));

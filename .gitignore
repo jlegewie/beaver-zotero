@@ -11,6 +11,7 @@ yarn.lock
 .env.production
 .env.staging
 .env.development
+.env.development.local
 .scaffold
 build
 logs

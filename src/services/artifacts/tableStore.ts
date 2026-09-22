@@ -903,7 +903,7 @@ export async function createTableUncoordinated(options: CreateTableOptions): Pro
     accessGuard?.(options.spec);
     const spec = pruneTableCitations(options.spec);
     if (operation_id === undefined)
-        return createTableOnce({ ...ordinary, spec });
+        return createTableOnce({ ...ordinary, spec, accessGuard });
     if (typeof operation_id !== 'string' || !operation_id.trim())
         throw new TableItemError('operation_id must not be empty.', 'invalid_request');
     const resolved = resolveTableLibrary(options.libraryID);
@@ -945,6 +945,7 @@ export async function createTableUncoordinated(options: CreateTableOptions): Pro
         accessGuard?.(spec);
         const created = await createTableOnce({
             ...ordinary,
+            accessGuard,
             libraryID,
             spec,
             creationOperation: {

@@ -16,6 +16,7 @@ import type {
     BackgroundJobRecord,
     BackgroundJobType,
 } from './database';
+import { captureAccountGuard } from './accountGuard';
 import { DocumentExtractExecutor } from './backgroundQueue/documentExtractExecutor';
 import type {
     JobExecutionContext,
@@ -72,7 +73,7 @@ export interface ProcessOnceResult {
 }
 
 export type BackgroundLaneStatus = Partial<
-    Record<BackgroundJobType, { inFlight: number; capacity: number; remoteWaiting?: number }>
+    Record<BackgroundJobType, { inFlight: number; capacity: number; remoteWaiting?: number; pauseUntil?: number; pauseReason?: string }>
 >;
 
 type LaneEntry = {
@@ -87,6 +88,8 @@ type ExecutorRegistration = {
     executor: JobExecutor;
     maxInFlight: number;
     survivesLibraryExclusion: boolean;
+    pauseUntil?: number;
+    pauseReason?: string;
 };
 
 export class BackgroundExtractor {
@@ -96,6 +99,8 @@ export class BackgroundExtractor {
     private tickRunning = false;
     private tickIdleWaiters: Array<() => void> = [];
     private pendingWake = false;
+    /** Invalidates maintenance resume callbacks after a terminal stop. */
+    private lifecycleGeneration = 0;
     private dbWritesPermanentlyDisabled = false;
     private prefEnabled = true;
     private syncInProgress = false;
@@ -186,6 +191,8 @@ export class BackgroundExtractor {
             status[jobType] = {
                 inFlight: this.laneInFlight.get(jobType)?.size ?? 0,
                 capacity: registration.maxInFlight,
+                pauseUntil: registration.pauseUntil,
+                pauseReason: registration.pauseReason,
                 remoteWaiting: registration.executor.getRemoteWaitingCount?.() ?? 0,
             };
         }
@@ -333,10 +340,12 @@ export class BackgroundExtractor {
     /** Suspend background work for local storage maintenance, preserving startup state. */
     async suspendForMaintenance(): Promise<() => void> {
         const wasStarted = this.started;
-        await this.stop();
+        const lifecycleGeneration = this.lifecycleGeneration;
+        await this.stopDispatcher('suspend');
         if (this.tickRunning) await new Promise<void>((resolve) => this.tickIdleWaiters.push(resolve));
         return () => {
-            if (wasStarted && !Zotero.__beaverShuttingDown) this.start();
+            if (wasStarted && lifecycleGeneration === this.lifecycleGeneration
+                && !Zotero.__beaverShuttingDown) this.start();
         };
     }
 
@@ -345,6 +354,11 @@ export class BackgroundExtractor {
      * MuPDF worker.
      */
     async stop(): Promise<void> {
+        this.lifecycleGeneration++;
+        await this.stopDispatcher('dispose');
+    }
+
+    private async stopDispatcher(executorAction: 'suspend' | 'dispose'): Promise<void> {
         this.stopRequested = true;
         this.drainNowRequested = false;
         if (Zotero.__beaverShuttingDown === true) {
@@ -391,8 +405,23 @@ export class BackgroundExtractor {
         await this.abortAndAwaitInFlight();
         // Stop executor-owned background work (e.g. slot-free OCR trackers) that
         // lives outside the lane in-flight maps and so is untouched by the abort.
-        for (const { executor } of this.executors.values()) {
-            this.disposeExecutor(executor);
+        let suspendFailed = false;
+        let suspendFailure: unknown;
+        if (executorAction === 'suspend') {
+            const results = await Promise.allSettled([...this.executors.values()].map(
+                async ({ executor }) => await executor.suspend?.(),
+            ));
+            const failure = results.find(
+                (result): result is PromiseRejectedResult => result.status === 'rejected',
+            );
+            if (failure) {
+                suspendFailed = true;
+                suspendFailure = failure.reason;
+            }
+        } else {
+            for (const { executor } of this.executors.values()) {
+                this.disposeExecutor(executor);
+            }
         }
         try {
             await disposeMuPDFWorker('background');
@@ -402,6 +431,7 @@ export class BackgroundExtractor {
         this.setWorkerRunning(false);
         this.started = false;
         this.pendingWake = false;
+        if (suspendFailed) throw suspendFailure;
     }
 
     /**
@@ -563,6 +593,7 @@ export class BackgroundExtractor {
             for (let slot = 0; slot < freeSlots; slot += 1) {
                 if (this.stopRequested) return launched;
                 if (!isLibraryScopeKnown()) break;
+                if (this.executors.get(jobType) !== registration || this.laneCapacityFree(jobType) === 0) break;
                 const record = await options.db.claimNextBackgroundJob(
                     Date.now(),
                     VISIBILITY_TIMEOUT_MS,
@@ -577,6 +608,10 @@ export class BackgroundExtractor {
                     return launched;
                 }
 
+                if (this.executors.get(jobType) !== registration || this.laneCapacityFree(jobType) === 0) {
+                    if (!this.shouldSkipDbWrites()) await options.db.releaseBackgroundJob(record.id, Date.now());
+                    break;
+                }
                 if (!isLibraryScopeKnown()) {
                     // The scope went unknown (logout / account switch) while the
                     // claim was in flight. Release rather than retire: the row is
@@ -661,6 +696,8 @@ export class BackgroundExtractor {
         externalAbortSignal: AbortSignal,
     ): Promise<void> {
         const attemptedAt = Date.now();
+        const isIndexJob = record.jobType === 'fulltext_upsert' || record.jobType === 'fulltext_untag';
+        const accountIsCurrent = isIndexJob ? captureAccountGuard() : () => true;
         dispatchBackgroundEvent('background-job:start', { id: record.id, record });
         const db = Zotero.Beaver?.db;
         if (!db) return;
@@ -684,6 +721,11 @@ export class BackgroundExtractor {
             outcome = { kind: 'retry', error: `unexpected: ${message}` };
         }
 
+        if (isIndexJob
+            && (externalAbortSignal.aborted || !accountIsCurrent()
+                || this.executors.get(record.jobType)?.executor !== executor)) {
+            outcome = { kind: 'release', reason: 'access_changed' };
+        }
         await this.persistOutcome(record, executor, outcome, db, attemptedAt);
     }
 
@@ -771,6 +813,23 @@ export class BackgroundExtractor {
         db: QueueDB,
         attemptedAt: number,
     ): Promise<void> {
+        const registration = this.executors.get(record.jobType);
+        const now = Date.now();
+        if (outcome.laneCooldownMs && registration?.executor === executor) {
+            const pauseUntil = now + outcome.laneCooldownMs;
+            if (pauseUntil > (registration.pauseUntil ?? 0)) {
+                registration.pauseUntil = pauseUntil;
+                registration.pauseReason = outcome.reason ?? outcome.error;
+                logger(`BackgroundExtractor: lane ${record.jobType} paused until ${pauseUntil}: ${registration.pauseReason}`, 2);
+            }
+        }
+        if (outcome.countsAsAttempt === false) {
+            const availableAt = now + Math.max(1_000, outcome.retryAfterMs ?? 30_000);
+            await db.rescheduleBackgroundJob(record.id, availableAt, outcome.error);
+            logger(`BackgroundExtractor: job id=${record.id} waiting without attempt until ${availableAt}: ${outcome.error}`, 2);
+            dispatchBackgroundEvent('background-job:deferred', { id: record.id, reason: outcome.reason ?? outcome.error });
+            return;
+        }
         const result = await db.failBackgroundJob(record.id, outcome.error, {
             maxAttempts: MAX_ATTEMPTS,
             backoffMs: (attempt) => outcome.retryAfterMs ?? BACKOFF_MS(attempt),
@@ -784,6 +843,7 @@ export class BackgroundExtractor {
                     status: 'failed',
                     error: outcome.error,
                     attemptedAt,
+                    extractionSource: outcome.attemptedExtractionSource,
                 });
             } else if (record.jobType === 'fulltext_upsert' && record.payload?.doc_hash) {
                 await db.markAttachmentUpsertFailed(
@@ -835,6 +895,12 @@ export class BackgroundExtractor {
 
     private scheduleTick(delayMs: number): void {
         if (this.stopRequested) return;
+        const now = Date.now();
+        for (const registration of this.executors.values()) {
+            if ((registration.pauseUntil ?? 0) > now) {
+                delayMs = Math.min(delayMs, registration.pauseUntil! - now);
+            }
+        }
         if (this.currentTickId !== undefined) clearTimeout(this.currentTickId);
         const id = setTimeout(() => {
             this.currentTickId = undefined;
@@ -897,6 +963,12 @@ export class BackgroundExtractor {
     private laneCapacityFree(jobType: BackgroundJobType): number {
         const registration = this.executors.get(jobType);
         if (!registration) return 0;
+        if (registration.pauseUntil) {
+            if (registration.pauseUntil > Date.now()) return 0;
+            logger(`BackgroundExtractor: lane ${jobType} cooldown ended`, 3);
+            registration.pauseUntil = undefined;
+            registration.pauseReason = undefined;
+        }
         const inFlight = this.laneInFlight.get(jobType)?.size ?? 0;
         return Math.max(0, registration.maxInFlight - inFlight);
     }

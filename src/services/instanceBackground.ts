@@ -146,6 +146,7 @@ export class InstanceBackground {
             inFlight,
             libraryId,
             Object.keys(lanes).filter((type) => type !== "fulltext_untag"),
+            Object.entries(lanes).filter(([, lane]) => (lane?.pauseUntil ?? 0) > Date.now()).map(([type]) => type),
         );
         return key === this.progressScopeKey && !this.disposed
             ? { ...progress, discovered: this.discovered }

@@ -91,6 +91,17 @@ describe('validateCreateCollectionAction', () => {
         (globalThis as any).Zotero = previousZotero;
     });
 
+    it('rejects a trashed parent before approval', async () => {
+        vi.mocked(Zotero.Collections.getByLibraryAndKey).mockReturnValue({
+            deleted: true, libraryID: 1, key: 'PARENT01', name: 'Parent', id: 2,
+        } as any);
+        const response = await validateCreateCollectionAction(buildValidateRequest({
+            name: 'Child', parent_key: 'PARENT01',
+        }));
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe('parent_not_found');
+    });
+
     it('accepts a portable "u-<key>" item_id resolving to the default (personal) target library', async () => {
         const res = await validateCreateCollectionAction(
             buildValidateRequest({ name: 'New Collection', item_ids: ['u-ABCD1234'] })
@@ -190,6 +201,18 @@ describe('executeCreateCollectionAction', () => {
             action_data: actionData,
         } as unknown as WSAgentActionExecuteRequest;
     }
+
+    it('rejects a parent trashed after validation without creating a collection', async () => {
+        vi.mocked(Zotero.Collections.getByLibraryAndKey).mockReturnValue({
+            deleted: true, libraryID: 1, key: 'PARENT01', name: 'Parent', id: 2,
+        } as any);
+        const response = await executeCreateCollectionAction(buildExecuteRequest({
+            name: 'Child', parent_key: 'PARENT01',
+        }), ctx);
+        expect(response.success).toBe(false);
+        expect(response.error_code).toBe('parent_not_found');
+        expect(Zotero.Collection).not.toHaveBeenCalled();
+    });
 
     it('adds items resolved via both portable and legacy item_id forms', async () => {
         const res = await executeCreateCollectionAction(

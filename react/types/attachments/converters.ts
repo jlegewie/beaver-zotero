@@ -12,6 +12,32 @@ import type { ExternalFileRecord } from '../../../src/services/database';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { safeStub, serializeAttachmentStub, serializeItemStub } from '../../../src/utils/zoteroSerializers';
 import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
+import { isTableAttachment, loadTableItemFields } from '../../../src/services/artifacts/tableItemIdentity';
+import { isTableChatEnabled } from '../../../src/services/tableCapability';
+
+/** Validate the embedded table and current access before creating a submitted reference. */
+export async function toValidatedMessageAttachment(item: Zotero.Item): Promise<MessageAttachment | null> {
+    if (item.isAttachment() && item.attachmentContentType === 'text/html') await loadTableItemFields([item]);
+    if (!isTableAttachment(item)) return toMessageAttachment(item);
+    if (!isTableChatEnabled()) throw new Error('Table chat is not enabled in this build.');
+    const libraryRef = libraryRefForLibraryID(item.libraryID);
+    if (!libraryRef) throw new Error('Table library unavailable.');
+    const key = `${libraryRef}-${item.key}`;
+    const provider = Zotero.Beaver?.libraryOperations;
+    if (!provider) throw new Error('Table provider unavailable.');
+    const response = await provider.run('artifact_request', [{
+        event: 'artifact_request', request_id: Zotero.Utilities.randomString(16), op: 'list', keys: [key],
+    }]);
+    const entry = response.items?.find(entry => entry.key === key);
+    if (!response.ok || !entry || entry.unavailable) {
+        const code = entry?.unavailable ? entry.error_code : response.error_code ?? 'provider_unavailable';
+        throw new Error(`Table unavailable (${code}).`);
+    }
+    // Match the current local display after validation; renaming the Zotero
+    // item does not rewrite the title embedded in its snapshot.
+    const title = String(item.getField('title') || entry.title || 'Untitled table');
+    return { type: 'table', reference: { kind: 'table', key, title: title.slice(0, 300) } };
+}
 
 
 export function toAnnotation(item: Zotero.Item): Annotation | null {
@@ -40,6 +66,8 @@ export function toAnnotation(item: Zotero.Item): Annotation | null {
 
 
 export function toMessageAttachment(item: Zotero.Item): MessageAttachment | null {
+    // Stored tables require the asynchronous provider validation above.
+    if (isTableAttachment(item)) return null;
     // Convert to MessageAttachment (backend models)
     const zoteroItemReference = {
         library_id: item.libraryID,

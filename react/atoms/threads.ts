@@ -554,8 +554,9 @@ export const loadThreadAtom = atom(
                 // From user attachments in runs (external files have no Zotero
                 // reference to preload)
                 for (const run of processedRuns) {
-                    (run.user_prompt.attachments || [])
-                        .filter(att => att.type !== 'external_file')
+                    const attachments = run.user_prompt.attachments || [];
+                    attachments
+                        .filter(att => att.type !== 'external_file' && att.type !== 'table')
                         .filter(att => !!att.zotero_key)
                         .forEach(att => allItemReferences.set(zoteroReferenceKey(att), {
                             library_id: att.library_id,

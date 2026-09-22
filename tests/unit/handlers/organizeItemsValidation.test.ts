@@ -82,6 +82,18 @@ describe("validateOrganizeItemsAction", () => {
     (globalThis as any).Zotero = previousZotero;
   });
 
+  it.each(['add', 'remove'])('rejects trashed collection %s targets before approval', async (operation) => {
+    (Zotero.Libraries as any).getAll = () => [{ libraryID: 1 }, { libraryID: 100 }];
+    vi.mocked(Zotero.Collections.getByLibraryAndKey).mockImplementation((_lib: number, key: string) =>
+      key === 'TRASH001' ? { deleted: true, name: 'Trash', libraryID: 1, key, id: 1 } as any : null);
+    const response = await validateOrganizeItemsAction(buildRequest({
+      item_ids: ['1-ITEM0001'], collections: { [operation]: ['TRASH001'] },
+    }));
+    expect(response.valid).toBe(false);
+    expect(response.error_code).toBe('collection_not_found');
+    expect(response.error).not.toContain('Trash');
+  });
+
   it("allows tag changes on an annotation and keys state by the portable id", async () => {
     itemKind = "annotation";
     const res = await validateOrganizeItemsAction(

@@ -1,4 +1,6 @@
 import type { BatchProgressEntry } from "./batchProgress";
+import type { TableRecord } from "../protocol/artifactProtocol";
+export { tableResultMessages } from './tableResults';
 
 /**
  * Tool-result view models.
@@ -230,8 +232,14 @@ export interface TagListView {
 
 export interface AttachmentSearchView {
     view_type: "attachment_search";
-    tool_name: "find_in_attachments";
+    tool_name: "find_in_attachments" | "fulltext_search";
     query: string;
+    /**
+     * Phrases to mark in match previews (lowercase words, matched at word
+     * boundaries). Absent/null: derive single terms from `query` (legacy
+     * producers). Empty: mark nothing and show each preview from its start.
+     */
+    highlight_phrases?: string[] | null;
     total_matches: number;
     attachment_count: number;
     attachments: AttachmentSearchRowView[];
@@ -306,7 +314,13 @@ export interface BatchJobView {
 }
 
 /** The general discriminated union — discriminated by `view_type`. */
+export interface TableView {
+    view_type: "table";
+    record: TableRecord;
+}
+
 export type ToolResultView =
+    | TableView
     | ItemListView
     | AnnotationListView
     | ExternalReferenceListView
@@ -324,6 +338,15 @@ export type ToolResultView =
 export function isToolResultView(value: unknown): value is ToolResultView {
     if (!value || typeof value !== "object") return false;
     const viewType = (value as { view_type?: unknown }).view_type;
+    if (viewType === 'table') {
+        const record = (value as TableView).record;
+        return !!record && record.reference?.kind === 'table'
+            && typeof record.reference.key === 'string'
+            && /^(?:u|g[1-9]\d*)-[A-Z0-9]{8}$/.test(record.reference.key)
+            && typeof record.reference.title === 'string'
+            && typeof record.change === 'string'
+            && !!record.summary && typeof record.summary === 'object';
+    }
     return (
         viewType === "item_list" ||
         viewType === "annotation_list" ||

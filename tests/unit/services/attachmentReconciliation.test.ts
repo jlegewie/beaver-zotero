@@ -7,11 +7,13 @@ const mocks = vi.hoisted(() => ({
     kind: 'snapshot', backgroundEnabled: true,
 }));
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
-vi.mock('../../../src/utils/prefs', () => ({ getPref: (key: string) => key === 'backgroundProcessingEnabled' && mocks.backgroundEnabled }));
+vi.mock('../../../src/utils/prefs', () => ({ getPref: (key: string) =>
+    (key === 'backgroundProcessingEnabled' || key === 'backgroundExtractorEnabled')
+    && mocks.backgroundEnabled }));
 vi.mock('../../../src/utils/idleService', () => ({ getSystemIdleTimeMs: () => 60_000 }));
-vi.mock('../../../src/utils/zoteroItemUtils', () => ({ safeIsInTrash: (item: any) => item.deleted === true }));
+vi.mock('../../../src/utils/zoteroItemUtils', () => ({ safeIsInTrash: (item: any) => item.isInTrash?.() ?? item.deleted === true }));
 vi.mock('../../../src/services/documentExtraction/attachmentResolution', () => ({
-    getReadableContentKind: () => mocks.kind, liveAttachmentContentKind: () => mocks.kind,
+    getReadableContentKind: (item: any) => item.isRegularItem?.() ? null : mocks.kind, liveAttachmentContentKind: () => mocks.kind,
 }));
 vi.mock('../../../src/services/documentExtraction/attachmentSource', () => ({
     resolveAttachmentFileSource: mocks.resolve, loadAttachmentData: vi.fn(),
@@ -26,6 +28,8 @@ import { ReconcilerService } from '../../../src/services/backgroundProcessing/re
 import { NewItemWatcher } from '../../../src/services/backgroundProcessing/newItemWatcher';
 import { observeAttachmentSource } from '../../../src/services/documentExtraction/sourceObservation';
 import { DocumentExtractExecutor } from '../../../src/services/backgroundQueue/documentExtractExecutor';
+import { BackgroundExtractor } from '../../../src/services/backgroundExtractor';
+import { maybeEnqueueOcrJob } from '../../../src/services/ocr/enqueueOcr';
 import { expectedExtractionSchemaVersion } from '../../../src/services/documentExtraction/shared/extractionSchemaVersions';
 
 const entitlements = { hasOcrAccess: true, hasSearchIndexAccess: true };
@@ -104,6 +108,75 @@ describe('attachment change reconciliation', () => {
         await db.enqueueBackgroundJobs(jobs);
     }
 
+    async function parentFixture() {
+        const parent = { id: 20, libraryID: 1, key: 'PARENT00', deleted: false, isRegularItem: () => true };
+        const second = { ...item, id: 8, key: 'CHILD002', deleted: false, parentID: parent.id,
+            isInTrash: () => second.deleted || parent.deleted };
+        item.parentID = parent.id;
+        item.isInTrash = () => item.deleted === true || parent.deleted;
+        await connection.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER, parentItemID INTEGER)');
+        await connection.queryAsync("INSERT INTO items VALUES (20, 1, 'PARENT00'), (8, 1, 'CHILD002')");
+        await connection.queryAsync('INSERT INTO itemAttachments VALUES (7, 20), (8, 20)');
+        vi.mocked(Zotero.Items.getAsync).mockImplementation(async (id: any) =>
+            id === 20 ? parent : id === 8 ? second : item);
+        // Keep all assertions inside the targeted path, before the periodic scan.
+        (reconciler as any).nextScanAt = Date.now() + 300_000;
+        const change = async (event = 'modify') => {
+            observer.notify(event, 'item', [parent.id]);
+            await vi.advanceTimersByTimeAsync(501);
+        };
+        return { parent, second, change };
+    }
+
+    it('cleans both children on parent-only trash and rediscovers them on restore without a sweep', async () => {
+        const { parent, change } = await parentFixture();
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'CHILD002', itemId: 8, contentKind: 'snapshot' });
+        await seed(false);
+        parent.deleted = true;
+        await change('trash');
+        expect(item.deleted).not.toBe(true);
+        expect(await db.getAttachmentProcessingState(1, item.key)).toBeNull();
+        expect(await db.getAttachmentProcessingState(1, 'CHILD002')).toBeNull();
+        expect((await db.peekBackgroundJobs()).filter(job => job.jobType === 'fulltext_untag')).toHaveLength(2);
+        expect(mocks.invalidate).toHaveBeenCalledWith(1, item.key);
+        parent.deleted = false;
+        await change();
+        expect(await db.getAttachmentProcessingState(1, item.key)).not.toBeNull();
+        expect(await db.getAttachmentProcessingState(1, 'CHILD002')).not.toBeNull();
+        const extracts = (await db.peekBackgroundJobs()).filter(job => job.jobType === 'document_extract');
+        expect(extracts).toHaveLength(2);
+        expect(extracts.every(job => job.payload?.request_context === 'backfill')).toBe(true);
+    });
+
+    it('keeps independently trashed children excluded when their parent is restored', async () => {
+        const { second, change } = await parentFixture();
+        second.deleted = true;
+        await change();
+        expect(await db.getAttachmentProcessingState(1, item.key)).not.toBeNull();
+        expect(await db.getAttachmentProcessingState(1, second.key)).toBeNull();
+    });
+
+    it('deduplicates parent and child notifications and preserves unchanged indexed content', async () => {
+        const { change } = await parentFixture();
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'CHILD002', itemId: 8, contentKind: 'snapshot' });
+        await seed(false);
+        observer.notify('modify', 'item', [7, 8]);
+        await change();
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+        expect(mocks.invalidate).not.toHaveBeenCalled();
+    });
+
+    it('uses current state after parent trash and restore coalesce', async () => {
+        const { parent, change } = await parentFixture();
+        await seed(false);
+        parent.deleted = true;
+        observer.notify('trash', 'item', [parent.id]);
+        parent.deleted = false;
+        await change();
+        expect(await db.getAttachmentProcessingState(1, item.key)).toMatchObject({ upsertStatus: 'done' });
+        expect((await db.peekBackgroundJobs()).some(job => job.jobType === 'fulltext_untag')).toBe(false);
+    });
+
     it('counts five unchanged missing files again only when a deep recheck explicitly retries them', async () => {
         mocks.resolve.mockResolvedValue({ kind: 'error', code: 'file_missing' });
         const missing = Array.from({ length: 5 }, (_, index) => ({ ...item, id: 20 + index, key: `MISSING${index}` }));
@@ -144,6 +217,27 @@ describe('attachment change reconciliation', () => {
             jobType: 'document_extract', priority: 90,
             payload: expect.objectContaining({ request_context: 'interactive' }),
         })]);
+    });
+
+    it('re-enqueues OCR after a recoverable service-unavailable response', async () => {
+        mocks.kind = 'pdf';
+        item.attachmentContentType = 'application/pdf';
+        await db.ensureAttachmentProcessingState({
+            libraryId: 1, zoteroKey: item.key, itemId: item.id, contentKind: 'pdf',
+        });
+        await connection.queryAsync(`UPDATE attachment_processing_state SET
+            extract_status = 'done', extract_schema_version = ?, ocr_status = 'needed', file_hash = 'hash',
+            last_error = 'ocr_service_unavailable' WHERE zotero_key = ?`,
+            [expectedExtractionSchemaVersion('pdf'), item.key]);
+
+        await (reconciler as any).reconcileAttachment(
+            db, item, 'pdf', false, [], await db.getAttachmentProcessingState(1, item.key), false, 'backfill',
+        );
+
+        expect(maybeEnqueueOcrJob).toHaveBeenCalledWith(expect.objectContaining({
+            zoteroKey: item.key,
+            requestContext: 'backfill',
+        }));
     });
 
     it.each([
@@ -249,6 +343,66 @@ describe('attachment change reconciliation', () => {
         expect(mocks.invalidate).not.toHaveBeenCalled();
     });
 
+    it.each(['attachment', 'parent'] as const)(
+        'preserves an unchanged text reading failure after %s metadata changes',
+        async (target) => {
+            mocks.kind = 'text';
+            const { change } = await parentFixture();
+            await db.recordAttachmentReadingOutcome({
+                libraryId: 1, zoteroKey: item.key, contentKind: 'text',
+                errorCode: 'read_failed', attemptedAt: 100,
+            });
+            const issues = await db.getProcessingIssueCounts(entitlements);
+            expect(issues).not.toEqual([]);
+
+            if (target === 'parent') await change();
+            else await notify();
+
+            expect(await db.getAttachmentReadingError(1, item.key)).toBe('read_failed');
+            expect(await db.getProcessingIssueCounts(entitlements)).toEqual(issues);
+            expect(await db.getAttachmentProcessingState(1, item.key)).toBeNull();
+            expect(await db.peekBackgroundJobs()).toEqual([]);
+            expect(mocks.invalidate).not.toHaveBeenCalled();
+        },
+    );
+
+    it.each(['text', 'image', null] as const)(
+        'removes an indexed PDF immediately when a notification changes it to %s',
+        async (kind) => {
+            mocks.kind = 'pdf';
+            await seed(false);
+            mocks.kind = kind as any;
+
+            await notify();
+
+            expect(await db.getAttachmentProcessingState(1, item.key)).toBeNull();
+            expect(await db.peekBackgroundJobs()).toEqual([
+                expect.objectContaining({ jobType: 'fulltext_untag' }),
+            ]);
+            expect(mocks.invalidate).toHaveBeenCalledWith(1, item.key);
+        },
+    );
+
+    it('starts fresh processing when a plain-text replacement changes back to PDF', async () => {
+        mocks.kind = 'pdf';
+        await seed(false);
+        mocks.kind = 'text';
+        await notify();
+        expect(await db.getAttachmentProcessingState(1, item.key)).toBeNull();
+
+        mocks.kind = 'pdf';
+        await notify();
+
+        expect(await db.getAttachmentProcessingState(1, item.key)).toMatchObject({
+            contentKind: 'pdf',
+            extractStatus: null,
+        });
+        expect(await db.peekBackgroundJobs()).toEqual(expect.arrayContaining([
+            expect.objectContaining({ jobType: 'fulltext_untag' }),
+            expect.objectContaining({ jobType: 'document_extract' }),
+        ]));
+    });
+
     it('preserves PDF geometry cache through repeated annotation parent modifications', async () => {
         mocks.kind = 'pdf';
         await seed(false);
@@ -294,6 +448,61 @@ describe('attachment change reconciliation', () => {
         await connection.queryAsync('DELETE FROM background_jobs');
         await notify();
         expect(await db.peekBackgroundJobs()).toEqual([]);
+    });
+
+    it('preserves a permanent EPUB extraction failure as a distinct terminal reason', async () => {
+        mocks.kind = 'epub';
+        item.attachmentContentType = 'application/epub+zip';
+        mocks.extract.mockResolvedValue({
+            kind: 'response_error', code: 'extraction_failed',
+            message: 'Missing container', permanent: true,
+        });
+        await notify('add');
+        const job = await db.claimNextBackgroundJob(Date.now(), 60_000);
+        const outcome = await new DocumentExtractExecutor().execute(job!, {
+            db: db as any, runOnMuPDFWorker: async (fn) => fn(), externalAbortSignal: new AbortController().signal,
+            shouldSkipDbWrites: () => false, enqueue: async () => {},
+        });
+        expect(outcome).toMatchObject({ kind: 'complete', reason: 'terminal:extraction_failed' });
+        expect(await db.getAttachmentProcessingState(1, item.key)).toMatchObject({
+            extractStatus: 'failed', lastError: 'permanent_epub:extraction_failed',
+        });
+    });
+
+    it('revives a dead extraction only when an ordinary notification sees replacement bytes', async () => {
+        mocks.extract.mockResolvedValue({
+            kind: 'response_error', code: 'extraction_failed', message: 'Unreadable archive',
+        });
+        await db.enqueueBackgroundJob({
+            jobType: 'document_extract', libraryId: 1, zoteroKey: item.key,
+            itemId: item.id, contentKind: 'snapshot', payloadKind: 'structured',
+            payload: { content_kind: 'snapshot' }, now: 0,
+        });
+        await connection.queryAsync(`UPDATE background_jobs
+            SET attempt_count = 2, available_at = 0`);
+        const processor = new BackgroundExtractor();
+        expect(await processor.processOnce({ awaitLaunchedJobs: true })).toMatchObject({ processed: true });
+
+        const failed = await db.getAttachmentProcessingState(1, item.key);
+        expect(failed).toMatchObject({
+            extractStatus: 'failed',
+            extractionSource: (await observeAttachmentSource(item, 'snapshot'))!.identity,
+        });
+        expect(await db.getBackgroundDeadLetters()).toHaveLength(1);
+
+        await notify();
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+        expect(await db.getBackgroundDeadLetters()).toHaveLength(1);
+
+        mocks.stat.mockResolvedValue({ lastModified: 11, size: 20 });
+        await notify();
+        expect(await db.getBackgroundDeadLetters()).toEqual([]);
+        expect(await db.getAttachmentProcessingState(1, item.key)).toMatchObject({
+            extractStatus: null, lastError: 'source_recheck',
+        });
+        expect(await db.peekBackgroundJobs()).toEqual([
+            expect.objectContaining({ jobType: 'document_extract' }),
+        ]);
     });
 
     it.each([

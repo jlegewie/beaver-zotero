@@ -128,6 +128,8 @@ beforeEach(() => {
         getAttachmentProcessingState: vi.fn(async () => null),
         markAttachmentOcrDone: vi.fn(async () => true),
         markAttachmentOcrFailed: vi.fn(async () => undefined),
+        markAttachmentOcrUnavailable: vi.fn(async () => true),
+        clearAttachmentOcrUnavailable: vi.fn(async () => true),
         recordAttachmentReadingOutcome: vi.fn(async () => undefined),
     };
 
@@ -330,15 +332,25 @@ describe('OcrExecutor', () => {
         expect(second).toEqual({ kind: 'complete', reason: 'ocr_ok' });
     });
 
-    it('completes without work when the backend reports disabled', async () => {
-        api.requestOcr.mockResolvedValue({ status: 'disabled' });
+    it('records a recoverable unavailable state when the backend reports disabled', async () => {
+        api.requestOcr
+            .mockResolvedValueOnce({ status: 'disabled' })
+            .mockResolvedValueOnce({ status: 'ready', get_url: 'https://gcs/get' });
         const ctx = makeCtx();
 
         const outcome = await executor.execute(record, ctx);
 
         expect(mockedPut).not.toHaveBeenCalled();
         expect(ctx.runOnMuPDFWorker).not.toHaveBeenCalled();
+        expect(dbStub.markAttachmentOcrUnavailable).toHaveBeenCalledWith(
+            1, 'AAAAAAAA', 'hash123', 'ocr_service_unavailable',
+        );
+        expect(dbStub.markAttachmentOcrFailed).not.toHaveBeenCalled();
         expect(outcome).toEqual({ kind: 'complete', reason: 'ocr_disabled' });
+
+        await expect(executor.execute(record, makeCtx())).resolves.toEqual({ kind: 'complete', reason: 'ocr_ok' });
+        expect(dbStub.clearAttachmentOcrUnavailable).toHaveBeenCalledWith(1, 'AAAAAAAA', 'hash123');
+        expect(dbStub.markAttachmentOcrUnavailable).toHaveBeenCalledOnce();
     });
 
     it('recovers legacy detection metadata through native extraction before requesting OCR', async () => {
@@ -447,6 +459,7 @@ describe('OcrExecutor', () => {
             download_ms: expect.any(Number), publication_ms: expect.any(Number),
             quality_result: 'text_and_geometry_passed',
         }));
+        expect(dbStub.markAttachmentOcrDone).toHaveBeenCalledWith(expect.objectContaining({ attemptedAt: expect.any(Number) }));
         api.reportOutcome.mockClear();
         dbStub.markAttachmentOcrDone.mockResolvedValue(false);
         expect(await executor.execute(record, makeCtx())).toMatchObject({ reason: 'stale_completion_ignored' });
@@ -463,6 +476,7 @@ describe('OcrExecutor', () => {
         expect(outcome.kind).toBe('failPermanent');
         if (outcome.kind === 'failPermanent') {
             expect(outcome.failure.terminalCode).toBe('ocr_no_text');
+            expect(dbStub.markAttachmentOcrFailed).toHaveBeenCalledWith(1, 'AAAAAAAA', 'hash123', 'ocr_no_text: OCR produced no usable text layer');
             expect(outcome.failure.task).toBe('ocr');
         }
         // Client-detected terminal is reported to the backend for observability.
@@ -908,5 +922,35 @@ describe('OcrExecutor', () => {
 
         expect(dbStub.releaseBackgroundJob).not.toHaveBeenCalled();
         expect((globalThis as any).Zotero.Beaver.backgroundExtractor.notify).not.toHaveBeenCalled();
+    });
+
+    it('suspend() waits for an aborted slot-free track to settle', async () => {
+        api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-s' });
+        let releaseTrack!: () => void;
+        const trackBarrier = new Promise<void>((resolve) => { releaseTrack = resolve; });
+        let observeAbort!: () => void;
+        const abortObserved = new Promise<void>((resolve) => { observeAbort = resolve; });
+        fakePoller.poll.mockImplementation(
+            (_id: string, opts: { signal: AbortSignal }) =>
+                new Promise((_resolve, reject) => {
+                    opts.signal.addEventListener('abort', async () => {
+                        observeAbort();
+                        await trackBarrier;
+                        reject(new Error('aborted'));
+                    }, { once: true });
+                }),
+        );
+
+        expect(await executor.execute(record, makeCtx()))
+            .toEqual({ kind: 'defer', reason: 'ocr_polling' });
+        let suspended = false;
+        const suspension = executor.suspend().then(() => { suspended = true; });
+        await abortObserved;
+        expect(suspended).toBe(false);
+        releaseTrack();
+        await suspension;
+
+        expect(dbStub.releaseBackgroundJob).not.toHaveBeenCalled();
+        expect(executor.getRemoteWaitingCount()).toBe(0);
     });
 });

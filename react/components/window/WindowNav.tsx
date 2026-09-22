@@ -14,7 +14,7 @@ import { Icon, MoreHorizontalIcon, PlusSignIcon, SearchIcon, UserIcon, CancelIco
 import Spinner from '@beaver/agent-ui/icons/Spinner';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
+import ContextMenu, { MenuItem, MenuPosition } from '@beaver/agent-ui/primitives/ContextMenu';
 
 const UNNAMED_CHAT = 'Unnamed conversation';
 
@@ -72,8 +72,9 @@ interface ThreadRowProps {
 }
 
 /**
- * One chat in the history. The row itself opens the chat; its trailing menu
- * carries rename, pin and delete.
+ * One chat in the history. The row itself opens the chat; rename, pin and
+ * delete live in a menu opened from the trailing button or by right-clicking
+ * anywhere on the row.
  */
 const ThreadRow: React.FC<ThreadRowProps> = ({
     thread,
@@ -89,6 +90,49 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
     // Menus render inline, so the row must stay "hovered" while its menu is
     // open even when the pointer travels into the menu.
     const [menuOpen, setMenuOpen] = useState(false);
+    const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
+    const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+
+    // While a pin toggle is in flight the button gives way to a spinner, and
+    // the menu is unavailable from either opener.
+    const menuAvailable = !pinPending;
+
+    /** Opens the menu hanging under the trailing button, as a click on it does. */
+    const openMenuAtButton = () => {
+        const rect = menuButtonRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        // Under the pointer, which is on the button's right half.
+        setMenuPosition({ x: rect.left - 6, y: rect.bottom + 5 });
+        setMenuOpen(true);
+    };
+
+    const handleMenuButtonClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        openMenuAtButton();
+        // The menu takes focus; the button must not keep its focus ring.
+        menuButtonRef.current?.blur();
+    };
+
+    /**
+     * Right-click anywhere on the row opens the same menu at the pointer, in
+     * place of the native context menu. A keyboard-invoked context menu
+     * (Shift+F10, the Menu key) reports no pointer position, so it falls back
+     * to the button anchor.
+     */
+    const handleContextMenu = (e: React.MouseEvent) => {
+        if (!menuAvailable) return;
+        e.preventDefault();
+        e.stopPropagation();
+        // The open menu is a child of the row; a right-click on it must not
+        // drag the menu under the pointer.
+        if ((e.target as Element).closest('[role="menu"]')) return;
+        if (e.clientX === 0 && e.clientY === 0) {
+            openMenuAtButton();
+            return;
+        }
+        setMenuPosition({ x: e.clientX, y: e.clientY });
+        setMenuOpen(true);
+    };
 
     // A truncated name scrolls slowly to its end while the row is hovered, so
     // the whole name can be read without opening the chat. The distance is
@@ -136,6 +180,7 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
             data-thread-id={thread.id}
             onMouseEnter={handleRowEnter}
             onMouseLeave={handleRowLeave}
+            onContextMenu={handleContextMenu}
         >
             <button
                 type="button"
@@ -150,21 +195,31 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
                 </span>
             </button>
             <div className="beaver-window-nav-row-actions">
-                {pinPending ? (
-                    <span className="beaver-window-nav-row-spinner"><Spinner size={12} /></span>
+                {menuAvailable ? (
+                    <button
+                        type="button"
+                        ref={menuButtonRef}
+                        className="variant-ghost-secondary icon-only beaver-window-nav-row-menu"
+                        aria-label={`Actions for ${name}`}
+                        aria-haspopup="menu"
+                        aria-expanded={menuOpen}
+                        onClick={handleMenuButtonClick}
+                    >
+                        <Icon icon={MoreHorizontalIcon} />
+                    </button>
                 ) : (
-                    <MenuButton
-                        icon={MoreHorizontalIcon}
-                        menuItems={menuItems}
-                        variant="ghost-secondary"
-                        className="beaver-window-nav-row-menu"
-                        ariaLabel={`Actions for ${name}`}
-                        toggleCallback={setMenuOpen}
-                        // Under the pointer, which is on the button's right half.
-                        positionAdjustment={{ x: -6 }}
-                    />
+                    <span className="beaver-window-nav-row-spinner"><Spinner size={12} /></span>
                 )}
             </div>
+            {/* Outside the actions container, whose hover-only opacity and
+                pointer events must not apply to the menu. */}
+            <ContextMenu
+                menuItems={menuItems}
+                isOpen={menuOpen}
+                onClose={() => setMenuOpen(false)}
+                position={menuPosition}
+                useFixedPosition={true}
+            />
         </div>
     );
 };

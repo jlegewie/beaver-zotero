@@ -1,5 +1,6 @@
 import { resolveCollection } from '../../../src/services/collections/collectionIdentity';
 import { tryGetWindowRuntime } from '../../runtime/windowRuntime';
+import { openStoredTable } from './tables';
 import type { NavigationHost, AttachmentMatchNavigation } from '@beaver/agent-ui/host/types';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { AttachmentMatchTarget } from '@beaver/agent-core/run-state/toolResultTypes';
@@ -57,6 +58,7 @@ function findCollectionByKey(key: string, libraryID: number | null): Zotero.Coll
  * The richer `activateCitation` flow lives in `./citationActivation`.
  */
 export const zoteroNavigation: NavigationHost = {
+    openTable: openStoredTable,
     revealInLibrary(ref: ZoteroItemReference): void {
         const resolved = resolveItemID(ref);
         if (!resolved || resolved === 'library_unavailable') {

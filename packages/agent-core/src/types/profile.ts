@@ -43,9 +43,13 @@ export type CreditPlanStatus = "none" | "active" | "past_due" | "canceled";
 
 export interface ProfileBalance {
     pagesRemaining: number;
+    /** Spendable now — zero unless billing status allows subscription credits. */
     subscriptionChatCreditsRemaining: number;
+    /** Spendable now — zero once the purchased pool has expired. */
     purchasedChatCreditsRemaining: number;
     chatCreditsRemaining: number;
+    /** Allowance + rollover the current period can draw on; zero when ineligible. */
+    subscriptionCreditLimit: number;
     rolledOverCredits: number;
     monthlyCredits: number;
     monthlyCreditsUsed: number;
@@ -166,6 +170,15 @@ export interface SafeProfileModel {
     // Chat credits
     chat_credits_used: number;
     purchased_chat_credits: number;
+
+    // Spendable balances, computed by the backend from billing status and
+    // purchased-credit expiry. The raw allowance/rollover/used fields above
+    // describe the plan and the current period; these are what the account can
+    // actually spend, so any displayed balance or has-credits check must read
+    // these instead of recomputing from the raw fields.
+    available_subscription_credits: number;
+    available_purchased_credits: number;
+    subscription_credit_limit: number;
 
     // Indexing status for backend processing mode
     indexing_complete: boolean;

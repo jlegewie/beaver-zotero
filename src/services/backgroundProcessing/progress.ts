@@ -1,3 +1,5 @@
+import { OCR_SERVICE_UNAVAILABLE } from '../ocr/constants';
+
 /** Durable attachment membership and current outcomes for one processing run. */
 export interface ProcessingProgress {
     runId: number;
@@ -59,18 +61,28 @@ export class ProcessingProgressStore {
         )`);
         // Scope is restored by the account owner before any status is exposed.
         await this.query("DELETE FROM processing_progress_libraries");
-        await this.query(`CREATE VIEW IF NOT EXISTS processing_progress_jobs AS
+        // Views are executable definitions rather than stored data. Recreate the
+        // dependent set so existing databases receive current classification.
+        await this.query(`DROP VIEW IF EXISTS processing_progress_pending`);
+        await this.query(`DROP VIEW IF EXISTS processing_progress_stages`);
+        await this.query(`DROP VIEW IF EXISTS processing_progress_jobs`);
+        await this.query(`CREATE VIEW processing_progress_jobs AS
             SELECT j.* FROM background_jobs j
             JOIN processing_progress_libraries l USING (library_id)
             CROSS JOIN processing_progress_run r
             WHERE j.job_type = 'document_extract'
-                OR (j.job_type = 'document_ocr' AND r.ocr = 1)
+                OR (j.job_type = 'document_ocr' AND r.ocr = 1 AND NOT EXISTS (
+                    SELECT 1 FROM attachment_processing_state s
+                    WHERE s.library_id = j.library_id AND s.zotero_key = j.zotero_key
+                        AND s.ocr_status = 'needed' AND s.last_error = '${OCR_SERVICE_UNAVAILABLE}'
+                ))
                 OR (j.job_type = 'fulltext_upsert' AND r.upsert = 1)`);
         await this
-            .query(`CREATE VIEW IF NOT EXISTS processing_progress_stages AS
+            .query(`CREATE VIEW processing_progress_stages AS
             SELECT s.*, CASE
                 WHEN s.extract_status IS NULL THEN 'document_extract'
-                WHEN s.extract_status = 'done' AND s.ocr_status = 'needed' AND r.ocr = 1 THEN 'document_ocr'
+                WHEN s.extract_status = 'done' AND s.ocr_status = 'needed' AND r.ocr = 1
+                    AND s.last_error IS NOT '${OCR_SERVICE_UNAVAILABLE}' THEN 'document_ocr'
                 WHEN s.extract_status = 'done' AND s.structured_document_hash IS NOT NULL
                     AND (s.ocr_status IS NULL OR s.ocr_status IN ('na', 'done'))
                     AND s.upsert_status IS NULL AND r.upsert = 1 THEN 'fulltext_upsert'
@@ -78,13 +90,14 @@ export class ProcessingProgressStore {
                 CASE WHEN s.extract_status IN ('failed', 'skipped')
                     OR s.ocr_status = 'failed'
                     OR (s.ocr_status = 'needed' AND r.ocr = 0)
+                    OR (s.ocr_status = 'needed' AND s.last_error IS '${OCR_SERVICE_UNAVAILABLE}')
                     OR (s.upsert_status = 'failed' AND r.upsert = 1)
                     THEN 1 ELSE 0 END AS problem
             FROM attachment_processing_state s
             JOIN processing_progress_libraries l USING (library_id)
             CROSS JOIN processing_progress_run r`);
         await this
-            .query(`CREATE VIEW IF NOT EXISTS processing_progress_pending AS
+            .query(`CREATE VIEW processing_progress_pending AS
             SELECT library_id, zotero_key FROM processing_progress_jobs
             UNION
             SELECT s.library_id, s.zotero_key FROM processing_progress_stages s
@@ -171,8 +184,14 @@ export class ProcessingProgressStore {
         inFlight: number,
         libraryId?: number,
         jobTypes?: string[],
+        pausedTypes: string[] = [],
     ): Promise<ProcessingProgress> {
-        const result = await this.snapshot(discovering, libraryId, jobTypes);
+        const result = await this.snapshot(
+            discovering,
+            libraryId,
+            jobTypes,
+            pausedTypes,
+        );
         if (
             !discovering &&
             inFlight === 0 &&
@@ -187,7 +206,7 @@ export class ProcessingProgressStore {
                     AND NOT EXISTS (SELECT 1 FROM processing_progress_pending)`,
                 [Date.now(), result.runId],
             );
-            return this.snapshot(discovering, libraryId, jobTypes);
+            return this.snapshot(discovering, libraryId, jobTypes, pausedTypes);
         }
         return result;
     }
@@ -196,8 +215,12 @@ export class ProcessingProgressStore {
         discovering: boolean,
         libraryId?: number,
         jobTypes?: string[],
+        pausedTypes: string[] = [],
     ): Promise<ProcessingProgress> {
         let result!: ProcessingProgress;
+        const runnable = pausedTypes.length
+            ? ` AND job_type NOT IN (${pausedTypes.map(() => "?").join(", ")})`
+            : "";
         const types =
             jobTypes === undefined
                 ? "1"
@@ -230,7 +253,7 @@ export class ProcessingProgressStore {
             ) d USING (library_id, zotero_key)
             CROSS JOIN (
                 SELECT COUNT(*) AS pending,
-                    COALESCE(SUM(CASE WHEN available_at <= ? THEN 1 ELSE 0 END), 0) AS available,
+                    COALESCE(SUM(CASE WHEN available_at <= ?${runnable} THEN 1 ELSE 0 END), 0) AS available,
                     COUNT(DISTINCT library_id || '/' || zotero_key) AS attachments
                 FROM processing_progress_jobs WHERE ${types}
                     ${libraryId === undefined ? "" : "AND library_id = ?"}
@@ -239,6 +262,7 @@ export class ProcessingProgressStore {
             [
                 ...(libraryId === undefined ? [] : [libraryId]),
                 Date.now(),
+                ...pausedTypes,
                 ...(jobTypes ?? []),
                 ...(libraryId === undefined ? [] : [libraryId]),
             ],

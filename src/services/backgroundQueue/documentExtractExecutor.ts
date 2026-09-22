@@ -146,16 +146,26 @@ export class DocumentExtractExecutor implements JobExecutor {
                 return { kind: 'release', reason: 'external_abort' };
             }
             const message = error instanceof Error ? error.message : String(error);
-            return { kind: 'retry', error: `unexpected: ${message}` };
+            return {
+                kind: 'retry', error: `unexpected: ${message}`,
+                attemptedExtractionSource: extractionSource,
+            };
         }
-        if ('kind' in extracted) return extracted;
+        if ('kind' in extracted) {
+            return extracted.kind === 'retry'
+                ? { ...extracted, attemptedExtractionSource: extractionSource }
+                : extracted;
+        }
 
         const afterSignature = await getFileSignature(source.source.filePath);
         if (
             beforeSignature.mtime_ms !== afterSignature.mtime_ms
             || beforeSignature.size_bytes !== afterSignature.size_bytes
         ) {
-            return { kind: 'retry', error: 'source_changed_during_extraction' };
+            return {
+                kind: 'retry', error: 'source_changed_during_extraction',
+                attemptedExtractionSource: extractionSource,
+            };
         }
 
         let fileHash: string | null = null;
@@ -552,7 +562,9 @@ export class DocumentExtractExecutor implements JobExecutor {
         await this.persistTerminalExtractError(
             record,
             ctx,
-            result.code,
+            result.permanent === true && kind === 'epub'
+                ? `permanent_epub:${result.code}`
+                : result.code,
             isSkippedResponse(result.code) ? 'skipped' : 'failed',
             attemptedAt,
             extractionSource,

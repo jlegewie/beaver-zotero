@@ -402,9 +402,9 @@ Three tiers — **`tests/README.md` has the details, templates, and shared-state
   mocks (`supabaseClient`, `zoteroUtils`, `react/atoms/profile`, `react/store`) for anything
   importing `agentDataProvider`. Behavior-driven test names.
 
-## Dev-only HTTP endpoints
+## Development and staging HTTP endpoints
 
-The plugin registers dev-only endpoints under `/beaver/test/*` (see
+Development and staging builds register endpoints under `/beaver/test/*` (see
 `src/services/localEndpoints/http.ts`) for inspecting extraction, cache, and run state without
 driving the UI:
 
@@ -413,7 +413,11 @@ curl -sS -X POST http://127.0.0.1:<port>/beaver/test/<name> \
   -H 'Content-Type: application/json' -d '{}'
 ```
 
-They are registered by `addon.localEndpoints` and gated on authentication, so **they exist
+Staging builds also enable in-memory Zotero debug capture at plugin startup, without
+changing the profile's logging preferences. Production builds do not enable these
+diagnostics. The fake voice-session endpoint remains development-only.
+
+The endpoints are registered by `addon.localEndpoints` and gated on authentication, so **they exist
 only once Beaver is logged in on that instance**, including with zero windows. UI commands
 accept `windowId` and resolve it once at entry; a missing or closing target returns
 `window_unavailable`. Enumerate stable ids with `/beaver/test/window-runtime` and
@@ -515,6 +519,35 @@ Multiple Zotero instances coexist because `zotero-plugin.config.ts` sets
 
 `.worktree-meta.json`, `.mcp.json`, and the worktree log files are git-excluded and never
 reach other worktrees.
+
+### Pair a worktree with its own backend
+
+Only is working on both a backend and frontend in a worktree or when requested by the user, 
+start the backend from its corresponding backend checkout on an unused loopback port
+(separate from Zotero's HTTP/RDP ports and the main backend's port):
+
+```bash
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8001
+```
+
+In the Zotero worktree, put `BEAVER_DEV_BACKEND_URL=http://127.0.0.1:8001` in
+`.env.development.local` (git-ignored, local to that checkout), then run
+`scripts/worktree/worktree-zotero.sh reload`. For a one-off build/reload, prefix the
+command with `BEAVER_DEV_BACKEND_URL=http://127.0.0.1:8001` instead; the shell value
+wins. This overrides the API origin in **both bundles**, including HTTP and WebSocket
+clients, only when both build mode and `BUILD_ENV` are `development`. Production and
+staging ignore it. Only HTTP(S) loopback origins are accepted; auth/Supabase settings
+stay as configured, so this isolates the backend process, not its database or account.
+
+Changing/removing the override requires rebuilding and reloading the plugin. With a
+watcher, stop it before changing configuration and restart it afterwards. Remove the
+local override (or use an empty shell value) and rebuild/reload to restore the default.
+
+Prefer no backend reload for repeatable test runs. Add `--reload --reload-dir app` for
+backend editing when useful; a reload interrupts active requests/sockets. **Stop the
+backend you started when finished**, including its reload supervisor/worker, and verify
+its port is released. Keep its terminal/process handle so cleanup targets only that
+worktree's backend.
 
 ### Cloned databases
 

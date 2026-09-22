@@ -51,6 +51,7 @@ import {
 import {
     OCR_ENGINE_VERSION,
     OCR_OUTCOME_DETAIL_MAX,
+    OCR_SERVICE_UNAVAILABLE,
     OCR_TRACK_BUDGET_MS,
     OCR_TERMINAL_FAILED,
     OCR_TERMINAL_GEOMETRY,
@@ -115,11 +116,8 @@ export class OcrExecutor implements JobExecutor {
     /** The poller is injectable so callers can provide scoped instances. */
     constructor(private readonly poller: OcrStatusPoller = ocrStatusPoller) {}
 
-    /**
-     * Abort background tracks when the dispatcher shuts down or replaces this
-     * executor.
-     */
-    dispose(): void {
+    private abortTracks(): Promise<void>[] {
+        const promises = [...this.tracks.values()].map((track) => track.promise);
         for (const track of this.tracks.values()) {
             try {
                 track.abort.abort();
@@ -128,6 +126,20 @@ export class OcrExecutor implements JobExecutor {
             }
         }
         this.tracks.clear();
+        return promises;
+    }
+
+    /** Abort and settle slot-free polls before local storage maintenance. */
+    async suspend(): Promise<void> {
+        await Promise.allSettled(this.abortTracks());
+    }
+
+    /**
+     * Abort background tracks when the dispatcher shuts down or replaces this
+     * executor.
+     */
+    dispose(): void {
+        this.abortTracks();
     }
 
     getRemoteWaitingCount(): number {
@@ -559,8 +571,15 @@ export class OcrExecutor implements JobExecutor {
         logger(`OcrExecutor: ${job.sourceKey} OCR request response: ${request.status}`, 3);
         switch (request.status) {
             case 'disabled':
-                // Backend says the user lacks OCR entitlement (gate backstop).
-                logger(`OcrExecutor: ${job.sourceKey} OCR disabled by backend entitlement gate`, 3);
+                // Keep the stage retryable, but record why it is not active work.
+                // A later reconciliation will request OCR again when admission returns.
+                await ctx.db.markAttachmentOcrUnavailable(
+                    job.item.libraryID,
+                    job.item.key,
+                    job.fileHash,
+                    OCR_SERVICE_UNAVAILABLE,
+                );
+                logger(`OcrExecutor: ${job.sourceKey} OCR service is temporarily unavailable`, 3);
                 return { outcome: { kind: 'complete', reason: 'ocr_disabled' } };
             case 'rejected':
                 logger(`OcrExecutor: ${job.sourceKey} rejected (${request.reason}; ${request.page_count}/${request.limit})`, 2);
@@ -569,6 +588,7 @@ export class OcrExecutor implements JobExecutor {
             case 'failed':
                 return { outcome: this.failureOutcome(job, request.error) };
             case 'ready':
+                await ctx.db.clearAttachmentOcrUnavailable(job.item.libraryID, job.item.key, job.fileHash);
                 logger(`OcrExecutor: ${job.sourceKey} OCR cache hit; downloading searchable PDF`, 3);
                 if (request.get_url) return { getUrl: request.get_url };
                 return { outcome: { kind: 'retry', error: 'ocr_ready_without_url', reason: 'ocr_ready_without_url' } };
@@ -576,6 +596,7 @@ export class OcrExecutor implements JobExecutor {
                 if (!request.job_id || !request.put_url) {
                     return { outcome: { kind: 'retry', error: 'ocr_pending_without_put_url', reason: 'ocr_pending_without_put_url' } };
                 }
+                await ctx.db.clearAttachmentOcrUnavailable(job.item.libraryID, job.item.key, job.fileHash);
                 await this.upload(request.put_url, job, ctx);
                 logger(`OcrExecutor: ${job.sourceKey} marking OCR upload complete for backend job ${request.job_id}`, 3);
                 await ocrApiClient.markUploaded(request.job_id);
@@ -586,6 +607,7 @@ export class OcrExecutor implements JobExecutor {
                 if (!request.job_id) {
                     return { outcome: { kind: 'retry', error: 'ocr_queued_without_job_id', reason: 'ocr_queued_without_job_id' } };
                 }
+                await ctx.db.clearAttachmentOcrUnavailable(job.item.libraryID, job.item.key, job.fileHash);
                 logger(`OcrExecutor: ${job.sourceKey} joined queued OCR backend job ${request.job_id}`, 3);
                 return this.defer(request.job_id, job, recordId);
         }
@@ -717,6 +739,7 @@ export class OcrExecutor implements JobExecutor {
         this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
         // Hand the MuPDF extraction to the serialized background lane.
         logger(`OcrExecutor: ${job.sourceKey} re-extracting OCR searchable PDF`, 3);
+        const attemptedAt = Date.now();
         const result = await ctx.runOnMuPDFWorker(async () => {
             if (await shouldStopCachePreparation(record)) return null;
             return extractPdfBytesAndCacheAsOriginalAttachment({
@@ -765,6 +788,7 @@ export class OcrExecutor implements JobExecutor {
                         return { kind: 'retry', error: 'ocr_source_changed', reason: 'source_changed' };
                     }
                     const applied = await ctx.db.markAttachmentOcrDone({
+                        attemptedAt,
                         libraryId: job.item.libraryID,
                         zoteroKey: job.item.key,
                         fileHash: job.fileHash,
@@ -863,7 +887,9 @@ export class OcrExecutor implements JobExecutor {
             job.item.libraryID,
             job.item.key,
             job.fileHash,
-            outcome.failure.error,
+            outcome.failure.terminalCode === OCR_TERMINAL_NO_TEXT
+                ? `${OCR_TERMINAL_NO_TEXT}: ${outcome.failure.error}`
+                : outcome.failure.error,
         );
     }
 

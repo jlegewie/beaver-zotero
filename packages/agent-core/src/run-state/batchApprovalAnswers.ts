@@ -11,11 +11,13 @@
  */
 
 import type { BatchApprovalMode } from '../protocol/agentProtocol';
+import type { TableBatchApproval, TableApprovalIdentity } from '../protocol/artifactProtocol';
 
 export type { BatchApprovalMode };
 
 /** The decision as it goes on the wire, minus the correlation id. */
 export interface BatchApprovalDecision {
+    table?: TableApprovalIdentity;
     approved: boolean;
     mode: BatchApprovalMode;
     user_instructions: string | null;
@@ -83,8 +85,10 @@ export function setUserInstructions(text: string, draft: BatchApprovalDraft): Ba
 export function buildResponse(
     draft: BatchApprovalDraft,
     approved: boolean,
+    table?: TableBatchApproval | null,
 ): BatchApprovalDecision {
     return {
+        ...(table ? { table: { key: table.reference.key, schema_id: table.schema_id, population_id: table.population_id } } : {}),
         approved,
         mode: draft.mode,
         user_instructions: draft.userInstructions.trim() || null,

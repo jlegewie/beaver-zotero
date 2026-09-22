@@ -26,9 +26,10 @@ vi.mock('../../../src/utils/prefs', () => ({
 
 // Spy on the excluded-library notice so tests can assert the user is told why
 // the open file did not become context.
-const { excludedLibraryPopupMock, removePopupMock } = vi.hoisted(() => ({
+const { excludedLibraryPopupMock, removePopupMock, popupMock } = vi.hoisted(() => ({
     excludedLibraryPopupMock: vi.fn(),
     removePopupMock: vi.fn(),
+    popupMock: vi.fn(),
 }));
 
 // The real module pulls in popup UI, validation, and reader utils. Mock the
@@ -36,7 +37,7 @@ const { excludedLibraryPopupMock, removePopupMock } = vi.hoisted(() => ({
 vi.mock('../../../react/utils/popupMessageUtils', async () => {
     const { atom: jotaiAtom } = await import('jotai');
     return {
-        addPopupMessageAtom: jotaiAtom(null, () => undefined),
+        addPopupMessageAtom: jotaiAtom(null, (_get, _set, message) => popupMock(message)),
         addRegularItemPopupAtom: jotaiAtom(null, () => undefined),
         addRegularItemsSummaryPopupAtom: jotaiAtom(null, () => undefined),
         removePopupMessageAtom: jotaiAtom(null, (_get, _set, messageId: unknown) => {
@@ -95,6 +96,8 @@ vi.mock('../../../react/atoms/profile', () => ({
 }));
 
 const {
+    addItemToCurrentMessageItemsAtom,
+    currentMessageItemsAtom,
     currentMessageCollectionsAtom,
     updateMessageCollectionsFromZoteroSelectionAtom,
     currentReaderAttachmentAtom,
@@ -127,6 +130,27 @@ describe('updateReaderAttachmentAtom library exclusion', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         vi.unstubAllGlobals();
+    });
+
+    it.each([
+        ['text/html', 'Table Removed from Message'],
+        ['application/pdf', 'File Removed'],
+    ])('uses the correct removal label for a rejected %s attachment', async (contentType, label) => {
+        stubZotero(SEARCHABLE_LIBRARY_ID);
+        (Zotero as any).Attachments = { LINK_MODE_IMPORTED_URL: 1 };
+        const { isRejectedItemValidation } = await import('../../../react/atoms/itemValidation');
+        vi.mocked(isRejectedItemValidation).mockReturnValueOnce(true);
+        const item = {
+            id: 55, key: 'ABCDEFGH', libraryID: SEARCHABLE_LIBRARY_ID,
+            attachmentContentType: contentType, attachmentLinkMode: 1,
+            isAttachment: () => true, isTopLevelItem: () => true,
+            isRegularItem: () => false, isAnnotation: () => false, isNote: () => false,
+            getField: () => 'beaver://table/example', getDisplayTitle: () => 'Example',
+        } as any;
+        const store = createStore();
+        store.set(addItemToCurrentMessageItemsAtom, item);
+        await vi.waitFor(() => expect(popupMock).toHaveBeenCalledWith(expect.objectContaining({ title: `${label} "Example"` })));
+        expect(store.get(currentMessageItemsAtom)).toEqual([]);
     });
 
     it('stores the attachment when the reader library is searchable', async () => {

@@ -101,3 +101,19 @@ batch supplies its library reference.
 
 Regression fixtures live in the collection mutation lifecycle, item import,
 note collection resolution, and collection compatibility unit suites.
+
+## Backend integration follow-ups
+
+The backend must preserve `unresolved_collections` in model-facing discovery
+results so partial success cannot silently drop a requested collection. Population
+results must retain `collection_ids` aligned with `collection_names`, including
+repeated aliases. Typed plugin errors should retain their recovery message rather
+than being wrapped with another “Collection not found” prefix or replaced.
+
+Search input validation must allow the collection reference grammar described
+above. Write tools persist the normalized keys and portable references returned
+in `normalized_action_data`; changing only the backend schema is insufficient.
+
+Full metadata memberships exclude trashed collections. Collection write validation
+rejects trashed targets, and execution rechecks create parents, move parents and
+sources, and organize memberships after approval.

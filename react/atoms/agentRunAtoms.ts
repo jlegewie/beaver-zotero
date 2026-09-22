@@ -1,3 +1,4 @@
+import { getSearchIndexState } from '../../src/services/searchIndexState';
 import { isThreadConflict } from "@beaver/agent-core/types/apiErrors";
 import {
     threadAdmissionAtom,
@@ -64,11 +65,11 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { selectedModelAtom, ModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { saveInterruptedThread } from '../../src/utils/interruptedThreadPrefs';
-import { MessageAttachment, SourceAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
+import { MessageAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import type { ZoteroCollection } from '@beaver/agent-core/types/zotero';
-import { toMessageAttachment, externalFileRecordToAttachment } from '../types/attachments/converters';
+import { toMessageAttachment, toValidatedMessageAttachment, externalFileRecordToAttachment } from '../types/attachments/converters';
 import { promptEditDraftsAtom } from './promptEdits';
-import { safeStub, serializeAttachmentStub, serializeCollection, serializeItemStub, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
+import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { SubscriptionStatus, ProcessingMode } from '@beaver/agent-core/types/profile';
 import {
     isDatabaseSyncSupportedAtom,
@@ -855,14 +856,48 @@ async function startAutoRetryRunOwned(
             // A thread the backend never named has nothing persisted to
             // truncate, but its runs still have to leave the local view.
             if (threadId) {
-                const expectedTailRunId =
-                    truncateFromIndex > 0 ? threadRuns[truncateFromIndex - 1].id : null;
-                const outcome = await truncateThreadOnServer(
+                let persistedRunIds: Set<string> | undefined;
+                if (Zotero.Beaver?.presence) {
+                    const observed = get(threadAdmissionAtom);
+                    const generation = getCredentialGeneration();
+                    const writer = currentWriter();
+                    const history = await readAdmissionHistory(threadId);
+                    assertCredentialGeneration(generation);
+                    assertWriter(writer);
+                    if (abandonReplacementIfThreadChanged(get, set, {
+                        navSeqBeforeAwait,
+                        pendingRetryRunId: failedRunId,
+                        logPrefix,
+                        popupText: AUTO_RETRY_ABANDONED_TEXT,
+                    })) return;
+                    persistedRunIds = new Set(history.runs.map(run => run.id));
+                    const localPersisted = threadRuns.filter(run =>
+                        persistedRunIds!.has(run.id) ||
+                        (run.status !== 'error' && run.status !== 'canceled'));
+                    // Unsaved failures can sit between saved turns. Only saved
+                    // runs define the server's suffix and surviving tail.
+                    const matches = observed?.threadId === threadId
+                        && (observed.tailRunId === history.tail_run_id ||
+                            (observed.unconfirmedRunId === history.tail_run_id &&
+                                (!observed.tailRunId || persistedRunIds.has(observed.tailRunId))))
+                        && localPersisted.length === history.runs.length
+                        && localPersisted.every((run, index) => run.id === history.runs[index].id);
+                    if (history.activity.state === 'active' || !matches) {
+                        reportTruncateConflict(set, threadId, observed?.tailRunId ?? null,
+                            history.activity.state === 'active' ? 'busy' : 'refused', true);
+                        return;
+                    }
+                }
+                const survivingRuns = threadRuns.slice(0, truncateFromIndex)
+                    .filter(run => !persistedRunIds || persistedRunIds.has(run.id));
+                const expectedTailRunId = survivingRuns.at(-1)?.id ?? null;
+                const persistedRemovals = runIdsToRemove.filter(id => !persistedRunIds || persistedRunIds.has(id));
+                const outcome = persistedRemovals.length ? await truncateThreadOnServer(
                     threadId,
-                    runIdsToRemove,
+                    persistedRemovals,
                     expectedTailRunId,
                     logPrefix,
-                );
+                ) : 'ok';
                 if (abandonReplacementIfThreadChanged(get, set, {
                     navSeqBeforeAwait,
                     pendingRetryRunId: failedRunId,
@@ -1550,9 +1585,6 @@ export function createWSCallbacks(
         onRequestAck: (data: WSRequestAckData) => {
             logger('WS onRequestAck:', data, 1);
             set(wsRequestAckDataAtom, data);
-            const id = store.get(currentThreadIdAtom);
-            if (id)
-                setAdmission(set, id, data.runId, "idle");
         },
 
         onPart: async (event: WSPartEvent) => {
@@ -1684,6 +1716,9 @@ export function createWSCallbacks(
                 highTokenUsage: event.high_token_usage,
             }, 1);
             set(activeRunAtom, (prev) => prev ? updateRunComplete(prev, event) : prev);
+            const run = store.get(activeRunAtom);
+            if (run?.id === event.run_id && run.thread_id)
+                setAdmission(set, run.thread_id, event.run_id, "idle");
             // Streaming-done is deliberately left set: this frame now arrives
             // as soon as the run is durable, with the citation lookup still
             // running, and that state is what tells the user their sources are
@@ -1763,6 +1798,14 @@ export function createWSCallbacks(
             logger('WS onThread:', { threadId: newThreadId }, 1);
             set(currentThreadIdAtom, newThreadId);
             set(activeRunAtom, (prev) => prev ? { ...prev, thread_id: newThreadId } : prev);
+            const run = store.get(activeRunAtom);
+            const admission = store.get(threadAdmissionAtom);
+            if (run) {
+                // The thread is claimed, but its run may not have been inserted yet.
+                setAdmission(set, newThreadId,
+                    admission?.threadId === newThreadId ? admission.tailRunId : null,
+                    "idle", run.id);
+            }
         },
 
         onThreadName: (event: WSThreadNameEvent) => {
@@ -2256,8 +2299,13 @@ async function executeWSRequest(
     restoreComposer?: () => void,
 ): Promise<void> {
     assertWriter(currentWriter());
+    const admission = get(threadAdmissionAtom);
+    if (request.thread_id && admission?.threadId !== request.thread_id) {
+        restoreComposer?.();
+        throw new Error("Refresh the chat before sending again.");
+    }
     request.expected_tail_run_id = request.thread_id
-        ? (get(threadAdmissionAtom)?.tailRunId ?? null)
+        ? (admission?.tailRunId ?? null)
         : null;
     // Every send/retry/resume lands here; stop if the client is already gone.
     if (clientShutDown) {
@@ -2287,6 +2335,12 @@ async function executeWSRequest(
             (activeRun.status === 'in_progress' || activeRun.status === 'awaiting_deferred')
         );
     };
+
+    const searchIndexState = await getSearchIndexState();
+    assertWriter(requestWriter);
+    if (clientShutDown || supersededByLiveRun()) return;
+    delete request.search_index_state;
+    if (searchIndexState) request.search_index_state = searchIndexState;
 
     connectLoopsInFlight++;
     const result = await connectWithRetry({
@@ -2504,8 +2558,7 @@ const sendWSMessage = async (
         }
 
         let attachments: MessageAttachment[] =
-            selectedItems
-                .map(item => toMessageAttachment(item))
+            (await Promise.all(selectedItems.map(item => toValidatedMessageAttachment(item))))
                 .filter((attachment): attachment is MessageAttachment => attachment !== null);
         attachments = await processImageAnnotations(attachments);
 
@@ -2567,15 +2620,8 @@ const sendWSMessage = async (
                 if (readerAttachment.parentItem) {
                     await Zotero.Items.loadDataTypes([readerAttachment.parentItem], ['itemData', 'creators']);
                 }
-                attachments.push({
-                    library_id: readerAttachment.libraryID,
-                    zotero_key: readerAttachment.key,
-                    library_ref: libraryRefForLibraryID(readerAttachment.libraryID) ?? undefined,
-                    type: 'source',
-                    attachment: safeStub(() => serializeAttachmentStub(readerAttachment)),
-                    parent_item: safeStub(() => readerAttachment.parentItem ? serializeItemStub(readerAttachment.parentItem) : undefined),
-                    include: 'fulltext'
-                } as SourceAttachment);
+                const readerMessageAttachment = await toValidatedMessageAttachment(readerAttachment);
+                if (readerMessageAttachment) attachments.push(readerMessageAttachment);
             } else {
                 logger(`sendWSMessageAtom: Handeling reader attachment - Skipping reader attachment: ${readerKeys[0]}`, 1);
             }
@@ -2904,16 +2950,29 @@ async function startRegenerateRunOwned(
             }
             if (!(await reconcileThread(get, set, current, settledHistory))) return;
             threadRuns = get(threadRunsAtom);
-            persistedRunIds = new Set(threadRuns.map(run => run.id));
-            // A failed pre-admission request exists only in this renderer. Keep
-            // that suffix when the authoritative tail and persisted prefix still
-            // match; a remotely truncated or rewritten history is a conflict.
-            const localSuffix = localHistory.slice(threadRuns.length);
+            const persisted = new Set(threadRuns.map(run => run.id));
+            persistedRunIds = persisted;
+            // A request that failed before the backend inserted its run exists
+            // only in this renderer, and a follow-up sent after it is saved
+            // behind it, so such runs are kept wherever they sit. Every other
+            // local run must appear in the authoritative history in the same
+            // order. The observed tail must stand, or advance to this renderer's
+            // claimed run while retaining the previously observed tail.
+            // A failed or stopped run the backend did persist is in both lists
+            // and needs no rescue.
+            const isLocalOnlyFailure = (run: AgentRun) =>
+                !persisted.has(run.id) && (run.status === 'error' || run.status === 'canceled');
+            const localPersisted = localHistory.filter(run => !isLocalOnlyFailure(run));
             if (observedAdmission?.threadId === settlementThreadId
-                && observedAdmission.tailRunId === get(threadAdmissionAtom)?.tailRunId
-                && threadRuns.every((run, index) => run.id === localHistory[index]?.id)
-                && localSuffix.every(run => run.status === 'error' || run.status === 'canceled')) {
-                threadRuns = [...threadRuns, ...localSuffix];
+                && (observedAdmission.tailRunId === get(threadAdmissionAtom)?.tailRunId ||
+                    (observedAdmission.unconfirmedRunId === get(threadAdmissionAtom)?.tailRunId &&
+                        (!observedAdmission.tailRunId || persisted.has(observedAdmission.tailRunId))))
+                && localPersisted.length === threadRuns.length
+                && localPersisted.every((run, index) => run.id === threadRuns[index].id)) {
+                const authoritative = threadRuns;
+                let next = 0;
+                threadRuns = localHistory.map(run =>
+                    isLocalOnlyFailure(run) ? run : authoritative[next++]);
                 set(threadRunsAtom, threadRuns);
             }
             if (threadRuns.some((run) => !intendedRunIds.has(run.id))) {
@@ -3743,8 +3802,9 @@ export const sendCreditConfirmationResponseAtom = atom(
  */
 export const sendBatchApprovalResponseAtom = atom(
     null,
-    (_get, set, { approvalId, approved, mode, userInstructions }: {
+    (_get, set, { approvalId, approved, mode, userInstructions, table }: {
         approvalId: string;
+        table?: import('@beaver/agent-core/protocol/artifactProtocol').TableApprovalIdentity;
         approved: boolean;
         mode: BatchApprovalMode;
         userInstructions?: string | null;
@@ -3756,6 +3816,7 @@ export const sendBatchApprovalResponseAtom = atom(
             approved,
             mode,
             userInstructions,
+            table,
         );
         if (!delivered) {
             logger(`sendBatchApprovalResponseAtom: Batch approval response for ${approvalId} was not sent`, 1);
@@ -3833,7 +3894,8 @@ export async function withThreadWriter<T>(get: Getter, set: Setter, operation: (
             presence &&
             id &&
             writer?.preparing === 1 &&
-            !get(activeRunAtom) &&
+            (!get(activeRunAtom) || (!isRunActive(get(activeRunAtom)) &&
+                !!get(threadAdmissionAtom)?.unconfirmedRunId)) &&
             !get(retryPendingRunIdAtom)
         ) {
             const generation = getCredentialGeneration();
@@ -3846,7 +3908,8 @@ export async function withThreadWriter<T>(get: Getter, set: Setter, operation: (
             if (
                 snapshot.activity.state === "active" ||
                 (previous?.threadId === id &&
-                    previous.tailRunId !== snapshot.tailRunId)
+                    previous.tailRunId !== snapshot.tailRunId &&
+                    previous.unconfirmedRunId !== snapshot.tailRunId)
             ) {
                 if (snapshot.activity.state !== "active")
                     guardedSet(threadConflictAtom, "thread_tail_mismatch");

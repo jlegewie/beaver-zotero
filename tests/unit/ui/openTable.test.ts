@@ -127,3 +127,20 @@ it('repairs locally on Open and surfaces unfinished bookkeeping without hiding t
     expect(Zotero.Beaver.libraryOperations.run).toHaveBeenCalledWith('table_openTable', [REF]);
     expect(readerOpen).toHaveBeenCalledOnce();
 });
+
+
+it('opens a group snapshot in the reader even when local bookkeeping is refused', async () => {
+    const groupRef = { libraryID: 7, key: 'GROUPKEY' };
+    resolveTableItem.mockResolvedValue({
+        ...fileItem('/tmp/group-table.html'),
+        id: 84,
+        ...groupRef,
+    });
+    (Zotero.Beaver.libraryOperations.run as any).mockRejectedValue(new Error('Library excluded'));
+    expect(await openTable(groupRef)).toMatchObject({ ok: true });
+    expect(resolveTableItem).toHaveBeenCalledWith(groupRef);
+    expect(readerOpen).toHaveBeenCalledWith(84, undefined, {
+        openInWindow: false,
+        allowDuplicate: false,
+    });
+});

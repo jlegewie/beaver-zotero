@@ -18,7 +18,15 @@ export interface JobExecutionContext {
 export type JobOutcome =
     | { kind: 'complete'; reason: string }
     | { kind: 'release'; reason: string }
-    | { kind: 'retry'; error: string; reason?: string; retryAfterMs?: number }
+    | {
+        kind: 'retry'; error: string; reason?: string; retryAfterMs?: number;
+        /** Only document failures consume the finite attempt budget. */
+        countsAsAttempt?: boolean;
+        /** Pause new claims in this lane as well as delaying this job. */
+        laneCooldownMs?: number;
+        /** Source identity observed before this attempt read document bytes. */
+        attemptedExtractionSource?: string | null;
+    }
     | {
         kind: 'failPermanent';
         failure: DocumentProcessingFailureInput;
@@ -40,6 +48,11 @@ export interface JobExecutor {
         record: BackgroundJobRecord,
         error: string,
     ): DocumentProcessingFailureInput | null;
+    /**
+     * Quiesce executor-owned work that outlives `execute()` without making the
+     * executor unusable when the dispatcher resumes after maintenance.
+     */
+    suspend?(): void | Promise<void>;
     /**
      * Release executor-owned work that outlives a single `execute()` call.
      */

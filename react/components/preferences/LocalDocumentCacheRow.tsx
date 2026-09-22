@@ -120,7 +120,7 @@ const LocalDocumentCacheRow: React.FC<{ hasBorder?: boolean }> = ({ hasBorder = 
                         {plural(cache.ocr_repreparation_required_count, 'prepared scan')} need re-preparation after an extraction update. Their cached data is retained and will not be served until compatible preparation is available.
                     </span>}
                     {cleared && <span role="status" className="display-flex mt-1">
-                        Cache cleared. Prepared OCR text is retained. Other files will be read again when needed. To prepare them ahead of time, enable Background Processing and then use Rebuild cache when pending processing has finished and the button appears.
+                        Cache cleared. Prepared OCR text is retained. Other files will be read again when needed. To prepare them ahead of time, enable Background Processing and use Rebuild cache under Cached text once pending processing has finished.
                     </span>}
                     {error && <span role="alert" className="display-flex font-color-red mt-1">{error}</span>}
                 </>

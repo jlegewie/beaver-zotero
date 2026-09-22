@@ -206,6 +206,7 @@ describe('BeaverDB background processing state', () => {
         await db.resetAttachmentExtraction(1, 'ABCDEFGH', 'file_changed');
 
         await expect(db.markAttachmentOcrDone({
+            attemptedAt: 200,
             libraryId: 1,
             zoteroKey: 'ABCDEFGH',
             fileHash: 'file',
@@ -260,6 +261,7 @@ describe('BeaverDB background processing state', () => {
 
         const ocrHash = 'f'.repeat(64);
         await expect(db.markAttachmentOcrDone({
+            attemptedAt: 200,
             libraryId: 1,
             zoteroKey: 'ABCDEFGH',
             fileHash: 'file',
@@ -360,6 +362,37 @@ describe('BeaverDB background processing state', () => {
             extracted: 0,
             upserted: 0,
         });
+    });
+
+    it('guards recoverable OCR unavailability by source and excludes it from active preparation', async () => {
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'SCAN0001', contentKind: 'pdf' });
+        await connection.queryAsync(`UPDATE attachment_processing_state SET
+            extract_status = 'done', ocr_status = 'needed', file_hash = 'current'
+            WHERE zotero_key = 'SCAN0001'`);
+
+        await expect(db.markAttachmentOcrUnavailable(
+            1, 'SCAN0001', 'stale', 'ocr_service_unavailable',
+        )).resolves.toBe(false);
+        expect((await db.getAttachmentProcessingState(1, 'SCAN0001'))?.lastError).toBeNull();
+
+        await expect(db.markAttachmentOcrUnavailable(
+            1, 'SCAN0001', 'current', 'ocr_service_unavailable',
+        )).resolves.toBe(true);
+        expect(await db.getAttachmentProcessingAggregates(1, { ocr: true })).toMatchObject({
+            awaitingOcr: 0,
+            unreadable: 1,
+            oldestPendingAt: null,
+        });
+        await db.recordAttachmentReadingOutcome({
+            libraryId: 1, zoteroKey: 'SCAN0001', contentKind: 'pdf',
+            errorCode: 'ocr_required', attemptedAt: 1,
+        });
+        expect(await db.getProcessingIssueCounts({
+            hasOcrAccess: true, hasSearchIndexAccess: false,
+        })).toEqual([{ reason: 'ocr_unavailable', count: 1 }]);
+        await expect(db.clearAttachmentOcrUnavailable(1, 'SCAN0001', 'stale')).resolves.toBe(false);
+        await expect(db.clearAttachmentOcrUnavailable(1, 'SCAN0001', 'current')).resolves.toBe(true);
+        expect((await db.getAttachmentProcessingState(1, 'SCAN0001'))?.lastError).toBeNull();
     });
 
     it('keeps the newest replacement metadata on a deduplicated upsert job', async () => {

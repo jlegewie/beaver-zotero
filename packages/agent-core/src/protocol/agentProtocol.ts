@@ -2363,6 +2363,7 @@ export type BatchApprovalMode = 'full_access' | 'ask_each_time';
  * nothing destructive, and the block is then hidden.
  */
 export interface WSBatchApprovalRequest extends WSBaseEvent {
+    table?: import('./artifactProtocol').TableBatchApproval | null;
     event: 'batch_approval_request';
     /** Correlation id for the response */
     approval_id: string;
@@ -2451,6 +2452,7 @@ export interface WSBatchApprovalRequest extends WSBaseEvent {
  * batch runs, on a decline they say what to do instead.
  */
 export interface WSBatchApprovalResponse {
+    table?: import('./artifactProtocol').TableApprovalIdentity;
     type: 'batch_approval_response';
     approval_id: string;
     /** Whether the user approved the batch */
@@ -2993,11 +2995,27 @@ export interface ChargingPermissions {
     pause_long_running_agent?: boolean;
 }
 
+/** Current attachment preparation counts; the server owns eligibility policy. */
+export interface SearchIndexLibraryState {
+    library_ref: string;
+    total: number;
+    indexed: number;
+    /** Settled document limitations, disjoint from indexed attachments. */
+    unavailable: number;
+}
+
+export interface SearchIndexState {
+    version: 1;
+    libraries: SearchIndexLibraryState[];
+}
+
 /**
  * Agent run request sent by the client after receiving the 'ready' event.
  * Model selection is included in this request (moved from auth message).
  */
 export interface AgentRunRequest {
+    /** Fresh local preparation snapshot, omitted without search access. */
+    search_index_state?: SearchIndexState;
     /** Request type discriminator */
     type: 'chat';
     /** Client-generated run ID for this agent run */

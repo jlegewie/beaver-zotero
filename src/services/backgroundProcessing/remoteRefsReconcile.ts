@@ -36,8 +36,15 @@ export async function reconcileRemoteRefs(
 
         const requirements = await searchIndexApiClient.requirements();
         if (isCancelled()) return;
+        // A queued row may complete while this sweep is waiting on verify(). Its
+        // result would then describe the remote state from before that upload,
+        // and re-enqueuing the stale `missing` result would upload it twice.
+        // Let pending, deferred, and in-flight jobs own this cycle; a later
+        // sweep will verify their completed result and still repair real drift.
+        const pendingUpserts = await db.getPendingFulltextUpsertKeys();
         const local = await db.getAttachmentProcessingStatesByLibrary(libraryId);
-        const candidates = local.filter((row) => row.structuredDocumentHash && row.extractStatus === 'done');
+        const candidates = local.filter((row) => row.structuredDocumentHash && row.extractStatus === 'done'
+            && !pendingUpserts.has(`${libraryId}/${row.zoteroKey}`));
         const verified = new Map<string, IndexVerifyResponse['refs'][number]>();
         for (let offset = 0; offset < candidates.length; offset += INDEX_VERIFY_BATCH_SIZE) {
             if (isCancelled() || !isBackgroundProcessingLibraryEnabled(libraryId)) return;

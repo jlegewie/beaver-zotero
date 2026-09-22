@@ -31,6 +31,7 @@ import type {
  * from these fields.
  */
 export interface PendingBatchApproval {
+    table?: WSBatchApprovalRequest['table'];
     /** Correlation id for the wire response (the map key) */
     approvalId: string;
     /** The agent run awaiting the decision */
@@ -123,6 +124,7 @@ export const addPendingBatchApprovalAtom = atom(
         set(pendingBatchApprovalsAtom, (prev) => {
             const next = new Map(prev);
             next.set(event.approval_id, {
+                table: event.table,
                 approvalId: event.approval_id,
                 runId: event.run_id,
                 threadId: event.thread_id,

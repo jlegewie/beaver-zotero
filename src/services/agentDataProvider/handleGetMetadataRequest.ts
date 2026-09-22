@@ -261,15 +261,16 @@ export async function handleGetMetadataRequest(
 
             // Enrich collection keys with names for agent readability
             // toJSON() returns collections as plain key strings: ["ABCD1234", ...]
-            // We convert to [{collection_key, name}, ...] so the agent sees meaningful names
+            // Exclude trash before attaching names and portable identities.
             if (Array.isArray(result.collections)) {
-                result.collections = result.collections.map((collKey: string) => {
+                result.collections = result.collections.flatMap((collKey: string) => {
                     try {
                         const coll = Zotero.Collections.getByLibraryAndKey(libraryId, collKey);
+                        if (!coll || coll.deleted) return [];
                         return {
-                            ...(coll ? serializeCollectionIdentity(coll) : {}),
+                            ...serializeCollectionIdentity(coll),
                             collection_key: collKey,
-                            name: coll ? coll.name : collKey,
+                            name: coll.name,
                         };
                     } catch (error) {
                         if (error instanceof CollectionResolutionError) throw error;

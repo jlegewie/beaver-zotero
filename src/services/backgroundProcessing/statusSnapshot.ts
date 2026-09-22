@@ -111,7 +111,11 @@ export async function collectProcessingStatus(
         type !== 'fulltext_untag'
         && (type !== 'fulltext_upsert' || hasSearchIndexAccess)
         && (type !== 'document_ocr' || hasOcrAccess));
-    const activeQueue = progress?.queue ?? await db.getBackgroundQueueStats(Date.now(), activeTypes);
+    const pausedTypes = Object.entries(lanes)
+        .filter(([, lane]) => (lane?.pauseUntil ?? 0) > Date.now()).map(([type]) => type);
+    const activeQueue = progress?.queue ?? await (pausedTypes.length
+        ? db.getBackgroundQueueStats(Date.now(), activeTypes, pausedTypes)
+        : db.getBackgroundQueueStats(Date.now(), activeTypes));
     const worker: BackgroundWorkerSnapshot = {
         dispatchBlocker: extractor?.getDispatchBlocker?.() ?? null,
         available: activeQueue.available,

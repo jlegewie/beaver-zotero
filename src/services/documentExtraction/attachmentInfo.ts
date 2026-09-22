@@ -152,7 +152,7 @@ function statusFromCachedPdf(
         return { page_count: null, status: 'unreadable', status_code: 'pdf_invalid' };
     }
     if (record.errorCode === 'no_text_layer') {
-        return { page_count: record.pageCount, status: 'unreadable', status_code: 'pdf_needs_ocr', status_reason: 'This scan is not prepared yet. Enable cloud preparation in Beaver Preferences; reading does not start OCR.' };
+        return { page_count: record.pageCount, status: 'unreadable', status_code: 'pdf_needs_ocr', status_reason: 'This scan is not prepared yet. Cloud preparation may be turned off or temporarily unavailable; reading does not start OCR.' };
     }
     return { page_count: record.pageCount, status: 'readable' };
 }
@@ -318,7 +318,7 @@ async function resolvePdfInfo(
         );
         if (ocrAnalysis.needsOCR) {
             await cache?.putErrorMetadata({ item: attachment, filePath: availability.filePath, sourceSizeBytes, contentType: availability.contentType, errorCode: 'no_text_layer', pageCount, pageLabels, pages: pages ?? null });
-            return { page_count: pageCount, status: 'unreadable', status_code: 'pdf_needs_ocr', status_reason: 'This scan is not prepared yet. Enable cloud preparation in Beaver Preferences; reading does not start OCR.' };
+            return { page_count: pageCount, status: 'unreadable', status_code: 'pdf_needs_ocr', status_reason: 'This scan is not prepared yet. Cloud preparation may be turned off or temporarily unavailable; reading does not start OCR.' };
         }
 
         await cache?.putMetadata({

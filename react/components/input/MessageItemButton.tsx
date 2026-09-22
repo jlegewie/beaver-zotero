@@ -1,4 +1,6 @@
 import { viewAttachment } from '../../runtime/navigation';
+import { isTableAttachment } from '../../../src/services/artifacts/tableItemIdentity';
+import { getTablesApi } from '../../../src/services/artifacts/tablesApi';
 import { getContextWindow } from '../../runtime/windowRuntime';
 import React, { forwardRef } from 'react';
 import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon, LibraryIcon, PdfIcon, NoteIcon, FileViewIcon } from "../icons/icons";
@@ -173,6 +175,10 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
 
         // Open the attachment file in the reader (or its external app).
         const openAttachment = () => {
+            if (isTableAttachment(item)) {
+                void getTablesApi()?.openTable({ libraryID: item.libraryID, key: item.key });
+                return;
+            }
             viewAttachment(item.id);
         };
 
@@ -180,6 +186,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         // reader, notes open in the editor, and everything else is revealed in
         // the Zotero library.
         const revealItem = () => {
+            if (isTableAttachment(item)) { openAttachment(); return; }
             if (isAnnotation) {
                 navigateToAnnotation(item);
                 return;

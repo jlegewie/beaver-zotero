@@ -13,7 +13,8 @@ import Button from "@beaver/agent-ui/primitives/Button";
  * Three visual states derived from profileSyncStatusAtom:
  *  - ok with no profile yet: spinner + "Connecting…".
  *  - transient (with offline flag): "You're offline" or "Reconnecting…" + manual retry.
- *  - fatal: error message + manual retry.
+ *  - fatal: error message + manual retry, plus the status's own heading and
+ *    documentation link when it identified the cause (see instanceAccount).
  */
 const ProfileLoadingPage: React.FC = () => {
     const status = useAtomValue(profileSyncStatusAtom);
@@ -23,7 +24,7 @@ const ProfileLoadingPage: React.FC = () => {
     const isOffline = isTransient && status.offline;
 
     const heading = isFatal
-        ? "Couldn't load your profile"
+        ? status.title ?? "Couldn't load your profile"
         : isOffline
             ? "You're offline"
             : isTransient
@@ -50,13 +51,25 @@ const ProfileLoadingPage: React.FC = () => {
                 <div className="font-color-primary font-semibold">{heading}</div>
                 <div className="font-color-secondary">{subtext}</div>
                 {(isFatal || isTransient) && (
-                    <div className="mt-2">
+                    <div className="display-flex flex-col items-center gap-2 mt-2">
                         <Button
                             variant="outline"
                             onClick={() => triggerProfileRefresh()}
                         >
                             Try again
                         </Button>
+                        {isFatal && status.helpUrl && (
+                            <a
+                                href="#"
+                                className="text-link"
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    Zotero.launchURL(status.helpUrl!);
+                                }}
+                            >
+                                Troubleshooting guide
+                            </a>
+                        )}
                     </div>
                 )}
             </div>
