@@ -47,6 +47,11 @@ export interface JobExecutor {
         error: string,
     ): DocumentProcessingFailureInput | null;
     /**
+     * Quiesce executor-owned work that outlives `execute()` without making the
+     * executor unusable when the dispatcher resumes after maintenance.
+     */
+    suspend?(): void | Promise<void>;
+    /**
      * Release executor-owned work that outlives a single `execute()` call.
      */
     dispose?(): void;

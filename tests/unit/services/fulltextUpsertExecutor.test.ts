@@ -828,6 +828,37 @@ describe('FulltextUpsertExecutor', () => {
         expect((await db.getAttachmentProcessingState(1, record.zoteroKey))?.upsertStatus).toBeNull();
     });
 
+    it.each(['fulltext_upsert', 'fulltext_untag'] as const)(
+        'processes queued %s work after maintenance resumes the same executor',
+        async (jobType) => {
+            Zotero.Beaver.account = { getGeneration: () => 1,
+                getSnapshot: () => ({ session: { user: { id: 'owner' } } }) } as any;
+            api.untag.mockResolvedValue({ results: [{ outcome: 'untagged' }] });
+            const payload = jobType === 'fulltext_untag'
+                ? { ...record.payload!, doc_hash: 'b'.repeat(64), index_account_id: 'owner',
+                    index_scope_ref: 'lLOCAL123', index_local_id: 'LOCAL123' }
+                : record.payload;
+            await db.enqueueBackgroundJob({ ...record, jobType, payload, now: 0 });
+            const proc = new BackgroundExtractor();
+            const executor = new FulltextUpsertExecutor(api as any, jobType);
+            proc.registerExecutor(executor, {
+                maxInFlight: 1,
+                survivesLibraryExclusion: jobType === 'fulltext_untag',
+            });
+            proc.start();
+
+            const resume = await proc.suspendForMaintenance();
+            resume();
+            expect(await proc.processOnce({ awaitLaunchedJobs: true }))
+                .toMatchObject({ processed: true });
+            expect(jobType === 'fulltext_upsert' ? api.upsertHash : api.untag)
+                .toHaveBeenCalledTimes(1);
+            expect(await db.peekBackgroundJobs()).toEqual([]);
+
+            await proc.stop();
+        },
+    );
+
     it('checks ownership before rejecting a late requirements response', async () => {
         api.requirements.mockImplementation(async () => {
             Zotero.Beaver.libraryScopeInitialized = false;

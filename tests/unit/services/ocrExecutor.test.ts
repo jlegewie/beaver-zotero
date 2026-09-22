@@ -911,4 +911,34 @@ describe('OcrExecutor', () => {
         expect(dbStub.releaseBackgroundJob).not.toHaveBeenCalled();
         expect((globalThis as any).Zotero.Beaver.backgroundExtractor.notify).not.toHaveBeenCalled();
     });
+
+    it('suspend() waits for an aborted slot-free track to settle', async () => {
+        api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-s' });
+        let releaseTrack!: () => void;
+        const trackBarrier = new Promise<void>((resolve) => { releaseTrack = resolve; });
+        let observeAbort!: () => void;
+        const abortObserved = new Promise<void>((resolve) => { observeAbort = resolve; });
+        fakePoller.poll.mockImplementation(
+            (_id: string, opts: { signal: AbortSignal }) =>
+                new Promise((_resolve, reject) => {
+                    opts.signal.addEventListener('abort', async () => {
+                        observeAbort();
+                        await trackBarrier;
+                        reject(new Error('aborted'));
+                    }, { once: true });
+                }),
+        );
+
+        expect(await executor.execute(record, makeCtx()))
+            .toEqual({ kind: 'defer', reason: 'ocr_polling' });
+        let suspended = false;
+        const suspension = executor.suspend().then(() => { suspended = true; });
+        await abortObserved;
+        expect(suspended).toBe(false);
+        releaseTrack();
+        await suspension;
+
+        expect(dbStub.releaseBackgroundJob).not.toHaveBeenCalled();
+        expect(executor.getRemoteWaitingCount()).toBe(0);
+    });
 });

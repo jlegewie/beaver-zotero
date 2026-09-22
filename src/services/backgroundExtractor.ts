@@ -99,6 +99,8 @@ export class BackgroundExtractor {
     private tickRunning = false;
     private tickIdleWaiters: Array<() => void> = [];
     private pendingWake = false;
+    /** Invalidates maintenance resume callbacks after a terminal stop. */
+    private lifecycleGeneration = 0;
     private dbWritesPermanentlyDisabled = false;
     private prefEnabled = true;
     private syncInProgress = false;
@@ -338,10 +340,12 @@ export class BackgroundExtractor {
     /** Suspend background work for local storage maintenance, preserving startup state. */
     async suspendForMaintenance(): Promise<() => void> {
         const wasStarted = this.started;
-        await this.stop();
+        const lifecycleGeneration = this.lifecycleGeneration;
+        await this.stopDispatcher('suspend');
         if (this.tickRunning) await new Promise<void>((resolve) => this.tickIdleWaiters.push(resolve));
         return () => {
-            if (wasStarted && !Zotero.__beaverShuttingDown) this.start();
+            if (wasStarted && lifecycleGeneration === this.lifecycleGeneration
+                && !Zotero.__beaverShuttingDown) this.start();
         };
     }
 
@@ -350,6 +354,11 @@ export class BackgroundExtractor {
      * MuPDF worker.
      */
     async stop(): Promise<void> {
+        this.lifecycleGeneration++;
+        await this.stopDispatcher('dispose');
+    }
+
+    private async stopDispatcher(executorAction: 'suspend' | 'dispose'): Promise<void> {
         this.stopRequested = true;
         this.drainNowRequested = false;
         if (Zotero.__beaverShuttingDown === true) {
@@ -396,8 +405,23 @@ export class BackgroundExtractor {
         await this.abortAndAwaitInFlight();
         // Stop executor-owned background work (e.g. slot-free OCR trackers) that
         // lives outside the lane in-flight maps and so is untouched by the abort.
-        for (const { executor } of this.executors.values()) {
-            this.disposeExecutor(executor);
+        let suspendFailed = false;
+        let suspendFailure: unknown;
+        if (executorAction === 'suspend') {
+            const results = await Promise.allSettled([...this.executors.values()].map(
+                async ({ executor }) => await executor.suspend?.(),
+            ));
+            const failure = results.find(
+                (result): result is PromiseRejectedResult => result.status === 'rejected',
+            );
+            if (failure) {
+                suspendFailed = true;
+                suspendFailure = failure.reason;
+            }
+        } else {
+            for (const { executor } of this.executors.values()) {
+                this.disposeExecutor(executor);
+            }
         }
         try {
             await disposeMuPDFWorker('background');
@@ -407,6 +431,7 @@ export class BackgroundExtractor {
         this.setWorkerRunning(false);
         this.started = false;
         this.pendingWake = false;
+        if (suspendFailed) throw suspendFailure;
     }
 
     /**

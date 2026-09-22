@@ -115,11 +115,8 @@ export class OcrExecutor implements JobExecutor {
     /** The poller is injectable so callers can provide scoped instances. */
     constructor(private readonly poller: OcrStatusPoller = ocrStatusPoller) {}
 
-    /**
-     * Abort background tracks when the dispatcher shuts down or replaces this
-     * executor.
-     */
-    dispose(): void {
+    private abortTracks(): Promise<void>[] {
+        const promises = [...this.tracks.values()].map((track) => track.promise);
         for (const track of this.tracks.values()) {
             try {
                 track.abort.abort();
@@ -128,6 +125,20 @@ export class OcrExecutor implements JobExecutor {
             }
         }
         this.tracks.clear();
+        return promises;
+    }
+
+    /** Abort and settle slot-free polls before local storage maintenance. */
+    async suspend(): Promise<void> {
+        await Promise.allSettled(this.abortTracks());
+    }
+
+    /**
+     * Abort background tracks when the dispatcher shuts down or replaces this
+     * executor.
+     */
+    dispose(): void {
+        this.abortTracks();
     }
 
     getRemoteWaitingCount(): number {

@@ -1515,6 +1515,50 @@ describe('BackgroundExtractor', () => {
         expect(disposeSpy).toHaveBeenCalledTimes(1);
     });
 
+    it('suspends reusable executors for maintenance and keeps terminal stop distinct', async () => {
+        const suspendSpy = vi.fn(async () => undefined);
+        const disposeSpy = vi.fn();
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        proc.registerExecutor(
+            {
+                jobType: 'document_ocr',
+                execute: async () => ({ kind: 'complete', reason: 'ocr_ok' }),
+                suspend: suspendSpy,
+                dispose: disposeSpy,
+            },
+            { maxInFlight: 1 },
+        );
+        proc.start();
+
+        const resume = await proc.suspendForMaintenance();
+        expect(suspendSpy).toHaveBeenCalledTimes(1);
+        expect(disposeSpy).not.toHaveBeenCalled();
+
+        await proc.stop();
+        expect(disposeSpy).toHaveBeenCalledTimes(1);
+        resume();
+        expect(await proc.processOnce()).toEqual({ processed: false, reason: 'stopped' });
+    });
+
+    it('rejects maintenance suspension when an executor cannot quiesce', async () => {
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        proc.registerExecutor(
+            {
+                jobType: 'document_ocr',
+                execute: async () => ({ kind: 'complete', reason: 'ocr_ok' }),
+                suspend: () => { throw new Error('track did not settle'); },
+            },
+            { maxInFlight: 1 },
+        );
+        proc.start();
+
+        await expect(proc.suspendForMaintenance()).rejects.toThrow('track did not settle');
+        expect(await proc.processOnce()).toEqual({ processed: false, reason: 'stopped' });
+        expect(mockState.disposeCalls).toContain('background');
+    });
+
     it('unregisters and disposes only the executor that owns the lane', async () => {
         const firstDispose = vi.fn();
         const secondDispose = vi.fn();
