@@ -9,9 +9,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 vi.mock('../../../src/utils/prefs', () => ({ getPref: (key: string) => key === 'backgroundProcessingEnabled' && mocks.backgroundEnabled }));
 vi.mock('../../../src/utils/idleService', () => ({ getSystemIdleTimeMs: () => 60_000 }));
-vi.mock('../../../src/utils/zoteroItemUtils', () => ({ safeIsInTrash: (item: any) => item.deleted === true }));
+vi.mock('../../../src/utils/zoteroItemUtils', () => ({ safeIsInTrash: (item: any) => item.isInTrash?.() ?? item.deleted === true }));
 vi.mock('../../../src/services/documentExtraction/attachmentResolution', () => ({
-    getReadableContentKind: () => mocks.kind, liveAttachmentContentKind: () => mocks.kind,
+    getReadableContentKind: (item: any) => item.isRegularItem?.() ? null : mocks.kind, liveAttachmentContentKind: () => mocks.kind,
 }));
 vi.mock('../../../src/services/documentExtraction/attachmentSource', () => ({
     resolveAttachmentFileSource: mocks.resolve, loadAttachmentData: vi.fn(),
@@ -103,6 +103,75 @@ describe('attachment change reconciliation', () => {
             await db.getAttachmentProcessingState(1, item.key));
         await db.enqueueBackgroundJobs(jobs);
     }
+
+    async function parentFixture() {
+        const parent = { id: 20, libraryID: 1, key: 'PARENT00', deleted: false, isRegularItem: () => true };
+        const second = { ...item, id: 8, key: 'CHILD002', deleted: false, parentID: parent.id,
+            isInTrash: () => second.deleted || parent.deleted };
+        item.parentID = parent.id;
+        item.isInTrash = () => item.deleted === true || parent.deleted;
+        await connection.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER, parentItemID INTEGER)');
+        await connection.queryAsync("INSERT INTO items VALUES (20, 1, 'PARENT00'), (8, 1, 'CHILD002')");
+        await connection.queryAsync('INSERT INTO itemAttachments VALUES (7, 20), (8, 20)');
+        vi.mocked(Zotero.Items.getAsync).mockImplementation(async (id: any) =>
+            id === 20 ? parent : id === 8 ? second : item);
+        // Keep all assertions inside the targeted path, before the periodic scan.
+        (reconciler as any).nextScanAt = Date.now() + 300_000;
+        const change = async (event = 'modify') => {
+            observer.notify(event, 'item', [parent.id]);
+            await vi.advanceTimersByTimeAsync(501);
+        };
+        return { parent, second, change };
+    }
+
+    it('cleans both children on parent-only trash and rediscovers them on restore without a sweep', async () => {
+        const { parent, change } = await parentFixture();
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'CHILD002', itemId: 8, contentKind: 'snapshot' });
+        await seed(false);
+        parent.deleted = true;
+        await change('trash');
+        expect(item.deleted).not.toBe(true);
+        expect(await db.getAttachmentProcessingState(1, item.key)).toBeNull();
+        expect(await db.getAttachmentProcessingState(1, 'CHILD002')).toBeNull();
+        expect((await db.peekBackgroundJobs()).filter(job => job.jobType === 'fulltext_untag')).toHaveLength(2);
+        expect(mocks.invalidate).toHaveBeenCalledWith(1, item.key);
+        parent.deleted = false;
+        await change();
+        expect(await db.getAttachmentProcessingState(1, item.key)).not.toBeNull();
+        expect(await db.getAttachmentProcessingState(1, 'CHILD002')).not.toBeNull();
+        const extracts = (await db.peekBackgroundJobs()).filter(job => job.jobType === 'document_extract');
+        expect(extracts).toHaveLength(2);
+        expect(extracts.every(job => job.payload?.request_context === 'backfill')).toBe(true);
+    });
+
+    it('keeps independently trashed children excluded when their parent is restored', async () => {
+        const { second, change } = await parentFixture();
+        second.deleted = true;
+        await change();
+        expect(await db.getAttachmentProcessingState(1, item.key)).not.toBeNull();
+        expect(await db.getAttachmentProcessingState(1, second.key)).toBeNull();
+    });
+
+    it('deduplicates parent and child notifications and preserves unchanged indexed content', async () => {
+        const { change } = await parentFixture();
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'CHILD002', itemId: 8, contentKind: 'snapshot' });
+        await seed(false);
+        observer.notify('modify', 'item', [7, 8]);
+        await change();
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+        expect(mocks.invalidate).not.toHaveBeenCalled();
+    });
+
+    it('uses current state after parent trash and restore coalesce', async () => {
+        const { parent, change } = await parentFixture();
+        await seed(false);
+        parent.deleted = true;
+        observer.notify('trash', 'item', [parent.id]);
+        parent.deleted = false;
+        await change();
+        expect(await db.getAttachmentProcessingState(1, item.key)).toMatchObject({ upsertStatus: 'done' });
+        expect((await db.peekBackgroundJobs()).some(job => job.jobType === 'fulltext_untag')).toBe(false);
+    });
 
     it('counts five unchanged missing files again only when a deep recheck explicitly retries them', async () => {
         mocks.resolve.mockResolvedValue({ kind: 'error', code: 'file_missing' });

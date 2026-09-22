@@ -158,7 +158,7 @@ describe('FulltextUpsertExecutor', () => {
             hasSearchIndexAccess: true,
             libraryScopeInitialized: true,
             searchableLibraryIds: [1],
-            documentCache: { getResult: vi.fn(async () => payload), getStats: vi.fn(async () => null) },
+            documentCache: { getResult: vi.fn(async () => payload), getStats: vi.fn(async () => null), invalidate: vi.fn(async () => undefined) },
         };
         (globalThis as any).Zotero.Items = {
             getByLibraryAndKeyAsync: vi.fn(async () => ({
@@ -174,6 +174,93 @@ describe('FulltextUpsertExecutor', () => {
         vi.restoreAllMocks();
         await connection.closeDatabase();
         if (storageDir) rmSync(storageDir, { recursive: true, force: true });
+    });
+
+    function parentTrashFixture() {
+        const parent = { deleted: false };
+        let loaded = false;
+        (Zotero.Items as any).getAsync = vi.fn(async () => { loaded = true; return parent; });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue({
+            libraryID: 1, key: record.zoteroKey, parentID: 20,
+            isInTrash: () => { if (!loaded) throw new Error('Parent not loaded'); return parent.deleted; },
+        } as any);
+        (Zotero.Beaver as any).account = { getGeneration: () => 1,
+            getSnapshot: () => ({ session: { user: { id: 'account-a' } } }) };
+        ctx.enqueue = async (job) => { await db.enqueueBackgroundJob(job); };
+        return parent;
+    }
+
+    it('does not hash-upload a child of a trashed parent even while its ledger is current', async () => {
+        const parent = parentTrashFixture();
+        const executor = new FulltextUpsertExecutor(api as any);
+        await executor.execute(record, ctx);
+        api.upsertHash.mockClear();
+        parent.deleted = true;
+        expect(await executor.execute(record, ctx)).toMatchObject({ kind: 'complete', reason: 'in_trash' });
+        expect(api.upsertHash).not.toHaveBeenCalled();
+        expect(api.upsertPayload).not.toHaveBeenCalled();
+        expect(await db.getAttachmentProcessingState(1, record.zoteroKey)).toBeNull();
+        expect(await countCleanupIntents(connection, 'account-a')).toBe(1);
+    });
+
+    it.each(['hash', 'payload'] as const)('preserves durable cleanup when parent trash happens during %s upload', async (stage) => {
+        const parent = parentTrashFixture();
+        if (stage === 'payload') {
+            api.upsertHash.mockRejectedValueOnce(new ApiError(409, 'Conflict', 'payload needed', 'payload_required'));
+            api.upsertPayload.mockImplementationOnce(async () => { parent.deleted = true; return response('completed'); });
+        } else {
+            api.upsertHash.mockImplementationOnce(async () => { parent.deleted = true; return response(); });
+        }
+        const executor = new FulltextUpsertExecutor(api as any);
+        expect(await executor.execute(record, ctx)).toMatchObject({ kind: 'complete', reason: 'in_trash' });
+        expect(await db.getAttachmentProcessingState(1, record.zoteroKey)).toBeNull();
+        const cleanup = (await db.peekBackgroundJobs()).find(job => job.jobType === 'fulltext_untag')!;
+        expect(cleanup).toBeDefined();
+        expect(await countCleanupIntents(connection, 'account-a')).toBe(1);
+        api.untag.mockResolvedValue({ results: [{ outcome: 'untagged' }] });
+        expect(await executor.execute(cleanup, ctx)).toMatchObject({ reason: 'index_untagged' });
+        expect(await countCleanupIntents(connection, 'account-a')).toBe(0);
+    });
+
+    it('retries unknown parent trash state without uploading or deleting the ledger', async () => {
+        parentTrashFixture();
+        vi.mocked(Zotero.Items.getAsync).mockRejectedValue(new Error('parent load failed'));
+        expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx)).toMatchObject({
+            kind: 'retry', error: 'trash_state_unavailable',
+        });
+        expect(api.upsertHash).not.toHaveBeenCalled();
+        expect(await db.getAttachmentProcessingState(1, record.zoteroKey)).not.toBeNull();
+    });
+
+    it('serializes restored membership acquisition after cleanup already in flight', async () => {
+        const parent = parentTrashFixture();
+        const executor = new FulltextUpsertExecutor(api as any);
+        await executor.execute(record, ctx);
+        parent.deleted = true;
+        await executor.execute(record, ctx);
+        const cleanup = (await db.peekBackgroundJobs()).find(job => job.jobType === 'fulltext_untag')!;
+        let release!: () => void;
+        let entered!: () => void;
+        const started = new Promise<void>(resolve => { entered = resolve; });
+        api.untag.mockImplementationOnce(async () => {
+            entered();
+            await new Promise<void>(resolve => { release = resolve; });
+            return { results: [{ outcome: 'untagged' }] };
+        });
+        const deleting = new FulltextUpsertExecutor(api as any, 'fulltext_untag').execute(cleanup, ctx);
+        await started;
+        try {
+            parent.deleted = false;
+            expect(await executor.execute(record, ctx)).toMatchObject({ kind: 'retry', error: 'index_membership_busy', countsAsAttempt: false });
+            expect(api.upsertHash).toHaveBeenCalledTimes(1);
+        } finally {
+            release();
+            await deleting;
+        }
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: record.zoteroKey, itemId: 10, contentKind: 'pdf' });
+        await connection.queryAsync("UPDATE attachment_processing_state SET extract_status='done', structured_document_hash=?, extract_schema_version='4'", ['a'.repeat(64)]);
+        expect(await executor.execute(record, ctx)).toMatchObject({ reason: 'index_tagged' });
+        expect(await db.getAttachmentProcessingState(1, record.zoteroKey)).toMatchObject({ upsertStatus: 'done' });
     });
 
     it('cleans up without paid access using the frozen remote identity', async () => {
@@ -248,7 +335,7 @@ describe('FulltextUpsertExecutor', () => {
             expect(await db.getAttachmentProcessingState(1, record.zoteroKey)).toMatchObject({
                 upsertStatus: null, upsertRemoteIdentity: { index_account_id: 'account-a' },
             });
-            expect(await executor.execute(cleanup, ctx)).toEqual({ kind: 'defer', reason: 'index_acquisition_pending' });
+            expect(await executor.execute(cleanup, ctx)).toMatchObject({ kind: 'retry', error: 'index_membership_busy', countsAsAttempt: false });
             expect(api.untag).not.toHaveBeenCalled();
             expect(await countCleanupIntents(connection, 'account-a')).toBe(1);
         } finally {
