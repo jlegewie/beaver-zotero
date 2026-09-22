@@ -3,7 +3,7 @@
  * These functions are used by AgentActionView for post-run action handling.
  */
 import { formatCollectionId } from '../collections/collectionIdentity';
-import { assertLibraryWritable, resolveOrganizeLibrary, recheckCollection, recheckCollectionMemberships } from '../collections/collectionMutations';
+import { assertLibraryWritable, resolveOrganizeLibrary, recheckCollectionForUndo, recheckCollectionMemberships, recheckCollectionsToRemove } from '../collections/collectionMutations';
 import { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { CollectionChanges, OrganizeItemsResultData, TagChanges } from '@beaver/agent-core/types/agentActions/base';
@@ -27,7 +27,11 @@ export async function executeOrganizeItemsAction(
     const hasCollections = !!(collections?.add?.length || collections?.remove?.length);
     const libraryID = hasCollections ? await resolveOrganizeLibrary(item_ids, true) : null;
     if (libraryID != null) {
-        recheckCollectionMemberships([...(collections?.add ?? []), ...(collections?.remove ?? [])], libraryID);
+        // Adds must all resolve before anything is written — silently skipping
+        // one would report incomplete work as done. A vanished remove target is
+        // already in the requested state, so it is dropped instead.
+        recheckCollectionMemberships(collections?.add ?? [], libraryID);
+        recheckCollectionsToRemove(collections?.remove ?? [], libraryID);
     }
     const currentState: Record<string, { tags: string[]; collections: string[] }> = {};
 
@@ -64,7 +68,7 @@ export async function executeOrganizeItemsAction(
             // Item lookups and saves yield between iterations; validate this item's
             // memberships before changing its cached tags or collections.
             const addCollections = isTopLevel && hasCollections ? recheckCollectionMemberships(collections?.add ?? [], item.libraryID) : [];
-            const removeCollections = isTopLevel && hasCollections ? recheckCollectionMemberships(collections?.remove ?? [], item.libraryID) : [];
+            const removeCollections = isTopLevel && hasCollections ? recheckCollectionsToRemove(collections?.remove ?? [], item.libraryID) : [];
 
             // Get current state before modifications
             const existingTags = new Set(item.getTags().map((t: { tag: string }) => t.tag));
@@ -145,6 +149,13 @@ export async function executeOrganizeItemsAction(
     };
 }
 
+/** Recorded memberships whose collection still exists; the rest are nothing to undo. */
+function resolveForUndo(references: readonly string[] | null | undefined, libraryID: number) {
+    return (references ?? [])
+        .map(reference => recheckCollectionForUndo(reference, libraryID))
+        .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+}
+
 /**
  * Undo an organize_items agent action.
  * Restores items to their original tags and collections using current_state.
@@ -187,9 +198,11 @@ export async function undoOrganizeItemsAction(
             if (originalState) {
                 // Precise undo using saved state
                 
-                // Resolve every membership before mutating the cached item.
-                const addedCollections = (collections?.add ?? []).map(ref => recheckCollection(ref, item.libraryID));
-                const removedCollections = (collections?.remove ?? []).map(ref => recheckCollection(ref, item.libraryID));
+                // Resolve every membership before mutating the cached item. A
+                // collection the user has since erased holds no membership to
+                // restore, so it is skipped rather than failing the undo.
+                const addedCollections = resolveForUndo(collections?.add, item.libraryID);
+                const removedCollections = resolveForUndo(collections?.remove, item.libraryID);
 
                 // Restore tags: remove added tags, add back removed tags
                 if (tags?.add) {
@@ -227,8 +240,8 @@ export async function undoOrganizeItemsAction(
             } else if (resultData) {
                 // Fallback: reverse using result_data which contains actual changes made
                 // This is safe because result_data now tracks actual changes, not requested changes
-                const addedCollections = (resultData.collections_added ?? []).map(ref => recheckCollection(ref, item.libraryID));
-                const removedCollections = (resultData.collections_removed ?? []).map(ref => recheckCollection(ref, item.libraryID));
+                const addedCollections = resolveForUndo(resultData.collections_added, item.libraryID);
+                const removedCollections = resolveForUndo(resultData.collections_removed, item.libraryID);
                 if (resultData.tags_added) {
                     for (const tagName of resultData.tags_added) {
                         item.removeTag(tagName);
@@ -264,5 +277,6 @@ export async function undoOrganizeItemsAction(
     }
 
     logger(`undoOrganizeItemsAction: Restored ${item_ids.length} items`, 1);
-    if (failures.length) throw new Error(failures.join('; '));
+    // One cause (an inaccessible library, say) fails every item; report it once.
+    if (failures.length) throw new Error([...new Set(failures)].join('; '));
 }

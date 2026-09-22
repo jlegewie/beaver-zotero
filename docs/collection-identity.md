@@ -86,11 +86,24 @@ inputs and per-item proposals can retain the resolved memberships. Collection
 names in organize-item validation include native and portable map keys.
 
 Execution rechecks the recorded identity, current access, editability, existence,
-and applicable move/delete guards. Missing requested memberships fail before
-writes; a name is never resolved to a replacement collection after approval.
-Child notes inherit their parent's membership and do not receive direct
-collection assignments. Restore permits a trashed collection only through an
-explicit exact-identity lookup and rechecks its parent.
+and applicable move/delete guards. A name is never resolved to a replacement
+collection after approval. A membership the write would *add*, and a parent or
+target a create/rename/move/delete names, must still exist: it fails before any
+write rather than reporting incomplete work as done. A membership the write
+would *remove* is dropped instead — an item cannot belong to a collection that
+no longer exists, so the requested state already holds, and failing over it
+would also discard tag changes requested in the same action. Child notes inherit
+their parent's membership and do not receive direct collection assignments.
+Restore permits a trashed collection only through an explicit exact-identity
+lookup and rechecks its parent.
+
+Undo resolves recorded targets the same way with two allowances, because it is
+the user's only way back out of an applied action: it accepts a trashed
+collection, whose memberships still exist, and treats a collection that is gone
+entirely as nothing left to restore, continuing with the rest of the undo.
+Access, editability and library-availability failures still stop it. Resolution
+errors quote the reference the caller supplied, never one the recheck qualified
+on its behalf.
 
 Readers accept portable ID-only collection rows, scoped legacy keys, and
 historical compound keys. Structured action and attachment decoding preserves

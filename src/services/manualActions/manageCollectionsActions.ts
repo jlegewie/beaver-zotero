@@ -25,13 +25,12 @@
  *     `deleted` property to detect trash state.
  */
 import { readCollectionActionData } from '@beaver/agent-core/identity/collectionActionData';
-import { formatCollectionId } from '../collections/collectionIdentity';
-import { assertLibraryWritable, recheckCollection, recheckCollectionParent } from '../collections/collectionMutations';
+import { CollectionResolutionError, formatCollectionId } from '../collections/collectionIdentity';
+import { assertLibraryWritable, recheckCollectionForUndo, recheckCollectionIfPresent, recheckCollectionParent } from '../collections/collectionMutations';
 import { AgentAction, ManageCollectionsAgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { ManageCollectionsProposedData, ManageCollectionsResultData } from '@beaver/agent-core/types/agentActions/base';
 import { libraryRefForLibraryID, resolveWriteTargetLibrary } from '../../utils/libraryIdentity';
-
 
 export async function executeManageCollectionsAction(
     action: AgentAction
@@ -54,11 +53,11 @@ export async function executeManageCollectionsAction(
     if (!resolution.ok) throw new Error(resolution.message);
     const resolvedLibraryID = resolution.libraryID;
 
-    const lookup = recheckCollection(collection_key, resolvedLibraryID);
+    // Keep the typed code, but restate the message: the resolver's text is
+    // model-facing recovery guidance, and this one is read on an apply card.
+    const lookup = recheckCollectionIfPresent(collection_key, resolvedLibraryID);
+    if (!lookup) throw new CollectionResolutionError('collection_not_found', `Collection not found: ${collection_key}`);
     const collection = lookup.collection;
-    if (!collection) {
-        throw new Error(`Collection not found: ${collection_key}`);
-    }
 
     // Snapshot the authoritative pre-apply state RIGHT BEFORE the op.
     const oldName: string = collection.name;
@@ -118,7 +117,6 @@ export async function executeManageCollectionsAction(
     };
 }
 
-
 /**
  * Undo a manage_collections action.
  *
@@ -151,7 +149,7 @@ export async function undoManageCollectionsAction(
     const old_parent_key = result.old_parent_key ?? null;
 
     if (op === 'rename') {
-        const collection = recheckCollection(collection_key, resolvedLibraryID, true).collection;
+        const collection = recheckCollectionForUndo(collection_key, resolvedLibraryID)?.collection;
         if (!collection) {
             logger(`undoManageCollectionsAction: Collection ${resolvedLibraryID}-${collection_key} not found; skipping`, 1);
             return;
@@ -165,7 +163,7 @@ export async function undoManageCollectionsAction(
     }
 
     if (op === 'move') {
-        const collection = recheckCollection(collection_key, resolvedLibraryID, true).collection;
+        const collection = recheckCollectionForUndo(collection_key, resolvedLibraryID)?.collection;
         if (!collection) {
             logger(`undoManageCollectionsAction: Collection ${resolvedLibraryID}-${collection_key} not found; skipping`, 1);
             return;
@@ -177,7 +175,7 @@ export async function undoManageCollectionsAction(
     }
 
     if (op === 'delete') {
-        const collection = recheckCollection(collection_key, resolvedLibraryID, true).collection;
+        const collection = recheckCollectionForUndo(collection_key, resolvedLibraryID)?.collection;
         if (!collection) {
             // Trash was emptied (manually or by auto-empty). The collection
             // is gone from the DB and its key is unrecoverable.
@@ -201,7 +199,6 @@ export async function undoManageCollectionsAction(
 
     throw new Error(`Unsupported manage_collections action: ${op}`);
 }
-
 
 /**
  * Undo a batch of manage_collections actions in reverse-chronological order.

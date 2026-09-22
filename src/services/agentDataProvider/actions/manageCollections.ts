@@ -399,17 +399,20 @@ export async function executeManageCollectionsAction(
     }
 
     try {
-        const lookup = recheckCollection(collection_key, resolvedLibraryId);
-        const collection = lookup.collection;
-        if (!collection) {
+        let lookup;
+        try {
+            lookup = recheckCollection(collection_key, resolvedLibraryId);
+        } catch (error) {
+            if (!(error instanceof CollectionResolutionError) || error.code !== 'collection_not_found') throw error;
             return {
                 type: 'agent_action_execute_response',
                 request_id: request.request_id,
                 success: false,
-                error: `Collection not found: ${collection_key}`,
+                error: `Collection not found: ${collection_key}. The collection existed when this action was validated and has since been deleted, so no changes were applied. Call list_collections in the intended library and retry with a live collection ID.`,
                 error_code: 'collection_not_found',
             };
         }
+        const collection = lookup.collection;
 
         // Re-snapshot the authoritative pre-apply state at execute time.
         // A re-apply after manual library edits produces a fresh snapshot

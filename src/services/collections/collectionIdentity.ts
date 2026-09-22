@@ -35,6 +35,13 @@ export interface CollectionScope {
     access?: 'agent' | 'local';
     /** Exact recorded targets only, for explicit undo/restore operations. */
     includeTrashed?: boolean;
+    /**
+     * The reference the caller actually supplied, quoted in error messages when
+     * the resolved value was qualified on its behalf. Without it an internally
+     * scoped key is reported back as if the caller had sent it, and the model
+     * mistakes a missing collection for a malformed library prefix.
+     */
+    displayReference?: string | number;
 }
 
 export interface ResolvedCollection {
@@ -115,14 +122,17 @@ function ambiguity(input: string | number, collections: Zotero.Collection[]): Co
 
 /** Resolve exactly one collection within the permitted scope, excluding trash. */
 export function resolveCollection(input: string | number, scope: CollectionScope = {}): ResolvedCollection {
+    // Every message quotes what the caller supplied, never a reference this
+    // module qualified for it.
+    const label = scope.displayReference ?? input;
     const allowed = allowedLibraries(scope);
     if (!allowed.length) {
         const recovery = scope.access !== 'local' && !Zotero.Beaver?.libraryScopeInitialized
             ? 'Library access is still loading. Retry after Zotero finishes initializing; keep the same collection reference and scope.'
             : 'The requested scope contains no accessible libraries. Call list_libraries and select the intended available library. If it is absent, ask the user to check Beaver Library Access and Zotero library availability.';
-        throw new CollectionResolutionError('library_not_searchable', `Cannot resolve collection "${input}". ${recovery}`);
+        throw new CollectionResolutionError('library_not_searchable', `Cannot resolve collection "${label}". ${recovery}`);
     }
-    const missing = () => collectionNotFoundError(input);
+    const missing = () => collectionNotFoundError(label);
     const checkLibrary = (id: number) => {
         if (scope.libraryID !== undefined && id !== scope.libraryID) {
             // Only identify the source library when it is accessible independently
@@ -130,9 +140,9 @@ export function resolveCollection(input: string | number, scope: CollectionScope
             const sourceRef = allowedLibraries({ access: scope.access }).includes(id)
                 ? libraryRefForLibraryID(id) : null;
             const source = sourceRef ? ` from library "${sourceRef}"` : '';
-            throw new CollectionResolutionError('library_collection_mismatch', `Collection reference "${input}"${source} belongs to a different library than the requested library "${libraryRefForLibraryID(scope.libraryID) ?? scope.libraryID}". Call list_collections in the requested library and use a returned ID. If the reference's library is the intended target, explicitly select that library instead; do not strip the reference's library prefix.`);
+            throw new CollectionResolutionError('library_collection_mismatch', `Collection reference "${label}"${source} belongs to a different library than the requested library "${libraryRefForLibraryID(scope.libraryID) ?? scope.libraryID}". Call list_collections in the requested library and use a returned ID. If the reference's library is the intended target, explicitly select that library instead; do not strip the reference's library prefix.`);
         }
-        if (!allowed.includes(id)) throw new CollectionResolutionError('library_not_searchable', `Collection reference "${input}" is not available within the requested search scope. Call list_libraries, then list_collections in the intended available library and retry with a returned ID. If the intended library is absent, ask the user to check Beaver Library Access and Zotero library availability; do not substitute another library.`);
+        if (!allowed.includes(id)) throw new CollectionResolutionError('library_not_searchable', `Collection reference "${label}" is not available within the requested search scope. Call list_libraries, then list_collections in the intended available library and retry with a returned ID. If the intended library is absent, ask the user to check Beaver Library Access and Zotero library availability; do not substitute another library.`);
     };
     const exact = (id: number, key: string) => {
         checkLibrary(id);
@@ -144,7 +154,7 @@ export function resolveCollection(input: string | number, scope: CollectionScope
     const parsed = parseItemReference(value);
     if (parsed) {
         const id = parsed.library_ref ? resolveLibraryRef(parsed) : parsed.library_id;
-        if (id == null) throw new CollectionResolutionError('library_unavailable', `Cannot resolve collection "${input}": library reference "${parsed.library_ref}" is unavailable on this computer. Call list_libraries to check available library references. Ask the user to make the intended library available in Zotero if it is absent, then retry with the same qualified ID; do not fall back to the personal library.`);
+        if (id == null) throw new CollectionResolutionError('library_unavailable', `Cannot resolve collection "${label}": library reference "${parsed.library_ref}" is unavailable on this computer. Call list_libraries to check available library references. Ask the user to make the intended library available in Zotero if it is absent, then retry with the same qualified ID; do not fall back to the personal library.`);
         return exact(id, parsed.zotero_key);
     }
     // Native search conditions also accept the legacy libraryID_key spelling.
@@ -172,7 +182,7 @@ export function resolveCollection(input: string | number, scope: CollectionScope
         matches = allowed.flatMap(id => Zotero.Collections.getByLibrary(id, true))
             .filter(collection => !collection.deleted && collection.name.toLowerCase() === value.toLowerCase());
     }
-    if (matches.length > 1) throw ambiguity(input, matches);
+    if (matches.length > 1) throw ambiguity(label, matches);
     if (!matches.length) throw missing();
     return found(matches[0]);
 }

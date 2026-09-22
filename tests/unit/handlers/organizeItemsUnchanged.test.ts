@@ -251,18 +251,39 @@ describe('executeOrganizeItemsAction unchanged_items', () => {
         expect(items.AAAAAAAA.save).not.toHaveBeenCalled();
     });
 
-    it('rejects a deleted remove-target before changing items', async () => {
+    it('treats a deleted remove-target as already satisfied', async () => {
         // An item cannot be in a collection that no longer exists, so the
         // requested state holds and the item belongs in unchanged_items.
         items.AAAAAAAA = makeItem('AAAAAAAA', [], []);
 
-        await expect(executeOrganizeItemsAction(
+        const response = await executeOrganizeItemsAction(
             buildRequest({
                 item_ids: ['1-AAAAAAAA'],
                 collections: { remove: ['DELETED12'] },
             }),
             timeoutCtx()
-        )).rejects.toMatchObject({ code: 'collection_not_found' });
+        );
 
+        expect(response.success).toBe(true);
+        expect(response.result_data).toMatchObject({ items_modified: 0, unchanged_items: ['1-AAAAAAAA'] });
+        expect(items.AAAAAAAA.save).not.toHaveBeenCalled();
+    });
+
+    it('applies tag changes requested alongside a deleted remove-target', async () => {
+        // Failing over a no-op removal would silently drop the tag edit.
+        items.AAAAAAAA = makeItem('AAAAAAAA', [], []);
+
+        const response = await executeOrganizeItemsAction(
+            buildRequest({
+                item_ids: ['1-AAAAAAAA'],
+                tags: { add: ['marker'] },
+                collections: { remove: ['DELETED12'] },
+            }),
+            timeoutCtx()
+        );
+
+        expect(response.success).toBe(true);
+        expect(response.result_data).toMatchObject({ items_modified: 1, tags_added: ['marker'] });
+        expect(items.AAAAAAAA.state.tags).toEqual(['marker']);
     });
 });

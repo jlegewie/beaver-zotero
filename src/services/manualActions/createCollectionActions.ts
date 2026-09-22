@@ -4,7 +4,7 @@
  */
 import { readCollectionActionData } from '@beaver/agent-core/identity/collectionActionData';
 import { formatCollectionId } from '../collections/collectionIdentity';
-import { assertLibraryWritable, recheckCollection } from '../collections/collectionMutations';
+import { assertLibraryWritable, recheckCollection, recheckCollectionForUndo } from '../collections/collectionMutations';
 import { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { CreateCollectionResultData } from '@beaver/agent-core/types/agentActions/base';
@@ -45,14 +45,11 @@ export async function executeCreateCollectionAction(
         libraryID: library_id,
     };
 
-    // Set parent if provided
+    // Set parent if provided. A parent deleted since approval raises a typed
+    // `collection_not_found`; never fall back to creating at top level or to a
+    // same-named replacement.
     if (parent_key) {
-        const parentCollection = recheckCollection(parent_key, library_id).collection;
-        if (parentCollection) {
-            collectionParams.parentID = parentCollection.id;
-        } else {
-            throw new Error(`Parent collection not found: ${parent_key}`);
-        }
+        collectionParams.parentID = recheckCollection(parent_key, library_id).collection.id;
     }
 
     // Create the collection
@@ -141,7 +138,10 @@ export async function undoCreateCollectionAction(
     }
 
     assertLibraryWritable(libraryID);
-    const collection = recheckCollection(typeof resultData.collection_id === 'string' ? resultData.collection_id : resultData.collection_key, libraryID, true).collection;
+    const collection = recheckCollectionForUndo(
+        typeof resultData.collection_id === 'string' ? resultData.collection_id : resultData.collection_key,
+        libraryID,
+    )?.collection;
 
     if (!collection) {
         // Collection may have already been deleted manually

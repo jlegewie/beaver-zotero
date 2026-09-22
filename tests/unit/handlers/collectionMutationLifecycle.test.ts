@@ -193,7 +193,8 @@ it('rechecks move cycles introduced after approval and refuses invalid restore p
     expect(collections[1].parentKey).toBe(false);
 });
 
-it.each(['execution snapshot', 'proposed snapshot', 'legacy result'])('leaves cached tags and memberships untouched when undo membership validation fails (%s)', async source => {
+/** An organize_items apply whose undo has to restore one tag and one membership. */
+function undoFixture(source: 'execution snapshot' | 'proposed snapshot' | 'legacy result') {
     const row = item(7, 'ITEMKEY1');
     const tags = new Set(['added']);
     Object.assign(row, {
@@ -202,8 +203,6 @@ it.each(['execution snapshot', 'proposed snapshot', 'legacy result'])('leaves ca
         removeTag: vi.fn((tag: string) => tags.delete(tag)),
     });
     row.memberships.push(collections[1].id);
-    const removed = collection(7, 'REMOVED1', 'Removed');
-    removed.deleted = true;
     const snapshot = { 'g12345-ITEMKEY1': { tags: ['removed'], collections: ['REMOVED1'] } };
     const data = {
         item_ids: ['g12345-ITEMKEY1'],
@@ -214,9 +213,40 @@ it.each(['execution snapshot', 'proposed snapshot', 'legacy result'])('leaves ca
     const result = source === 'execution snapshot' ? { current_state: snapshot } : source === 'legacy result'
         ? { tags_added: ['added'], tags_removed: ['removed'], collections_added: ['SAMEKEY1'], collections_removed: ['REMOVED1'] }
         : undefined;
-    await expect(manualOrganize.undoOrganizeItemsAction(action('organize_items', data, result))).rejects.toThrow();
+    return { row, tags, undo: () => manualOrganize.undoOrganizeItemsAction(action('organize_items', data, result)) };
+}
+
+const undoSources = ['execution snapshot', 'proposed snapshot', 'legacy result'] as const;
+
+it.each(undoSources)('undoes memberships in a collection the user has since trashed (%s)', async source => {
+    // A trashed collection still holds its memberships, so undo can and must
+    // put the item back. Refusing would strand the action in `applied`.
+    const removed = collection(7, 'REMOVED1', 'Removed');
+    removed.deleted = true;
+    const { row, tags, undo } = undoFixture(source);
+    await undo();
+    expect([...tags]).toEqual(['removed']);
+    expect(row.memberships).toEqual([removed.id]);
+    expect(row.saveTx).toHaveBeenCalled();
+});
+
+it.each(undoSources)('skips an erased membership and still restores the rest (%s)', async source => {
+    // REMOVED1 no longer exists at all: there is no membership left to restore,
+    // but the tag change requested alongside it must still be undone.
+    const { row, tags, undo } = undoFixture(source);
+    await undo();
+    expect([...tags]).toEqual(['removed']);
+    expect(row.memberships).toEqual([]);
+});
+
+it.each(undoSources)('leaves cached tags and memberships untouched when undo cannot write (%s)', async source => {
+    collection(7, 'REMOVED1', 'Removed');
+    const { row, tags, undo } = undoFixture(source);
+    const inbox = collections[1].id;
+    libraries[1].editable = false;
+    await expect(undo()).rejects.toThrow();
     expect([...tags]).toEqual(['added']);
-    expect(row.memberships).toEqual([collections[1].id]);
+    expect(row.memberships).toEqual([inbox]);
     expect(row.saveTx).not.toHaveBeenCalled();
     expect((row as any).addTag).not.toHaveBeenCalled();
     expect((row as any).removeTag).not.toHaveBeenCalled();

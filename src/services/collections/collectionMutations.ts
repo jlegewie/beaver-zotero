@@ -19,15 +19,66 @@ export function resolveCollectionMemberships(inputs: readonly string[], libraryI
     return result.collections;
 }
 
+export interface RecheckOptions {
+    /** Exact recorded targets only, for explicit undo/restore operations. */
+    includeTrashed?: boolean;
+}
+
 /** Native execution keys are exact identities, never names to resolve again. */
-export function recheckCollection(input: string, libraryID: number, includeTrashed = false): ResolvedCollection {
+export function recheckCollection(input: string, libraryID: number, { includeTrashed = false }: RecheckOptions = {}): ResolvedCollection {
+    // A resolved collection always carries a portable identity, so every
+    // collection recheck needs one — only tag-only paths may relax this.
     assertLibraryWritable(libraryID);
-    return resolveCollection(parseItemReference(input) ? input : `${libraryID}-${input}`, { libraryID, includeTrashed });
+    // A bare key is qualified with the target library so it resolves exactly
+    // rather than by name; the caller's own reference is what errors quote.
+    return resolveCollection(parseItemReference(input) ? input : `${libraryID}-${input}`,
+        { libraryID, includeTrashed, displayReference: input });
 }
 
 export function recheckCollectionMemberships(inputs: readonly string[], libraryID: number): ResolvedCollection[] {
     assertLibraryWritable(libraryID);
     return inputs.map(input => recheckCollection(input, libraryID));
+}
+
+/**
+ * Recheck memberships a write wants to *remove*.
+ *
+ * An item cannot belong to a collection that no longer exists, so a remove
+ * target that vanished between approval and execution already holds the
+ * requested state. Dropping it keeps the rest of the action — including tag
+ * changes requested alongside it — from being refused over a no-op. Access and
+ * editability failures still propagate: those are not "already done".
+ */
+export function recheckCollectionsToRemove(inputs: readonly string[], libraryID: number): ResolvedCollection[] {
+    assertLibraryWritable(libraryID);
+    return inputs
+        .map(input => recheckCollectionIfPresent(input, libraryID))
+        .filter((entry): entry is ResolvedCollection => entry !== null);
+}
+
+/**
+ * Recheck a recorded membership for undo.
+ *
+ * Undo is the user's escape hatch, so it resolves trashed collections (whose
+ * memberships still exist) and reports a collection that is gone entirely as
+ * "nothing to restore" rather than failing the whole undo and stranding the
+ * action in `applied` with no way back.
+ */
+export function recheckCollectionForUndo(input: string, libraryID: number): ResolvedCollection | null {
+    return recheckCollectionIfPresent(input, libraryID, { includeTrashed: true });
+}
+
+/**
+ * `recheckCollection`, but a collection that no longer exists yields `null`.
+ * Access and library errors still propagate: only "gone" is tolerated.
+ */
+export function recheckCollectionIfPresent(input: string, libraryID: number, options?: RecheckOptions): ResolvedCollection | null {
+    try {
+        return recheckCollection(input, libraryID, options);
+    } catch (error) {
+        if (error instanceof CollectionResolutionError && error.code === 'collection_not_found') return null;
+        throw error;
+    }
 }
 
 /** Recheck move constraints after approval and before undoing a move. */

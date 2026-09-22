@@ -1,5 +1,5 @@
 import { formatCollectionId, CollectionResolutionError } from '../../collections/collectionIdentity';
-import { resolveOrganizeLibrary, resolveCollectionMemberships, recheckCollection } from '../../collections/collectionMutations';
+import { resolveOrganizeLibrary, resolveCollectionMemberships, recheckCollection, recheckCollectionsToRemove } from '../../collections/collectionMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { WSAgentActionExecuteResponse, WSAgentActionValidateResponse } from '@beaver/agent-core/protocol/agentProtocol';
 import { modelObjectId, parseItemReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
@@ -430,16 +430,22 @@ export async function executeOrganizeItemsAction(
     const collectionLibraryId = hasCollectionChanges ? await resolveOrganizeLibrary(item_ids, true) : null;
     if (hasCollectionChanges && item_ids.length > 0) {
         if (collectionLibraryId != null) {
+            // An "add" whose key no longer resolves fails the batch before
+            // anything is written: the per-item loop would silently do nothing
+            // for it and still report the item as handled, leaving the caller
+            // to treat incomplete work as complete. A missing REMOVE target
+            // needs no such guard — an item cannot be in a collection that no
+            // longer exists, so the requested state already holds, and failing
+            // over it would also drop tag changes requested alongside it.
             await ta.track('collection_resolve_ms', async () => {
                 for (const collKey of collections?.add ?? []) {
                     checkAborted(ctx, 'organize_items:collection_resolve');
-                    const collection = recheckCollection(collKey, collectionLibraryId!).collection;
-                    if (collection) addCollections.set(collection.key, collection);
+                    const entry = recheckCollection(collKey, collectionLibraryId!);
+                    addCollections.set(entry.key, entry.collection);
                 }
-                for (const collKey of collections?.remove ?? []) {
-                    checkAborted(ctx, 'organize_items:collection_resolve');
-                    const collection = recheckCollection(collKey, collectionLibraryId!).collection;
-                    if (collection) removeCollections.set(collection.key, collection);
+                checkAborted(ctx, 'organize_items:collection_resolve');
+                for (const entry of recheckCollectionsToRemove(collections?.remove ?? [], collectionLibraryId!)) {
+                    removeCollections.set(entry.key, entry.collection);
                 }
             });
             if (collections?.add) collections.add = [...addCollections.keys()];
