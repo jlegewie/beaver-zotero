@@ -1,4 +1,4 @@
-import { assertLibraryWritable, recheckCollectionMemberships } from '../collections/collectionMutations';
+import { assertLibraryWritable, recheckExistingCollections } from '../collections/collectionMutations';
 import { collectionNotFoundError } from '../collections/collectionIdentity';
 import type { OperationContext } from '../agentDataProvider/operationContext';
 /**
@@ -182,7 +182,8 @@ export async function executeCreateNoteAction(action: AgentAction, runId: string
     // Child notes (with parentKey) cannot be in collections — Zotero's
     // fki_collectionItems_itemID_parentItemID trigger aborts saveTx if we try.
     const appliedCollectionKeys: string[] = [];
-    const memberships = recheckCollectionMemberships(parentKey ? [] : collectionKeysToApply, targetLibraryId);
+    // Collections deleted since validation are skipped; the note is still created.
+    const memberships = recheckExistingCollections(parentKey ? [] : collectionKeysToApply, targetLibraryId);
     if (!parentKey) {
         for (const entry of memberships) {
             zoteroNote.addToCollection(entry.collection.id);

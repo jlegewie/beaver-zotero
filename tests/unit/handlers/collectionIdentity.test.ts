@@ -1,4 +1,4 @@
-import { assertLibraryWritable, recheckCollection, recheckCollectionForUndo, recheckCollectionsToRemove } from '../../../src/services/collections/collectionMutations';
+import { assertLibraryWritable, recheckCollection, recheckCollectionForUndo, recheckExistingCollections } from '../../../src/services/collections/collectionMutations';
 import { collectionToReference } from '../../../react/utils/zoteroReferences';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveCollection, resolveCollectionList, serializeCollectionIdentity, serializeCollectionReadIdentity, CollectionResolutionError, collectionLibrariesMismatchError } from '../../../src/services/collections/collectionIdentity';
@@ -185,9 +185,9 @@ describe('recheck of recorded mutation targets', () => {
     });
 
     it('drops a remove target that no longer exists and keeps access failures typed', () => {
-        expect(recheckCollectionsToRemove(['MISSING1', 'ABCD2345'], 1).map(entry => entry.key)).toEqual(['ABCD2345']);
+        expect(recheckExistingCollections(['MISSING1', 'ABCD2345'], 1).map(entry => entry.key)).toEqual(['ABCD2345']);
         zotero.Libraries.get = () => ({ editable: false });
-        expectCode(() => recheckCollectionsToRemove(['ABCD2345'], 1), 'library_not_editable');
+        expectCode(() => recheckExistingCollections(['ABCD2345'], 1), 'library_not_editable');
     });
 
     it('resolves a trashed collection for undo and reports an erased one as nothing to restore', () => {

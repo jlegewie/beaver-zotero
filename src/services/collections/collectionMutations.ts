@@ -19,6 +19,16 @@ export function resolveCollectionMemberships(inputs: readonly string[], libraryI
     return result.collections;
 }
 
+/**
+ * Execution-time error for a collection that validated but is gone by the time
+ * the write runs (typically deleted while the action awaited approval). The
+ * model's arguments were correct, so it must not retry with other IDs.
+ */
+export function collectionDeletedSinceValidationMessage(role: 'Collection' | 'Parent collection', reference: string): string {
+    return `${role} ${reference} was deleted after this action was validated (for example while it awaited approval), so no changes were applied. `
+        + 'Do not retry this action or look for a replacement collection; tell the user and ask how to proceed.';
+}
+
 export interface RecheckOptions {
     /** Exact recorded targets only, for explicit undo/restore operations. */
     includeTrashed?: boolean;
@@ -41,15 +51,15 @@ export function recheckCollectionMemberships(inputs: readonly string[], libraryI
 }
 
 /**
- * Recheck memberships a write wants to *remove*.
+ * Recheck recorded memberships, dropping collections that no longer exist.
  *
- * An item cannot belong to a collection that no longer exists, so a remove
- * target that vanished between approval and execution already holds the
- * requested state. Dropping it keeps the rest of the action — including tag
- * changes requested alongside it — from being refused over a no-op. Access and
- * editability failures still propagate: those are not "already done".
+ * A remove target that vanished already holds the requested state. An add
+ * target can vanish after approval, or when a redo recreates the collection
+ * under a new key; the write then proceeds without that membership rather than
+ * discarding the item, note or tag changes it was requested alongside. Access
+ * and editability failures still propagate.
  */
-export function recheckCollectionsToRemove(inputs: readonly string[], libraryID: number): ResolvedCollection[] {
+export function recheckExistingCollections(inputs: readonly string[], libraryID: number): ResolvedCollection[] {
     assertLibraryWritable(libraryID);
     return inputs
         .map(input => recheckCollectionIfPresent(input, libraryID))

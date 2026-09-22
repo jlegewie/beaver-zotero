@@ -1,6 +1,6 @@
 import { readCollectionActionData } from '@beaver/agent-core/identity/collectionActionData';
 import { CollectionResolutionError, resolveCollection, serializeCollectionIdentity, formatCollectionId } from '../../collections/collectionIdentity';
-import { recheckCollection, recheckCollectionParent } from '../../collections/collectionMutations';
+import { collectionDeletedSinceValidationMessage, recheckCollection, recheckCollectionParent } from '../../collections/collectionMutations';
 import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
 /**
  * Validate and execute library-wide collection operations (manage_collections).
@@ -408,7 +408,7 @@ export async function executeManageCollectionsAction(
                 type: 'agent_action_execute_response',
                 request_id: request.request_id,
                 success: false,
-                error: `Collection not found: ${collection_key}. The collection existed when this action was validated and has since been deleted, so no changes were applied. Call list_collections in the intended library and retry with a live collection ID.`,
+                error: collectionDeletedSinceValidationMessage('Collection', collection_key),
                 error_code: 'collection_not_found',
             };
         }
@@ -467,7 +467,7 @@ export async function executeManageCollectionsAction(
                     type: 'agent_action_execute_response',
                     request_id: request.request_id,
                     success: false,
-                    error: `Parent collection not found: ${new_parent_key}. Call list_collections in the intended library and retry with a live parent collection.`,
+                    error: collectionDeletedSinceValidationMessage('Parent collection', String(new_parent_key)),
                     error_code: 'parent_not_found',
                 };
             }

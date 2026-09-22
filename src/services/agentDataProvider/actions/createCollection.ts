@@ -1,6 +1,6 @@
 import { readCollectionActionData } from '@beaver/agent-core/identity/collectionActionData';
 import { CollectionResolutionError, resolveCollection, formatCollectionId, type ResolvedCollection } from '../../collections/collectionIdentity';
-import { assertLibraryWritable, recheckCollection } from '../../collections/collectionMutations';
+import { assertLibraryWritable, collectionDeletedSinceValidationMessage, recheckCollection } from '../../collections/collectionMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSAgentActionExecuteResponse,
@@ -262,7 +262,7 @@ async function executeCreateCollectionAction(
                 type: 'agent_action_execute_response',
                 request_id: request.request_id,
                 success: false,
-                error: `Parent collection not found: ${parent_key}`,
+                error: collectionDeletedSinceValidationMessage('Parent collection', parent_key),
                 error_code: 'parent_not_found',
             };
         }

@@ -157,14 +157,16 @@ it.each(['automatic', 'manual'])('keeps note memberships fixed from approval thr
     } finally { target.name = oldName; }
 });
 
-it('fails a deleted approved note membership without saving an unfiled note', async () => {
+it('saves the note unfiled when an approved membership was deleted', async () => {
     const prepared = await validate({ library_ref: 'g12345', collections: ['Group only'] });
     collections = collections.filter(c => c.key !== 'GROUP234');
     const save = vi.fn();
-    (Zotero as any).Item = function () { return { setNote: vi.fn(), saveTx: save }; };
+    const addToCollection = vi.fn();
+    (Zotero as any).Item = function () { return { setNote: vi.fn(), saveTx: save, addToCollection, libraryID: 7, key: 'NOTEKEY1' }; };
     const result = await executeCreateNoteAction({ request_id: 'r', action_data: prepared.normalized_action_data,
         operation: { renderMarkdown: async (html: string) => html } } as any,
         { signal: new AbortController().signal, timeoutSeconds: 60, startTime: Date.now() });
-    expect(result).toMatchObject({ success: false, error_code: 'collection_not_found' });
-    expect(save).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ success: true });
+    expect(save).toHaveBeenCalledOnce();
+    expect(addToCollection).not.toHaveBeenCalled();
 });

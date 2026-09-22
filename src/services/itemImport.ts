@@ -1,5 +1,5 @@
 import { resolveCollection, type ResolvedCollection } from './collections/collectionIdentity';
-import { recheckCollectionMemberships } from './collections/collectionMutations';
+import { recheckExistingCollections } from './collections/collectionMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { CreateItemProposedAction, CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { ExternalReference, NormalizedPublicationType } from '@beaver/agent-core/types/externalReferences';
@@ -432,7 +432,9 @@ export async function applyCreateItemData(
     const timing = options?.timing;
 
     const target = await trackWith(timing, 'resolve_target_ms', () => resolveImportTarget(options));
-    const memberships = recheckCollectionMemberships(proposedData.collection_ids ?? proposedData.collection_keys ?? [], target.libraryId);
+    // A requested collection that no longer exists (deleted after approval, or
+    // recreated under a new key by a redo) is skipped; the item is still created.
+    const memberships = recheckExistingCollections(proposedData.collection_ids ?? proposedData.collection_keys ?? [], target.libraryId);
 
     // Create or Import the item (handles library/collection resolution internally)
     // Skip background PDF fetch here - we'll schedule it below with more context
@@ -495,7 +497,7 @@ async function finishCreateItemData(
 
     // 2. Collections (from proposed data, in addition to context collection)
     if (memberships.length > 0) {
-        const collectionIds = recheckCollectionMemberships(memberships.map(entry => entry.collectionId), libraryId)
+        const collectionIds = recheckExistingCollections(memberships.map(entry => entry.collectionId), libraryId)
             .map(entry => entry.collection.id);
         if (collectionIds.length > 0) {
             // Append to existing collections if any (from translation or context)

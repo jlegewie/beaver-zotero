@@ -1,5 +1,5 @@
 import { formatCollectionId, CollectionResolutionError } from '../../collections/collectionIdentity';
-import { resolveOrganizeLibrary, resolveCollectionMemberships, recheckCollection, recheckCollectionsToRemove } from '../../collections/collectionMutations';
+import { collectionDeletedSinceValidationMessage, resolveOrganizeLibrary, resolveCollectionMemberships, recheckCollection, recheckExistingCollections } from '../../collections/collectionMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { WSAgentActionExecuteResponse, WSAgentActionValidateResponse } from '@beaver/agent-core/protocol/agentProtocol';
 import { modelObjectId, parseItemReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
@@ -440,11 +440,18 @@ export async function executeOrganizeItemsAction(
             await ta.track('collection_resolve_ms', async () => {
                 for (const collKey of collections?.add ?? []) {
                     checkAborted(ctx, 'organize_items:collection_resolve');
-                    const entry = recheckCollection(collKey, collectionLibraryId!);
-                    addCollections.set(entry.key, entry.collection);
+                    try {
+                        const entry = recheckCollection(collKey, collectionLibraryId!);
+                        addCollections.set(entry.key, entry.collection);
+                    } catch (error) {
+                        if (error instanceof CollectionResolutionError && error.code === 'collection_not_found') {
+                            throw new CollectionResolutionError('collection_not_found', collectionDeletedSinceValidationMessage('Collection', collKey));
+                        }
+                        throw error;
+                    }
                 }
                 checkAborted(ctx, 'organize_items:collection_resolve');
-                for (const entry of recheckCollectionsToRemove(collections?.remove ?? [], collectionLibraryId!)) {
+                for (const entry of recheckExistingCollections(collections?.remove ?? [], collectionLibraryId!)) {
                     removeCollections.set(entry.key, entry.collection);
                 }
             });

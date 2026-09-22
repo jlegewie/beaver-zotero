@@ -87,12 +87,14 @@ names in organize-item validation include native and portable map keys.
 
 Execution rechecks the recorded identity, current access, editability, existence,
 and applicable move/delete guards. A name is never resolved to a replacement
-collection after approval. A membership the write would *add*, and a parent or
-target a create/rename/move/delete names, must still exist: it fails before any
-write rather than reporting incomplete work as done. A membership the write
-would *remove* is dropped instead — an item cannot belong to a collection that
-no longer exists, so the requested state already holds, and failing over it
-would also discard tag changes requested in the same action. Child notes inherit
+collection after approval. A parent or target a create/rename/move/delete names
+must still exist: it fails before any write. A membership that no longer exists
+is dropped instead. For a remove, the requested state already holds. For an add
+by create-item, create-note, or a manually executed or redone organize-items, the
+item, note or tag changes still apply without it; a redo of an undone
+create-collection recreates it under a new key, so earlier memberships cannot
+resolve. The in-run organize-items executor still fails a missing add target so
+the model does not treat incomplete work as done. Child notes inherit
 their parent's membership and do not receive direct collection assignments.
 Restore permits a trashed collection only through an explicit exact-identity
 lookup and rechecks its parent.

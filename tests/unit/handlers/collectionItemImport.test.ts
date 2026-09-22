@@ -51,11 +51,13 @@ it.each(['automatic', 'manual'])('resolves memberships before approval and prese
     expect(created[0].eraseTx).toHaveBeenCalledOnce();
 });
 
-it('fails an absent approved membership before creating an item', async () => {
+it('creates the item without an approved membership that no longer exists', async () => {
     collections.pop();
-    await expect(applyCreateItemData({ item: { title: 'Paper' }, collection_ids: ['g12345-SAMEKEY1'] } as any, { libraryId: 7 }))
-        .rejects.toMatchObject({ code: 'collection_not_found' });
-    expect(created).toEqual([]);
+    const result = await applyCreateItemData({ item: { title: 'Paper' }, collection_ids: ['g12345-SAMEKEY1'] } as any, { libraryId: 7 });
+    expect(result).toMatchObject({ collection_ids: [], collection_keys: [] });
+    expect(created).toHaveLength(1);
+    expect(created[0].eraseTx).not.toHaveBeenCalled();
+    expect(created[0].setCollections).not.toHaveBeenCalled();
 });
 it('rejects native context collections belonging to another library before import', async () => {
     await expect(createZoteroItem({ title: 'Paper' } as any, { libraryId: 7, collectionId: 10 }))
@@ -76,12 +78,11 @@ it.each(['identifier', 'url', 'manual'])('removes a %s import if its context col
     expect(created[0].eraseTx).toHaveBeenCalledOnce();
 });
 
-it.each(['identifier', 'url', 'manual'])('removes a %s import if a proposed membership disappears during creation', async route => {
+it.each(['identifier', 'url', 'manual'])('keeps a %s import unfiled if a proposed membership disappears during creation', async route => {
     mockImportWithDeletedCollection(route);
-    await expect(applyCreateItemData({ item: importReference(route), collection_ids: ['g12345-SAMEKEY1'] } as any, { libraryId: 7 }))
-        .rejects.toMatchObject({ code: 'collection_not_found' });
+    await applyCreateItemData({ item: importReference(route), collection_ids: ['g12345-SAMEKEY1'] } as any, { libraryId: 7 });
     expect(created).toHaveLength(1);
-    expect(created[0].eraseTx).toHaveBeenCalledOnce();
+    expect(created[0].eraseTx).not.toHaveBeenCalled();
     expect(created[0].setCollections).not.toHaveBeenCalled();
 });
 

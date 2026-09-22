@@ -1,4 +1,4 @@
-import { recheckCollectionMemberships } from '../../collections/collectionMutations';
+import { recheckCollectionMemberships, recheckExistingCollections } from '../../collections/collectionMutations';
 import { collectionLibrariesMismatchError, resolveCollectionList } from '../../collections/collectionIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
@@ -646,7 +646,8 @@ async function executeCreateNoteAction(
             ? collectionKeys
             : (collectionKey ? [collectionKey] : []));
         const appliedCollectionKeys: string[] = [];
-        const memberships = recheckCollectionMemberships(parentKey ? [] : collectionKeysToApply, targetLibraryId);
+        // Collections deleted since validation are skipped; the note is still created.
+        const memberships = recheckExistingCollections(parentKey ? [] : collectionKeysToApply, targetLibraryId);
         if (collectionKeysToApply.length > 0 && !parentKey) {
             for (const entry of memberships) {
                 zoteroNote.addToCollection(entry.collection.id);

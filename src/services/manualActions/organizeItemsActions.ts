@@ -3,7 +3,7 @@
  * These functions are used by AgentActionView for post-run action handling.
  */
 import { formatCollectionId } from '../collections/collectionIdentity';
-import { assertLibraryWritable, resolveOrganizeLibrary, recheckCollectionForUndo, recheckCollectionMemberships, recheckCollectionsToRemove } from '../collections/collectionMutations';
+import { assertLibraryWritable, resolveOrganizeLibrary, recheckCollectionForUndo, recheckExistingCollections } from '../collections/collectionMutations';
 import { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { CollectionChanges, OrganizeItemsResultData, TagChanges } from '@beaver/agent-core/types/agentActions/base';
@@ -27,11 +27,11 @@ export async function executeOrganizeItemsAction(
     const hasCollections = !!(collections?.add?.length || collections?.remove?.length);
     const libraryID = hasCollections ? await resolveOrganizeLibrary(item_ids, true) : null;
     if (libraryID != null) {
-        // Adds must all resolve before anything is written — silently skipping
-        // one would report incomplete work as done. A vanished remove target is
-        // already in the requested state, so it is dropped instead.
-        recheckCollectionMemberships(collections?.add ?? [], libraryID);
-        recheckCollectionsToRemove(collections?.remove ?? [], libraryID);
+        // Access, editability and library mismatches fail before any item is
+        // written. Collections that no longer exist (e.g. recreated under a new
+        // key by a redo) are skipped, so the rest of the action still applies.
+        recheckExistingCollections(collections?.add ?? [], libraryID);
+        recheckExistingCollections(collections?.remove ?? [], libraryID);
     }
     const currentState: Record<string, { tags: string[]; collections: string[] }> = {};
 
@@ -67,8 +67,8 @@ export async function executeOrganizeItemsAction(
             const isTopLevel = item.isTopLevelItem();
             // Item lookups and saves yield between iterations; validate this item's
             // memberships before changing its cached tags or collections.
-            const addCollections = isTopLevel && hasCollections ? recheckCollectionMemberships(collections?.add ?? [], item.libraryID) : [];
-            const removeCollections = isTopLevel && hasCollections ? recheckCollectionsToRemove(collections?.remove ?? [], item.libraryID) : [];
+            const addCollections = isTopLevel && hasCollections ? recheckExistingCollections(collections?.add ?? [], item.libraryID) : [];
+            const removeCollections = isTopLevel && hasCollections ? recheckExistingCollections(collections?.remove ?? [], item.libraryID) : [];
 
             // Get current state before modifications
             const existingTags = new Set(item.getTags().map((t: { tag: string }) => t.tag));

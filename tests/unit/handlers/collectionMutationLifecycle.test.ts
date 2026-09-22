@@ -168,10 +168,19 @@ describe('collection mutation identity lifecycle', () => {
     });
 });
 
-it.each(['deleted', 'read-only', 'excluded'])('refuses an approved manual membership when the destination becomes %s', async change => {
+it('skips an approved manual membership whose destination was deleted', async () => {
     const target = item(7, 'ITEMKEY1');
     const prepared = await validateOrganizeItemsAction(request({ item_ids: ['g12345-ITEMKEY1'], collections: { add: ['Inbox'] } }));
-    if (change === 'deleted') collections[1].deleted = true;
+    collections[1].deleted = true;
+    const result = await manualOrganize.executeOrganizeItemsAction(action('organize_items', prepared.normalized_action_data));
+    expect(result.items_modified).toBe(0);
+    expect(target.saveTx).not.toHaveBeenCalled();
+    expect(target.memberships).toEqual([]);
+});
+
+it.each(['read-only', 'excluded'])('refuses an approved manual membership when the destination becomes %s', async change => {
+    const target = item(7, 'ITEMKEY1');
+    const prepared = await validateOrganizeItemsAction(request({ item_ids: ['g12345-ITEMKEY1'], collections: { add: ['Inbox'] } }));
     if (change === 'read-only') libraries[1].editable = false;
     if (change === 'excluded') Zotero.Beaver.searchableLibraryIds = [1];
     await expect(manualOrganize.executeOrganizeItemsAction(action('organize_items', prepared.normalized_action_data))).rejects.toThrow();
