@@ -3,6 +3,38 @@ import process from "node:process";
 import { URL } from "node:url";
 import dotenv from "dotenv";
 
+function readEnvironmentFile(name) {
+    try {
+        return dotenv.parse(readFileSync(new URL(name, import.meta.url)));
+    } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+        return {};
+    }
+}
+
+function localBackendUrl(value) {
+    const message =
+        "BEAVER_DEV_BACKEND_URL must be an HTTP(S) loopback origin (e.g. http://127.0.0.1:8001)";
+    let url;
+    try {
+        url = new URL(value);
+    } catch {
+        throw new Error(message);
+    }
+    if (
+        !["http:", "https:"].includes(url.protocol) ||
+        !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) ||
+        url.username ||
+        url.password ||
+        url.pathname !== "/" ||
+        url.search ||
+        url.hash
+    ) {
+        throw new Error(message);
+    }
+    return url.origin;
+}
+
 /** Resolve identical backend configuration for both bundles and the graph gate. */
 export function loadBuildEnvironment({
     mode,
@@ -16,15 +48,15 @@ export function loadBuildEnvironment({
     const runtimeMode =
         env.NODE_ENV || mode || (development ? "development" : "production");
     const buildEnv = env.BUILD_ENV || runtimeMode;
-    let file = {};
-    try {
-        file = dotenv.parse(
-            readFileSync(new URL(`.env.${buildEnv}`, import.meta.url)),
-        );
-    } catch (error) {
-        if (error.code !== "ENOENT") throw error;
-    }
+    const file = readEnvironmentFile(`.env.${buildEnv}`);
     const values = { ...env, ...file };
+    // Both bundlers resolve this from their checkout, never from the caller's cwd.
+    if (runtimeMode === "development" && buildEnv === "development") {
+        const local = readEnvironmentFile(".env.development.local");
+        const override =
+            env.BEAVER_DEV_BACKEND_URL ?? local.BEAVER_DEV_BACKEND_URL;
+        if (override) values.API_BASE_URL = localBackendUrl(override);
+    }
     const definitions = Object.fromEntries(
         [
             "API_BASE_URL",

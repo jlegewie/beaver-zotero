@@ -520,6 +520,35 @@ Multiple Zotero instances coexist because `zotero-plugin.config.ts` sets
 `.worktree-meta.json`, `.mcp.json`, and the worktree log files are git-excluded and never
 reach other worktrees.
 
+### Pair a worktree with its own backend
+
+Only is working on both a backend and frontend in a worktree or when requested by the user, 
+start the backend from its corresponding backend checkout on an unused loopback port
+(separate from Zotero's HTTP/RDP ports and the main backend's port):
+
+```bash
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8001
+```
+
+In the Zotero worktree, put `BEAVER_DEV_BACKEND_URL=http://127.0.0.1:8001` in
+`.env.development.local` (git-ignored, local to that checkout), then run
+`scripts/worktree/worktree-zotero.sh reload`. For a one-off build/reload, prefix the
+command with `BEAVER_DEV_BACKEND_URL=http://127.0.0.1:8001` instead; the shell value
+wins. This overrides the API origin in **both bundles**, including HTTP and WebSocket
+clients, only when both build mode and `BUILD_ENV` are `development`. Production and
+staging ignore it. Only HTTP(S) loopback origins are accepted; auth/Supabase settings
+stay as configured, so this isolates the backend process, not its database or account.
+
+Changing/removing the override requires rebuilding and reloading the plugin. With a
+watcher, stop it before changing configuration and restart it afterwards. Remove the
+local override (or use an empty shell value) and rebuild/reload to restore the default.
+
+Prefer no backend reload for repeatable test runs. Add `--reload --reload-dir app` for
+backend editing when useful; a reload interrupts active requests/sockets. **Stop the
+backend you started when finished**, including its reload supervisor/worker, and verify
+its port is released. Keep its terminal/process handle so cleanup targets only that
+worktree's backend.
+
 ### Cloned databases
 
 Zotero runs its databases in WAL mode and truncates the WAL on a clean shutdown, so a non-empty
