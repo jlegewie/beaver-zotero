@@ -144,7 +144,7 @@ export async function executeRequest(
             request_id: request.request_id,
             success: false,
             error: String(error),
-            error_code: 'execution_failed',
+            error_code: (error as { code?: string }).code ?? 'execution_failed',
             result_data: {
                 started_at: startTime,
                 elapsed_ms: elapsedMs,

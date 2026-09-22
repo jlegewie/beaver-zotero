@@ -92,6 +92,7 @@ const DECLARATION_ONLY_FEATURES = [
     'pdf_candidates',
     'ask_user_question',
     'portable_ids',
+    'collection_ids',
     'list_items_include_children',
     'create_note_tags_collections',
     'edit_note_batch',
@@ -181,7 +182,7 @@ describe('client feature declaration (Lane C)', () => {
         expect(ZOTERO_PLUGIN_CLIENT_TYPE).toBe('zotero-plugin');
     });
 
-    it('feature vocabulary matches the backend FEAT_* string values exactly', () => {
+    it('feature vocabulary includes the negotiated declaration-only contracts', () => {
         expect(Object.values(CLIENT_FEATURES).slice().sort()).toEqual(ALL_BACKEND_FEATURES);
     });
 

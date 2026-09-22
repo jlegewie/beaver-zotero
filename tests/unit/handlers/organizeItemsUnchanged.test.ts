@@ -85,6 +85,7 @@ describe('executeOrganizeItemsAction unchanged_items', () => {
         items = {};
         previousZotero = (globalThis as any).Zotero;
         (globalThis as any).Zotero = {
+            Beaver: { libraryScopeInitialized: true, searchableLibraryIds: [1] },
             Libraries: {
                 get: vi.fn(() => ({ libraryID: 1, name: 'My Library', editable: true })),
                 userLibraryID: 1,
@@ -94,18 +95,51 @@ describe('executeOrganizeItemsAction unchanged_items', () => {
                 getLibraryIDFromGroupID: vi.fn(() => false),
             },
             Collections: {
+                getByLibrary: vi.fn(() => []),
                 get: vi.fn((id: number) => (id === COLLECTION_ID ? { key: COLLECTION_KEY, id } : null)),
-                getByLibraryAndKeyAsync: vi.fn(async (_lib: number, key: string) =>
-                    key === COLLECTION_KEY ? { id: COLLECTION_ID, key } : null
+                getByLibraryAndKey: vi.fn((_lib: number, key: string) =>
+                    key === COLLECTION_KEY ? { id: COLLECTION_ID, key, libraryID: 1, name: 'Collection' } : null
                 ),
             },
             Items: {
-                getByLibraryAndKeyAsync: vi.fn(async (_lib: number, key: string) => items[key] ?? null),
+                getByLibraryAndKeyAsync: vi.fn((_lib: number, key: string) => items[key] ?? null),
             },
             DB: {
                 executeTransaction: vi.fn(async (fn: () => Promise<void>) => fn()),
             },
         };
+    });
+
+    it.each([1, 7])('applies tag-only edits in library %s without collection preflight or collection results', async libraryID => {
+        const item = makeItem('AAAAAAAA', [], []);
+        item.libraryID = libraryID;
+        items.AAAAAAAA = item;
+        Zotero.Beaver.searchableLibraryIds = [1, 7];
+        vi.mocked(Zotero.Libraries.get).mockReturnValue({ libraryID, editable: true } as any);
+
+        const response = await executeOrganizeItemsAction(buildRequest({
+            item_ids: [`${libraryID}-AAAAAAAA`], tags: { add: ['reviewed'] },
+        }), timeoutCtx());
+
+        expect(response.success).toBe(true);
+        expect(item.state.tags).toEqual(['reviewed']);
+        expect(Zotero.Items.getByLibraryAndKeyAsync).toHaveBeenCalledTimes(1);
+        expect(Zotero.Collections.getByLibraryAndKey).not.toHaveBeenCalled();
+        expect(response.result_data).toMatchObject({ tags_added: ['reviewed'], items_modified: 1 });
+        expect(response.result_data?.collection_ids_added).toBeUndefined();
+        expect(response.result_data?.collection_ids_removed).toBeUndefined();
+        expect(response.result_data?.collections_added).toBeUndefined();
+        expect(response.result_data?.collections_removed).toBeUndefined();
+    });
+
+    it('omits portable result fields for collection operations that made no changes', async () => {
+        items.AAAAAAAA = makeItem('AAAAAAAA', [], [COLLECTION_ID]);
+        const response = await executeOrganizeItemsAction(buildRequest({
+            item_ids: ['1-AAAAAAAA'], collections: { add: [COLLECTION_KEY] },
+        }), timeoutCtx());
+        expect(response.success).toBe(true);
+        expect(response.result_data?.collection_ids_added).toBeUndefined();
+        expect(response.result_data?.collection_ids_removed).toBeUndefined();
     });
 
     afterEach(() => {
@@ -190,12 +224,13 @@ describe('executeOrganizeItemsAction unchanged_items', () => {
 
     it('rejects a trashed add target before applying any item changes', async () => {
         items.AAAAAAAA = makeItem('AAAAAAAA', [], []);
-        vi.mocked(Zotero.Collections.getByLibraryAndKeyAsync).mockResolvedValue({ id: COLLECTION_ID, deleted: true } as any);
-        const response = await executeOrganizeItemsAction(buildRequest({
+        vi.mocked(Zotero.Collections.getByLibraryAndKey).mockImplementation((_lib: number, key: string) =>
+            key === COLLECTION_KEY
+                ? { id: COLLECTION_ID, key, libraryID: 1, name: 'Collection', deleted: true }
+                : null);
+        await expect(executeOrganizeItemsAction(buildRequest({
             item_ids: ['1-AAAAAAAA'], tags: { add: ['new'] }, collections: { add: [COLLECTION_KEY] },
-        }), timeoutCtx());
-        expect(response.success).toBe(false);
-        expect(response.error_code).toBe('collection_not_found');
+        }), timeoutCtx())).rejects.toMatchObject({ code: 'collection_not_found' });
         expect(items.AAAAAAAA.save).not.toHaveBeenCalled();
         expect(items.AAAAAAAA.state.tags).toEqual([]);
     });
@@ -205,18 +240,14 @@ describe('executeOrganizeItemsAction unchanged_items', () => {
         // nothing, so the item is NOT in the requested state.
         items.AAAAAAAA = makeItem('AAAAAAAA', [], [COLLECTION_ID]);
 
-        const response = await executeOrganizeItemsAction(
+        await expect(executeOrganizeItemsAction(
             buildRequest({
                 item_ids: ['1-AAAAAAAA'],
                 collections: { add: [COLLECTION_KEY, 'DELETED12'] },
             }),
             timeoutCtx()
-        );
+        )).rejects.toMatchObject({ code: 'collection_not_found' });
 
-        expect(response.success).toBe(false);
-        expect(response.error_code).toBe('collection_not_found');
-        expect(response.error).toContain('DELETED12');
-        expect(response.result_data).toBeUndefined();
         expect(items.AAAAAAAA.save).not.toHaveBeenCalled();
     });
 
@@ -234,7 +265,25 @@ describe('executeOrganizeItemsAction unchanged_items', () => {
         );
 
         expect(response.success).toBe(true);
-        expect(response.result_data?.items_modified).toBe(0);
-        expect(response.result_data?.unchanged_items).toEqual(['1-AAAAAAAA']);
+        expect(response.result_data).toMatchObject({ items_modified: 0, unchanged_items: ['1-AAAAAAAA'] });
+        expect(items.AAAAAAAA.save).not.toHaveBeenCalled();
+    });
+
+    it('applies tag changes requested alongside a deleted remove-target', async () => {
+        // Failing over a no-op removal would silently drop the tag edit.
+        items.AAAAAAAA = makeItem('AAAAAAAA', [], []);
+
+        const response = await executeOrganizeItemsAction(
+            buildRequest({
+                item_ids: ['1-AAAAAAAA'],
+                tags: { add: ['marker'] },
+                collections: { remove: ['DELETED12'] },
+            }),
+            timeoutCtx()
+        );
+
+        expect(response.success).toBe(true);
+        expect(response.result_data).toMatchObject({ items_modified: 1, tags_added: ['marker'] });
+        expect(items.AAAAAAAA.state.tags).toEqual(['marker']);
     });
 });

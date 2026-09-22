@@ -99,7 +99,7 @@ export const ActionPreview: React.FC<{
 
     if (toolName === 'create_collection' || previewData.actionType === 'create_collection') {
         const name = previewData.actionData.name || '';
-        const parentKey = previewData.actionData.parent_key;
+        const parentKey = previewData.actionData.parent_collection_id ?? previewData.actionData.parent_key;
         const itemIds = previewData.actionData.item_ids || [];
 
         // Resolve the library id from the sources that survive into stored

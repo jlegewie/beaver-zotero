@@ -80,7 +80,7 @@ describe('executeCreateNoteAction', () => {
         class MockNote {
             libraryID = 0;
             parentKey?: string;
-            key = 'NOTEKEY';
+            key = 'NOTEKEY1';
             addRelatedItem = vi.fn();
             addToCollection = vi.fn();
             addTag = vi.fn();
@@ -96,6 +96,7 @@ describe('executeCreateNoteAction', () => {
             ...(globalThis as any).Zotero,
             Libraries: {
                 userLibraryID: 1,
+                get: vi.fn((id: number) => ({ libraryID: id, editable: true })),
             },
             Items: {
                 getByLibraryAndKeyAsync: vi.fn().mockResolvedValue(relatedItem),
@@ -105,12 +106,15 @@ describe('executeCreateNoteAction', () => {
                     }
                 }),
             },
+            Groups: { getGroupIDFromLibraryID: vi.fn(() => 12345) },
             Collections: {
-                get: vi.fn((id: number) => id === 99 ? { key: 'COLLKEY' } : null),
+                getByLibraryAndKey: vi.fn((libraryID: number, key: string) => ({ key, libraryID, id: key, name: key })),
+                get: vi.fn((id: number) => id === 99 ? { key: 'COLLKEY1' } : null),
             },
             Item: MockNote,
         };
 
+        Zotero.Beaver.searchableLibraryIds = [1, 7, 100, 42];
         vi.mocked(resolveCreateNoteParent).mockResolvedValue({
             ok: true,
             parentKey: null,
@@ -124,7 +128,7 @@ describe('executeCreateNoteAction', () => {
         vi.mocked(getCollectionByIdOrName).mockImplementation((idOrName: any, libraryId?: number) => {
             if (idOrName == null || idOrName === 'NOSUCH') return null;
             const byName: Record<string, string> = {
-                'Reading List': 'RLKEY',
+                'Reading List': 'RLKEY111',
                 'Inbox': 'INBOXKEY',
             };
             const key = byName[String(idOrName)] ?? String(idOrName);
@@ -145,11 +149,11 @@ describe('executeCreateNoteAction', () => {
         expect((globalThis as any).Zotero.Items.loadDataTypes).toHaveBeenCalledWith([relatedItem], ['collections']);
         expect(relatedItem.getCollections).toHaveBeenCalled();
         expect(noteInstances).toHaveLength(1);
-        expect(noteInstances[0].addToCollection).toHaveBeenCalledWith('COLLKEY');
+        expect(noteInstances[0].addToCollection).toHaveBeenCalledWith('COLLKEY1');
         expect(result).toMatchObject({
             library_id: 1,
-            zotero_key: 'NOTEKEY',
-            collection_key: 'COLLKEY',
+            zotero_key: 'NOTEKEY1',
+            collection_key: 'COLLKEY1',
             related_item_key: 'RELKEY',
             warning: 'fallback warning',
         });
@@ -249,21 +253,21 @@ describe('executeCreateNoteAction', () => {
             proposed_data: {
                 title: 'Title',
                 content: 'Body',
-                collection_keys: ['RLKEY', 'INBOXKEY'],
+                collection_keys: ['RLKEY111', 'INBOXKEY'],
                 tags: ['alpha', 'beta'],
             },
         } as any, 'run-1');
 
         const note = noteInstances[0];
         expect(note.addToCollection).toHaveBeenCalledTimes(2);
-        expect(note.addToCollection).toHaveBeenCalledWith('RLKEY');
+        expect(note.addToCollection).toHaveBeenCalledWith('RLKEY111');
         expect(note.addToCollection).toHaveBeenCalledWith('INBOXKEY');
         expect(note.addTag).toHaveBeenCalledWith('alpha');
         expect(note.addTag).toHaveBeenCalledWith('beta');
 
         expect(result).toMatchObject({
-            collection_key: 'RLKEY',
-            collection_keys: ['RLKEY', 'INBOXKEY'],
+            collection_key: 'RLKEY111',
+            collection_keys: ['RLKEY111', 'INBOXKEY'],
             tags: ['alpha', 'beta'],
         });
     });
@@ -273,15 +277,15 @@ describe('executeCreateNoteAction', () => {
             proposed_data: {
                 title: 'Title',
                 content: 'Body',
-                // "Reading List" and RLKEY resolve to the same key -> deduped.
-                collections: ['Reading List', 'RLKEY', 'Inbox'],
+                // "Reading List" and RLKEY111 resolve to the same key -> deduped.
+                collections: ['Reading List', 'RLKEY111', 'Inbox'],
             },
         } as any, 'run-1');
 
         const note = noteInstances[0];
         expect(note.addToCollection).toHaveBeenCalledTimes(2);
         expect(result).toMatchObject({
-            collection_keys: ['RLKEY', 'INBOXKEY'],
+            collection_keys: ['RLKEY111', 'INBOXKEY'],
         });
     });
 
@@ -322,7 +326,7 @@ describe('executeCreateNoteAction', () => {
                 title: 'Title',
                 content: 'Body',
                 parent_item_id: '1-PARENTKEY',
-                collection_keys: ['RLKEY'],
+                collection_keys: ['RLKEY111'],
                 tags: ['alpha'],
             },
         } as any, 'run-1');

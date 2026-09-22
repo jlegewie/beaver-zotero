@@ -1,3 +1,5 @@
+import { resolveCollection, type ResolvedCollection } from './collections/collectionIdentity';
+import { recheckExistingCollections } from './collections/collectionMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { CreateItemProposedAction, CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { ExternalReference, NormalizedPublicationType } from '@beaver/agent-core/types/externalReferences';
@@ -13,6 +15,10 @@ import { fetchPdfAttachment } from './pdfAttachmentFetch';
 const SAVE_ATTACHMENTS_WITH_TRANSLATORS = false;
 const BEAVER_PROVENANCE_MARKER = 'Added by Beaver';
 
+
+function trackWith<T>(timing: TimingAccumulator | undefined, name: string, fn: () => Promise<T>): Promise<T> {
+    return timing ? timing.track(name, fn) : fn();
+}
 
 /** Options for importing items */
 export interface ImportItemOptions {
@@ -72,6 +78,7 @@ async function resolveImportTarget(options?: ImportItemOptions): Promise<{
         throw new Error('Target library is not editable');
     }
     
+    if (collectionId != null) resolveCollection(collectionId, { libraryID: libraryId });
     return { libraryId, collectionId };
 }
 
@@ -304,12 +311,17 @@ export function stampBeaverProvenanceExtra(
  * @param options - Import options including target library and collection
  */
 export async function createZoteroItem(reference: ExternalReference, options?: ImportItemOptions): Promise<Zotero.Item> {
-    const timing = options?.timing;
-    const track = <T>(name: string, fn: () => Promise<T>): Promise<T> =>
-        timing ? timing.track(name, fn) : fn();
+    const target = await trackWith(options?.timing, 'resolve_target_ms', () => resolveImportTarget(options));
+    return importZoteroItem(reference, options, target);
+}
 
-    // Resolve target library and collection
-    const { libraryId, collectionId } = await track('resolve_target_ms', () => resolveImportTarget(options));
+/** Import into a target already validated by the public entry point. */
+async function importZoteroItem(
+    reference: ExternalReference,
+    options: ImportItemOptions | undefined,
+    { libraryId, collectionId }: Awaited<ReturnType<typeof resolveImportTarget>>,
+): Promise<Zotero.Item> {
+    const timing = options?.timing;
 
     let item: Zotero.Item | null = null;
 
@@ -318,7 +330,7 @@ export async function createZoteroItem(reference: ExternalReference, options?: I
     // to avoid duplicate items if the translation completes after timeout
     if (reference.identifiers) {
         try {
-            item = await track('identifier_translation_ms', () =>
+            item = await trackWith(timing, 'identifier_translation_ms', () =>
                 tryImportFromIdentifiers(reference.identifiers, libraryId)
             );
             if (item) {
@@ -334,7 +346,7 @@ export async function createZoteroItem(reference: ExternalReference, options?: I
     // sites routinely take 15–30s+ and blow the WebSocket executor budget.
     if (!item && reference.url && !options?.skipUrlTranslation) {
         try {
-            item = await track('url_translation_ms', () => importFromUrl(reference.url!, libraryId));
+            item = await trackWith(timing, 'url_translation_ms', () => importFromUrl(reference.url!, libraryId));
             if (item) {
                 logger("createZoteroItem: Successfully imported item via URL", 2);
             }
@@ -346,20 +358,36 @@ export async function createZoteroItem(reference: ExternalReference, options?: I
     // 3. Fallback: Create item manually from available metadata
     if (!item) {
         logger("createZoteroItem: Falling back to manual item creation", 2);
-        item = await track('manual_creation_ms', () => createItemManually(reference, libraryId));
+        item = await trackWith(timing, 'manual_creation_ms', () => createItemManually(reference, libraryId));
     }
+
+    try {
+        return await finishZoteroItemImport(item, reference, options, collectionId);
+    } catch (error) {
+        await cleanupFailedImport(item);
+        throw error;
+    }
+}
+
+/** Attach context membership and schedule optional PDF discovery for a new item. */
+async function finishZoteroItemImport(
+    item: Zotero.Item,
+    reference: ExternalReference,
+    options: ImportItemOptions | undefined,
+    collectionId: number | null,
+): Promise<Zotero.Item> {
+    const libraryId = item.libraryID;
+    const timing = options?.timing;
 
     // 4. Add to collection if specified
     if (collectionId) {
-        const collection = Zotero.Collections.get(collectionId);
-        if (collection) {
-            await track('add_to_collection_ms', () =>
-                Zotero.DB.executeTransaction(async () => {
-                    await collection.addItem(item!.id);
-                })
-            );
-            logger(`createZoteroItem: Added item to collection ${collection.name}`, 2);
-        }
+        const collection = resolveCollection(collectionId, { libraryID: libraryId }).collection;
+        await trackWith(timing, 'add_to_collection_ms', () =>
+            Zotero.DB.executeTransaction(async () => {
+                await collection.addItem(item.id);
+            })
+        );
+        logger(`createZoteroItem: Added item to collection ${collection.name}`, 2);
     }
 
     // 5. Schedule background PDF fetch (unless caller handles it separately)
@@ -402,29 +430,50 @@ export async function applyCreateItemData(
 ): Promise<CreateItemResultData> {
     const itemData = proposedData.item;
     const timing = options?.timing;
-    const track = <T>(name: string, fn: () => Promise<T>): Promise<T> =>
-        timing ? timing.track(name, fn) : fn();
+
+    const target = await trackWith(timing, 'resolve_target_ms', () => resolveImportTarget(options));
+    // A requested collection that no longer exists (deleted after approval, or
+    // recreated under a new key by a redo) is skipped; the item is still created.
+    const memberships = recheckExistingCollections(proposedData.collection_ids ?? proposedData.collection_keys ?? [], target.libraryId);
 
     // Create or Import the item (handles library/collection resolution internally)
     // Skip background PDF fetch here - we'll schedule it below with more context
-    const item = await track('create_zotero_item_ms', () =>
-        createZoteroItem(itemData, {
+    const item = await trackWith(timing, 'create_zotero_item_ms', () =>
+        importZoteroItem(itemData, {
             ...options,
             skipBackgroundPdfFetch: true,
-        })
+        }, target)
     );
+    
+    try {
+        return await finishCreateItemData(item, proposedData, options, memberships);
+    } catch (error) {
+        await cleanupFailedImport(item);
+        throw error;
+    }
+}
+
+/** Apply requested metadata and memberships to an item just created by this import. */
+async function finishCreateItemData(
+    item: Zotero.Item,
+    proposedData: CreateItemProposedData,
+    options: ImportItemOptions | undefined,
+    memberships: ResolvedCollection[],
+): Promise<CreateItemResultData> {
+    const itemData = proposedData.item;
     const libraryId = item.libraryID;
     const itemKey = item.key;
-    
+    const timing = options?.timing;
+
     // Track if we need to save (consolidate all modifications)
     let needsSave = false;
-    
+
     // Post-processing (Things that apply regardless of how item was created)
-    
+
     // 1. Add Extra fields (Identifiers that aren't standard fields, Beaver provenance)
     const extraLines: string[] = [];
     const identifiers = itemData.identifiers;
-    
+
     if (identifiers) {
         const currentExtra = item.getField('extra') as string || '';
         if (identifiers.arXivID && !currentExtra.includes(identifiers.arXivID)) {
@@ -447,12 +496,9 @@ export async function applyCreateItemData(
     needsSave = stampBeaverProvenanceExtra(item, { reason: proposedData.reason }) || needsSave;
 
     // 2. Collections (from proposed data, in addition to context collection)
-    if (proposedData.collection_keys && proposedData.collection_keys.length > 0) {
-        const collectionIds: number[] = [];
-        for (const key of proposedData.collection_keys) {
-            const collection = Zotero.Collections.getByLibraryAndKey(libraryId, key);
-            if (collection) collectionIds.push(collection.id);
-        }
+    if (memberships.length > 0) {
+        const collectionIds = recheckExistingCollections(memberships.map(entry => entry.collectionId), libraryId)
+            .map(entry => entry.collection.id);
         if (collectionIds.length > 0) {
             // Append to existing collections if any (from translation or context)
             const currentCollections = item.getCollections();
@@ -461,7 +507,7 @@ export async function applyCreateItemData(
             needsSave = true;
         }
     }
-    
+
     // 3. Tags
     if (proposedData.suggested_tags && proposedData.suggested_tags.length > 0) {
         for (const tag of proposedData.suggested_tags) {
@@ -472,7 +518,7 @@ export async function applyCreateItemData(
 
     // Single consolidated save for all modifications
     if (needsSave) {
-        await track('post_save_ms', () => item.saveTx());
+        await trackWith(timing, 'post_save_ms', () => item.saveTx());
         logger(`applyCreateItemData: Saved item with extra fields, collections, and tags`, 2);
     }
 
@@ -536,9 +582,21 @@ export async function applyCreateItemData(
         library_id: libraryId,
         zotero_key: itemKey,
         library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
+        collection_ids: memberships.map(entry => entry.collectionId),
+        collection_keys: memberships.map(entry => entry.key),
         attachment_status: attachmentStatus,
         attachment_key: attachmentKey,
     };
+}
+
+/** Remove an item owned by an import that failed after persistence. */
+async function cleanupFailedImport(item: Zotero.Item): Promise<void> {
+    try {
+        // Erasing the parent also removes any translated attachments or provenance notes.
+        await item.eraseTx();
+    } catch (error) {
+        logger(`Failed to clean up imported item ${item.libraryID}-${item.key}: ${error}`, 1);
+    }
 }
 
 /**

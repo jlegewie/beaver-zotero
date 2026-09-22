@@ -131,7 +131,7 @@ const CreateItemPreviewRow: React.FC<{
                                 zotero_key: resultData.zotero_key,
                                 library_ref: resultData.library_ref,
                             },
-                            proposedData.collection_keys?.[0]
+                            proposedData.collection_ids?.[0] ?? proposedData.collection_keys?.[0]
                         )}
                     />
                 </Tooltip>

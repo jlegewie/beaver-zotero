@@ -1,3 +1,4 @@
+import { normalizeCollectionAttachment } from '../types/attachments/apiTypes';
 import type { ThreadActivity, ThreadRunsResponse } from "../transport/agentService";
 import { agentRunService } from '../transport/agentService';
 import type { AgentAction } from '../agents/agentActionTypes';
@@ -50,7 +51,15 @@ export async function loadThreadRuns(
         options?.history ?? await agentRunService.getThreadRuns(threadId, true);
 
     // Mark any in_progress runs as canceled since they're no longer active
-    const processedRuns = runs.map(run => {
+    const processedRuns = runs.map(source => {
+        const run = source.user_prompt.attachments?.some(att => att.type === 'collection') ? {
+            ...source,
+            user_prompt: {
+                ...source.user_prompt,
+                attachments: source.user_prompt.attachments.map(att =>
+                    att.type === 'collection' ? normalizeCollectionAttachment(att) : att),
+            },
+        } : source;
         if (run.status === 'in_progress') {
             logger(`loadThreadRuns: Marking in_progress run ${run.id} as canceled`, 1);
             return {
