@@ -242,6 +242,20 @@ export class DocumentExtractExecutor implements JobExecutor {
         }
 
         const hashChanged = previous.structuredDocumentHash !== documentHash;
+        if (!hashChanged && documentHash && extracted.ocrStatus === 'na') {
+            const accountId = Zotero.Beaver?.account?.getSnapshot().session?.user.id;
+            if (accountId) {
+                const woken = await ctx.db.finishFulltextCacheRecovery({
+                    libraryId: item.libraryID,
+                    zoteroKey: item.key,
+                    accountId,
+                    documentHash,
+                    extractionSource,
+                    now: Date.now(),
+                });
+                if (woken) Zotero.Beaver?.backgroundExtractor?.notify();
+            }
+        }
         if (
             hashChanged
             && documentHash

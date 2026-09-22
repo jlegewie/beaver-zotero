@@ -43,6 +43,81 @@ describe('BeaverDB background queue', () => {
         await conn.closeDatabase();
     });
 
+    async function claimRecovery(now = 1_000_000) {
+        await db.enqueueBackgroundJob(makeInput({
+            jobType: 'fulltext_upsert', priority: 50, now,
+            payload: makePayload({ doc_hash: 'hash-a' }),
+        }));
+        const job = await db.claimNextBackgroundJob(now, 360_000, 100, ['fulltext_upsert']);
+        expect(job).not.toBeNull();
+        return job!;
+    }
+
+    it('wakes only a matching deferred cache recovery before its visibility deadline', async () => {
+        const job = await claimRecovery();
+        await db.enqueueBackgroundJob(makeInput({
+            jobType: 'fulltext_upsert', zoteroKey: 'OTHER123', priority: 40,
+            payload: makePayload({ doc_hash: 'hash-b' }), now: 1_000_000,
+        }));
+        const other = await db.claimNextBackgroundJob(1_000_000, 360_000, 100, ['fulltext_upsert']);
+        await db.rescheduleBackgroundJob(other!.id, 1_200_000, 'claim_busy');
+
+        expect(await db.beginFulltextCacheRecovery(job, 'account-a', 'hash-a', 'source-a')).toBe(true);
+        expect(await db.deferFulltextCacheRecovery(job.id, job.availableAt, 1_000_010)).toBe(false);
+        await db.enqueueBackgroundJob(makeInput({ jobType: 'fulltext_upsert', priority: 50,
+            payload: makePayload({ doc_hash: 'hash-a' }), now: 1_000_015 }));
+        for (const change of [
+            { accountId: 'account-b' }, { documentHash: 'hash-b' },
+            { extractionSource: 'source-b' }, { zoteroKey: 'OTHER123' },
+        ]) {
+            expect(await db.finishFulltextCacheRecovery({
+                libraryId: 1, zoteroKey: job.zoteroKey, accountId: 'account-a',
+                documentHash: 'hash-a', extractionSource: 'source-a', now: 1_000_020,
+                ...change,
+            })).toBe(false);
+        }
+        expect(await db.claimNextBackgroundJob(1_000_020, 360_000, 100, ['fulltext_upsert'])).toBeNull();
+        expect(await db.finishFulltextCacheRecovery({
+            libraryId: 1, zoteroKey: job.zoteroKey, accountId: 'account-a',
+            documentHash: 'hash-a', extractionSource: 'source-a', now: 1_000_030,
+        })).toBe(true);
+        const ready = await db.claimNextBackgroundJob(1_000_030, 360_000, 100, ['fulltext_upsert']);
+        expect(ready).toMatchObject({ id: job.id, priority: 50, attemptCount: 0 });
+        expect((await db.peekBackgroundJobs()).find(row => row.id === other!.id))
+            .toMatchObject({ availableAt: 1_200_000, lastError: 'claim_busy' });
+    });
+
+    it('holds a fast extraction until the active upload finishes deferring', async () => {
+        const job = await claimRecovery();
+        expect(await db.beginFulltextCacheRecovery(job, 'account-a', 'hash-a', null)).toBe(true);
+        expect(await db.finishFulltextCacheRecovery({
+            libraryId: 1, zoteroKey: job.zoteroKey, accountId: 'account-a',
+            documentHash: 'hash-a', extractionSource: null, now: 1_000_010,
+        })).toBe(false);
+        expect(await db.claimNextBackgroundJob(1_000_010, 360_000, 100, ['fulltext_upsert'])).toBeNull();
+        expect(await db.deferFulltextCacheRecovery(job.id, job.availableAt, 1_000_020)).toBe(true);
+        expect(await db.claimNextBackgroundJob(1_000_020, 360_000, 100, ['fulltext_upsert']))
+            .toMatchObject({ id: job.id });
+    });
+
+    it('clears the wait on visibility reclaim and fences a stale attempt from the new claim', async () => {
+        const old = await claimRecovery();
+        expect(await db.beginFulltextCacheRecovery(old, 'account-a', 'hash-a', 'source-a')).toBe(true);
+        const current = await db.claimNextBackgroundJob(old.availableAt, 360_000, 100, ['fulltext_upsert']);
+        expect(current).toMatchObject({ id: old.id });
+        expect(await db.beginFulltextCacheRecovery(current!, 'account-a', 'hash-a', 'source-a')).toBe(true);
+        expect(await db.deferFulltextCacheRecovery(old.id, old.availableAt, old.availableAt + 1)).toBe(false);
+        await db.cancelFulltextCacheRecovery(old.id, old.availableAt);
+        expect(await db.finishFulltextCacheRecovery({
+            libraryId: 1, zoteroKey: old.zoteroKey, accountId: 'account-a',
+            documentHash: 'hash-a', extractionSource: 'source-a', now: old.availableAt + 1,
+        })).toBe(false);
+        expect(await db.claimNextBackgroundJob(old.availableAt + 1, 360_000, 100, ['fulltext_upsert']))
+            .toBeNull();
+        expect(await db.deferFulltextCacheRecovery(current!.id, current!.availableAt, old.availableAt + 2))
+            .toBe(true);
+    });
+
     it('dedupes a second enqueue for the same job identity and lowers priority/availability', async () => {
         const first = await db.enqueueBackgroundJob(
             makeInput({ priority: 200, now: 5_000 }),

@@ -789,6 +789,12 @@ export class BackgroundExtractor {
                 });
                 return;
             case 'defer':
+                if (outcome.reason === 'payload_cache_miss') {
+                    // Extraction may finish before this executor releases its
+                    // lane. Complete the handoff before the lane can claim again.
+                    const woken = await db.deferFulltextCacheRecovery(record.id, record.availableAt, Date.now());
+                    if (woken) this.notify();
+                }
                 // Leave the row parked: the claim already bumped `available_at`
                 // by the visibility timeout, so doing nothing keeps the row
                 // invisible until the executor's own tracker wakes it (or the

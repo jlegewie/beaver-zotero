@@ -407,6 +407,11 @@ declare namespace Zotero {
                 preparationPayload?: import("../src/services/database").BackgroundJobPayload,
             ): Promise<{ exists: boolean; promoted: boolean }>;
 
+            beginFulltextCacheRecovery: import('../src/services/database').BeaverDB['beginFulltextCacheRecovery'];
+            deferFulltextCacheRecovery: import('../src/services/database').BeaverDB['deferFulltextCacheRecovery'];
+            finishFulltextCacheRecovery: import('../src/services/database').BeaverDB['finishFulltextCacheRecovery'];
+            cancelFulltextCacheRecovery: import('../src/services/database').BeaverDB['cancelFulltextCacheRecovery'];
+
             completeBackgroundJob(id: number): Promise<void>;
             completeBackgroundPreparationJob(id: number, now: number): Promise<boolean>;
 
