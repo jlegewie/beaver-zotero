@@ -843,6 +843,7 @@ export class BackgroundExtractor {
                     status: 'failed',
                     error: outcome.error,
                     attemptedAt,
+                    extractionSource: outcome.attemptedExtractionSource,
                 });
             } else if (record.jobType === 'fulltext_upsert' && record.payload?.doc_hash) {
                 await db.markAttachmentUpsertFailed(

@@ -24,6 +24,8 @@ export type JobOutcome =
         countsAsAttempt?: boolean;
         /** Pause new claims in this lane as well as delaying this job. */
         laneCooldownMs?: number;
+        /** Source identity observed before this attempt read document bytes. */
+        attemptedExtractionSource?: string | null;
     }
     | {
         kind: 'failPermanent';

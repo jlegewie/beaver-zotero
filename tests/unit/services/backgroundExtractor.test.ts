@@ -1878,13 +1878,17 @@ describe('BackgroundExtractor', () => {
         await (proc as any).recordRetryFailure(
             record,
             executor,
-            { kind: 'retry', error: 'final extraction error' },
+            {
+                kind: 'retry', error: 'final extraction error',
+                attemptedExtractionSource: 'local:123:456',
+            },
             db,
             Date.now(),
         );
 
-        expect((await db.getAttachmentProcessingState(1, 'AAAAAAAA'))?.extractStatus)
-            .toBe('failed');
+        expect(await db.getAttachmentProcessingState(1, 'AAAAAAAA')).toMatchObject({
+            extractStatus: 'failed', extractionSource: 'local:123:456',
+        });
         expect((await db.getBackgroundQueueStats(Date.now())).dead).toBe(1);
     });
 

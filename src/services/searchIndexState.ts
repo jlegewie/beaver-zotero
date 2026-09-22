@@ -44,7 +44,14 @@ export function classifySearchPreparation(
         || (row.extractStatus === 'done' && row.ocrStatus === 'failed');
     const codes = row.error?.split(':').map(part => part.trim()) ?? [];
     // Exact legacy terminal text is retained for already-persisted outcomes.
-    const unavailable = codes.some(code => UNAVAILABLE_CODES.has(code))
+    const nativeDocumentLimitation = (
+        (row.contentKind === 'epub' || row.contentKind === 'snapshot')
+        && row.error === 'no_text_layer'
+    ) || (
+        row.contentKind === 'epub'
+        && row.error?.startsWith('permanent_epub:') === true
+    );
+    const unavailable = nativeDocumentLimitation || codes.some(code => UNAVAILABLE_CODES.has(code))
         || row.error === 'OCR produced no usable text layer';
     if (settled && !row.readingSucceeded && unavailable) return 'unavailable';
     return 'pending';

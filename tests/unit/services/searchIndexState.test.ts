@@ -30,6 +30,23 @@ describe('search preparation classification', () => {
     it.each(['download_failed', 'read_failed', 'extraction_failed', 'ocr_required', 'unsupported_schema_version', 'wrapper: encrypted_extra', 'ocr_backend_failed: download_failed'])('does not shrink the denominator for %s', error => {
         expect(classifySearchPreparation(row({ extractStatus: 'failed', error }), identity)).toBe('pending');
     });
+    it('excludes settled EPUB limitations without changing PDF retry semantics', () => {
+        expect(classifySearchPreparation(row({
+            contentKind: 'epub', extractStatus: 'failed', error: 'no_text_layer',
+        }), identity)).toBe('unavailable');
+        expect(classifySearchPreparation(row({
+            contentKind: 'snapshot', extractStatus: 'failed', error: 'no_text_layer',
+        }), identity)).toBe('unavailable');
+        expect(classifySearchPreparation(row({
+            contentKind: 'epub', extractStatus: 'failed', error: 'permanent_epub:extraction_failed',
+        }), identity)).toBe('unavailable');
+        expect(classifySearchPreparation(row({
+            contentKind: 'epub', extractStatus: 'failed', error: 'extraction_failed',
+        }), identity)).toBe('pending');
+        expect(classifySearchPreparation(row({
+            contentKind: 'pdf', extractStatus: 'failed', error: 'no_text_layer',
+        }), identity)).toBe('pending');
+    });
     it('keeps retries and superseded reading failures pending', () => {
         expect(classifySearchPreparation(row({ extractStatus: null, error: 'encrypted' }), identity)).toBe('pending');
         expect(classifySearchPreparation(row({ extractStatus: 'failed', error: 'encrypted', readingSucceeded: true }), identity)).toBe('pending');

@@ -7,7 +7,9 @@ const mocks = vi.hoisted(() => ({
     kind: 'snapshot', backgroundEnabled: true,
 }));
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
-vi.mock('../../../src/utils/prefs', () => ({ getPref: (key: string) => key === 'backgroundProcessingEnabled' && mocks.backgroundEnabled }));
+vi.mock('../../../src/utils/prefs', () => ({ getPref: (key: string) =>
+    (key === 'backgroundProcessingEnabled' || key === 'backgroundExtractorEnabled')
+    && mocks.backgroundEnabled }));
 vi.mock('../../../src/utils/idleService', () => ({ getSystemIdleTimeMs: () => 60_000 }));
 vi.mock('../../../src/utils/zoteroItemUtils', () => ({ safeIsInTrash: (item: any) => item.isInTrash?.() ?? item.deleted === true }));
 vi.mock('../../../src/services/documentExtraction/attachmentResolution', () => ({
@@ -26,6 +28,7 @@ import { ReconcilerService } from '../../../src/services/backgroundProcessing/re
 import { NewItemWatcher } from '../../../src/services/backgroundProcessing/newItemWatcher';
 import { observeAttachmentSource } from '../../../src/services/documentExtraction/sourceObservation';
 import { DocumentExtractExecutor } from '../../../src/services/backgroundQueue/documentExtractExecutor';
+import { BackgroundExtractor } from '../../../src/services/backgroundExtractor';
 import { expectedExtractionSchemaVersion } from '../../../src/services/documentExtraction/shared/extractionSchemaVersions';
 
 const entitlements = { hasOcrAccess: true, hasSearchIndexAccess: true };
@@ -423,6 +426,61 @@ describe('attachment change reconciliation', () => {
         await connection.queryAsync('DELETE FROM background_jobs');
         await notify();
         expect(await db.peekBackgroundJobs()).toEqual([]);
+    });
+
+    it('preserves a permanent EPUB extraction failure as a distinct terminal reason', async () => {
+        mocks.kind = 'epub';
+        item.attachmentContentType = 'application/epub+zip';
+        mocks.extract.mockResolvedValue({
+            kind: 'response_error', code: 'extraction_failed',
+            message: 'Missing container', permanent: true,
+        });
+        await notify('add');
+        const job = await db.claimNextBackgroundJob(Date.now(), 60_000);
+        const outcome = await new DocumentExtractExecutor().execute(job!, {
+            db: db as any, runOnMuPDFWorker: async (fn) => fn(), externalAbortSignal: new AbortController().signal,
+            shouldSkipDbWrites: () => false, enqueue: async () => {},
+        });
+        expect(outcome).toMatchObject({ kind: 'complete', reason: 'terminal:extraction_failed' });
+        expect(await db.getAttachmentProcessingState(1, item.key)).toMatchObject({
+            extractStatus: 'failed', lastError: 'permanent_epub:extraction_failed',
+        });
+    });
+
+    it('revives a dead extraction only when an ordinary notification sees replacement bytes', async () => {
+        mocks.extract.mockResolvedValue({
+            kind: 'response_error', code: 'extraction_failed', message: 'Unreadable archive',
+        });
+        await db.enqueueBackgroundJob({
+            jobType: 'document_extract', libraryId: 1, zoteroKey: item.key,
+            itemId: item.id, contentKind: 'snapshot', payloadKind: 'structured',
+            payload: { content_kind: 'snapshot' }, now: 0,
+        });
+        await connection.queryAsync(`UPDATE background_jobs
+            SET attempt_count = 2, available_at = 0`);
+        const processor = new BackgroundExtractor();
+        expect(await processor.processOnce({ awaitLaunchedJobs: true })).toMatchObject({ processed: true });
+
+        const failed = await db.getAttachmentProcessingState(1, item.key);
+        expect(failed).toMatchObject({
+            extractStatus: 'failed',
+            extractionSource: (await observeAttachmentSource(item, 'snapshot'))!.identity,
+        });
+        expect(await db.getBackgroundDeadLetters()).toHaveLength(1);
+
+        await notify();
+        expect(await db.peekBackgroundJobs()).toEqual([]);
+        expect(await db.getBackgroundDeadLetters()).toHaveLength(1);
+
+        mocks.stat.mockResolvedValue({ lastModified: 11, size: 20 });
+        await notify();
+        expect(await db.getBackgroundDeadLetters()).toEqual([]);
+        expect(await db.getAttachmentProcessingState(1, item.key)).toMatchObject({
+            extractStatus: null, lastError: 'source_recheck',
+        });
+        expect(await db.peekBackgroundJobs()).toEqual([
+            expect.objectContaining({ jobType: 'document_extract' }),
+        ]);
     });
 
     it.each([

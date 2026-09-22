@@ -634,6 +634,9 @@ export class ReconcilerService {
             if (kindChanged || changed || legacyChanged || (deepCheck && unknown) || availabilityRetry) {
                 await Zotero.Beaver?.documentCache?.invalidate(item.libraryID, item.key);
                 await db.resetAttachmentExtraction(item.libraryID, item.key, 'source_recheck');
+                if (kindChanged || changed || legacyChanged) {
+                    await db.deleteBackgroundDeadLetters(item.libraryID, item.key);
+                }
                 if (availabilityRetry && row.ocrStatus === 'failed') {
                     await db.resetAttachmentOcr(item.libraryID, item.key, 'availability_recheck');
                     row = { ...row, ocrStatus: null };
