@@ -50,11 +50,20 @@ import {
 // documents ~7x slower to walk. `dedupOverlappingLines` (below) does the same
 // collapse as a cheap O(n) post-pass instead, so `collect-styles` is
 // intentionally NOT set here.
-const STRUCTURED_TEXT_OPTIONS = "preserve-whitespace";
-const STRUCTURED_TEXT_OPTIONS_WITH_IMAGES = "preserve-whitespace,preserve-images";
-const STRUCTURED_TEXT_OPTIONS_DETAILED = "preserve-whitespace,preserve-ligatures";
+//
+// use-known-glyph-outlines (fork-local) is always on. Symbol fonts without a
+// ToUnicode CMap often draw a symbol in a slot named for a Latin letter (an
+// Elsevier font's "m" draws μ, so "20 μg" reads "20 mg"). The mapping is
+// valid at every step, so no U+FFFD appears and the recovery path below never
+// sees it. MuPDF instead replaces the character when the glyph's outline is in
+// a reviewed table of known symbol outlines. Older WASM builds ignore the
+// option.
+const TEXT_REPAIR_OPTIONS = "use-known-glyph-outlines";
+const STRUCTURED_TEXT_OPTIONS = `preserve-whitespace,${TEXT_REPAIR_OPTIONS}`;
+const STRUCTURED_TEXT_OPTIONS_WITH_IMAGES = `preserve-whitespace,preserve-images,${TEXT_REPAIR_OPTIONS}`;
+const STRUCTURED_TEXT_OPTIONS_DETAILED = `preserve-whitespace,preserve-ligatures,${TEXT_REPAIR_OPTIONS}`;
 const STRUCTURED_TEXT_OPTIONS_DETAILED_WITH_IMAGES =
-    "preserve-whitespace,preserve-ligatures,preserve-images";
+    `preserve-whitespace,preserve-ligatures,preserve-images,${TEXT_REPAIR_OPTIONS}`;
 
 // Recovery flags for unmapped glyphs. When MuPDF cannot resolve a glyph to a
 // Unicode codepoint it emits U+FFFD. These two stext options recover such
