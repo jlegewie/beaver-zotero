@@ -13,6 +13,7 @@ import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { BACKGROUND_EXTRACT_PRIORITY, BACKGROUND_UPSERT_PRIORITY } from '../../../src/services/backgroundProcessing/constants';
 import { OCR_PRIORITY_ON_DEMAND } from '../../../src/services/ocr/constants';
 import { computeStructuredDocumentHash } from '../../../src/services/documentExtraction/structuredDocumentHash';
+import { buildUntagJobInput, isBackgroundProcessingLibraryEnabled } from '../../../src/services/backgroundProcessing/utils';
 
 async function countCleanupIntents(connection: MockDBConnection, accountId: string): Promise<number> {
     const rows = await connection.queryAsync('SELECT COUNT(*) AS n FROM index_cleanup_outbox WHERE account_id = ?', [accountId]);
@@ -28,7 +29,10 @@ vi.mock('../../../src/beaver-extract', () => ({
 vi.mock('../../../src/utils/idleService', () => ({
     getSystemIdleTimeMs: () => 60_000, registerIdleObserver: () => () => {},
 }));
-vi.mock('../../../src/utils/prefs', () => ({ getPref: (key: string) => key === 'backgroundProcessingEnabled' ? true : undefined }));
+const prefs = vi.hoisted(() => ({ backgroundProcessingEnabled: true }));
+vi.mock('../../../src/utils/prefs', () => ({
+    getPref: (key: string) => key === 'backgroundProcessingEnabled' ? prefs.backgroundProcessingEnabled : undefined,
+}));
 
 vi.mock('../../../src/services/searchIndex/searchIndexApiClient', () => ({
     searchIndexApiClient: {},
@@ -89,6 +93,8 @@ describe('FulltextUpsertExecutor', () => {
 
     beforeEach(async ({ task }) => {
         vi.clearAllMocks();
+        prefs.backgroundProcessingEnabled = true;
+        vi.mocked(isBackgroundProcessingLibraryEnabled).mockReturnValue(true);
         storageDir = task.name.startsWith('recovers a throttled backlog')
             ? mkdtempSync(join(tmpdir(), 'beaver-index-retry-')) : undefined;
         connection = new MockDBConnection(storageDir ? join(storageDir, 'queue.sqlite') : undefined);
@@ -297,11 +303,236 @@ describe('FulltextUpsertExecutor', () => {
         expect(cleanup.payload).toMatchObject({ ...originalIdentity, doc_hash: 'a'.repeat(64) });
         expect(await executor.execute(cleanup, ctx)).toMatchObject({ kind: 'complete', reason: 'cleanup_account_unavailable' });
         expect(api.untag).not.toHaveBeenCalled();
+
+        // Returning to A reacquires its retained membership instead of deleting it.
         accountId = 'account-a';
-        api.untag.mockResolvedValue({ results: [{ outcome: 'untagged' }] });
-        expect(await executor.execute(cleanup, ctx)).toMatchObject({ kind: 'complete' });
-        expect(api.untag).toHaveBeenCalledTimes(1);
+        expect(await executor.execute(cleanup, ctx)).toEqual({ kind: 'complete', reason: 'cleanup_reacquiring' });
+        expect(api.untag).not.toHaveBeenCalled();
+        expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({
+            jobType: 'fulltext_upsert', libraryId: 1, zoteroKey: record.zoteroKey,
+            priority: BACKGROUND_UPSERT_PRIORITY, payload: expect.objectContaining({ doc_hash: 'a'.repeat(64) }),
+        }));
+        expect(await countCleanupIntents(connection, 'account-a')).toBe(1);
+        await db.completeBackgroundJob(cleanup.id);
+        expect(await executor.execute(record, ctx)).toMatchObject({ kind: 'complete', reason: 'index_tagged' });
+        expect(api.upsertHash).toHaveBeenCalledTimes(3);
+        expect(api.upsertPayload).not.toHaveBeenCalled();
+        // The completed acquisition retires A's cleanup; B's stays durable.
         expect(await countCleanupIntents(connection, 'account-a')).toBe(0);
+        expect(await countCleanupIntents(connection, 'account-b')).toBe(1);
+        expect(await db.restoreIndexCleanup('account-a')).toBe(0);
+        expect(api.untag).not.toHaveBeenCalled();
+        expect(await db.getAttachmentProcessingState(1, record.zoteroKey)).toMatchObject({
+            upsertStatus: 'done', upsertRemoteIdentity: { index_account_id: 'account-a' },
+        });
+    });
+
+    describe('upsert completion superseding cleanup intents', () => {
+        const identityA = { index_account_id: 'account-a', index_scope_ref: 'lLOCAL123', index_local_id: 'LOCAL123' };
+        const done = (overrides = {}) => db.markAttachmentUpsertDone({ libraryId: 1, zoteroKey: record.zoteroKey,
+            structuredDocumentHash: 'a'.repeat(64), upsertIndexVersion: '3', remoteIdentity: identityA,
+            supersedeIndexCleanup: true, ...overrides });
+
+        it('keeps the intent of a cleanup queued before the ledger row is deleted', async () => {
+            await db.recordAttachmentIndexIdentity(1, record.zoteroKey, 'a'.repeat(64), identityA);
+            const row = (await db.getAttachmentProcessingState(1, record.zoteroKey))!;
+            await db.enqueueBackgroundJob(buildUntagJobInput(row, Date.now()));
+            expect(await done()).toBe(true);
+            await db.deleteAttachmentProcessingState(1, record.zoteroKey);
+            expect(await countCleanupIntents(connection, 'account-a')).toBe(1);
+        });
+
+        it('retires an intent with no queued cleanup once the membership is confirmed', async () => {
+            await db.enqueueBackgroundJob(buildUntagJobInput({ ...record, structuredDocumentHash: 'a'.repeat(64),
+                upsertRemoteIdentity: identityA }, Date.now()));
+            const queued = (await db.peekBackgroundJobs()).find((job) => job.jobType === 'fulltext_untag')!;
+            await db.completeBackgroundJob(queued.id);
+            expect(await done()).toBe(true);
+            expect(await countCleanupIntents(connection, 'account-a')).toBe(0);
+        });
+
+        it('keeps intents when the ledger no longer matches', async () => {
+            await db.enqueueBackgroundJob(buildUntagJobInput({ ...record, structuredDocumentHash: 'a'.repeat(64),
+                upsertRemoteIdentity: identityA }, Date.now()));
+            const queued = (await db.peekBackgroundJobs()).find((job) => job.jobType === 'fulltext_untag')!;
+            await db.completeBackgroundJob(queued.id);
+            expect(await done({ expectedUpsertStatus: 'failed' })).toBe(false);
+            expect(await countCleanupIntents(connection, 'account-a')).toBe(1);
+        });
+    });
+
+    describe('cleanup for an unchanged document another account owns', () => {
+        const ownerB = { index_account_id: 'account-b', index_scope_ref: 'lLOCAL123', index_local_id: 'LOCAL123' };
+
+        async function queueCleanupForA(overrides: Record<string, string> = {}, shared: Record<string, string> = {}) {
+            Zotero.Beaver.account = { getGeneration: () => 1,
+                getSnapshot: () => ({ session: { user: { id: 'account-a' } } }) } as any;
+            await db.markAttachmentUpsertDone({ libraryId: 1, zoteroKey: record.zoteroKey,
+                structuredDocumentHash: 'a'.repeat(64), upsertIndexVersion: '3', remoteIdentity: { ...ownerB, ...shared } });
+            record.jobType = 'fulltext_untag';
+            record.priority = 80;
+            record.payload = { ...record.payload!, index_action: 'untag', index_cleanup_reason: 'replacement',
+                doc_hash: 'a'.repeat(64), index_account_id: 'account-a', index_scope_ref: 'lLOCAL123',
+                index_local_id: 'LOCAL123', ...shared, ...overrides };
+            await db.enqueueBackgroundJob({ ...record, now: Date.now() });
+            api.untag.mockResolvedValue({ results: [{ outcome: 'untagged' }] });
+        }
+
+        it('reacquires instead of deleting the retained membership', async () => {
+            await queueCleanupForA();
+            expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx))
+                .toEqual({ kind: 'complete', reason: 'cleanup_reacquiring' });
+            expect(api.untag).not.toHaveBeenCalled();
+            expect(enqueue).toHaveBeenCalledTimes(1);
+            expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ jobType: 'fulltext_upsert', itemId: 10 }));
+            expect(await countCleanupIntents(connection, 'account-a')).toBe(1);
+            expect(await db.getAttachmentProcessingState(1, record.zoteroKey)).toMatchObject({
+                upsertStatus: 'done', upsertRemoteIdentity: ownerB,
+            });
+        });
+
+        it.each([
+            ['changed content', () => queueCleanupForA({ doc_hash: 'b'.repeat(64) })],
+            ['another device', () => queueCleanupForA({ index_local_id: 'OLDDEVICE' })],
+            ['another scope', () => queueCleanupForA({ index_scope_ref: 'g123' })],
+            ['a stale scope both identities share', () => queueCleanupForA({}, { index_scope_ref: 'g123' })],
+            ['a stale device both identities share', () => queueCleanupForA({}, { index_local_id: 'OLDDEVICE' })],
+            ['no search access', async () => {
+                await queueCleanupForA();
+                (Zotero.Beaver as any).hasSearchIndexAccess = false;
+            }],
+            ['background processing disabled', async () => {
+                await queueCleanupForA();
+                prefs.backgroundProcessingEnabled = false;
+            }],
+            ['excluded library', async () => {
+                await queueCleanupForA();
+                vi.mocked(isBackgroundProcessingLibraryEnabled).mockReturnValue(false);
+            }],
+        ] as const)('untags when it cannot reacquire: %s', async (_case, arrange) => {
+            await arrange();
+            expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx))
+                .toEqual({ kind: 'complete', reason: 'index_untagged' });
+            expect(api.untag).toHaveBeenCalledTimes(1);
+            expect(enqueue).not.toHaveBeenCalled();
+            expect(await countCleanupIntents(connection, 'account-a')).toBe(0);
+        });
+
+        it('keeps a membership its own failed acquisition still tracks', async () => {
+            await queueCleanupForA();
+            await db.recordAttachmentIndexIdentity(1, record.zoteroKey, 'a'.repeat(64),
+                { ...ownerB, index_account_id: 'account-a' });
+            await db.markAttachmentUpsertFailed(1, record.zoteroKey, 'a'.repeat(64), 'index_unexpected_error');
+            expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx))
+                .toEqual({ kind: 'complete', reason: 'cleanup_superseded' });
+            expect(api.untag).not.toHaveBeenCalled();
+            expect(await countCleanupIntents(connection, 'account-a')).toBe(0);
+        });
+
+        it('does not reacquire for a cleanup without a durable identity', async () => {
+            await queueCleanupForA();
+            const { index_scope_ref: _scope, ...payload } = record.payload!;
+            record.payload = payload;
+            expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx))
+                .toEqual({ kind: 'complete', reason: 'index_untagged' });
+            expect(enqueue).not.toHaveBeenCalled();
+        });
+
+        /** Settle the queued cleanup like the dispatcher, then restore it from its durable intent. */
+        async function restoredCleanup(): Promise<BackgroundJobRecord> {
+            for (const job of await db.peekBackgroundJobs()) {
+                if (job.jobType === 'fulltext_untag') await db.completeBackgroundJob(job.id);
+            }
+            expect(await db.restoreIndexCleanup('account-a')).toBe(1);
+            return (await db.peekBackgroundJobs()).find((job) => job.jobType === 'fulltext_untag')!;
+        }
+
+        it('reacquires once after the other account’s own upload failed', async () => {
+            await queueCleanupForA();
+            await db.markAttachmentUpsertFailed(1, record.zoteroKey, 'a'.repeat(64), 'index_unexpected_error');
+            const executor = new FulltextUpsertExecutor(api as any);
+            expect(await executor.execute(record, ctx)).toEqual({ kind: 'complete', reason: 'cleanup_reacquiring' });
+            expect(api.untag).not.toHaveBeenCalled();
+            expect(enqueue).toHaveBeenCalledTimes(1);
+            expect((await restoredCleanup()).payload).toMatchObject({ index_reacquire_attempted: true });
+        });
+
+        it('waits without re-queueing while its reacquisition is still pending', async () => {
+            await queueCleanupForA();
+            ctx.enqueue = async (job) => { await db.enqueueBackgroundJob(job); };
+            const executor = new FulltextUpsertExecutor(api as any);
+            expect(await executor.execute(record, ctx)).toEqual({ kind: 'complete', reason: 'cleanup_reacquiring' });
+            await db.markAttachmentUpsertFailed(1, record.zoteroKey, 'a'.repeat(64), 'index_unexpected_error');
+            const enqueueSpy = vi.spyOn(db, 'enqueueBackgroundJob');
+            expect(await executor.execute(await restoredCleanup(), ctx))
+                .toEqual({ kind: 'complete', reason: 'cleanup_reacquiring' });
+            expect(enqueueSpy).not.toHaveBeenCalled();
+            expect(api.untag).not.toHaveBeenCalled();
+        });
+
+        it('untags instead of retrying a reacquisition that failed before ownership moved', async () => {
+            await queueCleanupForA();
+            const executor = new FulltextUpsertExecutor(api as any);
+            expect(await executor.execute(record, ctx)).toEqual({ kind: 'complete', reason: 'cleanup_reacquiring' });
+            api.requirements.mockResolvedValue({ index_version: 3, extract_schema_versions: { pdf: ['5'] } });
+            const upsert = enqueue.mock.calls[0][0];
+            expect(await executor.execute({ ...record, ...upsert }, ctx))
+                .toMatchObject({ kind: 'failPermanent', reason: 'terminal:unsupported_schema_version' });
+            expect(await db.getAttachmentProcessingState(1, record.zoteroKey)).toMatchObject({
+                upsertStatus: 'failed', upsertRemoteIdentity: ownerB,
+            });
+            expect(await executor.execute(await restoredCleanup(), ctx))
+                .toEqual({ kind: 'complete', reason: 'index_untagged' });
+            expect(enqueue).toHaveBeenCalledTimes(1);
+            expect(await countCleanupIntents(connection, 'account-a')).toBe(0);
+        });
+
+        it.each(['done', 'failed'] as const)('untags exclusion cleanup while its %s ledger row is still present', async (status) => {
+            await queueCleanupForA({ index_cleanup_reason: 'exclusion' });
+            await db.recordAttachmentIndexIdentity(1, record.zoteroKey, 'a'.repeat(64),
+                { ...ownerB, index_account_id: 'account-a' });
+            if (status === 'done') {
+                await db.markAttachmentUpsertDone({ libraryId: 1, zoteroKey: record.zoteroKey,
+                    structuredDocumentHash: 'a'.repeat(64), upsertIndexVersion: '3' });
+            } else {
+                await db.markAttachmentUpsertFailed(1, record.zoteroKey, 'a'.repeat(64), 'index_unexpected_error');
+            }
+            vi.mocked(isBackgroundProcessingLibraryEnabled).mockReturnValue(false);
+            const read = vi.spyOn(db, 'getAttachmentProcessingState');
+            expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx))
+                .toEqual({ kind: 'complete', reason: 'index_untagged' });
+            expect(read).not.toHaveBeenCalled();
+            expect(await db.getAttachmentProcessingState(1, record.zoteroKey)).toMatchObject({ upsertStatus: status });
+            expect(await countCleanupIntents(connection, 'account-a')).toBe(0);
+        });
+
+        it('untags a deleted attachment instead of trusting its failed acquisition', async () => {
+            await queueCleanupForA();
+            await db.recordAttachmentIndexIdentity(1, record.zoteroKey, 'a'.repeat(64),
+                { ...ownerB, index_account_id: 'account-a' });
+            await db.markAttachmentUpsertFailed(1, record.zoteroKey, 'a'.repeat(64), 'index_unexpected_error');
+            await db.retireAttachmentProcessingStates(1, [record.zoteroKey]);
+            expect(await db.getAttachmentProcessingState(1, record.zoteroKey)).toBeNull();
+            const cleanup = (await db.peekBackgroundJobs()).find((job) => job.jobType === 'fulltext_untag'
+                && job.payload?.index_account_id === 'account-a')!;
+            expect(await new FulltextUpsertExecutor(api as any).execute(cleanup, ctx))
+                .toEqual({ kind: 'complete', reason: 'index_untagged' });
+            expect(await countCleanupIntents(connection, 'account-a')).toBe(0);
+        });
+
+        it('queues a deletion cleanup for the owner that reacquired, not the previous one', async () => {
+            await queueCleanupForA();
+            await db.recordAttachmentIndexIdentity(1, record.zoteroKey, 'a'.repeat(64),
+                { ...ownerB, index_account_id: 'account-a' });
+            for (const job of await db.peekBackgroundJobs()) await db.completeBackgroundJob(job.id);
+            expect(await db.markAttachmentUpsertDone({ libraryId: 1, zoteroKey: record.zoteroKey,
+                structuredDocumentHash: 'a'.repeat(64), upsertIndexVersion: '3',
+                remoteIdentity: { ...ownerB, index_account_id: 'account-a' }, supersedeIndexCleanup: true })).toBe(true);
+            expect(await countCleanupIntents(connection, 'account-a')).toBe(0);
+            await db.retireAttachmentProcessingStates(1, [record.zoteroKey]);
+            expect(await countCleanupIntents(connection, 'account-a')).toBe(1);
+            expect(await countCleanupIntents(connection, 'account-b')).toBe(1);
+        });
     });
 
     it.each([undefined, 'exclusion', 'replacement', 'stale_completion'] as const)('defers %s cleanup while A reacquires ownership after A → B → A', async (reason) => {

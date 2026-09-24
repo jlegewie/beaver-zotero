@@ -481,6 +481,9 @@ declare namespace Zotero {
             deleteBackgroundJobsByLibrary(libraryId: number): Promise<void>;
             restoreIndexCleanup(accountId: string): Promise<number>;
             acknowledgeIndexCleanup(job: import('../src/services/database').BackgroundJobRecord): Promise<void>;
+            markIndexCleanupReacquireAttempted: import('../src/services/database').BeaverDB['markIndexCleanupReacquireAttempted'];
+            retireAttachmentProcessingStates: import('../src/services/database').BeaverDB['retireAttachmentProcessingStates'];
+            hasPendingFulltextUpsert: import('../src/services/database').BeaverDB['hasPendingFulltextUpsert'];
             adoptAttachmentExtractionSource(input: {
                 libraryId: number; zoteroKey: string; source: string;
                 contentKind: import("../src/services/database").AttachmentProcessingStateRecord['contentKind'];
@@ -516,14 +519,7 @@ declare namespace Zotero {
             markAttachmentOcrUnavailable(libraryId: number, zoteroKey: string, fileHash: string, error: string): Promise<boolean>;
             clearAttachmentOcrUnavailable(libraryId: number, zoteroKey: string, fileHash: string): Promise<boolean>;
             recordAttachmentIndexIdentity: import('../src/services/database').BeaverDB['recordAttachmentIndexIdentity'];
-            markAttachmentUpsertDone(input: {
-                libraryId: number; zoteroKey: string; structuredDocumentHash: string;
-                upsertIndexVersion: string;
-                remoteIdentity?: import('../src/services/database').AttachmentProcessingStateRecord['upsertRemoteIdentity'];
-                expectedUpsertStatus?: import("../src/services/database").AttachmentUpsertStatus;
-                expectedUpsertIndexVersion?: string | null;
-                expectedExtractStatus?: import("../src/services/database").AttachmentExtractStatus;
-            }): Promise<boolean>;
+            markAttachmentUpsertDone: import('../src/services/database').BeaverDB['markAttachmentUpsertDone'];
             markAttachmentUpsertFailed(libraryId: number, zoteroKey: string, structuredDocumentHash: string, error: string): Promise<void>;
             getSearchPreparationRows: import('../src/services/database').BeaverDB['getSearchPreparationRows'];
             getPendingFulltextUpsertKeys: import('../src/services/database').BeaverDB['getPendingFulltextUpsertKeys'];

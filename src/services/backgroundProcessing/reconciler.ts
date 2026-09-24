@@ -27,7 +27,6 @@ import {
     backgroundProcessingEnabled,
     buildBackgroundExtractPayload,
     buildIndexJobPayload,
-    buildUntagJobInput,
     isBackgroundProcessingLibraryEnabled,
 } from './utils';
 
@@ -241,11 +240,7 @@ export class ReconcilerService {
     }
 
     private async removeAttachment(db: QueueDB, libraryId: number, key: string): Promise<void> {
-        const row = await db.getAttachmentProcessingState(libraryId, key);
-        if (row?.structuredDocumentHash && row.upsertRemoteIdentity) {
-            await db.enqueueBackgroundJob(buildUntagJobInput(row, Date.now()));
-        }
-        await db.deleteAttachmentProcessingState(libraryId, key);
+        await db.retireAttachmentProcessingStates(libraryId, [key]);
         await Zotero.Beaver?.documentCache?.invalidate(libraryId, key);
     }
 
@@ -541,14 +536,9 @@ export class ReconcilerService {
         }
 
         // Heal missed delete notifications while a full enumeration is already
-        // happening. Untag work is persisted before the local ledger rows drop.
-        const staleRows = ledgerRows.filter((row) => !liveKeys.has(row.zoteroKey));
-        await db.enqueueBackgroundJobs(staleRows
-            .filter((row) => row.structuredDocumentHash && row.upsertRemoteIdentity)
-            .map((row) => buildUntagJobInput(row, Date.now())));
-        for (const row of staleRows) {
-            await db.deleteAttachmentProcessingState(libraryId, row.zoteroKey);
-        }
+        // happening. Untag work is persisted with the local ledger rows' removal.
+        await db.retireAttachmentProcessingStates(libraryId, ledgerRows
+            .filter((row) => !liveKeys.has(row.zoteroKey)).map((row) => row.zoteroKey));
 
         if (!isBackgroundProcessingLibraryEnabled(libraryId)) return;
         const ledgerRowCount = (await db.getAttachmentProcessingAggregates(libraryId)).total;
@@ -738,12 +728,8 @@ export class ReconcilerService {
         for (const key of readingKeys) {
             if (this.cancelled(generation) || !isBackgroundProcessingLibraryEnabled(libraryId)) return;
             if (!liveKeys.has(key)) {
-                const row = await db.getAttachmentProcessingState(libraryId, key);
-                // Preserve remote cleanup before dropping either local observation.
-                if (row?.structuredDocumentHash && row.upsertRemoteIdentity) {
-                    await db.enqueueBackgroundJob(buildUntagJobInput(row, Date.now()));
-                }
-                await db.deleteAttachmentProcessingState(libraryId, key);
+                // Preserve remote cleanup while dropping either local observation.
+                await db.retireAttachmentProcessingStates(libraryId, [key]);
                 await Zotero.Beaver?.documentCache?.invalidate(libraryId, key);
             }
         }

@@ -195,7 +195,7 @@ describe('ReconcilerService.retryAttachments', () => {
         await connection.queryAsync(`UPDATE attachment_processing_state
             SET upsert_status = 'done', upsert_remote_identity='{"index_account_id":"account-a","index_scope_ref":"lLOCAL123","index_local_id":"LOCAL123"}', structured_document_hash = ?`, ['a'.repeat(64)]);
         vi.stubGlobal('Zotero', { ...Zotero, DB: { queryAsync: vi.fn(async () => undefined) } });
-        vi.spyOn(db, 'enqueueBackgroundJob').mockRejectedValueOnce(new Error('disk full'));
+        vi.spyOn(db as any, 'enqueueBackgroundJobInTransaction').mockRejectedValueOnce(new Error('disk full'));
 
         reconciler.start();
         await expect((reconciler as any).reconcileReadingState(db, 1, (reconciler as any).generation))
