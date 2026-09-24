@@ -143,16 +143,9 @@ it("releases native temporary tables on success and failure", async () => {
         "DROP TABLE IF EXISTS tmpDuplicates_TEST",
     );
 });
-it("returns complete field comparisons only for inspect", async () => {
-    expect((await find()).groups[0].members[0].fields).not.toHaveProperty(
-        "abstractNote",
-    );
-    const result = await handleDuplicatesRequest({
-        event: "duplicates_request",
-        request_id: "i",
-        mode: "inspect",
-        item_ids: ["u-ITEM0001", "u-ITEM0002"],
-    });
+it("returns complete field comparisons and child inventories from discovery", async () => {
+    const result = await find();
+    expect(result.groups[0].members[0].children).toEqual([]);
     expect(result.groups[0].differing_fields).toContain("abstractNote");
     expect(result.groups[0].differing_fields).not.toContain("inPublications");
     expect(result.groups[0].differing_fields).not.toContain("citationKey");
@@ -167,12 +160,7 @@ it("enforces exclusions before querying and after asynchronous inspection", asyn
     vi.spyOn(Zotero.Items, "loadDataTypes").mockImplementation(async () => {
         state.excluded = true;
     });
-    const result = await handleDuplicatesRequest({
-        event: "duplicates_request",
-        request_id: "i",
-        mode: "inspect",
-        item_ids: ["u-ITEM0001", "u-ITEM0002"],
-    });
+    const result = await find();
     expect(result.error_code).toBe("library_excluded");
     expect(result.groups).toEqual([]);
 });

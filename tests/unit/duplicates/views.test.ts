@@ -67,7 +67,7 @@ it("renders comparison values and children from persisted view data without live
         React.createElement(DuplicatesResultView, {
             view: {
                 view_type: "duplicates",
-                mode: "inspect",
+                mode: "find",
                 groups: [group],
                 total_count: 1,
                 has_more: false,

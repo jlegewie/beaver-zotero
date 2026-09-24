@@ -118,7 +118,6 @@ const SYSTEM_FIELDS = new Set([
 ]);
 export async function describeGroup(
     items: Zotero.Item[],
-    detailed: boolean,
 ): Promise<DuplicateGroup> {
     await Zotero.Items.loadDataTypes(items, [
         "itemData",
@@ -157,40 +156,25 @@ export async function describeGroup(
             date_added: item.dateAdded,
             attachment_count: item.getAttachments().length,
             note_count: item.getNotes().length,
-            fields: detailed
-                ? fields
-                : Object.fromEntries(
-                      Object.entries(fields).filter(([key]) =>
-                          [
-                              "title",
-                              "creators",
-                              "date",
-                              "DOI",
-                              "ISBN",
-                              "publicationTitle",
-                          ].includes(key),
-                      ),
-                  ),
+            fields,
         };
-        if (detailed) {
-            const children = await Zotero.Items.getAsync([
-                ...item.getAttachments(),
-                ...item.getNotes(),
-            ]);
-            await Zotero.Items.loadDataTypes(children, [
-                "itemData",
-                "childItems",
-                "note",
-            ]);
-            member.children = children.map((child) => ({
-                item_id: modelObjectId(child.libraryID, child.key),
-                title: String(child.getField("title") || ""),
-                item_type: child.itemType,
-                annotation_count: child.isFileAttachment()
-                    ? (child as any).getAnnotations(false, true).length
-                    : 0,
-            }));
-        }
+        const children = await Zotero.Items.getAsync([
+            ...item.getAttachments(),
+            ...item.getNotes(),
+        ]);
+        await Zotero.Items.loadDataTypes(children, [
+            "itemData",
+            "childItems",
+            "note",
+        ]);
+        member.children = children.map((child) => ({
+            item_id: modelObjectId(child.libraryID, child.key),
+            title: String(child.getField("title") || ""),
+            item_type: child.itemType,
+            annotation_count: child.isFileAttachment()
+                ? (child as any).getAnnotations(false, true).length
+                : 0,
+        }));
         members.push(member);
     }
     const fieldNames = new Set(members.flatMap((m) => Object.keys(m.fields)));
@@ -275,14 +259,6 @@ export async function handleDuplicatesRequest(
         snapshot_id: "",
     };
     try {
-        if (request.mode === "inspect") {
-            const items = await loadDuplicateItems(request.item_ids || []);
-            const group = await describeGroup(items, true);
-            const excluded = checkLibraryExcluded(items[0].libraryID);
-            if (excluded)
-                throw duplicateError(excluded.message, "library_excluded");
-            return { ...empty, groups: [group], total_count: 1 };
-        }
         const scope = validateLibraryAccess(request.library);
         if (!scope.valid) throw duplicateError(scope.error!, scope.error_code);
         const libraryID = scope.library!.libraryID;
@@ -340,7 +316,7 @@ export async function handleDuplicatesRequest(
         const page = await Promise.all(
             groups
                 .slice(offset, offset + limit)
-                .map((g) => describeGroup(g, false)),
+                .map((g) => describeGroup(g)),
         );
         const excluded = checkLibraryExcluded(libraryID);
         if (excluded)

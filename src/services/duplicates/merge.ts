@@ -165,7 +165,7 @@ export async function validateMergeItemsAction(
             .map((i) => modelObjectId(i.libraryID, i.key)),
     };
     validateChoices(normalized, items);
-    const preview = await describeGroup(items, true);
+    const preview = await describeGroup(items);
     // Previews stay open until execute: a diff preview never saves, so the
     // snapshot reads the saved notes, and a rejected merge leaves them intact.
     const affected = await affectedItems(items);
@@ -201,7 +201,7 @@ export async function applyMerge(
         );
     const affected = await affectedItems(items, true, ctx);
     await settleNotePreviews(affected);
-    const preview = await describeGroup(items, true);
+    const preview = await describeGroup(items);
     let mutationStarted = false;
     try {
         return await nativeMergeTransaction(

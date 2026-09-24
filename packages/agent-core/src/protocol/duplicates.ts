@@ -40,10 +40,9 @@ export interface DuplicatesResultView {
 export interface DuplicatesRequest {
     event: "duplicates_request";
     request_id: string;
-    mode: "find" | "inspect";
+    mode: "find";
     library?: string | null;
     collection?: string | null;
-    item_ids?: string[];
     limit?: number;
     offset?: number;
     snapshot_id?: string | null;
