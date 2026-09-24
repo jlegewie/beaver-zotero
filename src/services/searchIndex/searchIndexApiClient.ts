@@ -122,7 +122,7 @@ export class SearchIndexApiClient extends ApiService {
     /**
      * Payload upserts are large, so the body goes over the wire gzipped. The
      * payload is sent in its backend projection; `doc_hash` still identifies
-     * the full cached document.
+     * the cached document.
      */
     async upsertPayload(request: IndexUpsertRequest): Promise<IndexUpsertResponse> {
         const wireRequest = request.payload

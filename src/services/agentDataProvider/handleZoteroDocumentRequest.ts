@@ -73,21 +73,56 @@ type DocumentErrorResponse = (
     content_kind?: ExtractContentKind,
 ) => WSZoteroDocumentResponse;
 
-function parseSerializedPdfResult(jsonBytes: Uint8Array): DocumentExtractResult {
-    const parsed: unknown = JSON.parse(new TextDecoder().decode(jsonBytes));
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+const PDF_CONTENT_KIND_INSERT = '"content_kind":"pdf",';
+
+function serializedPdfWireResultBytes(rawResultBytes: number): number {
+    return rawResultBytes + PDF_CONTENT_KIND_INSERT.length;
+}
+
+function serializedPdfResultToWireJson(jsonBytes: Uint8Array): string {
+    if (jsonBytes.byteLength < 2 || jsonBytes[0] !== 0x7b) {
         throw new Error('Serialized PDF result must be a JSON object');
     }
-    return { content_kind: 'pdf', ...parsed } as DocumentExtractResult;
+    const raw = new TextDecoder().decode(jsonBytes);
+    if (raw === '{}') {
+        return '{"content_kind":"pdf"}';
+    }
+    if (raw[0] !== '{' || raw[raw.length - 1] !== '}') {
+        throw new Error('Serialized PDF result must be a JSON object');
+    }
+    return `{"content_kind":"pdf",${raw.slice(1)}`;
 }
 
 /**
- * Success response carrying an extracted document.
+ * Success response for a pre-serialized PDF result. The cached serialization
+ * is already in the form the backend consumes, so its bytes are spliced into
+ * the envelope without parsing them.
+ */
+function buildSerializedPdfSuccessResponse(
+    request: WSZoteroDocumentRequest,
+    envelope: Omit<WSZoteroDocumentResponse, 'result'>,
+    jsonBytes: Uint8Array,
+    totalPages: number | null,
+    errorResponse: DocumentErrorResponse,
+): WSZoteroDocumentResponse | PreparedJsonMessage {
+    const oversized = guardSerializedPayloadSize(
+        request,
+        serializedPdfWireResultBytes(jsonBytes.byteLength),
+        totalPages,
+        'pdf',
+        errorResponse,
+    );
+    if (oversized) return oversized;
+    return createPreparedJsonMessage(envelope, { result: serializedPdfResultToWireJson(jsonBytes) });
+}
+
+/**
+ * Success response carrying an extracted document object.
  *
  * WebSocket responses go to the backend, so the document is sent in its
  * backend projection, serialized once, and spliced into the envelope as a
- * prepared field. Local callers (`responseMode: 'object'`) get the full
- * document.
+ * prepared field. Local callers (`responseMode: 'object'`) get the document
+ * as extracted.
  */
 function buildDocumentSuccessResponse(
     request: WSZoteroDocumentRequest,
@@ -101,9 +136,7 @@ function buildDocumentSuccessResponse(
     if (options.responseMode !== 'websocket') {
         return guardPayloadSize(request, { ...envelope, result: document }, totalPages, contentKind, errorResponse);
     }
-    const resultJson = JSON.stringify(toBackendDocumentPayload(document, {
-        includeMargins: request.include_margins === true,
-    }));
+    const resultJson = JSON.stringify(toBackendDocumentPayload(document));
     const oversized = guardSerializedPayloadSize(
         request,
         new TextEncoder().encode(resultJson).byteLength,
@@ -625,10 +658,7 @@ export async function handleZoteroDocumentRequest(
                 const { libraryId, zoteroKey } = result.resolvedAttachment;
                 logger(`handleZoteroDocumentRequest: document cache hit for ${libraryId}-${zoteroKey} mode=${mode}`, 3);
             }
-            const document = result.serializedResult
-                ? parseSerializedPdfResult(result.serializedResult.jsonBytes)
-                : { ...result.result, content_kind: 'pdf' as const };
-            return buildDocumentSuccessResponse(request, options, {
+            const envelope: Omit<WSZoteroDocumentResponse, 'result'> = {
                 type: 'zotero_document',
                 request_id,
                 resolved_attachment: {
@@ -641,7 +671,16 @@ export async function handleZoteroDocumentRequest(
                 ...(parentItem ? { parent_item: parentItem } : {}),
                 ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
                 ...(await diagnosticsField()),
-            }, document, result.totalPages ?? null, 'pdf', errorResponse);
+            };
+            if (result.serializedResult) {
+                return buildSerializedPdfSuccessResponse(
+                    request, envelope, result.serializedResult.jsonBytes, result.totalPages ?? null, errorResponse,
+                );
+            }
+            return buildDocumentSuccessResponse(
+                request, options, envelope, { ...result.result, content_kind: 'pdf' as const },
+                result.totalPages ?? null, 'pdf', errorResponse,
+            );
         }
 
         if (result.kind === 'timeout' || (result.kind === 'external_abort' && timeout.signal.aborted)) {
@@ -878,17 +917,23 @@ async function handleExternalFileDocumentRequest(
             if (result.cached) {
                 logger(`handleZoteroDocumentRequest: document cache hit for ${requestKey} mode=${mode}`, 3);
             }
-            const document = result.serializedResult
-                ? parseSerializedPdfResult(result.serializedResult.jsonBytes)
-                : { ...result.result, content_kind: 'pdf' as const };
-            return buildDocumentSuccessResponse(request, options, {
+            const envelope: Omit<WSZoteroDocumentResponse, 'result'> = {
                 type: 'zotero_document',
                 request_id,
                 external_file_key: extKey,
                 content_type: result.contentType,
                 content_kind: 'pdf',
                 served_attachment: servedExternal,
-            }, document, result.totalPages ?? null, 'pdf', errorResponse);
+            };
+            if (result.serializedResult) {
+                return buildSerializedPdfSuccessResponse(
+                    request, envelope, result.serializedResult.jsonBytes, result.totalPages ?? null, errorResponse,
+                );
+            }
+            return buildDocumentSuccessResponse(
+                request, options, envelope, { ...result.result, content_kind: 'pdf' as const },
+                result.totalPages ?? null, 'pdf', errorResponse,
+            );
         }
 
         if (result.kind === 'timeout' || result.kind === 'external_abort') {

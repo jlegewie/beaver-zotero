@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { structuredResultWithCitablePages } from '../../helpers/structuredDocuments';
 
 // Mock createCitationHTML before importing the module under test
 vi.mock('../../../src/utils/zoteroUtils', () => ({
@@ -911,13 +912,11 @@ describe('expandToRawHtml', () => {
         (Zotero.Libraries as any).get = vi.fn(() => ({ isGroup: false }));
         (Zotero as any).Beaver = { documentCache: {
             getMetadata: async () => ({ pageLabels: { 1: 'iv', 2: 'v' } }),
-            getResult: async () => ({ mode: 'structured', document: { citationIndex: {
-                s1: { pageIndex: 1, ...(withLabels ? { pageLabel: 'iv' } : {}) },
-                s2: { pageIndex: 1, pageLabel: 'iv' },
-                s3: { pageIndex: 2, pageLabel: 'v' },
-                s4: { pageIndex: 2, pageLabel: 'v' },
-                s5: { pageIndex: 3, ...(withLabels ? { pageLabel: 'vi' } : {}) },
-            } } }),
+            getResult: async () => structuredResultWithCitablePages(4, [
+                { index: 1, label: withLabels ? 'iv' : undefined, items: [{ id: 'p1', sentences: ['s1', 's2'] }] },
+                { index: 2, label: 'v', items: [{ id: 'p2', sentences: ['s3', 's4'] }] },
+                { index: 3, label: withLabels ? 'vi' : undefined, items: [{ id: 'p3', sentences: ['s5'] }] },
+            ]),
         } };
         try {
             for (const attribute of ['id', 'att_id']) {

@@ -1,7 +1,8 @@
 /**
- * zotero_document responses sent over the WebSocket carry the backend
- * projection of the document (no citation index, no PDF margin items unless
- * requested); local callers still receive the full document.
+ * zotero_document responses sent over the WebSocket carry documents in the
+ * form the backend consumes: cached PDF serializations are spliced in
+ * verbatim, and EPUB/snapshot documents drop their derivable citation index.
+ * Local callers receive documents as extracted.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -51,10 +52,7 @@ const pdfRecord = {
     createdAt: '2026-06-01T00:00:00.000Z',
 };
 
-function structuredResult(marginCount = 2) {
-    const margins = Array.from({ length: marginCount }, (_, i) => ({
-        id: `margin${i + 1}`, kind: 'margin', pageIndex: 0, order: i + 1, bbox: [0, 0, 5, 5], text: 'x',
-    }));
+function structuredResult() {
     return {
         schemaVersion: '4',
         mode: 'structured',
@@ -64,14 +62,8 @@ function structuredResult(marginCount = 2) {
             bboxPrecision: 1,
             pages: [{
                 index: 0, width: 612, height: 792, viewBox: [0, 0, 612, 792], rotation: 0,
-                items: [
-                    { id: 'p1', kind: 'text', pageIndex: 0, order: 0, bbox: [10, 10, 100, 20], text: 'Body.' },
-                    ...margins,
-                ],
+                items: [{ id: 'p1', kind: 'text', pageIndex: 0, order: 0, bbox: [10, 10, 100, 20], text: 'Body.' }],
             }],
-            citationIndex: Object.fromEntries(
-                ['p1', ...margins.map(m => m.id)].map(id => [id, { id, kind: 'item', pageIndex: 0, itemId: id }]),
-            ),
         },
     };
 }
@@ -98,7 +90,7 @@ function request(overrides: Partial<WSZoteroDocumentRequest> = {}): WSZoteroDocu
     } as WSZoteroDocumentRequest;
 }
 
-async function websocketResult(req: WSZoteroDocumentRequest): Promise<any> {
+async function websocketMessage(req: WSZoteroDocumentRequest): Promise<any> {
     const response = await handleZoteroDocumentRequest(req, { responseMode: 'websocket' });
     expect(isPreparedJsonMessage(response)).toBe(true);
     return JSON.parse(materializePreparedJsonMessage(response as any));
@@ -110,40 +102,20 @@ describe('handleZoteroDocumentRequest backend document payload', () => {
         vi.mocked(resolveExternalFile).mockResolvedValue({ ok: true, record: pdfRecord });
     });
 
-    it('sends PDFs without the citation index or margin items', async () => {
+    it('splices cached PDF serializations into the response without parsing them', async () => {
         mockSerializedPdf(structuredResult());
+        const parse = vi.spyOn(JSON, 'parse');
 
-        const message = await websocketResult(request());
+        const response = await handleZoteroDocumentRequest(request(), { responseMode: 'websocket' });
 
+        expect(parse).not.toHaveBeenCalled();
+        parse.mockRestore();
+        const message = JSON.parse(materializePreparedJsonMessage(response as any));
         expect(message).toMatchObject({ type: 'zotero_document', request_id: 'req-1', content_kind: 'pdf' });
-        expect(message.result.content_kind).toBe('pdf');
-        expect(message.result.document).not.toHaveProperty('citationIndex');
-        expect(message.result.document.pages[0].items.map((item: any) => item.id)).toEqual(['p1']);
+        expect(message.result).toEqual({ content_kind: 'pdf', ...structuredResult() });
     });
 
-    it('keeps margin items when the backend asks for them', async () => {
-        mockSerializedPdf(structuredResult());
-
-        const message = await websocketResult(request({ include_margins: true }));
-
-        expect(message.result.document).not.toHaveProperty('citationIndex');
-        expect(message.result.document.pages[0].items.map((item: any) => item.id))
-            .toEqual(['p1', 'margin1', 'margin2']);
-    });
-
-    it('applies the payload budget to the projected size', async () => {
-        const full = structuredResult(200);
-        mockSerializedPdf(full);
-        const projectedBytes = JSON.stringify({ content_kind: 'pdf', ...structuredResult(0) }).length;
-        expect(JSON.stringify(full).length).toBeGreaterThan(projectedBytes * 5);
-
-        const message = await websocketResult(request({ max_payload_bytes: projectedBytes + 100 }));
-
-        expect(message.error_code).toBeUndefined();
-        expect(message.result.document.pages[0].items).toHaveLength(1);
-    });
-
-    it('still rejects documents whose projection exceeds the payload budget', async () => {
+    it('rejects serialized PDFs that exceed the payload budget', async () => {
         mockSerializedPdf(structuredResult());
 
         const response = await handleZoteroDocumentRequest(
@@ -175,14 +147,14 @@ describe('handleZoteroDocumentRequest backend document payload', () => {
             contentType: 'application/epub+zip',
         } as any);
 
-        const message = await websocketResult(request());
+        const message = await websocketMessage(request());
 
         expect(message.content_kind).toBe('epub');
         expect(message.result).not.toHaveProperty('citationIndex');
         expect(message.result.sections).toHaveLength(1);
     });
 
-    it('returns the full document to local callers', async () => {
+    it('returns documents as extracted to local callers', async () => {
         vi.mocked(extractAndCacheResolvedPdfDocument).mockResolvedValue({
             kind: 'ok',
             cached: true,
@@ -194,8 +166,6 @@ describe('handleZoteroDocumentRequest backend document payload', () => {
 
         const response = await handleZoteroDocumentRequest(request());
 
-        expect(response.result).toMatchObject({ content_kind: 'pdf' });
-        expect((response.result as any).document.citationIndex).toBeDefined();
-        expect((response.result as any).document.pages[0].items).toHaveLength(3);
+        expect(response.result).toEqual({ ...structuredResult(), content_kind: 'pdf' });
     });
 });

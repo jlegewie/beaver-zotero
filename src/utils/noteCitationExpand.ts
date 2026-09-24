@@ -55,6 +55,7 @@ import {
 } from '@beaver/agent-core/citations/citationGrammar';
 import type { PageLabels } from '../services/documentCache';
 import type { StructuredExtractResult } from '@beaver/agent-core/extract/schema';
+import { getCitationIndex } from '../beaver-extract/schema/citationIndex';
 import {
     firstPageNumber,
     formatCitationPages,
@@ -284,7 +285,7 @@ function resolvePageFromStructuredResult(
     locator: Locator,
     includeRange = false,
 ): ResolvedLocatorPage | null {
-    const index = result.document.citationIndex ?? {};
+    const index = getCitationIndex(result.document);
     const pages: number[] = [];
     const labels: PageLabels = {};
     for (const id of citationIndexCandidateIdsForLocator(locator)) {

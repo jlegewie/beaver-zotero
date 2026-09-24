@@ -16,6 +16,7 @@ import {
 } from '@beaver/agent-core/citations/citationGrammar';
 import { getCitationPreloadFilePath, preloadPageLabelsForContent } from './pageLabels';
 import type { CitationIndexEntry, StructuredExtractResult } from '@beaver/agent-core/extract/schema';
+import { getCitationIndex } from '../../src/beaver-extract/schema/citationIndex';
 import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
 import type { ExternalFileRecord } from '../../src/services/database';
 
@@ -47,7 +48,7 @@ function resolveEntriesFromStructuredResult(
     result: StructuredExtractResult,
     locator: Locator,
 ): CitationIndexEntry[] {
-    const index = result.document.citationIndex ?? {};
+    const index = getCitationIndex(result.document);
     const entries: CitationIndexEntry[] = [];
     const seen = new Set<string>();
     for (const id of citationIndexCandidateIdsForLocator(locator)) {

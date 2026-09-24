@@ -340,11 +340,6 @@ export interface WSZoteroDocumentRequest extends WSBaseEvent {
     timeout_seconds?: number;
     /** Maximum uncompressed serialized size of payload. */
     max_payload_bytes?: number | null;
-    /**
-     * Keep PDF `margin` items (running heads, page numbers, watermarks) in the
-     * returned document. Absent means false.
-     */
-    include_margins?: boolean | null;
 }
 
 /** Request from backend to render attachment pages as images */

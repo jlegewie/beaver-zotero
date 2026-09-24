@@ -75,7 +75,6 @@ import {
 import {
     SCHEMA_VERSION,
     assignDocumentIds,
-    buildCitationIndex,
     projectStructuredPage,
     type BeaverExtractResult,
     type ExtractionDebug,
@@ -1001,8 +1000,15 @@ function toStructuredExtractResult(
     includeDiagnostics = false,
     debug?: ExtractionDebug,
 ): StructuredExtractResult {
+    // Margin items stay internal: no consumer reads them, and watermarks drawn
+    // glyph by glyph can make them a large share of a document. They are
+    // appended after all other items, so dropping them leaves the other items'
+    // order and ids unchanged. Debug output keeps them as `marginDecisions`.
     const pages = result.pages.map((page) =>
-        projectStructuredPage(page, bboxPrecision),
+        projectStructuredPage(
+            { ...page, items: page.items.filter((item) => item.kind !== "margin") },
+            bboxPrecision,
+        ),
     );
     assignDocumentIds(pages);
     const degradation = degradationSummary(result);
@@ -1037,7 +1043,6 @@ function toStructuredExtractResult(
             bboxOrigin: "top-left",
             bboxPrecision,
             pages,
-            citationIndex: buildCitationIndex(pages),
         },
         ...(mergedDebug ? { debug: mergedDebug } : {}),
     };

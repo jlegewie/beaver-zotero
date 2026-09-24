@@ -103,11 +103,15 @@ function diffStructuredPage(
     diffScalar(`${base}.label`, e.label, a.label, diffs);
     if (diffs.length >= cap) return;
 
-    const maxItems = Math.max(e.items.length, a.items.length);
+    // Margin items are not part of the public document, but stored fixtures
+    // may still list them. They trail every page, so ignoring them on both
+    // sides leaves the remaining items aligned.
+    const expectedItems = e.items.filter((item) => item.kind !== "margin");
+    const actualItems = a.items.filter((item) => item.kind !== "margin");
+    const maxItems = Math.max(expectedItems.length, actualItems.length);
     for (let i = 0; i < maxItems && diffs.length < cap; i++) {
-        const ei = e.items[i];
-        const ai = a.items[i];
-        if (!ei && ai?.kind === "margin" && i >= e.items.length) continue;
+        const ei = expectedItems[i];
+        const ai = actualItems[i];
         if (!ei) {
             diffs.push({ path: `${base}.items[${i}]`, kind: "extra", actual: ai });
             continue;

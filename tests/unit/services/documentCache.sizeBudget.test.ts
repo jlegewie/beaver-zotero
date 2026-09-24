@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BeaverDB } from '../../../src/services/database';
-import { DocumentCache } from '../../../src/services/documentCache';
+import { DOCUMENT_PAYLOAD_FORMAT_VERSION, DocumentCache } from '../../../src/services/documentCache';
 import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { buildPdfCachedMetadata } from '@beaver/agent-core/extract/document/shared/contentKinds';
 
@@ -65,7 +65,7 @@ describe('DocumentCache size budget', () => {
             payloadSizeBytes: input.sizeBytes,
             payloadSha256: null,
             extractionSchemaVersion: '4',
-            cacheFormatVersion: 1,
+            cacheFormatVersion: DOCUMENT_PAYLOAD_FORMAT_VERSION,
         });
         await conn.queryAsync(
             `UPDATE document_cache_payloads
@@ -117,7 +117,7 @@ describe('DocumentCache size budget', () => {
                     source_file_size_bytes, source_size_bytes, payload_path,
                     payload_size_bytes, payload_sha256, extraction_schema_version,
                     cache_format_version, created_at, last_accessed_at
-                 ) SELECT id, item_id, 1, ?, 'structured', 'pdf', ?, 10, 3, 3, ?, ?, NULL, '4', 1, ?, NULL
+                 ) SELECT id, item_id, 1, ?, 'structured', 'pdf', ?, 10, 3, 3, ?, ?, NULL, '4', ${DOCUMENT_PAYLOAD_FORMAT_VERSION}, ?, NULL
                    FROM document_cache_metadata WHERE library_id = 1 AND zotero_key = ?`,
                 [
                     key,
@@ -177,7 +177,7 @@ describe('DocumentCache size budget', () => {
                 );
                 payloadRows.push(
                     `(${id}, ${10_000 + i}, 1, '${key}', 'structured', 'pdf',`
-                    + ` '/tmp/${key}.pdf', 10, 3, 3, '${path}', ${sizeBytes}, NULL, '4', 1,`
+                    + ` '/tmp/${key}.pdf', 10, 3, 3, '${path}', ${sizeBytes}, NULL, '4', ${DOCUMENT_PAYLOAD_FORMAT_VERSION},`
                     + ` '${created}', NULL)`,
                 );
                 files.add(path);

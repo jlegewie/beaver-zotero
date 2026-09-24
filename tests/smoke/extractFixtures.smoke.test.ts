@@ -20,6 +20,7 @@ import {
     type SnapshotDiff,
 } from "../../src/beaver-extract/cli/fixture/pageDiff";
 import { extractPdf } from "../../src/beaver-extract/node/api";
+import { getCitationIndex } from "../../src/beaver-extract/schema/citationIndex";
 import { resolveAnalysisWindow } from "../../src/beaver-extract/cli/fixture/analysisScope";
 import {
     loadExtractFixtures,
@@ -84,9 +85,14 @@ describe("BeaverExtract fixtures (smoke)", () => {
             if (diffs.length > 0) {
                 throw new Error(formatDiffs(`[${f.scope}] ${f.id}`, diffs));
             }
+            // The public document carries neither margin items nor a stored
+            // citation index; ids resolve through the derived index.
+            expect(result.document).not.toHaveProperty("citationIndex");
+            const citationIndex = getCitationIndex(result.document);
             for (const page of result.document.pages.filter((p) => selected.has(p.index))) {
                 for (const item of page.items) {
-                    expect(result.document.citationIndex[item.id]).toMatchObject({
+                    expect(item.kind).not.toBe("margin");
+                    expect(citationIndex[item.id]).toMatchObject({
                         id: item.id,
                         kind: "item",
                         pageIndex: page.index,
@@ -94,7 +100,7 @@ describe("BeaverExtract fixtures (smoke)", () => {
                     });
                     if (!("sentences" in item) || !item.sentences) continue;
                     for (const sentence of item.sentences) {
-                        expect(result.document.citationIndex[sentence.id]).toMatchObject({
+                        expect(citationIndex[sentence.id]).toMatchObject({
                             id: sentence.id,
                             kind: "sentence",
                             pageIndex: page.index,
