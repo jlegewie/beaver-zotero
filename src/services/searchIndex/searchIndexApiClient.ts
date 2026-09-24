@@ -1,6 +1,7 @@
 import { ApiService } from '@beaver/agent-core/transport/apiService';
 import { gzipJsonValueChunked } from '../../utils/gzip';
 import type { DocumentExtractResult } from '@beaver/agent-core/extract/document/shared/documentExtractResult';
+import { toBackendDocumentPayload } from '../documentExtraction/backendDocumentPayload';
 
 export const SEARCH_INDEX_API_PREFIX = '/api/v1/index';
 
@@ -118,11 +119,18 @@ export class SearchIndexApiClient extends ApiService {
         );
     }
 
-    /** Payload upserts are large, so the body goes over the wire gzipped. */
+    /**
+     * Payload upserts are large, so the body goes over the wire gzipped. The
+     * payload is sent in its backend projection; `doc_hash` still identifies
+     * the full cached document.
+     */
     async upsertPayload(request: IndexUpsertRequest): Promise<IndexUpsertResponse> {
+        const wireRequest = request.payload
+            ? { ...request, payload: toBackendDocumentPayload(request.payload) }
+            : request;
         return await this.postRaw<IndexUpsertResponse>(
             `${SEARCH_INDEX_API_PREFIX}/upsert`,
-            await gzipJsonValueChunked(request),
+            await gzipJsonValueChunked(wireRequest),
             { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' },
             { timeoutMs: UPSERT_TIMEOUT_MS },
         );
