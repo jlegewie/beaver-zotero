@@ -17,9 +17,12 @@ import {
 } from '../searchIndex/searchIndexApiClient';
 import {
     BACKGROUND_EXTRACT_PRIORITY,
+    BACKGROUND_UPSERT_PRIORITY,
 } from '../backgroundProcessing/constants';
 import {
+    backgroundProcessingEnabled,
     buildBackgroundExtractPayload,
+    buildIndexJobPayload,
     buildUntagJobInput,
     isBackgroundProcessingLibraryEnabled,
 } from '../backgroundProcessing/utils';
@@ -319,6 +322,7 @@ export class FulltextUpsertExecutor implements JobExecutor {
             expectedUpsertStatus: row.upsertStatus,
             expectedUpsertIndexVersion: row.upsertIndexVersion,
             expectedExtractStatus: row.extractStatus,
+            supersedeIndexCleanup: true,
         });
         if (!applied) {
             await ctx.enqueue(buildUntagJobInput({ ...row, upsertRemoteIdentity: remoteIdentity },
@@ -349,18 +353,61 @@ export class FulltextUpsertExecutor implements JobExecutor {
         if (isBackgroundProcessingLibraryEnabled(record.libraryId)) {
             const current = await ctx.db.getAttachmentProcessingState(record.libraryId, record.zoteroKey);
             if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
-            if (isBackgroundProcessingLibraryEnabled(record.libraryId) && current?.structuredDocumentHash === hash
-                && current.extractStatus === 'done'
-                && current.upsertRemoteIdentity?.index_account_id === accountId
-                && current.upsertRemoteIdentity?.index_scope_ref === scopeRef
-                && current.upsertRemoteIdentity?.index_local_id === record.payload?.index_local_id) {
-                // Ownership is recorded before upload. Its response can still be
-                // pending even after the remote membership has been restored.
-                if (current.upsertStatus !== 'done') {
-                    return { kind: 'defer', reason: 'index_acquisition_pending' };
+            const unchanged = current?.structuredDocumentHash === hash && current.extractStatus === 'done'
+                ? current : null;
+            const owner = unchanged?.upsertRemoteIdentity;
+            if (unchanged && owner && isBackgroundProcessingLibraryEnabled(record.libraryId)
+                && owner.index_scope_ref === scopeRef
+                && owner.index_local_id === record.payload?.index_local_id) {
+                if (owner.index_account_id === accountId) {
+                    // Ownership is recorded before upload. Its response can still be
+                    // pending even after the remote membership has been restored.
+                    if (unchanged.upsertStatus === null) {
+                        return { kind: 'defer', reason: 'index_acquisition_pending' };
+                    }
+                    // A failed upload still leaves the ledger tracking this
+                    // membership; retiring the ledger later re-queues its cleanup.
+                    await ctx.db.acknowledgeIndexCleanup(record);
+                    return { kind: 'complete', reason: 'cleanup_superseded' };
                 }
-                await ctx.db.acknowledgeIndexCleanup(record);
-                return { kind: 'complete', reason: 'cleanup_superseded' };
+                // Only cleanups with a complete identity have a durable intent to
+                // hand over, and only an entitled lane can recreate that identity.
+                if (record.payload?.index_scope_ref && this.canReacquire(record, scopeRef)) {
+                    // Another account took over this unchanged document while this
+                    // account was signed out. Removing this account's membership
+                    // first would delete remote rows that the returning account
+                    // still needs and force a fresh embedding. Reacquire it with a
+                    // hash-only upsert instead. Its completion retires this cleanup;
+                    // until then the durable intent stays in the outbox and is
+                    // re-evaluated on the lane's next cleanup restore.
+                    const pending = await ctx.db.hasPendingFulltextUpsert(record.libraryId, record.zoteroKey);
+                    if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+                    // The other account's upload may have failed, which is no reason
+                    // to drop this account's membership. A failure after this
+                    // account's own attempt is: it failed before ownership moved,
+                    // and retrying it would only repeat the failure.
+                    const attemptFailed = record.payload.index_reacquire_attempted === true
+                        && unchanged.upsertStatus === 'failed' && !pending;
+                    if (!attemptFailed) {
+                        if (!pending) {
+                            await ctx.enqueue({
+                                jobType: 'fulltext_upsert',
+                                libraryId: record.libraryId,
+                                itemId: unchanged.itemId ?? record.itemId,
+                                zoteroKey: record.zoteroKey,
+                                contentKind: unchanged.contentKind,
+                                payloadKind: 'structured',
+                                priority: BACKGROUND_UPSERT_PRIORITY,
+                                payload: buildIndexJobPayload(unchanged.contentKind, { docHash: hash }),
+                                now: Date.now(),
+                            });
+                            if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+                            await ctx.db.markIndexCleanupReacquireAttempted(record);
+                        }
+                        if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
+                        return { kind: 'complete', reason: 'cleanup_reacquiring' };
+                    }
+                }
             }
         }
         const outcome = await this.untagOne({
@@ -373,6 +420,17 @@ export class FulltextUpsertExecutor implements JobExecutor {
             await ctx.db.acknowledgeIndexCleanup(record);
         }
         return outcome;
+    }
+
+    /**
+     * True when this account's upsert lane would recreate exactly the cleanup's
+     * remote identity, so a later pass can confirm the cleanup as superseded.
+     */
+    private canReacquire(record: BackgroundJobRecord, scopeRef: string): boolean {
+        return Zotero.Beaver?.hasSearchIndexAccess === true
+            && backgroundProcessingEnabled()
+            && scopeRef === getIndexScopeRef(record.libraryId)
+            && record.payload?.index_local_id === getZoteroUserIdentifier().localUserKey;
     }
 
     private async untagOne(ref: IndexDocumentRef, storedLocalId: string | undefined, accessChanged: () => boolean): Promise<JobOutcome> {
