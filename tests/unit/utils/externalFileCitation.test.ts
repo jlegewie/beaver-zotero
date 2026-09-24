@@ -8,6 +8,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
 import { preloadExternalFileCitations } from '../../../src/utils/externalFileCitation';
 import { expandToRawHtml, preloadStructuralLocatorPages } from '../../../src/utils/noteCitationExpand';
 import { simplifyNoteHtml } from '../../../src/utils/noteHtmlSimplifier';
+import { structuredResultWithCitablePages } from '../../helpers/structuredDocuments';
 
 const tag = '<citation id="ext-MRDTFYHP" loc="page6"/>';
 const metadata = () => ({ elements: new Map() } as any);
@@ -59,10 +60,10 @@ describe('external file citations in notes', () => {
         ['s5', 'iv'],
         ['s5-s6', 'iv-v'],
     ])('resolves external locator %s to cached page labels', async (loc, label) => {
-        const getResult = vi.fn().mockResolvedValue({ mode: 'structured', document: { citationIndex: {
-            s5: { pageIndex: 5, pageLabel: 'iv' },
-            s6: { pageIndex: 6, pageLabel: 'v' },
-        } } });
+        const getResult = vi.fn().mockResolvedValue(structuredResultWithCitablePages(7, [
+            { index: 5, label: 'iv', items: [{ id: 'p1', sentences: ['s5'] }] },
+            { index: 6, label: 'v', items: [{ id: 'p2', sentences: ['s6'] }] },
+        ]));
         (Zotero as any).Beaver.documentCache = { getResult };
         const input = `<citation id="ext-MRDTFYHP" loc="${loc}"/>`;
         const { files } = await preloadExternalFileCitations(input);

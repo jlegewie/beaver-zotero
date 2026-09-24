@@ -29,50 +29,17 @@ import {
     getCitationPreloadFilePath,
     preloadPageLabelsForContent,
 } from '../../../react/utils/pageLabels';
+import { structuredResultWithCitablePages } from '../../helpers/structuredDocuments';
 
 const mockGetCitationPreloadFilePath = vi.mocked(getCitationPreloadFilePath);
 const mockPreloadPageLabelsForContent = vi.mocked(preloadPageLabelsForContent);
 
 function structuredResult() {
-    return {
-        mode: 'structured',
-        document: {
-            pageCount: 5,
-            pages: [],
-            citationIndex: {
-                s25: {
-                    id: 's25',
-                    kind: 'sentence',
-                    pageIndex: 2,
-                    pageLabel: '7',
-                    itemId: 'p4',
-                    sentenceId: 's25',
-                },
-                s26: {
-                    id: 's26',
-                    kind: 'sentence',
-                    pageIndex: 2,
-                    pageLabel: '7',
-                    itemId: 'p4',
-                    sentenceId: 's26',
-                },
-                p12: {
-                    id: 'p12',
-                    kind: 'item',
-                    pageIndex: 1,
-                    pageLabel: '6',
-                    itemId: 'p12',
-                },
-                table3: {
-                    id: 'table3',
-                    kind: 'item',
-                    pageIndex: 4,
-                    pageLabel: '12',
-                    itemId: 'table3',
-                },
-            },
-        },
-    };
+    return structuredResultWithCitablePages(5, [
+        { index: 1, label: '6', items: [{ id: 'p12' }] },
+        { index: 2, label: '7', items: [{ id: 'p4', sentences: ['s25', 's26'] }] },
+        { index: 4, label: '12', items: [{ id: 'table3' }] },
+    ]);
 }
 
 describe('citation render context', () => {

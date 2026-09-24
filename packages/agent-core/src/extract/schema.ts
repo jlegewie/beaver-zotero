@@ -86,8 +86,13 @@ export interface StructuredDocument {
      */
     bboxOrigin: BBoxOrigin;
     bboxPrecision: number;
+    /**
+     * Citable content in reading order. PDF `margin` items (running heads,
+     * page numbers, watermarks) are not part of the public document; the
+     * extractor uses them internally and reports them only in debug output.
+     * Citation ids resolve through an index derived from these pages.
+     */
     pages: StructuredPage[];
-    citationIndex: CitationIndex;
 }
 
 export interface StructuredPage {
