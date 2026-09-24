@@ -51,14 +51,17 @@ import {
 // collapse as a cheap O(n) post-pass instead, so `collect-styles` is
 // intentionally NOT set here.
 //
-// use-known-glyph-outlines (fork-local) is always on. Symbol fonts without a
-// ToUnicode CMap often draw a symbol in a slot named for a Latin letter (an
-// Elsevier font's "m" draws μ, so "20 μg" reads "20 mg"). The mapping is
-// valid at every step, so no U+FFFD appears and the recovery path below never
-// sees it. MuPDF instead replaces the character when the glyph's outline is in
-// a reviewed table of known symbol outlines. Older WASM builds ignore the
-// option.
-const TEXT_REPAIR_OPTIONS = "use-known-glyph-outlines";
+// Text repair, always on (fork-local options; older WASM builds ignore them):
+//   - use-known-glyph-outlines: symbol fonts often draw a symbol in a slot
+//     whose glyph name or ToUnicode says otherwise (an Elsevier font's "m"
+//     draws μ, so "20 μg" reads "20 mg"; its ToUnicode maps "=" to "¼"). No
+//     U+FFFD appears, so the recovery path below never sees it. MuPDF replaces
+//     the character when the glyph's outline is in a reviewed table of known
+//     symbol outlines.
+//   - space-after-symbols: MuPDF otherwise never turns a word gap after a math
+//     operator, arrow or geometric shape into a space ("○Lead contact").
+// Control characters are replaced in the final result (`replaceControlCharsInResult`, ops.ts).
+const TEXT_REPAIR_OPTIONS = "use-known-glyph-outlines,space-after-symbols";
 const STRUCTURED_TEXT_OPTIONS = `preserve-whitespace,${TEXT_REPAIR_OPTIONS}`;
 const STRUCTURED_TEXT_OPTIONS_WITH_IMAGES = `preserve-whitespace,preserve-images,${TEXT_REPAIR_OPTIONS}`;
 const STRUCTURED_TEXT_OPTIONS_DETAILED = `preserve-whitespace,preserve-ligatures,${TEXT_REPAIR_OPTIONS}`;

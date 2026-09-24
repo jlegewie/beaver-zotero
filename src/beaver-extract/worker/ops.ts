@@ -961,10 +961,43 @@ function translateDegradationItemIds(
     };
 }
 
+// C0/C1 control characters never belong in extracted text; Type 3 fonts in
+// some Word exports emit U+0007 for list tabs ("23. \x07Heer"). Each is
+// replaced by one space so text offsets stay aligned. This runs on the final
+// result, not on raw pages: page analysis (the OCR gate, unmapped-glyph
+// recovery) relies on control characters counting as non-letters.
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
+const CONTROL_CHAR_TEST = new RegExp(CONTROL_CHARS.source);
+function replaceControlChars(text: string): string {
+    return CONTROL_CHAR_TEST.test(text) ? text.replace(CONTROL_CHARS, " ") : text;
+}
+
+/** Replace control characters in every text field of the result, in place. */
+function replaceControlCharsInResult(result: InternalExtractionResult): void {
+    result.fullText = replaceControlChars(result.fullText);
+    for (const page of result.pages) {
+        page.content = replaceControlChars(page.content);
+        for (const item of page.items) {
+            if (!("text" in item)) continue;
+            item.text = replaceControlChars(item.text);
+            for (const line of item.lines) line.text = replaceControlChars(line.text);
+            if (!("sentences" in item) || !item.sentences) continue;
+            for (const sentence of item.sentences) {
+                sentence.text = replaceControlChars(sentence.text);
+                for (const fragment of sentence.fragments ?? []) {
+                    fragment.text = replaceControlChars(fragment.text);
+                }
+            }
+        }
+    }
+}
+
 function toMarkdownExtractResult(
     result: InternalExtractionResult,
     includeDiagnostics = false,
 ): MarkdownExtractResult {
+    replaceControlCharsInResult(result);
     return {
         mode: "markdown",
         schemaVersion: SCHEMA_VERSION,
@@ -1001,6 +1034,7 @@ function toStructuredExtractResult(
     includeDiagnostics = false,
     debug?: ExtractionDebug,
 ): StructuredExtractResult {
+    replaceControlCharsInResult(result);
     const pages = result.pages.map((page) =>
         projectStructuredPage(page, bboxPrecision),
     );
