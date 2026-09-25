@@ -331,16 +331,16 @@ describe('fixture capture', () => {
         );
 
         expect(await capture('current__p0', [])).toBe(0);
-        expect(await capture('v5__p0', ['--schema-version', '5'])).toBe(0);
+        expect(await capture('v4__p0', ['--schema-version', '4'])).toBe(0);
         process.exitCode = undefined;
         expect(await capture('v3__p0', ['--schema-version', '3'])).toBe(1);
 
         const read = (id: string) => JSON.parse(readFileSync(join(tmpRoot, id, 'fixture.json'), 'utf8'));
-        expect(read('current__p0').config.schemaVersion).toBe('4');
-        expect(read('v5__p0').config.schemaVersion).toBe('5');
+        expect(read('current__p0').config.schemaVersion).toBe('5');
+        expect(read('v4__p0').config.schemaVersion).toBe('4');
         expect(existsSync(join(tmpRoot, 'v3__p0', 'fixture.json'))).toBe(false);
         const versions = api.extractPdf.mock.calls.map(([input]: any[]) => input.schemaVersion);
-        expect(versions).toEqual(['4', '4', '5', '5']);
+        expect(versions).toEqual(['5', '5', '4', '4']);
     });
 
     it('refuses to overwrite an existing fixture without --update', async () => {

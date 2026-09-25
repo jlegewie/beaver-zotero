@@ -1,18 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Simulate the plugin after the PDF schema bump: current "5", and schema 4
-// still producible on demand.
-vi.mock('@beaver/agent-core/extract/schema', async () => {
-    const actual = await vi.importActual<typeof import('@beaver/agent-core/extract/schema')>(
-        '@beaver/agent-core/extract/schema',
-    );
-    return { ...actual, SCHEMA_VERSION: '5' };
-});
+const presets = vi.hoisted(() => ({ producible: null as string[] | null }));
+// Lets a test simulate a plugin that no longer produces schema 4.
 vi.mock('../../../src/beaver-extract/schema/presets', async () => {
     const actual = await vi.importActual<typeof import('../../../src/beaver-extract/schema/presets')>(
         '../../../src/beaver-extract/schema/presets',
     );
-    return { ...actual, PRODUCIBLE_PDF_SCHEMA_VERSIONS: ['4', '5'] };
+    return {
+        ...actual,
+        get PRODUCIBLE_PDF_SCHEMA_VERSIONS() {
+            return presets.producible ?? actual.PRODUCIBLE_PDF_SCHEMA_VERSIONS;
+        },
+    };
 });
 vi.mock('../../../src/services/documentExtractionCore', () => ({
     extractAndCacheResolvedPdfDocument: vi.fn(),
@@ -66,6 +65,7 @@ describe('locator resolution by id scheme', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        presets.producible = null;
         attachment = {
             id: 42,
             key: 'ATTACH12',
@@ -135,6 +135,18 @@ describe('locator resolution by id scheme', () => {
         });
         const resolved = await preloadStructuralLocatorPages('<citation id="1-ATTACH12" loc="s12"/>');
         expect(resolved.unresolved).toEqual(['id="1-ATTACH12" loc="s12"']);
+    });
+
+    it('reports locators of a version the plugin no longer produces without extracting', async () => {
+        presets.producible = ['5'];
+        const resolved = await preloadStructuralLocatorPages(
+            '<citation id="1-ATTACH12" loc="s12"/> <citation id="1-ATTACH12" loc="s1.2"/>',
+        );
+        expect(resolved.unavailable).toEqual(['id="1-ATTACH12" loc="s12"']);
+        expect(resolved.unresolved).toEqual([]);
+        expect(Object.keys(resolved.pages)).toHaveLength(1);
+        expect(getResult).toHaveBeenCalledOnce();
+        expect(extractAndCacheResolvedPdfDocument).not.toHaveBeenCalled();
     });
 
     it('reads non-PDF attachments from the cache whatever the id scheme', async () => {

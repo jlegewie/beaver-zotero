@@ -784,6 +784,7 @@ export async function handleTestDocumentSerializedHttpRequest(request: any) {
         max_pages: request?.max_pages ?? undefined,
         max_payload_bytes: request?.max_payload_bytes ?? undefined,
         timeout_seconds: request?.timeout_seconds ?? undefined,
+        schema_version: request?.schema_version ?? undefined,
     };
 
     const response = await handleZoteroDocumentRequest(wsRequest, {

@@ -8,7 +8,10 @@ import type {
 import { resolveAttachmentFileSource } from '../documentExtraction/attachmentSource';
 import { computeStructuredDocumentHash } from '../documentExtraction/structuredDocumentHash';
 import type { DocumentExtractResult } from '@beaver/agent-core/extract/document/shared/documentExtractResult';
-import { expectedExtractionSchemaVersion } from '../documentExtraction/shared/extractionSchemaVersions';
+import {
+    expectedExtractionSchemaVersion,
+    isCurrentExtractionSchemaVersion,
+} from '../documentExtraction/shared/extractionSchemaVersions';
 import {
     type IndexDocumentRef,
     type IndexUpsertRequest,
@@ -161,6 +164,11 @@ export class FulltextUpsertExecutor implements JobExecutor {
         };
         const initialEligibility = await checkEligibility();
         if (initialEligibility) return initialEligibility;
+        // A row extracted under an earlier schema is never indexed; the
+        // reconciler re-extracts it, which queues a fresh upsert.
+        if (!isCurrentExtractionSchemaVersion(row.contentKind, row.extractSchemaVersion)) {
+            return { kind: 'complete', reason: 'extract_schema_changed' };
+        }
         const scopeRef = getIndexScopeRef(record.libraryId);
         if (!scopeRef) return { kind: 'complete', reason: 'invalid_scope_ref' };
         const { localUserKey } = getZoteroUserIdentifier();
@@ -172,8 +180,7 @@ export class FulltextUpsertExecutor implements JobExecutor {
             return this.mapApiError(record, row, error, ctx, accessChanged);
         }
         if (accessChanged()) return { kind: 'release', reason: 'access_changed' };
-        const schemaVersion = row.extractSchemaVersion
-            ?? expectedExtractionSchemaVersion(row.contentKind);
+        const schemaVersion = expectedExtractionSchemaVersion(row.contentKind);
         if (!schemaVersion || !requirements.extract_schema_versions[row.contentKind]?.includes(schemaVersion)) {
             return this.terminal(record, row, 'unsupported_schema_version', undefined, ctx, accessChanged);
         }

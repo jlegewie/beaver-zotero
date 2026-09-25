@@ -4,7 +4,7 @@ import { DocumentCache } from '../../../src/services/documentCache';
 import { gzipString } from '../../../src/utils/gzip';
 import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { createMockAttachment } from '../../helpers/factories';
-import type { BeaverExtractResult } from '@beaver/agent-core/extract/schema';
+import { SCHEMA_VERSION, type BeaverExtractResult } from '@beaver/agent-core/extract/schema';
 import type { PageGeometry } from '../../../src/services/documentCache';
 import type { EpubDocument } from '../../../src/services/documentExtraction/epub';
 import { computeStructuredDocumentHash } from '../../../src/services/documentExtraction/structuredDocumentHash';
@@ -28,7 +28,7 @@ function createCacheAttachment(): CacheAttachmentItem {
 }
 
 const structuredResult: BeaverExtractResult = {
-    schemaVersion: '4',
+    schemaVersion: SCHEMA_VERSION,
     mode: 'structured',
     document: {
         pageCount: 1,
@@ -276,7 +276,7 @@ describe('DocumentCache payloads', () => {
     it('serialized PDF probe does not accept pageCount substring matches', () => {
         const bytes = new TextEncoder().encode(
             JSON.stringify({
-                schemaVersion: '4',
+                schemaVersion: SCHEMA_VERSION,
                 mode: 'structured',
                 document: { pageCount: 15, pages: [] },
             }),
@@ -1149,7 +1149,7 @@ describe('DocumentCache payloads', () => {
             3,
             'application/pdf',
             '{not json',
-            '4',
+            SCHEMA_VERSION,
             1,
         );
         const metadataId = (raw.prepare(`
@@ -1177,7 +1177,7 @@ describe('DocumentCache payloads', () => {
             payloadPath,
             files.get(payloadPath)!.byteLength,
             null,
-            '4',
+            SCHEMA_VERSION,
             1,
         );
 
@@ -1213,7 +1213,7 @@ describe('DocumentCache payloads', () => {
             3,
             'application/pdf',
             JSON.stringify({ content_kind: 'epub', sectionCount: 1, sections: [] }),
-            '4',
+            SCHEMA_VERSION,
             1,
         );
         const metadataId = (raw.prepare(`
@@ -1241,7 +1241,7 @@ describe('DocumentCache payloads', () => {
             payloadPath,
             files.get(payloadPath)!.byteLength,
             null,
-            '4',
+            SCHEMA_VERSION,
             1,
         );
 

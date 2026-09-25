@@ -3,6 +3,7 @@ import { BeaverDB } from '../../../src/services/database';
 import { DOCUMENT_PAYLOAD_FORMAT_VERSION, DocumentCache } from '../../../src/services/documentCache';
 import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { buildPdfCachedMetadata } from '@beaver/agent-core/extract/document/shared/contentKinds';
+import { SCHEMA_VERSION } from '@beaver/agent-core/extract/schema';
 
 const mockIOUtils = (globalThis as any).IOUtils as {
     exists: ReturnType<typeof vi.fn>;
@@ -48,7 +49,7 @@ describe('DocumentCache size budget', () => {
             contentType: 'application/pdf',
             documentMetadata: buildPdfCachedMetadata(1, { 0: '1' }, null),
             errorCode: null,
-            extractionSchemaVersion: '4',
+            extractionSchemaVersion: SCHEMA_VERSION,
             metadataFormatVersion: 1,
         });
         await db.upsertDocumentCachePayload({
@@ -64,7 +65,7 @@ describe('DocumentCache size budget', () => {
             payloadPath,
             payloadSizeBytes: input.sizeBytes,
             payloadSha256: null,
-            extractionSchemaVersion: '4',
+            extractionSchemaVersion: SCHEMA_VERSION,
             cacheFormatVersion: DOCUMENT_PAYLOAD_FORMAT_VERSION,
         });
         await conn.queryAsync(
@@ -102,7 +103,7 @@ describe('DocumentCache size budget', () => {
                     file_mtime_ms, file_size_bytes, source_size_bytes, content_type,
                     document_metadata_json, error_code, extraction_schema_version,
                     metadata_format_version
-                 ) VALUES (?, 1, ?, 'pdf', ?, 10, 3, 3, 'application/pdf', ?, NULL, '4', 1)`,
+                 ) VALUES (?, 1, ?, 'pdf', ?, 10, 3, 3, 'application/pdf', ?, NULL, '${SCHEMA_VERSION}', 1)`,
                 [
                     10_000 + i,
                     key,
@@ -117,7 +118,7 @@ describe('DocumentCache size budget', () => {
                     source_file_size_bytes, source_size_bytes, payload_path,
                     payload_size_bytes, payload_sha256, extraction_schema_version,
                     cache_format_version, created_at, last_accessed_at
-                 ) SELECT id, item_id, 1, ?, 'structured', 'pdf', ?, 10, 3, 3, ?, ?, NULL, '4', ${DOCUMENT_PAYLOAD_FORMAT_VERSION}, ?, NULL
+                 ) SELECT id, item_id, 1, ?, 'structured', 'pdf', ?, 10, 3, 3, ?, ?, NULL, '${SCHEMA_VERSION}', ${DOCUMENT_PAYLOAD_FORMAT_VERSION}, ?, NULL
                    FROM document_cache_metadata WHERE library_id = 1 AND zotero_key = ?`,
                 [
                     key,
@@ -173,11 +174,11 @@ describe('DocumentCache size budget', () => {
                 metadataRows.push(
                     `(${id}, ${10_000 + i}, 1, '${key}', 'pdf', '/tmp/${key}.pdf', 10, 3, 3,`
                     + ` 'application/pdf', '{"content_kind":"pdf","pageCount":1,`
-                    + `"pageLabels":null,"pages":null}', NULL, '4', 1)`,
+                    + `"pageLabels":null,"pages":null}', NULL, '${SCHEMA_VERSION}', 1)`,
                 );
                 payloadRows.push(
                     `(${id}, ${10_000 + i}, 1, '${key}', 'structured', 'pdf',`
-                    + ` '/tmp/${key}.pdf', 10, 3, 3, '${path}', ${sizeBytes}, NULL, '4', ${DOCUMENT_PAYLOAD_FORMAT_VERSION},`
+                    + ` '/tmp/${key}.pdf', 10, 3, 3, '${path}', ${sizeBytes}, NULL, '${SCHEMA_VERSION}', ${DOCUMENT_PAYLOAD_FORMAT_VERSION},`
                     + ` '${created}', NULL)`,
                 );
                 files.add(path);
