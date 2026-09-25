@@ -323,6 +323,26 @@ describe('fixture capture', () => {
         expect(fix.config.settings.graphicsLayerMode).toBe('on');
     });
 
+    it('captures under the requested PDF schema version and stores it in the config', async () => {
+        const { deps, api } = makeDeps();
+        const capture = (id: string, extra: string[]) => runCli(
+            ['fixture', 'capture', 'fake.pdf', '--root', tmpRoot, '--id', id, '--pages', '0', ...extra, '--json'],
+            deps,
+        );
+
+        expect(await capture('current__p0', [])).toBe(0);
+        expect(await capture('v5__p0', ['--schema-version', '5'])).toBe(0);
+        process.exitCode = undefined;
+        expect(await capture('v3__p0', ['--schema-version', '3'])).toBe(1);
+
+        const read = (id: string) => JSON.parse(readFileSync(join(tmpRoot, id, 'fixture.json'), 'utf8'));
+        expect(read('current__p0').config.schemaVersion).toBe('4');
+        expect(read('v5__p0').config.schemaVersion).toBe('5');
+        expect(existsSync(join(tmpRoot, 'v3__p0', 'fixture.json'))).toBe(false);
+        const versions = api.extractPdf.mock.calls.map(([input]: any[]) => input.schemaVersion);
+        expect(versions).toEqual(['4', '4', '5', '5']);
+    });
+
     it('refuses to overwrite an existing fixture without --update', async () => {
         const { deps } = makeDeps();
         const args = (extra: string[] = []) => [
@@ -608,6 +628,31 @@ describe('fixture update', () => {
 
         // capturedAt is preserved
         expect(readFixtureJson('rebase__p0').capturedAt).toBe(capturedAt);
+    });
+
+    it('extracts legacy fixtures without a schema version under schema 4', async () => {
+        await captureBaseline();
+        const fixturePath = join(tmpRoot, 'rebase__p0', 'fixture.json');
+        const stored = JSON.parse(readFileSync(fixturePath, 'utf8'));
+        delete stored.config.schemaVersion;
+        writeFileSync(fixturePath, JSON.stringify(stored, null, 2));
+
+        const { deps, api } = makeDeps();
+        expect(await runCli(['fixture', 'evaluate', 'rebase__p0', '--root', tmpRoot, '--json'], deps)).toBe(0);
+        expect(api.extractPdf.mock.calls.map(([input]: any[]) => input.schemaVersion)).toEqual(['4', '4']);
+    });
+
+    it('re-extracts under --schema-version and stores it in the config', async () => {
+        await captureBaseline();
+        const { deps, api } = makeDeps();
+        const code = await runCli(
+            ['fixture', 'update', 'rebase__p0', '--root', tmpRoot, '--schema-version', '5', '--json'],
+            deps,
+        );
+        expect(code).toBe(0);
+        expect(api.extractPdf.mock.calls.map(([input]: any[]) => input.schemaVersion)).toEqual(['5', '5']);
+        expect(JSON.parse(readFileSync(join(tmpRoot, 'rebase__p0', 'fixture.json'), 'utf8')).config.schemaVersion)
+            .toBe('5');
     });
 
     it('rewrites and bumps updatedAt when extractPdf returns a different snapshot', async () => {

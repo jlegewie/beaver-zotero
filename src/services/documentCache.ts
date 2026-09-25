@@ -163,6 +163,8 @@ export class DocumentCache {
     private itemWriteLocks = new Map<string, Promise<void>>();
     private writeLocks = new Map<string, Promise<void>>();
     private extractionLocks = new Map<string, ExtractionLockEntry<CacheablePayload>>();
+    /** In-flight uncached extractions; clearing the cache leaves them running. */
+    private uncachedExtractions = new Map<string, ExtractionLockEntry<CacheablePayload>>();
     /** Wall-clock time of the last size-budget pass; 0 = never run. */
     private lastBudgetPassAt = 0;
     /** Payload bytes written since the last size-budget pass. */
@@ -722,6 +724,58 @@ export class DocumentCache {
             });
 
         this.extractionLocks.set(lockKey, entry);
+        return this.waitForSharedExtraction(entry, input.abortSignal, input.sharedTimeoutMs);
+    }
+
+    /**
+     * Run one shared extraction that is never read from or written to the
+     * cache, for results in a non-current schema version.
+     *
+     * Concurrent callers with the same `key` join the same extraction and get
+     * the same waiter deadlines and last-waiter abort as cached extractions.
+     * Callers must put everything that distinguishes results (attachment,
+     * source file, mode, schema version, result form, worker slot) in `key`.
+     */
+    async getOrCreateUncachedResult<T extends CacheablePayload>(input: {
+        key: string;
+        sharedTimeoutMs?: number;
+        abortSignal?: AbortSignal;
+        create: (signal: AbortSignal) => Promise<T>;
+    }): Promise<T | null> {
+        const existing = this.uncachedExtractions.get(input.key) as ExtractionLockEntry<T> | undefined;
+        if (existing) {
+            return this.waitForSharedExtraction(existing, input.abortSignal, input.sharedTimeoutMs);
+        }
+        const controller = createAbortController();
+        const entry: ExtractionLockEntry<T> = {
+            controller,
+            waiters: new Map(),
+            settled: false,
+            promise: Promise.resolve(null),
+            sharedTimer: null,
+            createdAt: Date.now(),
+        };
+        entry.promise = (async () => {
+            try {
+                const result = await input.create(controller.signal);
+                return controller.signal.aborted ? null : result;
+            } finally {
+                this.clearSharedExtractionTimer(entry);
+            }
+        })()
+            .catch((error) => {
+                logger(`DocumentCache.getOrCreateUncachedResult error: ${error}`, 1);
+                throw error;
+            })
+            .finally(() => {
+                entry.settled = true;
+                this.clearSharedExtractionTimer(entry);
+                if (this.uncachedExtractions.get(input.key) === entry) {
+                    this.uncachedExtractions.delete(input.key);
+                }
+            });
+
+        this.uncachedExtractions.set(input.key, entry);
         return this.waitForSharedExtraction(entry, input.abortSignal, input.sharedTimeoutMs);
     }
 

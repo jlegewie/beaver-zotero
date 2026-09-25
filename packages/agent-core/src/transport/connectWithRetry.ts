@@ -18,7 +18,7 @@
  */
 
 import { logger } from '../platform/logger';
-import type { AgentRunRequest, WSCallbacks, ZoteroInstanceWire } from '../protocol/agentProtocol';
+import type { AgentRunRequest, ExtractSchemaVersionsWire, WSCallbacks, ZoteroInstanceWire } from '../protocol/agentProtocol';
 import { resolveClientIdentity } from './clientIdentity';
 import { AgentConnectionError } from './agentService';
 import {
@@ -53,6 +53,7 @@ export interface ConnectableAgentService {
         clientFeatures?: string[],
         zoteroInstance?: ZoteroInstanceWire,
         connectRecovery?: ConnectRecoveryAuthFields,
+        extractSchemaVersions?: ExtractSchemaVersionsWire,
     ): Promise<void>;
     close(
         code?: number,
@@ -181,6 +182,7 @@ export async function connectWithRetry(
                     identity.clientFeatures,
                     identity.zoteroInstance,
                     recovery,
+                    identity.extractSchemaVersions,
                 );
                 logger(`${prefix} connect settled`);
                 return { kind: 'connected', attemptsMade };

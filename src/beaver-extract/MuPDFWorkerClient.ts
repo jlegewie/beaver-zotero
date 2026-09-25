@@ -1736,6 +1736,8 @@ export class MuPDFWorkerClient {
              * per-page timings) to the result. Default false.
              */
             includeDiagnostics?: boolean;
+            /** PDF schema version to produce. Default: the current version. */
+            schemaVersion?: string;
         },
         signal?: AbortSignal,
     ): Promise<BeaverExtractResult> {
@@ -1752,6 +1754,7 @@ export class MuPDFWorkerClient {
             pageRange: args?.pageRange,
             analysisWindow: args?.analysisWindow,
             includeDiagnostics: args?.includeDiagnostics,
+            schemaVersion: args?.schemaVersion,
         }, { signal });
     }
 
@@ -1773,6 +1776,7 @@ export class MuPDFWorkerClient {
             pageRange: args?.pageRange,
             analysisWindow: args?.analysisWindow,
             includeDiagnostics: args?.includeDiagnostics,
+            schemaVersion: args?.schemaVersion,
         }, { signal });
     }
 
@@ -1788,6 +1792,8 @@ export class MuPDFWorkerClient {
             analysisWindow?: number;
             capturePages: number[];
             debugMode?: "triage" | "full";
+            /** PDF schema version to produce. Default: the current version. */
+            schemaVersion?: string;
         },
         signal?: AbortSignal,
     ): Promise<StructuredExtractWithDebugResult> {
@@ -1804,6 +1810,7 @@ export class MuPDFWorkerClient {
                 analysisWindow: args.analysisWindow,
                 capturePages: args.capturePages,
                 debugMode: args.debugMode,
+                schemaVersion: args.schemaVersion,
             },
             { signal },
         );

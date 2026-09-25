@@ -340,6 +340,13 @@ export interface WSZoteroDocumentRequest extends WSBaseEvent {
     timeout_seconds?: number;
     /** Maximum uncompressed serialized size of payload. */
     max_payload_bytes?: number | null;
+    /**
+     * Extraction schema version to produce for the resolved content kind.
+     * Absent means the current version. A producible version that is not
+     * current is extracted on demand without the document cache (structured
+     * mode only); any other version fails with `unsupported_schema_version`.
+     */
+    schema_version?: string | null;
 }
 
 /** Request from backend to render attachment pages as images */
@@ -958,6 +965,7 @@ export type ZoteroDocumentErrorCode =
     | 'document_too_large'  // Serialized extraction result exceeds the WebSocket transfer budget
     | 'beaver_table'        // The item is a Beaver table; `error` names its portable id so the backend can redirect to read_table
     | 'schema_version_mismatch'
+    | 'unsupported_schema_version' // Requested `schema_version` is not producible for this content kind and mode
     | 'mode_mismatch';
 
 /**
@@ -2633,6 +2641,10 @@ export interface WSAuthMessage {
      * home both open) and show the user a recognizable label. Absent for
      * non-Zotero clients. */
     zotero_instance?: ZoteroInstanceWire;
+    /** Extraction schema versions this client serves document requests in.
+     * Absent for clients that serve no documents; the backend treats a missing
+     * PDF entry as current "4", producible ["4"]. */
+    extract_schema_versions?: ExtractSchemaVersionsWire;
     /** Provider-mode handshakes only: echo of the `wake_id` from the
      * provider-wake broadcast that triggered this connection. Absent for chat
      * connections and for provider connections opened without a wake. */
@@ -2657,6 +2669,19 @@ export interface WSAuthMessage {
         timed_out?: boolean;
     };
 }
+
+/** Extraction schema versions of one content kind a client can produce. */
+export interface ExtractSchemaVersionDeclaration {
+    /** Version served when a document request names none. */
+    current: string;
+    /** Every version a document request may name, including `current`. */
+    producible: string[];
+}
+
+/** Per-content-kind extraction schema versions, declared at connect. */
+export type ExtractSchemaVersionsWire = Partial<
+    Record<Exclude<ExtractContentKind, 'text'>, ExtractSchemaVersionDeclaration>
+>;
 
 /**
  * Wire shape (snake_case) identifying a Zotero install. `local_user_key` is always

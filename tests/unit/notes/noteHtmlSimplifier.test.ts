@@ -901,6 +901,32 @@ describe('expandToRawHtml', () => {
         expect(Zotero.Items.getByLibraryAndKey).not.toHaveBeenCalled();
     });
 
+    it('reports locators of an unproducible schema version without reading the cache', async () => {
+        const previousBeaver = Zotero.Beaver;
+        vi.mocked(Zotero.Items.getByLibraryAndKey).mockReturnValue({
+            id: 42, key: 'ATTACH12', libraryID: 1, parentID: false,
+            isAttachment: () => true, isFileAttachment: () => true, isPDFAttachment: () => true,
+            getField: () => 'Report.pdf',
+            getFilePathAsync: async () => '/report.pdf',
+        } as any);
+        const getResult = vi.fn(async () => structuredResultWithCitablePages(1, [
+            { index: 0, items: [{ id: 'p1', sentences: ['s1'] }] },
+        ]));
+        (Zotero as any).Beaver = { documentCache: { getResult } };
+        try {
+            // Page-scoped ids name schema 5, which this plugin cannot produce yet.
+            const resolved = await preloadStructuralLocatorPages(
+                '<citation id="1-ATTACH12" loc="s5.6"/> <citation id="1-ATTACH12" loc="s1"/>',
+            );
+            expect(resolved.unavailable).toEqual(['id="u-ATTACH12" loc="s5.6"']);
+            expect(resolved.unresolved).toEqual([]);
+            expect(Object.keys(resolved.pages)).toHaveLength(1);
+            expect(getResult).toHaveBeenCalledOnce();
+        } finally {
+            (Zotero as any).Beaver = previousBeaver;
+        }
+    });
+
     it.each([true, false])('resolves standalone spans across three pages (labels: %s) for both ID spellings', async (withLabels) => {
         const previousBeaver = Zotero.Beaver;
         vi.mocked(Zotero.Items.getByLibraryAndKey).mockReturnValue({
@@ -3891,6 +3917,15 @@ describe('buildUnresolvedLocatorWarning', () => {
         expect(warning).toContain('id="1-AAA" loc="s4"');
         expect(warning).toContain('id="2-BBB" loc="p7"');
         expect(warning).toMatch(/only support page locators/i);
+        expect(warning).not.toMatch(/can't be loaded/);
+    });
+
+    it('tells the model to re-read pages for locators that can never resolve', () => {
+        const warning = buildUnresolvedLocatorWarning(['id="1-AAA" loc="s4"'], ['id="1-AAA" loc="s5.6"']);
+        expect(warning).toContain('extraction is available');
+        expect(warning).toContain('can\'t be loaded, so they were saved without a locator: id="1-AAA" loc="s5.6"');
+        expect(warning).toContain('Re-read the cited pages');
+        expect(buildUnresolvedLocatorWarning([], ['id="1-AAA" loc="s5.6"'])).not.toContain('extraction is available');
     });
 });
 

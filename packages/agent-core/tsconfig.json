@@ -51,6 +51,7 @@
     "./src/identity/collectionActionData.ts",
     "./src/extract/types.ts",
     "./src/extract/schema.ts",
+    "./src/extract/ids.ts",
     "./src/agents/types.ts",
     "./src/agents/messageVisibility.ts",
     "./src/types/actions.ts",

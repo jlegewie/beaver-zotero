@@ -633,7 +633,10 @@ export async function executeEditNoteAction(
     //     citations keep a page locator instead of dropping it on save.
     const structuralLocators = await preloadStructuralLocatorPages(new_string);
     const resolvedLocatorPages = structuralLocators.pages;
-    const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
+    const locatorWarning = buildUnresolvedLocatorWarning(
+        structuralLocators.unresolved,
+        structuralLocators.unavailable,
+    );
 
     // ── rewrite mode: replace entire note body ──
     if (operation === 'rewrite') {
@@ -1289,7 +1292,10 @@ async function executeBatchSingleRewrite(
     const newPageLabels = await preloadPageLabelsForNewCitations(edit.new_string);
     const structuralLocators = await preloadStructuralLocatorPages(edit.new_string);
     const resolvedLocatorPages = structuralLocators.pages;
-    const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
+    const locatorWarning = buildUnresolvedLocatorWarning(
+        structuralLocators.unresolved,
+        structuralLocators.unavailable,
+    );
 
     let expandedNew: string;
     try {

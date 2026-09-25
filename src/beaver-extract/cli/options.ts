@@ -12,6 +12,7 @@ import type {
     ExtractionSettings,
     GraphicsLayerMode,
 } from "@beaver/agent-core/extract/types";
+import { pdfExtractionPreset } from "../schema/presets";
 
 export function parsePagesList(value: string): number[] {
     const parts = value.split(",").map((s) => s.trim()).filter(Boolean);
@@ -101,6 +102,14 @@ export async function loadJsonFile<T = unknown>(path: string): Promise<T> {
         const msg = e instanceof Error ? e.message : String(e);
         throw new Error(`failed to parse JSON in ${path}: ${msg}`);
     }
+}
+
+/** `--schema-version`: a PDF schema version with an extraction preset. */
+export function parseSchemaVersion(value: string): string {
+    if (!pdfExtractionPreset(value)) {
+        throw new Error(`--schema-version: no extraction preset for PDF schema "${value}"`);
+    }
+    return value;
 }
 
 export function parseGraphicsLayerMode(value: string): GraphicsLayerMode {

@@ -22,8 +22,12 @@ import type { ParagraphDetectionSettings } from "../../ParagraphDetector";
 import type { SentenceSplitterConfig } from "../../sentenceTypes";
 import { parseAnalysisScope, type AnalysisScope } from "./analysisScope";
 import type { Fingerprints } from "./fingerprints";
+import { pdfExtractionPreset } from "../../schema/presets";
 
 export const FIXTURE_SCHEMA_VERSION = 5 as const;
+
+/** PDF schema version of fixtures whose config does not name one. */
+export const LEGACY_FIXTURE_PDF_SCHEMA_VERSION = "4";
 
 export interface FixtureConfig {
     pageIndices: number[];
@@ -31,6 +35,13 @@ export interface FixtureConfig {
     splitterConfig: SentenceSplitterConfig;
     settings: ExtractionSettings;
     paragraphSettings: ParagraphDetectionSettings;
+    /** PDF schema version (extraction preset) the fixture was captured under. */
+    schemaVersion?: string;
+}
+
+/** The PDF schema version to extract a fixture under. */
+export function fixturePdfSchemaVersion(config: FixtureConfig): string {
+    return config.schemaVersion ?? LEGACY_FIXTURE_PDF_SCHEMA_VERSION;
 }
 
 export interface ExpectedExtraction {
@@ -127,6 +138,15 @@ export function validateConfig(value: unknown, source: string): FixtureConfig {
         v.paragraphSettings,
         `${source}.paragraphSettings`,
     ) as ParagraphDetectionSettings;
+    let schemaVersion: string | undefined;
+    if (v.schemaVersion != null) {
+        schemaVersion = expectString(v.schemaVersion, `${source}.schemaVersion`);
+        if (!pdfExtractionPreset(schemaVersion)) {
+            throw new FixtureValidationError(
+                `${source}.schemaVersion: no extraction preset for PDF schema "${schemaVersion}"`,
+            );
+        }
+    }
 
     return {
         pageIndices,
@@ -134,6 +154,7 @@ export function validateConfig(value: unknown, source: string): FixtureConfig {
         splitterConfig,
         settings,
         paragraphSettings,
+        ...(schemaVersion !== undefined ? { schemaVersion } : {}),
     };
 }
 

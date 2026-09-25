@@ -22,6 +22,7 @@ import {
 import { extractPdf } from "../../src/beaver-extract/node/api";
 import { getCitationIndex } from "../../src/beaver-extract/schema/citationIndex";
 import { resolveAnalysisWindow } from "../../src/beaver-extract/cli/fixture/analysisScope";
+import { fixturePdfSchemaVersion } from "../../src/beaver-extract/cli/fixture/fixtureSchema";
 import {
     loadExtractFixtures,
     privateRoot,
@@ -48,6 +49,7 @@ describe("BeaverExtract fixtures (smoke)", () => {
                 settings: f.fixture.config.settings,
                 paragraphSettings: f.fixture.config.paragraphSettings,
                 structured: { splitterConfig: f.fixture.config.splitterConfig },
+                schemaVersion: fixturePdfSchemaVersion(f.fixture.config),
             });
             if (result.mode !== "structured") {
                 throw new Error("expected structured result");
@@ -63,6 +65,7 @@ describe("BeaverExtract fixtures (smoke)", () => {
                 pageIndices: f.fixture.config.pageIndices,
                 settings: f.fixture.config.settings,
                 paragraphSettings: f.fixture.config.paragraphSettings,
+                schemaVersion: fixturePdfSchemaVersion(f.fixture.config),
             });
             if (markdown.mode !== "markdown") {
                 throw new Error("expected markdown result");

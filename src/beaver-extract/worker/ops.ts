@@ -76,6 +76,8 @@ import {
     CURRENT_PDF_EXTRACTION_PRESET,
     SCHEMA_VERSION,
     assignDocumentIds,
+    pdfExtractionPreset,
+    type PdfExtractionPreset,
     projectStructuredPage,
     type BeaverExtractResult,
     type ExtractionDebug,
@@ -287,13 +289,18 @@ class PageWalkCache {
 
     constructor(
         private readonly doc: DocumentLike,
-        private readonly fontApi?: FontApi,
+        private readonly fontApi: FontApi | undefined,
+        /** Text repair of the op's schema preset; applies to every walk. */
+        private readonly textRepair: boolean,
     ) {}
 
     getPlain(pageIndex: number, includeImages: boolean): RawPageData {
         let page = this.plain.get(pageIndex);
         if (!page) {
-            page = extractRawPageFromDoc(this.doc, pageIndex, { includeImages });
+            page = extractRawPageFromDoc(this.doc, pageIndex, {
+                includeImages,
+                textRepair: this.textRepair,
+            });
             this.plain.set(pageIndex, page);
         }
         return page;
@@ -307,6 +314,7 @@ class PageWalkCache {
                 pageIndex,
                 includeImages,
                 this.fontApi,
+                this.textRepair,
             );
             this.detailed.set(pageIndex, page);
         }
@@ -990,10 +998,13 @@ function replaceControlChars(text: string): string {
 
 /**
  * Replace control characters in every text field of the result, in place,
- * when the current PDF schema preset enables text repair.
+ * when the PDF schema preset enables text repair.
  */
-function replaceControlCharsInResult(result: InternalExtractionResult): void {
-    if (!CURRENT_PDF_EXTRACTION_PRESET.textRepair) return;
+function replaceControlCharsInResult(
+    result: InternalExtractionResult,
+    preset: PdfExtractionPreset,
+): void {
+    if (!preset.textRepair) return;
     result.fullText = replaceControlChars(result.fullText);
     for (const page of result.pages) {
         page.content = replaceControlChars(page.content);
@@ -1014,12 +1025,13 @@ function replaceControlCharsInResult(result: InternalExtractionResult): void {
 
 function toMarkdownExtractResult(
     result: InternalExtractionResult,
+    preset: PdfExtractionPreset,
     includeDiagnostics = false,
 ): MarkdownExtractResult {
-    replaceControlCharsInResult(result);
+    replaceControlCharsInResult(result, preset);
     return {
         mode: "markdown",
-        schemaVersion: SCHEMA_VERSION,
+        schemaVersion: preset.schemaVersion,
         createdAt: result.metadata.extractedAt,
         // Profiling/diagnostics payload is opt-in.
         ...(includeDiagnostics
@@ -1049,11 +1061,12 @@ function toMarkdownExtractResult(
 
 function toStructuredExtractResult(
     result: InternalExtractionResult,
+    preset: PdfExtractionPreset,
     bboxPrecision: number,
     includeDiagnostics = false,
     debug?: ExtractionDebug,
 ): StructuredExtractResult {
-    replaceControlCharsInResult(result);
+    replaceControlCharsInResult(result, preset);
     // Margin items stay internal: no consumer reads them, and watermarks drawn
     // glyph by glyph can make them a large share of a document. They are
     // appended after all other items, so dropping them leaves the other items'
@@ -1064,7 +1077,7 @@ function toStructuredExtractResult(
             bboxPrecision,
         ),
     );
-    assignDocumentIds(pages);
+    assignDocumentIds(pages, preset.idScheme);
     const degradation = degradationSummary(result);
     const pageDegradation = degradationByPage(result);
     const mergedDebug: ExtractionDebug | undefined = pageDegradation
@@ -1078,7 +1091,7 @@ function toStructuredExtractResult(
         : debug;
     return {
         mode: "structured",
-        schemaVersion: SCHEMA_VERSION,
+        schemaVersion: preset.schemaVersion,
         createdAt: result.metadata.extractedAt,
         // Profiling/diagnostics payload is opt-in.
         ...(includeDiagnostics
@@ -1266,6 +1279,13 @@ function serializeExtractResult(result: BeaverExtractResult): SerializedBeaverEx
     };
 }
 
+function resolvePdfExtractionPreset(schemaVersion: string | undefined): PdfExtractionPreset {
+    if (schemaVersion == null) return CURRENT_PDF_EXTRACTION_PRESET;
+    const preset = pdfExtractionPreset(schemaVersion);
+    if (!preset) throw new Error(`No extraction preset for PDF schema ${schemaVersion}`);
+    return preset;
+}
+
 /**
  * Strict, fused extract op for the agent handlers.
  *
@@ -1315,6 +1335,8 @@ export async function opExtract(
         analysisWindow?: number;
         /** Attach the opt-in `diagnostics` block */
         includeDiagnostics?: boolean;
+        /** PDF schema version to produce; defaults to the current version. */
+        schemaVersion?: string;
     },
 ): Promise<OpReply<BeaverExtractResult>> {
     // Defense in depth: the facade enforces this too, but the worker is
@@ -1341,6 +1363,7 @@ export async function opExtract(
     const engine: "block" | "paragraph" | "structured" = isStructured
         ? "structured"
         : (explicitEngine ?? "paragraph");
+    const preset = resolvePdfExtractionPreset(args.schemaVersion);
 
     const tOpStart = performance.now();
     const tDocOpenStart = performance.now();
@@ -1383,7 +1406,7 @@ export async function opExtract(
         // spread of pages and the pipeline walks them again; sharing the
         // walk here keeps an expensive-to-walk page from being processed
         // twice (gate + extraction).
-        const pageCache = new PageWalkCache(doc, fontApi);
+        const pageCache = new PageWalkCache(doc, fontApi, preset.textRepair);
 
         if (opts.checkTextLayer) {
             // Run the gate over the SAME walk the pipeline will reuse —
@@ -1453,10 +1476,11 @@ export async function opExtract(
         const result = isStructured
             ? toStructuredExtractResult(
                 internal,
+                preset,
                 args.structured?.bboxPrecision ?? 1,
                 args.includeDiagnostics ?? false,
               )
-            : toMarkdownExtractResult(internal, args.includeDiagnostics ?? false);
+            : toMarkdownExtractResult(internal, preset, args.includeDiagnostics ?? false);
         return { result };
     } catch (e) {
         docFailed = true;
@@ -1490,8 +1514,11 @@ export async function opStructuredExtractWithDebug(
         analysisWindow?: number;
         capturePages: number[];
         debugMode?: "triage" | "full";
+        /** PDF schema version to produce; defaults to the current version. */
+        schemaVersion?: string;
     },
 ): Promise<OpReply<StructuredExtractWithDebugResult>> {
+    const preset = resolvePdfExtractionPreset(args.schemaVersion);
     const tOpStart = performance.now();
     const tDocOpenStart = performance.now();
     const doc = await acquireDoc(args.pdfData);
@@ -1505,7 +1532,7 @@ export async function opStructuredExtractWithDebug(
         assertDocumentHasPages(pageCount);
         const pageLabels = collectPageLabels(doc);
         const fontApi = (await ensureApi()).Font;
-        const pageCache = new PageWalkCache(doc, fontApi);
+        const pageCache = new PageWalkCache(doc, fontApi, preset.textRepair);
 
         if (opts.checkTextLayer) {
             const ocrProvider: RawPageProvider = {
@@ -1553,7 +1580,7 @@ export async function opStructuredExtractWithDebug(
             internal.metadata.timings.totalMs = performance.now() - tOpStart;
         }
         const bboxPrecision = args.structured?.bboxPrecision ?? 1;
-        const result = toStructuredExtractResult(internal, bboxPrecision);
+        const result = toStructuredExtractResult(internal, preset, bboxPrecision);
         const debug = buildDebugProjection(
             internal,
             result,
