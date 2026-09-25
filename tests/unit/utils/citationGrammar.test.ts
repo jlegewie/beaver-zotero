@@ -7,6 +7,7 @@ import {
     getRequestedRef,
     getResolvedRef,
     locatorFromLegacyPage,
+    locatorIdScheme,
     normalizeCitationTag,
     parseLoc,
     parseZoteroId,
@@ -43,6 +44,57 @@ describe('citationGrammar', () => {
         expect(citationIndexCandidateIdsForLocator(parseLoc('tab3')!)).toEqual(['table3']);
         expect(citationIndexCandidateIdsForLocator(parseLoc('p10-p12')!)).toEqual(['p10', 'p12']);
         expect(citationIndexCandidateIdsForLocator(parseLoc('heading3')!)).toEqual(['heading3']);
+    });
+
+    it('parses page-scoped record ids and ranges', () => {
+        expect(parseLoc('s5.6')).toEqual({ kind: 'sentence', value: '5.6', raw: 's5.6' });
+        expect(parseLoc('p12.3')).toEqual({ kind: 'paragraph', value: '12.3', raw: 'p12.3' });
+        expect(parseLoc('heading5.1')).toEqual({ kind: 'heading', value: '5.1', raw: 'heading5.1' });
+        expect(parseLoc('paragraph5.2')).toEqual({ kind: 'paragraph', value: '5.2', raw: 'paragraph5.2' });
+        expect(parseLoc('s5.6-s5.9')).toEqual({ kind: 'sentence', value: '5.6-5.9', raw: 's5.6-s5.9' });
+        // Cross-page and reversed ranges keep their ends as written.
+        expect(parseLoc('s5.30-s6.2')).toEqual({ kind: 'sentence', value: '5.30-6.2', raw: 's5.30-s6.2' });
+        expect(parseLoc('s6.2-s5.30')).toEqual({ kind: 'sentence', value: '6.2-5.30', raw: 's6.2-s5.30' });
+        // A bare page-scoped right end is the full form without its prefix.
+        expect(parseLoc('s5.6-5.9')).toEqual({ kind: 'sentence', value: '5.6-5.9', raw: 's5.6-5.9' });
+    });
+
+    it('expands the same-page shorthand and keeps the raw locator as the key', () => {
+        const loc = parseLoc('s5.6-9')!;
+        expect(loc).toEqual({ kind: 'sentence', value: '5.6-5.9', raw: 's5.6-9' });
+        expect(citationIndexCandidateIdsForLocator(loc)).toEqual(['s5.6', 's5.9']);
+        expect(requestedCitationKey({ kind: 'zotero', library_id: 1, zotero_key: 'ABCD1234', loc }))
+            .toBe('zotero:1-ABCD1234:s5.6-9');
+        // The document-wide shorthand and page ranges are unchanged.
+        expect(parseLoc('s12-15')).toEqual({ kind: 'sentence', value: '12-15', raw: 's12-15' });
+        expect(parseLoc('page5.1-7')).toEqual({ kind: 'page', value: '5.1-7', raw: 'page5.1-7' });
+    });
+
+    it('rejects ranges that mix id schemes', () => {
+        for (const raw of ['s243-s5.6', 's5.6-s243', 's243-5.6']) {
+            const loc = parseLoc(raw)!;
+            expect(loc).toEqual({ kind: 'unknown', value: raw, raw });
+            expect(citationIndexCandidateIdsForLocator(loc)).toEqual([]);
+            expect(locatorIdScheme(loc)).toBeNull();
+        }
+    });
+
+    it('maps page-scoped locators to citation index ids by their ends', () => {
+        expect(citationIndexCandidateIdsForLocator(parseLoc('s5.6')!)).toEqual(['s5.6']);
+        expect(citationIndexCandidateIdsForLocator(parseLoc('s5.30-s6.2')!)).toEqual(['s5.30', 's6.2']);
+        expect(citationIndexCandidateIdsForLocator(parseLoc('paragraph5.2')!)).toEqual(['p5.2']);
+        expect(citationIndexCandidateIdsForLocator(parseLoc('tab3.1-tab4.1')!)).toEqual(['table3.1', 'table4.1']);
+    });
+
+    it('names the id scheme of record-id locators only', () => {
+        expect(locatorIdScheme(parseLoc('s243')!)).toBe('document');
+        expect(locatorIdScheme(parseLoc('s243-s250')!)).toBe('document');
+        expect(locatorIdScheme(parseLoc('s5.6')!)).toBe('page');
+        expect(locatorIdScheme(parseLoc('s5.6-9')!)).toBe('page');
+        expect(locatorIdScheme(parseLoc('fig2.1')!)).toBe('page');
+        expect(locatorIdScheme(parseLoc('page5')!)).toBeNull();
+        expect(locatorIdScheme(parseLoc('l34')!)).toBeNull();
+        expect(locatorIdScheme(parseLoc('intro')!)).toBeNull();
     });
 
     it('keeps unknown and legacy page locators stable', () => {

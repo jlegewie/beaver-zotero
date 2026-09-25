@@ -17,6 +17,10 @@ import {
 import { getCitationPreloadFilePath, preloadPageLabelsForContent } from './pageLabels';
 import type { CitationIndexEntry, StructuredExtractResult } from '@beaver/agent-core/extract/schema';
 import { getCitationIndex } from '../../src/beaver-extract/schema/citationIndex';
+import {
+    locatorSchemaVersion,
+    structuredPdfResultForSchema,
+} from '../../src/services/documentExtraction/structuredPdfResult';
 import { UNRESOLVED_LIBRARY_ID } from '../../src/utils/libraryIdentity';
 import type { ExternalFileRecord } from '../../src/services/database';
 
@@ -63,7 +67,9 @@ function resolveEntriesFromStructuredResult(
 /**
  * Builds local citation metadata for non-page locators using the structured
  * extraction cache. Tool-call note content is not always covered by backend
- * citation metadata, so note export needs this local page bridge.
+ * citation metadata, so note export needs this local page bridge. A locator
+ * whose id scheme names a producible non-current PDF schema version resolves
+ * against an uncached extraction of that version.
  */
 export async function buildLocalCitationDataMapForContent(
     content: string,
@@ -101,19 +107,18 @@ export async function buildLocalCitationDataMapForContent(
             const preloadPath = await getCitationPreloadFilePath(item);
             if (!preloadPath) continue;
 
-            const cacheKey = `${preloadPath.item.libraryID}:${preloadPath.item.key}:${preloadPath.filePath}`;
+            const schemaVersion = locatorSchemaVersion(
+                normalized.ref.loc,
+                !!preloadPath.item.isPDFAttachment?.(),
+            );
+            const cacheKey = `${preloadPath.item.libraryID}:${preloadPath.item.key}:${preloadPath.filePath}:${schemaVersion}`;
             let resultPromise = structuredResultsByFile.get(cacheKey);
             if (!resultPromise) {
-                resultPromise = cache.getResult(
-                    {
-                        libraryId: preloadPath.item.libraryID,
-                        zoteroKey: preloadPath.item.key,
-                    },
-                    'structured',
-                    preloadPath.filePath,
-                ).then((result) => (
-                    result && result.mode === 'structured' ? result : null
-                ));
+                resultPromise = structuredPdfResultForSchema({
+                    source: { kind: 'zotero', item: preloadPath.item },
+                    filePath: preloadPath.filePath,
+                    schemaVersion,
+                });
                 structuredResultsByFile.set(cacheKey, resultPromise);
             }
             const result = await resultPromise;

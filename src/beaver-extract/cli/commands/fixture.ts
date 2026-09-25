@@ -25,6 +25,7 @@ import {
     loadJsonFile,
     parseAnalysisWindow,
     parsePagesList,
+    parseSchemaVersion,
 } from "../options";
 import {
     DEFAULT_ANALYSIS_SCOPE,
@@ -56,6 +57,7 @@ import {
     type ExpectedExtraction,
     FixtureValidationError,
     type FixtureConfig,
+    fixturePdfSchemaVersion,
     validateConfig,
     validateFixture,
     validateTolerance,
@@ -78,6 +80,7 @@ import type {
 } from "../../schema";
 import type { ParagraphDetectionSettings } from "../../ParagraphDetector";
 import type { SentenceSplitterConfig } from "../../sentenceTypes";
+import { SCHEMA_VERSION } from "@beaver/agent-core/extract/schema";
 import { join, resolve as resolvePath } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 
@@ -146,6 +149,10 @@ function buildCaptureCommand(deps: CliDeps): Command {
             "path to JSON file with ParagraphDetectionSettings",
         )
         .option("--bbox-tolerance <pt>", "stored tolerance in points (default 0.5)")
+        .option(
+            "--schema-version <v>",
+            "PDF schema version (extraction preset) to capture under; default current",
+        )
         .option(
             "--update",
             "allow replacing an existing fixture (config-changing path)",
@@ -300,6 +307,7 @@ interface CaptureOpts {
     graphicsLayerMode?: string;
     paragraphSettings?: string;
     bboxTolerance?: string;
+    schemaVersion?: string;
     update?: boolean;
     allowOcr?: boolean;
     preview?: boolean;
@@ -332,6 +340,7 @@ async function buildConfigFromCaptureOpts(opts: CaptureOpts): Promise<FixtureCon
         splitterConfig,
         settings,
         paragraphSettings,
+        schemaVersion: opts.schemaVersion ? parseSchemaVersion(opts.schemaVersion) : SCHEMA_VERSION,
     };
 }
 
@@ -446,11 +455,17 @@ interface EvaluateOpts {
 
 function buildUpdateCommand(deps: CliDeps): Command {
     const cmd = new Command("update");
-    cmd.description("Rebaseline a fixture's expected snapshot. Preserves the stored config.")
+    cmd.description(
+        "Rebaseline a fixture's expected snapshot. Preserves the stored config unless --schema-version is given.",
+    )
         .argument("<id>", "fixture id (folder name)")
         .option(
             "--root <dir>",
             defaultRootHelp(),
+        )
+        .option(
+            "--schema-version <v>",
+            "re-extract under this PDF schema version and store it in the config",
         )
         .option(
             "--preview",
@@ -467,7 +482,10 @@ function buildUpdateCommand(deps: CliDeps): Command {
             try {
                 const previous = readFixture(root, id);
                 const pdfBytes = readSharedPdf(root, previous.pdfSha256);
-                const captured = await captureExpected(deps, pdfBytes, previous.config);
+                const config: FixtureConfig = opts.schemaVersion
+                    ? { ...previous.config, schemaVersion: parseSchemaVersion(opts.schemaVersion) }
+                    : previous.config;
+                const captured = await captureExpected(deps, pdfBytes, config);
                 const expected = captured.expected;
                 const fingerprints = captureFingerprints();
 
@@ -475,6 +493,7 @@ function buildUpdateCommand(deps: CliDeps): Command {
                 const candidate: CapturedFixture = {
                     ...previous,
                     schema: FIXTURE_SCHEMA_VERSION,
+                    config,
                     expected,
                     fingerprints,
                     updatedAt: now,
@@ -518,6 +537,7 @@ function buildUpdateCommand(deps: CliDeps): Command {
 
 interface UpdateOpts {
     root?: string;
+    schemaVersion?: string;
     preview?: boolean;
     json?: boolean;
     pretty?: boolean;
@@ -786,6 +806,7 @@ function buildStructuredExtractInput(pdfBytes: Uint8Array, config: FixtureConfig
         settings: config.settings,
         paragraphSettings: config.paragraphSettings,
         structured: { splitterConfig: config.splitterConfig },
+        schemaVersion: fixturePdfSchemaVersion(config),
     };
 }
 
@@ -797,6 +818,7 @@ function buildMarkdownExtractInput(pdfBytes: Uint8Array, config: FixtureConfig):
         pageIndices: config.pageIndices,
         settings: config.settings,
         paragraphSettings: config.paragraphSettings,
+        schemaVersion: fixturePdfSchemaVersion(config),
     };
 }
 

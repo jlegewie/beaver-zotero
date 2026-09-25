@@ -30,6 +30,10 @@ import { readableToExtractKind, type ExtractContentKind, type ReadableContentKin
 import type { DocumentExtractResult } from '@beaver/agent-core/extract/document/shared/documentExtractResult';
 import { toBackendDocumentPayload } from '../documentExtraction/backendDocumentPayload';
 import {
+    isCurrentExtractionSchemaVersion,
+    unsupportedSchemaVersionMessage,
+} from '../documentExtraction/shared/extractionSchemaVersions';
+import {
     DEFAULT_PAGES_TIMEOUT_SECONDS,
     MAX_PDF_TIMEOUT_SECONDS,
     TimeoutError,
@@ -453,6 +457,12 @@ export async function handleZoteroDocumentRequest(
         }
 
         timeoutContentKind = readableToExtractKind(contentKind);
+        if (timeoutContentKind) {
+            const unsupportedVersion = unsupportedSchemaVersionMessage(timeoutContentKind, request.schema_version, mode);
+            if (unsupportedVersion) {
+                return errorResponse(unsupportedVersion, 'unsupported_schema_version', null, timeoutContentKind);
+            }
+        }
         // View-row metadata for the backend tool-result view (parent-centric
         // display + the served file's own name/content_kind). Both are optional;
         // a failure here must never fail document delivery, and both ride on
@@ -651,6 +661,7 @@ export async function handleZoteroDocumentRequest(
             externalAbortSignal: timeout.signal,
             onRemoteDownloadFailure: notifyRemoteDownloadFailure,
             serializedResult: options.responseMode === 'websocket',
+            schemaVersion: request.schema_version,
         });
 
         if (result.kind === 'ok') {
@@ -691,8 +702,11 @@ export async function handleZoteroDocumentRequest(
             try {
                 // Exclusions can change while the foreground extraction is in
                 // flight. Recheck the live boundary before staging follow-up
-                // work so an excluded library never reaches the queue.
-                if (isLibrarySearchable(target.libraryId)) {
+                // work so an excluded library never reaches the queue. A
+                // non-current schema version is on-demand only: the background
+                // queue produces and caches the current version.
+                if (isCurrentExtractionSchemaVersion('pdf', request.schema_version)
+                    && isLibrarySearchable(target.libraryId)) {
                     await Zotero.Beaver?.db?.enqueueBackgroundJob({
                         jobType: 'document_extract',
                         libraryId: target.libraryId,
@@ -831,6 +845,11 @@ async function handleExternalFileDocumentRequest(
             );
         }
 
+        const unsupportedVersion = unsupportedSchemaVersionMessage(record.contentKind, request.schema_version, mode);
+        if (unsupportedVersion) {
+            return errorResponse(unsupportedVersion, 'unsupported_schema_version', null, record.contentKind);
+        }
+
         if (record.contentKind === 'text') {
             let data: Uint8Array;
             try {
@@ -911,6 +930,7 @@ async function handleExternalFileDocumentRequest(
             workerName: 'hot',
             externalAbortSignal: timeout.signal,
             serializedResult: options.responseMode === 'websocket',
+            schemaVersion: request.schema_version,
         });
 
         if (result.kind === 'ok') {

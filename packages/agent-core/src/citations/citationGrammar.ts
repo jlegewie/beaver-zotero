@@ -1,4 +1,5 @@
 import { ID_PREFIXES } from '../extract/schema';
+import { parseExtractId, parseExtractIdValue, type ExtractIdScheme } from '../extract/ids';
 import { resolveObjectIdReference } from '../identity/libraryRef';
 import type { ZoteroItemReference } from '../types/zotero';
 
@@ -114,15 +115,26 @@ function locPrefixFor(raw: string): { prefix: string; kind: LocatorKind; value: 
     for (const entry of LOC_PREFIXES) {
         if (raw.startsWith(entry.prefix) && raw.length > entry.prefix.length) {
             const value = raw.slice(entry.prefix.length);
-            if (entry.numericOnly && !/^\d+(?:-.+)?$/.test(value)) continue;
+            if (entry.numericOnly && !/^\d+(?:\.\d+)?(?:-.+)?$/.test(value)) continue;
             return { prefix: entry.prefix, kind: entry.kind, value };
         }
     }
     return null;
 }
 
+/** Id scheme of a record-id locator value: `243` → document, `5.6` → page. */
+function idValueScheme(value: string): ExtractIdScheme | null {
+    return parseExtractIdValue(value)?.scheme ?? null;
+}
+
 /**
  * Parse compact page locators and Beaver Extract record ids.
+ *
+ * Record ids come in two schemes (see `ExtractIdScheme`): document-wide
+ * (`s243`, range `s243-s250`) and page-scoped (`s5.6`, ranges `s5.6-s5.9` and
+ * `s5.30-s6.2`). The page-scoped same-page shorthand `s5.6-9` is normalized to
+ * the value `5.6-5.9`. A range whose ends use different schemes names no
+ * document version and parses as `unknown`.
  */
 export function parseLoc(token: string | undefined): Locator | undefined {
     if (token == null) return undefined;
@@ -140,7 +152,19 @@ export function parseLoc(token: string | undefined): Locator | undefined {
         const left = first.value.slice(0, rangeDash);
         const rightRaw = first.value.slice(rangeDash + 1);
         const right = locPrefixFor(rightRaw);
-        if (left && right && right.kind === first.kind && right.prefix === first.prefix && right.value) {
+        const rightValue = right && right.kind === first.kind && right.prefix === first.prefix
+            ? right.value
+            : rightRaw;
+        // Id schemes only apply to record-id locators, not to page numbers.
+        const recordId = !!CITATION_INDEX_PREFIXES[first.kind];
+        const leftId = recordId ? parseExtractIdValue(left) : null;
+        const rightId = recordId ? parseExtractIdValue(rightValue) : null;
+        const pageShorthand = leftId?.scheme === 'page' && rightId?.scheme === 'document' && rightValue === rightRaw;
+        if (pageShorthand) {
+            value = `${left}-${leftId.page}.${rightValue}`;
+        } else if (leftId && rightId && leftId.scheme !== rightId.scheme) {
+            return { kind: 'unknown', value: raw, raw };
+        } else if (left && right && right.kind === first.kind && right.prefix === first.prefix && right.value) {
             value = `${left}-${right.value}`;
         }
     }
@@ -148,25 +172,30 @@ export function parseLoc(token: string | undefined): Locator | undefined {
     return { kind: first.kind, value, raw };
 }
 
+/** True when both ends of a range are extraction ids of different schemes. */
+function isMixedSchemeRange(left: string, right: string): boolean {
+    const leftScheme = parseExtractId(left)?.scheme;
+    const rightScheme = parseExtractId(right)?.scheme;
+    return !!leftScheme && !!rightScheme && leftScheme !== rightScheme;
+}
+
 function rawRangeCandidateIds(raw: string): string[] {
-    const ids = new Set<string>([raw]);
     const parts = raw.split('-');
     if (parts.length === 2 && parts[0] && parts[1]) {
         const left = parts[0];
-        const right = parts[1];
-        ids.add(left);
-        if (/^[A-Za-z_]/.test(right)) {
-            ids.add(right);
-        } else {
-            const prefix = left.match(/^[A-Za-z_]+/)?.[0];
-            ids.add(prefix ? `${prefix}${right}` : right);
-        }
+        const right = /^[A-Za-z_]/.test(parts[1])
+            ? parts[1]
+            : `${left.match(/^[A-Za-z_]+/)?.[0] ?? ''}${parts[1]}`;
+        if (isMixedSchemeRange(left, right)) return [];
+        return [...new Set([raw, left, right])];
     }
-    return [...ids];
+    return [raw];
 }
 
 /**
- * Return structured extraction citation-index ids addressed by a locator.
+ * Return structured extraction citation-index ids addressed by a locator: the
+ * id itself, or both ends of a range. A range covers everything between its
+ * ends in reading order, never an arithmetic span of the id suffixes.
  */
 export function citationIndexCandidateIdsForLocator(locator: Locator): string[] {
     const prefix = CITATION_INDEX_PREFIXES[locator.kind];
@@ -175,7 +204,7 @@ export function citationIndexCandidateIdsForLocator(locator: Locator): string[] 
     const ids = new Set<string>();
     const values = locator.value.split('-');
     const addValue = (value: string) => {
-        if (/^\d+$/.test(value)) ids.add(`${prefix}${value}`);
+        if (idValueScheme(value)) ids.add(`${prefix}${value}`);
     };
 
     if (values.length === 1) {
@@ -186,6 +215,24 @@ export function citationIndexCandidateIdsForLocator(locator: Locator): string[] 
     }
 
     return ids.size > 0 ? [...ids] : rawRangeCandidateIds(locator.raw);
+}
+
+/** True when a non-page locator's value is an id range (`12-15`, `5.6-6.2`). */
+export function isRecordIdRange(locator: Locator): boolean {
+    if (locator.kind === 'page') return false;
+    const ends = locator.value.split('-');
+    return ends.length === 2 && ends.every((end) => idValueScheme(end) !== null);
+}
+
+/**
+ * The id scheme of a PDF record-id locator (`s243` → `document`, `s5.6` →
+ * `page`), which names the PDF schema version it resolves against. `null` for
+ * page locators, line locators (text documents are unversioned), and
+ * locators that are not record ids.
+ */
+export function locatorIdScheme(locator: Locator): ExtractIdScheme | null {
+    if (locator.kind === 'line' || !CITATION_INDEX_PREFIXES[locator.kind]) return null;
+    return idValueScheme(locator.value.split('-')[0]);
 }
 
 /**

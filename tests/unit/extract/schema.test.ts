@@ -71,7 +71,7 @@ describe("canonical extraction schema helpers", () => {
                 ],
             },
         ];
-        assignDocumentIds(pages);
+        assignDocumentIds(pages, "document");
         expect(pages[0].items[0].id).toBe("heading1");
         expect(pages[0].items[1].id).toBe("p1");
         const sentence = pages[0].items[1];
