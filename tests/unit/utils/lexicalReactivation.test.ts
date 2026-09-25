@@ -150,6 +150,36 @@ describe('Lexical selection stability', () => {
         expect(editable.textContent?.endsWith('Another sentence.')).toBe(true);
     });
 
+    it('replaces a /query typed in front of other text with a pill in place', async () => {
+        const { editable, editorHandle } = await mountEmptyEditor();
+        await act(async () => editorHandle.current!.setText('/rev\nthe rest'));
+        await act(async () => editorHandle.current!.insertSlashCommand(
+            { actionId: 'action', commandName: 'review', title: 'Review' } as any, 3, '\nthe rest'.length,
+        ));
+        const pill = editable.querySelector('.beaver-slash-command');
+        expect(pill).not.toBeNull();
+        expect(editable.textContent).toBe(`${pill!.textContent} \nthe rest`);
+        expect(editorHandle.current!.getSelectionOffset()).toBe(pill!.textContent!.length + 1);
+    });
+
+    it('adds no second space when the text after the /query already starts with one', async () => {
+        const { editable, editorHandle } = await mountEmptyEditor();
+        await act(async () => editorHandle.current!.setText('/rev this paper'));
+        await act(async () => editorHandle.current!.insertSlashCommand(
+            { actionId: 'action', commandName: 'review', title: 'Review' } as any, 3, ' this paper'.length,
+        ));
+        const pill = editable.querySelector('.beaver-slash-command');
+        expect(editable.textContent).toBe(`${pill!.textContent} this paper`);
+    });
+
+    it('takes back an @query typed in front of other text, keeping that text', async () => {
+        const { editable, editorHandle } = await mountEmptyEditor();
+        await act(async () => editorHandle.current!.setText('find @smisdfsdf'));
+        await act(async () => editorHandle.current!.deleteTrailingQuery('@smi'.length, 'sdfsdf'.length));
+        expect(editable.textContent).toBe('find sdfsdf');
+        expect(editorHandle.current!.getSelectionOffset()).toBe('find '.length);
+    });
+
     it('repairs a late caret collapse after the first character', async () => {
         const { editable, nativeSelection } = await mountEmptyEditor();
 

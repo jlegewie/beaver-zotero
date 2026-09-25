@@ -213,14 +213,15 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     }, []);
     // Stable forwarder so the slash menu can insert a command pill into the
     // Lexical editor (the editor handle isn't available until after mount).
-    const insertSlashCommand = useCallback((descriptor: SlashCommandDescriptor, queryLength: number | null) => {
-        editorHandleRef.current?.insertSlashCommand(descriptor, queryLength);
+    const insertSlashCommand = useCallback((descriptor: SlashCommandDescriptor, queryLength: number | null, keepAfter?: number) => {
+        editorHandleRef.current?.insertSlashCommand(descriptor, queryLength, keepAfter);
     }, []);
 
     // Lets a menu consume the `@query` / `/query` it used as its search box.
-    const deleteTrailingQuery = useCallback((length: number) => {
-        editorHandleRef.current?.deleteTrailingQuery(length);
+    const deleteTrailingQuery = useCallback((length: number, keepAfter: number) => {
+        editorHandleRef.current?.deleteTrailingQuery(length, keepAfter);
     }, []);
+    const getCaretOffset = useCallback(() => editorHandleRef.current?.getSelectionOffset() ?? null, []);
     const addSourcesMenuRef = useRef<AddSourcesMenuHandle | null>(null);
     const requestSourcesMenu = getHost().components?.requestSourcesMenu;
 
@@ -234,11 +235,13 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         handleSlashMenuChange,
         handleSlashTrigger,
         handleSlashMenuKeyDown,
+        slashCaretOffsetFor,
     } = useSlashMenu(editInputRef, 'below', focusEditor, insertSlashCommand, {
         setContent: setEditedContent,
         // The overlay edits a sent message's own attachment list; targets an
         // action pulls in are added to it on submit, not to the composer.
         attachTargets: false,
+        getCaretOffset,
     });
 
     // Typed `@` opens the picker with the editor as its search box (same as
@@ -248,6 +251,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         position: addSourcesMenuPosition,
         query: addSourcesSearchQuery,
         querySource: addSourcesQuerySource,
+        hasTextAfterQuery: addSourcesHasTextAfter,
         setQuery: setAddSourcesSearchQuery,
         openFromButton: openAddSourcesMenu,
         handleTrigger: handleAddSourcesTrigger,
@@ -256,9 +260,11 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         dismiss: dismissAddSourcesMenu,
         commit: commitAddSourcesMenu,
         resetQuery: resetAddSourcesQuery,
+        caretOffsetFor: addSourcesCaretOffset,
     } = useAddSourcesMenu({
         verticalPosition: 'below',
         deleteTrailingQuery,
+        getCaretOffset,
         focusEditor,
         setMessageContent: setEditedContent,
         menuRef: addSourcesMenuRef,
@@ -444,30 +450,32 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         // An open Add Sources menu owns keystrokes, so `/` in its query is a
         // search term, not an actions trigger.
         if (requestSourcesMenu && handleAddSourcesChange(value)) {
-            queueCaretToEnd(value.length);
+            queueCaretToEnd(addSourcesCaretOffset(value));
             return;
         }
         if (handleSlashMenuChange(value)) {
-            queueCaretToEnd(value.length);
+            queueCaretToEnd(slashCaretOffsetFor(value));
             return;
         }
         const inputEl = editInputRef.current;
         if (inputEl && handleSlashTrigger(value, inputEl.getBoundingClientRect(), editBaselineRef.current)) {
-            queueCaretToEnd(value.length);
+            queueCaretToEnd(slashCaretOffsetFor(value));
             return;
         }
         if (requestSourcesMenu && inputEl && handleAddSourcesTrigger(value, inputEl, editBaselineRef.current)) {
-            queueCaretToEnd(value.length);
+            queueCaretToEnd(addSourcesCaretOffset(value));
             return;
         }
         setEditedContent(value);
     }, [
+        addSourcesCaretOffset,
         handleAddSourcesChange,
         handleAddSourcesTrigger,
         handleSlashMenuChange,
         handleSlashTrigger,
         queueCaretToEnd,
         requestSourcesMenu,
+        slashCaretOffsetFor,
     ]);
 
     /**
@@ -766,6 +774,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                                     isAddSourcesMenuOpen
                                     && addSourcesQuerySource === 'editor'
                                     && addSourcesSearchQuery.length === 0
+                                    && !addSourcesHasTextAfter
                                         ? 'Type to search'
                                         : null
                                 }

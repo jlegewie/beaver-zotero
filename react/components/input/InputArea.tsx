@@ -110,13 +110,14 @@ const InputArea: React.FC<InputAreaProps> = ({
     }, []);
     // The open Add Sources menu, for stepping back out of one of its submenus.
     const addSourcesMenuRef = useRef<AddSourcesMenuHandle | null>(null);
-    const deleteTrailingQuery = useCallback((length: number) => {
-        editorHandleRef.current?.deleteTrailingQuery(length);
+    const deleteTrailingQuery = useCallback((length: number, keepAfter: number) => {
+        editorHandleRef.current?.deleteTrailingQuery(length, keepAfter);
     }, []);
+    const getCaretOffset = useCallback(() => editorHandleRef.current?.getSelectionOffset() ?? null, []);
     // Stable forwarder so the slash menu can insert a command pill into the
     // Lexical editor (the editor handle isn't available until after mount).
-    const insertSlashCommand = useCallback((descriptor: SlashCommandDescriptor, queryLength: number | null) => {
-        editorHandleRef.current?.insertSlashCommand(descriptor, queryLength);
+    const insertSlashCommand = useCallback((descriptor: SlashCommandDescriptor, queryLength: number | null, keepAfter?: number) => {
+        editorHandleRef.current?.insertSlashCommand(descriptor, queryLength, keepAfter);
     }, []);
 
     // A programmatic composer reset (new thread, thread switch, send) can write
@@ -298,7 +299,8 @@ const InputArea: React.FC<InputAreaProps> = ({
         handleSlashMenuChange,
         handleSlashTrigger,
         handleSlashMenuKeyDown,
-    } = useSlashMenu(inputRef, verticalPosition, focusEditor, insertSlashCommand);
+        slashCaretOffsetFor,
+    } = useSlashMenu(inputRef, verticalPosition, focusEditor, insertSlashCommand, { getCaretOffset });
 
     // A `@` typed in the editor drives the Add Sources menu the same way: the
     // caret never leaves the editor and the text after the `@` is the menu's
@@ -309,6 +311,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         position: addSourcesMenuPosition,
         query: addSourcesSearchQuery,
         querySource: addSourcesQuerySource,
+        hasTextAfterQuery: addSourcesHasTextAfter,
         setQuery: setAddSourcesSearchQuery,
         openFromButton: openAddSourcesMenu,
         handleTrigger: handleAddSourcesTrigger,
@@ -317,9 +320,11 @@ const InputArea: React.FC<InputAreaProps> = ({
         dismiss: dismissAddSourcesMenu,
         commit: commitAddSourcesMenu,
         resetQuery: resetAddSourcesQuery,
+        caretOffsetFor: addSourcesCaretOffset,
     } = useAddSourcesMenu({
         verticalPosition,
         deleteTrailingQuery,
+        getCaretOffset,
         focusEditor,
         setMessageContent,
         menuRef: addSourcesMenuRef,
@@ -412,12 +417,12 @@ const InputArea: React.FC<InputAreaProps> = ({
         // The open Add Sources menu owns every keystroke until it closes, so a
         // `/` typed into its query is a search term, not an actions trigger.
         if (handleAddSourcesChange(value)) {
-            queueSelectionRestore(value.length, false);
+            queueSelectionRestore(addSourcesCaretOffset(value), false);
             return;
         }
 
         if (handleSlashMenuChange(value)) {
-            queueSelectionRestore(value.length, false);
+            queueSelectionRestore(slashCaretOffsetFor(value), false);
             return;
         }
 
@@ -426,7 +431,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         // instructions for that decision, and a pill's prompt and attachments
         // are resolved only on the send path.
         if (inputEl && !isAwaitingApproval && handleSlashTrigger(value, inputEl.getBoundingClientRect())) {
-            queueSelectionRestore(value.length, false);
+            queueSelectionRestore(slashCaretOffsetFor(value), false);
             return;
         }
 
@@ -436,12 +441,13 @@ const InputArea: React.FC<InputAreaProps> = ({
             !hideAttachmentMenu &&
             handleAddSourcesTrigger(value, inputEl)
         ) {
-            queueSelectionRestore(value.length, false);
+            queueSelectionRestore(addSourcesCaretOffset(value), false);
             return;
         }
 
         setMessageContent(value);
     }, [
+        addSourcesCaretOffset,
         handleAddSourcesChange,
         handleAddSourcesTrigger,
         handleSlashMenuChange,
@@ -451,6 +457,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         isAwaitingApproval,
         queueSelectionRestore,
         setMessageContent,
+        slashCaretOffsetFor,
     ]);
 
     const handleEditorKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -738,7 +745,10 @@ const InputArea: React.FC<InputAreaProps> = ({
                         inlineHint={
                             isAddSourcesMenuOpen &&
                             addSourcesQuerySource === 'editor' &&
-                            addSourcesSearchQuery.length === 0
+                            addSourcesSearchQuery.length === 0 &&
+                            // The hint sits at the end of the content, so it
+                            // would be misplaced ahead of existing text.
+                            !addSourcesHasTextAfter
                                 ? 'Type to search'
                                 : null
                         }

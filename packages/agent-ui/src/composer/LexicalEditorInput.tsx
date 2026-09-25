@@ -288,19 +288,22 @@ export type LexicalEditorInputHandle = {
     /** Append without rebuilding command nodes. Returns false while IME composition is active. */
     appendText: (text: string) => boolean;
     setText: (text: string, caretOffset?: number) => void;
-    /** Delete the last `length` characters of the editor content in place (no
-     *  full rebuild), leaving the caret at the end. Used to take back the
-     *  `@query` the Add Sources menu consumed as its search box, without
-     *  flattening colored command nodes. */
-    deleteTrailingQuery: (length: number) => void;
+    /** Delete `length` characters of the editor content in place (no full
+     *  rebuild), ending `keepAfter` characters before its end, and leave the
+     *  caret where they were. Used to take back the `@query` the Add Sources
+     *  menu consumed as its search box, without flattening colored command
+     *  nodes. */
+    deleteTrailingQuery: (length: number, keepAfter?: number) => void;
     selectRange: (start: number, end: number, options?: { skipFocus?: boolean }) => void;
     getSelectionOffset: () => number | null;
     /** Insert a styled command pill followed by a space, caret left at the
      *  end. With a numeric `queryLength`, the trailing `/query` (length
      *  `queryLength`, excluding the `/`) the user typed is replaced by the
-     *  pill (slash-menu flow). With `null`, nothing is removed and the pill is
+     *  pill (slash-menu flow); a positive `keepAfter` places that `/query`
+     *  that many characters before the end instead, and the caret is left
+     *  after the pill. With `null`, nothing is removed and the pill is
      *  appended after the existing content (programmatic staging flow). */
-    insertSlashCommand: (descriptor: SlashCommandDescriptor, queryLength: number | null) => void;
+    insertSlashCommand: (descriptor: SlashCommandDescriptor, queryLength: number | null, keepAfter?: number) => void;
     /** Returns the command pills currently in the editor, in document order. */
     getSlashCommands: () => SlashCommandDescriptor[];
     /**
@@ -489,14 +492,22 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                 setText: (text, caretOffset = text.length) => {
                     setPlainText(text, caretOffset);
                 },
-                deleteTrailingQuery: (length) => {
+                deleteTrailingQuery: (length, keepAfter = 0) => {
                     if (length <= 0) return;
                     selectionRepairGenerationRef.current++;
                     pinnedEndCaretRef.current = false;
                     blurSelectionRef.current = null;
                     editor.update(() => {
-                        $deleteTrailingQuery(length);
-                        $getRoot().selectEnd();
+                        if (keepAfter <= 0) {
+                            $deleteTrailingQuery(length);
+                            $getRoot().selectEnd();
+                            return;
+                        }
+                        // The query ends a line with more content after it.
+                        const end = $getRoot().getTextContentSize() - keepAfter;
+                        $selectFlatRange(Math.max(0, end - length), end);
+                        const selection = $getSelection();
+                        if ($isRangeSelection(selection)) selection.removeText();
                     });
                 },
                 selectRange: (start, end, options) => {
@@ -515,12 +526,15 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     });
                     return offset;
                 },
-                insertSlashCommand: (descriptor, queryLength) => {
+                insertSlashCommand: (descriptor, queryLength, keepAfter = 0) => {
                     selectionRepairGenerationRef.current++;
                     blurSelectionRef.current = null;
+                    // The typed `/query` sits in front of other content: the
+                    // pill replaces it in place rather than at the end.
+                    const inPlace = queryLength !== null && keepAfter > 0;
                     editor.update(() => {
                         const root = $getRoot();
-                        if (queryLength !== null) {
+                        if (queryLength !== null && !inPlace) {
                             $deleteTrailingQuery(queryLength + 1); // +1 for the leading '/'
                         }
 
@@ -558,6 +572,25 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                             descriptor.persisted,
                         );
                         const spaceNode = $createTextNode(' ');
+                        if (inPlace) {
+                            const text = root.getTextContent();
+                            const end = text.length - keepAfter;
+                            $selectFlatRange(Math.max(0, end - ((queryLength ?? 0) + 1)), end);
+                            const selection = $getSelection();
+                            if ($isRangeSelection(selection)) {
+                                selection.removeText();
+                                // Text that already starts with a space needs
+                                // no second one after the pill.
+                                if (text[end] === ' ') {
+                                    selection.insertNodes([slashNode]);
+                                    slashNode.selectNext(0, 0);
+                                } else {
+                                    selection.insertNodes([slashNode, spaceNode]);
+                                    spaceNode.selectEnd();
+                                }
+                                return;
+                            }
+                        }
                         const lastChild = root.getLastChild();
                         const paragraph = $isElementNode(lastChild)
                             ? lastChild
@@ -576,6 +609,10 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     // mouse click) and land the caret at the end, right after the
                     // inserted pill + space.
                     editor.focus(() => { /* noop */ }, { defaultSelection: 'rootEnd' });
+                    if (inPlace) {
+                        pinnedEndCaretRef.current = false;
+                        return;
+                    }
                     // Pin the caret to the end until the user interacts: the
                     // UI churn that follows a staged insert (sidebar opening,
                     // panels re-rendering, attachments mounting) can reset the
