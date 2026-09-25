@@ -411,9 +411,9 @@ export interface ConfigHost {
      * character in Gecko on Windows, which sends some IMEs' candidate window to
      * the top-left corner of the screen.
      *
-     * Opt-in, because composing over selected text fails while it is on: a
-     * host that omits it (or omits this whole slice) leaves the suppression
-     * **disabled**.
+     * Opt-in, because commits then rely more often on the composer's
+     * composition-end recovery: a host that omits it (or omits this whole
+     * slice) leaves the suppression **disabled**.
      */
     isImeCompositionStartCharSuppressionEnabled?(): boolean;
     /**

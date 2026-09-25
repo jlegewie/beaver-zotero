@@ -37,10 +37,10 @@ pref("readerExplainPrompt", "Explain the selected passage or annotation(s) from 
 // interacts badly with the deferral.
 pref("imeCompositionOrderFix", true);
 // Chat composer IME handling (opt-in): on Windows, stop the editor from
-// inserting its own marker character when a composition starts. Keeps some
-// IMEs (e.g. Shouxin) from placing their candidate window at the screen's
-// top-left corner, but composing over selected text then fails, so it is off
-// by default.
+// inserting its own marker character when a composition starts at a plain
+// caret. Keeps some IMEs (e.g. Shouxin) from placing their candidate window at
+// the screen's top-left corner. Only for users of such IMEs: with others it can
+// leave a commit selected or disturb the composition display, so off by default.
 pref("imeSuppressCompositionStartChar", false);
 // Verbose IME event tracing in the chat composer, for diagnosing composition
 // issues from debug output.

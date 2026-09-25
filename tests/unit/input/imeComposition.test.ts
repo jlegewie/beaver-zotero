@@ -1,9 +1,14 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
+    $createLineBreakNode,
     $createParagraphNode,
     $createTextNode,
     $getRoot,
+    $getSelection,
+    $isRangeSelection,
+    $setCompositionKey,
+    CONTROLLED_TEXT_INSERTION_COMMAND,
     COMMAND_PRIORITY_EDITOR,
     COMPOSITION_END_COMMAND,
     COMPOSITION_START_COMMAND,
@@ -739,6 +744,66 @@ describe('registerCompositionStartCharSuppression', () => {
 
     it('swallows the start character and still starts the composition', () => {
         expect(startCompositionInEmptyEditor(true)).toEqual({ modelText: '', composing: true });
+    });
+
+    /**
+     * Places the selection with `select`, then dispatches the start-character
+     * insertion the way Lexical's composition start does (composition key
+     * already set), and returns the resulting text.
+     */
+    const insertStartCharAt = (select: () => void) => {
+        const root = document.createElement('div');
+        root.contentEditable = 'true';
+        document.body.appendChild(root);
+        const editor = createEditor({
+            namespace: 'ime-start-char-caret-test',
+            onError: error => { throw error; },
+        });
+        editor.setRootElement(root);
+        const disposePlainText = registerPlainText(editor);
+        const disposeSuppression = registerCompositionStartCharSuppression(editor);
+        editor.update(select, { discrete: true });
+        editor.update(() => {
+            const selection = $getSelection();
+            if ($isRangeSelection(selection)) $setCompositionKey(selection.anchor.key);
+            editor.dispatchCommand(CONTROLLED_TEXT_INSERTION_COMMAND, '\u200b');
+        }, { discrete: true });
+        let modelText = '';
+        editor.getEditorState().read(() => {
+            modelText = $getRoot().getTextContent();
+        });
+        disposeSuppression();
+        disposePlainText();
+        editor.setRootElement(null);
+        root.remove();
+        return modelText;
+    };
+
+    it('swallows the start character at a caret inside text', () => {
+        expect(insertStartCharAt(() => {
+            const text = $createTextNode('本文');
+            $getRoot().clear().append($createParagraphNode().append(text));
+            text.select(2, 2);
+        })).toBe('本文');
+    });
+
+    it('keeps the start character when the composition replaces selected text', () => {
+        expect(insertStartCharAt(() => {
+            const text = $createTextNode('本文研究');
+            $getRoot().clear().append($createParagraphNode().append(text));
+            text.select(0, 2);
+        })).toBe('\u200b研究');
+    });
+
+    it('keeps the start character at an element caret beside other content', () => {
+        expect(insertStartCharAt(() => {
+            const paragraph = $createParagraphNode().append(
+                $createTextNode('本文'),
+                $createLineBreakNode(),
+            );
+            $getRoot().clear().append(paragraph);
+            paragraph.select(2, 2);
+        })).toBe('本文\n\u200b');
     });
 });
 

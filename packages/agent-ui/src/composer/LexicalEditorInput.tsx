@@ -1406,9 +1406,11 @@ const CaretNavigationPlugin: React.FC<{
  * the composing text) and a reconciler update would disturb the composition, so
  * neither target applies. Left alone, the reset is reported to the IME, and
  * IMEs such as Microsoft Pinyin and Sogou continue composing at offset 0. The
- * guard instead re-asserts the raw DOM selection recorded after the
- * composition's latest input, before the IME observes the change. Gecko keeps
- * the composition open across that selection write.
+ * guard instead re-asserts the raw DOM selection the composition last had
+ * (recorded on its input events and selection changes), before the IME
+ * observes the change, and only when the live selection shows the reset's
+ * zeroed offsets. Gecko keeps the composition open across that selection
+ * write.
  *
  * Skipped while: the mutation batch touches the editor's own subtree (the
  * reconciler manages those), a pointer is down (don't fight an in-progress
@@ -1456,10 +1458,15 @@ const SelectionGuardPlugin: React.FC<{
             // current DOM selection and the snapshot is no longer needed.
             const onSelectionChange = () => {
                 pendingDomSelectionRef.current = null;
+                // An IME can move the caret within its composition without an
+                // input event (e.g. clause navigation). A reset repaired below
+                // is already undone by the time this task runs.
+                if (ime.isComposing()) recordCompositionSelection();
             };
 
             // Where the active composition last left the caret. Recorded after
-            // Lexical's own root listeners have processed each event.
+            // Lexical's own root listeners have processed each event, and on
+            // every selection change during the composition.
             let compositionSelection: DomSelectionSnapshot | null = null;
             const recordCompositionSelection = () => {
                 const sel = win.getSelection();
@@ -1478,6 +1485,10 @@ const SelectionGuardPlugin: React.FC<{
                 if (!root.contains(target.anchorNode) || !root.contains(target.focusNode)) return;
                 const sel = win.getSelection();
                 if (!sel) return;
+                // Only undo the chrome document's reset, which zeroes both
+                // offsets. Any other difference is a caret move this guard has
+                // not recorded yet, and restoring would fight the IME.
+                if (sel.anchorOffset !== 0 || sel.focusOffset !== 0) return;
                 if (
                     sel.anchorNode === target.anchorNode
                     && sel.anchorOffset === target.anchorOffset

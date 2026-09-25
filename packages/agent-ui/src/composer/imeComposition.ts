@@ -1,6 +1,7 @@
 import {
     $getSelection,
     $getRoot,
+    $isElementNode,
     $isRangeSelection,
     COMMAND_PRIORITY_CRITICAL,
     COMPOSITION_END_COMMAND,
@@ -800,19 +801,36 @@ const LEXICAL_COMPOSITION_START_CHAR = '\u200b';
  * any plain contenteditable.
  *
  * Only the insertion Lexical makes while it is starting a composition is
- * swallowed; every other controlled insertion passes through.
+ * swallowed, and only where the IME has somewhere to write without it: a
+ * collapsed caret inside a text node, or an empty paragraph (the browser
+ * creates the text node). A caret beside a pill or line break, and a
+ * composition typed over selected text, keep Lexical's start character; those
+ * compositions keep the original candidate-window placement.
  *
- * Known limitation, and the reason callers keep this opt-in: without the start
- * character, a composition typed over selected text leaves the selection in
- * place and the committed text is inserted twice, and commits more often
- * depend on the composition-end payload recovery.
+ * Callers keep this opt-in, meant for users of an affected IME: without the
+ * start character, commits depend more often on the composition-end payload
+ * recovery, and some IMEs that are fine without it misbehave with it on
+ * (Sogou can leave a commit selected; Microsoft IME for Japanese may show only
+ * the first composed character until commit).
  */
 export function registerCompositionStartCharSuppression(editor: LexicalEditor): () => void {
     return editor.registerCommand<unknown>(
         CONTROLLED_TEXT_INSERTION_COMMAND,
-        payload => payload === LEXICAL_COMPOSITION_START_CHAR && editor.isComposing(),
+        payload => payload === LEXICAL_COMPOSITION_START_CHAR
+            && editor.isComposing()
+            && $isCaretSafeWithoutStartChar(),
         COMMAND_PRIORITY_CRITICAL,
     );
+}
+
+/** Whether an IME can compose at the current selection without Lexical's start character. */
+function $isCaretSafeWithoutStartChar(): boolean {
+    const selection = $getSelection();
+    if (!$isRangeSelection(selection) || !selection.isCollapsed()) return false;
+    const { anchor } = selection;
+    if (anchor.type === 'text') return true;
+    const node = anchor.getNode();
+    return $isElementNode(node) && node.getChildrenSize() === 0;
 }
 
 const TRACED_EVENTS = [
