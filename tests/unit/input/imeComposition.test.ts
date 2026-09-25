@@ -6,14 +6,17 @@ import {
     $getRoot,
     COMMAND_PRIORITY_EDITOR,
     COMPOSITION_END_COMMAND,
+    COMPOSITION_START_COMMAND,
     createEditor,
 } from 'lexical';
 import type { LexicalEditor } from 'lexical';
+import { registerPlainText } from '@lexical/plain-text';
 import {
     createCompositionGatedEmitter,
     createImeCompositionTracker,
     decideCompositionPayloadRecovery,
     registerCompositionEndDeferral,
+    registerCompositionStartCharSuppression,
 } from '@beaver/agent-ui/composer/imeComposition';
 
 type RootListener = (root: HTMLElement | null, prev: HTMLElement | null) => void;
@@ -588,6 +591,154 @@ describe('decideCompositionPayloadRecovery', () => {
             textSize: 4,
             deadlineReached: true,
         })).toEqual({ action: 'abort', reason: 'invalid-baseline' });
+    });
+});
+
+describe('decideCompositionPayloadRecovery with a composition-start snapshot', () => {
+    it('recognizes a commit the IME applied before compositionend', () => {
+        // The caret is collapsed after the committed text, so the replacement
+        // range covers nothing and only the start snapshot shows it landed.
+        expect(decideCompositionPayloadRecovery({
+            baselineModel: '你好中国',
+            currentText: '你好中国',
+            committedText: '中国',
+            replacementRange: { start: 4, end: 4 },
+            textSize: 4,
+            deadlineReached: true,
+            compositionStart: { model: '你好', range: { start: 2, end: 2 } },
+        })).toEqual({ action: 'already-present' });
+    });
+
+    it('ignores the composition start marker captured in the snapshot', () => {
+        expect(decideCompositionPayloadRecovery({
+            baselineModel: '你好中国',
+            currentText: '你好中国',
+            committedText: '中国',
+            replacementRange: { start: 4, end: 4 },
+            textSize: 4,
+            deadlineReached: true,
+            compositionStart: { model: '你好\u200b', range: { start: 2, end: 3 } },
+        })).toEqual({ action: 'already-present' });
+    });
+
+    it('still recovers a repeated phrase that never reached the editor', () => {
+        expect(decideCompositionPayloadRecovery({
+            baselineModel: '中国',
+            currentText: '中国',
+            committedText: '中国',
+            replacementRange: { start: 2, end: 2 },
+            textSize: 2,
+            deadlineReached: true,
+            compositionStart: { model: '中国', range: { start: 2, end: 2 } },
+        })).toEqual({ action: 'recover', start: 2, end: 2, cleanupObserved: false });
+    });
+
+    it('treats replaced selected text as part of the composition', () => {
+        expect(decideCompositionPayloadRecovery({
+            baselineModel: '中国研究',
+            currentText: '中国研究',
+            committedText: '中国',
+            replacementRange: { start: 2, end: 2 },
+            textSize: 4,
+            deadlineReached: true,
+            compositionStart: { model: '本文研究', range: { start: 0, end: 2 } },
+        })).toEqual({ action: 'already-present' });
+    });
+});
+
+describe('composition payload recovery with an early IME commit', () => {
+    it('does not insert a commit that is already in the editor', () => {
+        vi.useFakeTimers();
+        const root = document.createElement('div');
+        document.body.appendChild(root);
+        const editor = createEditor({
+            namespace: 'ime-early-commit-test',
+            onError: error => { throw error; },
+        });
+        editor.setRootElement(root);
+        editor.update(() => {
+            const text = $createTextNode('你好');
+            $getRoot().append($createParagraphNode().append(text));
+            text.select(2, 2);
+        }, { discrete: true });
+        const dispose = registerCompositionEndDeferral(editor);
+
+        root.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
+        // The IME applies its commit before compositionend.
+        editor.update(() => {
+            const text = $getRoot().getFirstDescendant();
+            if (text && 'setTextContent' in text) {
+                (text as ReturnType<typeof $createTextNode>).setTextContent('你好中国');
+                (text as ReturnType<typeof $createTextNode>).select(4, 4);
+            }
+        }, { discrete: true });
+        editor.dispatchCommand(
+            COMPOSITION_END_COMMAND,
+            new CompositionEvent('compositionend', { data: '中国' }),
+        );
+        root.dispatchEvent(new InputEvent('input', {
+            bubbles: true,
+            data: '中国',
+            inputType: 'insertCompositionText',
+            isComposing: false,
+        }));
+        vi.runAllTimers();
+
+        let modelText = '';
+        editor.getEditorState().read(() => {
+            modelText = $getRoot().getTextContent();
+        });
+        expect(modelText).toBe('你好中国');
+
+        dispose();
+        editor.setRootElement(null);
+        root.remove();
+        vi.useRealTimers();
+    });
+});
+
+describe('registerCompositionStartCharSuppression', () => {
+    const startCompositionInEmptyEditor = (suppress: boolean) => {
+        const root = document.createElement('div');
+        root.contentEditable = 'true';
+        document.body.appendChild(root);
+        const editor = createEditor({
+            namespace: 'ime-start-char-test',
+            onError: error => { throw error; },
+        });
+        editor.setRootElement(root);
+        const disposePlainText = registerPlainText(editor);
+        const disposeSuppression = suppress ? registerCompositionStartCharSuppression(editor) : null;
+        editor.update(() => {
+            const paragraph = $createParagraphNode();
+            $getRoot().clear().append(paragraph);
+            paragraph.select();
+        }, { discrete: true });
+
+        // An element-anchored caret makes Lexical insert its start character.
+        editor.dispatchCommand(
+            COMPOSITION_START_COMMAND,
+            new CompositionEvent('compositionstart', { data: '' }),
+        );
+        let modelText = '';
+        editor.getEditorState().read(() => {
+            modelText = $getRoot().getTextContent();
+        });
+        const composing = editor.isComposing();
+
+        disposeSuppression?.();
+        disposePlainText();
+        editor.setRootElement(null);
+        root.remove();
+        return { modelText, composing };
+    };
+
+    it('lets Lexical insert its start character by default', () => {
+        expect(startCompositionInEmptyEditor(false).modelText).toBe('\u200b');
+    });
+
+    it('swallows the start character and still starts the composition', () => {
+        expect(startCompositionInEmptyEditor(true)).toEqual({ modelText: '', composing: true });
     });
 });
 

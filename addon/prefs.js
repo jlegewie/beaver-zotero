@@ -36,6 +36,12 @@ pref("readerExplainPrompt", "Explain the selected passage or annotation(s) from 
 // Sogou Pinyin from discarding committed text). Kill-switch in case an IME
 // interacts badly with the deferral.
 pref("imeCompositionOrderFix", true);
+// Chat composer IME handling (opt-in): on Windows, stop the editor from
+// inserting its own marker character when a composition starts. Keeps some
+// IMEs (e.g. Shouxin) from placing their candidate window at the screen's
+// top-left corner, but composing over selected text then fails, so it is off
+// by default.
+pref("imeSuppressCompositionStartChar", false);
 // Verbose IME event tracing in the chat composer, for diagnosing composition
 // issues from debug output.
 pref("debugImeTrace", false);

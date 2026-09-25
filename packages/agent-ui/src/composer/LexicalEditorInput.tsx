@@ -41,6 +41,7 @@ import {
     type SlashCommandDescriptor,
 } from './slashCommands';
 import { isImeKeyEvent } from '../primitives/ime';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { getHost } from '../host';
 import { isMacPlatform, isWindowsPlatform } from '../utils/platform';
 import type { ActionPopupSource } from '../chat/actionPopup';
@@ -48,6 +49,7 @@ import {
     createCompositionGatedEmitter,
     createImeCompositionTracker,
     registerCompositionEndDeferral,
+    registerCompositionStartCharSuppression,
     registerImeTrace,
     type ImeCompositionTracker,
 } from './imeComposition';
@@ -1107,6 +1109,32 @@ const WindowsImeCompositionOrderPlugin: React.FC = () => {
 };
 
 /**
+ * Keeps Lexical from rewriting the start of each composition in Gecko on
+ * Windows (see registerCompositionStartCharSuppression). Opt-in through the
+ * host's `isImeCompositionStartCharSuppressionEnabled`; a host that supplies
+ * none leaves Lexical's default behavior.
+ */
+const WindowsImeCompositionStartPlugin: React.FC = () => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => {
+        if (getHost().config?.isImeCompositionStartCharSuppressionEnabled?.() !== true) return;
+        let dispose: (() => void) | undefined;
+        const unregisterRoot = editor.registerRootListener((rootElement) => {
+            dispose?.();
+            dispose = undefined;
+            const nav = rootElement?.ownerDocument.defaultView?.navigator;
+            if (!nav || !isWindowsPlatform(nav) || !/\bGecko\/\d+/.test(nav.userAgent)) return;
+            dispose = registerCompositionStartCharSuppression(editor);
+        });
+        return () => {
+            unregisterRoot();
+            dispose?.();
+        };
+    }, [editor]);
+    return null;
+};
+
+/**
  * Compact IME event tracing (host config `isImeTracingEnabled`), for diagnosing
  * composition issues without a local reproduction. Off unless the host opts in.
  */
@@ -1374,11 +1402,19 @@ const CaretNavigationPlugin: React.FC<{
  * 2. The editor state's selection, re-applied through the reconciler when the
  *    live DOM selection no longer matches it.
  *
+ * During an IME composition the editor state is not authoritative (the IME owns
+ * the composing text) and a reconciler update would disturb the composition, so
+ * neither target applies. Left alone, the reset is reported to the IME, and
+ * IMEs such as Microsoft Pinyin and Sogou continue composing at offset 0. The
+ * guard instead re-asserts the raw DOM selection recorded after the
+ * composition's latest input, before the IME observes the change. Gecko keeps
+ * the composition open across that selection write.
+ *
  * Skipped while: the mutation batch touches the editor's own subtree (the
  * reconciler manages those), a pointer is down (don't fight an in-progress
- * click/drag), IME composition is active, or the editor is not the active
- * element (re-asserting a DOM selection while a menu input has focus would
- * trigger the XUL focus manager's selection-based focus theft).
+ * click/drag), the IME is in its post-composition grace period, or the editor
+ * is not the active element (re-asserting a DOM selection while a menu input
+ * has focus would trigger the XUL focus manager's selection-based focus theft).
  */
 const SelectionGuardPlugin: React.FC<{
     pendingDomSelectionRef: React.MutableRefObject<DomSelectionSnapshot | null>;
@@ -1422,6 +1458,50 @@ const SelectionGuardPlugin: React.FC<{
                 pendingDomSelectionRef.current = null;
             };
 
+            // Where the active composition last left the caret. Recorded after
+            // Lexical's own root listeners have processed each event.
+            let compositionSelection: DomSelectionSnapshot | null = null;
+            const recordCompositionSelection = () => {
+                const sel = win.getSelection();
+                compositionSelection = sel ? captureDomSelection(sel, root) : null;
+            };
+            const onCompositionInput = () => {
+                if (ime.isComposing()) recordCompositionSelection();
+            };
+            const onCompositionEnd = () => {
+                compositionSelection = null;
+            };
+            const traceRestores = getHost().config?.isImeTracingEnabled?.() === true;
+            const restoreCompositionSelection = () => {
+                const target = compositionSelection;
+                if (!target || !ime.isComposing()) return;
+                if (!root.contains(target.anchorNode) || !root.contains(target.focusNode)) return;
+                const sel = win.getSelection();
+                if (!sel) return;
+                if (
+                    sel.anchorNode === target.anchorNode
+                    && sel.anchorOffset === target.anchorOffset
+                    && sel.focusNode === target.focusNode
+                    && sel.focusOffset === target.focusOffset
+                ) return;
+                const reset = `${sel.anchorOffset}/${sel.focusOffset}`;
+                try {
+                    sel.setBaseAndExtent(
+                        target.anchorNode,
+                        target.anchorOffset,
+                        target.focusNode,
+                        target.focusOffset,
+                    );
+                    if (traceRestores) {
+                        logger(
+                            `[IME] selection guard restored composition selection`
+                            + ` ${reset} -> ${target.anchorOffset}/${target.focusOffset}`
+                            + ` compositionId=${ime.compositionId()}`,
+                        );
+                    }
+                } catch { /* offsets may no longer fit the composing text node */ }
+            };
+
             const onMutations = (records: MutationRecord[]) => {
                 // Editor-internal records are the reconciler's own work — it
                 // sets the selection itself after them. Only mutations outside
@@ -1432,8 +1512,11 @@ const SelectionGuardPlugin: React.FC<{
                 // reconciler-placed selection compares equal and is left alone.
                 if (records.every(record => root.contains(record.target))) return;
                 if (pointerDown) return;
-                if (ime.isImeActive()) return;
                 if (doc.activeElement !== root) return;
+                if (ime.isImeActive()) {
+                    restoreCompositionSelection();
+                    return;
+                }
                 const sel = win.getSelection();
                 if (!sel) return;
 
@@ -1494,7 +1577,13 @@ const SelectionGuardPlugin: React.FC<{
             doc.addEventListener('pointercancel', onPointerCancel, true);
             doc.addEventListener('selectionchange', onSelectionChange);
             win.addEventListener('blur', onWindowBlur);
+            root.addEventListener('compositionstart', recordCompositionSelection);
+            root.addEventListener('input', onCompositionInput);
+            root.addEventListener('compositionend', onCompositionEnd);
             return () => {
+                root.removeEventListener('compositionstart', recordCompositionSelection);
+                root.removeEventListener('input', onCompositionInput);
+                root.removeEventListener('compositionend', onCompositionEnd);
                 observer.disconnect();
                 doc.removeEventListener('pointerdown', onPointerDown, true);
                 doc.removeEventListener('pointerup', onPointerUp, true);
@@ -2205,6 +2294,7 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />
                     <ClipboardAttachmentPlugin handlers={pasteHandlers} ime={ime} />
                     <WindowsImeCompositionOrderPlugin />
+                    <WindowsImeCompositionStartPlugin />
                     <ImeTracePlugin ime={ime} />
                     <EditorApi
                         ref={ref}
