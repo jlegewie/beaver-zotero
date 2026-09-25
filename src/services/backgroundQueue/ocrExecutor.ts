@@ -453,25 +453,45 @@ export class OcrExecutor implements JobExecutor {
             return { outcome: { kind: 'complete', reason: 'no_file_hash' } };
         }
 
-        // Page count and the original byte length both come from the cached
-        // NO_TEXT_LAYER metadata written at detection. For remote the row is keyed
-        // by the same synthetic path and stores the original byteLength, so no extra
-        // download is needed here to learn the cache key.
+        // A page count alone does not establish that OCR is still needed: a
+        // replacement PDF with native text has one too. The cache validates the
+        // current source identity, and its no-text verdict must agree with the
+        // processing ledger for the file hash we are about to send to OCR.
         let meta = await this.resolveSourceMetadata(resolvedItem, filePath);
         this.throwIfLibraryUnavailable(record.libraryId, ctx);
-        if (!Number.isInteger(meta?.pageCount) || (meta?.pageCount ?? 0) < 1) {
-            // Recover through normal detection so valid native text stays native.
+        let state = await ctx.db.getAttachmentProcessingState(record.libraryId, record.zoteroKey);
+        this.throwIfLibraryUnavailable(record.libraryId, ctx);
+        const currentDetection = () => state?.fileHash === fileHash
+            && state.extractStatus === 'done';
+        const needsOcr = () => meta?.errorCode === 'no_text_layer'
+            && currentDetection()
+            && (state?.ocrStatus === 'needed'
+                || (record.payload?.prepare_cache === true && state?.ocrStatus === 'done'));
+        const hasDetectionMetadata = () => needsOcr()
+            && Number.isInteger(meta?.pageCount) && (meta?.pageCount ?? 0) >= 1;
+
+        if (!hasDetectionMetadata()) {
+            if (currentDetection() && state?.ocrStatus === 'na' && meta && meta.errorCode === null) {
+                return { outcome: { kind: 'complete', reason: 'ocr_not_needed' } };
+            }
+            // Missing or conflicting evidence needs normal detection. It can
+            // recognize a new scan as well as a native-text replacement.
             const recovery = await new DocumentExtractExecutor().execute({
                 ...record, jobType: 'document_extract', contentKind: 'pdf', payloadKind: 'structured',
                 payload: { ...record.payload, content_kind: 'pdf', maxPages: null, timeoutSeconds: 120 },
             }, ctx);
             this.throwIfLibraryUnavailable(record.libraryId, ctx);
             if (recovery.kind !== 'complete') return { outcome: recovery };
-            const state = await ctx.db.getAttachmentProcessingState(record.libraryId, record.zoteroKey);
+            state = await ctx.db.getAttachmentProcessingState(record.libraryId, record.zoteroKey);
             this.throwIfLibraryUnavailable(record.libraryId, ctx);
-            if (state?.ocrStatus !== 'needed') return { outcome: recovery };
             meta = await this.resolveSourceMetadata(resolvedItem, filePath);
             this.throwIfLibraryUnavailable(record.libraryId, ctx);
+            if (recovery.reason !== 'needs_ocr' || !currentDetection()
+                || (state?.ocrStatus !== 'needed'
+                    && !(record.payload?.prepare_cache === true && state?.ocrStatus === 'done'))
+                || (meta !== null && meta.errorCode !== 'no_text_layer')) {
+                return { outcome: recovery };
+            }
         }
         const pageCount = meta?.pageCount ?? null;
         if (!Number.isInteger(pageCount) || pageCount == null || pageCount < 1) {
@@ -502,18 +522,22 @@ export class OcrExecutor implements JobExecutor {
         };
     }
 
-    /** Page count + original byte length from the cached NO_TEXT_LAYER metadata. */
+    /** Detection verdict, page count, and byte length for the current source. */
     private async resolveSourceMetadata(
         item: Zotero.Item,
         filePath: string,
-    ): Promise<{ pageCount: number | null; sourceSizeBytes: number } | null> {
+    ): Promise<{ pageCount: number | null; sourceSizeBytes: number; errorCode: string | null } | null> {
         const cache = Zotero.Beaver?.documentCache;
         if (!cache) return null;
         const meta = await cache
             .getMetadata({ libraryId: item.libraryID, zoteroKey: item.key }, filePath)
             .catch(() => null);
         if (!meta) return null;
-        return { pageCount: meta.pageCount ?? null, sourceSizeBytes: meta.sourceSizeBytes ?? 0 };
+        return {
+            pageCount: meta.pageCount ?? null,
+            sourceSizeBytes: meta.sourceSizeBytes ?? 0,
+            errorCode: meta.errorCode ?? null,
+        };
     }
 
     /**

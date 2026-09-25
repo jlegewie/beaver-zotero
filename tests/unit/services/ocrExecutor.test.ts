@@ -89,6 +89,9 @@ function mockRemoteItem(syncedHash: string | undefined = 'synced999') {
         attachmentSyncedHash: syncedHash,
         attachmentContentType: 'application/pdf',
     }));
+    dbStub.getAttachmentProcessingState.mockResolvedValue({
+        fileHash: syncedHash, extractStatus: 'done', ocrStatus: 'needed',
+    });
 }
 
 const record = { id: 7, libraryId: 1, zoteroKey: 'AAAAAAAA' } as any;
@@ -125,7 +128,7 @@ beforeEach(() => {
         // Attachment-ledger surface consulted around re-extraction.
         ensureAttachmentProcessingState: vi.fn(async () => ({})),
         ensureAttachmentFileHash: vi.fn(async () => undefined),
-        getAttachmentProcessingState: vi.fn(async () => null),
+        getAttachmentProcessingState: vi.fn(async () => ({ fileHash: 'hash123', extractStatus: 'done', ocrStatus: 'needed' })),
         markAttachmentOcrDone: vi.fn(async () => true),
         markAttachmentOcrFailed: vi.fn(async () => undefined),
         markAttachmentOcrUnavailable: vi.fn(async () => true),
@@ -150,7 +153,7 @@ beforeEach(() => {
         get libraryScopeInitialized() { return libraryScope.initialized; },
         get searchableLibraryIds() { return libraryScope.searchableIds; },
         documentCache: {
-            getMetadata: vi.fn(async () => ({ pageCount: 5 })),
+            getMetadata: vi.fn(async () => ({ pageCount: 5, errorCode: 'no_text_layer' })),
             getResult: vi.fn(async () => ({ pageCount: 5, pages: [] })),
         },
         db: dbStub,
@@ -357,7 +360,9 @@ describe('OcrExecutor', () => {
         const metadata = Zotero.Beaver.documentCache!.getMetadata as ReturnType<typeof vi.fn>;
         metadata.mockResolvedValueOnce(null);
         const recovery = vi.spyOn(DocumentExtractExecutor.prototype, 'execute').mockResolvedValueOnce({ kind: 'complete', reason: 'needs_ocr' });
-        dbStub.getAttachmentProcessingState.mockResolvedValue({ ocrStatus: 'needed' });
+        dbStub.getAttachmentProcessingState.mockResolvedValue({
+            fileHash: 'hash123', extractStatus: 'done', ocrStatus: 'needed',
+        });
         api.requestOcr.mockResolvedValue({ status: 'disabled' });
         await executor.execute(record, makeCtx());
         expect(recovery).toHaveBeenCalledWith(expect.objectContaining({ jobType: 'document_extract', payload: expect.objectContaining({ content_kind: 'pdf' }) }), expect.anything());
@@ -368,16 +373,87 @@ describe('OcrExecutor', () => {
     it('does not upload when metadata recovery finds valid native text', async () => {
         (Zotero.Beaver.documentCache!.getMetadata as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
         const recovery = vi.spyOn(DocumentExtractExecutor.prototype, 'execute').mockResolvedValueOnce({ kind: 'complete', reason: 'ok' });
-        dbStub.getAttachmentProcessingState.mockResolvedValue({ ocrStatus: 'na' });
+        dbStub.getAttachmentProcessingState.mockResolvedValue({
+            fileHash: 'hash123', extractStatus: 'done', ocrStatus: 'na',
+        });
         expect(await executor.execute(record, makeCtx())).toEqual({ kind: 'complete', reason: 'ok' });
         expect(api.requestOcr).not.toHaveBeenCalled();
+        recovery.mockRestore();
+    });
+
+    it('retires an OCR ticket after the replacement is indexed with native text', async () => {
+        (Zotero.Beaver.documentCache!.getMetadata as ReturnType<typeof vi.fn>)
+            .mockResolvedValue({ pageCount: 1, errorCode: null });
+        dbStub.getAttachmentProcessingState.mockResolvedValue({
+            fileHash: 'hash123', extractStatus: 'done', ocrStatus: 'na',
+        });
+        const recovery = vi.spyOn(DocumentExtractExecutor.prototype, 'execute');
+
+        expect(await executor.execute(record, makeCtx()))
+            .toEqual({ kind: 'complete', reason: 'ocr_not_needed' });
+        expect(recovery).not.toHaveBeenCalled();
+        expect(api.requestOcr).not.toHaveBeenCalled();
+        expect(dbStub.markAttachmentOcrFailed).not.toHaveBeenCalled();
+        recovery.mockRestore();
+    });
+
+    it('detects a native replacement before reconciliation despite its cached page count', async () => {
+        (Zotero.Beaver.documentCache!.getMetadata as ReturnType<typeof vi.fn>)
+            .mockResolvedValue({ pageCount: 1, errorCode: null });
+        dbStub.getAttachmentProcessingState.mockResolvedValue({
+            fileHash: 'old-scan-hash', extractStatus: 'done', ocrStatus: 'needed',
+        });
+        const recovery = vi.spyOn(DocumentExtractExecutor.prototype, 'execute')
+            .mockResolvedValueOnce({ kind: 'complete', reason: 'ok' });
+
+        expect(await executor.execute(record, makeCtx()))
+            .toEqual({ kind: 'complete', reason: 'ok' });
+        expect(recovery).toHaveBeenCalledOnce();
+        expect(api.requestOcr).not.toHaveBeenCalled();
+        expect(dbStub.markAttachmentOcrFailed).not.toHaveBeenCalled();
+        recovery.mockRestore();
+    });
+
+    it('continues OCR after a scanned replacement is detected', async () => {
+        (Zotero.Beaver.documentCache!.getMetadata as ReturnType<typeof vi.fn>)
+            .mockResolvedValue({ pageCount: 3, errorCode: 'no_text_layer' });
+        dbStub.getAttachmentProcessingState
+            .mockResolvedValueOnce({ fileHash: 'old-scan-hash', extractStatus: 'done', ocrStatus: 'needed' })
+            .mockResolvedValue({ fileHash: 'hash123', extractStatus: 'done', ocrStatus: 'needed' });
+        const recovery = vi.spyOn(DocumentExtractExecutor.prototype, 'execute')
+            .mockResolvedValueOnce({ kind: 'complete', reason: 'needs_ocr' });
+        api.requestOcr.mockResolvedValue({ status: 'disabled' });
+
+        expect(await executor.execute(record, makeCtx()))
+            .toEqual({ kind: 'complete', reason: 'ocr_disabled' });
+        expect(recovery).toHaveBeenCalledOnce();
+        expect(api.requestOcr).toHaveBeenCalledWith('hash123', 3, 'backfill');
+        recovery.mockRestore();
+    });
+
+    it('allows cache preparation to restore a processed scan', async () => {
+        (Zotero.Beaver!.documentCache as any).getStats = vi.fn(async () => ({
+            payload_budget_bytes: 1000, payload_total_bytes: 0,
+        }));
+        dbStub.getAttachmentProcessingState.mockResolvedValue({
+            fileHash: 'hash123', extractStatus: 'done', ocrStatus: 'done',
+        });
+        api.requestOcr.mockResolvedValue({ status: 'disabled' });
+        const recovery = vi.spyOn(DocumentExtractExecutor.prototype, 'execute');
+
+        expect(await executor.execute(preparation, makeCtx()))
+            .toEqual({ kind: 'complete', reason: 'ocr_disabled' });
+        expect(recovery).not.toHaveBeenCalled();
+        expect(api.requestOcr).toHaveBeenCalledWith('hash123', 5, 'backfill');
         recovery.mockRestore();
     });
 
     it('settles failed metadata recovery visibly without requesting cloud work', async () => {
         (Zotero.Beaver.documentCache!.getMetadata as ReturnType<typeof vi.fn>).mockResolvedValue(null);
         const recovery = vi.spyOn(DocumentExtractExecutor.prototype, 'execute').mockResolvedValueOnce({ kind: 'complete', reason: 'needs_ocr' });
-        dbStub.getAttachmentProcessingState.mockResolvedValue({ ocrStatus: 'needed' });
+        dbStub.getAttachmentProcessingState.mockResolvedValue({
+            fileHash: 'hash123', extractStatus: 'done', ocrStatus: 'needed',
+        });
         expect(await executor.execute(record, makeCtx())).toMatchObject({ reason: 'ocr_metadata_unavailable' });
         expect(dbStub.markAttachmentOcrFailed).toHaveBeenCalledWith(1, 'AAAAAAAA', 'hash123', expect.stringContaining('ocr_metadata_unavailable'));
         expect(api.requestOcr).not.toHaveBeenCalled();
@@ -612,7 +688,7 @@ describe('OcrExecutor', () => {
     it('downloads a remote-only scan in-memory, uploads it, and caches size-keyed', async () => {
         mockRemoteItem('synced999');
         mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
-        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345 }));
+        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345, errorCode: 'no_text_layer' }));
         api.requestOcr.mockResolvedValue({ status: 'pending', job_id: 'job-rem', put_url: 'https://gcs/put' });
         api.markUploaded.mockResolvedValue({ status: 'queued', job_id: 'job-rem' });
         fakePoller.poll.mockResolvedValue({ kind: 'completed', getUrl: 'https://gcs/get' });
@@ -643,7 +719,7 @@ describe('OcrExecutor', () => {
         // treatment as an on-demand one.
         mockRemoteItem('synced999');
         mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
-        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345 }));
+        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345, errorCode: 'no_text_layer' }));
         api.requestOcr.mockResolvedValue({ status: 'pending', job_id: 'job-bf', put_url: 'https://gcs/put' });
         api.markUploaded.mockResolvedValue({ status: 'queued', job_id: 'job-bf' });
         fakePoller.poll.mockResolvedValue({ kind: 'completed', getUrl: 'https://gcs/get' });
@@ -662,7 +738,7 @@ describe('OcrExecutor', () => {
         // download must not go ahead on the strength of the earlier resolve.
         mockRemoteItem('synced999');
         mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
-        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345 }));
+        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345, errorCode: 'no_text_layer' }));
         api.requestOcr.mockImplementation(async () => {
             mockedRemoteAccess.mockReturnValue(false);
             return { status: 'pending', job_id: 'job-rev', put_url: 'https://gcs/put' };
@@ -688,7 +764,7 @@ describe('OcrExecutor', () => {
     it('retries when the remote scan download fails on the upload path', async () => {
         mockRemoteItem('synced999');
         mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
-        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345 }));
+        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345, errorCode: 'no_text_layer' }));
         mockedLoad.mockResolvedValue({ kind: 'error', code: 'download_failed' } as any);
         api.requestOcr.mockResolvedValue({ status: 'pending', job_id: 'job-rem', put_url: 'https://gcs/put' });
 
@@ -704,7 +780,7 @@ describe('OcrExecutor', () => {
         // largest files Beaver downloads, and the answer will not change.
         mockRemoteItem('synced999');
         mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
-        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345 }));
+        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345, errorCode: 'no_text_layer' }));
         mockedLoad.mockResolvedValue({ kind: 'error', code: 'download_failed', permanent: true } as any);
         api.requestOcr.mockResolvedValue({ status: 'pending', job_id: 'job-rem', put_url: 'https://gcs/put' });
         const ctx = makeCtx();
@@ -721,11 +797,13 @@ describe('OcrExecutor', () => {
         // retries this replaces.
         mockRemoteItem('synced999');
         mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
-        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345 }));
+        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345, errorCode: 'no_text_layer' }));
         mockedLoad.mockResolvedValue({ kind: 'error', code: 'download_failed', permanent: true } as any);
         api.requestOcr.mockResolvedValue({ status: 'pending', job_id: 'job-rem', put_url: 'https://gcs/put' });
         const ctx = makeCtx();
-        ctx.db.getAttachmentProcessingState = vi.fn(async () => ({ fileHash: 'synced999' })) as any;
+        ctx.db.getAttachmentProcessingState = vi.fn(async () => ({
+            fileHash: 'synced999', extractStatus: 'done', ocrStatus: 'needed',
+        })) as any;
         ctx.db.markAttachmentOcrFailed = vi.fn(async () => undefined) as any;
 
         await executor.execute(record, ctx);
@@ -741,7 +819,7 @@ describe('OcrExecutor', () => {
     it('completes file_too_large when the remote download exceeds the cap', async () => {
         mockRemoteItem('synced999');
         mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
-        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345 }));
+        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345, errorCode: 'no_text_layer' }));
         mockedLoad.mockResolvedValue({ kind: 'error', code: 'file_too_large' } as any);
         api.requestOcr.mockResolvedValue({ status: 'pending', job_id: 'job-rem', put_url: 'https://gcs/put' });
 
@@ -895,6 +973,9 @@ describe('OcrExecutor', () => {
             attachmentHash: 'hashCHANGED',
             attachmentContentType: 'application/pdf',
         }));
+        dbStub.getAttachmentProcessingState.mockResolvedValue({
+            fileHash: 'hashCHANGED', extractStatus: 'done', ocrStatus: 'needed',
+        });
         api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
         const second = await ex.execute(record, makeCtx());
 
