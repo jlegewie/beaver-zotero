@@ -144,7 +144,7 @@ describe("canonical extraction schema helpers", () => {
         expect(page.items.map((item) => item.kind)).toEqual(["text", "margin"]);
         const textItem = page.items[0];
         expect("sentences" in textItem ? textItem.sentences?.[0].text : "").toBe("Text.");
-        expect(SCHEMA_VERSION).toBe("4");
+        expect(SCHEMA_VERSION).toBe("5");
     });
 
     it("rejects page selection for structured extraction at public layers", async () => {

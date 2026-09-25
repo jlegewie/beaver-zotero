@@ -13,6 +13,7 @@ import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { BACKGROUND_EXTRACT_PRIORITY, BACKGROUND_UPSERT_PRIORITY } from '../../../src/services/backgroundProcessing/constants';
 import { OCR_PRIORITY_ON_DEMAND } from '../../../src/services/ocr/constants';
 import { computeStructuredDocumentHash } from '../../../src/services/documentExtraction/structuredDocumentHash';
+import { SCHEMA_VERSION } from '@beaver/agent-core/extract/schema';
 import { buildUntagJobInput, isBackgroundProcessingLibraryEnabled } from '../../../src/services/backgroundProcessing/utils';
 
 async function countCleanupIntents(connection: MockDBConnection, accountId: string): Promise<number> {
@@ -72,7 +73,7 @@ function response(status: 'completed' | 'tagged' = 'tagged', indexVersion = 3) {
         chunks_skipped: 0,
         chunks_deleted: 0,
         index_version: indexVersion,
-        extract_schema_version: '4',
+        extract_schema_version: SCHEMA_VERSION,
         embed_tokens: status === 'completed' ? 10 : 0,
     };
 }
@@ -117,11 +118,11 @@ describe('FulltextUpsertExecutor', () => {
             fileSizeBytes: 2,
             fileHash: 'file-md5',
             structuredDocumentHash: 'a'.repeat(64),
-            extractSchemaVersion: '4',
+            extractSchemaVersion: SCHEMA_VERSION,
             ocrStatus: 'na',
         });
         api = {
-            requirements: vi.fn().mockResolvedValue({ index_version: 3, extract_schema_versions: { pdf: ['4'], epub: ['2'], snapshot: ['1'] } }),
+            requirements: vi.fn().mockResolvedValue({ index_version: 3, extract_schema_versions: { pdf: [SCHEMA_VERSION], epub: ['2'], snapshot: ['1'] } }),
             upsertHash: vi.fn().mockResolvedValue(response('tagged')),
             upsertPayload: vi.fn().mockResolvedValue(response('completed')),
             untag: vi.fn().mockResolvedValue({ results: [] }),
@@ -155,7 +156,7 @@ describe('FulltextUpsertExecutor', () => {
             lastError: null,
         };
         const payload = {
-            schemaVersion: '4',
+            schemaVersion: SCHEMA_VERSION,
             mode: 'structured',
             document: { pageCount: 0, bboxOrigin: 'top-left', bboxPrecision: 1, pages: [], citationIndex: {} },
         };
@@ -265,7 +266,7 @@ describe('FulltextUpsertExecutor', () => {
             await deleting;
         }
         await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: record.zoteroKey, itemId: 10, contentKind: 'pdf' });
-        await connection.queryAsync("UPDATE attachment_processing_state SET extract_status='done', structured_document_hash=?, extract_schema_version='4'", ['a'.repeat(64)]);
+        await connection.queryAsync("UPDATE attachment_processing_state SET extract_status='done', structured_document_hash=?, extract_schema_version=?", ['a'.repeat(64), SCHEMA_VERSION]);
         expect(await executor.execute(record, ctx)).toMatchObject({ reason: 'index_tagged' });
         expect(await db.getAttachmentProcessingState(1, record.zoteroKey)).toMatchObject({ upsertStatus: 'done' });
     });
@@ -474,7 +475,7 @@ describe('FulltextUpsertExecutor', () => {
             await queueCleanupForA();
             const executor = new FulltextUpsertExecutor(api as any);
             expect(await executor.execute(record, ctx)).toEqual({ kind: 'complete', reason: 'cleanup_reacquiring' });
-            api.requirements.mockResolvedValue({ index_version: 3, extract_schema_versions: { pdf: ['5'] } });
+            api.requirements.mockResolvedValue({ index_version: 3, extract_schema_versions: { pdf: ['4'] } });
             const upsert = enqueue.mock.calls[0][0];
             expect(await executor.execute({ ...record, ...upsert }, ctx))
                 .toMatchObject({ kind: 'failPermanent', reason: 'terminal:unsupported_schema_version' });
@@ -804,7 +805,7 @@ describe('FulltextUpsertExecutor', () => {
     });
 
     it('uses backend requirements when a later index generation is accepted', async () => {
-        api.requirements.mockResolvedValue({ index_version: 4, extract_schema_versions: { pdf: ['4'] } });
+        api.requirements.mockResolvedValue({ index_version: 4, extract_schema_versions: { pdf: [SCHEMA_VERSION] } });
         api.upsertHash.mockResolvedValue(response('tagged', 4));
         expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx)).toMatchObject({ reason: 'index_tagged' });
         expect(await db.getAttachmentProcessingState(1, 'ABCDEFGH')).toMatchObject({ upsertIndexVersion: '4' });
@@ -839,7 +840,7 @@ describe('FulltextUpsertExecutor', () => {
         expect(outcome).toEqual({ kind: 'complete', reason: 'index_completed' });
         expect(api.upsertPayload).toHaveBeenCalledWith(expect.objectContaining({
             doc_hash: 'a'.repeat(64),
-            payload: expect.objectContaining({ schemaVersion: '4' }),
+            payload: expect.objectContaining({ schemaVersion: SCHEMA_VERSION }),
         }));
     });
 
@@ -927,6 +928,14 @@ describe('FulltextUpsertExecutor', () => {
         expect(await db.getAttachmentProcessingState(1, 'ABCDEFGH')).toMatchObject({ upsertStatus: 'done' });
     });
 
+    it('never indexes a row extracted under an earlier schema version', async () => {
+        await connection.queryAsync("UPDATE attachment_processing_state SET extract_schema_version = '4'");
+        expect(await new FulltextUpsertExecutor(api as any).execute(record, ctx))
+            .toEqual({ kind: 'complete', reason: 'extract_schema_changed' });
+        expect(api.requirements).not.toHaveBeenCalled();
+        expect(api.upsertHash).not.toHaveBeenCalled();
+    });
+
     it.each(['failed', 'na'])('does not wait for OCR when its status is %s and no document hash exists', async (ocrStatus) => {
         await connection.queryAsync(`UPDATE attachment_processing_state
             SET structured_document_hash = NULL, ocr_status = ?`, [ocrStatus]);
@@ -980,7 +989,7 @@ describe('FulltextUpsertExecutor', () => {
             await db.markAttachmentExtracted({ libraryId: 1, zoteroKey: record.zoteroKey,
                 expectedFileMtimeMs: null, expectedFileSizeBytes: null, previousDocumentHash: null,
                 expectedExtractStatus: null, fileMtimeMs: 1, fileSizeBytes: 2,
-                fileHash: 'file-md5', structuredDocumentHash: hash, extractSchemaVersion: '4', ocrStatus: 'na' });
+                fileHash: 'file-md5', structuredDocumentHash: hash, extractSchemaVersion: SCHEMA_VERSION, ocrStatus: 'na' });
             await db.recordAttachmentIndexIdentity(1, record.zoteroKey, hash, identity);
             if (state !== 'acquiring') await db.markAttachmentUpsertDone({
                 libraryId: 1, zoteroKey: record.zoteroKey, structuredDocumentHash: hash,
@@ -1210,8 +1219,8 @@ describe('FulltextUpsertExecutor', () => {
         for (const key of keys) {
             await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: key, contentKind: 'pdf' });
             await connection.queryAsync(`UPDATE attachment_processing_state SET extract_status = 'done',
-                ocr_status = 'na', structured_document_hash = ?, extract_schema_version = '4' WHERE zotero_key = ?`,
-                ['a'.repeat(64), key]);
+                ocr_status = 'na', structured_document_hash = ?, extract_schema_version = ? WHERE zotero_key = ?`,
+                ['a'.repeat(64), SCHEMA_VERSION, key]);
             const queued = await db.enqueueBackgroundJob({ ...record, zoteroKey: key, now,
                 payload: { ...record.payload!, doc_hash: 'a'.repeat(64) } });
             for (let attempt = 0; attempt < 2; attempt++) {

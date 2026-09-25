@@ -19,6 +19,7 @@
  * Run with: `npm run test:live -- mupdfWorker`
  */
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { SCHEMA_VERSION } from '@beaver/agent-core/extract/schema';
 
 import {
     isZoteroAvailable,
@@ -186,7 +187,7 @@ describe('MuPDF worker smoke — orchestration ops', () => {
 
             const result = res.result;
             expect(result.mode).toBe('markdown');
-            expect(result.schemaVersion).toBe('4');
+            expect(result.schemaVersion).toBe(SCHEMA_VERSION);
             expect(result.document.pageCount).toBe(SMALL_PDF_PAGE_COUNT);
             expect(result.document.pages).toHaveLength(SMALL_PDF_PAGE_COUNT);
             for (const page of result.document.pages) {

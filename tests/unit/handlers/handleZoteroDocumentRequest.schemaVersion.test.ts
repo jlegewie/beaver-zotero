@@ -19,15 +19,6 @@ function structuredResult(schemaVersion: string) {
     };
 }
 
-// Schema 5 is producible here, so a request for it takes the uncached path
-// while the current version stays "4".
-vi.mock('../../../src/beaver-extract/schema/presets', async () => {
-    const actual = await vi.importActual<typeof import('../../../src/beaver-extract/schema/presets')>(
-        '../../../src/beaver-extract/schema/presets',
-    );
-    return { ...actual, PRODUCIBLE_PDF_SCHEMA_VERSIONS: ['4', '5'] };
-});
-
 vi.mock('../../../src/utils/prefs', () => ({
     getPref: vi.fn((key: string) => key === 'installedVersion' ? '0.99.0' : 100),
     setPref: vi.fn(),
@@ -54,7 +45,7 @@ vi.mock('../../../src/beaver-extract', () => {
     const run = async (args: any) => {
         mockState.extractCalls.push(args);
         if (mockState.extractImpl) return mockState.extractImpl(args);
-        return structuredResult(args.schemaVersion ?? '4');
+        return structuredResult(args.schemaVersion ?? '5');
     };
     const mockClient = {
         getPageCount: async () => 1,
@@ -197,11 +188,11 @@ describe('handleZoteroDocumentRequest schema_version', () => {
     });
 
     it('extracts a producible non-current version without reading or writing the cache', async () => {
-        const response = await handleZoteroDocumentRequest(request({ schema_version: '5' }));
+        const response = await handleZoteroDocumentRequest(request({ schema_version: '4' }));
 
         expect(response.error_code).toBeUndefined();
-        expect((response.result as any).schemaVersion).toBe('5');
-        expect(mockState.extractCalls).toEqual([expect.objectContaining({ schemaVersion: '5' })]);
+        expect((response.result as any).schemaVersion).toBe('4');
+        expect(mockState.extractCalls).toEqual([expect.objectContaining({ schemaVersion: '4' })]);
         for (const method of CACHE_STORAGE_METHODS) {
             expect(storage[method], method).not.toHaveBeenCalled();
         }
@@ -210,13 +201,13 @@ describe('handleZoteroDocumentRequest schema_version', () => {
 
     it('serves the pre-serialized websocket response in the requested version', async () => {
         const response = await handleZoteroDocumentRequest(
-            request({ schema_version: '5' }),
+            request({ schema_version: '4' }),
             { responseMode: 'websocket' },
         );
 
         const json = JSON.stringify(response);
-        expect(json).toContain('\\"schemaVersion\\":\\"5\\"');
-        expect(mockState.extractCalls).toEqual([expect.objectContaining({ schemaVersion: '5' })]);
+        expect(json).toContain('\\"schemaVersion\\":\\"4\\"');
+        expect(mockState.extractCalls).toEqual([expect.objectContaining({ schemaVersion: '4' })]);
         expect(storage.getSerializedResult).not.toHaveBeenCalled();
         expect(storage.getOrCreateSerializedResult).not.toHaveBeenCalled();
     });
@@ -229,13 +220,13 @@ describe('handleZoteroDocumentRequest schema_version', () => {
             return structuredResult(args.schemaVersion);
         };
 
-        const first = handleZoteroDocumentRequest(request({ request_id: 'a', schema_version: '5' }));
-        const second = handleZoteroDocumentRequest(request({ request_id: 'b', schema_version: '5' }));
+        const first = handleZoteroDocumentRequest(request({ request_id: 'a', schema_version: '4' }));
+        const second = handleZoteroDocumentRequest(request({ request_id: 'b', schema_version: '4' }));
         await vi.waitFor(() => expect(mockState.extractCalls).toHaveLength(1));
         release();
 
         const responses = await Promise.all([first, second]);
-        expect(responses.map((r) => (r.result as any)?.schemaVersion)).toEqual(['5', '5']);
+        expect(responses.map((r) => (r.result as any)?.schemaVersion)).toEqual(['4', '4']);
         expect(mockState.extractCalls).toHaveLength(1);
     });
 
@@ -245,7 +236,7 @@ describe('handleZoteroDocumentRequest schema_version', () => {
             throw new (ExtractionError as any)('encrypted', 'password required');
         };
 
-        const response = await handleZoteroDocumentRequest(request({ schema_version: '5' }));
+        const response = await handleZoteroDocumentRequest(request({ schema_version: '4' }));
 
         expect(response.error_code).toBe('encrypted');
         expect(storage.putErrorMetadata).not.toHaveBeenCalled();
@@ -253,8 +244,8 @@ describe('handleZoteroDocumentRequest schema_version', () => {
     });
 
     it('treats the current version like an unversioned request', async () => {
-        storage.getOrCreateResult.mockResolvedValue(structuredResult('4'));
-        const response = await handleZoteroDocumentRequest(request({ schema_version: '4' }));
+        storage.getOrCreateResult.mockResolvedValue(structuredResult('5'));
+        const response = await handleZoteroDocumentRequest(request({ schema_version: '5' }));
 
         expect(response.error_code).toBeUndefined();
         expect(storage.getMetadata).toHaveBeenCalled();
@@ -271,7 +262,7 @@ describe('handleZoteroDocumentRequest schema_version', () => {
     });
 
     it('rejects a non-current version in markdown mode', async () => {
-        const response = await handleZoteroDocumentRequest(request({ mode: 'markdown', schema_version: '5' }));
+        const response = await handleZoteroDocumentRequest(request({ mode: 'markdown', schema_version: '4' }));
 
         expect(response).toMatchObject({ error_code: 'unsupported_schema_version', content_kind: 'pdf' });
         expect(response.error).toContain('structured mode');
@@ -287,7 +278,7 @@ describe('handleZoteroDocumentRequest schema_version', () => {
             contentType: 'application/epub+zip',
         } as any);
 
-        const response = await handleZoteroDocumentRequest(request({ schema_version: '4' }));
+        const response = await handleZoteroDocumentRequest(request({ schema_version: '5' }));
 
         expect(response).toMatchObject({ error_code: 'unsupported_schema_version', content_kind: 'epub' });
     });

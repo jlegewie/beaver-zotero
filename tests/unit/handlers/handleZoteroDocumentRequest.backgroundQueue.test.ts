@@ -7,12 +7,6 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
-vi.mock('../../../src/beaver-extract/schema/presets', async () => {
-    const actual = await vi.importActual<typeof import('../../../src/beaver-extract/schema/presets')>(
-        '../../../src/beaver-extract/schema/presets',
-    );
-    return { ...actual, PRODUCIBLE_PDF_SCHEMA_VERSIONS: ['4', '5'] };
-});
 vi.mock('@beaver/agent-core/transport/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
@@ -131,12 +125,12 @@ describe('handleZoteroDocumentRequest background queue', () => {
             request_id: 'req-other-schema-timeout',
             attachment: { library_id: 1, zotero_key: 'ABCD1234' },
             mode: 'structured',
-            schema_version: '5',
+            schema_version: '4',
         });
 
         expect(response).toMatchObject({ error_code: 'timeout', content_kind: 'pdf' });
         expect(vi.mocked(extractAndCacheResolvedPdfDocument)).toHaveBeenCalledWith(
-            expect.objectContaining({ schemaVersion: '5' }),
+            expect.objectContaining({ schemaVersion: '4' }),
         );
         expect(mocks.enqueueBackgroundJob).not.toHaveBeenCalled();
         expect(mocks.notify).not.toHaveBeenCalled();

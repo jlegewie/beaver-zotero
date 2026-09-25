@@ -30,12 +30,13 @@ describe("PDF extraction presets", () => {
 
     it("uses the preset of the current schema version", () => {
         expect(CURRENT_PDF_EXTRACTION_PRESET.schemaVersion).toBe(SCHEMA_VERSION);
-        expect(CURRENT_PDF_EXTRACTION_PRESET.textRepair).toBe(false);
-        expect(CURRENT_PDF_EXTRACTION_PRESET.idScheme).toBe("document");
+        expect(CURRENT_PDF_EXTRACTION_PRESET.textRepair).toBe(true);
+        expect(CURRENT_PDF_EXTRACTION_PRESET.idScheme).toBe("page");
     });
 
-    it("declares only the current version producible, and every producible version has a preset", () => {
-        expect(PRODUCIBLE_PDF_SCHEMA_VERSIONS).toEqual([SCHEMA_VERSION]);
+    it("declares schema 4 and the current version producible, and every producible version has a preset", () => {
+        expect(SCHEMA_VERSION).toBe("5");
+        expect(PRODUCIBLE_PDF_SCHEMA_VERSIONS).toEqual(["4", "5"]);
         for (const version of PRODUCIBLE_PDF_SCHEMA_VERSIONS) {
             expect(pdfExtractionPreset(version)).toBeDefined();
         }

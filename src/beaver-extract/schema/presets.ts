@@ -39,5 +39,8 @@ export const CURRENT_PDF_EXTRACTION_PRESET: PdfExtractionPreset = (() => {
  * PDF schema versions the plugin serves on request and declares to the
  * backend. Every entry needs a preset; a preset alone does not make a version
  * producible.
+ *
+ * Schema 4 is served on demand so document-wide ids from earlier threads
+ * (`s243`) still resolve; it is never cached or background-processed.
  */
-export const PRODUCIBLE_PDF_SCHEMA_VERSIONS: readonly string[] = [SCHEMA_VERSION];
+export const PRODUCIBLE_PDF_SCHEMA_VERSIONS: readonly string[] = ["4", SCHEMA_VERSION];

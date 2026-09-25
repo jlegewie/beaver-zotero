@@ -901,32 +901,6 @@ describe('expandToRawHtml', () => {
         expect(Zotero.Items.getByLibraryAndKey).not.toHaveBeenCalled();
     });
 
-    it('reports locators of an unproducible schema version without reading the cache', async () => {
-        const previousBeaver = Zotero.Beaver;
-        vi.mocked(Zotero.Items.getByLibraryAndKey).mockReturnValue({
-            id: 42, key: 'ATTACH12', libraryID: 1, parentID: false,
-            isAttachment: () => true, isFileAttachment: () => true, isPDFAttachment: () => true,
-            getField: () => 'Report.pdf',
-            getFilePathAsync: async () => '/report.pdf',
-        } as any);
-        const getResult = vi.fn(async () => structuredResultWithCitablePages(1, [
-            { index: 0, items: [{ id: 'p1', sentences: ['s1'] }] },
-        ]));
-        (Zotero as any).Beaver = { documentCache: { getResult } };
-        try {
-            // Page-scoped ids name schema 5, which this plugin cannot produce yet.
-            const resolved = await preloadStructuralLocatorPages(
-                '<citation id="1-ATTACH12" loc="s5.6"/> <citation id="1-ATTACH12" loc="s1"/>',
-            );
-            expect(resolved.unavailable).toEqual(['id="u-ATTACH12" loc="s5.6"']);
-            expect(resolved.unresolved).toEqual([]);
-            expect(Object.keys(resolved.pages)).toHaveLength(1);
-            expect(getResult).toHaveBeenCalledOnce();
-        } finally {
-            (Zotero as any).Beaver = previousBeaver;
-        }
-    });
-
     it.each([true, false])('resolves standalone spans across three pages (labels: %s) for both ID spellings', async (withLabels) => {
         const previousBeaver = Zotero.Beaver;
         vi.mocked(Zotero.Items.getByLibraryAndKey).mockReturnValue({
@@ -939,14 +913,14 @@ describe('expandToRawHtml', () => {
         (Zotero as any).Beaver = { documentCache: {
             getMetadata: async () => ({ pageLabels: { 1: 'iv', 2: 'v' } }),
             getResult: async () => structuredResultWithCitablePages(4, [
-                { index: 1, label: withLabels ? 'iv' : undefined, items: [{ id: 'p1', sentences: ['s1', 's2'] }] },
-                { index: 2, label: 'v', items: [{ id: 'p2', sentences: ['s3', 's4'] }] },
-                { index: 3, label: withLabels ? 'vi' : undefined, items: [{ id: 'p3', sentences: ['s5'] }] },
+                { index: 1, label: withLabels ? 'iv' : undefined, items: [{ id: 'p2.1', sentences: ['s2.1', 's2.2'] }] },
+                { index: 2, label: 'v', items: [{ id: 'p3.1', sentences: ['s3.1', 's3.2'] }] },
+                { index: 3, label: withLabels ? 'vi' : undefined, items: [{ id: 'p4.1', sentences: ['s4.1'] }] },
             ]),
         } };
         try {
             for (const attribute of ['id', 'att_id']) {
-                const input = `<citation ${attribute}="1-ATTACH12" loc="s1-s5"/>`;
+                const input = `<citation ${attribute}="1-ATTACH12" loc="s2.1-s4.1"/>`;
                 const resolved = await preloadStructuralLocatorPages(input);
                 expect(resolved.unresolved).toEqual([]);
                 const html = expandToRawHtml(input, { elements: new Map() }, 'new', undefined, undefined, resolved.pages);

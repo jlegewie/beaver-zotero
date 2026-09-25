@@ -3,6 +3,7 @@ import { BeaverDB } from '../../../src/services/database';
 import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { OCR_PRIORITY_BACKFILL, OCR_PRIORITY_ON_DEMAND } from '../../../src/services/ocr/constants';
 import { ApiError } from '@beaver/agent-core/types/apiErrors';
+import { SCHEMA_VERSION } from '@beaver/agent-core/extract/schema';
 
 const mocks = vi.hoisted(() => ({
     extractAndCacheDocument: vi.fn(),
@@ -138,7 +139,7 @@ describe('DocumentExtractExecutor OCR continuation', () => {
             expectedFileSizeBytes: null, previousDocumentHash: null,
             expectedExtractStatus: null, fileMtimeMs: 1, fileSizeBytes: 2,
             fileHash: 'a'.repeat(32), structuredDocumentHash: 'hash-a',
-            extractSchemaVersion: '4', extractionSource: 'source-a', ocrStatus: 'na',
+            extractSchemaVersion: SCHEMA_VERSION, extractionSource: 'source-a', ocrStatus: 'na',
         })).toBe(true);
         await db.enqueueBackgroundJob({
             jobType: 'fulltext_upsert', libraryId: 1, zoteroKey: 'SCANNED1',
@@ -148,7 +149,7 @@ describe('DocumentExtractExecutor OCR continuation', () => {
         });
         const waiting = (await db.claimNextBackgroundJob(Date.now(), 360_000, 100, ['fulltext_upsert']))!;
         const api = {
-            requirements: vi.fn(async () => ({ index_version: 3, extract_schema_versions: { pdf: ['4'] } })),
+            requirements: vi.fn(async () => ({ index_version: 3, extract_schema_versions: { pdf: [SCHEMA_VERSION] } })),
             upsertHash: vi.fn(async () => { throw new ApiError(409, 'Conflict', 'payload needed', 'payload_required'); }),
         };
         const upsert = new FulltextUpsertExecutor(api as any);
@@ -161,7 +162,7 @@ describe('DocumentExtractExecutor OCR continuation', () => {
         expect(outcome).toEqual({ kind: 'defer', reason: 'payload_cache_miss' });
         await (new BackgroundExtractor() as any).persistOutcome(waiting, upsert, outcome, db, Date.now());
         mocks.extractAndCacheDocument.mockResolvedValueOnce({
-            kind: 'ok', result: { schemaVersion: '4', mode: 'structured',
+            kind: 'ok', result: { schemaVersion: SCHEMA_VERSION, mode: 'structured',
                 document: { pageCount: 0, bboxOrigin: 'top-left', bboxPrecision: 1, pages: [], citationIndex: {} } },
         });
         expect(await runExtractJob(50)).toEqual({ kind: 'complete', reason: 'ok' });

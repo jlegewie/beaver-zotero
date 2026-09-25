@@ -5,7 +5,7 @@ import type {
     PageGeometry,
 } from "./types";
 
-export const SCHEMA_VERSION = "4";
+export const SCHEMA_VERSION = "5";
 
 export type Rect = [number, number, number, number];
 export type BBoxOrigin = "top-left";
