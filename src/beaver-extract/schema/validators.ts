@@ -13,10 +13,14 @@ function assertObject(value: unknown, path: string): asserts value is Record<str
     }
 }
 
-function assertResultBase(value: unknown, expectedMode: BeaverExtractResult["mode"]) {
+function assertResultBase(
+    value: unknown,
+    expectedMode: BeaverExtractResult["mode"],
+    expectedSchemaVersion: string,
+) {
     assertObject(value, "$");
-    if (value.schemaVersion !== SCHEMA_VERSION) {
-        throw new Error(`$.schemaVersion must be "${SCHEMA_VERSION}"`);
+    if (value.schemaVersion !== expectedSchemaVersion) {
+        throw new Error(`$.schemaVersion must be "${expectedSchemaVersion}"`);
     }
     if (value.mode !== expectedMode) {
         throw new Error(`$.mode must be "${expectedMode}"`);
@@ -41,10 +45,12 @@ function assertRect(value: unknown, path: string): asserts value is Rect {
     }
 }
 
+/** `expectedSchemaVersion` defaults to the current PDF schema version. */
 export function validateMarkdownExtractResult(
     json: unknown,
+    expectedSchemaVersion = SCHEMA_VERSION,
 ): MarkdownExtractResult {
-    assertResultBase(json, "markdown");
+    assertResultBase(json, "markdown", expectedSchemaVersion);
     const result = json as MarkdownExtractResult;
     result.document.pages.forEach((page, index) => {
         if (!Number.isInteger(page.index)) {
@@ -57,10 +63,12 @@ export function validateMarkdownExtractResult(
     return result;
 }
 
+/** `expectedSchemaVersion` defaults to the current PDF schema version. */
 export function validateStructuredExtractResult(
     json: unknown,
+    expectedSchemaVersion = SCHEMA_VERSION,
 ): StructuredExtractResult {
-    assertResultBase(json, "structured");
+    assertResultBase(json, "structured", expectedSchemaVersion);
     const result = json as StructuredExtractResult;
     if (result.document.bboxOrigin !== "top-left") {
         throw new Error('$.document.bboxOrigin must be "top-left"');

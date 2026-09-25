@@ -103,9 +103,9 @@ export function buildExtractCommand(deps: CliDeps): Command {
 
                 const result = await deps.api.extractPdf(input);
                 if (result.mode === "structured") {
-                    validateStructuredExtractResult(result);
+                    validateStructuredExtractResult(result, input.schemaVersion);
                 } else if (result.mode === "markdown") {
-                    validateMarkdownExtractResult(result);
+                    validateMarkdownExtractResult(result, input.schemaVersion);
                 }
 
                 if (opts.json) {

@@ -61,6 +61,7 @@ import {
     locatorSchemaVersion,
     structuredPdfResultForSchema,
 } from '../services/documentExtraction/structuredPdfResult';
+import { producibleExtractionSchemaVersions } from '../services/documentExtraction/shared/extractionSchemaVersions';
 import {
     firstPageNumber,
     formatCitationPages,
@@ -103,6 +104,11 @@ export interface StructuralLocatorPreload {
      * is not in the document's citation index). Surfaced as a save warning.
      */
     unresolved: string[];
+    /**
+     * Descriptions of record-id locators whose id scheme names a PDF schema
+     * version this plugin cannot produce, so they can never map to a page.
+     */
+    unavailable: string[];
 }
 
 // =============================================================================
@@ -327,8 +333,9 @@ function resolvePageFromStructuredResult(
 export async function preloadStructuralLocatorPages(str: string): Promise<StructuralLocatorPreload> {
     const pages: ResolvedLocatorPages = {};
     const unresolved: string[] = [];
+    const unavailable: string[] = [];
     const cache = Zotero.Beaver?.documentCache;
-    if (!cache) return { pages, unresolved };
+    if (!cache) return { pages, unresolved, unavailable };
 
     const seen = new Set<string>();
     // Keyed by attachment (or external file) and schema version.
@@ -410,6 +417,10 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
             if (!attachmentItem) { unresolved.push(describe); continue; }
 
             const schemaVersion = locatorSchemaVersion(loc, !!attachmentItem.isPDFAttachment?.());
+            if (!producibleExtractionSchemaVersions('pdf').includes(schemaVersion)) {
+                unavailable.push(describe);
+                continue;
+            }
             const resultKey = `${attachmentItem.id}:${schemaVersion}`;
             let resultPromise = resultsByAttachment.get(resultKey);
             if (!resultPromise) {
@@ -435,7 +446,7 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
         }
     }
 
-    return { pages, unresolved };
+    return { pages, unresolved, unavailable };
 }
 
 /**
@@ -443,12 +454,24 @@ export async function preloadStructuralLocatorPages(str: string): Promise<Struct
  * not be mapped to a page (and were therefore stored without a locator).
  * Returns null when nothing was dropped.
  */
-export function buildUnresolvedLocatorWarning(unresolved: string[]): string | null {
-    if (unresolved.length === 0) return null;
-    return `Note citations only support page locators. These structural locators `
-        + `could not be mapped to a page and were saved without a locator: `
-        + `${unresolved.join('; ')}. They map to a page once the cited document's `
-        + `text extraction is available.`;
+export function buildUnresolvedLocatorWarning(
+    unresolved: string[],
+    unavailable: string[] = [],
+): string | null {
+    if (unresolved.length === 0 && unavailable.length === 0) return null;
+    let warning = 'Note citations only support page locators.';
+    if (unresolved.length > 0) {
+        warning += ` These structural locators could not be mapped to a page and were `
+            + `saved without a locator: ${unresolved.join('; ')}. They map to a page once `
+            + `the cited document's text extraction is available.`;
+    }
+    if (unavailable.length > 0) {
+        warning += ` These locators come from a version of the document's text that `
+            + `can't be loaded, so they were saved without a locator: `
+            + `${unavailable.join('; ')}. Re-read the cited pages and use the locators `
+            + `shown there.`;
+    }
+    return warning;
 }
 
 /**
