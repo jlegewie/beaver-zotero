@@ -80,10 +80,10 @@ describe("pageDiff", () => {
         ]);
     });
 
-    it("ignores extra trailing actual margin items only", () => {
+    it("ignores margin items on either side but not other extra items", () => {
         const expected = [structuredPage()];
-        const actualMargin = [structuredPage()];
-        actualMargin[0].items.push({
+        const withMargin = [structuredPage()];
+        withMargin[0].items.push({
             id: "margin1",
             kind: "margin",
             pageIndex: 0,
@@ -91,7 +91,8 @@ describe("pageDiff", () => {
             bbox: [0, 190, 100, 200],
             text: "Footer",
         });
-        expect(diffStructuredPages(expected, actualMargin, { bboxAbsPt: 0.5 })).toEqual([]);
+        expect(diffStructuredPages(expected, withMargin, { bboxAbsPt: 0.5 })).toEqual([]);
+        expect(diffStructuredPages(withMargin, expected, { bboxAbsPt: 0.5 })).toEqual([]);
 
         const actualText = [structuredPage()];
         actualText[0].items.push({

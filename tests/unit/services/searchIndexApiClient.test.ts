@@ -13,6 +13,28 @@ describe('search index wire contract', () => {
         expect(post.mock.calls[0][2]).toEqual({ 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
         expect(JSON.parse(pako.ungzip(post.mock.calls[0][1] as Uint8Array, { to: 'string' }))).toEqual(request);
     });
+    it('uploads EPUB payloads without their citation index under the cached document hash', async () => {
+        const client = new SearchIndexApiClient();
+        const post = vi.spyOn(client as any, 'postRaw').mockResolvedValue({ status: 'completed' });
+        const payload = {
+            content_kind: 'epub',
+            schemaVersion: '2',
+            sectionCount: 1,
+            sections: [{ index: 0, rawHref: 'a.xhtml', items: [{ id: 'p1', text: 'Body.' }] }],
+            citationIndex: { p1: { id: 'p1', kind: 'item', sectionIndex: 0, itemId: 'p1' } },
+            diagnostics: { extractedTextChars: 5, sourceTextChars: 5, textCoverage: 1 },
+        };
+        const request = { source: 'zotero_attachment', scope_ref: 'lDEVICE01', zotero_key: 'ABCDEFGH', zotero_local_id: 'DEVICE01', content_kind: 'epub', doc_hash: 'b'.repeat(64), extract_schema_version: '2', payload };
+
+        await client.upsertPayload(request as any);
+
+        const sent = JSON.parse(pako.ungzip(post.mock.calls[0][1] as Uint8Array, { to: 'string' }));
+        expect(sent.doc_hash).toBe('b'.repeat(64));
+        expect(sent.payload).not.toHaveProperty('citationIndex');
+        expect(sent.payload.sections).toEqual(payload.sections);
+        // The caller's cached document is not modified.
+        expect(payload.citationIndex).toBeDefined();
+    });
     it('bounds both upsert paths with a client deadline', async () => {
         // Without a deadline an upsert waits forever and pins one of the
         // lane's in-flight slots, so this backstop must not be dropped.

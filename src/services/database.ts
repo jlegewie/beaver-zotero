@@ -380,6 +380,22 @@ export type AttachmentExtractStatus = 'done' | 'failed' | 'skipped' | null;
 export type AttachmentOcrStatus = 'na' | 'needed' | 'done' | 'failed' | null;
 export type AttachmentUpsertStatus = 'done' | 'failed' | null;
 
+export interface MarkAttachmentUpsertDoneInput {
+    libraryId: number;
+    zoteroKey: string;
+    structuredDocumentHash: string;
+    upsertIndexVersion: string;
+    remoteIdentity?: AttachmentProcessingStateRecord['upsertRemoteIdentity'];
+    expectedUpsertStatus?: AttachmentUpsertStatus;
+    expectedUpsertIndexVersion?: string | null;
+    expectedExtractStatus?: AttachmentExtractStatus;
+    /**
+     * Also retire this account's pending cleanup of the membership just
+     * confirmed. Only for callers holding the attachment's index lock.
+     */
+    supersedeIndexCleanup?: boolean;
+}
+
 /** Durable per-attachment progress ledger for whole-library processing. */
 export interface AttachmentProcessingStateRecord {
     libraryId: number;
@@ -2539,6 +2555,25 @@ export class BeaverDB {
         return existing;
     }
 
+    /**
+     * Drop ledger rows for attachments that left the library, queueing cleanup
+     * for any remote membership they record. Reading the row, queueing its
+     * cleanup and deleting it share one transaction, so a concurrent upsert or
+     * cleanup never observes a row whose deletion cleanup is already queued,
+     * and the cleanup always reflects the latest recorded owner.
+     */
+    public async retireAttachmentProcessingStates(libraryId: number, zoteroKeys: string[]): Promise<void> {
+        if (zoteroKeys.length === 0) return;
+        await this.conn.executeTransaction(async () => {
+            for (const zoteroKey of zoteroKeys) {
+                const row = await this.deleteAttachmentProcessingState(libraryId, zoteroKey);
+                if (row?.structuredDocumentHash && row.upsertRemoteIdentity) {
+                    await this.enqueueBackgroundJobInTransaction(buildUntagJobInput(row, Date.now()));
+                }
+            }
+        });
+    }
+
     public async deleteAttachmentProcessingStatesByLibrary(libraryId: number): Promise<void> {
         await this.queryAsync(`DELETE FROM attachment_reading_state WHERE library_id = ?`, [libraryId]);
         await this.queryAsync(
@@ -2903,16 +2938,31 @@ export class BeaverDB {
         return result;
     }
 
-    public async markAttachmentUpsertDone(input: {
-        libraryId: number;
-        zoteroKey: string;
-        structuredDocumentHash: string;
-        upsertIndexVersion: string;
-        remoteIdentity?: AttachmentProcessingStateRecord['upsertRemoteIdentity'];
-        expectedUpsertStatus?: AttachmentUpsertStatus;
-        expectedUpsertIndexVersion?: string | null;
-        expectedExtractStatus?: AttachmentExtractStatus;
-    }): Promise<boolean> {
+    public async markAttachmentUpsertDone(input: MarkAttachmentUpsertDoneInput): Promise<boolean> {
+        const identity = input.remoteIdentity;
+        if (!input.supersedeIndexCleanup || !identity) return await this.markAttachmentUpsertDoneRow(input);
+        let applied = false;
+        // The ledger now records exactly this membership, so a cleanup of it is
+        // superseded. Any later retirement re-queues cleanup from the ledger.
+        await this.conn.executeTransaction(async () => {
+            applied = await this.markAttachmentUpsertDoneRow(input);
+            if (!applied) return;
+            const job = { zoteroKey: input.zoteroKey,
+                payload: { ...identity, doc_hash: input.structuredDocumentHash } as BackgroundJobPayload };
+            const key = indexCleanupIdentity(job);
+            // A queued cleanup may belong to a deletion or exclusion that removes
+            // the ledger row next, outside this attachment's index lock. Keep its
+            // durable intent; the queued job settles it against the ledger itself.
+            const retired = await this.executeChangedRow(`DELETE FROM index_cleanup_outbox
+                WHERE identity = ? AND NOT EXISTS (SELECT 1 FROM background_jobs
+                    WHERE job_type = 'fulltext_untag' AND library_id = ? AND zotero_key = ?
+                      AND dedupe_key = ?)`, [key, input.libraryId, input.zoteroKey, key]);
+            if (retired) await this.deleteDeadIndexCleanupCopies(job);
+        });
+        return applied;
+    }
+
+    private async markAttachmentUpsertDoneRow(input: MarkAttachmentUpsertDoneInput): Promise<boolean> {
         const guardStatus = input.expectedUpsertStatus !== undefined;
         const guardVersion = input.expectedUpsertIndexVersion !== undefined;
         const guardExtract = input.expectedExtractStatus !== undefined;
@@ -4746,21 +4796,35 @@ export class BeaverDB {
         return restored;
     }
 
+    /** Record on the durable intent that its owner has queued one reacquisition. */
+    public async markIndexCleanupReacquireAttempted(job: BackgroundJobRecord): Promise<void> {
+        await this.queryAsync(`UPDATE index_cleanup_outbox
+            SET job_json = json_set(job_json, '$.payload.index_reacquire_attempted', json('true'))
+            WHERE identity = ?`, [indexCleanupIdentity(job)]);
+    }
+
     /** Retire an identity after removal, confirmed supersession, or terminal rejection. */
     public async acknowledgeIndexCleanup(job: BackgroundJobRecord): Promise<void> {
         await this.conn.executeTransaction(async () => {
             await this.queryAsync('DELETE FROM index_cleanup_outbox WHERE identity = ?', [indexCleanupIdentity(job)]);
-            // A restored live job can still have a diagnostic dead-letter copy.
-            // Retire every copy of this exact remote identity in the same transaction.
-            await this.queryAsync(`DELETE FROM background_jobs_dead
-                WHERE job_type = 'fulltext_untag' AND zotero_key = ?
-                  AND json_extract(payload_json, '$.index_account_id') IS ?
-                  AND json_extract(payload_json, '$.index_scope_ref') IS ?
-                  AND json_extract(payload_json, '$.index_local_id') IS ?
-                  AND json_extract(payload_json, '$.doc_hash') IS ?`,
-                [job.zoteroKey, job.payload?.index_account_id ?? null, job.payload?.index_scope_ref ?? null,
-                    job.payload?.index_local_id ?? null, job.payload?.doc_hash ?? null]);
+            await this.deleteDeadIndexCleanupCopies(job);
         });
+    }
+
+    /**
+     * A restored live job can still have a diagnostic dead-letter copy. Retire
+     * every copy of this exact remote identity with its intent. Must run inside
+     * the transaction that retires the intent.
+     */
+    private async deleteDeadIndexCleanupCopies(job: Pick<BackgroundJobInput, 'zoteroKey' | 'payload'>): Promise<void> {
+        await this.queryAsync(`DELETE FROM background_jobs_dead
+            WHERE job_type = 'fulltext_untag' AND zotero_key = ?
+              AND json_extract(payload_json, '$.index_account_id') IS ?
+              AND json_extract(payload_json, '$.index_scope_ref') IS ?
+              AND json_extract(payload_json, '$.index_local_id') IS ?
+              AND json_extract(payload_json, '$.doc_hash') IS ?`,
+            [job.zoteroKey, job.payload?.index_account_id ?? null, job.payload?.index_scope_ref ?? null,
+                job.payload?.index_local_id ?? null, job.payload?.doc_hash ?? null]);
     }
 
     /**
@@ -5076,6 +5140,18 @@ export class BeaverDB {
      * pushes `available_at` forward — so this covers available, deferred and
      * in-flight work, and survives a restart.
      */
+    /** True while an upsert for this attachment is queued, parked or in flight. */
+    public async hasPendingFulltextUpsert(libraryId: number, zoteroKey: string): Promise<boolean> {
+        let pending = false;
+        await this.queryAsync(
+            `SELECT 1 FROM background_jobs
+             WHERE job_type = 'fulltext_upsert' AND library_id = ? AND zotero_key = ? LIMIT 1`,
+            [libraryId, zoteroKey],
+            { onRow: () => { pending = true; } },
+        );
+        return pending;
+    }
+
     public async getPendingFulltextUpsertKeys(): Promise<Set<string>> {
         const keys = new Set<string>();
         await this.queryAsync(
