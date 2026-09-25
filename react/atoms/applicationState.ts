@@ -309,6 +309,9 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         ? await getLibrarySummaries(searchableLibraryIds)
         : undefined;
 
+    // Resolved by Zotero from the requested and available UI locales.
+    const interfaceLanguage = typeof Zotero.locale === 'string' && Zotero.locale ? Zotero.locale : undefined;
+
     return {
         current_view: currentView,
         ...(readerState ? { reader_state: readerState } : {}),
@@ -329,6 +332,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
             : {}),
         ...(indexingStatus ? { indexing_status: indexingStatus } : {}),
         ...(libraries ? { libraries } : {}),
+        ...(interfaceLanguage ? { interface_language: interfaceLanguage } : {}),
     };
 }
 
