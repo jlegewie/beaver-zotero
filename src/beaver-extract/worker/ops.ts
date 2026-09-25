@@ -73,6 +73,7 @@ import {
     bboxWidth,
 } from "@beaver/agent-core/extract/types";
 import {
+    CURRENT_PDF_EXTRACTION_PRESET,
     SCHEMA_VERSION,
     assignDocumentIds,
     projectStructuredPage,
@@ -968,7 +969,7 @@ function translateDegradationItemIds(
 // 0x85, ...) mean different things in different fonts and are not mapped.
 // This runs on the final result, not on raw pages: page analysis (the OCR
 // gate, unmapped-glyph recovery) relies on control characters counting as
-// non-letters.
+// non-letters. It is part of text repair, so it is off in the schema-4 preset.
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
 const CONTROL_CHAR_TEST = new RegExp(CONTROL_CHARS.source);
@@ -987,8 +988,12 @@ function replaceControlChars(text: string): string {
         : text;
 }
 
-/** Replace control characters in every text field of the result, in place. */
+/**
+ * Replace control characters in every text field of the result, in place,
+ * when the current PDF schema preset enables text repair.
+ */
 function replaceControlCharsInResult(result: InternalExtractionResult): void {
+    if (!CURRENT_PDF_EXTRACTION_PRESET.textRepair) return;
     result.fullText = replaceControlChars(result.fullText);
     for (const page of result.pages) {
         page.content = replaceControlChars(page.content);
