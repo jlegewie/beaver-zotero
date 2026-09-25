@@ -2971,6 +2971,11 @@ export interface ApplicationStateInput {
     indexing_status?: IndexingStatus;
     /** Per-library summary stats (counts) for searchable libraries. */
     libraries?: LibrarySummary[];
+    /**
+     * Locale of the host application's user interface, as a BCP 47 tag
+     * (e.g. 'en-US', 'de', 'zh-CN'). Omitted when the host does not report one.
+     */
+    interface_language?: string;
 }
 
 /** Frontend embedding index status reported with each agent run. */

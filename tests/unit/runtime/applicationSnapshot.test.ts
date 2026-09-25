@@ -102,3 +102,12 @@ it('suppresses destination library and note state for a staged reader action', a
     expect(state.library_selection).toBeUndefined();
     expect(state.current_collections ?? []).toEqual([]);
 });
+
+it('reports the Zotero interface language when the host exposes one', async () => {
+    mocks.win = undefined;
+    vi.stubGlobal('Zotero', { locale: 'de', Libraries: { get: () => null } });
+    expect((await buildZoteroApplicationState(createStore().get)).interface_language).toBe('de');
+
+    vi.stubGlobal('Zotero', { Libraries: { get: () => null } });
+    expect(await buildZoteroApplicationState(createStore().get)).not.toHaveProperty('interface_language');
+});
