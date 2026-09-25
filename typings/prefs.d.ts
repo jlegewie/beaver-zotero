@@ -30,6 +30,7 @@ declare namespace _ZoteroTypes {
       "maxAddAttachmentToMessage": number;
       "readerExplainPrompt": string;
       "imeCompositionOrderFix": boolean;
+      "imeSuppressCompositionStartChar": boolean;
       "debugImeTrace": boolean;
       "accessRemoteFiles": boolean;
       "dataProviderEnabled": boolean;

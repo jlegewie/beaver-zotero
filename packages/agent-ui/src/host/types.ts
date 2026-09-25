@@ -407,6 +407,16 @@ export interface ConfigHost {
      */
     isImeCompositionOrderFixEnabled?(): boolean;
     /**
+     * Whether the composer stops Lexical from inserting its composition start
+     * character in Gecko on Windows, which sends some IMEs' candidate window to
+     * the top-left corner of the screen.
+     *
+     * Opt-in, because commits then rely more often on the composer's
+     * composition-end recovery: a host that omits it (or omits this whole
+     * slice) leaves the suppression **disabled**.
+     */
+    isImeCompositionStartCharSuppressionEnabled?(): boolean;
+    /**
      * Whether the composer emits compact IME event traces to the log, for
      * diagnosing composition issues without a local reproduction. Diagnostic
      * only; a host that omits it (or omits this whole slice) gets **no** tracing.
