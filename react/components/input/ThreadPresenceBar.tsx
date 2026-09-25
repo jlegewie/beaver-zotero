@@ -8,6 +8,7 @@ import { otherThreadWriterAtom, threadDeletedAtom, threadHistoryStaleAtom } from
 import { currentThreadIdAtom, loadThreadAtom, newThreadAtom } from '../../atoms/threads';
 import { userIdAtom } from '../../atoms/auth';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
+import { retryPendingRunIdAtom } from '../../atoms/agentRunAtoms';
 import Button from '@beaver/agent-ui/primitives/Button';
 import { Icon, ArrowUpRightIcon, DeleteIcon, PictureInPictureIcon, SyncIcon } from '../icons/icons';
 
@@ -29,6 +30,9 @@ const ThreadPresenceBar: React.FC = () => {
     const chatDeleted = useAtomValue(threadDeletedAtom);
     const serverBlocked = useAtomValue(serverThreadBlockedAtom);
     const conflict = useAtomValue(threadConflictAtom);
+    // This window's own retry marks the chat busy while it waits for the
+    // server to settle; the retry control already shows that progress.
+    const retryPending = useAtomValue(retryPendingRunIdAtom) !== null;
     const historyStale = useAtomValue(threadHistoryStaleAtom);
     const viewerUserId = useAtomValue(userIdAtom);
     const viewerThreadId = useAtomValue(currentThreadIdAtom);
@@ -94,7 +98,7 @@ const ThreadPresenceBar: React.FC = () => {
                 </Button>
             </>
         );
-    } else if (serverBlocked) {
+    } else if (serverBlocked && !retryPending) {
         content = (
             <span className="font-color-primary text-sm">
                 A response is still running in this chat
