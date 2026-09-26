@@ -1501,6 +1501,17 @@ async function extractAndCacheResolvedPdfDocumentImpl(
 
         const extractionError = asExtractionError(error);
         if (extractionError) {
+            // A retained OCR preparation of this source is unservable after an
+            // extraction update; background processing prepares it again.
+            const repreparing = extractionError.code === ExtractionErrorCode.NO_TEXT_LAYER
+                && resolvedCacheRef !== null && resolvedFilePath !== null
+                && await Zotero.Beaver?.documentCache?.getProtectedRepreparation(
+                    { libraryId: resolvedCacheRef.libraryID, zoteroKey: resolvedCacheRef.key },
+                    resolvedFilePath,
+                ) != null;
+            const noTextLayerMessage = repreparing
+                ? `The PDF file for ${errorKey} is a prepared scan that must be prepared again after an extraction update. Its text is unavailable until background preparation finishes`
+                : `The PDF file for ${errorKey} is not prepared (no text layer). Cloud preparation may be turned off or temporarily unavailable; reading does not start OCR`;
             if (
                 resolvedCacheRef
                 && resolvedFilePath
@@ -1539,7 +1550,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                         ? `The PDF file for ${errorKey} is password-protected`
                         : cachedCode === 'invalid_pdf'
                             ? `The PDF file for ${errorKey} is invalid or corrupted`
-                            : `The PDF file for ${errorKey} is not prepared (no text layer). Cloud preparation may be turned off or temporarily unavailable; reading does not start OCR`,
+                            : noTextLayerMessage,
                     pageCount: extractionError.pageCount ?? totalPages,
                     resolvedAttachment,
                 };
@@ -1559,7 +1570,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                     return {
                         kind: 'response_error',
                         code: 'no_text_layer',
-                        message: `The PDF file for ${errorKey} is not prepared (no text layer). Cloud preparation may be turned off or temporarily unavailable; reading does not start OCR`,
+                        message: noTextLayerMessage,
                         pageCount: totalPagesForError,
                         resolvedAttachment,
                     };

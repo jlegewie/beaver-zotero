@@ -2768,6 +2768,42 @@ export class BeaverDB {
         return applied;
     }
 
+    /**
+     * Record a fresh scan detection for an OCR-prepared attachment that is being
+     * prepared again. Unlike {@link markAttachmentExtracted}, the prepared hash,
+     * OCR stage and index membership are kept, so search keeps serving the
+     * previous preparation until the OCR completion publishes its replacement.
+     */
+    public async markAttachmentExtractedForOcrRestore(input: {
+        libraryId: number;
+        zoteroKey: string;
+        expectedExtractStatus: AttachmentExtractStatus;
+        fileMtimeMs: number;
+        fileSizeBytes: number;
+        fileHash: string | null;
+        extractSchemaVersion: string;
+        extractionSource?: string | null;
+    }): Promise<boolean> {
+        return await this.executeChangedRow(
+            `UPDATE attachment_processing_state SET
+                extract_status = 'done', extract_schema_version = ?, extraction_source = ?,
+                last_error = NULL, updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ? AND ocr_status = 'done'
+               AND file_mtime_ms IS ? AND file_size_bytes IS ? AND file_hash IS ?
+               AND extract_status IS ?`,
+            [
+                input.extractSchemaVersion,
+                input.extractionSource ?? null,
+                input.libraryId,
+                input.zoteroKey,
+                input.fileMtimeMs,
+                input.fileSizeBytes,
+                input.fileHash,
+                input.expectedExtractStatus,
+            ],
+        );
+    }
+
     public async markAttachmentExtractFailure(input: {
         libraryId: number;
         zoteroKey: string;
@@ -4123,6 +4159,24 @@ export class BeaverDB {
         return stats;
     }
 
+    /** Attachment keys in one library whose retained OCR preparation is incompatible. */
+    public async getIncompatibleProtectedDocumentKeys(
+        libraryId: number,
+        versions: { metadata: number; payload: number; pdf: string | null },
+    ): Promise<string[]> {
+        const keys: string[] = [];
+        await this.queryAsync(`SELECT DISTINCT m.zotero_key
+            FROM document_cache_payloads p JOIN document_cache_metadata m ON m.id = p.metadata_id
+            WHERE p.extraction_source = 'ocr' AND m.library_id = ? AND m.content_kind = 'pdf'
+                AND (p.cache_format_version != ? OR p.extraction_schema_version != ?
+                    OR m.metadata_format_version != ? OR m.extraction_schema_version != ?)
+            ORDER BY m.zotero_key`,
+        [libraryId, versions.payload, versions.pdf, versions.metadata, versions.pdf], {
+            onRow: (row: any) => keys.push(row.getResultByIndex(0)),
+        });
+        return keys;
+    }
+
     /**
      * Get one batch of least-recently-used payload rows, oldest first.
      *
@@ -4333,12 +4387,24 @@ export class BeaverDB {
         });
     }
 
-    /** Processed files missing local content, ordered by recent use or addition. */
+    /**
+     * Processed files missing local content, ordered by recent use or addition.
+     * With `protectedVersions`, a retained OCR preparation that no longer
+     * carries those versions counts as missing, so it is prepared again.
+     */
     public async getUncachedProcessingCandidates(options: {
         libraryIds: number[]; hasOcrAccess: boolean; firstOnly?: boolean;
+        protectedVersions?: { metadata: number; payload: number; pdf: string | null };
     }): Promise<Array<{ libraryId: number; zoteroKey: string }>> {
         const result: Array<{ libraryId: number; zoteroKey: string }> = [];
         if (options.libraryIds.length === 0) return result;
+        const versions = options.protectedVersions;
+        const incompatibleProtected = versions ? `OR EXISTS (SELECT 1 FROM document_cache_payloads OP
+                    JOIN document_cache_metadata OM ON OM.id = OP.metadata_id
+                    WHERE OP.library_id = S.library_id AND OP.zotero_key = S.zotero_key
+                        AND OP.extraction_source = 'ocr'
+                        AND (OP.cache_format_version != ? OR OP.extraction_schema_version != ?
+                            OR OM.metadata_format_version != ? OR OM.extraction_schema_version != ?))` : '';
         await this.queryAsync(`SELECT S.library_id, S.zotero_key
             FROM attachment_processing_state S
             LEFT JOIN document_cache_metadata M
@@ -4346,15 +4412,19 @@ export class BeaverDB {
             WHERE S.library_id IN (${options.libraryIds.map(() => '?').join(',')})
                 AND S.extract_status = 'done'
                 AND (S.ocr_status = 'na' ${options.hasOcrAccess ? "OR S.ocr_status = 'done'" : ''})
-                AND NOT EXISTS (SELECT 1 FROM document_cache_payloads P
+                AND (NOT EXISTS (SELECT 1 FROM document_cache_payloads P
                     WHERE P.library_id = S.library_id AND P.zotero_key = S.zotero_key
                         AND P.payload_kind = 'structured')
+                    ${incompatibleProtected})
                 AND NOT EXISTS (SELECT 1 FROM background_jobs J
                     WHERE J.library_id = S.library_id AND J.zotero_key = S.zotero_key)
                 AND NOT EXISTS (SELECT 1 FROM background_jobs
                     WHERE json_extract(payload_json, '$.prepare_cache') = 1)
             ORDER BY COALESCE(M.last_accessed_at, S.created_at) DESC, S.library_id, S.zotero_key
-            ${options.firstOnly ? 'LIMIT 1' : ''}`, options.libraryIds, {
+            ${options.firstOnly ? 'LIMIT 1' : ''}`, [
+            ...options.libraryIds,
+            ...(versions ? [versions.payload, versions.pdf, versions.metadata, versions.pdf] : []),
+        ], {
             onRow: (row: any) => result.push({
                 libraryId: row.getResultByIndex(0), zoteroKey: row.getResultByIndex(1),
             }),

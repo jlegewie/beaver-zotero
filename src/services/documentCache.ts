@@ -88,6 +88,13 @@ export interface DocumentCacheStats {
 
 type DocumentRef = { libraryId: number; zoteroKey: string };
 
+/** A retained OCR preparation that must be prepared again before it is served. */
+export interface ProtectedRepreparation {
+    /** Page count recorded when the scan was prepared. */
+    pageCount: number | null;
+    sourceSizeBytes: number;
+}
+
 /**
  * Minimal item identity the cache stores with each entry. Zotero.Item
  * satisfies it structurally; external files pass a synthetic ref
@@ -227,6 +234,41 @@ export class DocumentCache {
             return record;
         } catch (error) {
             logger(`DocumentCache.getMetadata error: ${error}`, 1);
+            return null;
+        }
+    }
+
+    /**
+     * Describe a retained OCR preparation of the current source that can no
+     * longer be served because a metadata, payload or extraction version moved
+     * on. Its bytes stay on disk until a compatible OCR preparation replaces
+     * them, and the retained record is evidence that this exact source is a
+     * scan. Returns `null` for compatible, native, or replaced sources.
+     */
+    async getProtectedRepreparation(
+        ref: DocumentRef,
+        filePath: string,
+    ): Promise<ProtectedRepreparation | null> {
+        try {
+            const record = await this.db.getDocumentCacheMetadataByKey(ref.libraryId, ref.zoteroKey);
+            if (!record || record.contentKind !== 'pdf' || record.filePath !== filePath) return null;
+            const payloads = (await this.db.getDocumentCachePayloadsForMetadata(record.id))
+                .filter(p => p.extractionSource === 'ocr');
+            if (payloads.length === 0) return null;
+            // Mirrors the incompatible count reported by getStats().
+            const schemaVersion = expectedExtractionSchemaVersion('pdf');
+            const compatible = record.metadataFormatVersion === DOCUMENT_METADATA_FORMAT_VERSION
+                && record.extractionSchemaVersion === schemaVersion
+                && payloads.every(p => p.cacheFormatVersion === DOCUMENT_PAYLOAD_FORMAT_VERSION
+                    && p.extractionSchemaVersion === schemaVersion);
+            if (compatible) return null;
+            const source = await this.getSourceIdentity(filePath, record.sourceSizeBytes);
+            if (!this.sourceIdentityMatches(source, {
+                filePath: record.filePath, fileSignature: record.fileSignature, sourceSizeBytes: record.sourceSizeBytes,
+            })) return null;
+            return { pageCount: record.pageCount, sourceSizeBytes: record.sourceSizeBytes };
+        } catch (error) {
+            logger(`DocumentCache.getProtectedRepreparation error: ${error}`, 1);
             return null;
         }
     }
@@ -1181,10 +1223,7 @@ export class DocumentCache {
 
     /** Return compact document-cache counts and directory information. */
     async getStats(): Promise<DocumentCacheStats> {
-        const protectedStats = await this.db.getProtectedDocumentCacheStats({
-            metadata: DOCUMENT_METADATA_FORMAT_VERSION, payload: DOCUMENT_PAYLOAD_FORMAT_VERSION,
-            pdf: expectedExtractionSchemaVersion('pdf'),
-        });
+        const protectedStats = await this.db.getProtectedDocumentCacheStats(this.pdfCompatibilityVersions());
         // Polling uses registered cache state. Reads and startup GC reconcile external
         // file changes; cache writes, eviction, and clearing update these rows directly.
         return {
@@ -1203,6 +1242,20 @@ export class DocumentCache {
             ocr_repreparation_required_count: protectedStats.incompatible,
             payload_budget_bytes: DocumentCache.budgetBytes(),
         };
+    }
+
+    /** Versions a PDF cache entry must carry to be served. */
+    pdfCompatibilityVersions(): { metadata: number; payload: number; pdf: string | null } {
+        return {
+            metadata: DOCUMENT_METADATA_FORMAT_VERSION,
+            payload: DOCUMENT_PAYLOAD_FORMAT_VERSION,
+            pdf: expectedExtractionSchemaVersion('pdf'),
+        };
+    }
+
+    /** Attachments in a library whose retained OCR preparation must be prepared again. */
+    async getProtectedRepreparationKeys(libraryId: number): Promise<string[]> {
+        return this.db.getIncompatibleProtectedDocumentKeys(libraryId, this.pdfCompatibilityVersions());
     }
 
     /**

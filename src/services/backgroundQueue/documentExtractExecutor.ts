@@ -192,14 +192,30 @@ export class DocumentExtractExecutor implements JobExecutor {
             return { kind: 'complete', reason: 'unsupported_schema_version' };
         }
 
-        // Detecting the original scan again must not discard its indexed OCR hash.
-        // The OCR completion compares the restored content with that retained hash.
-        const restoringOcr = record.payload?.prepare_cache === true
-            && previous.ocrStatus === 'done' && extracted.ocrStatus === 'needed'
+        // Detecting the original scan again must not discard its indexed OCR hash,
+        // whether cache preparation lost the prepared text or an extraction update
+        // made the retained preparation unservable. The document stays searchable
+        // under that hash; the OCR completion compares the restored content with
+        // it and replaces the membership only once the new identity is ready.
+        const restoringOcr = previous.ocrStatus === 'done' && extracted.ocrStatus === 'needed'
             && previous.fileMtimeMs === afterSignature.mtime_ms
             && previous.fileSizeBytes === afterSignature.size_bytes
-            && previous.fileHash === fileHash;
-        const applied = restoringOcr || await ctx.db.markAttachmentExtracted({
+            && previous.fileHash === fileHash
+            && (record.payload?.prepare_cache === true
+                || await Zotero.Beaver?.documentCache?.getProtectedRepreparation(
+                    { libraryId: item.libraryID, zoteroKey: item.key },
+                    source.source.filePath,
+                ) != null);
+        const applied = restoringOcr ? await ctx.db.markAttachmentExtractedForOcrRestore({
+            libraryId: item.libraryID,
+            zoteroKey: item.key,
+            expectedExtractStatus: previous.extractStatus,
+            fileMtimeMs: afterSignature.mtime_ms,
+            fileSizeBytes: afterSignature.size_bytes,
+            fileHash,
+            extractSchemaVersion: schemaVersion,
+            extractionSource,
+        }) : await ctx.db.markAttachmentExtracted({
             libraryId: item.libraryID,
             zoteroKey: item.key,
             expectedFileMtimeMs: previous.fileMtimeMs,
