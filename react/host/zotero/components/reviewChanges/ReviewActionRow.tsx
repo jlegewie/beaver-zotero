@@ -347,6 +347,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                     previewData={previewData}
                     status={status}
                     actions={row.actions}
+                    disabled={isDisabled || isBusy}
                     compact
                 />
             )}

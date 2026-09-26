@@ -697,6 +697,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         <ActionPreview
                             toolName={toolName}
                             previewData={previewData}
+                            disabled={isProcessing}
                             status={status}
                             actions={actions}
                         />

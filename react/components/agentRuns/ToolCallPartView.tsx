@@ -295,6 +295,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         part.tool_name === 'edit_annotations' ||
         part.tool_name === 'delete_annotations' ||
         part.tool_name === 'organize_items' ||
+        part.tool_name === 'merge_items' ||
         part.tool_name === 'manage_tags' ||
         part.tool_name === 'manage_collections' ||
         part.tool_name === 'create_items' ||

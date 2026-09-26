@@ -1,3 +1,4 @@
+export type { DuplicatesRequest, DuplicatesResponse } from './duplicates';
 export { validateArtifactRequest } from './artifactProtocol';
 import type { ArtifactRequest } from './artifactProtocol';
 import { SubscriptionStatus, ProcessingMode, ChargeType } from '../types/profile';
@@ -2104,7 +2105,7 @@ export interface WSListLibrariesResponse {
 export type DeferredToolPreference = 'always_ask' | 'always_apply' | 'continue_without_applying';
 
 /** Agent action type for deferred tools */
-export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
+export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'merge_items' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
 
 /** Request from backend to validate an agent action */
 export interface WSAgentActionValidateRequest extends WSBaseEvent {
@@ -2238,6 +2239,7 @@ export interface WSDeferredApprovalRequest extends WSBaseEvent {
 
 /** Response to deferred approval request (user's decision) */
 export interface WSDeferredApprovalResponse {
+    action_changes?: import('./duplicates').MergeItemsChoices;
     type: 'deferred_approval_response';
     action_id: string;
     approved: boolean;
@@ -2598,6 +2600,7 @@ export type WSEvent =
     | WSListTagsRequest
     | WSGetMetadataRequest
     | WSGetAnnotationsRequest
+    | import('./duplicates').DuplicatesRequest
     | WSFindAnnotationsRequest
     | WSListLibrariesRequest
     // Note tools
@@ -2710,6 +2713,7 @@ export interface ZoteroInstanceWire {
  * values MUST match the backend's `FEAT_*` constants exactly.
  */
 export const CLIENT_FEATURES = {
+    ZOTERO_DUPLICATES: 'zotero_duplicates',
     LIBRARY_MANAGEMENT: 'library_management',
     MANAGE_LIBRARY_STRUCTURE: 'manage_library_structure',
     NOTE_SUPPORT: 'note_support',

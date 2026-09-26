@@ -1,3 +1,4 @@
+import { MergeItemsPreview } from './MergeItemsPreview';
 import React from 'react';
 import type { AgentAction } from '../../../agents/agentActions';
 import type { OrganizeItemsResultData } from '@beaver/agent-core/types/agentActions/base';
@@ -34,7 +35,9 @@ export const ActionPreview: React.FC<{
     isStreaming?: boolean;
     /** Use the compact presentation intended for the end-of-run review card. */
     compact?: boolean;
-}> = ({ toolName, previewData, status, actions, isStreaming, compact = false }) => {
+    disabled?: boolean;
+}> = ({ toolName, previewData, status, actions, isStreaming, compact = false, disabled = false }) => {
+    if (toolName === 'merge_items') return <MergeItemsPreview compact={compact} actionId={actions?.[0]?.id} data={previewData.actionData as any} result={status === 'applied' ? previewData.resultData as any : undefined} editable={!disabled && (status === 'pending' || status === 'awaiting' || status === 'undone' || status === 'rejected')} />;
     const editNotePreviewKind = getEditNotePreviewKind(toolName, previewData.actionType);
     if (toolName === 'edit_metadata' || previewData.actionType === 'edit_metadata') {
         const edits = previewData.actionData.edits || [];

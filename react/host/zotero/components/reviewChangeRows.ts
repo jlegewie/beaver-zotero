@@ -296,6 +296,7 @@ const CHANGE_KINDS: Record<string, { verb: string; noun: string }> = {
     edit_metadata: { verb: 'edited', noun: 'item' },
     edit_note: { verb: 'edited', noun: 'note' },
     organize_items: { verb: 'organized', noun: 'item' },
+    merge_items: { verb: 'merged', noun: 'group' },
     manage_tags: { verb: 'updated', noun: 'tag' },
     manage_collections: { verb: 'updated', noun: 'collection' },
     create_highlight_annotations: { verb: 'created', noun: 'highlight' },

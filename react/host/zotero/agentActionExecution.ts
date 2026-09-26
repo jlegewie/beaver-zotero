@@ -1,3 +1,5 @@
+import { mergeItemsChoicesAtom, withMergeChoices } from '../../atoms/mergeItemsChoices';
+import { executeMergeItemsAction, undoMergeItemsAction } from '../../utils/mergeItemsActions';
 import { atom, Getter, Setter } from 'jotai';
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { CreateItemProposedData } from '@beaver/agent-core/types/agentActions/items';
@@ -76,6 +78,7 @@ const APPLY_EXECUTORS = new Map<string, (action: AgentAction, runId: string) => 
     ['edit_note_batch', (action) => executeEditNoteOrBatchAction(action)],
     ['create_collection', (action) => executeCreateCollectionAction(action)],
     ['organize_items', (action) => executeOrganizeItemsAction(action)],
+    ['merge_items', (action) => executeMergeItemsAction(action)],
     ['manage_tags', (action) => executeManageTagsAction(action)],
     ['manage_collections', (action) => executeManageCollectionsAction(action)],
     ['create_note', (action, runId) => executeCreateNoteAction(action, runId)],
@@ -90,6 +93,7 @@ const UNDO_EXECUTORS = new Map<string, (action: AgentAction) => Promise<void>>([
     ['edit_note_batch', undoEditNoteOrBatchAction],
     ['create_collection', undoCreateCollectionAction],
     ['organize_items', undoOrganizeItemsAction],
+    ['merge_items', undoMergeItemsAction],
     ['manage_tags', undoManageTagsAction],
     ['manage_collections', undoManageCollectionsAction],
     ['create_note', undoCreateNoteAction],
@@ -222,14 +226,20 @@ export const applyAgentActionsAtom = atom(
 async function applyClaimedActions(
     get: Getter,
     set: Setter,
-    actions: AgentAction[],
+    claimed: AgentAction[],
     runId: string,
 ): Promise<ApplyAgentActionsResult> {
     const applied: string[] = [];
     const failed: AgentActionFailure[] = [];
-    const action = actions[0];
-    const actionType = normalizeActionType(action.action_type);
+    let actions = claimed;
+    const actionType = normalizeActionType(actions[0].action_type);
     try {
+        // The reviewed merge choices replace the proposal the backend sent.
+        // Folding them in here, inside the try, reports an inconsistent record
+        // on the action card instead of throwing through the caller's click
+        // handler.
+        actions = actions.map((candidate) => withMergeChoices(candidate, get(mergeItemsChoicesAtom)[candidate.id]));
+        const action = actions[0];
         if (actionType === 'edit_note' || actionType === 'edit_note_batch') {
             await dismissActiveEditNotePreview();
         }

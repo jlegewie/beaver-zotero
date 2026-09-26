@@ -1,3 +1,4 @@
+import { mergeItemsChoicesAtom } from './mergeItemsChoices';
 import { getSearchIndexState } from '../../src/services/searchIndexState';
 import { isThreadConflict } from "@beaver/agent-core/types/apiErrors";
 import {
@@ -3587,7 +3588,7 @@ export const sendApprovalResponseAtom = atom(
             return next;
         });
         logger(`sendApprovalResponseAtom: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
-        const delivered = agentService.sendApprovalResponse(actionId, approved, userInstructions);
+        const delivered = agentService.sendApprovalResponse(actionId, approved, userInstructions, approved ? _get(mergeItemsChoicesAtom)[actionId] : undefined);
         if (!delivered) {
             logger(`sendApprovalResponseAtom: Approval response for ${actionId} was not sent; marking stale`, 1);
             set(markApprovalStaleAtom, actionId);
