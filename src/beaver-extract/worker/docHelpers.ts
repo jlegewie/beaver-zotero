@@ -53,15 +53,20 @@ import {
 // intentionally NOT set here.
 const STRUCTURED_TEXT_OPTIONS ="preserve-whitespace";
 const STRUCTURED_TEXT_OPTIONS_WITH_IMAGES = "preserve-whitespace,preserve-images";
-const STRUCTURED_TEXT_OPTIONS_DETAILED = "preserve-whitespace,preserve-ligatures";
-const STRUCTURED_TEXT_OPTIONS_DETAILED_WITH_IMAGES =
-    "preserve-whitespace,preserve-ligatures,preserve-images";
 
-// Text repair, set by the PDF schema preset (`textRepair`; fork-local options,
-// older WASM builds ignore them). Walks default to the current preset; an
-// extraction for another schema version passes its own. Both change extracted
-// text and therefore ids, so they are off in the schema-4 preset:
-//   - use-known-glyph-outlines: symbol fonts often draw a symbol in a slot
+// Text repair, set by the PDF schema preset (`textRepair`). Walks default to
+// the current preset; an extraction for another schema version passes its own.
+// Each switch changes extracted text and therefore ids, so all are off in the
+// schema-4 preset:
+//   - ligature expansion (detailed walk only; the JSON walk always expands):
+//     without `preserve-ligatures`, MuPDF writes a ligature glyph (U+FB00–FB06)
+//     as its letters, so "identiﬁed" reads "identified" and matches plain-letter
+//     queries. The first letter carries the glyph's box and the rest get
+//     zero-width boxes at its end, so `text` and `chars` stay in lockstep.
+//     Preserving them also loses the word space after a word-final ligature
+//     ("cutoffof"), because MuPDF adds no synthetic space after U+FB0x.
+//   - use-known-glyph-outlines (fork-local, like the next; older WASM builds
+//     ignore both): symbol fonts often draw a symbol in a slot
 //     whose glyph name or ToUnicode says otherwise (an Elsevier font's "m"
 //     draws μ, so "20 μg" reads "20 mg"; its ToUnicode maps "=" to "¼"). No
 //     U+FFFD appears, so the recovery path below never sees it. MuPDF replaces
@@ -74,6 +79,12 @@ const STRUCTURED_TEXT_OPTIONS_DETAILED_WITH_IMAGES =
 const TEXT_REPAIR_OPTIONS = "use-known-glyph-outlines,space-after-symbols";
 function withTextRepair(options: string, textRepair: boolean): string {
     return textRepair ? `${options},${TEXT_REPAIR_OPTIONS}` : options;
+}
+
+/** Structured-text options for the detailed (per-character) walk. */
+export function detailedStructuredTextOptions(includeImages: boolean, textRepair: boolean): string {
+    const base = includeImages ? STRUCTURED_TEXT_OPTIONS_WITH_IMAGES : STRUCTURED_TEXT_OPTIONS;
+    return textRepair ? withTextRepair(base, true) : `${base},preserve-ligatures`;
 }
 
 // Recovery flags for unmapped glyphs. When MuPDF cannot resolve a glyph to a
@@ -656,12 +667,7 @@ function extractRawPageDetailedOnce(
             // label not available
         }
 
-        let stextOptions = withTextRepair(
-            includeImages
-                ? STRUCTURED_TEXT_OPTIONS_DETAILED_WITH_IMAGES
-                : STRUCTURED_TEXT_OPTIONS_DETAILED,
-            textRepair,
-        );
+        let stextOptions = detailedStructuredTextOptions(includeImages, textRepair);
         if (recoverUnmappedGlyphs) stextOptions = withRecoveryFlags(stextOptions);
         const stext = page.toStructuredText(stextOptions);
 

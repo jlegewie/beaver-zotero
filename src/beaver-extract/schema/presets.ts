@@ -9,9 +9,9 @@ import type { ExtractIdScheme } from "@beaver/agent-core/extract/ids";
 export interface PdfExtractionPreset {
     schemaVersion: string;
     /**
-     * Text repair: the stext options `use-known-glyph-outlines` and
-     * `space-after-symbols` (fork-local), and control-character replacement
-     * on the final result.
+     * Text repair: ligature expansion in the detailed walk, the stext options
+     * `use-known-glyph-outlines` and `space-after-symbols` (fork-local), and
+     * control-character replacement on the final result.
      */
     textRepair: boolean;
     /** How item and sentence ids are numbered (see `ExtractIdScheme`). */
