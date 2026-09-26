@@ -6,6 +6,7 @@ import {
     PRODUCIBLE_PDF_SCHEMA_VERSIONS,
     pdfExtractionPreset,
 } from "../../../src/beaver-extract/schema/presets";
+import { detailedStructuredTextOptions } from "../../../src/beaver-extract/worker/docHelpers";
 
 describe("PDF extraction presets", () => {
     it("keeps text repair off and ids document-wide for schema 4", () => {
@@ -39,6 +40,30 @@ describe("PDF extraction presets", () => {
         expect(PRODUCIBLE_PDF_SCHEMA_VERSIONS).toEqual(["4", "5"]);
         for (const version of PRODUCIBLE_PDF_SCHEMA_VERSIONS) {
             expect(pdfExtractionPreset(version)).toBeDefined();
+        }
+    });
+});
+
+describe("detailed structured-text options", () => {
+    const options = (includeImages: boolean, version: string) =>
+        detailedStructuredTextOptions(includeImages, pdfExtractionPreset(version)!.textRepair).split(",");
+
+    it("keeps ligatures as single characters for schema 4", () => {
+        expect(options(false, "4")).toEqual(["preserve-whitespace", "preserve-ligatures"]);
+        expect(options(true, "4")).toEqual([
+            "preserve-whitespace",
+            "preserve-images",
+            "preserve-ligatures",
+        ]);
+    });
+
+    it("lets MuPDF expand ligatures into letters for schema 5", () => {
+        for (const includeImages of [false, true]) {
+            const opts = options(includeImages, "5");
+            expect(opts).not.toContain("preserve-ligatures");
+            expect(opts).toContain("use-known-glyph-outlines");
+            expect(opts).toContain("space-after-symbols");
+            expect(opts.includes("preserve-images")).toBe(includeImages);
         }
     });
 });
