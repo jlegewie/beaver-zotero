@@ -188,6 +188,53 @@ describe('DocumentCache payloads', () => {
         expect(await cache.getResult(ref, 'structured', sourcePath)).toEqual(structuredResult);
     });
 
+    describe('retained OCR preparation after a version update', () => {
+        const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
+
+        it('is not reported while the OCR preparation can be served', async () => {
+            await putStructured(structuredResult, 'ocr');
+            expect(await cache.getProtectedRepreparation(ref, sourcePath)).toBeNull();
+            expect(await cache.getProtectedRepreparationKeys(1)).toEqual([]);
+        });
+
+        it('is reported for the same source after a payload-format update', async () => {
+            await putStructured(structuredResult, 'ocr');
+            await conn.queryAsync('UPDATE document_cache_payloads SET cache_format_version = 0');
+
+            expect(await cache.getProtectedRepreparation(ref, sourcePath)).toEqual({ pageCount: 1, sourceSizeBytes: 3 });
+            expect(await cache.getProtectedRepreparationKeys(1)).toEqual(['ABCD1234']);
+            expect((await cache.getStats()).ocr_repreparation_required_count).toBe(1);
+            expect(await cache.getResult(ref, 'structured', sourcePath)).toBeNull();
+            expect(await db.getDocumentCachePayload(1, 'ABCD1234', 'structured')).not.toBeNull();
+        });
+
+        it('is reported for the same source after an extraction-schema update', async () => {
+            await putStructured(structuredResult, 'ocr');
+            await conn.queryAsync("UPDATE document_cache_metadata SET extraction_schema_version = 'old'");
+            await conn.queryAsync("UPDATE document_cache_payloads SET extraction_schema_version = 'old'");
+
+            expect(await cache.getMetadata(ref, sourcePath)).toBeNull();
+            expect(await cache.getProtectedRepreparation(ref, sourcePath)).toEqual({ pageCount: 1, sourceSizeBytes: 3 });
+            expect(await cache.getProtectedRepreparationKeys(1)).toEqual(['ABCD1234']);
+        });
+
+        it('is not reported once the source file changed', async () => {
+            await putStructured(structuredResult, 'ocr');
+            await conn.queryAsync('UPDATE document_cache_payloads SET cache_format_version = 0');
+            mockIOUtils.stat.mockResolvedValue({ lastModified: 11, size: 3 } as any);
+
+            expect(await cache.getProtectedRepreparation(ref, sourcePath)).toBeNull();
+        });
+
+        it('is not reported for native text', async () => {
+            await putStructured();
+            await conn.queryAsync('UPDATE document_cache_payloads SET cache_format_version = 0');
+
+            expect(await cache.getProtectedRepreparation(ref, sourcePath)).toBeNull();
+            expect(await cache.getProtectedRepreparationKeys(1)).toEqual([]);
+        });
+    });
+
     it('does not claim a deletion succeeded when its compare-and-set fails', async () => {
         await putStructured();
         const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };

@@ -26,6 +26,7 @@ import {
 import { ExternalAbortError } from '../agentDataProvider/timeout';
 import { extractPdfBytesAndCacheAsOriginalAttachment } from '../documentExtraction/ocrReextract';
 import { computeStructuredDocumentHash } from '../documentExtraction/structuredDocumentHash';
+import type { ProtectedRepreparation } from '../documentCache';
 import {
     backgroundProcessingEnabled,
     buildIndexJobPayload,
@@ -457,18 +458,26 @@ export class OcrExecutor implements JobExecutor {
         // replacement PDF with native text has one too. The cache validates the
         // current source identity, and its no-text verdict must agree with the
         // processing ledger for the file hash we are about to send to OCR.
+        // A retained OCR preparation of this exact source that an extraction
+        // update made unservable is the same evidence: the source is a scan,
+        // and a processed scan (`done`) is prepared again from its artifact.
         let meta = await this.resolveSourceMetadata(resolvedItem, filePath);
+        this.throwIfLibraryUnavailable(record.libraryId, ctx);
+        let repreparation = await this.resolveProtectedRepreparation(resolvedItem, filePath);
         this.throwIfLibraryUnavailable(record.libraryId, ctx);
         let state = await ctx.db.getAttachmentProcessingState(record.libraryId, record.zoteroKey);
         this.throwIfLibraryUnavailable(record.libraryId, ctx);
         const currentDetection = () => state?.fileHash === fileHash
             && state.extractStatus === 'done';
-        const needsOcr = () => meta?.errorCode === 'no_text_layer'
+        const detectedScan = () => meta?.errorCode === 'no_text_layer' || repreparation !== null;
+        const needsOcr = () => detectedScan()
             && currentDetection()
             && (state?.ocrStatus === 'needed'
-                || (record.payload?.prepare_cache === true && state?.ocrStatus === 'done'));
+                || ((record.payload?.prepare_cache === true || repreparation !== null)
+                    && state?.ocrStatus === 'done'));
+        const detectedPageCount = () => meta?.pageCount ?? repreparation?.pageCount ?? null;
         const hasDetectionMetadata = () => needsOcr()
-            && Number.isInteger(meta?.pageCount) && (meta?.pageCount ?? 0) >= 1;
+            && Number.isInteger(detectedPageCount()) && (detectedPageCount() ?? 0) >= 1;
 
         if (!hasDetectionMetadata()) {
             if (currentDetection() && state?.ocrStatus === 'na' && meta && meta.errorCode === null) {
@@ -486,20 +495,24 @@ export class OcrExecutor implements JobExecutor {
             this.throwIfLibraryUnavailable(record.libraryId, ctx);
             meta = await this.resolveSourceMetadata(resolvedItem, filePath);
             this.throwIfLibraryUnavailable(record.libraryId, ctx);
+            repreparation = await this.resolveProtectedRepreparation(resolvedItem, filePath);
+            this.throwIfLibraryUnavailable(record.libraryId, ctx);
             if (recovery.reason !== 'needs_ocr' || !currentDetection()
                 || (state?.ocrStatus !== 'needed'
-                    && !(record.payload?.prepare_cache === true && state?.ocrStatus === 'done'))
-                || (meta !== null && meta.errorCode !== 'no_text_layer')) {
+                    && !((record.payload?.prepare_cache === true || repreparation !== null)
+                        && state?.ocrStatus === 'done'))
+                || (meta !== null && !detectedScan())) {
                 return { outcome: recovery };
             }
         }
-        const pageCount = meta?.pageCount ?? null;
+        const pageCount = detectedPageCount();
         if (!Number.isInteger(pageCount) || pageCount == null || pageCount < 1) {
             await ctx.db.markAttachmentOcrFailed(record.libraryId, record.zoteroKey, fileHash,
                 'ocr_metadata_unavailable: Detection could not recover a page count');
             return { outcome: { kind: 'complete', reason: 'ocr_metadata_unavailable' } };
         }
-        const sourceSizeBytes = isRemoteOnly ? (meta?.sourceSizeBytes ?? 0) : 0;
+        const sourceSizeBytes = isRemoteOnly
+            ? (meta?.sourceSizeBytes ?? repreparation?.sourceSizeBytes ?? 0) : 0;
 
         // Lazy, memoized: only the first-time `pending` upload path reads/downloads
         // bytes; a cache hit (`ready`) or rejoin (`queued`) never loads the original.
@@ -538,6 +551,18 @@ export class OcrExecutor implements JobExecutor {
             sourceSizeBytes: meta.sourceSizeBytes ?? 0,
             errorCode: meta.errorCode ?? null,
         };
+    }
+
+    /** Retained OCR preparation of the current source that must be prepared again. */
+    private async resolveProtectedRepreparation(
+        item: Zotero.Item,
+        filePath: string,
+    ): Promise<ProtectedRepreparation | null> {
+        const cache = Zotero.Beaver?.documentCache;
+        if (!cache) return null;
+        return cache
+            .getProtectedRepreparation({ libraryId: item.libraryID, zoteroKey: item.key }, filePath)
+            .catch(() => null);
     }
 
     /**

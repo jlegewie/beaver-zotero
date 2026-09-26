@@ -4,6 +4,7 @@ import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { OCR_PRIORITY_BACKFILL, OCR_PRIORITY_ON_DEMAND } from '../../../src/services/ocr/constants';
 import { ApiError } from '@beaver/agent-core/types/apiErrors';
 import { SCHEMA_VERSION } from '@beaver/agent-core/extract/schema';
+import { expectedExtractionSchemaVersion } from '../../../src/services/documentExtraction/shared/extractionSchemaVersions';
 
 const mocks = vi.hoisted(() => ({
     extractAndCacheDocument: vi.fn(),
@@ -223,10 +224,66 @@ describe('DocumentExtractExecutor OCR continuation', () => {
             structured_document_hash = 'indexed-hash', upsert_status = 'done', upsert_index_version = '2'`, ['a'.repeat(32)]);
         const before = await db.getAttachmentProcessingState(1, 'SCANNED1');
         await runExtractJob(110, true);
-        expect(await db.getAttachmentProcessingState(1, 'SCANNED1')).toEqual(before);
+        expect(await db.getAttachmentProcessingState(1, 'SCANNED1')).toEqual({
+            ...before,
+            extractSchemaVersion: expectedExtractionSchemaVersion('pdf'),
+            extractionSource: 'source-a',
+            updatedAt: expect.any(String),
+        });
         expect(mocks.enqueueOcrJob).toHaveBeenCalledOnce();
         expect(mocks.enqueueOcrJob).toHaveBeenCalledWith(expect.objectContaining({ prepareCache: true }));
         expect(mocks.extractAndCacheDocument).toHaveBeenCalledWith(expect.objectContaining({ prepareCache: true }));
+    });
+
+    describe('after an extraction-schema reset of a processed scan', () => {
+        const getProtectedRepreparation = vi.fn();
+        const untagJobs = async () => (await db.peekBackgroundJobs())
+            .filter((job) => job.jobType === 'fulltext_untag');
+
+        beforeEach(async () => {
+            (Zotero.Beaver as any).documentCache = { getProtectedRepreparation };
+            await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'SCANNED1', itemId: 7, contentKind: 'pdf' });
+            await connection.queryAsync(`UPDATE attachment_processing_state SET
+                extract_status = 'done', extract_schema_version = 'old', ocr_status = 'done',
+                ocr_engine_version = 'ocrmypdf-1', file_mtime_ms = 1, file_size_bytes = 2, file_hash = ?,
+                structured_document_hash = 'indexed-hash', upsert_status = 'done', upsert_index_version = '2',
+                upsert_remote_identity = '{"index_account_id":"account-a","index_scope_ref":"lLOCAL123","index_local_id":"LOCAL123"}'`,
+            ['a'.repeat(32)]);
+            await db.resetAttachmentExtraction(1, 'SCANNED1', 'extract_schema_changed');
+        });
+
+        it('keeps the indexed OCR identity searchable while its retained preparation is prepared again', async () => {
+            getProtectedRepreparation.mockResolvedValue({ pageCount: 5, sourceSizeBytes: 0 });
+
+            expect(await runExtractJob(100)).toEqual({ kind: 'complete', reason: 'needs_ocr' });
+            expect(getProtectedRepreparation).toHaveBeenCalledWith({ libraryId: 1, zoteroKey: 'SCANNED1' }, '/tmp/scan.pdf');
+            expect(await db.getAttachmentProcessingState(1, 'SCANNED1')).toMatchObject({
+                extractStatus: 'done',
+                extractSchemaVersion: expectedExtractionSchemaVersion('pdf'),
+                ocrStatus: 'done',
+                ocrEngineVersion: 'ocrmypdf-1',
+                structuredDocumentHash: 'indexed-hash',
+                upsertStatus: 'done',
+                lastError: null,
+            });
+            expect(await untagJobs()).toEqual([]);
+            expect(mocks.enqueueOcrJob).toHaveBeenCalledOnce();
+            expect(mocks.enqueueOcrJob).toHaveBeenCalledWith(expect.objectContaining({
+                zoteroKey: 'SCANNED1', priority: OCR_PRIORITY_BACKFILL, prepareCache: false,
+            }));
+        });
+
+        it('treats the scan as new OCR work when no preparation is retained', async () => {
+            getProtectedRepreparation.mockResolvedValue(null);
+
+            expect(await runExtractJob(100)).toEqual({ kind: 'complete', reason: 'needs_ocr' });
+            expect(await db.getAttachmentProcessingState(1, 'SCANNED1')).toMatchObject({
+                extractStatus: 'done', ocrStatus: 'needed', structuredDocumentHash: null, upsertStatus: null,
+            });
+            expect(await untagJobs()).toEqual([
+                expect.objectContaining({ zoteroKey: 'SCANNED1', payload: expect.objectContaining({ doc_hash: 'indexed-hash' }) }),
+            ]);
+        });
     });
 
     it('stops cache restoration before extraction when the cache has filled', async () => {

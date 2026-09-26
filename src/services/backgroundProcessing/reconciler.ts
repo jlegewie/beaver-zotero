@@ -534,6 +534,7 @@ export class ReconcilerService {
             await db.enqueueBackgroundJobs(jobs);
             await new Promise<void>((resolve) => setTimeout(resolve, 0));
         }
+        await this.enqueueProtectedOcrRepreparation(db, libraryId, liveKeys, generation);
 
         // Heal missed delete notifications while a full enumeration is already
         // happening. Untag work is persisted with the local ledger rows' removal.
@@ -707,6 +708,42 @@ export class ReconcilerService {
                     docHash: row.structuredDocumentHash,
                 }),
                 now: Date.now(),
+            });
+        }
+    }
+
+    /**
+     * Ticket OCR for processed scans whose retained preparation a cache-format
+     * update made unservable. Their ledger still reads as prepared, so nothing
+     * else would prepare them again. The ticket reuses the backend's OCR
+     * artifact when it still has one. Extraction-schema changes reach the same
+     * ticket through the reset extraction in {@link reconcileAttachment}.
+     */
+    private async enqueueProtectedOcrRepreparation(
+        db: QueueDB,
+        libraryId: number,
+        liveKeys: Set<string>,
+        generation: number,
+    ): Promise<void> {
+        const cache = Zotero.Beaver?.documentCache;
+        if (!cache || Zotero.Beaver?.hasOcrAccess !== true) return;
+        for (const key of await cache.getProtectedRepreparationKeys(libraryId)) {
+            if (this.cancelled(generation) || !isBackgroundProcessingLibraryEnabled(libraryId)) return;
+            if (!liveKeys.has(key)) continue;
+            const row = await db.getAttachmentProcessingState(libraryId, key);
+            if (row?.contentKind !== 'pdf' || row.extractStatus !== 'done' || row.ocrStatus !== 'done') continue;
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, key);
+            if (!item || !isBackgroundProcessingLibraryEnabled(libraryId)) continue;
+            await enqueueOcrJob({
+                item,
+                libraryId,
+                zoteroKey: key,
+                itemId: item.id,
+                pageCount: null,
+                priority: OCR_PRIORITY_BACKFILL,
+                requestContext: 'backfill',
+            }).catch((error) => {
+                logger(`ReconcilerService: OCR re-preparation enqueue failed for ${libraryId}-${key}: ${error}`, 2);
             });
         }
     }

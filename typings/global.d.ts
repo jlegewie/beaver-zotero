@@ -502,6 +502,7 @@ declare namespace Zotero {
                 extractSchemaVersion: string; ocrStatus: 'na' | 'needed';
                 extractionSource?: string | null;
             }): Promise<boolean>;
+            markAttachmentExtractedForOcrRestore: import('../src/services/database').BeaverDB['markAttachmentExtractedForOcrRestore'];
             markAttachmentExtractFailure(input: {
                 libraryId: number; zoteroKey: string; status: 'failed' | 'skipped'; error: string;
                 attemptedAt: number; extractionSource?: string | null;

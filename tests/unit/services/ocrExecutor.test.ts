@@ -154,6 +154,7 @@ beforeEach(() => {
         get searchableLibraryIds() { return libraryScope.searchableIds; },
         documentCache: {
             getMetadata: vi.fn(async () => ({ pageCount: 5, errorCode: 'no_text_layer' })),
+            getProtectedRepreparation: vi.fn(async () => null),
             getResult: vi.fn(async () => ({ pageCount: 5, pages: [] })),
         },
         db: dbStub,
@@ -445,6 +446,81 @@ describe('OcrExecutor', () => {
             .toEqual({ kind: 'complete', reason: 'ocr_disabled' });
         expect(recovery).not.toHaveBeenCalled();
         expect(api.requestOcr).toHaveBeenCalledWith('hash123', 5, 'backfill');
+        recovery.mockRestore();
+    });
+
+    it('prepares a processed scan again from its OCR artifact after an extraction-schema update', async () => {
+        const cache = Zotero.Beaver.documentCache as any;
+        // Retained metadata of the older schema is not served, but it still
+        // identifies this source as a prepared scan.
+        cache.getMetadata.mockResolvedValue(null);
+        cache.getProtectedRepreparation.mockResolvedValue({ pageCount: 5, sourceSizeBytes: 0 });
+        dbStub.getAttachmentProcessingState.mockResolvedValue({
+            fileHash: 'hash123', extractStatus: 'done', ocrStatus: 'done', ocrEngineVersion: OCR_ENGINE_VERSION,
+        });
+        api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
+        const recovery = vi.spyOn(DocumentExtractExecutor.prototype, 'execute');
+
+        expect(await executor.execute(record, makeCtx())).toEqual({ kind: 'complete', reason: 'ocr_ok' });
+        expect(recovery).not.toHaveBeenCalled();
+        expect(api.requestOcr).toHaveBeenCalledWith('hash123', 5, 'backfill');
+        expect(mockedPut).not.toHaveBeenCalled();
+        expect(mockedReextract).toHaveBeenCalledWith(expect.objectContaining({ expectedPageCount: 5 }));
+        expect(dbStub.markAttachmentOcrDone).toHaveBeenCalledWith(expect.objectContaining({
+            expectedOcrStatus: 'done', expectedExtractStatus: 'done',
+        }));
+        expect(dbStub.markAttachmentOcrFailed).not.toHaveBeenCalled();
+        recovery.mockRestore();
+    });
+
+    it('prepares a processed scan again after a payload-format update without re-detecting it', async () => {
+        const cache = Zotero.Beaver.documentCache as any;
+        // Current metadata written by the OCR preparation carries no error verdict.
+        cache.getMetadata.mockResolvedValue({ pageCount: 5, errorCode: null });
+        cache.getProtectedRepreparation.mockResolvedValue({ pageCount: 5, sourceSizeBytes: 0 });
+        dbStub.getAttachmentProcessingState.mockResolvedValue({
+            fileHash: 'hash123', extractStatus: 'done', ocrStatus: 'done',
+        });
+        api.requestOcr.mockResolvedValue({ status: 'disabled' });
+        const recovery = vi.spyOn(DocumentExtractExecutor.prototype, 'execute');
+
+        expect(await executor.execute(record, makeCtx())).toEqual({ kind: 'complete', reason: 'ocr_disabled' });
+        expect(recovery).not.toHaveBeenCalled();
+        expect(api.requestOcr).toHaveBeenCalledWith('hash123', 5, 'backfill');
+        recovery.mockRestore();
+    });
+
+    it('continues OCR when recovery detection finds a scan whose preparation is retained', async () => {
+        const cache = Zotero.Beaver.documentCache as any;
+        cache.getMetadata.mockResolvedValue(null);
+        // Detection cannot overwrite retained preparation metadata, so the
+        // evidence only becomes visible alongside the refreshed ledger.
+        cache.getProtectedRepreparation
+            .mockResolvedValueOnce(null)
+            .mockResolvedValue({ pageCount: 3, sourceSizeBytes: 0 });
+        dbStub.getAttachmentProcessingState
+            .mockResolvedValueOnce({ fileHash: 'hash123', extractStatus: null, ocrStatus: null })
+            .mockResolvedValue({ fileHash: 'hash123', extractStatus: 'done', ocrStatus: 'needed' });
+        const recovery = vi.spyOn(DocumentExtractExecutor.prototype, 'execute')
+            .mockResolvedValueOnce({ kind: 'complete', reason: 'needs_ocr' });
+        api.requestOcr.mockResolvedValue({ status: 'disabled' });
+
+        expect(await executor.execute(record, makeCtx())).toEqual({ kind: 'complete', reason: 'ocr_disabled' });
+        expect(recovery).toHaveBeenCalledOnce();
+        expect(api.requestOcr).toHaveBeenCalledWith('hash123', 3, 'backfill');
+        recovery.mockRestore();
+    });
+
+    it('does not prepare a processed scan again while its preparation is still servable', async () => {
+        (Zotero.Beaver.documentCache as any).getMetadata.mockResolvedValue({ pageCount: 5, errorCode: null });
+        dbStub.getAttachmentProcessingState.mockResolvedValue({
+            fileHash: 'hash123', extractStatus: 'done', ocrStatus: 'done',
+        });
+        const recovery = vi.spyOn(DocumentExtractExecutor.prototype, 'execute')
+            .mockResolvedValueOnce({ kind: 'complete', reason: 'ok' });
+
+        expect(await executor.execute(record, makeCtx())).toEqual({ kind: 'complete', reason: 'ok' });
+        expect(api.requestOcr).not.toHaveBeenCalled();
         recovery.mockRestore();
     });
 
