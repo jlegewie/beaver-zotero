@@ -35,6 +35,7 @@ import type {
     ItemLine,
     RawLineDetailed,
     RawPageDataDetailed,
+    ReferenceItem,
     SectionHeaderItem,
     SentenceItem,
     TextBearingItem,
@@ -533,7 +534,7 @@ function itemFromContentItem(
     return { ...base, kind: "text" };
 }
 
-function fallbackSentenceFromItem(item: TextItem): SentenceItem {
+function fallbackSentenceFromItem(item: SentenceCapableItem): SentenceItem {
     return {
         parentId: item.id,
         index: 0,
@@ -592,8 +593,11 @@ function resolveSentencesInParagraph(
     return out;
 }
 
-function itemSupportsSentences(item: DocItem): item is TextItem {
-    return item.kind === "text";
+/** Item kinds that carry sentence spans and take a fallback sentence when splitting degrades. */
+type SentenceCapableItem = TextItem | ReferenceItem;
+
+function itemSupportsSentences(item: DocItem): item is SentenceCapableItem {
+    return item.kind === "text" || item.kind === "reference";
 }
 
 function inverseRotateItem(
@@ -796,7 +800,7 @@ export function extractPageSentences(
             degradedCount++;
             degradedItems.add(docItem.id);
             addNote({ itemId: docItem.id, itemKind: docItem.kind, reason: "unmapped" });
-            if (docItem.kind === "text") {
+            if (itemSupportsSentences(docItem)) {
                 const fallback = fallbackSentenceFromItem(docItem);
                 docItem.sentences = [fallback];
                 flatSentences.push(fallback);
@@ -827,7 +831,7 @@ export function extractPageSentences(
                 reason: "invariant_violation",
                 message: built.error,
             });
-            if (docItem.kind === "text") {
+            if (itemSupportsSentences(docItem)) {
                 const fallback = fallbackSentenceFromItem(docItem);
                 docItem.sentences = [fallback];
                 flatSentences.push(fallback);
@@ -1067,7 +1071,7 @@ export function annotateColumnContinuations(
         if (lastSentence) delete lastSentence.joinWithNext;
 
         if (!lastSentence) continue;
-        if (cur.kind !== "text" || next.kind !== "text") {
+        if (!itemSupportsSentences(cur) || cur.kind !== next.kind) {
             continue;
         }
         if (next.columnIndex !== cur.columnIndex + 1) continue;

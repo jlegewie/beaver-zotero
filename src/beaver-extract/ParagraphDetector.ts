@@ -62,9 +62,13 @@ const DEFAULT_SETTINGS: Required<ParagraphDetectionSettings> = {
 };
 
 /**
- * Page-wide thresholds for paragraph detection
+ * Page-wide thresholds for paragraph detection.
+ *
+ * Exported so downstream analyzers (e.g. item feature extraction) can
+ * normalize geometry against the same numbers the detector used. Only
+ * surfaced on `PageParagraphResult` when `trackThresholds` is set.
  */
-interface PageThresholds {
+export interface PageThresholds {
     medianHeight: number;
     medianGap: number;
     gapExcessThreshold: number;
@@ -72,9 +76,11 @@ interface PageThresholds {
 }
 
 /**
- * Column-specific thresholds for paragraph detection
+ * Column-specific thresholds for paragraph detection.
+ *
+ * Exported for the same reason as {@link PageThresholds}.
  */
-interface ColumnThresholds {
+export interface ColumnThresholds {
     leftEdgeMode: number;
     rightEdgeMode: number;
     leftEdgeMad: number;
@@ -151,6 +157,18 @@ export interface PageParagraphResult {
      * grouped into each paragraph without re-running detection.
      */
     itemLines?: PageLine[][];
+    /**
+     * Page-wide thresholds that drove detection. Only populated when
+     * `detectParagraphs` is called with `options.trackThresholds === true`.
+     */
+    pageThresholds?: PageThresholds;
+    /**
+     * Per-column thresholds that drove detection, keyed by
+     * `ContentItem.columnIndex`. Columns with no lines are absent (the
+     * detector skips them), so read defensively. Only populated when
+     * `options.trackThresholds === true`.
+     */
+    columnThresholds?: Record<number, ColumnThresholds>;
 }
 
 /**
@@ -287,7 +305,7 @@ function hasCJKContent(text: string, threshold: number = 0.5): boolean {
  *     (e.g. `Dogga1, Cudini1, Farr1, Dara3`). Threshold is 3 so genetics
  *     headings like "BRCA1 and BRCA2" (2 hits) stay clean.
  */
-function looksLikeAuthorList(text: string): boolean {
+export function looksLikeAuthorList(text: string): boolean {
     const tightMarkers = (text.match(/\p{L}+[†‡§¶*]/gu) || []).length;
     if (tightMarkers >= 2) return true;
     const namePlusDigit = (text.match(/\p{L}{3,}\d+(?=[,\s)*†‡§¶]|$)/gu) || []).length;
@@ -334,7 +352,7 @@ function looksLikeByline(text: string): boolean {
  * En-dash/em-dash specifically (not the plain hyphen) so headings like
  * "State-of-the-art" don't get caught.
  */
-function looksLikeJournalCitation(text: string): boolean {
+export function looksLikeJournalCitation(text: string): boolean {
     const t = text.trim();
     if (/\(\s*(?:18|19|20)\d{2}[a-z]?\s*\)\.?$/.test(t)) return true;
     if (/\bpp?\.\s*\d/i.test(t)) return true;
@@ -2042,6 +2060,14 @@ export interface DetectParagraphsOptions {
      * callers pay nothing.
      */
     trackItemLines?: boolean;
+    /**
+     * When true, the returned `PageParagraphResult` will include the
+     * `pageThresholds` / `columnThresholds` the detector computed. The
+     * values are echoed exactly as used — enabling this changes nothing
+     * about detection. Defaults to false so existing callers pay nothing
+     * and their result shape is unchanged.
+     */
+    trackThresholds?: boolean;
 }
 
 /**
@@ -2074,6 +2100,7 @@ export function detectParagraphs(
     // line into the next column so single-line first items can detect
     // wrap-continuations of icon-font bullet lists across the column boundary.
     let prevDocLine: PageLine | null = null;
+    const columnThresholdsByColumn: Record<number, ColumnThresholds> = {};
     for (const colResult of lineResult.columnResults) {
         if (colResult.lines.length === 0) continue;
 
@@ -2083,6 +2110,9 @@ export function detectParagraphs(
             pageThresholds,
             opts
         );
+        if (options.trackThresholds) {
+            columnThresholdsByColumn[colResult.columnIndex] = columnThresholds;
+        }
 
         // Steps 3-6: Process lines into items
         const result = processColumnLines(
@@ -2125,6 +2155,10 @@ export function detectParagraphs(
 
     if (options.trackItemLines) {
         baseResult.itemLines = allItemLines;
+    }
+    if (options.trackThresholds) {
+        baseResult.pageThresholds = pageThresholds;
+        baseResult.columnThresholds = columnThresholdsByColumn;
     }
 
     return baseResult;

@@ -22,6 +22,7 @@ import { setCliLogLevel, type CliLogLevel } from "./bootstrap";
 import type { CliDeps } from "../cli/runCliTypes";
 import { buildAnalyzeLayoutCommand } from "../cli/commands/analyzeLayout";
 import { buildExtractCommand } from "../cli/commands/extract";
+import { buildFeaturesCommand } from "../cli/commands/features";
 import { buildFixtureCommand } from "../cli/commands/fixture";
 import { buildInfoCommand } from "../cli/commands/info";
 import { buildOcrFixtureCommand } from "../cli/commands/ocrFixture";
@@ -88,6 +89,7 @@ export function buildProgram(deps: CliDeps): Command {
         .addCommand(buildRawDetailedCommand(deps))
         .addCommand(buildRenderCommand(deps))
         .addCommand(buildFixtureCommand(deps))
+        .addCommand(buildFeaturesCommand(deps))
         .addCommand(buildOcrFixtureCommand(deps));
     program.exitOverride();
     return program;

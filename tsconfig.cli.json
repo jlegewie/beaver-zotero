@@ -16,8 +16,12 @@
     "tests/unit/pdf/cliEnvelope.test.ts",
     "tests/unit/pdf/cliFixtureCommand.test.ts",
     "tests/unit/pdf/debugOverlayBuilders.test.ts",
+    "tests/unit/pdf/featuresCommand.test.ts",
+    "tests/unit/pdf/featuresExportSampling.test.ts",
+    "tests/unit/pdf/itemFeatures.test.ts",
     "tests/unit/pdf/nodeApiSerialization.test.ts",
     "tests/unit/pdf/overlaySvg.test.ts",
+    "tests/unit/pdf/styleAnalyzerFontFlags.test.ts",
     "tests/helpers/extractFixtureLoader.ts",
     "tests/smoke"
   ],

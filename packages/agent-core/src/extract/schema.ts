@@ -115,6 +115,7 @@ export type DocumentItemKind =
     | "text"
     | "section_header"
     | "list_item"
+    | "reference"
     | "caption"
     | "footnote"
     | "formula"
@@ -128,6 +129,7 @@ export const ID_PREFIXES = {
     text: "p",
     section_header: "heading",
     list_item: "list",
+    reference: "ref",
     caption: "caption",
     footnote: "footnote",
     formula: "eq",
@@ -148,8 +150,9 @@ export interface DocumentItemBase {
 export interface TextBearingItem extends DocumentItemBase {
     /**
      * Exact paragraph reconstruction in reading order. For sentence-bearing
-     * kinds (`text` / `caption` / `footnote` / `list_item`) this overlaps with
-     * `sentences[].text` but is NOT byte-equal to `sentences.map(s => s.text).join(' ')`:
+     * kinds (`text` / `caption` / `footnote` / `list_item` / `reference`) this
+     * overlaps with `sentences[].text` but is NOT byte-equal to
+     * `sentences.map(s => s.text).join(' ')`:
      * the splitter only emits ranges over the sentence-bearing characters, so
      * inter-sentence whitespace and inter-line filler (footnote runs, etc.)
      * live on `text` only. Use `text` for the canonical paragraph string and
@@ -170,6 +173,12 @@ export interface SectionHeaderItem extends TextBearingItem {
 
 export interface ListItem extends TextBearingItem {
     kind: "list_item";
+    sentences?: Sentence[];
+}
+
+/** A single bibliographic reference-list entry. */
+export interface ReferenceItem extends TextBearingItem {
+    kind: "reference";
     sentences?: Sentence[];
 }
 
@@ -203,6 +212,7 @@ export type DocumentItem =
     | TextItem
     | SectionHeaderItem
     | ListItem
+    | ReferenceItem
     | CaptionItem
     | FootnoteItem
     | FormulaItem

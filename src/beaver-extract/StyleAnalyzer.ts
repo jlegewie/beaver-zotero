@@ -25,6 +25,41 @@ const DEFAULT_MIN_CHARS = 4;
 const DEFAULT_THRESHOLD_PERC = 0.15;
 
 /**
+ * Decide whether a font is bold and/or italic from its name plus the
+ * weight / style MuPDF reports.
+ *
+ * Shared by `extractStyle` (line-level) and span-level callers that only
+ * have the loose `{ fontName, fontWeight, fontStyle }` triple, so both
+ * agree on what counts as bold or italic.
+ */
+export function resolveFontFlags(
+    fontName: string,
+    weight: string | undefined,
+    style: string | undefined,
+): { bold: boolean; italic: boolean } {
+    const fontNameLower = fontName.toLowerCase();
+
+    // Subset font names often encode weight/style as a suffix that substring
+    // checks miss — e.g. `AJHJCE+AdvTT56ea2c23.B` (bold),
+    // `BPEJCI+AdvTTa15c7c65.I` (italic), `XXX.BI`/`.IB` (bold-italic).
+    const boldSuffix = /\.(B|Bd|Bld|Bold|Black|Heavy|BI|IB)$/i;
+    const italicSuffix = /\.(I|It|Italic|Obl|Oblique|BI|IB)$/i;
+
+    const bold = weight === "bold" ||
+        fontNameLower.includes("bold") ||
+        fontNameLower.includes("black") ||
+        fontNameLower.includes("heavy") ||
+        boldSuffix.test(fontName);
+
+    const italic = style === "italic" ||
+        fontNameLower.includes("italic") ||
+        fontNameLower.includes("oblique") ||
+        italicSuffix.test(fontName);
+
+    return { bold, italic };
+}
+
+/**
  * Extract TextStyle from a raw line's font information.
  */
 export function extractStyle(line: RawLine): TextStyle {
@@ -40,32 +75,14 @@ export function extractStyle(line: RawLine): TextStyle {
         };
     }
 
-    // Determine bold/italic from font properties or name
     const fontName = font.name || "unknown";
-    const fontNameLower = fontName.toLowerCase();
-
-    // Subset font names often encode weight/style as a suffix that substring
-    // checks miss — e.g. `AJHJCE+AdvTT56ea2c23.B` (bold),
-    // `BPEJCI+AdvTTa15c7c65.I` (italic), `XXX.BI`/`.IB` (bold-italic).
-    const boldSuffix = /\.(B|Bd|Bld|Bold|Black|Heavy|BI|IB)$/i;
-    const italicSuffix = /\.(I|It|Italic|Obl|Oblique|BI|IB)$/i;
-
-    const isBold = font.weight === "bold" ||
-        fontNameLower.includes("bold") ||
-        fontNameLower.includes("black") ||
-        fontNameLower.includes("heavy") ||
-        boldSuffix.test(fontName);
-
-    const isItalic = font.style === "italic" ||
-        fontNameLower.includes("italic") ||
-        fontNameLower.includes("oblique") ||
-        italicSuffix.test(fontName);
+    const { bold, italic } = resolveFontFlags(fontName, font.weight, font.style);
 
     return {
         size: Math.round(font.size || 12),
         font: fontName,
-        bold: isBold,
-        italic: isItalic,
+        bold,
+        italic,
     };
 }
 

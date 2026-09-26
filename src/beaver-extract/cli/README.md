@@ -82,6 +82,7 @@ npm run beaver-extract -- overlay --help
 | `render`         | Render one or more pages to PNG.                       |
 | `fixture`        | Manage extraction-regression fixtures (see below).     |
 | `ocr-fixture`    | Manage OCR-detection regression fixtures (see below).  |
+| `features`       | Export item-classifier features over a corpus as JSONL.|
 
 Overlay levels: `columns | lines | items | sentences | margins`.
 
@@ -118,6 +119,64 @@ Failure envelope (written to stderr; process exits non-zero):
 
 `overlay --sidecar-json` writes a companion `<out>.json` with rect data,
 stats, and effective options for offline diffing.
+
+## Item-classifier feature export
+
+`features` runs the structured per-page pipeline with item-feature
+extraction switched on and writes one JSONL row per detected item
+(`sha256`, `path`, `pageIndex`, `pageCount`, `itemId`, `kind`, `text`,
+`features`, `featureVersion`, `neighborIds`, `columnIndex`, `bbox`). The
+vector layout is `FEATURE_NAMES` in
+`src/beaver-extract/classify/itemFeatures.ts`; `featureVersion` pins it.
+
+The column layout is written once per run to `<out>.features.json`
+(`{ featureVersion, featureNames }`). Resuming an export produced under a
+different feature version or name list is refused, as is one that has
+committed rows but no sidecar.
+
+Documents come either from `--manifest <csv>` (`sha256,path,page_count`)
+or from a deterministic stratified draw over `--inventory <csv>` with
+`--sample N --seed S`. Sampling also writes the drawn manifest to
+`<out>.manifest.csv`.
+
+Page policy: documents of 60 pages or fewer are processed in full;
+longer ones contribute their first 20 and last 40 pages.
+
+| Flag | Meaning |
+| --- | --- |
+| `--out <jsonl>` | Output path. Rows are appended, one batch per document. |
+| `--inventory <csv>` / `--manifest <csv>` | Document source. |
+| `--sample <n>` / `--seed <n>` / `--bucket-floor <n>` | Stratified draw from `--inventory`. |
+| `--resume` | Continue an existing output: skip documents with a terminal entry in `<out>.ledger.jsonl` or two aborted attempts, after discarding any output past the last committed offset. Required when `--out` already exists. |
+| `--limit <n>` | Process at most N unsettled documents, then exit. Implies `--resume`. |
+| `--timeout-ms <n>` | Per-document timeout (default 300000). On expiry the document is recorded as aborted and the batch stops; see below. |
+| `--language <lang>` | Splitter language code. |
+
+Every attempted document gets a line in `<out>.ledger.jsonl`
+(`status` is `ok`, `empty`, `failed` or `aborted`, plus `outputBytes`, the
+output size once the document's rows were on disk); failures are also
+written to `<out>.failures.jsonl`. Rows are appended before the ledger
+line, so on resume a torn ledger tail is cut back to the last complete
+line and any output beyond the last recorded `outputBytes` (zero for an
+empty ledger) is an interrupted write, truncated before that document is
+retried. The ledger file is created before the first document. Resume
+refuses an output shorter than its committed offset (committed rows are
+missing), a fresh run refuses an output or ledger that already has
+content, and an I/O error while writing rows or the ledger stops the run
+with a non-zero exit and no ledger line, so the document is retried next
+time. A fatal WASM trap is specific to the
+document: the runtime is reset, the document is recorded as failed and
+the batch continues. Heap exhaustion or a timeout leaves the runtime in
+an unknown state, so the document is recorded as aborted and the batch
+stops; the next invocation retries it in a fresh process, and after two
+aborts it is skipped. Extraction leaks memory across documents, so drive
+long runs as a shell loop over `--resume --limit <n>`; stop when the
+printed summary reports `"remaining": 0`, and also stop when an
+invocation exits non-zero or prints no summary, otherwise a failed
+invocation is retried forever. The page policy is applied against the
+page count the worker reads from the PDF itself; a manifest's
+`page_count` only drives sampling, so a stale or missing count cannot
+drop a document's tail pages.
 
 ## Profiling structured extract
 
@@ -412,6 +471,7 @@ src/beaver-extract/
 │   │   ├── rawDetailed.ts           # `raw-detailed`
 │   │   ├── render.ts                # `render`
 │   │   ├── fixture.ts               # `fixture {capture,evaluate,update,migrate,list}`
+│   │   ├── features.ts              # `features` (item-classifier training export)
 │   │   └── ocrFixture.ts            # `ocr-fixture {capture,evaluate,update,list}`
 │   └── fixture/                 # extract + OCR fixture file format (Node-only)
 │       ├── fixtureFile.ts           # atomic read/write, _shared/ dedup

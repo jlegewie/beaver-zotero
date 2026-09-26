@@ -56,6 +56,11 @@ import { pagesForFilterWithBridgedFonts } from "../RawFontBridge";
 import { buildPageAnalysisContext } from "../PageAnalysisContext";
 import type { SentenceSplitter } from "../SentenceMapper";
 import type { ParagraphDetectionSettings } from "../ParagraphDetector";
+import {
+    computeItemFeatures,
+    type ItemFeatureResult,
+} from "../classify/itemFeatures";
+import type { DocContext } from "../classify/docContext";
 import type {
     SentenceSplitterConfig,
     SentenceTraceResult,
@@ -151,10 +156,23 @@ export function extractSentencesForPage(args: {
      * empty fonts and downstream heading detection silently degrades.
      */
     fontApi?: FontApi;
+    /**
+     * Opt-in item-feature extraction for the item classifier and its
+     * training export. Absent (the default) means the page is processed
+     * exactly as before and `itemFeatures` is omitted from the result.
+     *
+     * `docContext` carries the running document context; the returned
+     * `itemFeatures.docContext` is the advanced value to hand to the next
+     * page. `pageCount` is the document's total page count, which the
+     * position features normalize against — pass the true count even when
+     * only a subset of pages is being processed.
+     */
+    itemFeatures?: { pageCount: number; docContext?: DocContext };
 }): {
     sentenceResult: PageSentenceResult;
     filteredResult: FilteredParagraphResult;
     phaseTimings: StructuredPagePhaseTimings;
+    itemFeatures?: ItemFeatureResult;
 } {
     const tDetailed = performance.now();
     const detailed =
@@ -199,6 +217,7 @@ export function extractSentencesForPage(args: {
         margins: args.margins,
         marginZone: args.marginZone,
         paragraphSettings: args.paragraphSettings,
+        trackThresholds: args.itemFeatures !== undefined,
         fillBoundaries,
         dividerLines,
     });
@@ -242,7 +261,28 @@ export function extractSentencesForPage(args: {
         degradationCount: sentenceResult.degradation?.count ?? 0,
     };
 
-    return { sentenceResult, filteredResult, phaseTimings };
+    const itemFeatures = args.itemFeatures
+        ? computeItemFeatures({
+              pageIndex: args.pageIndex,
+              pageCount: args.itemFeatures.pageCount,
+              pageWidth: filteredResult.paragraphResult.width,
+              pageHeight: filteredResult.paragraphResult.height,
+              items: filteredResult.paragraphResult.items,
+              itemLines: filteredResult.paragraphResult.itemLines ?? [],
+              pageThresholds: filteredResult.paragraphResult.pageThresholds ?? {
+                  medianHeight: 0,
+                  medianGap: 0,
+                  gapExcessThreshold: 0,
+                  binPx: 0,
+              },
+              columnThresholds:
+                  filteredResult.paragraphResult.columnThresholds ?? {},
+              styleProfile: filteredResult.styleProfile,
+              docContext: args.itemFeatures.docContext,
+          })
+        : undefined;
+
+    return { sentenceResult, filteredResult, phaseTimings, itemFeatures };
 }
 
 /**
