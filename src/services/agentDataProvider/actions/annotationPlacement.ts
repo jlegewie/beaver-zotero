@@ -137,6 +137,13 @@ export async function prepareRelocation(
             );
         }
         if (!relocation.note_position) {
+            // A passage continuing on the next page resolves for highlights
+            // only, so name that rather than the absent note position.
+            if (/[,;]/.test(relocation.loc_raw ?? "")) {
+                throw new RelocationMismatchError(
+                    "cannot be moved there; a sticky note takes a single locator, and a comma-separated passage is for highlights only",
+                );
+            }
             throw new RelocationMismatchError(
                 "cannot be moved there; the destination has no position for a note",
             );

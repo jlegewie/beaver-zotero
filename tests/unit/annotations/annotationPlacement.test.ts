@@ -174,6 +174,16 @@ describe("prepareRelocation", () => {
         ).rejects.toThrow(/continuation on the next page produced no rects/);
     });
 
+    it("tells a note moved to a multi-page passage that notes take one locator", async () => {
+        await expect(
+            prepareRelocation(
+                attachment,
+                "note",
+                pdfRelocation({ loc_raw: "s4.27,s5.1", note_position: null }),
+            ),
+        ).rejects.toThrow(/sticky note takes a single locator/);
+    });
+
     it("refuses a highlight destination spanning three pages", async () => {
         const location = pdfRelocation().page_locations[0];
         await expect(
