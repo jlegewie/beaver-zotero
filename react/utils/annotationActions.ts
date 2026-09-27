@@ -142,27 +142,33 @@ async function createHighlightAnnotation(
         throw new Error('Highlight annotation missing geometry');
     }
 
-    const primaryLocation = annotation.proposed_data.highlight_locations[0];
-    const allSamePage = annotation.proposed_data.highlight_locations.every(
-        (loc: PageLocation) => loc.page_idx === primaryLocation.page_idx
+    const locations: PageLocation[] = annotation.proposed_data.highlight_locations;
+    const primaryLocation = locations[0];
+    // Zotero stores a highlight on at most two consecutive pages: `rects` on
+    // the first and `nextPageRects` on the one after it.
+    const nextPageIndex = primaryLocation.page_idx + 1;
+    const spansTwoPages = locations.some((loc) => loc.page_idx === nextPageIndex);
+    const unsupported = locations.some(
+        (loc) => loc.page_idx !== primaryLocation.page_idx && loc.page_idx !== nextPageIndex,
     );
-
-    if (!allSamePage) {
-        logger('Highlight annotation spans multiple pages; applying first page only for now', 2);
+    if (unsupported) {
+        logger('Highlight annotation spans more than two consecutive pages; applying the first page only', 2);
     }
 
-    const conversions = allSamePage
-        ? await Promise.all(
-            annotation.proposed_data.highlight_locations.map((loc: PageLocation) =>
-                convertLocationToRects(reader, loc)
-            )
-        )
-        : [await convertLocationToRects(reader, primaryLocation)];
+    const convertPage = async (pageIndex: number) => Promise.all(
+        locations
+            .filter((loc) => loc.page_idx === pageIndex)
+            .map((loc) => convertLocationToRects(reader, loc)),
+    );
+    const conversions = await convertPage(primaryLocation.page_idx);
     const rects = conversions.flatMap((c) => c.rects);
     if (rects.length === 0) {
         throw new Error('Highlight annotation failed to compute rectangles');
     }
     const primaryViewBox = conversions[0].viewBox;
+    const nextPageRects = spansTwoPages && !unsupported
+        ? (await convertPage(nextPageIndex)).flatMap((c) => c.rects)
+        : [];
 
     const now = (new Date()).toISOString();
     const sortIndex = generateSortIndex(primaryLocation.page_idx, rects[0], primaryViewBox);
@@ -176,6 +182,7 @@ async function createHighlightAnnotation(
         position: {
             pageIndex: primaryLocation.page_idx,
             rects,
+            ...(nextPageRects.length > 0 ? { nextPageRects } : {}),
         },
         text: annotation.proposed_data.text || '',
         tags: [],

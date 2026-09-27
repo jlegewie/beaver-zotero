@@ -19,12 +19,11 @@ import { getAttachmentFileStatus } from '../agentDataProvider/utils';
 import {
     createEpubHighlightAnnotation,
     createEpubNoteAnnotation,
-    createHighlightAnnotation,
     createNoteAnnotation,
+    createPdfHighlightForItem,
     EpubAnnotationError,
-    highlightPartComment,
+    HighlightPageSpanError,
     MissingPageGeometryError,
-    resolvedAnnotationPageLabel,
 } from '../annotations/createAnnotation';
 import { getReadableContentKind } from '../documentExtraction/attachmentResolution';
 
@@ -36,7 +35,7 @@ function mapAnnotationErrorCode(error: unknown): string {
             ? 'page_extraction_failed'
             : 'page_geometry_unavailable';
     }
-    if (error instanceof EpubAnnotationError) {
+    if (error instanceof EpubAnnotationError || error instanceof HighlightPageSpanError) {
         return error.code;
     }
     return 'apply_failed';
@@ -121,50 +120,16 @@ export async function executeCreateHighlightAnnotationsAction(
             continue;
         }
 
-        // The item-level label is only a valid fallback for single-page
-        // highlights; for a multi-page item it is the first page's label, so
-        // reusing it would mislabel later pages. Per-page labels come from
-        // each loc.page_label (or the cache) instead.
-        const itemPageLabelFallback = item.page_locations.length === 1
-            ? (item.page_label ?? null)
-            : null;
-
-        const partCount = item.page_locations.length;
-        for (let partIndex = 0; partIndex < partCount; partIndex++) {
-            const loc = item.page_locations[partIndex];
-            try {
-                const ref = await createHighlightAnnotation(attachment, {
-                    pageIndex: loc.page_idx,
-                    boxes: loc.boxes ?? [],
-                    text: item.text ?? '',
-                    color: item.color,
-                    comment: highlightPartComment(item.comment ?? item.title, partIndex, partCount),
-                    pageLabel: loc.page_label ?? itemPageLabelFallback,
-                    readingOrderOffset: loc.reading_order_offset ?? null,
-                    tags,
-                });
-                created.push({
-                    client_item_id: item.client_item_id,
-                    index: item.index,
-                    loc_raw: item.loc_raw,
-                    library_id: ref.library_id,
-                    zotero_key: ref.zotero_key,
-                    library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
-                    page_idx: loc.page_idx,
-                    page_label: resolvedAnnotationPageLabel(
-                        loc.page_idx,
-                        loc.page_label ?? itemPageLabelFallback,
-                    ),
-                });
-            } catch (error: any) {
-                failed.push({
-                    client_item_id: item.client_item_id,
-                    index: item.index,
-                    loc_raw: item.loc_raw,
-                    error: error?.message ?? String(error),
-                    error_code: mapAnnotationErrorCode(error),
-                });
-            }
+        try {
+            created.push(await createPdfHighlightForItem(attachment, item, tags));
+        } catch (error: any) {
+            failed.push({
+                client_item_id: item.client_item_id,
+                index: item.index,
+                loc_raw: item.loc_raw,
+                error: error?.message ?? String(error),
+                error_code: mapAnnotationErrorCode(error),
+            });
         }
     }
 
