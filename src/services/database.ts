@@ -2668,6 +2668,20 @@ export class BeaverDB {
         );
     }
 
+    /** Swap the recorded source identity only while it still equals `expectedSource`. */
+    public async replaceAttachmentExtractionSource(input: {
+        libraryId: number;
+        zoteroKey: string;
+        expectedSource: string;
+        source: string;
+    }): Promise<boolean> {
+        return await this.executeChangedRow(
+            `UPDATE attachment_processing_state SET extraction_source = ?
+             WHERE library_id = ? AND zotero_key = ? AND extraction_source = ?`,
+            [input.source, input.libraryId, input.zoteroKey, input.expectedSource],
+        );
+    }
+
     public async resetAttachmentOcr(
         libraryId: number,
         zoteroKey: string,

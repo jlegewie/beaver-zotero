@@ -1,5 +1,5 @@
 import { getContextWindow } from '../../runtime/windowRuntime';
-import { openNote, openReader } from '../../runtime/navigation';
+import { AttachmentFileUnavailableError, openNote, openReader } from '../../runtime/navigation';
 import { store } from '../../store';
 import { pageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
@@ -421,6 +421,8 @@ export async function activateCitation(activation: CitationActivation): Promise<
 
     } catch (error) {
         logger('Citation activation: Failed to handle citation click: ' + error);
+        // Zotero already told the user the file is unavailable.
+        if (error instanceof AttachmentFileUnavailableError) return;
 
         // Fallback: try the URI-based approach from the loaded item
         try {
