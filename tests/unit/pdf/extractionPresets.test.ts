@@ -62,6 +62,8 @@ describe("detailed structured-text options", () => {
             const opts = options(includeImages, "5");
             expect(opts).not.toContain("preserve-ligatures");
             expect(opts).toContain("use-known-glyph-outlines");
+            expect(opts).toContain("map-symbol-private-use");
+            expect(opts).toContain("use-glyph-name-for-garbage");
             expect(opts).toContain("space-after-symbols");
             expect(opts.includes("preserve-images")).toBe(includeImages);
         }

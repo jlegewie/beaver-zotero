@@ -9,8 +9,9 @@ import type { ExtractIdScheme } from "@beaver/agent-core/extract/ids";
 export interface PdfExtractionPreset {
     schemaVersion: string;
     /**
-     * Text repair: ligature expansion in the detailed walk, the stext options
-     * `use-known-glyph-outlines` and `space-after-symbols` (fork-local), and
+     * Text repair: ligature expansion in the detailed walk, the fork-local
+     * stext options `use-known-glyph-outlines`, `map-symbol-private-use`,
+     * `use-glyph-name-for-garbage` and `space-after-symbols`, and
      * control-character replacement on the final result.
      */
     textRepair: boolean;
