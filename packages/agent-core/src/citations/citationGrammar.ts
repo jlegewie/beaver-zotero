@@ -128,17 +128,69 @@ function idValueScheme(value: string): ExtractIdScheme | null {
 }
 
 /**
- * Parse compact page locators and Beaver Extract record ids.
+ * Parse compact page locators, Beaver Extract record ids, and multi-page passages.
  *
  * Record ids come in two schemes (see `ExtractIdScheme`): document-wide
  * (`s243`, range `s243-s250`) and page-scoped (`s5.6`, ranges `s5.6-s5.9` and
  * `s5.30-s6.2`). The page-scoped same-page shorthand `s5.6-9` is normalized to
  * the value `5.6-5.9`. A range whose ends use different schemes names no
  * document version and parses as `unknown`.
+ *
+ * A comma-separated list of page-scoped sentence ids or ranges
+ * (`s7.45,s8.1-s8.2`) cites one passage that continues on the next page; see
+ * `parsePageContinuation`.
  */
 export function parseLoc(token: string | undefined): Locator | undefined {
     if (token == null) return undefined;
-    const raw = token;
+    const passage = /[,;]/.test(token) ? parsePageContinuation(token) : null;
+    return passage ?? parseSingleLoc(token);
+}
+
+/** First and last page of a page-scoped sentence locator. */
+function pageScopedSentencePages(locator: Locator): [start: number, end: number] | null {
+    if (locator.kind !== 'sentence' || locatorIdScheme(locator) !== 'page') return null;
+    const [startValue, endValue = startValue] = locator.value.split('-');
+    const start = parseExtractIdValue(startValue);
+    const end = parseExtractIdValue(endValue);
+    if (start?.page === undefined || end?.page === undefined) return null;
+    if (end.page < start.page || (end.page === start.page && end.n < start.n)) return null;
+    return [start.page, end.page];
+}
+
+/**
+ * Parse `s7.45,s8.1-s8.2` into one sentence locator valued `7.45,8.1-8.2`.
+ *
+ * The pieces of one passage that continues across pages: page-scoped
+ * sentence ids or ranges, each starting on the page after the previous piece
+ * ends. The first piece that breaks this ends the passage, so a list naming
+ * separate passages keeps only its first one.
+ *
+ * Returns `null` when the first piece is not a page-scoped sentence locator:
+ * such comma-joined locators keep parsing as one token. Mirrors the backend's
+ * `parse_loc`.
+ */
+function parsePageContinuation(raw: string): Locator | null {
+    const values: string[] = [];
+    let previousEndPage: number | null = null;
+    for (const token of raw.split(/[,;]/).map((part) => part.trim())) {
+        const locator = parseSingleLoc(token);
+        const pages = pageScopedSentencePages(locator);
+        if (!pages) break;
+        if (previousEndPage !== null && pages[0] !== previousEndPage + 1) break;
+        values.push(locator.value);
+        previousEndPage = pages[1];
+    }
+    if (values.length === 0) return null;
+    return { kind: 'sentence', value: values.join(','), raw };
+}
+
+/** The values a locator names: its value, or each piece of a multi-page passage. */
+export function locatorValues(locator: Locator): string[] {
+    return locator.kind === 'sentence' ? locator.value.split(',') : [locator.value];
+}
+
+/** Parse one compact locator token (no lists). */
+function parseSingleLoc(raw: string): Locator {
     if (!raw) return { kind: 'unknown', value: raw, raw };
 
     const first = locPrefixFor(raw);
@@ -194,32 +246,40 @@ function rawRangeCandidateIds(raw: string): string[] {
 
 /**
  * Return structured extraction citation-index ids addressed by a locator: the
- * id itself, or both ends of a range. A range covers everything between its
- * ends in reading order, never an arithmetic span of the id suffixes.
+ * id itself, both ends of a range, or those of each piece of a multi-page passage.
+ * A range covers everything between its ends in reading order, never an
+ * arithmetic span of the id suffixes.
  */
 export function citationIndexCandidateIdsForLocator(locator: Locator): string[] {
     const prefix = CITATION_INDEX_PREFIXES[locator.kind];
     if (!prefix) return rawRangeCandidateIds(locator.raw);
 
     const ids = new Set<string>();
-    const values = locator.value.split('-');
     const addValue = (value: string) => {
         if (idValueScheme(value)) ids.add(`${prefix}${value}`);
     };
 
-    if (values.length === 1) {
-        addValue(values[0]);
-    } else if (values.length === 2) {
-        addValue(values[0]);
-        addValue(values[1]);
+    for (const piece of locatorValues(locator)) {
+        const values = piece.split('-');
+        if (values.length === 1) {
+            addValue(values[0]);
+        } else if (values.length === 2) {
+            addValue(values[0]);
+            addValue(values[1]);
+        }
     }
 
     return ids.size > 0 ? [...ids] : rawRangeCandidateIds(locator.raw);
 }
 
-/** True when a non-page locator's value is an id range (`12-15`, `5.6-6.2`). */
+/**
+ * True when a non-page locator spans several ids: an id range (`12-15`,
+ * `5.6-6.2`) or a multi-page passage (`7.45,8.1`).
+ */
 export function isRecordIdRange(locator: Locator): boolean {
     if (locator.kind === 'page') return false;
+    const pieces = locatorValues(locator);
+    if (pieces.length > 1) return pieces.every((piece) => idValueScheme(piece.split('-')[0]) !== null);
     const ends = locator.value.split('-');
     return ends.length === 2 && ends.every((end) => idValueScheme(end) !== null);
 }
@@ -232,7 +292,7 @@ export function isRecordIdRange(locator: Locator): boolean {
  */
 export function locatorIdScheme(locator: Locator): ExtractIdScheme | null {
     if (locator.kind === 'line' || !CITATION_INDEX_PREFIXES[locator.kind]) return null;
-    return idValueScheme(locator.value.split('-')[0]);
+    return idValueScheme(locatorValues(locator)[0].split('-')[0]);
 }
 
 /**
