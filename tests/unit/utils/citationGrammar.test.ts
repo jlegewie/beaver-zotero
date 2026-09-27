@@ -6,8 +6,10 @@ import {
     getPageLocator,
     getRequestedRef,
     getResolvedRef,
+    isRecordIdRange,
     locatorFromLegacyPage,
     locatorIdScheme,
+    locatorValues,
     normalizeCitationTag,
     parseLoc,
     parseZoteroId,
@@ -204,6 +206,46 @@ describe('citationGrammar', () => {
             zotero_key: 'PARENT',
             loc: { kind: 'page', value: '4', raw: 'page4' },
         });
+    });
+});
+
+describe('multi-page passages', () => {
+    it.each([
+        // A passage continuing on the next page, piece by piece.
+        ['s7.45,s8.3', 'sentence', '7.45,8.3'],
+        ['s7.44-s7.45,s8.1-s8.2', 'sentence', '7.44-7.45,8.1-8.2'],
+        ['s7.44-45, s8.3', 'sentence', '7.44-7.45,8.3'],
+        ['s7.45;s8.3', 'sentence', '7.45,8.3'],
+        ['s3.40,s4.1-s5.2,s6.1', 'sentence', '3.40,4.1-5.2,6.1'],
+        // A piece not on the next page ends the passage.
+        ['s3.58,s3.63', 'sentence', '3.58'],
+        ['s2.3,s9.4', 'sentence', '2.3'],
+        ['s8.3,s7.45', 'sentence', '8.3'],
+        ['s7.45,s8.3,s8.5', 'sentence', '7.45,8.3'],
+        ['s3.5,s243', 'sentence', '3.5'],
+        ['s3.5,page4', 'sentence', '3.5'],
+        ['s3.5,heading4.1', 'sentence', '3.5'],
+        // Lists that do not start with a page-scoped sentence parse as one token, as before.
+        ['s12,s40', 'unknown', 's12,s40'],
+        ['page3,page5', 'page', '3,page5'],
+        ['heading3.1,s4.2', 'unknown', 'heading3.1,s4.2'],
+    ])('parses %s like the backend', (raw, kind, value) => {
+        expect(parseLoc(raw)).toEqual({ kind, value, raw });
+    });
+
+    it('addresses the ends of every piece and names the page-scoped scheme', () => {
+        const loc = parseLoc('s7.44-s7.45,s8.3')!;
+        expect(locatorValues(loc)).toEqual(['7.44-7.45', '8.3']);
+        expect(citationIndexCandidateIdsForLocator(loc)).toEqual(['s7.44', 's7.45', 's8.3']);
+        expect(locatorIdScheme(loc)).toBe('page');
+        expect(isRecordIdRange(loc)).toBe(true);
+        expect(isRecordIdRange(parseLoc('s2.3,s9.4')!)).toBe(false);
+    });
+
+    it('keeps the raw list as the citation key', () => {
+        const loc = parseLoc('s7.45,s8.3')!;
+        expect(requestedCitationKey({ kind: 'zotero', library_id: 1, zotero_key: 'ABCD1234', loc }))
+            .toBe('zotero:1-ABCD1234:s7.45,s8.3');
     });
 });
 

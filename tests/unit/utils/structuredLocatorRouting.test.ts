@@ -156,6 +156,27 @@ describe('locator resolution by id scheme', () => {
         expect(extractAndCacheResolvedPdfDocument).not.toHaveBeenCalled();
     });
 
+    it('resolves a multi-page passage to the pages of its pieces', async () => {
+        getResult.mockResolvedValue({
+            ...structuredResultWithCitablePages(5, [
+                { index: 0, items: [{ id: 'p1.1', sentences: ['s1.1', 's1.2'] }] },
+                { index: 1, items: [{ id: 'p2.1', sentences: ['s2.1'] }] },
+            ]),
+            schemaVersion: '5',
+        });
+
+        const map = await buildLocalCitationDataMapForContent(
+            '<citation id="1-ATTACH12" loc="s1.2,s2.1"/> <citation id="1-ATTACH12" loc="s1.1,s1.2"/>',
+        );
+
+        expect(map['local:zotero:1-ATTACH12:s1.2,s2.1'].locations).toEqual([
+            { part_id: 's1.2', page_idx: 0 },
+            { part_id: 's2.1', page_idx: 1 },
+        ]);
+        // A second piece on the same page is not a continuation and is dropped.
+        expect(map['local:zotero:1-ATTACH12:s1.1,s1.2'].locations).toEqual([{ part_id: 's1.1', page_idx: 0 }]);
+    });
+
     it('builds note-export metadata for locators of both schemes', async () => {
         const map = await buildLocalCitationDataMapForContent(
             '<citation id="1-ATTACH12" loc="s1.2"/> <citation id="1-ATTACH12" loc="s12"/>',
