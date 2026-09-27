@@ -84,12 +84,64 @@ const STRUCTURED_TEXT_OPTIONS_WITH_IMAGES = "preserve-whitespace,preserve-images
 //     so unmapped text layers still reach the recovery path below.
 //   - space-after-symbols: MuPDF otherwise never turns a word gap after a math
 //     operator, arrow or geometric shape into a space ("○Lead contact").
+//   - sentence terminators inside a run of unmapped glyphs become U+FFFD
+//     (`maskTerminatorsInUnmappedRuns`, applied by both walks).
 // Control characters are replaced in the final result under the same switch
 // (`replaceControlCharsInResult`, ops.ts).
 const TEXT_REPAIR_OPTIONS =
     "use-known-glyph-outlines,map-symbol-private-use,use-glyph-name-for-garbage,space-after-symbols";
 function withTextRepair(options: string, textRepair: boolean): string {
     return textRepair ? `${options},${TEXT_REPAIR_OPTIONS}` : options;
+}
+
+const UNMAPPED_GLYPH = "\uFFFD";
+const SENTENCE_TERMINAL_RE = /^\p{Sentence_Terminal}$/u;
+
+/**
+ * Replace sentence terminators that sit between two unmapped glyphs with
+ * U+FFFD, in place. Returns whether anything changed.
+ *
+ * Text repair can map single glyphs of an otherwise unmappable font: the
+ * period's outline is in the known-outline table, its digits are not, so a
+ * number in such a font reads "�.����". The splitter then ends a sentence at
+ * every one of those periods, turning one garbled figure line into a string
+ * of one-word pseudo-sentences, and the periods make the noise look like
+ * numbers. A terminator with no readable text on either side ends nothing,
+ * so it is folded back into the unmapped run.
+ */
+export function maskTerminatorsInUnmappedRuns(chars: string[]): boolean {
+    let changed = false;
+    let i = 1;
+    while (i < chars.length - 1) {
+        if (chars[i - 1] !== UNMAPPED_GLYPH || !SENTENCE_TERMINAL_RE.test(chars[i])) {
+            i++;
+            continue;
+        }
+        let end = i;
+        while (end < chars.length && SENTENCE_TERMINAL_RE.test(chars[end])) end++;
+        if (chars[end] === UNMAPPED_GLYPH) {
+            for (let k = i; k < end; k++) chars[k] = UNMAPPED_GLYPH;
+            changed = true;
+        }
+        i = end;
+    }
+    return changed;
+}
+
+/** `maskTerminatorsInUnmappedRuns` for a JSON-walk line's text. */
+function maskLineTextTerminators(text: string): string {
+    if (!text.includes(UNMAPPED_GLYPH)) return text;
+    const chars = Array.from(text);
+    return maskTerminatorsInUnmappedRuns(chars) ? chars.join("") : text;
+}
+
+/** `maskTerminatorsInUnmappedRuns` for a detailed-walk line, keeping `chars` and `text` in lockstep. */
+function maskDetailedLineTerminators(line: RawLineDetailed): void {
+    if (!line.text.includes(UNMAPPED_GLYPH)) return;
+    const runes = line.chars.map((ch) => ch.c);
+    if (!maskTerminatorsInUnmappedRuns(runes)) return;
+    for (let k = 0; k < runes.length; k++) line.chars[k].c = runes[k];
+    line.text = runes.join("");
 }
 
 /** Structured-text options for the detailed (per-character) walk. */
@@ -347,9 +399,10 @@ function extractRawPageOnce(
             // label not available
         }
 
+        const textRepair = opts?.textRepair ?? CURRENT_PDF_EXTRACTION_PRESET.textRepair;
         let stextOptions = withTextRepair(
             opts?.includeImages ? STRUCTURED_TEXT_OPTIONS_WITH_IMAGES : STRUCTURED_TEXT_OPTIONS,
-            opts?.textRepair ?? CURRENT_PDF_EXTRACTION_PRESET.textRepair,
+            textRepair,
         );
         if (opts?.recoverUnmappedGlyphs) stextOptions = withRecoveryFlags(stextOptions);
         const stext = page.toStructuredText(stextOptions);
@@ -393,6 +446,7 @@ function extractRawPageOnce(
                     const line = lines[i];
                     const fromDir = dirs?.[i];
                     line.rotation = fromDir ?? aspectRatioRotation(line.bbox);
+                    if (textRepair) line.text = maskLineTextTerminators(line.text);
                 }
             }
 
@@ -754,6 +808,7 @@ function extractRawPageDetailedOnce(
                 },
                 endLine: () => {
                     if (currentLine && currentBlock) {
+                        if (textRepair) maskDetailedLineTerminators(currentLine);
                         currentBlock.lines.push(currentLine);
                     }
                     currentLine = null;
