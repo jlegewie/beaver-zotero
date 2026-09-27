@@ -485,6 +485,7 @@ declare namespace Zotero {
             markIndexCleanupReacquireAttempted: import('../src/services/database').BeaverDB['markIndexCleanupReacquireAttempted'];
             retireAttachmentProcessingStates: import('../src/services/database').BeaverDB['retireAttachmentProcessingStates'];
             hasPendingFulltextUpsert: import('../src/services/database').BeaverDB['hasPendingFulltextUpsert'];
+            replaceAttachmentExtractionSource: import('../src/services/database').BeaverDB['replaceAttachmentExtractionSource'];
             adoptAttachmentExtractionSource(input: {
                 libraryId: number; zoteroKey: string; source: string;
                 contentKind: import("../src/services/database").AttachmentProcessingStateRecord['contentKind'];

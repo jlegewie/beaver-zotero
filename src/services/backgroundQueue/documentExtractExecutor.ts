@@ -18,7 +18,7 @@ import type {
     BackgroundJobRecord,
 } from '../database';
 import { observeAttachmentSource } from '../documentExtraction/sourceObservation';
-import { getFileSignature } from '../documentFileIdentity';
+import { getFileSignature, getRemoteFileHash } from '../documentFileIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
@@ -171,7 +171,7 @@ export class DocumentExtractExecutor implements JobExecutor {
         let fileHash: string | null = null;
         try {
             fileHash = source.source.isRemoteOnly
-                ? item.attachmentSyncedHash || null
+                ? await getRemoteFileHash(item)
                 : await item.attachmentHash || null;
         } catch (error) {
             logger(`DocumentExtractExecutor: attachmentHash failed: ${error}`, 2);

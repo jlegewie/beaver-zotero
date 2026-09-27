@@ -1013,6 +1013,20 @@ describe('FulltextUpsertExecutor', () => {
             .toBe('failed');
     });
 
+    it('applies a server-side library exclusion by refreshing the account and retrying later', async () => {
+        const refresh = vi.fn(async () => {});
+        (Zotero.Beaver as any).account = { getGeneration: () => 1, refresh,
+            getSnapshot: () => ({ session: { user: { id: 'account-a' } } }) };
+        api.upsertHash.mockRejectedValueOnce(
+            new ApiError(403, 'Forbidden', 'excluded', 'library_excluded'),
+        );
+        const outcome = await new FulltextUpsertExecutor(api as any).execute(record, ctx);
+        expect(refresh).toHaveBeenCalledWith(true);
+        expect(outcome).toMatchObject({ kind: 'retry', countsAsAttempt: false, retryAfterMs: 60_000 });
+        expect(outcome).not.toHaveProperty('laneCooldownMs');
+        expect((await db.getAttachmentProcessingState(1, record.zoteroKey))?.upsertStatus).toBeNull();
+    });
+
     it('honors a zero-second backend retry hint', async () => {
         api.upsertHash.mockRejectedValueOnce(
             new ApiError(429, 'Rate Limited', 'retry', 'claim_busy', {

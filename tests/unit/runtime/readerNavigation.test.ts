@@ -1,5 +1,5 @@
-import { beforeEach, expect, it, vi } from 'vitest';
-import { openReader, openNote, viewAttachment } from '../../../react/runtime/navigation';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { AttachmentFileUnavailableError, openReader, openNote, viewAttachment } from '../../../react/runtime/navigation';
 vi.mock('../../../react/utils/navigationNotice', () => ({ notifyNavigationUnavailable: vi.fn() }));
 let a: any, b: any;
 beforeEach(() => {
@@ -12,6 +12,7 @@ beforeEach(() => {
         Promise: { delay: vi.fn(async () => {}) },
         Reader: { open: vi.fn(async (itemID, _location, options) => ({ itemID, _window: options.window })), getByTabID: vi.fn() },
         Notes: { open: vi.fn(async () => undefined), _editorInstances: [] },
+        Items: { getAsync: vi.fn(async () => null) },
     });
 });
 it('passes A to native reader and note opening while B is active', async () => {
@@ -206,4 +207,96 @@ it('rechecks activation after the wait resolves and before invoking the native A
     vi.mocked(Zotero.getMainWindow).mockImplementation(() => ++reads <= 2 ? a : b);
     await expect(openReader(42, undefined, {}, a)).rejects.toMatchObject({ code: 'window_unavailable' });
     expect(Zotero.Reader.open).not.toHaveBeenCalled();
+});
+
+
+describe('file availability before opening the reader', () => {
+    const TO_DOWNLOAD = 2;
+    const FORCE_DOWNLOAD = 5;
+    let item: any;
+    let fileOnDisk: boolean;
+
+    beforeEach(() => {
+        fileOnDisk = false;
+        item = {
+            libraryID: 1,
+            attachmentSyncState: TO_DOWNLOAD,
+            isFileAttachment: () => true,
+            isStoredFileAttachment: () => true,
+            getFilePath: () => '/storage/ABC/file.pdf',
+            getFilePathAsync: vi.fn(async () => fileOnDisk ? '/storage/ABC/file.pdf' : false),
+        };
+        a.ZoteroPane.showAttachmentNotFoundDialog = vi.fn();
+        a.ZoteroPane.collectionsView.editable = true;
+        vi.stubGlobal('IOUtils', { exists: vi.fn(async () => fileOnDisk) });
+        Object.assign(Zotero as any, {
+            Items: { getAsync: vi.fn(async () => item) },
+            Sync: {
+                Storage: { Local: {
+                    getEnabledForLibrary: vi.fn(() => true),
+                    SYNC_STATE_TO_DOWNLOAD: TO_DOWNLOAD,
+                    SYNC_STATE_FORCE_DOWNLOAD: FORCE_DOWNLOAD,
+                } },
+                Runner: {
+                    downloadFile: vi.fn(async () => { fileOnDisk = true; return { localChanges: true }; }),
+                    alert: vi.fn(),
+                },
+            },
+            Notifier: { trigger: vi.fn() },
+            logError: vi.fn(),
+        });
+    });
+
+    it('downloads a file that is only on the server before opening it', async () => {
+        await openReader(42, { pageIndex: 0 }, {}, a);
+        expect(Zotero.Sync.Runner.downloadFile).toHaveBeenCalledWith(item);
+        expect(Zotero.Reader.open).toHaveBeenCalledWith(42, { pageIndex: 0 }, { window: a });
+        expect(vi.mocked(Zotero.Sync.Runner.downloadFile).mock.invocationCallOrder[0])
+            .toBeLessThan(vi.mocked(Zotero.Reader.open).mock.invocationCallOrder[0]);
+    });
+
+    it('shows the not-found dialog instead of a blank reader when the download yields no file', async () => {
+        vi.mocked(Zotero.Sync.Runner.downloadFile).mockResolvedValue({ localChanges: false } as any);
+        await expect(openReader(42, undefined, {}, a)).rejects.toBeInstanceOf(AttachmentFileUnavailableError);
+        expect(a.ZoteroPane.showAttachmentNotFoundDialog).toHaveBeenCalledWith(
+            item, '/storage/ABC/file.pdf', expect.objectContaining({ notOnServer: true }));
+        expect(Zotero.Reader.open).not.toHaveBeenCalled();
+    });
+
+    it('reports a failed download without opening the reader', async () => {
+        const error = new Error('offline');
+        vi.mocked(Zotero.Sync.Runner.downloadFile).mockRejectedValue(error);
+        await expect(openReader(42, undefined, {}, a)).rejects.toBeInstanceOf(AttachmentFileUnavailableError);
+        expect((Zotero.Sync.Runner as any).alert).toHaveBeenCalledWith(error);
+        expect(Zotero.Reader.open).not.toHaveBeenCalled();
+    });
+
+    it('does not download a missing linked file', async () => {
+        item.isStoredFileAttachment = () => false;
+        await expect(openReader(42, undefined, {}, a)).rejects.toBeInstanceOf(AttachmentFileUnavailableError);
+        expect(Zotero.Sync.Runner.downloadFile).not.toHaveBeenCalled();
+        expect(a.ZoteroPane.showAttachmentNotFoundDialog).toHaveBeenCalledWith(
+            item, '/storage/ABC/file.pdf', expect.objectContaining({ linkedFile: true, notOnServer: false }));
+    });
+
+    it('opens a local file directly unless a newer server version is queued', async () => {
+        fileOnDisk = true;
+        item.attachmentSyncState = 0;
+        await openReader(42, undefined, {}, a);
+        expect(Zotero.Sync.Runner.downloadFile).not.toHaveBeenCalled();
+
+        item.attachmentSyncState = FORCE_DOWNLOAD;
+        await openReader(42, undefined, {}, a);
+        expect(Zotero.Sync.Runner.downloadFile).toHaveBeenCalledOnce();
+        expect(Zotero.Reader.open).toHaveBeenCalledTimes(2);
+    });
+
+    it('opens the existing local copy when refreshing a queued file fails', async () => {
+        fileOnDisk = true;
+        item.attachmentSyncState = FORCE_DOWNLOAD;
+        vi.mocked(Zotero.Sync.Runner.downloadFile).mockRejectedValue(new Error('offline'));
+        await openReader(42, undefined, {}, a);
+        expect(Zotero.Reader.open).toHaveBeenCalledOnce();
+        expect((Zotero.Sync.Runner as any).alert).not.toHaveBeenCalled();
+    });
 });

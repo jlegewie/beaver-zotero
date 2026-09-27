@@ -28,6 +28,7 @@ import {
 import { ExternalAbortError } from '../agentDataProvider/timeout';
 import { extractPdfBytesAndCacheAsOriginalAttachment } from '../documentExtraction/ocrReextract';
 import { computeStructuredDocumentHash } from '../documentExtraction/structuredDocumentHash';
+import { getRemoteFileHash } from '../documentFileIdentity';
 import {
     backgroundProcessingEnabled,
     buildIndexJobPayload,
@@ -451,11 +452,11 @@ export class OcrExecutor implements JobExecutor {
         const filePath = fileSource.filePath;
 
         // attachmentHash hashes the local file and is undefined for remote-only
-        // items; the synced server MD5 is the same content hash, so backend OCR
+        // items; the server MD5 is the same content hash, so backend OCR
         // dedup stays consistent across machines.
         let fileHash: string | undefined;
         if (isRemoteOnly) {
-            fileHash = resolvedItem.attachmentSyncedHash || undefined;
+            fileHash = (await getRemoteFileHash(resolvedItem)) || undefined;
         } else {
             try {
                 fileHash = await resolvedItem.attachmentHash;
@@ -810,7 +811,7 @@ export class OcrExecutor implements JobExecutor {
                         document as any,
                     );
                     const currentHash = job.source.isRemoteOnly
-                        ? job.item.attachmentSyncedHash : await job.item.attachmentHash;
+                        ? await getRemoteFileHash(job.item) : await job.item.attachmentHash;
                     this.throwIfLibraryUnavailable(job.item.libraryID, ctx);
                     if (currentHash !== job.fileHash) {
                         return { kind: 'retry', error: 'ocr_source_changed', reason: 'source_changed' };
